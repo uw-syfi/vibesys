@@ -19,6 +19,7 @@ from server.events import EventType
 from vibesys.agents.client import AgentClient
 from vibesys.agents.drivers import agentshim as agentshim_driver
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
+from vibesys.api import MCPServerSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -27,8 +28,13 @@ if TYPE_CHECKING:
     import agentshim
 
 _SHARED_STATE_DIR = "/state/server/chat"
-_FULL_PROMPT = experiment_chat_system_prompt(_SHARED_STATE_DIR, _SHARED_STATE_DIR)
+_FULL_PROMPT = experiment_chat_system_prompt(_SHARED_STATE_DIR)
 _CONTINUATION_PROMPT = experiment_chat_continuation_prompt(_SHARED_STATE_DIR)
+_TOOL_SERVERS = (
+    MCPServerSpec(
+        name="vibesys-run", command="python", args=("-m", "vibesys.api.chat_tools_server")
+    ),
+)
 
 
 class _FakeClient:
@@ -76,9 +82,8 @@ def _chat(
             chat_thread_id=thread_id,
             workspace=workspace,
             state_dir=tmp_path / "state",
-            agent_shared_state_dir=_SHARED_STATE_DIR,
             agent_state_dir=_SHARED_STATE_DIR,
-            evidence=MagicMock(),
+            mcp_servers=_TOOL_SERVERS,
             log=lambda _message: None,
             environment=dict,
             progress=lambda: None,
@@ -108,6 +113,15 @@ def test_chat_sends_the_full_prompt_when_no_conversation_is_named(tmp_path: Path
     chat.ask("what happened?")
 
     assert [call["system_prompt"] for call in client.calls] == [_FULL_PROMPT]
+
+
+def test_chat_passes_the_investigation_tool_servers_to_the_agent(tmp_path: Path) -> None:
+    client = _FakeClient()
+    chat = _chat(tmp_path, client)
+
+    chat.ask("what happened?")
+
+    assert client.calls[0]["mcp_servers"] == list(_TOOL_SERVERS)
 
 
 def test_chat_shortens_the_prompt_inside_a_named_conversation(tmp_path: Path) -> None:

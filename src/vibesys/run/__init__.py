@@ -11,16 +11,7 @@ from vibesys.run.device import DeviceLease
 from vibesys.run.event_journal import EventJournal
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_tracker import GitTracker
-from vibesys.run.integration import (
-    AgentRuntimeResources,
-    AgentSelection,
-    DirectInvocationLifecycle,
-    ExecutionHandle,
-    InvocationLifecycle,
-    LocalRunIntegration,
-    RunAttachment,
-    RunIntegration,
-)
+from vibesys.run.integration import LocalRunIntegration, RunResourceHandoff
 from vibesys.run.logger import RunLogger
 from vibesys.run.paths import RunCommands, RunPaths
 from vibesys.run.project import (
@@ -36,6 +27,7 @@ from vibesys.run.round_transaction import (
     RoundTransactionCoordinator,
     RoundTransactionError,
 )
+from vibesys.run.run_control import RunControlChannel, RunStopped, splice_steering
 from vibesys.run.state import RunState, RunStateNamespace
 from vibesys.run.workspace import (
     EXCLUDED_WORKSPACE_DIRS,
@@ -47,20 +39,15 @@ from vibesys.run.workspace import (
 
 __all__ = [
     "EXCLUDED_WORKSPACE_DIRS",
-    "AgentRuntimeResources",
-    "AgentSelection",
     "CompletedRound",
     "CopySpec",
     "CoreEvent",
     "CoreEventType",
     "DeviceLease",
-    "DirectInvocationLifecycle",
     "EventJournal",
-    "ExecutionHandle",
     "ExperimentRepository",
     "GitTracker",
     "InputProjectSpec",
-    "InvocationLifecycle",
     "LocalRunIntegration",
     "LoopContext",
     "ProjectProvisioningError",
@@ -70,14 +57,16 @@ __all__ = [
     "RoundTransaction",
     "RoundTransactionCoordinator",
     "RoundTransactionError",
-    "RunAttachment",
     "RunCommands",
-    "RunIntegration",
+    "RunControlChannel",
     "RunLogger",
     "RunPaths",
+    "RunResourceHandoff",
     "RunState",
     "RunStateNamespace",
+    "RunStopped",
     "Workspace",
     "WorkspaceStep",
     "provision_project",
+    "splice_steering",
 ]

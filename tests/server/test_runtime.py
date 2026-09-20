@@ -20,6 +20,34 @@ from server.journal import EventJournal
 from server.runtime import ServerRuntime
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, EventStatus
+from vibesys.run.event_journal import EventJournal as CoreEventJournal
+from vibesys.run.integration import LocalRunIntegration
+from vibesys.run.run_control import RunControlChannel
+
+
+class _SessionControlStub:
+    """Adapt a `RunControlChannel` to the `vibesys.api.RunControl` shape.
+
+    Mirrors what `vibesys.api.session._LocalRunSession`'s `steer`/`pause`/
+    `resume`/`stop` methods do in production, so a bare `runtime.run(...)`
+    callback (which never goes through `ServerRuntime.drive`) can still stand
+    in as the live session `runtime.api`'s `session_provider` reads.
+    """
+
+    def __init__(self, control: RunControlChannel) -> None:
+        self._control = control
+
+    def steer(self, text: str) -> None:
+        self._control.queue_steer(text)
+
+    def pause(self) -> None:
+        self._control.request_pause()
+
+    def resume(self) -> None:
+        self._control.resume()
+
+    def stop(self) -> None:
+        self._control.request_stop()
 
 
 def _await_socket(socket_path: Path) -> None:
@@ -148,12 +176,20 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path):  # noqa: ANN0
     subscriber = threading.Thread(target=collect_until_stopped)
     subscriber.start()
 
+    integration = LocalRunIntegration()
+    integration.events.subscribe(runtime.integration.project_event)
+
     def run() -> str:
+        with runtime.condition:
+            runtime.session = _SessionControlStub(integration.control)
         runtime.api.execute(StopCommand())
-        runtime.controller.before_agent("implementer", "round 1", "work")
+        integration.control.raise_if_stopped()
         return "unreachable"
 
-    value = runtime.run(run)
+    try:
+        value = runtime.run(run)
+    finally:
+        integration.close()
 
     subscriber.join(timeout=5)
     assert value is None
@@ -177,8 +213,11 @@ def test_runtime_does_not_duplicate_core_terminal_event(tmp_path):  # noqa: ANN0
     )
     subscriber.start()
 
+    core_events = CoreEventJournal()
+    core_events.subscribe(runtime.integration.project_event)
+
     def run() -> None:
-        runtime.integration.events.emit(
+        core_events.emit(
             CoreEventType.RUN_FINISHED,
             status=EventStatus.COMPLETED,
         )

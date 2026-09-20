@@ -51,14 +51,24 @@ def test_tui_defaults_reject_a_missing_explicit_config(
     assert str(missing) in capsys.readouterr().err
 
 
-def test_server_runtime_receives_the_core_integration(
+def test_server_runtime_drives_the_built_run_request(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """`main` builds the `RunRequest` itself and drives it on `ServerRuntime`.
+
+    The server no longer dispatches through `headless.dispatch`: it parses
+    the CLI invocation, builds the `RunRequest` via `headless.build_run_request`,
+    and runs it through `ServerRuntime.drive`, which owns the `create_session`
+    call (and the core `LocalRunIntegration`) internally.
+    """
     import server.runtime as runtime_module  # noqa: PLC0415
 
     integration = object()
-    dispatch = Mock()
+    invocation = object()
+    request = object()
+    parse_cli_invocation = Mock(return_value=invocation)
+    build_run_request = Mock(return_value=request)
     observed: dict[str, object] = {}
 
     class FakeRuntime:
@@ -70,12 +80,18 @@ def test_server_runtime_receives_the_core_integration(
         def run(self, callback):  # noqa: ANN001, ANN202
             observed["result"] = callback()
 
+        def drive(self, driven_request):  # noqa: ANN001, ANN202
+            observed["driven_request"] = driven_request
+
     monkeypatch.setattr(runtime_module, "ServerRuntime", FakeRuntime)
-    monkeypatch.setattr(server_entrypoint.headless, "dispatch", dispatch)
+    monkeypatch.setattr(server_entrypoint.headless, "parse_cli_invocation", parse_cli_invocation)
+    monkeypatch.setattr(server_entrypoint.headless, "build_run_request", build_run_request)
     socket_path = tmp_path / "control.sock"
 
     main(["--theme", "light", "--local", "--control-socket", str(socket_path)])
 
     assert observed["socket_path"] == socket_path
     assert callable(observed["tui_defaults"])
-    dispatch.assert_called_once_with(["--local"], integration=integration)
+    parse_cli_invocation.assert_called_once_with(["--local"])
+    build_run_request.assert_called_once_with(invocation)
+    assert observed["driven_request"] is request

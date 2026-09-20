@@ -17,10 +17,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from server.chat.evidence import TrajectoryEvidence
     from server.controller import RunController
     from server.execution import ExecutionTracker
-    from vibesys.agents.session_key import AgentSessionKey
+    from vibesys.api import MCPServerSpec
+    from vs_agent import AgentSessionKey
 
 
 class ChatAgentClient(Protocol):
@@ -63,9 +63,8 @@ class ExperimentChatDependencies:
     chat_thread_id: str | None
     workspace: Path
     state_dir: Path
-    agent_shared_state_dir: str
     agent_state_dir: str
-    evidence: TrajectoryEvidence
+    mcp_servers: tuple[MCPServerSpec, ...]
     log: Callable[[str], None]
     environment: Callable[[], dict[str, str]]
     progress: Callable[[], object | None]
@@ -76,7 +75,7 @@ class ExperimentChatDependencies:
 
 
 class ExperimentChatSession:
-    """Own one chat agent, transcript, and evidence refresh."""
+    """Own one chat agent and its transcript."""
 
     def __init__(
         self,
@@ -91,7 +90,7 @@ class ExperimentChatSession:
         self._chat_thread_id = dependencies.chat_thread_id
         self._workspace = dependencies.workspace
         self._state_dir = dependencies.state_dir
-        self._evidence = dependencies.evidence
+        self._mcp_servers = dependencies.mcp_servers
         self._log = dependencies.log
         self._environment = dependencies.environment
         self._progress = dependencies.progress
@@ -101,18 +100,14 @@ class ExperimentChatSession:
         self._fallback = dependencies.fallback
         self._resources = resources
         self._lock = threading.Lock()
-        self._system_prompt = experiment_chat_system_prompt(
-            dependencies.agent_shared_state_dir,
-            dependencies.agent_state_dir,
-        )
+        self._system_prompt = experiment_chat_system_prompt(dependencies.agent_state_dir)
         self._continuation_prompt = experiment_chat_continuation_prompt(
             dependencies.agent_state_dir
         )
 
     def ask(self, question: str) -> ChatAnswer:
-        """Refresh evidence, invoke the chat agent, and persist its answer."""
+        """Invoke the chat agent and persist its answer."""
         with self._lock:
-            self._evidence.refresh(self._system_prompt)
             # The shortened prompt assumes the agent is still in the
             # conversation that was given the full instructions, so it is
             # justified by a live provider conversation rather than by the
@@ -160,7 +155,6 @@ class ExperimentChatSession:
             "experiment-chat",
             question,
             system_prompt,
-            consume_steering=False,
             participates_in_run_control=False,
             driver=self._driver,
             provider=self._provider,
@@ -186,6 +180,7 @@ class ExperimentChatSession:
                     progress=self._progress(),
                     reuse_session=True,
                     session_key=self._session_key,
+                    mcp_servers=list(self._mcp_servers),
                 )
             except BaseException as exc:
                 error = exc

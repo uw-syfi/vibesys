@@ -1,8 +1,11 @@
-"""Project authoritative agent-run state into experiment-log protocol entries.
+"""Reshape a run's `RunView` into experiment-log protocol entries.
 
-The agent loop owns hypothesis lifecycle state. This module is deliberately a
-one-way projection: it does not group rounds, select a baseline, or infer a
-resolution from individual round fields.
+`vibesys.api`'s `RunView`/`HypothesisView`/`HypothesisRoundView` already
+derive every fact this module publishes -- copying authoritative state,
+never grouping rounds, selecting a baseline, or inferring a resolution (see
+`vibesys.api._readmodel`). This module only reshapes those boundary DTOs into
+the server's own wire types (`HypothesisEntry`/`HypothesisRound`) and caches
+the reshaped result, revisioned so a client can fetch only what changed.
 """
 
 from __future__ import annotations
@@ -10,64 +13,65 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from threading import RLock
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from server.api.protocol import ExperimentCursor, ExperimentUpdate, HypothesisEntry, HypothesisRound
-from vibesys.loops.agent.hypotheses import measurement_delta_reason
-from vibesys.loops.agent.model import HypothesisResolution
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome, derive_hypothesis_title
 
 if TYPE_CHECKING:
-    from vibesys.loops.agent.model import AgentRunState, Hypothesis
-    from vs_loop_state import RoundRecord
+    from vibesys.api import HypothesisRoundView, HypothesisView, RunView
 
 
-def build_experiment_log(state: AgentRunState) -> list[HypothesisEntry]:
+def build_experiment_log(run_view: RunView) -> list[HypothesisEntry]:
     """Return the complete hypothesis history in stable start-round order."""
     return sorted(
-        (
-            build_experiment_entry(hypothesis, active_id=state.active_hypothesis_id)
-            for hypothesis in state.hypotheses
-        ),
+        (_to_hypothesis_entry(hypothesis) for hypothesis in run_view.hypotheses),
         key=lambda entry: (entry.first_round, entry.hypothesis_id),
     )
 
 
-def build_experiment_entry(hypothesis: Hypothesis, *, active_id: str | None) -> HypothesisEntry:
-    """Copy one domain hypothesis into its presentation-neutral DTO."""
-    rounds = hypothesis.rounds
-    measurement = hypothesis.measurement
+def _to_hypothesis_entry(hypothesis: HypothesisView) -> HypothesisEntry:
+    """Reshape one `HypothesisView` into its wire DTO, field-for-field."""
     return HypothesisEntry(
         hypothesis_id=hypothesis.hypothesis_id,
-        title=_text(hypothesis.plan.title) or derive_hypothesis_title(hypothesis.plan.hypothesis),
-        claim=_text(hypothesis.plan.hypothesis),
-        action=_text(hypothesis.plan.task),
-        first_round=hypothesis.started_round,
-        last_round=rounds[-1].round_number if rounds else hypothesis.started_round,
-        rounds=[_round(record) for record in rounds],
-        resolved_outcome=(
-            hypothesis.resolution.value if hypothesis.resolution is not None else None
-        ),
-        judge_verdict=_judge_verdict(hypothesis),
-        # The measurement fields are intentionally copied as one tuple.
-        # Choosing a newer per-round metric here would pair it with a
-        # different causal delta and make the UI lie about the measurement.
-        perf_metric=measurement.value if measurement is not None else None,
-        perf_unit=_text(measurement.unit) if measurement is not None else None,
-        perf_delta_pct=measurement.delta_pct if measurement is not None else None,
-        perf_metric_name=_text(measurement.metric) if measurement is not None else None,
-        perf_direction=measurement.direction if measurement is not None else None,
-        perf_baseline_value=measurement.baseline_value if measurement is not None else None,
-        perf_baseline_round=measurement.baseline_round if measurement is not None else None,
-        perf_baseline_commit=(
-            _text(measurement.baseline_commit) if measurement is not None else None
-        ),
-        perf_delta_reason=measurement_delta_reason(hypothesis),
-        kept=hypothesis.candidate_retained,
-        strategy_disposition=hypothesis.strategy.value,
+        title=hypothesis.title,
+        claim=hypothesis.claim,
+        action=hypothesis.action,
+        first_round=hypothesis.first_round,
+        last_round=hypothesis.last_round,
+        rounds=[_to_hypothesis_round(record) for record in hypothesis.rounds],
+        resolved_outcome=hypothesis.resolved_outcome,
+        judge_verdict=hypothesis.judge_verdict,
+        perf_metric=hypothesis.perf_metric,
+        perf_unit=hypothesis.perf_unit,
+        perf_delta_pct=hypothesis.perf_delta_pct,
+        perf_metric_name=hypothesis.perf_metric_name,
+        perf_direction=hypothesis.perf_direction,
+        perf_baseline_value=hypothesis.perf_baseline_value,
+        perf_baseline_round=hypothesis.perf_baseline_round,
+        perf_baseline_commit=hypothesis.perf_baseline_commit,
+        perf_delta_reason=hypothesis.perf_delta_reason,
+        kept=hypothesis.kept,
+        strategy_disposition=hypothesis.strategy_disposition,
         strategy_reason=hypothesis.strategy_reason,
-        active=hypothesis.hypothesis_id == active_id,
+        active=hypothesis.active,
+    )
+
+
+def _to_hypothesis_round(record: HypothesisRoundView) -> HypothesisRound:
+    """Reshape one `HypothesisRoundView` into its wire DTO, field-for-field."""
+    return HypothesisRound(
+        round=record.round_number,
+        passed=record.passed,
+        reviewed=record.reviewed,
+        hypothesis_outcome=record.hypothesis_outcome,
+        judge_verdict=record.judge_verdict,
+        perf_metric=record.perf_metric,
+        perf_unit=record.perf_unit,
+        perf_delta_pct=record.perf_delta_pct,
+        commit=record.commit,
+        official_evaluation=record.official_evaluation,
+        candidate_disposition=record.candidate_disposition,
     )
 
 
@@ -129,31 +133,31 @@ class ExperimentProjection:
         self,
         run_id: str,
         projection_id: str,
-        state: AgentRunState,
+        run_view: RunView,
         *,
         changed_keys: tuple[str, ...] | None = None,
     ) -> None:
-        """Apply one already-committed state without filesystem access."""
+        """Apply one already-committed view without filesystem access."""
         with self._lock:
             if self._source_id != projection_id:
                 self._reset(run_id, projection_id)
             if not self._ready or self._force_reset:
-                self._replace(state, rotate=self._ready)
+                self._replace(run_view, rotate=self._ready)
             else:
-                self._advance(state, changed_keys=changed_keys)
+                self._advance(run_view, changed_keys=changed_keys)
             self._generation += 1
 
     def replace(
         self,
         run_id: str,
         projection_id: str,
-        state: AgentRunState,
+        run_view: RunView,
     ) -> ExperimentQueryResult:
         """Install an authoritative snapshot and return it as a reset."""
         with self._lock:
             if self._source_id != projection_id:
                 self._reset(run_id, projection_id)
-            self._replace(state, rotate=self._ready)
+            self._replace(run_view, rotate=self._ready)
             self._generation += 1
             return self._full_result()
 
@@ -161,7 +165,7 @@ class ExperimentProjection:
         self,
         run_id: str,
         projection_id: str,
-        state: AgentRunState,
+        run_view: RunView,
         token: ExperimentLoadToken,
     ) -> ExperimentQueryResult | None:
         """Install a loaded snapshot only if no newer observation won the race."""
@@ -172,7 +176,7 @@ class ExperimentProjection:
                 or self._generation != token.generation
             ):
                 return None
-            self._replace(state, rotate=self._ready)
+            self._replace(run_view, rotate=self._ready)
             self._generation += 1
             return self._full_result()
 
@@ -202,88 +206,85 @@ class ExperimentProjection:
             changed_ids, removed_ids = changes
             return self._delta_result(cursor.revision, changed_ids, removed_ids)
 
-    def _replace(self, state: AgentRunState, *, rotate: bool = False) -> None:
+    def _replace(self, run_view: RunView, *, rotate: bool = False) -> None:
         if rotate:
             self._projection_id = self._new_projection_id()
-        entries = build_experiment_log(state)
+        entries = build_experiment_log(run_view)
         self._entries = {entry.hypothesis_id: entry for entry in entries}
         self._hypothesis_indices = {
-            hypothesis.hypothesis_id: index for index, hypothesis in enumerate(state.hypotheses)
+            hypothesis.hypothesis_id: index for index, hypothesis in enumerate(run_view.hypotheses)
         }
-        self._revision = state.experiment_revision
+        self._revision = run_view.experiment_revision
         self._history.clear()
         self._ready = True
         self._force_reset = False
 
     def _advance(  # noqa: C901  # Fallback validation keeps cache updates safe.
         self,
-        state: AgentRunState,
+        run_view: RunView,
         *,
         changed_keys: tuple[str, ...] | None,
     ) -> None:
-        if state.experiment_revision < self._revision:
+        if run_view.experiment_revision < self._revision:
             # The persisted cursor regressed under the same run id. This can
             # only be a restored or legacy state, so the old delta chain is no
             # longer a valid base for any client.
-            self._replace(state, rotate=True)
+            self._replace(run_view, rotate=True)
             return
-        if state.experiment_revision == self._revision:
+        if run_view.experiment_revision == self._revision:
             # A complete committed snapshot at the current revision can come
             # from restoring legacy state. It starts a new cursor chain so no
             # client can mistake different contents for an unchanged result.
             if changed_keys is None:
-                self._replace(state, rotate=True)
+                self._replace(run_view, rotate=True)
             return
         if changed_keys is None:
             previous_ids = set(self._entries)
-            current_ids = {hypothesis.hypothesis_id for hypothesis in state.hypotheses}
+            current_ids = {hypothesis.hypothesis_id for hypothesis in run_view.hypotheses}
             removed_ids = previous_ids - current_ids
             changed_ids = {
                 hypothesis.hypothesis_id
-                for hypothesis in state.hypotheses
+                for hypothesis in run_view.hypotheses
                 if hypothesis.last_experiment_revision > self._revision
             }
         else:
             removed_ids = set()
             changed_ids = set(changed_keys)
-            if len(state.hypotheses) < len(self._hypothesis_indices):
-                self._replace(state)
+            if len(run_view.hypotheses) < len(self._hypothesis_indices):
+                self._replace(run_view)
                 return
             # Lifecycle transitions append new hypotheses and preserve all
             # existing positions. Index only the appended suffix, so one new
             # hypothesis does not require scanning the prior history.
-            for index in range(len(self._hypothesis_indices), len(state.hypotheses)):
-                hypothesis = state.hypotheses[index]
+            for index in range(len(self._hypothesis_indices), len(run_view.hypotheses)):
+                hypothesis = run_view.hypotheses[index]
                 self._hypothesis_indices[hypothesis.hypothesis_id] = index
         # A missing per-entry revision means the state came from a writer that
         # predates deltas. Rebuild rather than returning an incomplete update.
         if not changed_ids and not removed_ids:
-            self._replace(state)
+            self._replace(run_view)
             return
         for hypothesis_id in changed_ids:
             index = self._hypothesis_indices.get(hypothesis_id)
-            if index is None or index >= len(state.hypotheses):
-                self._replace(state)
+            if index is None or index >= len(run_view.hypotheses):
+                self._replace(run_view)
                 return
-            hypothesis = state.hypotheses[index]
+            hypothesis = run_view.hypotheses[index]
             if hypothesis.hypothesis_id != hypothesis_id:
-                self._replace(state)
+                self._replace(run_view)
                 return
-            self._entries[hypothesis_id] = build_experiment_entry(
-                hypothesis,
-                active_id=state.active_hypothesis_id,
-            )
+            self._entries[hypothesis_id] = _to_hypothesis_entry(hypothesis)
         for hypothesis_id in removed_ids:
             self._entries.pop(hypothesis_id, None)
         self._history.append(
             _Delta(
                 from_revision=self._revision,
-                through_revision=state.experiment_revision,
+                through_revision=run_view.experiment_revision,
                 changed_ids=frozenset(changed_ids),
                 removed_ids=frozenset(removed_ids),
             )
         )
-        self._revision = state.experiment_revision
+        self._revision = run_view.experiment_revision
 
     def _changes_after(self, revision: int) -> tuple[set[str], set[str]] | None:
         cursor = revision
@@ -357,53 +358,3 @@ class ExperimentProjection:
 
     def _new_projection_id(self) -> str:
         return f"{self._source_id or 'projection'}:{uuid4().hex}"
-
-
-def _round(record: RoundRecord) -> HypothesisRound:
-    return HypothesisRound(
-        round=record.round_number,
-        passed=record.passed,
-        reviewed=record.reviewed,
-        hypothesis_outcome=_outcome(record.hypothesis_outcome),
-        judge_verdict=record.judge_verdict,
-        perf_metric=record.perf_metric,
-        perf_unit=_text(record.perf_unit),
-        perf_delta_pct=record.perf_delta_pct,
-        commit=_text(record.commit),
-        official_evaluation=record.official_evaluation,
-        candidate_disposition=_disposition(record.candidate_disposition),
-    )
-
-
-def _outcome(value: str | None) -> HypothesisOutcome | HypothesisResolution | None:
-    """Read a stored outcome as one of the two vocabularies that produce it.
-
-    A round record holds the implementer's declared outcome unless the
-    framework resolved the hypothesis, in which case it holds the resolution
-    instead. Anything else is a legacy or retired value with no meaning for a
-    client, so it projects as "not recorded" rather than failing the log.
-    """
-    if not value:
-        return None
-    for vocabulary in (HypothesisOutcome, HypothesisResolution):
-        member = vocabulary.__members__.get(value.upper())
-        if member is not None and member.value == value:
-            return member
-    return None
-
-
-def _disposition(value: str | None) -> CandidateDisposition | None:
-    """Read a stored disposition, dropping values the framework retired."""
-    if not value:
-        return None
-    member = CandidateDisposition.__members__.get(value.upper())
-    return member if member is not None and member.value == value else None
-
-
-def _judge_verdict(hypothesis: Hypothesis) -> Literal["pass", "fail"] | None:
-    value = hypothesis.review.value
-    return value if value in ("pass", "fail") else None
-
-
-def _text(value: str | None) -> str | None:
-    return value or None

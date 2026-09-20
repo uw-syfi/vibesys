@@ -4,6 +4,7 @@ import asyncio
 import re
 import shutil
 import time
+import uuid
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
@@ -64,22 +65,20 @@ from vibesys.render.run_log import RunLogRenderer
 from vibesys.render.sink import output_sink
 from vibesys.resource_paths import profiler_support_dir
 from vibesys.run import (
-    AgentRuntimeResources,
-    AgentSelection,
     DeviceLease,
     ExperimentRepository,
     GitTracker,
     ProjectProvisioningSpec,
     RepositoryVisibility,
-    RunAttachment,
     RunCommands,
-    RunIntegration,
     RunLogger,
     RunPaths,
+    RunResourceHandoff,
     RunState,
     RunStateNamespace,
     Workspace,
     provision_project,
+    splice_steering,
 )
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration
@@ -253,7 +252,7 @@ def create_run_context(  # noqa: PLR0913  # tracked: #288
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
     agent_state_model_type: type[BaseModel] | None = None,
-    integration: RunIntegration | None = None,
+    integration: LocalRunIntegration | None = None,
 ) -> "_RunContext":
     """Build a fully wired :class:`_RunContext`.
 
@@ -346,7 +345,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
     remote_repo: str | None,
     repo_visibility: RepositoryVisibility,
     agent_state_model_type: type[BaseModel] | None,
-    integration: RunIntegration | None,
+    integration: LocalRunIntegration | None,
 ) -> "_RunContext":
     context_start = time.perf_counter()
     # Boot spans recorded before this function ran (the dispatch preamble)
@@ -973,37 +972,31 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             round_transaction_coordinator=round_transaction_coordinator,
             agent_host_resources=agent_host_resources,
         )
-        detach_run = integration.attach_run(
-            RunAttachment(
+        integration.publish_resources(
+            RunResourceHandoff(
                 project=project,
                 run_id=run_id,
                 workspace=project_root,
                 log_dir=log_dir,
                 agent_backend=resolved_backend,
-                agent_defaults=AgentSelection(
-                    driver=resolve_agent_driver(config),
-                    provider=resolved_cli_provider,
-                    model=model_name,
-                    role_models=tuple(
-                        role.model
-                        for role in (config.agent.outer, config.agent.inner)
-                        if role.model is not None
-                    ),
+                driver=resolve_agent_driver(config),
+                provider=resolved_cli_provider,
+                model=model_name,
+                role_models=tuple(
+                    role.model
+                    for role in (config.agent.outer, config.agent.inner)
+                    if role.model is not None
                 ),
-                agent_runtime=AgentRuntimeResources(
-                    config=config,
-                    compute_backend=backend,
-                    skill_source_dirs=tuple(skill_source_paths),
-                    environment=environment,
-                    environment_request=run_environment_request,
-                    run_environment_sandboxed=session.view.cli_sandboxed,
-                    project_path_policy=project_path_policy,
-                    host_resources=agent_host_resources,
-                ),
+                config=config,
+                compute_backend=backend,
+                skill_source_dirs=tuple(skill_source_paths),
+                environment=environment,
+                environment_request=run_environment_request,
+                run_environment_sandboxed=session.view.cli_sandboxed,
+                project_path_policy=project_path_policy,
+                host_resources=agent_host_resources,
             )
         )
-        if detach_run is not None:
-            teardown_stack.callback(detach_run)
         construction_complete = True
     # Assembly's spans, including the enclosing one that just closed with the
     # total. The run log gets them in completion order: children, then parent.
@@ -1253,7 +1246,7 @@ class _RunContext:
         *,
         backend: ComputeBackend,
         run_environment: RunEnvironment,
-        integration: RunIntegration,
+        integration: LocalRunIntegration,
         logger: RunLogger,
         paths: RunPaths,
         debug: bool,
@@ -1475,62 +1468,52 @@ class _RunContext:
         driver = client.driver_name
         provider = client.provider
         model = client.model_for_kind(kind)
-        execution = self.integration.invocations.start(
-            kind,
-            round_label,
-            user_prompt,
-            system_prompt,
-            driver=driver,
-            provider=provider,
-            model=model,
-        )
-        user_prompt = execution.user_prompt
-        execution_id = execution.execution_id
+        control = self.integration.control
+        control.raise_if_stopped()
+        control.wait_while_paused()
+        steer_texts = control.take_pending_steer()
+        user_prompt = splice_steering(user_prompt, steer_texts)
+        execution_id = uuid.uuid4().hex
+        if steer_texts:
+            control.notify_steer_consumed(
+                agent_kind=kind, round_label=round_label, execution_id=execution_id
+            )
         event_fields: dict[str, Any] = {
             "agent_kind": kind,
             "round_label": round_label,
             "execution_id": execution_id,
         }
         attempt = _attempt_from_label(round_label)
-        try:
-            self.events.emit(
-                CoreEventType.AGENT_EXECUTION_STARTED,
-                status=EventStatus.ACTIVE,
-                data=AgentExecutionStartedData(
-                    stage=kind,
-                    attempt=attempt,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    activity=AgentExecutionActivityData(
-                        mode="thinking",
-                        summary=f"{kind.replace('_', ' ').title()} is working",
-                    ),
-                    driver=driver,
-                    provider=provider,
-                    model=model,
+        self.events.emit(
+            CoreEventType.AGENT_EXECUTION_STARTED,
+            status=EventStatus.ACTIVE,
+            data=AgentExecutionStartedData(
+                stage=kind,
+                attempt=attempt,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                activity=AgentExecutionActivityData(
+                    mode="thinking",
+                    summary=f"{kind.replace('_', ' ').title()} is working",
                 ),
-                **event_fields,
-            )
-            self.events.emit(
-                CoreEventType.PHASE_STARTED,
-                status=EventStatus.ACTIVE,
-                data=PhaseData(phase=kind, attempt=attempt),
-                **event_fields,
-            )
-            self.events.emit(
-                CoreEventType.INVOCATION_STARTED,
-                status=EventStatus.ACTIVE,
-                data=InvocationStartedData(system_prompt=system_prompt, user_prompt=user_prompt),
-                **event_fields,
-            )
-        except BaseException as lifecycle_error:
-            self.integration.invocations.finish(
-                kind,
-                round_label,
-                error=lifecycle_error,
-                execution_id=execution_id,
-            )
-            raise
+                driver=driver,
+                provider=provider,
+                model=model,
+            ),
+            **event_fields,
+        )
+        self.events.emit(
+            CoreEventType.PHASE_STARTED,
+            status=EventStatus.ACTIVE,
+            data=PhaseData(phase=kind, attempt=attempt),
+            **event_fields,
+        )
+        self.events.emit(
+            CoreEventType.INVOCATION_STARTED,
+            status=EventStatus.ACTIVE,
+            data=InvocationStartedData(system_prompt=system_prompt, user_prompt=user_prompt),
+            **event_fields,
+        )
         result: T | None = None
         error: BaseException | None = None
         try:
@@ -1554,43 +1537,24 @@ class _RunContext:
         finally:
             status = _execution_status(error)
             error_text = f"{type(error).__name__}: {error}" if error is not None else None
-            lifecycle_error: BaseException | None = None
-            try:
-                self.events.emit(
-                    CoreEventType.AGENT_EXECUTION_FINISHED,
-                    status=status,
-                    data=AgentExecutionFinishedData(result=json_value(result), error=error_text),
-                    **event_fields,
-                )
-                self.events.emit(
-                    CoreEventType.INVOCATION_FINISHED,
-                    status=status,
-                    data=InvocationFinishedData(result=json_value(result), error=error_text),
-                    **event_fields,
-                )
-                self.events.emit(
-                    CoreEventType.PHASE_FINISHED,
-                    status=status,
-                    data=PhaseData(phase=kind, attempt=attempt),
-                    **event_fields,
-                )
-            except BaseException as exc:  # noqa: BLE001
-                lifecycle_error = exc
-            finally:
-                self.integration.invocations.finish(
-                    kind,
-                    round_label,
-                    result=result,
-                    error=error or lifecycle_error,
-                    execution_id=execution_id,
-                )
-            if lifecycle_error is not None:
-                if error is None:
-                    raise lifecycle_error
-                error.add_note(
-                    "Additional error while recording invocation completion: "
-                    f"{type(lifecycle_error).__name__}: {lifecycle_error}"
-                )
+            self.events.emit(
+                CoreEventType.AGENT_EXECUTION_FINISHED,
+                status=status,
+                data=AgentExecutionFinishedData(result=json_value(result), error=error_text),
+                **event_fields,
+            )
+            self.events.emit(
+                CoreEventType.INVOCATION_FINISHED,
+                status=status,
+                data=InvocationFinishedData(result=json_value(result), error=error_text),
+                **event_fields,
+            )
+            self.events.emit(
+                CoreEventType.PHASE_FINISHED,
+                status=status,
+                data=PhaseData(phase=kind, attempt=attempt),
+                **event_fields,
+            )
 
     def wait_for_debug(self, step: str) -> None:
         if self.debug:

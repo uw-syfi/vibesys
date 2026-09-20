@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.agents.factory import supported_cli_providers
+from vibesys.api import supported_cli_providers
 
 ChatModelSource = Literal["run", "role", "suggested"]
 
