@@ -14,10 +14,8 @@ name = "gpt-5.4"
 # region = "us-east5"
 
 # [providers.anthropic]
-# uses ANTHROPIC_API_KEY env var
 
 # [providers.google-genai]
-# uses GOOGLE_API_KEY env var
 
 # [agent]
 # Selects the agent backend used by the outer loops. The default is "cli",

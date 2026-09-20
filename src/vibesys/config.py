@@ -76,17 +76,11 @@ class VertexCfg(_Strict):  # noqa: D101  # tracked: #288
     json_path: str | None = Field(
         default=None,
         alias="json",
-        description=(
-            "Path to the Vertex AI service-account JSON key file. Overridable via "
-            "$VERTEX_SERVICE_ACCOUNT_JSON."
-        ),
+        description=("Path to the Vertex AI service-account JSON key file. Accepted but ignored."),
     )
     project: str | None = Field(
         default=None,
-        description=(
-            "GCP project id. Falls back to the key file's project_id when unset. "
-            "Overridable via $VERTEX_PROJECT."
-        ),
+        description=("GCP project id. Accepted but ignored."),
     )
     region: str = Field(
         default="us-east5",
@@ -135,16 +129,16 @@ class ProvidersCfg(_Strict):  # noqa: D101  # tracked: #288
     )
     anthropic: _CredEnvProviderCfg | None = Field(
         default=None,
-        description="Anthropic provider marker; credentials from $ANTHROPIC_API_KEY.",
+        description="Anthropic provider marker. Accepted but ignored.",
     )
     google_genai: _CredEnvProviderCfg | None = Field(
         default=None,
         alias="google-genai",
-        description="Google GenAI provider marker; credentials from $GOOGLE_API_KEY.",
+        description="Google GenAI provider marker. Accepted but ignored.",
     )
     openai: _CredEnvProviderCfg | None = Field(
         default=None,
-        description="OpenAI provider marker; credentials from $OPENAI_API_KEY.",
+        description="OpenAI provider marker. Accepted but ignored.",
     )
 
 
