@@ -31,21 +31,22 @@ path.
   discussion in a separate design document.
 - Keep compatibility wrappers thin. New behavior should live in the canonical
   implementation module or reusable library.
-- `tach.toml` freezes the current Python module graph, and CI runs
-  `uv run tach check`. A new cross-module import fails until you add the edge
-  to `depends_on` in the same PR, so the reviewer sees it. Add an edge only when
-  the dependency is deliberate. The goal is to only ever remove edges. Cycles
-  are forbidden (`forbid_circular_dependencies`): move shared code down instead
-  of adding an upward edge. There are
-  no layers: every module, including `entrypoints` and each `server.*` module,
-  lists explicit edges. `entrypoints` is the composition root, with both a
-  server path and a direct headless path into core. Upward imports (core to
-  server, server to entrypoints, a `server.*` module to a higher one) fail
-  because the edge is undeclared. Tach is the single boundary tool. The libs
-  DAG holds because every lib edge is explicit (only `vs_project` to
-  `vs_loop_state` exists); reject any new one in review. The generated graphs
-  are in [architecture.md](architecture.md); after editing `tach.toml`, run
-  `uv run python scripts/check_tach_graph.py --write`.
+- `tach.toml` enforces the Python module graph, and CI runs
+  `uv run tach check`. Modules are stacked in four `layers` (entrypoints,
+  server, vibesys, libs; top to bottom). An import from a higher layer fails:
+  core -> server, server -> entrypoints, libs -> core, anything -> entrypoints.
+  `depends_on` handles everything finer: a new same-layer edge (inside server,
+  inside vibesys, between libs) fails until you add it in the same PR, so the
+  reviewer sees it, and `depends_on = []` pins leaf modules, including the
+  per-file `vibesys/*.py` modules. Add an edge only
+  when the dependency is deliberate; the goal is to only ever remove edges.
+  Cycles are forbidden (`forbid_circular_dependencies`): move shared code down
+  instead of adding an upward edge. `entrypoints` is the composition root, with
+  both a server path and a direct headless path into core. Tach is the single
+  boundary tool. The libs DAG holds because every lib edge is explicit (only
+  `vs_project` to `vs_loop_state` exists); reject any new one in review. The
+  generated graphs are in [architecture.md](architecture.md); after editing
+  `tach.toml`, run `uv run python scripts/check_tach_graph.py --write`.
 
 When one part of the application describes behavior and another part applies
 it, separate these roles when they have different owners or change for different
