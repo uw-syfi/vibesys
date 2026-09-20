@@ -99,7 +99,7 @@ from vibesys.profilers import (
 )
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.render.sink import output_sink
-from vibesys.run import LoopContext, RepositoryVisibility, RunIntegration, RunStateNamespace
+from vibesys.run import LocalRunIntegration, LoopContext, RepositoryVisibility, RunStateNamespace
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -2306,7 +2306,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     interface: str = DEFAULT_INTERFACE,
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
-    integration: RunIntegration | None = None,
+    integration: LocalRunIntegration | None = None,
     outer_loop: Literal["agent", "profile-guided"] = "agent",
     profile_guided: ProfileGuidedInput | None = None,
 ) -> bool:

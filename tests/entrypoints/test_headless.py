@@ -38,7 +38,6 @@ from vibesys.events import CoreEventType, RunStartedData
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.loops.roles import EXPECTED_AGENT_ROLES
 from vibesys.profilers import ProfilerKind
-from vibesys.run.integration import LocalRunIntegration
 from vibesys.sandbox.run_environment import run_environment_record
 from vs_project import (
     RUN_SCHEMA_VERSION,
@@ -62,6 +61,17 @@ def _patch_loop_runner(loop_name: str, runner: Mock):  # noqa: ANN202
         cli._LOOP_COMMANDS,  # noqa: SLF001
         {loop_name: dataclasses.replace(command, run=runner)},
     )
+
+
+# The lazily-imported loop function `vibesys.api._dispatch` calls for each
+# `LoopKind`. Tests that need `create_session`'s own RUN_STARTED/FINISHED/
+# FAILED bracket to actually execute patch these directly instead of the CLI
+# dispatch record (see `_patch_loop_runner`), which would bypass it.
+_LOOP_RUN_TARGETS = {
+    "agent": "vibesys.loops.agent.loop.run_agent_loop",
+    "plain": "vibesys.loops.plain.loop.run_plain_loop",
+    "evolve": "vibesys.loops.evolve.loop.run_evolve_loop",
+}
 
 
 def _write_input_project(parent: Path, name: str = "queue-spsc") -> Path:
@@ -450,17 +460,23 @@ def test_each_outer_loop_builds_the_task_image_once(
     )
     image_id = f"sha256:{'a' * 64}"
     run = getattr(cli, f"_run_{loop_name}")
+    config = Config.model_validate({"model": {"name": "gpt-5.4"}})
+    # `load_config_and_skills`/`_prepare_experiment_repository` normally fill
+    # these in as side effects on `args`; both are mocked away here, so set
+    # them explicitly to satisfy `RunRequest`'s validation.
+    invocation.args.repo_visibility = config.repository.visibility
+    invocation.args.exp_name = "test-run"
 
     with (
         patch("entrypoints.headless.build_task_image", return_value=image_id) as build,
         patch(
             "entrypoints.headless.load_config_and_skills",
-            return_value=(Mock(), (), ComputeBackend.CPU),
+            return_value=(config, (), ComputeBackend.CPU),
         ),
         patch("entrypoints.headless._prepare_experiment_repository"),
         patch(runner_path, return_value=True) as loop_runner,
     ):
-        run(invocation.args, Mock())
+        run(invocation.args)
 
     build.assert_called_once_with(dockerfile.resolve())
     assert loop_runner.call_args.kwargs["run_environment"].options["image"] == image_id
@@ -1738,60 +1754,58 @@ def test_render_configuration_error_prints_usage(
 def test_main_routes_to_the_selected_loop(
     loop: str,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """`create_session` dispatches to the loop function selected by `LoopKind`."""
     project = _write_input_project(tmp_path)
-    runner = Mock()
+    runner = Mock(return_value=True)
+    monkeypatch.setattr(_LOOP_RUN_TARGETS[loop], runner)
     argv = ["vibesys", "--outer-loop", loop, "--input", str(project)]
 
-    with patch.object(sys, "argv", argv), _patch_loop_runner(loop, runner):
+    with patch.object(sys, "argv", argv):
         main()
 
     runner.assert_called_once()
-    assert runner.call_args.args[0].input_bundle.root == project.resolve()
+    assert runner.call_args.kwargs["input_path"] == str(project.resolve())
 
 
-def test_dispatch_owns_headless_rendering_and_local_integration(
+def test_dispatch_owns_headless_rendering(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import entrypoints.headless as cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
-    integration = LocalRunIntegration()
-    integration.close = Mock()  # type: ignore[method-assign]
     renderer = Mock()
-    runner = Mock()
-    monkeypatch.setattr(cli, "LocalRunIntegration", lambda: integration)
     monkeypatch.setattr(cli, "HeadlessRenderer", lambda: renderer)
+    monkeypatch.setattr(_LOOP_RUN_TARGETS["agent"], Mock(return_value=True))
 
-    with _patch_loop_runner("agent", runner):
-        cli.dispatch(["--input", str(project)])
+    cli.dispatch(["--input", str(project)])
 
     assert [call.args[0].type for call in renderer.handle.call_args_list] == [
         CoreEventType.RUN_STARTED,
         CoreEventType.RUN_FINISHED,
     ]
-    integration.close.assert_called_once_with()
 
 
-def test_dispatch_records_failure_without_closing_passed_integration(tmp_path: Path) -> None:
+def test_dispatch_records_failure_through_the_headless_renderer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import entrypoints.headless as cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
-    integration = LocalRunIntegration()
-    integration.close = Mock()  # type: ignore[method-assign]
-    events = []
-    integration.events.subscribe(events.append)
-    runner = Mock(side_effect=RuntimeError("runner failed"))
+    renderer = Mock()
+    monkeypatch.setattr(cli, "HeadlessRenderer", lambda: renderer)
+    monkeypatch.setattr(_LOOP_RUN_TARGETS["agent"], Mock(side_effect=RuntimeError("runner failed")))
 
-    with _patch_loop_runner("agent", runner), pytest.raises(RuntimeError, match="runner failed"):
-        cli.dispatch(["--input", str(project)], integration=integration)
+    with pytest.raises(RuntimeError, match="runner failed"):
+        cli.dispatch(["--input", str(project)])
 
-    assert [event.type for event in events] == [
+    assert [call.args[0].type for call in renderer.handle.call_args_list] == [
         CoreEventType.RUN_STARTED,
         CoreEventType.RUN_FAILED,
     ]
-    integration.close.assert_not_called()
 
 
 def _write_microservice_project(parent: Path, *, traced: bool, name: str = "hotel") -> Path:
@@ -1897,42 +1911,47 @@ def test_expected_role_registry_covers_every_outer_loop() -> None:
 
 
 @pytest.mark.parametrize("loop", ["agent", "plain", "evolve"])
-def test_dispatch_advertises_expected_roles_on_run_started(loop: str, tmp_path: Path) -> None:
+def test_dispatch_advertises_expected_roles_on_run_started(
+    loop: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import entrypoints.headless as cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
-    integration = LocalRunIntegration()
-    events = []
-    integration.events.subscribe(events.append)
-    runner = Mock()
+    renderer = Mock()
+    monkeypatch.setattr(cli, "HeadlessRenderer", lambda: renderer)
+    monkeypatch.setattr(_LOOP_RUN_TARGETS[loop], Mock(return_value=True))
 
-    with _patch_loop_runner(loop, runner):
-        cli.dispatch(["--outer-loop", loop, "--input", str(project)], integration=integration)
+    cli.dispatch(["--outer-loop", loop, "--input", str(project)])
 
-    started = next(event for event in events if event.type is CoreEventType.RUN_STARTED)
+    started = next(
+        call.args[0]
+        for call in renderer.handle.call_args_list
+        if call.args[0].type is CoreEventType.RUN_STARTED
+    )
     assert isinstance(started.data, RunStartedData)
     assert started.data.expected_roles == EXPECTED_AGENT_ROLES[loop]
     assert started.data.expected_roles
 
 
 @pytest.mark.parametrize("loop", ["agent", "evolve"])
-def test_dispatch_omits_profiler_role_when_profiler_is_disabled(loop: str, tmp_path: Path) -> None:
+def test_dispatch_omits_profiler_role_when_profiler_is_disabled(
+    loop: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A disabled profiler never runs, so its placeholder must not be seeded."""
     import entrypoints.headless as cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
-    integration = LocalRunIntegration()
-    events = []
-    integration.events.subscribe(events.append)
-    runner = Mock()
+    renderer = Mock()
+    monkeypatch.setattr(cli, "HeadlessRenderer", lambda: renderer)
+    monkeypatch.setattr(_LOOP_RUN_TARGETS[loop], Mock(return_value=True))
 
-    with _patch_loop_runner(loop, runner):
-        cli.dispatch(
-            ["--outer-loop", loop, "--input", str(project), "--profiler", "none"],
-            integration=integration,
-        )
+    cli.dispatch(["--outer-loop", loop, "--input", str(project), "--profiler", "none"])
 
-    started = next(event for event in events if event.type is CoreEventType.RUN_STARTED)
+    started = next(
+        call.args[0]
+        for call in renderer.handle.call_args_list
+        if call.args[0].type is CoreEventType.RUN_STARTED
+    )
     assert "profiler" not in started.data.expected_roles
     assert started.data.expected_roles == tuple(
         role for role in EXPECTED_AGENT_ROLES[loop] if role != "profiler"

@@ -42,7 +42,6 @@ from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.run import (
     DeviceLease,
     LocalRunIntegration,
-    RunIntegration,
     RunLogger,
     RunPaths,
     RunStateNamespace,
@@ -197,7 +196,7 @@ def _create_context(  # noqa: PLR0913
     task_root: Path | None = None,
     remote_repo: str | None = None,
     hooks=None,  # noqa: ANN001
-    integration: RunIntegration | None = None,
+    integration: LocalRunIntegration | None = None,
 ) -> _RunContext:
     return create_run_context(
         config=Config.model_validate({"model": {"name": "gpt-test"}}),
@@ -346,7 +345,7 @@ def test_context_assembly_logs_stage_timings(tmp_path):  # noqa: ANN001, ANN201
     This is a regression guard for the diagnostic used to find where
     ``create_run_context`` spends time before the TUI's hypothesis screen
     can leave "loading experiments..." (the gate flips when the second
-    ``RunIntegration.attach`` records ``EXPERIMENTS_CHANGED``).
+    ``LocalRunIntegration.attach`` records ``EXPERIMENTS_CHANGED``).
     """
     project = tmp_path / "queue"
     evaluator = _write_project(project)

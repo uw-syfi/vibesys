@@ -83,14 +83,23 @@ class TestMain:
 
     def _patch_config(self):  # noqa: ANN202  # tracked: #288
         from vibesys.constants import DEFAULT_COMPUTE_BACKEND  # noqa: PLC0415  # tracked: #288
+        from vibesys.repository import RepositoryVisibility  # noqa: PLC0415  # tracked: #288
 
-        return patch(
-            "entrypoints.headless.load_config_and_skills",
-            return_value=(
+        # The real load_config_and_skills normalizes args.repo_visibility from
+        # config (headless.py); replicate that here so the built RunRequest has a
+        # valid enum instead of None.
+        def _fake_load(args, *_args, **_kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202  # tracked: #288
+            if getattr(args, "repo_visibility", None) is None:
+                args.repo_visibility = RepositoryVisibility.PRIVATE
+            return (
                 {"model": {"name": "claude-sonnet-4-6"}},
                 None,
                 DEFAULT_COMPUTE_BACKEND,
-            ),
+            )
+
+        return patch(
+            "entrypoints.headless.load_config_and_skills",
+            side_effect=_fake_load,
         )
 
     def test_main_exits_zero_on_success(self):  # noqa: ANN201  # tracked: #288

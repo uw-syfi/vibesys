@@ -252,7 +252,6 @@ def test_chat_execution_is_isolated_from_run_control(tmp_path):  # noqa: ANN001,
         "chat",
         "experiment-chat",
         "status?",
-        consume_steering=False,
         participates_in_run_control=False,
     )
 
@@ -268,7 +267,6 @@ def test_chat_execution_is_isolated_from_run_control(tmp_path):  # noqa: ANN001,
         "chat",
         "experiment-chat",
         "status?",
-        consume_steering=False,
         participates_in_run_control=False,
     )
     parts.controller.after_agent("chat", "experiment-chat", execution_id=paused_chat.execution_id)
@@ -280,7 +278,6 @@ def _chat_execution(parts, thread_id):  # noqa: ANN001, ANN202
         "chat",
         "experiment-chat",
         "status?",
-        consume_steering=False,
         participates_in_run_control=False,
     )
     return parts.executions.presentation_scope(

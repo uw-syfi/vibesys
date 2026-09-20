@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from server.api.design import DesignLog
 from server.api.experiments import (
@@ -15,7 +15,6 @@ from server.api.experiments import (
 )
 from server.api.performance import (
     build_performance_context,
-    metric_directions,
     summarize_objective,
 )
 from server.api.protocol import (
@@ -49,9 +48,7 @@ from server.api.protocol import (
 from server.api.workspace_git import WorkspacePatchReader
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
-from vibesys.loops.agent.hypotheses import reproject_run_evidence
-from vibesys.loops.agent.state import AgentRunStateStore
-from vibesys.loops.metrics import MetricSpace, Objective
+from vibesys.api import open_run_store
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vs_project import AgentRunConfiguration, ProjectStateError
@@ -60,15 +57,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from pydantic import BaseModel
-
     from server.chat.manager import ChatManager
     from server.controller import ProjectRunState, RunController
     from server.execution import ActiveAgentExecution, ExecutionTracker
     from server.integration import RunIntegrationAdapter
     from server.journal import EventJournal
     from server.settings import InteractiveSetupDefaults
-    from vibesys.loops.agent.model import AgentRunState
+    from vibesys.api import RunControl, RunView
     from vs_project import Project
 
 
@@ -129,6 +124,7 @@ class RunApi:
         chat: ChatManager,
         integration: RunIntegrationAdapter,
         *,
+        session_provider: Callable[[], RunControl | None],
         tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
     ) -> None:
         """Initialize the API with the components that own each request surface."""
@@ -138,6 +134,7 @@ class RunApi:
         self._journal = journal
         self._chat = chat
         self._integration = integration
+        self._session_provider = session_provider
         self._tui_defaults_provider = tui_defaults
         self._tui_defaults: InteractiveSetupDefaults | None = None
         self._tui_defaults_lock = threading.Lock()
@@ -152,7 +149,6 @@ class RunApi:
             self._observe_experiment_change,
             replay_filter=lambda _header: False,
         )
-        self._integration.add_committed_state_listener(self._observe_committed_state)
 
     def execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
         """Execute one typed request and return its protocol response."""
@@ -222,17 +218,34 @@ class RunApi:
     def _execute_command(
         self, request: PauseCommand | ResumeCommand | SteerCommand | StopCommand
     ) -> Response:
+        """Send a control message to the live run's session, if one is running.
+
+        Routes through `self._session_provider()` (a `vibesys.api.RunControl`)
+        rather than a channel this class owns: once a session's
+        `vibesys.run.run_control.RunControlChannel` is private to that
+        session (`vibesys.context._RunContext.invoke` reads it at each
+        invocation boundary; the controller's status/journal mirror its
+        events, see `server.integration.RunIntegrationAdapter
+        ._project_control_event`), there is no run-scoped channel to hold
+        onto between requests. No run live is a graceful no-op: the command
+        still acknowledges, there is just nothing to steer.
+        """
+        control = self._session_provider()
         if isinstance(request, PauseCommand):
-            self._controller.pause_after_call()
+            if control is not None:
+                control.pause()
             ack = CommandAck(action="pause", status="pending")
         elif isinstance(request, ResumeCommand):
-            self._controller.resume()
+            if control is not None:
+                control.resume()
             ack = CommandAck(action="resume", status="consumed")
         elif isinstance(request, StopCommand):
-            self._controller.stop_after_call()
+            if control is not None:
+                control.stop()
             ack = CommandAck(action="stop", status="pending")
         else:
-            self._controller.steer(request.text)
+            if control is not None:
+                control.steer(request.text)
             ack = CommandAck(action="steer", status="pending")
         return Response(request_id=request.request_id, ack=ack)
 
@@ -369,10 +382,17 @@ class RunApi:
         return self._journal.read_history()
 
     def performance_rounds(self) -> list[PerformanceRound]:
-        """Build the recorded round-level performance series."""
-        state = self._agent_run_state()
-        if state is None:
+        """Build the recorded round-level performance series.
+
+        Sourced from `vibesys.api`'s `RunView.rounds`: every field this DTO
+        needs (`round_number`, `perf_metric`, `perf_unit`, `passed`,
+        `profile_skipped`) is copied verbatim from the run's own round
+        history, not re-derived from core state.
+        """
+        project_run = self._controller.project_run
+        if project_run is None:
             return []
+        run_view = open_run_store(project_run.project).get_run(project_run.run_id)
         return [
             PerformanceRound(
                 round=record.round_number,
@@ -381,38 +401,53 @@ class RunApi:
                 passed=record.passed,
                 profile_skipped=record.profile_skipped,
             )
-            for record in state.rounds
+            for record in run_view.rounds
             if record.perf_metric is not None and record.perf_unit is not None
         ]
 
     def performance_context(self) -> PerformanceContext | None:
-        """Build objective and measurement context for performance rendering."""
+        """Build objective and measurement context for performance rendering.
+
+        Sourced from `vibesys.api`'s `RunView`: `HypothesisView.perf_metric_round`
+        carries the round that produced each hypothesis's headline measurement,
+        so `build_performance_context` can select the newest one without a
+        core-private `HypothesisMeasurement`.
+        """
         project_run = self._controller.project_run
         if project_run is None:
             return None
         manifest = project_run.project.state.load_run(project_run.run_id)
         if not isinstance(manifest.configuration, AgentRunConfiguration):
             return None
+        run_view = open_run_store(project_run.project).get_run(project_run.run_id)
         return build_performance_context(
-            self._agent_run_state(),
+            run_view,
             objectives=manifest.configuration.objectives,
             objective_description=self._objective_description(),
         )
 
     def experiments(self) -> list[HypothesisEntry]:
         """Build the experiment log for an agent outer loop."""
-        state = self._agent_run_state()
-        return [] if state is None else build_experiment_log(state)
+        project_run = self._controller.project_run
+        if project_run is None:
+            return []
+        run_view = open_run_store(project_run.project).get_run(project_run.run_id)
+        return build_experiment_log(run_view)
 
     def design_rounds(self) -> list[DesignRound]:
-        """Project the per-round design log for the attached run."""
+        """Project the per-round design log for the attached run.
+
+        Facts (hypothesis/round commits) come from `vibesys.api`'s
+        `RunView`; the design log itself only adds what a `RunView` does not
+        carry, the workspace's own git history.
+        """
         project_run = self._controller.project_run
-        state = self._agent_run_state()
-        if project_run is None or state is None:
+        if project_run is None:
             return []
+        run_view = open_run_store(project_run.project).get_run(project_run.run_id)
         design = self._design_log(project_run.project.root, project_run.run_id)
         manifest = project_run.project.state.load_run(project_run.run_id)
-        return design.rounds(state, baseline=manifest.trusted_input_baseline)
+        return design.rounds(run_view, baseline=manifest.trusted_input_baseline)
 
     def design_patch(self, base: str, head: str, path: str) -> DesignPatch | None:
         """Read one file's patch for a published design range, None unattached."""
@@ -502,7 +537,18 @@ class RunApi:
         project_run: ProjectRunState,
         request: ExperimentQuery,
     ) -> ExperimentQueryResult | None:
-        """Answer from memory, loading once outside projection locks if needed."""
+        """Answer from memory, loading once outside projection locks if needed.
+
+        `ExperimentProjection` consumes `vibesys.api`'s `RunView`.
+        `_observe_committed_state` below feeds it a `RunView` projected
+        in-memory from the state object the run loop just committed, with no
+        filesystem read (see `test_service_projects_committed_live_state_
+        without_reloading_history` in `tests/server/test_experiments.py`, which
+        asserts zero `AgentRunStateStore.load_optional` calls on that path).
+        An authoritative reload here, by contrast, goes through
+        `vibesys.api.open_run_store`, which always re-reads from disk; that
+        is expected since this branch only runs once per cache miss or race.
+        """
         while self._is_agent_run(project_run.project, project_run.run_id):
             projection_id = self._experiment_projection_id(project_run)
             cached = self._experiment_projection.query(
@@ -512,13 +558,13 @@ class RunApi:
             )
             if isinstance(cached, ExperimentQueryResult):
                 return cached
-            state = self._required_agent_run_state(project_run, reproject=True)
+            view = open_run_store(project_run.project).get_run(project_run.run_id)
             current = self._controller.project_run
             if current is not None and self._same_project_run(current, project_run):
                 installed = self._experiment_projection.install_loaded(
                     project_run.run_id,
                     projection_id,
-                    state,
+                    view,
                     cached,
                 )
                 if installed is not None:
@@ -528,58 +574,6 @@ class RunApi:
                 return None
             project_run = current
         return None
-
-    def _agent_run_state(
-        self,
-        project_run: ProjectRunState | None = None,
-        *,
-        reproject: bool = True,
-    ) -> AgentRunState | None:
-        project_run = project_run or self._controller.project_run
-        if project_run is None:
-            return None
-        if not self._is_agent_run(project_run.project, project_run.run_id):
-            return None
-        portable = project_run.project.state.portable_namespace(project_run.run_id, "agent")
-        store = AgentRunStateStore(portable)
-        state = store.load_optional()
-        if state is None:
-            from vibesys.run.state import RunStateNamespace  # noqa: PLC0415
-
-            local = project_run.project.state.local_namespace(
-                project_run.run_id, RunStateNamespace.AGENT
-            )
-            manifest = project_run.project.state.load_run(project_run.run_id)
-            configuration = cast("AgentRunConfiguration", manifest.configuration)
-            # Unified state predating the persisted metric space: the run
-            # manifest records the axes but no tolerance, so legacy rounds are
-            # ordered exactly, which is what they were ordered by when written.
-            return store.migrate_legacy(
-                rounds=project_run.project.state.load_rounds(project_run.run_id),
-                local_namespace=local,
-                legacy_space=MetricSpace(
-                    objectives=tuple(
-                        Objective(name=name, direction=direction)
-                        for name, direction in metric_directions(configuration.objectives).items()
-                    )
-                ),
-            )
-        # The run's own space and each round's own comparison travel with the
-        # state, so the read path needs no measurement configuration of its own.
-        return reproject_run_evidence(state) if reproject else state
-
-    def _required_agent_run_state(
-        self,
-        project_run: ProjectRunState,
-        *,
-        reproject: bool,
-    ) -> AgentRunState:
-        state = self._agent_run_state(project_run, reproject=reproject)
-        if state is None:
-            raise RuntimeError(  # noqa: TRY003
-                "attached run does not have agent experiment state"
-            )
-        return state
 
     def _is_agent_run(self, project: Project, run_id: str) -> bool:
         key = (project.root, run_id)
@@ -601,29 +595,22 @@ class RunApi:
         identity = f"{project_run.project.root.resolve()}\0{project_run.run_id}"
         return sha256(identity.encode()).hexdigest()[:16]
 
-    def _observe_committed_state(
-        self,
-        namespace: str,
-        project_root: Path,
-        run_id: str,
-        state: BaseModel,
-        changed_keys: tuple[str, ...] | None,
-    ) -> None:
-        """Incrementally project a state object immediately after its commit."""
-        if namespace != "agent":
-            return
+    def _observe_committed_state(self, view: RunView, changed_keys: tuple[str, ...] | None) -> None:
+        """Incrementally project a state object immediately after its commit.
+
+        Registered as this run's `RunSession.on_committed_view` listener (see
+        `server.runtime.ServerRuntime.drive`): the session already filtered
+        to `namespace == "agent"` and projected *view* in memory before
+        calling this, so there is no `namespace`/raw-state handling left to
+        do here.
+        """
         project_run = self._controller.project_run
-        if (
-            project_run is None
-            or project_run.run_id != run_id
-            or project_run.project.root != project_root
-        ):
+        if project_run is None:
             return
-        agent_state = cast("AgentRunState", state)
         self._experiment_projection.update(
-            run_id,
+            project_run.run_id,
             self._experiment_projection_id(project_run),
-            agent_state,
+            view,
             changed_keys=changed_keys,
         )
 

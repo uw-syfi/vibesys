@@ -39,6 +39,20 @@ class CoreEventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
 
+    # Run-control transitions (see `vibesys.run.run_control.RunControlChannel`):
+    # request-time events (`*_REQUESTED`, `STEER_QUEUED`, `RESUMED`) come from
+    # `RunControl` callers; boundary-consume-time events (`PAUSED`, `STOPPED`,
+    # `STEER_CONSUMED`) come from `_RunContext.invoke` landing them on the run
+    # loop's own thread. A server projects both onto its own status machine
+    # and CONTROL journal; there is no frontend-visible wire event for them.
+    STEER_QUEUED = "steer_queued"
+    PAUSE_REQUESTED = "pause_requested"
+    RESUMED = "resumed"
+    STOP_REQUESTED = "stop_requested"
+    STEER_CONSUMED = "steer_consumed"
+    PAUSED = "paused"
+    STOPPED = "stopped"
+
 
 class EventStatus(StrEnum):
     """Lifecycle status attached to a core event when applicable."""

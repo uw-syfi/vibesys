@@ -14,6 +14,7 @@ The loop is picked by ``--outer-loop {agent, profile-guided, plain, evolve}``:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import math
 import shlex
 import subprocess
@@ -26,6 +27,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 from vibesys import boot_trace
 from vibesys.agents.provider_policy import SHIPPED_PROVIDERS
+from vibesys.api import LoopKind, ResumeRef, RunRequest, RunResult, create_session
 from vibesys.config import Config, load_config
 from vibesys.constants import (
     KNOWN_COMPUTE_BACKENDS,
@@ -36,9 +38,7 @@ from vibesys.constants import (
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators import objective as _objective
 from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
-from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.loops.metrics import MetricSpace, Objective
-from vibesys.loops.roles import expected_agent_roles
 from vibesys.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
 from vibesys.render.headless import HeadlessRenderer
 from vibesys.repository import (
@@ -52,7 +52,6 @@ from vibesys.resource_paths import default_skill_roots
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
-from vibesys.run.integration import LocalRunIntegration, RunIntegration
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     build_run_environment,
@@ -2042,29 +2041,25 @@ def _validate_agent(args: argparse.Namespace) -> None:
         )
 
 
-def _run_agent(args: argparse.Namespace, integration: RunIntegration) -> None:
-    # Everything the run needs before the loop can start. The enclosing span
-    # is this preamble's total; ``context.py`` times assembly from there.
+def _build_agent_request(args: argparse.Namespace) -> RunRequest:
+    """Run the agent-loop preamble and build its ``RunRequest``.
+
+    Split out of ``_run_agent`` so the server can build this request and own
+    the resulting ``create_session`` call itself, instead of going through
+    ``dispatch``. The enclosing span is this preamble's total; ``context.py``
+    times assembly from there.
+    """
     with boot_trace.span("agent_preamble"):
         bundle: InputBundle = args.input_bundle
         with boot_trace.span("load_config_and_skills"):
             config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
         with boot_trace.span("prepare_experiment_repository"):
             _prepare_experiment_repository(args, config)
-        with boot_trace.span("import_run_agent_loop"):
-            from vibesys.loops.agent.loop import run_agent_loop  # noqa: PLC0415  # tracked: #288
         with boot_trace.span("load_objective"):
             objective = _with_operator_constraints(bundle.objective, args.constraint)
 
-        existing = False
-        exp_name = args.exp_name
-        start_round = 1
-
         if args.resume is not None:
-            exp_name = args.resume
-            existing = True
-            start_round = None
-            print(f"Resuming VibeSys run {exp_name} in {bundle.root}/")  # noqa: T201  # tracked: #288
+            print(f"Resuming VibeSys run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
 
         with boot_trace.span("load_objectives_toml"):
             metrics = _load_metric_space_toml(bundle.task_root)
@@ -2075,53 +2070,44 @@ def _run_agent(args: argparse.Namespace, integration: RunIntegration) -> None:
                 build_task_docker_image=True,
             )
 
-    success = run_agent_loop(
-        config=config,
-        exp_name=exp_name,
-        runs_dir=args.runs_dir,
-        input_path=str(bundle.root),
-        task_name=bundle.task_name,
-        task_root=bundle.task_root,
-        accuracy_command=bundle.accuracy_command_display,
-        benchmark_command=bundle.benchmark_command_display,
-        workspace_sources=bundle.workspace_sources,
-        evaluator_path=bundle.evaluator_path,
-        evaluator_package_root=bundle.evaluator_package_root,
-        benchmark_result=bundle.benchmark_result,
-        benchmark_result_protocol=bundle.benchmark_result_protocol,
-        accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
-        benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
-        objective=objective,
-        metrics=metrics,
-        max_rounds=args.max_rounds,
-        max_retries_per_round=args.max_retries_per_round,
-        judge_every=args.judge_every,
-        official_eval_every=args.official_eval_every,
-        memory_layout=args.memory_layout,
-        start_round=start_round,
-        existing=existing,
-        operator_constraints=tuple(
-            constraint.strip() for constraint in args.constraint if constraint.strip()
-        ),
-        debug=args.debug,
-        profiler_kind=args.profiler,
-        skills_dirs=skills,
-        run_environment=run_environment,
-        agent_backend="stub" if args.stub_agent else args.agent_backend,
-        cli_provider=args.cli_provider,
-        backend=backend,
-        modality=args.modality,
-        domain=bundle.domain,
-        interface=args.interface,
-        inner_loop=args.inner_loop,
-        remote_repo=args.repo,
-        repo_visibility=args.repo_visibility,
-        integration=integration,
-        outer_loop=getattr(args, "outer_loop", "agent"),
-        profile_guided=bundle.manifest.profile_guided,
-    )
+        return RunRequest(
+            project_root=bundle.root,
+            loop=LoopKind(getattr(args, "outer_loop", "agent")),
+            config=config,
+            input_bundle=bundle,
+            objective=objective,
+            resume=ResumeRef(run_id=args.resume) if args.resume is not None else None,
+            exp_name=args.exp_name,
+            runs_dir=args.runs_dir,
+            metrics=metrics,
+            operator_constraints=tuple(
+                constraint.strip() for constraint in args.constraint if constraint.strip()
+            ),
+            debug=args.debug,
+            profiler_kind=args.profiler,
+            skills_dirs=skills,
+            run_environment=run_environment,
+            agent_backend="stub" if args.stub_agent else args.agent_backend,
+            cli_provider=args.cli_provider,
+            backend=backend,
+            modality=args.modality,
+            interface=args.interface,
+            inner_loop=args.inner_loop,
+            remote_repo=args.repo,
+            repo_visibility=args.repo_visibility,
+            max_rounds=args.max_rounds,
+            max_retries_per_round=args.max_retries_per_round,
+            judge_every=args.judge_every,
+            official_eval_every=args.official_eval_every,
+            memory_layout=args.memory_layout,
+        )
 
-    if success:
+
+def _run_agent(args: argparse.Namespace) -> None:
+    request = _build_agent_request(args)
+    result = _execute_run_request(request)
+
+    if result.succeeded:
         print(f"\nAgent loop completed {args.max_rounds} rounds.")  # noqa: T201  # tracked: #288
     else:
         print("\nAgent loop stopped early (exception or KeyboardInterrupt).")  # noqa: T201  # tracked: #288
@@ -2364,21 +2350,21 @@ def _resolve_openevolve_options(
     return search_policy, openevolve_config
 
 
-def _run_evolve(args: argparse.Namespace, integration: RunIntegration) -> None:
+def _build_evolve_request(args: argparse.Namespace) -> RunRequest:
+    """Run the evolve-loop preamble and build its ``RunRequest``.
+
+    Split out of ``_run_evolve`` so the server can build this request and own
+    the resulting ``create_session`` call itself, instead of going through
+    ``dispatch``.
+    """
     bundle: InputBundle = args.input_bundle
     config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
     _prepare_experiment_repository(args, config)
-    from vibesys.loops.evolve.loop import run_evolve_loop  # noqa: PLC0415  # tracked: #288
 
-    objective = bundle.objective
     space = _resolve_metric_space(args)
 
-    existing = False
-    exp_name = args.exp_name
     if args.resume is not None:
-        exp_name = args.resume
-        existing = True
-        print(f"Resuming evolve run {exp_name} in {bundle.root}/")  # noqa: T201  # tracked: #288
+        print(f"Resuming evolve run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
     if space.objectives:
         spec = ", ".join(f"{o.name}({o.direction})" for o in space.objectives)
         print(  # noqa: T201  # tracked: #288
@@ -2388,30 +2374,16 @@ def _run_evolve(args: argparse.Namespace, integration: RunIntegration) -> None:
 
     search_policy, openevolve_config = _resolve_openevolve_options(args)
 
-    success = run_evolve_loop(
+    return RunRequest(
+        project_root=bundle.root,
+        loop=LoopKind.EVOLVE,
         config=config,
-        exp_name=exp_name,
+        input_bundle=bundle,
+        objective=bundle.objective,
+        resume=ResumeRef(run_id=args.resume) if args.resume is not None else None,
+        exp_name=args.exp_name,
         runs_dir=args.runs_dir,
-        input_path=str(bundle.root),
-        task_name=bundle.task_name,
-        task_root=bundle.task_root,
-        accuracy_command=bundle.accuracy_command_display,
-        benchmark_command=bundle.benchmark_command_display,
-        workspace_sources=bundle.workspace_sources,
-        evaluator_path=bundle.evaluator_path,
-        evaluator_package_root=bundle.evaluator_package_root,
-        accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
-        benchmark_result=bundle.benchmark_result,
-        benchmark_result_protocol=bundle.benchmark_result_protocol,
-        benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
-        objective=objective,
-        max_generations=args.max_generations,
-        children_per_generation=args.children_per_generation,
-        k_top_inspirations=args.k_top_inspirations,
-        k_random_inspirations=args.k_random_inspirations,
-        selection_temperature=args.selection_temperature,
-        seed=args.seed,
-        existing=existing,
+        space=space,
         debug=args.debug,
         profiler_kind=args.profiler,
         skills_dirs=skills,
@@ -2420,20 +2392,28 @@ def _run_evolve(args: argparse.Namespace, integration: RunIntegration) -> None:
         cli_provider=args.cli_provider,
         backend=backend,
         modality=args.modality,
-        domain=bundle.domain,
-        space=space,
+        remote_repo=args.repo,
+        repo_visibility=args.repo_visibility,
+        max_generations=args.max_generations,
+        children_per_generation=args.children_per_generation,
+        k_top_inspirations=args.k_top_inspirations,
+        k_random_inspirations=args.k_random_inspirations,
+        selection_temperature=args.selection_temperature,
+        seed=args.seed,
         frontier_bias=args.frontier_bias,
         bootstrap_max_attempts=args.bootstrap_max_attempts,
         keep_deployments=args.keep_deployments,
         max_parallelism=args.max_parallelism,
         search_policy=search_policy,
         openevolve_config=openevolve_config,
-        remote_repo=args.repo,
-        repo_visibility=args.repo_visibility,
-        integration=integration,
     )
 
-    if success:
+
+def _run_evolve(args: argparse.Namespace) -> None:
+    request = _build_evolve_request(args)
+    result = _execute_run_request(request)
+
+    if result.succeeded:
         print(  # noqa: T201  # tracked: #288
             f"\nEvolve loop completed {args.max_generations} generations "
             f"× {args.children_per_generation} cands."  # noqa: RUF001  # tracked: #288
@@ -2467,35 +2447,28 @@ def _validate_plain(args: argparse.Namespace) -> None:
     _validate_run_environment_profiler(args)
 
 
-def _run_plain(args: argparse.Namespace, integration: RunIntegration) -> None:
+def _build_plain_request(args: argparse.Namespace) -> RunRequest:
+    """Run the plain-loop preamble and build its ``RunRequest``.
+
+    Split out of ``_run_plain`` so the server can build this request and own
+    the resulting ``create_session`` call itself, instead of going through
+    ``dispatch``.
+    """
     bundle: InputBundle = args.input_bundle
     config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
     _prepare_experiment_repository(args, config)
-    from vibesys.loops.plain.loop import run_plain_loop  # noqa: PLC0415  # tracked: #288
 
-    existing = False
-    exp_name = args.exp_name
     if args.resume is not None:
-        exp_name = args.resume
-        existing = True
-        print(f"Resuming plain run {exp_name} in {bundle.root}/")  # noqa: T201  # tracked: #288
+        print(f"Resuming plain run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
 
-    success = run_plain_loop(
+    return RunRequest(
+        project_root=bundle.root,
+        loop=LoopKind.PLAIN,
         config=config,
-        exp_name=exp_name,
+        input_bundle=bundle,
+        resume=ResumeRef(run_id=args.resume) if args.resume is not None else None,
+        exp_name=args.exp_name,
         runs_dir=args.runs_dir,
-        input_path=str(bundle.root),
-        task_name=bundle.task_name,
-        task_root=bundle.task_root,
-        accuracy_command=bundle.accuracy_command_display,
-        benchmark_command=bundle.benchmark_command_display,
-        workspace_sources=bundle.workspace_sources,
-        evaluator_path=bundle.evaluator_path,
-        evaluator_package_root=bundle.evaluator_package_root,
-        max_rounds=args.max_rounds,
-        max_attempts_per_issue=args.max_attempts_per_issue,
-        max_issues_per_perf_eval=args.max_issues_per_perf_eval,
-        existing=existing,
         debug=args.debug,
         profiler_kind=args.profiler,
         skills_dirs=skills,
@@ -2503,17 +2476,34 @@ def _run_plain(args: argparse.Namespace, integration: RunIntegration) -> None:
         agent_backend=args.agent_backend,
         cli_provider=args.cli_provider,
         backend=backend,
-        domain=bundle.domain,
         remote_repo=args.repo,
         repo_visibility=args.repo_visibility,
-        integration=integration,
+        max_rounds=args.max_rounds,
+        max_attempts_per_issue=args.max_attempts_per_issue,
+        max_issues_per_perf_eval=args.max_issues_per_perf_eval,
     )
 
-    if success:
+
+def _run_plain(args: argparse.Namespace) -> None:
+    request = _build_plain_request(args)
+    result = _execute_run_request(request)
+
+    if result.succeeded:
         print("\nPlain loop completed: no remaining open issues.")  # noqa: T201  # tracked: #288
     else:
         print(f"\nPlain loop did not complete after {args.max_rounds} rounds.")  # noqa: T201  # tracked: #288
         sys.exit(1)
+
+
+def _execute_run_request(request: RunRequest) -> RunResult:
+    """Run *request* to completion through `vibesys.api.create_session`.
+
+    `HeadlessRenderer().handle` is the sink. `create_session` emits this
+    run's `RUN_STARTED`/`RUN_FINISHED`/`RUN_FAILED` lifecycle events onto it.
+    """
+    session = create_session(request, sink=HeadlessRenderer().handle)
+    session.start()
+    return asyncio.run(session.await_result())
 
 
 # ===========================================================================
@@ -2527,7 +2517,7 @@ class _LoopCommand:
 
     build_parser: Callable[[], argparse.ArgumentParser]
     validate: Callable[[argparse.Namespace], None]
-    run: Callable[[argparse.Namespace, RunIntegration], None]
+    run: Callable[[argparse.Namespace], None]
 
 
 _LOOP_COMMANDS: dict[str, _LoopCommand] = {
@@ -2536,6 +2526,28 @@ _LOOP_COMMANDS: dict[str, _LoopCommand] = {
     "plain": _LoopCommand(_build_plain_parser, _validate_plain, _run_plain),
     "evolve": _LoopCommand(_build_evolve_parser, _validate_evolve, _run_evolve),
 }
+
+# Mirrors `_LOOP_COMMANDS`: one request builder per `--outer-loop` kind, so
+# `build_run_request` can run a command's side-effectful preamble and produce
+# its `RunRequest` without also running the loop (`_LoopCommand.run` does
+# both). The server uses this to own its `create_session` call directly
+# instead of going through `dispatch`.
+_LOOP_REQUEST_BUILDERS: dict[str, Callable[[argparse.Namespace], RunRequest]] = {
+    "agent": _build_agent_request,
+    "profile-guided": _build_agent_request,
+    "plain": _build_plain_request,
+    "evolve": _build_evolve_request,
+}
+
+
+def build_run_request(invocation: CliInvocation) -> RunRequest:
+    """Build the ``RunRequest`` for one already-parsed CLI invocation.
+
+    Runs the same side-effectful preamble (config/skills loading, experiment
+    repository prep, the task Docker image build, metric-space loading) that
+    the matching ``_run_*`` would run inline, without starting the run.
+    """
+    return _LOOP_REQUEST_BUILDERS[invocation.loop_kind](invocation.args)
 
 
 def _explicit_cli_dests(
@@ -2571,8 +2583,16 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
     return CliInvocation(loop_kind=loop_kind, args=args)
 
 
-def dispatch(argv: list[str], integration: RunIntegration | None = None) -> None:
-    """Parse and run one headless VibeSys invocation."""
+def dispatch(argv: list[str]) -> None:
+    """Parse and run one headless VibeSys invocation.
+
+    Lifecycle events (``RUN_STARTED``/``RUN_FINISHED``/``RUN_FAILED``) are no
+    longer emitted here: the selected command's preamble (``_run_agent`` and
+    friends) builds a ``RunRequest`` and runs it through
+    ``vibesys.api.create_session``, which owns that emission (see
+    ``_execute_run_request``) along with the `LocalRunIntegration` each run
+    uses internally.
+    """
     if argv and argv[0] == "validate":
         _run_validate(argv[1:])
         return
@@ -2588,47 +2608,7 @@ def dispatch(argv: list[str], integration: RunIntegration | None = None) -> None
             invocation = parse_cli_invocation(argv)
         loop_kind, args = invocation.loop_kind, invocation.args
         runner = _LOOP_COMMANDS[loop_kind].run
-    owns_integration = integration is None
-    run_integration = integration or LocalRunIntegration()
-    unsubscribe: Callable[[], None] | None = None
-    try:
-        if owns_integration:
-            unsubscribe = run_integration.events.subscribe(HeadlessRenderer().handle)
-        with boot_trace.span("run_started_event"):
-            max_rounds = getattr(args, "max_rounds", getattr(args, "max_iterations", 1))
-            expected_roles = expected_agent_roles(loop_kind)
-            if args.profiler is ProfilerKind.NONE:
-                # A disabled profiler never runs (see loop.py's profiler-kind
-                # gate), so don't seed a placeholder for it.
-                expected_roles = tuple(role for role in expected_roles if role != "profiler")
-            run_integration.events.emit(
-                CoreEventType.RUN_STARTED,
-                status=EventStatus.ACTIVE,
-                data=RunStartedData(
-                    outer_loop=loop_kind,
-                    input=str(args.input_bundle.root),
-                    max_rounds=max_rounds,
-                    expected_roles=expected_roles,
-                ),
-            )
-        runner(args, run_integration)
-    except BaseException as exc:
-        run_integration.events.emit(
-            CoreEventType.RUN_FAILED,
-            f"{type(exc).__name__}: {exc}",
-            status=EventStatus.FAILED,
-        )
-        raise
-    else:
-        run_integration.events.emit(
-            CoreEventType.RUN_FINISHED,
-            status=EventStatus.COMPLETED,
-        )
-    finally:
-        if unsubscribe is not None:
-            unsubscribe()
-        if owns_integration:
-            run_integration.close()
+    runner(args)
 
 
 def _option_from_argv(argv: list[str], option: str) -> str | None:

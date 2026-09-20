@@ -49,6 +49,11 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 graph TD
     vibesys.agents --> vibesys
     vibesys.agents --> vibesys.render
+    vibesys.api --> vibesys
+    vibesys.api --> vibesys.evaluators
+    vibesys.api --> vibesys.loops
+    vibesys.api --> vibesys.run
+    vibesys.api --> vibesys.sandbox
     vibesys.backends --> vibesys
     vibesys.context --> vibesys
     vibesys.context --> vibesys.agents
@@ -96,6 +101,7 @@ graph TD
     entrypoints --> server.settings
     entrypoints --> vibesys
     entrypoints --> vibesys.agents
+    entrypoints --> vibesys.api
     entrypoints --> vibesys.evaluators
     entrypoints --> vibesys.loops
     entrypoints --> vibesys.render
@@ -103,6 +109,10 @@ graph TD
     entrypoints --> vibesys.sandbox
     entrypoints --> vs_github
     entrypoints --> vs_project
+    server --> vibesys
+    server --> vibesys.sandbox
+    server --> vs_project
+    server --> vs_sandbox
     server.api --> server.chat
     server.api --> server.controller
     server.api --> server.diagnostics
@@ -113,10 +123,12 @@ graph TD
     server.api --> server.run_lifecycle
     server.api --> server.settings
     server.api --> vibesys
+    server.api --> vibesys.api
     server.api --> vibesys.loops
     server.api --> vibesys.run
     server.api --> vs_loop_state
     server.api --> vs_project
+    server.chat --> server
     server.chat --> server.controller
     server.chat --> server.events
     server.chat --> server.execution
@@ -139,6 +151,8 @@ graph TD
     server.execution --> server.diagnostics
     server.execution --> server.events
     server.execution --> server.journal
+    server.execution --> vibesys
+    server.integration --> server
     server.integration --> server.chat
     server.integration --> server.controller
     server.integration --> server.diagnostics
@@ -168,6 +182,9 @@ graph TD
     server.runtime --> server.settings
     server.runtime --> server.transport
     server.runtime --> vibesys
+    server.runtime --> vibesys.api
+    server.runtime --> vibesys.render
+    server.runtime --> vibesys.run
     server.settings --> vibesys
     server.tool_payloads --> server.events
     server.transport --> server.api
@@ -177,6 +194,14 @@ graph TD
     vibesys.agents --> vibesys.render
     vibesys.agents --> vs_project
     vibesys.agents --> vs_sandbox
+    vibesys.api --> vibesys
+    vibesys.api --> vibesys.evaluators
+    vibesys.api --> vibesys.loops
+    vibesys.api --> vibesys.run
+    vibesys.api --> vibesys.sandbox
+    vibesys.api --> vs_loop_state
+    vibesys.api --> vs_project
+    vibesys.api --> vs_sandbox
     vibesys.backends --> vibesys
     vibesys.backends --> vs_sandbox
     vibesys.context --> vibesys
