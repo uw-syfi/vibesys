@@ -61,6 +61,7 @@ from vibesys.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
+from vibesys.render.log import log_and_print
 from vibesys.render.run_log import RunLogRenderer
 from vibesys.render.sink import output_sink
 from vibesys.resource_paths import profiler_support_dir
@@ -554,7 +555,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                     )
         with boot_trace.span("log_bootstrap"):
             integration.attach(log_dir)
-            logger = RunLogger(log_dir)
+            logger = RunLogger(log_dir, emit=log_and_print)
             teardown_stack.callback(logger.close)
             # Registered after logger.close so LIFO teardown unsubscribes the
             # renderer before the log file closes.
@@ -1076,7 +1077,7 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
     teardown_stack.callback(lambda: parent.git.remove_worktree(workspace))
     parent.git.add_worktree(workspace, parent_commit)
 
-    logger = RunLogger(log_dir, tee_stderr=False)
+    logger = RunLogger(log_dir, tee_stderr=False, emit=log_and_print)
     teardown_stack.callback(logger.close)
 
     resolved_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND

@@ -49,9 +49,7 @@ from server.api.workspace_git import WorkspacePatchReader
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
 from vibesys.api import open_run_store
-from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.run.git_tracker import GitTracker
-from vs_project import AgentRunConfiguration, ProjectStateError
+from vs_project import AgentRunConfiguration, GitTracker, NullGitTrackerEvents, ProjectStateError
 
 if TYPE_CHECKING:
     from collections.abc import Callable

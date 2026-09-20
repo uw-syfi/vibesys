@@ -20,8 +20,8 @@ from server.chat.session import (
 from server.events import ChatThreadCreatedData
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.api import build_agent_client
-from vibesys.run import RunLogger
 from vs_agent import AgentSessionKey, SessionScope
+from vs_project import RunLogger
 from vs_sandbox import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:

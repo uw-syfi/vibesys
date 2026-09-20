@@ -50,8 +50,6 @@ from vibesys.repository import (
 )
 from vibesys.resource_paths import default_skill_roots
 from vibesys.run.experiment_repo import ExperimentRepository
-from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.run.git_tracker import GitTracker
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     build_run_environment,
@@ -63,6 +61,8 @@ from vibesys.skills import resolve_skill_source_dirs
 from vs_github import GitHubCLI, GitHubCLIError
 from vs_project import (
     AgentRunConfiguration,
+    GitTracker,
+    NullGitTrackerEvents,
     PlainRunConfiguration,
     Project,
     ProjectLayoutError,

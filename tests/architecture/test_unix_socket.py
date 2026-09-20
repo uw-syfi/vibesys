@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.unix_socket import (
+from vs_project import (
     MAX_SOCKET_PATH_BYTES,
     SocketPathTooLongError,
     validate_socket_path,
