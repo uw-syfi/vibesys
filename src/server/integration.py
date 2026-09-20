@@ -27,9 +27,7 @@ from server.events import (
 from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
-from vibesys.api import supported_cli_providers
-from vibesys.events import CoreEventType
-from vibesys.render.sink import output_sink
+from vibesys.api import CoreEventType, output_sink, supported_cli_providers
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,9 +37,7 @@ if TYPE_CHECKING:
     from server.controller import ProjectRunState, RunController
     from server.execution import ExecutionTracker
     from server.journal import EventJournal as WireEventJournal
-    from vibesys.api import RunSession
-    from vibesys.events import CoreEvent
-    from vibesys.run.integration import RunResourceHandoff
+    from vibesys.api import CoreEvent, RunResourceHandoff, RunSession
     from vs_project import Project
 
 _EVENT_DATA_ADAPTER = TypeAdapter(EventData)

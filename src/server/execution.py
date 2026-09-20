@@ -31,8 +31,8 @@ from server.events import (
     ToolResultData,
     json_value,
 )
-from vibesys.events import AgentExecutionStartedData as CoreAgentExecutionStartedData
-from vibesys.events import CoreEvent
+from vibesys.api import AgentExecutionStartedData as CoreAgentExecutionStartedData
+from vibesys.api import CoreEvent
 
 if TYPE_CHECKING:
     from collections.abc import Generator

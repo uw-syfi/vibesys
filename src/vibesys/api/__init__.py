@@ -1,14 +1,14 @@
 """The public surface of VibeSys core: the only module other packages import.
 
-Everything else under `vibesys.*` is private to core + `entrypoints`. Both
-consumers -- `entrypoints` (headless) and `server.*` -- talk to core only
-through this module: no deep imports, no escape hatch.
+Everything else under `vibesys.*` is private to core + `entrypoints`. `server.*`
+talks to core only through this module: no deep imports, no escape hatch (see
+the narrow-boundary plan). `entrypoints`, as the composition root that
+assembles a `RunRequest`, still reaches some core internals directly.
 
-This package is additive scaffolding (Wave 1 of the `vibesys.api` boundary
-effort, see the narrow-boundary plan). The contracts and Protocols below are
-the target shape; several entry points still raise `NotImplementedError`
-pending later waves that move behavior in from `entrypoints/headless.py` and
-`server.*`. Nothing outside this package imports it yet.
+Most symbols here are contracts and Protocols (the boundary's target shape);
+the rest are re-exports of core-owned types that `server.*` legitimately needs
+(events, control signals, the resource-handoff seam) so it never has to import
+their private home modules.
 """
 
 from __future__ import annotations
@@ -49,15 +49,23 @@ from vibesys.api.session import (
     create_session,
 )
 from vibesys.api.store import RunStore, open_run_store
+from vibesys.events import AgentExecutionStartedData, CoreEventType
+from vibesys.loops.agent.issue_board import framework_memory_paths
+from vibesys.render.sink import output_sink
+from vibesys.repository import RepositoryVisibility
 from vibesys.run import RunLogger
+from vibesys.run.integration import RunResourceHandoff
+from vibesys.run.run_control import RunStopped
 
 __all__ = [
     "AgentEnvironment",
+    "AgentExecutionStartedData",
     "CandidateDisposition",
     "Config",
     "ConfigurationDiagnostic",
     "ConfigurationError",
     "CoreEvent",
+    "CoreEventType",
     "EventSink",
     "EventStatus",
     "HypothesisRoundView",
@@ -67,6 +75,7 @@ __all__ = [
     "MetricSpace",
     "Objective",
     "PerfDeltaReason",
+    "RepositoryVisibility",
     "ResumeRef",
     "RoundView",
     "RunAgentHost",
@@ -74,17 +83,21 @@ __all__ = [
     "RunLogger",
     "RunQuery",
     "RunRequest",
+    "RunResourceHandoff",
     "RunResult",
     "RunSession",
     "RunStatus",
+    "RunStopped",
     "RunStore",
     "RunView",
     "RunWorkspace",
     "build_agent_client",
     "create_session",
     "default_request",
+    "framework_memory_paths",
     "load_config",
     "open_run_store",
+    "output_sink",
     "project_committed_run_view",
     "supported_cli_providers",
     "validate",

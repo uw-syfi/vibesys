@@ -87,7 +87,7 @@ depends_on = ["server.diagnostics", "server.run_lifecycle", "server.event_index"
 
 [[modules]]
 path = "server.execution"
-depends_on = ["server.diagnostics", "server.events", "server.journal", "vibesys"]
+depends_on = ["server.diagnostics", "server.events", "server.journal", "vibesys", "vibesys.api"]
 
 [[modules]]
 path = "server.integration"
@@ -111,7 +111,7 @@ depends_on = ["server.read_model", "server.settings", "server.chat", "server.eve
 
 [[modules]]
 path = "server.settings"
-depends_on = ["vibesys"]
+depends_on = ["vibesys", "vibesys.api"]
 
 [[modules]]
 path = "server.tool_payloads"
@@ -127,7 +127,7 @@ depends_on = ["vs_feature_flags", "vs_loop_state"]
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vibesys.agents", "vibesys.domains", "vibesys.evaluators", "vibesys.loops", "vibesys.run", "vibesys.sandbox", "vs_agent", "vs_loop_state", "vs_project", "vs_sandbox"]
+depends_on = ["vibesys", "vibesys.agents", "vibesys.domains", "vibesys.evaluators", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_agent", "vs_loop_state", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.context"
