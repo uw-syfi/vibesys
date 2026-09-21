@@ -308,7 +308,8 @@ an evaluator error record carrying that reason.
 
 For each requested repetition, Go starts the Rust `benchmark` command. Rust
 loads the candidate and calls the C ABI directly from native producer and
-consumer threads:
+consumer threads. Linux pins each worker to a CPU from the process affinity
+mask; macOS requests user-interactive QoS. The timed loop:
 
 1. Create the queue and one handle per measured thread.
 2. Synchronize workers on a barrier.

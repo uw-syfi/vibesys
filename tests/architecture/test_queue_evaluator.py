@@ -187,6 +187,60 @@ def test_queue_tasks_live_with_the_editable_repository():  # noqa: ANN201  # tra
         assert not (project_root / "examples" / "data-structures" / old_name).exists()
 
 
+def test_repository_make_honors_cargo_target_dir(tmp_path: Path) -> None:
+    if shutil.which("cargo") is None:
+        pytest.skip("Rust is required by the trusted queue evaluator")
+
+    project_root = Path(__file__).parents[2]
+    repository = _queue_repository(project_root)
+    build_dir = tmp_path / "repository"
+    shutil.copytree(repository, build_dir)
+    cargo_target = tmp_path / "cargo-target"
+    subprocess.run(
+        ["make"],  # noqa: S607  # tracked: #288
+        cwd=build_dir,
+        check=True,
+        env=os.environ | {"CARGO_TARGET_DIR": str(cargo_target)},
+    )
+    assert (build_dir / "queue-candidate.so").is_file()
+    built = cargo_target / "release"
+    assert (built / "libqueue_candidate.so").is_file() or (
+        built / "libqueue_candidate.dylib"
+    ).is_file()
+    assert not (build_dir / "target").exists()
+
+
+def test_queue_benchmark_pins_linux_workers(tmp_path: Path) -> None:
+    if shutil.which("cargo") is None:
+        pytest.skip("Rust is required by the trusted queue evaluator")
+
+    source = _queue_evaluator(Path(__file__).parents[2]) / "native_runner"
+    text = (source / "src" / "benchmark.rs").read_text()
+    assert "fn pin_current_thread(worker_index: usize)" in text
+    assert "sched_setaffinity" in text
+    assert "configure_benchmark_thread(lane)" in text
+    assert "configure_benchmark_thread(worker_index)" in text
+    completed = subprocess.run(  # noqa: S603  # tracked: #288
+        [  # noqa: S607  # tracked: #288
+            "cargo",
+            "test",
+            "--locked",
+            "--manifest-path",
+            str(source / "Cargo.toml"),
+            "--target-dir",
+            str(tmp_path / "target"),
+            "benchmark::pin_tests::pins_current_thread_to_indexed_cpu_from_process_mask",
+            "--",
+            "--exact",
+        ],
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "1 passed" in completed.stdout
+
+
 def test_native_runner_build_ignores_candidate_cargo_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

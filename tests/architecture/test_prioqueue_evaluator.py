@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -244,6 +245,66 @@ def test_priority_queue_inputs_use_shared_editable_rust_starter():  # noqa: ANN2
         assert not (input_dir / "pyproject.toml").exists()
         for relative in starter_files:
             assert not (input_dir / relative).exists()
+
+
+def test_starter_make_honors_cargo_target_dir(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    if shutil.which("cargo") is None:
+        pytest.skip("Rust is required by the trusted priority-queue evaluator")
+
+    project_root = Path(__file__).parents[2]
+    starter = project_root / "examples" / "starters" / "priority-queue-rs"
+    build_dir = tmp_path / "starter"
+    _copy_input_bundle(starter, build_dir)
+    cargo_target = tmp_path / "cargo-target"
+    subprocess.run(
+        ["make"],  # noqa: S607  # tracked: #288
+        cwd=build_dir,
+        check=True,
+        env=os.environ | {"CARGO_TARGET_DIR": str(cargo_target)},
+    )
+    assert (build_dir / "priority-queue-candidate.so").is_file()
+    built = cargo_target / "release"
+    assert (built / "libpriority_queue_candidate.so").is_file() or (
+        built / "libpriority_queue_candidate.dylib"
+    ).is_file()
+    assert not (build_dir / "target").exists()
+
+
+def test_priority_queue_benchmark_pins_linux_workers(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    if shutil.which("cargo") is None:
+        pytest.skip("Rust is required by the trusted priority-queue evaluator")
+
+    source = (
+        Path(__file__).parents[2]
+        / "examples"
+        / "evaluators"
+        / "priority-queue"
+        / "native_runner"
+    )
+    text = (source / "src" / "benchmark.rs").read_text()
+    assert "fn pin_current_thread(worker_index: usize)" in text
+    assert "sched_setaffinity" in text
+    assert "configure_benchmark_thread(lane)" in text
+    assert "configure_benchmark_thread(worker_index)" in text
+    completed = subprocess.run(  # noqa: S603  # tracked: #288
+        [  # noqa: S607  # tracked: #288
+            "cargo",
+            "test",
+            "--locked",
+            "--manifest-path",
+            str(source / "Cargo.toml"),
+            "--target-dir",
+            str(tmp_path / "target"),
+            "benchmark::pin_tests::pins_current_thread_to_indexed_cpu_from_process_mask",
+            "--",
+            "--exact",
+        ],
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "1 passed" in completed.stdout
 
 
 @pytest.mark.parametrize(("input_name", "scenario"), PRIORITY_QUEUE_INPUTS.items())

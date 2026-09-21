@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 const CLOCK_CHECK_INTERVAL: u64 = 64;
 
 #[cfg(target_os = "macos")]
-fn configure_benchmark_thread() -> Result<(), String> {
+fn configure_benchmark_thread(_worker_index: usize) -> Result<(), String> {
     const QOS_CLASS_USER_INTERACTIVE: u32 = 0x21;
 
     extern "C" {
@@ -25,9 +25,52 @@ fn configure_benchmark_thread() -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn configure_benchmark_thread() -> Result<(), String> {
+#[cfg(target_os = "linux")]
+fn configure_benchmark_thread(worker_index: usize) -> Result<(), String> {
+    pin_current_thread(worker_index)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn configure_benchmark_thread(_worker_index: usize) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn pin_current_thread(worker_index: usize) -> Result<(), String> {
+    const CPU_SETSIZE: usize = 1024;
+    let mut allowed = [0_u64; CPU_SETSIZE / 64];
+    let bytes = std::mem::size_of_val(&allowed);
+    if unsafe { sched_getaffinity(0, bytes, allowed.as_mut_ptr()) } != 0 {
+        return Err(format!(
+            "sched_getaffinity: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let mut cpus = Vec::new();
+    for cpu in 0..CPU_SETSIZE {
+        if allowed[cpu / 64] & (1_u64 << (cpu % 64)) != 0 {
+            cpus.push(cpu);
+        }
+    }
+    if cpus.is_empty() {
+        return Err("process CPU affinity mask is empty".to_string());
+    }
+    let cpu = cpus[worker_index % cpus.len()];
+    let mut mask = [0_u64; CPU_SETSIZE / 64];
+    mask[cpu / 64] |= 1_u64 << (cpu % 64);
+    if unsafe { sched_setaffinity(0, bytes, mask.as_ptr()) } != 0 {
+        return Err(format!(
+            "sched_setaffinity cpu {cpu}: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+extern "C" {
+    fn sched_getaffinity(pid: i32, cpusetsize: usize, mask: *mut u64) -> i32;
+    fn sched_setaffinity(pid: i32, cpusetsize: usize, mask: *const u64) -> i32;
 }
 
 #[derive(Clone)]
@@ -136,6 +179,7 @@ fn run_phase(
     let stop = Arc::new(AtomicBool::new(false));
 
     let (mut producers, mut consumers, mut counts, elapsed) = thread::scope(|scope| {
+        let producer_count = producers.len();
         let mut producer_workers = Vec::with_capacity(producers.len());
         for (lane, producer) in producers.into_iter().enumerate() {
             let barrier = barrier.clone();
@@ -150,13 +194,23 @@ fn run_phase(
         }
 
         let mut consumer_workers = Vec::with_capacity(consumers.len());
-        for consumer in consumers {
+        for (index, consumer) in consumers.into_iter().enumerate() {
             let barrier = barrier.clone();
             let start = start.clone();
             let stop = stop.clone();
             let value_size = config.value_size;
+            let worker_index = producer_count + index;
             consumer_workers.push(scope.spawn(move || {
-                run_consumer(consumer, value_size, duration, keys, barrier, start, stop)
+                run_consumer(
+                    consumer,
+                    worker_index,
+                    value_size,
+                    duration,
+                    keys,
+                    barrier,
+                    start,
+                    stop,
+                )
             }));
         }
 
@@ -236,7 +290,7 @@ fn run_producer(
     let mut payload = vec![0_u8; value_size];
     let mut sequence = 0_u64;
     prepare_payload(&mut payload, (lane as u64) << 56);
-    let thread_configuration = configure_benchmark_thread();
+    let thread_configuration = configure_benchmark_thread(lane);
     barrier.wait();
     thread_configuration?;
     let deadline = *start.get().expect("benchmark start missing") + duration;
@@ -268,6 +322,7 @@ fn run_producer(
 #[allow(clippy::too_many_arguments)]
 fn run_consumer(
     mut consumer: Consumer,
+    worker_index: usize,
     value_size: usize,
     duration: Duration,
     keys: [u64; 2],
@@ -277,7 +332,7 @@ fn run_consumer(
 ) -> Result<(Consumer, Counts), String> {
     let mut counts = Counts::default();
     let mut output = vec![0_u8; value_size];
-    let thread_configuration = configure_benchmark_thread();
+    let thread_configuration = configure_benchmark_thread(worker_index);
     barrier.wait();
     thread_configuration?;
     let deadline = *start.get().expect("benchmark start missing") + duration;
@@ -390,5 +445,69 @@ fn mix_fingerprint(mut value: u64, key: u64) -> u64 {
 fn add_fingerprint(target: &mut [u64; 2], keys: [u64; 2], value: u64) {
     for index in 0..2 {
         target[index] = target[index].wrapping_add(mix_fingerprint(value, keys[index]));
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod pin_tests {
+    use super::*;
+
+    const CPU_SETSIZE: usize = 1024;
+
+    fn affinity_mask() -> [u64; CPU_SETSIZE / 64] {
+        let mut mask = [0_u64; CPU_SETSIZE / 64];
+        let bytes = std::mem::size_of_val(&mask);
+        assert_eq!(
+            unsafe { sched_getaffinity(0, bytes, mask.as_mut_ptr()) },
+            0,
+            "sched_getaffinity: {}",
+            std::io::Error::last_os_error()
+        );
+        mask
+    }
+
+    fn cpus_in(mask: &[u64; CPU_SETSIZE / 64]) -> Vec<usize> {
+        (0..CPU_SETSIZE)
+            .filter(|cpu| mask[cpu / 64] & (1_u64 << (cpu % 64)) != 0)
+            .collect()
+    }
+
+    fn set_affinity(mask: &[u64; CPU_SETSIZE / 64]) {
+        let bytes = std::mem::size_of_val(mask);
+        assert_eq!(
+            unsafe { sched_setaffinity(0, bytes, mask.as_ptr()) },
+            0,
+            "sched_setaffinity: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
+    struct RestoreAffinity([u64; CPU_SETSIZE / 64]);
+
+    impl Drop for RestoreAffinity {
+        fn drop(&mut self) {
+            set_affinity(&self.0);
+        }
+    }
+
+    #[test]
+    fn pins_current_thread_to_indexed_cpu_from_process_mask() {
+        let original = affinity_mask();
+        let _restore = RestoreAffinity(original);
+        let allowed = cpus_in(&original);
+        assert!(!allowed.is_empty());
+        let indexes: Vec<usize> = if allowed.len() == 1 {
+            vec![0]
+        } else {
+            vec![0, 1]
+        };
+        for worker_index in indexes {
+            set_affinity(&original);
+            pin_current_thread(worker_index).expect("pin worker");
+            assert_eq!(
+                cpus_in(&affinity_mask()),
+                vec![allowed[worker_index % allowed.len()]]
+            );
+        }
     }
 }
