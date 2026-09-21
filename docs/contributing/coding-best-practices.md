@@ -7,9 +7,15 @@ path.
 
 ## Architecture Boundaries
 
-- Put headless optimization behavior under `src/vibesys/`.
-- Put frontend-serving behavior under `src/server/`.
-- Put process composition under `src/entrypoints/`, not in `libs/`.
+- Put core optimization behavior under `src/vibesys/`, reached through the
+  `vibesys.api` facade (run/observe) and `vibesys.api.request` (build a
+  `RunRequest`).
+- Put the headless run driver (execute a `RunRequest`, render to the terminal)
+  under `src/headless/`, and frontend-serving behavior under `src/server/`.
+  Both are peers over `vibesys.api`; neither imports the other.
+- Put process composition under `src/entrypoints/`, not in `libs/`: the shared
+  CLI (argument parsing, `RunRequest` building) plus the thin mode entries that
+  fork to the `headless` or `server` driver.
 - Put reusable standalone libraries under `libs/`.
 - Put prompt, loop, and domain behavior in the package that owns that surface.
 - Put long-form serving knowledge under `resources/skills/`, not in framework

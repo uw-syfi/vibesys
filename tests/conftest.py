@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from entrypoints.headless_render import HeadlessRenderer
+from headless.render import HeadlessRenderer
 from vibesys.evaluators.input_manifest import (
     MANIFEST_NAME,
     InputBundle,

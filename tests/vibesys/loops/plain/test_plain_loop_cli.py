@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from entrypoints.headless import _build_plain_parser as build_parser
+from entrypoints.cli import _build_plain_parser as build_parser
 from entrypoints.headless import main
 
 TARGET_ARGS = [
@@ -98,7 +98,7 @@ class TestMain:
             )
 
         return patch(
-            "entrypoints.headless.load_config_and_skills",
+            "entrypoints.cli.load_config_and_skills",
             side_effect=_fake_load,
         )
 

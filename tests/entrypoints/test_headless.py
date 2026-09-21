@@ -15,7 +15,7 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from entrypoints.headless import (
+from entrypoints.cli import (
     _extract_flag,
     _extract_loop_selection,
     _load_metric_space_toml,
@@ -26,10 +26,10 @@ from entrypoints.headless import (
     _validate_target_inputs,
     _with_operator_constraints,
     load_config_and_skills,
-    main,
     parse_cli_invocation,
     run_environment_spec_from_args,
 )
+from entrypoints.headless import main
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -54,7 +54,7 @@ def _patch_loop_runner(loop_name: str, runner: Mock):  # noqa: ANN202
     """Replace one immutable CLI dispatch record's runner."""
     import dataclasses  # noqa: PLC0415
 
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     command = cli._LOOP_COMMANDS[loop_name]  # noqa: SLF001
     return patch.dict(
@@ -404,7 +404,7 @@ def test_task_dockerfile_selects_docker_without_building_during_validation(
     dockerfile = task / "Dockerfile"
     dockerfile.write_text("FROM python:3.12-bookworm\n")
 
-    with patch("entrypoints.headless.build_task_image") as build:
+    with patch("entrypoints.cli.build_task_image") as build:
         invocation = parse_cli_invocation(
             ["--project", str(project), "--task", "latency", *environment_flag]
         )
@@ -424,7 +424,7 @@ def test_task_dockerfile_builds_once_for_a_launch(tmp_path: Path) -> None:
     invocation = parse_cli_invocation(["--project", str(project), "--task", "latency"])
     image_id = f"sha256:{'a' * 64}"
 
-    with patch("entrypoints.headless.build_task_image", return_value=image_id) as build:
+    with patch("entrypoints.cli.build_task_image", return_value=image_id) as build:
         spec = run_environment_spec_from_args(
             invocation.args,
             build_task_docker_image=True,
@@ -448,7 +448,7 @@ def test_each_outer_loop_builds_the_task_image_once(
     runner_path: str,
     tmp_path: Path,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = tmp_path / "repository"
     project.mkdir()
@@ -468,12 +468,12 @@ def test_each_outer_loop_builds_the_task_image_once(
     invocation.args.exp_name = "test-run"
 
     with (
-        patch("entrypoints.headless.build_task_image", return_value=image_id) as build,
+        patch("entrypoints.cli.build_task_image", return_value=image_id) as build,
         patch(
-            "entrypoints.headless.load_config_and_skills",
+            "entrypoints.cli.load_config_and_skills",
             return_value=(config, (), ComputeBackend.CPU),
         ),
-        patch("entrypoints.headless._prepare_experiment_repository"),
+        patch("entrypoints.cli._prepare_experiment_repository"),
         patch(runner_path, return_value=True) as loop_runner,
     ):
         run(invocation.args)
@@ -568,7 +568,7 @@ def test_runs_dir_rejects_the_python_installation_prefix(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     prefix = tmp_path / ".venv"
@@ -606,7 +606,7 @@ def test_direct_runs_default_to_local_and_copied_runs_default_to_a_remote(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     github = Mock()
@@ -626,7 +626,7 @@ def test_direct_runs_default_to_local_and_copied_runs_default_to_a_remote(
 
 
 def test_short_repository_name_uses_the_configured_owner(tmp_path: Path) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     config_path = tmp_path / "agent.toml"
     config_path.write_text('[model]\nname = "gpt-5.5"\n[repository]\nowner = "my-lab"\n')
@@ -640,7 +640,7 @@ def test_short_repository_name_uses_the_configured_owner(tmp_path: Path) -> None
 
 
 def test_local_and_repo_are_mutually_exclusive() -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     args = cli._build_agent_parser().parse_args(  # noqa: SLF001
         ["--local", "--repo", "owner/trial", "--no-skills"]
@@ -662,7 +662,7 @@ def test_all_loops_accept_modal_without_a_profiler(
     validator: str,
     tmp_path: Path,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     args = getattr(cli, builder)().parse_args(
@@ -677,7 +677,7 @@ def test_profiler_validation_uses_the_selected_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     args = cli._build_agent_parser().parse_args(  # noqa: SLF001
@@ -710,7 +710,7 @@ def test_evolve_rejects_invalid_search_settings(
     value: str,
     tmp_path: Path,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     args = cli._build_evolve_parser().parse_args(  # noqa: SLF001
@@ -721,7 +721,7 @@ def test_evolve_rejects_invalid_search_settings(
 
 
 def test_openevolve_knobs_select_openevolve_for_a_new_run(tmp_path: Path) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     args = cli._build_evolve_parser().parse_args(  # noqa: SLF001
@@ -736,7 +736,7 @@ def test_openevolve_knobs_select_openevolve_for_a_new_run(tmp_path: Path) -> Non
 
 
 def test_openevolve_knobs_cannot_be_combined_with_vibesys_policy(tmp_path: Path) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     args = cli._build_evolve_parser().parse_args(  # noqa: SLF001
@@ -754,7 +754,7 @@ def test_openevolve_knobs_cannot_be_combined_with_vibesys_policy(tmp_path: Path)
 
 
 def test_target_validation_loads_the_manifest_contract(tmp_path: Path) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     with (project / "vibesys.input.toml").open("a") as manifest:
@@ -775,7 +775,7 @@ def test_target_validation_reports_missing_required_files(
     missing: str,
     tmp_path: Path,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     (project / missing).unlink()
@@ -790,7 +790,7 @@ def test_target_validation_explains_an_invalid_launch_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     monkeypatch.chdir(tmp_path)
     args = cli._build_agent_parser().parse_args([])  # noqa: SLF001
@@ -813,7 +813,7 @@ def test_agent_rejects_nonpositive_round_settings(
     value: str,
     tmp_path: Path,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     args = cli._build_agent_parser().parse_args(  # noqa: SLF001
@@ -839,7 +839,7 @@ def test_omitted_config_uses_builtin_defaults(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     launch = tmp_path / "launch"
@@ -859,7 +859,7 @@ def test_omitted_config_loads_only_the_launch_directory_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     launch = tmp_path / "launch"
@@ -877,7 +877,7 @@ def test_omitted_config_loads_only_the_launch_directory_config(
 
 
 def test_missing_explicit_config_is_a_configuration_error(tmp_path: Path) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     args = cli._build_agent_parser().parse_args(  # noqa: SLF001
         ["--config", str(tmp_path / "missing.toml")]
@@ -988,7 +988,7 @@ def test_repository_resume_keeps_a_recorded_local_environment_despite_task_docke
     monkeypatch.chdir(project)
 
     args = parse_cli_invocation(["--resume", run_id]).args
-    with patch("entrypoints.headless.build_task_image") as build:
+    with patch("entrypoints.cli.build_task_image") as build:
         spec = run_environment_spec_from_args(args, build_task_docker_image=True)
 
     assert spec.name == "local"
@@ -1019,7 +1019,7 @@ def test_repository_resume_rebuilds_a_recorded_task_docker_environment(
     monkeypatch.chdir(project)
 
     args = parse_cli_invocation(["--resume", run_id]).args
-    with patch("entrypoints.headless.build_task_image", return_value=rebuilt_image) as build:
+    with patch("entrypoints.cli.build_task_image", return_value=rebuilt_image) as build:
         spec = run_environment_spec_from_args(args, build_task_docker_image=True)
 
     assert spec.name == "docker"
@@ -1776,11 +1776,15 @@ def test_dispatch_owns_headless_rendering(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    from entrypoints import cli  # noqa: PLC0415
+
+    headless_run_module = sys.modules["headless.execute"]
 
     project = _write_input_project(tmp_path)
     renderer = Mock()
-    monkeypatch.setattr(cli, "HeadlessRenderer", lambda: renderer)
+    monkeypatch.setattr(headless_run_module, "HeadlessRenderer", lambda: renderer)
     monkeypatch.setattr(_LOOP_RUN_TARGETS["agent"], Mock(return_value=True))
 
     cli.dispatch(["--input", str(project)])
@@ -1795,11 +1799,15 @@ def test_dispatch_records_failure_through_the_headless_renderer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    from entrypoints import cli  # noqa: PLC0415
+
+    headless_run_module = sys.modules["headless.execute"]
 
     project = _write_input_project(tmp_path)
     renderer = Mock()
-    monkeypatch.setattr(cli, "HeadlessRenderer", lambda: renderer)
+    monkeypatch.setattr(headless_run_module, "HeadlessRenderer", lambda: renderer)
     monkeypatch.setattr(_LOOP_RUN_TARGETS["agent"], Mock(side_effect=RuntimeError("runner failed")))
 
     with pytest.raises(RuntimeError, match="runner failed"):
@@ -1849,7 +1857,7 @@ def test_instrumented_microservice_task_profiles_with_otel_by_default(tmp_path: 
     Without this the default run resolves to ``none`` for microservices, the
     profiler role never executes, and no critical-path evidence is produced.
     """
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_microservice_project(tmp_path, traced=True)
     args = cli._build_agent_parser().parse_args(["--input", str(project)])  # noqa: SLF001
@@ -1863,7 +1871,7 @@ def test_instrumented_microservice_task_profiles_with_otel_by_default(tmp_path: 
 
 def test_uninstrumented_microservice_task_keeps_auto(tmp_path: Path) -> None:
     """Without a collector there is nothing for the OTel profiler to read."""
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_microservice_project(tmp_path, traced=False)
     args = cli._build_agent_parser().parse_args(["--input", str(project)])  # noqa: SLF001
@@ -1876,7 +1884,7 @@ def test_uninstrumented_microservice_task_keeps_auto(tmp_path: Path) -> None:
 
 def test_explicit_profiler_flag_overrides_the_task_default(tmp_path: Path) -> None:
     """The bundle only supplies a default; the operator stays in control."""
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_microservice_project(tmp_path, traced=True)
     args = cli._build_agent_parser().parse_args(  # noqa: SLF001
@@ -1891,7 +1899,7 @@ def test_explicit_profiler_flag_overrides_the_task_default(tmp_path: Path) -> No
 
 def test_non_microservice_task_is_unaffected_by_trace_arguments(tmp_path: Path) -> None:
     """OTel is microservices-only; a generic bundle must not be upgraded."""
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_microservice_project(tmp_path, traced=True, name="generic-task")
     manifest = project / "vibesys.input.toml"
@@ -1906,7 +1914,7 @@ def test_non_microservice_task_is_unaffected_by_trace_arguments(tmp_path: Path) 
 
 def test_expected_role_registry_covers_every_outer_loop() -> None:
     """The advertised contract must name every loop dispatch can select."""
-    import entrypoints.headless as cli  # noqa: PLC0415
+    from entrypoints import cli  # noqa: PLC0415
 
     assert set(EXPECTED_AGENT_ROLES) == set(cli._OUTER_LOOPS)  # noqa: SLF001
     assert set(EXPECTED_AGENT_ROLES) == set(cli._LOOP_COMMANDS)  # noqa: SLF001
@@ -1917,11 +1925,15 @@ def test_expected_role_registry_covers_every_outer_loop() -> None:
 def test_dispatch_advertises_expected_roles_on_run_started(
     loop: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    from entrypoints import cli  # noqa: PLC0415
+
+    headless_run_module = sys.modules["headless.execute"]
 
     project = _write_input_project(tmp_path)
     renderer = Mock()
-    monkeypatch.setattr(cli, "HeadlessRenderer", lambda: renderer)
+    monkeypatch.setattr(headless_run_module, "HeadlessRenderer", lambda: renderer)
     monkeypatch.setattr(_LOOP_RUN_TARGETS[loop], Mock(return_value=True))
 
     cli.dispatch(["--outer-loop", loop, "--input", str(project)])
@@ -1941,11 +1953,15 @@ def test_dispatch_omits_profiler_role_when_profiler_is_disabled(
     loop: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A disabled profiler never runs, so its placeholder must not be seeded."""
-    import entrypoints.headless as cli  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    from entrypoints import cli  # noqa: PLC0415
+
+    headless_run_module = sys.modules["headless.execute"]
 
     project = _write_input_project(tmp_path)
     renderer = Mock()
-    monkeypatch.setattr(cli, "HeadlessRenderer", lambda: renderer)
+    monkeypatch.setattr(headless_run_module, "HeadlessRenderer", lambda: renderer)
     monkeypatch.setattr(_LOOP_RUN_TARGETS[loop], Mock(return_value=True))
 
     cli.dispatch(["--outer-loop", loop, "--input", str(project), "--profiler", "none"])

@@ -6,7 +6,7 @@ import argparse
 
 import pytest
 
-from entrypoints.headless import _add_common_args
+from entrypoints.cli import _add_common_args
 from vibesys import backends
 from vibesys.backends import SandboxKind
 from vibesys.backends.local import LocalBackend

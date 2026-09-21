@@ -55,7 +55,11 @@ forbid_circular_dependencies = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_project", "vs_github", "vibesys.api", "vs_agent", "server.runtime", "server.settings"]
+depends_on = ["vs_project", "vs_github", "vibesys.api", "vs_agent", "server.runtime", "server.settings", "headless"]
+
+[[modules]]
+path = "headless"
+depends_on = ["vibesys.api"]
 
 [[modules]]
 path = "server"

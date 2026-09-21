@@ -417,7 +417,7 @@ def _environment_bind_mount(mount: HostResource) -> EnvironmentBindMount:
 def _max_rounds_for_started_event(request: RunRequest) -> int:
     """Match today's `RUN_STARTED.max_rounds`: the loop's round budget, or 1.
 
-    `dispatch()` in `entrypoints/headless.py` derived this via
+    `dispatch()` in `entrypoints/cli.py` derived this via
     `getattr(args, "max_rounds", getattr(args, "max_iterations", 1))`. Evolve
     has no `--max-rounds` flag, so that chain always fell through to `1` for
     evolve; agent/plain reported their real `--max-rounds` value. Preserved

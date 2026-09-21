@@ -63,7 +63,7 @@ class LoopKind(StrEnum):
     """Closed set of outer loops a run can select.
 
     Mirrors the `--outer-loop` CLI choices documented in
-    `entrypoints/headless.py`. No single enum unifies them in core today
+    `entrypoints/cli.py`. No single enum unifies them in core today
     (each loop module spells its own `outer_loop` string/Literal); this is
     the canonical version new callers should use.
     """

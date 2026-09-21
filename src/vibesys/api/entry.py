@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from vibesys.config import load_config as _load_config
 from vibesys.evaluators.input_manifest import load_input_bundle
 
-# Mirrors entrypoints/headless.py's `_DEFAULT_CONFIG_TEXT`: the minimal
+# Mirrors entrypoints/cli.py's `_DEFAULT_CONFIG_TEXT`: the minimal
 # built-in config a run falls back to when a project has no `agent.toml`.
 _DEFAULT_CONFIG_TEXT = '[model]\nname = "gpt-5.4"\n'
 

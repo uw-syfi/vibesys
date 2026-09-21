@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from entrypoints.headless import load_config_and_skills
+from entrypoints.cli import load_config_and_skills
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
 from vibesys.schemas import SkillResourceSelection
 from vibesys.skills import (

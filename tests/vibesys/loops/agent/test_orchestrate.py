@@ -4668,7 +4668,7 @@ def test_loop_max_rounds_terminates(tmp_path, ref_file):  # noqa: ANN001, ANN201
 
 
 def test_cli_loads_objective_md_from_ref_parent(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from entrypoints.headless import _load_objective  # noqa: PLC0415  # tracked: #288
+    from entrypoints.cli import _load_objective  # noqa: PLC0415  # tracked: #288
     from vibesys.evaluators.input_manifest import (  # noqa: PLC0415  # tracked: #288
         load_input_bundle,
     )
@@ -4707,7 +4707,7 @@ def test_cli_missing_objective_md_errors(tmp_path):  # noqa: ANN001, ANN201  # t
 
 def test_cli_rejects_modal_with_nsys_profiler(tmp_path, ref_file):  # noqa: ANN001, ANN201, ARG001  # tracked: #288
     """--modal only supports torch profiler."""
-    from entrypoints.headless import (  # noqa: PLC0415  # tracked: #288
+    from entrypoints.cli import (  # noqa: PLC0415  # tracked: #288
         _build_agent_parser,
         _validate_agent,
     )

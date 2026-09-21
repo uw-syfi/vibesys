@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
-from entrypoints import headless
+from entrypoints import cli
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
 from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 def _control_socket_from_argv(argv: list[str]) -> Path | None:
     """Read the transport bootstrap flag without parsing run configuration."""
-    value = headless._option_from_argv(argv, "--control-socket")  # noqa: SLF001
+    value = cli._option_from_argv(argv, "--control-socket")  # noqa: SLF001
     return Path(value) if value else None
 
 
@@ -64,7 +64,7 @@ def _resolve_tui_defaults(  # noqa: PLR0913  # tracked: #288
     directory_only: bool = False,
 ) -> InteractiveSetupDefaults:
     """Resolve launcher-facing defaults from local configuration."""
-    config = headless._load_config_or_stub_default(  # noqa: SLF001
+    config = cli._load_config_or_stub_default(  # noqa: SLF001
         config_path,
         stub_agent=stub_agent,
     )
@@ -88,8 +88,8 @@ def _resolve_tui_defaults(  # noqa: PLR0913  # tracked: #288
 
 def _tui_defaults_from_argv(argv: list[str]) -> Callable[[], InteractiveSetupDefaults]:
     """Build the lazy defaults provider exposed over the control socket."""
-    config = headless._option_from_argv(argv, "--config")  # noqa: SLF001
-    theme = headless._option_from_argv(argv, "--theme")  # noqa: SLF001
+    config = cli._option_from_argv(argv, "--config")  # noqa: SLF001
+    theme = cli._option_from_argv(argv, "--theme")  # noqa: SLF001
     stub_agent = "--stub-agent" in argv
 
     def provide() -> InteractiveSetupDefaults:
@@ -104,13 +104,13 @@ def _tui_defaults_from_argv(argv: list[str]) -> Callable[[], InteractiveSetupDef
 
 
 def _build_tui_defaults_parser() -> argparse.ArgumentParser:
-    parser = headless._RunArgumentParser(  # noqa: SLF001
+    parser = cli._RunArgumentParser(  # noqa: SLF001
         prog="vibesys tui-defaults",
         description="Resolve configuration defaults for a TUI launcher.",
     )
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--input", type=Path, default=None)
-    parser.add_argument("--runs-dir", type=headless._parse_runs_dir, default=None)  # noqa: SLF001
+    parser.add_argument("--runs-dir", type=cli._parse_runs_dir, default=None)  # noqa: SLF001
     parser.add_argument("--exp-name", default=None)
     parser.add_argument("--theme", type=TuiTheme, choices=list(TuiTheme), default=None)
     parser.add_argument("--stub-agent", action="store_true")
@@ -131,7 +131,7 @@ def _run_tui_defaults(argv: list[str]) -> None:
             directory_only=args.directory_only,
         )
     except (ValueError, FileNotFoundError) as exc:
-        headless._configuration_error(  # noqa: SLF001
+        cli._configuration_error(  # noqa: SLF001
             str(exc),
             code="config_load_failed",
             stage="config_loading",
@@ -140,7 +140,7 @@ def _run_tui_defaults(argv: list[str]) -> None:
 
 
 def _missing_control_socket() -> NoReturn:
-    headless._configuration_error(  # noqa: SLF001
+    cli._configuration_error(  # noqa: SLF001
         "--control-socket is required by the frontend server",
         code="invalid_arguments",
         stage="argument_parsing",
@@ -154,7 +154,7 @@ def main(argv: list[str] | None = None) -> None:
         try:
             _run_tui_defaults(arguments[1:])
         except ConfigurationError as exc:
-            headless._render_configuration_error(exc)  # noqa: SLF001
+            cli._render_configuration_error(exc)  # noqa: SLF001
         return
 
     control_socket = _control_socket_from_argv(arguments)
@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> None:
         try:
             _missing_control_socket()
         except ConfigurationError as exc:
-            headless._render_configuration_error(exc)  # noqa: SLF001
+            cli._render_configuration_error(exc)  # noqa: SLF001
     from server.runtime import ServerRuntime  # noqa: PLC0415  # tracked: #288
 
     runtime = ServerRuntime(
@@ -170,8 +170,8 @@ def main(argv: list[str] | None = None) -> None:
         tui_defaults=_tui_defaults_from_argv(arguments),
     )
     try:
-        invocation = headless.parse_cli_invocation(_headless_argv(arguments))
-        request = headless.build_run_request(invocation)
+        invocation = cli.parse_cli_invocation(_headless_argv(arguments))
+        request = cli.build_run_request(invocation)
         result = runtime.run(lambda: runtime.drive(request))
     except ConfigurationError as exc:
         raise SystemExit(exc.diagnostic.exit_code) from None

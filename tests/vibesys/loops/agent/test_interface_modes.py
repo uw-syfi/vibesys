@@ -40,7 +40,7 @@ def test_no_language_pack_directory():  # noqa: ANN201  # tracked: #288
 
 
 def test_cli_exposes_only_process_boundary_modes():  # noqa: ANN201  # tracked: #288
-    from entrypoints.headless import _build_agent_parser  # noqa: PLC0415  # tracked: #288
+    from entrypoints.cli import _build_agent_parser  # noqa: PLC0415  # tracked: #288
 
     parser = _build_agent_parser()
     action = next(action for action in parser._actions if action.dest == "interface")  # noqa: SLF001  # tracked: #288
@@ -51,7 +51,7 @@ def test_cli_exposes_only_process_boundary_modes():  # noqa: ANN201  # tracked: 
 
 
 def test_cli_default_interface_is_inprocess():  # noqa: ANN201  # tracked: #288
-    from entrypoints.headless import _build_agent_parser  # noqa: PLC0415  # tracked: #288
+    from entrypoints.cli import _build_agent_parser  # noqa: PLC0415  # tracked: #288
 
     args = _build_agent_parser().parse_args(["--input", "/x", "--exp-name", "e"])
     assert args.interface == "inprocess"
@@ -59,7 +59,7 @@ def test_cli_default_interface_is_inprocess():  # noqa: ANN201  # tracked: #288
 
 @pytest.mark.parametrize("interface", ["native", "rust"])
 def test_cli_rejects_unknown_interface(interface):  # noqa: ANN001, ANN201  # tracked: #288
-    from entrypoints.headless import _build_agent_parser  # noqa: PLC0415  # tracked: #288
+    from entrypoints.cli import _build_agent_parser  # noqa: PLC0415  # tracked: #288
 
     with pytest.raises(ConfigurationError):
         _build_agent_parser().parse_args(

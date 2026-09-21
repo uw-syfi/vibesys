@@ -22,11 +22,13 @@ Submodules such as `vibesys.agents` and `server.api` are collapsed into their to
 
 ```mermaid
 graph TD
+    entrypoints --> headless
     entrypoints --> server
     entrypoints --> vibesys
     entrypoints --> vs_agent
     entrypoints --> vs_github
     entrypoints --> vs_project
+    headless --> vibesys
     server --> vibesys
     server --> vs_agent
     server --> vs_loop_state
@@ -99,12 +101,14 @@ graph TD
 
 ```mermaid
 graph TD
+    entrypoints --> headless
     entrypoints --> server.runtime
     entrypoints --> server.settings
     entrypoints --> vibesys.api
     entrypoints --> vs_agent
     entrypoints --> vs_github
     entrypoints --> vs_project
+    headless --> vibesys.api
     server --> vs_agent
     server --> vs_project
     server --> vs_sandbox

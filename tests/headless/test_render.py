@@ -2,7 +2,7 @@
 
 from io import StringIO
 
-from entrypoints.headless_render import HeadlessRenderer, TodoDisplay
+from headless.render import HeadlessRenderer, TodoDisplay
 from vibesys.events import (
     AgentOutputChannel,
     AgentOutputChunkData,

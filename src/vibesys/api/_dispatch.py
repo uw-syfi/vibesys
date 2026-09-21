@@ -6,7 +6,7 @@ keyword arguments `run_agent_loop`/`run_evolve_loop`/`run_plain_loop`
 (`vibesys.loops.{agent,evolve,plain}.loop`) expect, and returns their bare
 `bool` success result unchanged. The loop functions are imported lazily,
 inside each helper, matching the lazy-import-for-startup-cost pattern already
-used at their sole other call site, `entrypoints/headless.py`.
+used at their sole other call site, `entrypoints/cli.py`.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def _required_objective(request: RunRequest) -> str:
     never reads it (a plain-loop request has no reason to set it). Every
     agent/evolve construction site sets it from `InputBundle.objective`
     (itself non-optional): `vibesys.api.entry.default_request` always passes
-    `bundle.objective`, and `entrypoints/headless.py`'s
+    `bundle.objective`, and `entrypoints/cli.py`'s
     `_build_agent_request`/`_build_evolve_request` always pass
     `bundle.objective` (optionally wrapped by `_with_operator_constraints`).
     Nothing in `RunRequest`'s own type ties `objective` to `loop`, so this

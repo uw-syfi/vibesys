@@ -57,10 +57,11 @@ def test_server_runtime_drives_the_built_run_request(
 ) -> None:
     """`main` builds the `RunRequest` itself and drives it on `ServerRuntime`.
 
-    The server no longer dispatches through `headless.dispatch`: it parses
-    the CLI invocation, builds the `RunRequest` via `headless.build_run_request`,
-    and runs it through `ServerRuntime.drive`, which owns the `create_session`
-    call (and the core `LocalRunIntegration`) internally.
+    The server no longer dispatches through `entrypoints.cli.dispatch`: it
+    parses the CLI invocation, builds the `RunRequest` via
+    `entrypoints.cli.build_run_request`, and runs it through
+    `ServerRuntime.drive`, which owns the `create_session` call (and the core
+    `LocalRunIntegration`) internally.
     """
     import server.runtime as runtime_module  # noqa: PLC0415
 
@@ -84,8 +85,8 @@ def test_server_runtime_drives_the_built_run_request(
             observed["driven_request"] = driven_request
 
     monkeypatch.setattr(runtime_module, "ServerRuntime", FakeRuntime)
-    monkeypatch.setattr(server_entrypoint.headless, "parse_cli_invocation", parse_cli_invocation)
-    monkeypatch.setattr(server_entrypoint.headless, "build_run_request", build_run_request)
+    monkeypatch.setattr(server_entrypoint.cli, "parse_cli_invocation", parse_cli_invocation)
+    monkeypatch.setattr(server_entrypoint.cli, "build_run_request", build_run_request)
     socket_path = tmp_path / "control.sock"
 
     main(["--theme", "light", "--local", "--control-socket", str(socket_path)])

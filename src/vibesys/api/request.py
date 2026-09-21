@@ -85,7 +85,7 @@ def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | N
 
     `None` means the environment supports every profiler kind (no
     restriction), matching `RunEnvironment.supported_profiler_kinds` and its
-    use in `entrypoints.headless._validate_run_environment_profiler`. Building
+    use in `entrypoints.cli._validate_run_environment_profiler`. Building
     the environment just to read this one attribute is intentional here so
     callers never need to import `build_run_environment` (which returns a
     live, potentially side-effecting environment handle) themselves.
