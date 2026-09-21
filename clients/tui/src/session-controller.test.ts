@@ -2257,6 +2257,68 @@ describe('a stream that re-bootstraps into a log shorter than the tail', () => {
   });
 });
 
+/**
+ * A backfill request is addressed in the sequence numbering of the log that
+ * was streaming when it left. If the stream re-bootstraps before the answer
+ * lands, the answer describes the superseded log and must be dropped rather
+ * than folded under the fresh one.
+ */
+describe('a backfill in flight across a re-bootstrap', () => {
+  it('drops a stale response when the store changed while it was in flight', async () => {
+    const staleLog = longHistory(1_200);
+    const transport = new HistoryTransport(staleLog);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitBatch(staleLog.slice(1_100), 1_100, 'bootstrap-store');
+    transport.deferEvents = true;
+
+    const backfill = controller.loadOlderHistory();
+    // The run's durable log attaches while the request is in flight.
+    const runLog: RunEvent[] = [
+      {
+        ...event(1, 'run_started'),
+        data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
+      },
+      event(2, 'agent_output_chunk', 'fresh\n'),
+    ];
+    transport.emitBatch(runLog, 0, 'run-store');
+    const fresh = controller.state.core.transcript;
+
+    transport.releaseEvents();
+
+    await expect(backfill).resolves.toBe(false);
+    // The superseded log's chunk must not splice under the fresh fold.
+    expect(controller.state.core.transcript).toBe(fresh);
+    expect(controller.state.core.historyAfterSequence).toBe(0);
+  });
+
+  it('drops a stale response when the floor was raised while it was in flight', async () => {
+    const history = longHistory(2_000);
+    const transport = new HistoryTransport(history);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitBatch(history.slice(1_500), 1_500);
+    transport.deferEvents = true;
+
+    const backfill = controller.loadOlderHistory();
+    // A burst outran the tail bound, so the stream re-bootstrapped at a raised
+    // floor within the same store.
+    transport.emitBatch(history.slice(1_900), 1_900);
+    transport.releaseEvents();
+
+    await expect(backfill).resolves.toBe(false);
+    // The response was numbered against the old floor; folding it would have
+    // dragged the fresh floor down to its own range.
+    expect(controller.state.core.historyAfterSequence).toBe(1_900);
+
+    // The skipped history stays backfillable, one chunk under the new floor.
+    transport.deferEvents = false;
+    await expect(controller.loadOlderHistory()).resolves.toBe(true);
+    expect(controller.state.core.historyAfterSequence).toBe(900);
+    expect(controller.state.core.transcript).toHaveLength(1_100);
+  });
+});
+
 describe('stream reconnect', () => {
   /** Lets the zero-delay reconnect timer and its subscribe settle. */
   const settle = () => new Promise<void>(resolve => setTimeout(resolve, 1));
@@ -2485,7 +2547,7 @@ class ReconnectTransport implements ServerTransport {
     tail: number | undefined;
     storeId: string | undefined;
   }> = [];
-  /** How many upcoming subscribes to reject before letting one through. */
+  /** How many upcoming subscribes the server refuses (a typed rejection). */
   refuseSubscribes = 0;
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
@@ -2510,7 +2572,7 @@ class ReconnectTransport implements ServerTransport {
     this.subscribeCalls.push({afterSequence, tail: options?.tail, storeId: options?.storeId});
     if (this.refuseSubscribes > 0) {
       this.refuseSubscribes -= 1;
-      return Promise.reject(new Error('connection refused'));
+      return Promise.reject(new ServerError('Extra inputs are not permitted: store_id'));
     }
     this.#message = onMessage;
     this.#disconnect = onDisconnect;
@@ -2917,7 +2979,7 @@ class HistoryTransport implements ServerTransport {
   readonly subscribeTails: Array<number | undefined> = [];
   /** Rejects a subscribe carrying `tail`, the way a server without the field does. */
   rejectTail = false;
-  /** Fails every subscribe, tail or not. */
+  /** Fails every subscribe that `rejectTail` did not already reject. */
   subscribeError: Error | null = null;
   /** Fails `query.events` instead of answering it. */
   eventsError: Error | null = null;
@@ -2957,10 +3019,10 @@ class HistoryTransport implements ServerTransport {
     options?: SubscribeOptions,
   ): Promise<EventSubscription> {
     this.subscribeTails.push(options?.tail);
-    if (this.subscribeError !== null) return Promise.reject(this.subscribeError);
     if (this.rejectTail && options?.tail !== undefined) {
       return Promise.reject(new ServerError('Extra inputs are not permitted: tail'));
     }
+    if (this.subscribeError !== null) return Promise.reject(this.subscribeError);
     this.#message = onMessage;
     return Promise.resolve({close: async () => undefined});
   }

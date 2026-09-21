@@ -105,7 +105,7 @@ def build_chat_agent(
         backends: dict[str, Any] | None = None
         use_docker = False
         agent_shared_state_dir = str(shared_state_dir)
-        if attachment.agent_backend == "deepagents" or runtime.run_environment_sandboxed:
+        if runtime.run_environment_sandboxed:
             container_state_dir = "/opt/vibesys-chat"
             environment_request = replace(
                 runtime.environment_request,
@@ -133,10 +133,8 @@ def build_chat_agent(
             agent_backend=attachment.agent_backend,
             cli_provider=selection.provider,
             backends=backends,
-            skills=list(runtime.skills),
             skill_source_dirs=list(runtime.skill_source_dirs),
             compute_backend=runtime.compute_backend,
-            model=runtime.model,
             model_name=selection.model,
             run_log_file=logger.writer,
             use_docker=use_docker,

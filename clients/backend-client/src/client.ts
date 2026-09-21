@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {createConnection, type Socket} from 'node:net';
+import {BackendClientError, ServerError} from './errors.js';
 import {NewlineFramer} from './newline-framer.js';
 import type {
   Diagnostic,
@@ -42,17 +43,6 @@ const DEFAULT_CONNECT_RETRY_INTERVAL_MS = 25;
 /** Errors a not-yet-listening server produces; anything else is fatal. */
 const RETRYABLE_CONNECT_CODES = new Set(['ENOENT', 'ECONNREFUSED']);
 
-/** A failed server response, including its optional structured diagnostic. */
-export class ServerError extends Error {
-  constructor(
-    message: string,
-    readonly diagnostic: Diagnostic | null = null,
-  ) {
-    super(message);
-    this.name = 'ServerError';
-  }
-}
-
 export class ServerClient {
   readonly #socket: Socket;
   readonly #path: string;
@@ -76,8 +66,10 @@ export class ServerClient {
     this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     socket.setEncoding('utf8');
     socket.on('data', chunk => this.#onData(chunk.toString()));
-    socket.on('error', error => this.#rejectAll(error));
-    socket.on('close', () => this.#rejectAll(new Error('Server disconnected')));
+    socket.on('error', error => this.#rejectAll(transportFailure(error)));
+    socket.on('close', () =>
+      this.#rejectAll(new BackendClientError('disconnected', 'Server disconnected')),
+    );
   }
 
   /**
@@ -97,12 +89,14 @@ export class ServerClient {
       try {
         return await ServerClient.#connectOnce(path, options, deadline);
       } catch (error) {
-        if (!isRetryableConnectError(error)) throw error;
+        if (!isTransientDialError(error)) throw error;
         lastError = error;
       }
       if (Date.now() + retryIntervalMs >= deadline) {
-        throw new Error(
+        throw new BackendClientError(
+          'timeout',
           `Timed out connecting to server after ${timeoutMs}ms: ${lastError?.message}`,
+          {cause: lastError},
         );
       }
       await delay(retryIntervalMs);
@@ -118,13 +112,14 @@ export class ServerClient {
       const socket = createConnection(path);
       const onError = (error: Error): void => {
         clearTimeout(timeout);
-        reject(error);
+        reject(dialFailure(error));
       };
       const timeout = setTimeout(
         () => {
           socket.destroy();
           reject(
-            new Error(
+            new BackendClientError(
+              'timeout',
               `Timed out connecting to server after ${options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS}ms`,
             ),
           );
@@ -142,7 +137,7 @@ export class ServerClient {
 
   request(input: RequestInput): Promise<ProtocolResponse> {
     if (this.#socket.destroyed) {
-      return Promise.reject(new Error('Server is disconnected'));
+      return Promise.reject(new BackendClientError('disconnected', 'Server is disconnected'));
     }
     const requestId = randomUUID();
     const request = {
@@ -155,11 +150,16 @@ export class ServerClient {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.#pending.delete(requestId);
-        reject(new Error(`Server request timed out after ${this.#requestTimeoutMs}ms`));
+        reject(
+          new BackendClientError(
+            'timeout',
+            `Server request timed out after ${this.#requestTimeoutMs}ms`,
+          ),
+        );
       }, this.#requestTimeoutMs);
       this.#pending.set(requestId, {resolve, reject, timeout});
       this.#socket.write(`${JSON.stringify(request)}\n`, error => {
-        if (error) this.#rejectPending(requestId, error);
+        if (error) this.#rejectPending(requestId, transportFailure(error));
       });
     });
   }
@@ -178,7 +178,12 @@ export class ServerClient {
       let disconnected = false;
       let protocolErrorReceived = false;
       const handshakeTimeout = setTimeout(() => {
-        disconnect(new Error(`Server subscription timed out after ${this.#connectTimeoutMs}ms`));
+        disconnect(
+          new BackendClientError(
+            'timeout',
+            `Server subscription timed out after ${this.#connectTimeoutMs}ms`,
+          ),
+        );
         socket.destroy();
       }, this.#connectTimeoutMs);
       const disconnect = (error: Error): void => {
@@ -189,18 +194,19 @@ export class ServerClient {
         if (subscribed) onDisconnect(error);
         else reject(error);
       };
-      const handleSubscriptionLine = (line: string): boolean => {
-        if (!line) return true;
-        let message: ServerMessage;
-        try {
-          message = parseServerMessage(line);
-          onMessage(message);
-        } catch (error) {
-          disconnect(toError(error));
-          socket.destroy();
-          return false;
+      const handleStreamMessage = (message: ServerMessage): boolean => {
+        if (message.type === 'protocol_error') {
+          protocolErrorReceived = true;
+          if (!subscribed) {
+            // A structured refusal before the handshake is the server
+            // declining the subscription, not the transport failing, so the
+            // dial rejects with the refusal rather than with whatever the
+            // ensuing close would say.
+            disconnect(new ServerError(message.message, message.diagnostic ?? null));
+            socket.destroy();
+            return false;
+          }
         }
-        if (message.type === 'protocol_error') protocolErrorReceived = true;
         if (!subscribed && message.type === 'subscribed') {
           subscribed = true;
           clearTimeout(handshakeTimeout);
@@ -213,6 +219,18 @@ export class ServerClient {
           });
         }
         return true;
+      };
+      const handleSubscriptionLine = (line: string): boolean => {
+        if (!line) return true;
+        try {
+          const message = parseServerMessage(line);
+          onMessage(message);
+          return handleStreamMessage(message);
+        } catch (error) {
+          disconnect(streamFailure(error));
+          socket.destroy();
+          return false;
+        }
       };
       socket.setEncoding('utf8');
       socket.once('connect', () => {
@@ -236,10 +254,11 @@ export class ServerClient {
           if (!handleSubscriptionLine(line)) return;
         }
       });
-      socket.once('error', disconnect);
+      socket.once('error', error => disconnect(transportFailure(error)));
       socket.once('close', () => {
         disconnect(
-          new Error(
+          new BackendClientError(
+            'disconnected',
             subscribed
               ? 'Server event stream disconnected'
               : 'Server event stream disconnected before subscription',
@@ -273,7 +292,12 @@ export class ServerClient {
       const frames = new NewlineFramer();
       let settled = false;
       const connectTimeout = setTimeout(() => {
-        fail(new Error(`Timed out connecting to server after ${this.#connectTimeoutMs}ms`));
+        fail(
+          new BackendClientError(
+            'timeout',
+            `Timed out connecting to server after ${this.#connectTimeoutMs}ms`,
+          ),
+        );
       }, this.#connectTimeoutMs);
 
       const cleanup = (): void => {
@@ -287,13 +311,16 @@ export class ServerClient {
         settled = true;
         cleanup();
         socket.destroy();
-        reject(error);
+        reject(error instanceof BackendClientError ? error : transportFailure(error));
       };
-      const disconnected = (): void => fail(new Error('Server disconnected during chat'));
+      const disconnected = (): void =>
+        fail(new BackendClientError('disconnected', 'Server disconnected during chat'));
       const finish = (response: ProtocolResponse): void => {
         if (settled) return;
         if (response.request_id !== request.request_id) {
-          fail(new Error('Server chat response has an unexpected request ID'));
+          fail(
+            new BackendClientError('parse', 'Server chat response has an unexpected request ID'),
+          );
           return;
         }
         settled = true;
@@ -341,8 +368,7 @@ export class ServerClient {
       try {
         response = parseProtocolResponse(line);
       } catch (error) {
-        const parseError = error instanceof Error ? error : new Error(String(error));
-        this.#rejectAll(parseError);
+        this.#rejectAll(streamFailure(error));
         this.#socket.destroy();
         return;
       }
@@ -372,10 +398,36 @@ export class ServerClient {
   }
 }
 
-function isRetryableConnectError(error: unknown): error is Error {
-  if (!(error instanceof Error)) return false;
+/**
+ * Classify one dial attempt's failure, at the one boundary that knows Node
+ * errnos: only the errors a still-starting server produces are transient.
+ * Everything downstream branches on `kind` and `retryable`, never on the code.
+ */
+function dialFailure(error: Error): BackendClientError {
   const code = (error as NodeJS.ErrnoException).code;
-  return code !== undefined && RETRYABLE_CONNECT_CODES.has(code);
+  return new BackendClientError('disconnected', error.message, {
+    retryable: code !== undefined && RETRYABLE_CONNECT_CODES.has(code),
+    cause: error,
+  });
+}
+
+function isTransientDialError(error: unknown): error is BackendClientError {
+  return error instanceof BackendClientError && error.kind === 'disconnected' && error.retryable;
+}
+
+/** A live connection failed under an operation; the server said nothing. */
+function transportFailure(error: Error): BackendClientError {
+  return new BackendClientError('disconnected', error.message, {cause: error});
+}
+
+/**
+ * Pass a typed stream failure through; anything else escaped from processing a
+ * line (a consumer callback throw included), so the stream could not be read.
+ */
+function streamFailure(error: unknown): BackendClientError {
+  if (error instanceof BackendClientError) return error;
+  const cause = toError(error);
+  return new BackendClientError('parse', cause.message, {cause});
 }
 
 function delay(ms: number): Promise<void> {
@@ -400,12 +452,14 @@ function closeSocket(socket: Socket): Promise<void> {
 
 function parseProtocolResponse(line: string): ProtocolResponse {
   const value = parseRecord(line, 'response');
-  if (value['protocol_version'] !== 1) throw new Error('Unsupported server protocol version');
+  if (value['protocol_version'] !== 1) {
+    throw new BackendClientError('parse', 'Unsupported server protocol version');
+  }
   if (typeof value['request_id'] !== 'string') {
-    throw new Error('Invalid server response: request_id must be a string');
+    throw new BackendClientError('parse', 'Invalid server response: request_id must be a string');
   }
   if (typeof value['ok'] !== 'boolean') {
-    throw new Error('Invalid server response: ok must be a boolean');
+    throw new BackendClientError('parse', 'Invalid server response: ok must be a boolean');
   }
   return value as unknown as ProtocolResponse;
 }
@@ -419,20 +473,44 @@ function parseServerMessage(line: string): ServerMessage {
       typeof value['run_id'] !== 'string' ||
       typeof value['latest_sequence'] !== 'number'
     ) {
-      throw new Error('Invalid subscribed message');
+      throw new BackendClientError('parse', 'Invalid subscribed message');
     }
   } else if (type === 'event') {
-    if (!isRecord(value['event'])) throw new Error('Invalid event message');
+    if (!isRecord(value['event'])) throw new BackendClientError('parse', 'Invalid event message');
   } else if (type === 'event_batch') {
-    if (!Array.isArray(value['events'])) throw new Error('Invalid event batch message');
+    if (!Array.isArray(value['events'])) {
+      throw new BackendClientError('parse', 'Invalid event batch message');
+    }
   } else if (type === 'protocol_error') {
     if (typeof value['code'] !== 'string' || typeof value['message'] !== 'string') {
-      throw new Error('Invalid protocol error message');
+      throw new BackendClientError('parse', 'Invalid protocol error message');
     }
   } else {
-    throw new Error(`Unknown server event-stream message: ${String(type)}`);
+    throw unknownStreamLineError(value);
   }
   return value as unknown as ServerMessage;
+}
+
+/**
+ * A server that predates a subscribe field rejects the subscription the way it
+ * rejects any request: with a `Response` line on the stream socket, `ok: false`
+ * and no `type`. That line is the server refusing the request, the expected
+ * answer to a capability probe, not a line the protocol cannot read; anything
+ * else without a known `type` is one the protocol cannot read.
+ */
+function unknownStreamLineError(value: Record<string, unknown>): BackendClientError {
+  const rejected =
+    value['type'] === undefined && value['ok'] === false && typeof value['request_id'] === 'string';
+  if (!rejected) {
+    return new BackendClientError(
+      'parse',
+      `Unknown server event-stream message: ${String(value['type'])}`,
+    );
+  }
+  return new ServerError(
+    typeof value['error'] === 'string' ? value['error'] : 'Server rejected the subscription',
+    isRecord(value['diagnostic']) ? (value['diagnostic'] as unknown as Diagnostic) : null,
+  );
 }
 
 function parseRecord(line: string, description: string): Record<string, unknown> {
@@ -440,11 +518,15 @@ function parseRecord(line: string, description: string): Record<string, unknown>
   try {
     value = JSON.parse(line);
   } catch (error) {
-    throw new Error(
+    throw new BackendClientError(
+      'parse',
       `Invalid server ${description} JSON: ${error instanceof Error ? error.message : String(error)}`,
+      {cause: error},
     );
   }
-  if (!isRecord(value)) throw new Error(`Invalid server ${description}: expected an object`);
+  if (!isRecord(value)) {
+    throw new BackendClientError('parse', `Invalid server ${description}: expected an object`);
+  }
   return value;
 }
 

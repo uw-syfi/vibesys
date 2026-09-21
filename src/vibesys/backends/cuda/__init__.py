@@ -23,11 +23,10 @@ from vibesys.backends.cuda.gpu_monitor import (
 )
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
+from vs_sandbox.local_shell import LocalShellSandbox
 
 if TYPE_CHECKING:
-    # Annotation only; deepagents pulls langchain + anthropic (~seconds).
-    from deepagents.backends.protocol import SandboxBackendProtocol
-
+    from vs_sandbox.execution import Sandbox
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
@@ -63,7 +62,7 @@ class CudaBackend:
         # (kind, sandbox) tuples — kind is recorded at registration time so
         # ``reselect_device`` dispatches on the requested kind rather than on
         # the concrete sandbox class.
-        self._sandboxes: list[tuple[SandboxKind, SandboxBackendProtocol]] = []
+        self._sandboxes: list[tuple[SandboxKind, Sandbox]] = []
 
     # -- ComputeBackendImpl protocol ---------------------------------------------
 
@@ -74,7 +73,6 @@ class CudaBackend:
         host_workspace: str,
         log_path: Path | str | None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
-        passthrough_paths: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
@@ -83,14 +81,13 @@ class CudaBackend:
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
-    ) -> SandboxBackendProtocol:
+    ) -> Sandbox:
         """Construct a sandbox configured for CUDA execution."""
-        # Deferred: the sandbox classes subclass deepagents' BaseSandbox, which
-        # pulls langchain + anthropic. Registration must stay import-cheap.
+        # Deferred: importing DockerSandbox registers process-wide signal and
+        # atexit handlers. Registration must stay side-effect free.
         from vs_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
 
         bind_mounts = bind_mounts or []
-        passthrough_paths = passthrough_paths or []
         extra_env = extra_env or {}
         # Accepted for ComputeBackendImpl protocol parity but unused: neither
         # the LOCAL sandbox nor the agent-image-based DOCKER sandbox runs
@@ -121,7 +118,6 @@ class CudaBackend:
                 gpus=self._docker_gpu_spec() if attach_accelerator else None,
                 bind_mounts=bind_mounts,
                 resources=resources,
-                passthrough_paths=passthrough_paths,
                 env=env,
                 log_path=log_path,
                 auth_files=auth_files,
@@ -167,14 +163,12 @@ class CudaBackend:
         self._save_gpu_metadata(new_gpu)
 
         # Deferred for the same reason as in make_sandbox; by the time a
-        # rebalance happens both modules are already imported.
-        from deepagents.backends import LocalShellBackend  # noqa: PLC0415  # tracked: #288
-
+        # rebalance happens the module is already imported.
         from vs_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
 
         # Kind-dispatched pokes at sandbox internals: DOCKER entries are
         # always DockerSandbox (stop/start/_gpus), LOCAL entries are always
-        # LocalShellBackend (_env). The recorded kind still selects the
+        # LocalShellSandbox (env). The recorded kind still selects the
         # branch; the assertions only state that registration invariant so
         # the concrete attributes resolve.
         for kind, sb in self._sandboxes:
@@ -184,12 +178,8 @@ class CudaBackend:
                 sb._gpus = self._docker_gpu_spec()  # noqa: SLF001  # tracked: #288
                 sb.start()  # re-runs lifecycle hooks
             elif kind is SandboxKind.LOCAL:
-                assert isinstance(sb, LocalShellBackend)  # noqa: S101  # registration invariant
-                env: dict[str, str] | None = getattr(sb, "_env", None)
-                if env is None:
-                    env = {}
-                    sb._env = env  # noqa: SLF001  # tracked: #288
-                env["CUDA_VISIBLE_DEVICES"] = str(new_gpu.index)
+                assert isinstance(sb, LocalShellSandbox)  # noqa: S101  # registration invariant
+                sb.env["CUDA_VISIBLE_DEVICES"] = str(new_gpu.index)
 
         # Restart the contention monitor on the new device.
         if self._monitor is not None:

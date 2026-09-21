@@ -15,8 +15,6 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
-    from langchain_core.tools import BaseTool
-
     from vibesys.agents.progress import AgentProgress
     from vibesys.agents.session_key import AgentSessionKey
     from vs_sandbox import HostResource, ProjectPathPolicy
@@ -71,7 +69,6 @@ class AgentCapabilities:
     """Features a driver can provide without weakening requested semantics."""
 
     mcp_servers: bool = False
-    in_process_tools: bool = False
     nested_read_only_paths: bool = False
     hidden_paths: bool = False
     host_path_grants: bool = False
@@ -228,8 +225,8 @@ class AgentClientProtocol(Protocol):
     """The agent-service surface the run context and every loop depend on.
 
     Each backend supplies one implementation: the CLI
-    :class:`~vibesys.agents.client.AgentClient`, the deterministic stub, the
-    deepagents runner, and the plain loop's tracker wrapper. Attribution
+    :class:`~vibesys.agents.client.AgentClient`, the deterministic stub, and
+    the plain loop's tracker wrapper. Attribution
     (``backend_name``, ``driver_name``, ``provider``, ``model_for_kind``) is
     part of this contract because the loop stamps it onto every round record,
     so a consumer never has to probe an implementation for it.
@@ -284,7 +281,6 @@ class AgentClientProtocol(Protocol):
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
-        tools: list[BaseTool] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
     ) -> T:
@@ -303,7 +299,6 @@ class AgentClientProtocol(Protocol):
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
-        tools: list[BaseTool] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
     ) -> str:

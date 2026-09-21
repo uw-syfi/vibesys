@@ -10,18 +10,9 @@ import re
 import shlex
 import signal
 import subprocess
-import tempfile
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-from deepagents.backends.protocol import (
-    EditResult,
-    FileDownloadResponse,
-    FileUploadResponse,
-    WriteResult,
-)
-from deepagents.backends.sandbox import BaseSandbox
 
 from vs_sandbox.execution import SandboxExecutionResult, bounded_execution_result
 from vs_sandbox.host_resources import HostResourceAccess
@@ -191,16 +182,11 @@ def _agent_path_map(
     return tuple(sorted(entries, key=lambda pair: len(pair[0]), reverse=True))
 
 
-class DockerSandbox(BaseSandbox, WorkspaceSandbox):
+class DockerSandbox(WorkspaceSandbox):
     """Sandbox that runs all agent operations inside a Docker container.
 
     Model weights and other host directories are bind-mounted, eliminating
     symlink issues and path confusion.
-
-    The agent uses virtual absolute paths (``/foo``) expecting ``/`` to be
-    the workspace root — matching ``LocalShellBackend(virtual_mode=True)``
-    behaviour.  All filesystem methods translate these to container paths
-    (``/workspace/foo``) before delegating to ``BaseSandbox``.
 
     The container starts from a prebuilt agent image (shipped CLIs, toolchains,
     and a non-root ``agent`` user with a real HOME already baked in), so no
@@ -260,7 +246,6 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         env: dict[str, str] | None = None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
         resources: Sequence[HostResource] = (),
-        passthrough_paths: list[str] | None = None,
         log_path: str | Path | None = None,
         agent_uid: int | None = None,
         agent_gid: int | None = None,
@@ -309,8 +294,6 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
                 with *bind_mounts* rather than replacing it, so existing
                 callers that build mount tuples directly keep working
                 unchanged. Also the source :meth:`agent_path` consults.
-            passthrough_paths: Container paths outside /workspace that should
-                not be rewritten by virtual-path translation (e.g. ``["/model"]``).
             log_path: File path to log docker commands to. If None, no logging.
             agent_uid: Host uid the image's ``agent`` user is remapped to at
                 start, so files the agent writes to the bind-mounted
@@ -356,9 +339,6 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         self._auth_files: list[tuple[str, str]] = list(auth_files or [])
         self._lifecycle = SandboxLifecycle(lifecycle_hooks)
 
-        # Container paths outside /workspace that _vpath must not rewrite.
-        self._passthrough_prefixes: list[str] = list(passthrough_paths or [])
-
     @staticmethod
     def _setup_logger(log_path: str | Path | None) -> logging.Logger | None:
         if log_path is None:
@@ -390,92 +370,6 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
                 self._logger.info("  stderr: %s", result.stderr.strip()[:1000])
         if error:
             self._logger.info("  error: %s", error)
-
-    # -- virtual-path translation ------------------------------------------
-    #
-    # The agent emits paths rooted at "/" (virtual workspace root).
-    # BaseSandbox's filesystem helpers pass those literally into shell
-    # commands that run inside the container, where the workspace lives at
-    # /workspace.  We intercept every path-taking method to prepend the
-    # container root.
-
-    def _vpath(self, path: str) -> str:
-        """Translate a virtual absolute path to a container path."""
-        if path.startswith(self._CONTAINER_ROOT + "/") or path == self._CONTAINER_ROOT:
-            return path  # already absolute inside the container
-        # Preserve paths that match non-workspace mounts (e.g. /model)
-        for prefix in self._passthrough_prefixes:
-            if path == prefix or path.startswith(prefix + "/"):
-                return path
-        if path.startswith("/"):
-            return self._CONTAINER_ROOT + path
-        return path  # relative — resolved against workdir by the shell
-
-    def ls_info(self, path: str):  # noqa: ANN201, D102  # tracked: #288
-        return super().ls_info(self._vpath(path))
-
-    def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> str:  # noqa: D102  # tracked: #288
-        return super().read(self._vpath(file_path), offset, limit)
-
-    def write(self, file_path: str, content: str) -> WriteResult:
-        """Write a file into the container using docker cp.
-
-        Overrides ``BaseSandbox.write`` which inlines the content into a shell
-        command.  For large files this exceeds the OS argument-size limit
-        (``E2BIG``).  Using ``docker cp`` via a temp file avoids the limit.
-        """
-        if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
-
-        container_path = self._vpath(file_path)
-
-        # Ensure parent directory exists inside the container
-        parent = str(Path(container_path).parent)
-        mkdir_cmd = ["docker", "exec", self._container_id, "mkdir", "-p", parent]
-        subprocess.run(mkdir_cmd, capture_output=True, check=False)  # noqa: S603  # tracked: #288
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".tmp", delete=True) as tmp:
-            tmp.write(content)
-            tmp.flush()
-            cp_cmd = ["docker", "cp", tmp.name, f"{self._container_id}:{container_path}"]
-            self._log_cmd(cp_cmd)
-            result = subprocess.run(cp_cmd, capture_output=True, text=True, check=False)  # noqa: S603  # tracked: #288
-            self._log_cmd(cp_cmd, result)
-
-        if result.returncode != 0:
-            return WriteResult(path=file_path, error=result.stderr.strip())
-        return WriteResult(path=file_path)
-
-    def edit(  # noqa: D102  # tracked: #288
-        self,
-        file_path: str,
-        old_string: str,
-        new_string: str,
-        replace_all: bool = False,  # noqa: FBT001, FBT002  # tracked: #288
-    ) -> EditResult:
-        return super().edit(self._vpath(file_path), old_string, new_string, replace_all)
-
-    def glob_info(self, pattern: str, path: str = "/"):  # noqa: ANN201, D102  # tracked: #288
-        return super().glob_info(pattern, self._vpath(path))
-
-    def grep_raw(self, pattern: str, path: str | None = None, glob: str | None = None):  # noqa: ANN201, D102  # tracked: #288
-        # Check container is still running before issuing grep; a dead
-        # container causes docker-exec to emit an error on stderr that the
-        # parent parser cannot parse (e.g. "No such container").
-        if self._container_id is not None:
-            check = subprocess.run(  # noqa: S603  # tracked: #288
-                ["docker", "inspect", "--format={{.State.Running}}", self._container_id],  # noqa: S607  # tracked: #288
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if check.returncode != 0 or "true" not in check.stdout.lower():
-                raise RuntimeError(f"Docker container {self._container_id} is no longer running")  # noqa: TRY003  # tracked: #288
-        return super().grep_raw(
-            pattern,
-            self._vpath(path) if path is not None else self._CONTAINER_ROOT,
-            glob,
-        )
 
     @staticmethod
     def _resolve_gpu_device(gpus: str) -> str:
@@ -948,84 +842,6 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
             exit_code=result.returncode,
             max_output_chars=self._max_output_bytes,
         )
-
-    def upload_files(
-        self,
-        files: list[tuple[str, bytes]],
-    ) -> list[FileUploadResponse]:
-        """Upload files into the container using docker cp."""
-        if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
-
-        results: list[FileUploadResponse] = []
-
-        for path, content in files:
-            with tempfile.NamedTemporaryFile(delete=True) as tmp:
-                tmp.write(content)
-                tmp.flush()
-
-                container_path = self._vpath(path)
-                # Ensure parent dir exists
-                parent = str(Path(container_path).parent)
-                mkdir_cmd = ["docker", "exec", self._container_id, "mkdir", "-p", parent]
-                subprocess.run(  # noqa: S603  # tracked: #288
-                    mkdir_cmd,
-                    capture_output=True,
-                    check=False,
-                )
-                self._log_cmd(mkdir_cmd)
-
-                cp_cmd = ["docker", "cp", tmp.name, f"{self._container_id}:{container_path}"]
-                result = subprocess.run(  # noqa: S603  # tracked: #288
-                    cp_cmd,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                self._log_cmd(cp_cmd, result)
-
-                if result.returncode != 0:
-                    results.append(FileUploadResponse(path=path, error="permission_denied"))
-                else:
-                    results.append(FileUploadResponse(path=path))
-
-        return results
-
-    def download_files(
-        self,
-        paths: list[str],
-    ) -> list[FileDownloadResponse]:
-        """Download files from the container using docker cp."""
-        if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
-
-        results: list[FileDownloadResponse] = []
-
-        for path in paths:
-            container_path = self._vpath(path)
-
-            with tempfile.NamedTemporaryFile(delete=True, suffix=Path(path).suffix) as tmp:
-                tmp_path = tmp.name
-
-            cp_cmd = ["docker", "cp", f"{self._container_id}:{container_path}", tmp_path]
-            result = subprocess.run(  # noqa: S603  # tracked: #288
-                cp_cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self._log_cmd(cp_cmd, result)
-
-            if result.returncode != 0:
-                results.append(FileDownloadResponse(path=path, error="file_not_found"))
-            else:
-                try:
-                    content = Path(tmp_path).read_bytes()
-                    results.append(FileDownloadResponse(path=path, content=content))
-                finally:
-                    Path(tmp_path).unlink(missing_ok=True)
-
-        return results
 
     def __enter__(self) -> DockerSandbox:  # noqa: D105  # tracked: #288
         self.start()

@@ -41,9 +41,7 @@ def _build(  # noqa: PLR0913
         agent_backend=None,
         cli_provider=None,
         backends=backends,
-        skills=[],
         skill_source_dirs=[],
-        model=None,
         model_name=model_name,
         run_log_file=None,
         use_docker=use_docker,
@@ -129,7 +127,7 @@ def test_preflight_capabilities_match_constructed_driver(
 
 
 def test_non_cli_backend_has_no_external_driver_capabilities() -> None:
-    config = _config(backend="deepagents")
+    config = _config(backend="stub")
 
     assert agent_driver_supports_mcp_servers(config, agent_backend=None) is None
 
@@ -147,7 +145,7 @@ def test_omnigent_selection_passes_model_and_log_dir(tmp_path) -> None:  # noqa:
 
 def test_driver_is_rejected_for_non_cli_backend() -> None:
     with pytest.raises(SystemExit, match="valid only"):
-        _build(_config(driver="omnigent", backend="deepagents"), backends={})
+        _build(_config(driver="omnigent", backend="stub"), backends={})
 
 
 @pytest.mark.parametrize("provider", ["gemini", "opencode"])

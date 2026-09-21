@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 
-from deepagents.backends import LocalShellBackend
-
 from entrypoints.headless import _add_common_args
 from vibesys import backends
 from vibesys.backends import SandboxKind
@@ -17,6 +15,7 @@ from vs_sandbox import (
     DockerSandbox,
     HostResource,
     HostResourceAccess,
+    LocalShellSandbox,
     SandboxLifecycleHooks,
 )
 
@@ -54,7 +53,7 @@ class TestCpuSandbox:
             log_path=None,
             extra_env={"FOO": "bar"},
         )
-        assert isinstance(sb, LocalShellBackend)
+        assert isinstance(sb, LocalShellSandbox)
 
     def test_local_runs_lifecycle_hooks_before_returning(self, tmp_path):  # noqa: ANN001, ANN201
         impl = _make_backend(tmp_path)

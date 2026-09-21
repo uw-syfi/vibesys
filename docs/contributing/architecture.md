@@ -12,9 +12,8 @@ fails when they are stale. To refresh after editing `tach.toml`:
 uv run python scripts/check_tach_graph.py --write
 ```
 
-Views: a package-level overview, the core strongly connected component (a
-known cycle that `tach.toml` tolerates until it is broken), and the full module
-graph.
+Views: a package-level overview, the `vibesys` core modules, and the full
+module graph. The graph is acyclic and `tach.toml` forbids cycles.
 
 [//]: # (tach-graph:start)
 ## Architecture overview
@@ -42,25 +41,35 @@ graph TD
     vs_project --> vs_loop_state
 ```
 
-## Core cycle
+## Core layers
 
-Edges among the modules of the known strongly connected core.
+Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbids cycles.
 
 ```mermaid
 graph TD
-    vibesys --> vibesys.agents
-    vibesys --> vibesys.backends
-    vibesys --> vibesys.domains
-    vibesys --> vibesys.evaluators
-    vibesys --> vibesys.render
-    vibesys --> vibesys.run
-    vibesys --> vibesys.sandbox
     vibesys.agents --> vibesys
     vibesys.agents --> vibesys.render
     vibesys.backends --> vibesys
+    vibesys.context --> vibesys
+    vibesys.context --> vibesys.agents
+    vibesys.context --> vibesys.backends
+    vibesys.context --> vibesys.domains
+    vibesys.context --> vibesys.evaluators
+    vibesys.context --> vibesys.render
+    vibesys.context --> vibesys.run
+    vibesys.context --> vibesys.sandbox
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
+    vibesys.loops --> vibesys
+    vibesys.loops --> vibesys.agents
+    vibesys.loops --> vibesys.context
+    vibesys.loops --> vibesys.domains
+    vibesys.loops --> vibesys.evaluators
+    vibesys.loops --> vibesys.prompts
+    vibesys.loops --> vibesys.render
+    vibesys.loops --> vibesys.run
+    vibesys.loops --> vibesys.sandbox
     vibesys.prompts --> vibesys
     vibesys.render --> vibesys
     vibesys.run --> vibesys
@@ -87,7 +96,6 @@ graph TD
     entrypoints --> server.settings
     entrypoints --> vibesys
     entrypoints --> vibesys.agents
-    entrypoints --> vibesys.domains
     entrypoints --> vibesys.evaluators
     entrypoints --> vibesys.loops
     entrypoints --> vibesys.render
@@ -164,22 +172,23 @@ graph TD
     server.tool_payloads --> server.events
     server.transport --> server.api
     server.transport --> vibesys
-    vibesys --> vibesys.agents
-    vibesys --> vibesys.backends
-    vibesys --> vibesys.domains
-    vibesys --> vibesys.evaluators
-    vibesys --> vibesys.render
-    vibesys --> vibesys.run
-    vibesys --> vibesys.sandbox
     vibesys --> vs_feature_flags
-    vibesys --> vs_project
-    vibesys --> vs_sandbox
     vibesys.agents --> vibesys
     vibesys.agents --> vibesys.render
     vibesys.agents --> vs_project
     vibesys.agents --> vs_sandbox
     vibesys.backends --> vibesys
     vibesys.backends --> vs_sandbox
+    vibesys.context --> vibesys
+    vibesys.context --> vibesys.agents
+    vibesys.context --> vibesys.backends
+    vibesys.context --> vibesys.domains
+    vibesys.context --> vibesys.evaluators
+    vibesys.context --> vibesys.render
+    vibesys.context --> vibesys.run
+    vibesys.context --> vibesys.sandbox
+    vibesys.context --> vs_project
+    vibesys.context --> vs_sandbox
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
@@ -187,6 +196,7 @@ graph TD
     vibesys.evaluators --> vs_sandbox
     vibesys.loops --> vibesys
     vibesys.loops --> vibesys.agents
+    vibesys.loops --> vibesys.context
     vibesys.loops --> vibesys.domains
     vibesys.loops --> vibesys.evaluators
     vibesys.loops --> vibesys.prompts

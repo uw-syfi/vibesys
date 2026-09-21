@@ -1604,7 +1604,18 @@ function applyReducedCore(state: SessionState, core: CoreState): SessionState {
     // Warnings never banner, so a trailing warning must not mask the failure:
     // surface the last diagnostic that can.
     const finalDiagnostic = core.diagnostics.filter(d => d.severity !== 'warning').at(-1);
-    if (finalDiagnostic !== undefined) next = reportProjectedDiagnostic(next, finalDiagnostic);
+    // Only a transition into failure, or a diagnostic this fold appended, is
+    // news. A later fold of an already-failed run (a post-mortem chat batch,
+    // say) repeats the same terminal diagnostic, and re-reporting it would
+    // reopen a dismissed banner and inflate its report count; the same
+    // invariant `applyEventPrefix` keeps by projecting nothing. Reference
+    // equality is the right comparison: `reduceEventBatch` shares untouched
+    // diagnostic objects with the previous core, exactly as
+    // `latestDiagnosticChange` relies on.
+    const isNews =
+      finalDiagnostic !== undefined &&
+      (state.core.status !== 'failed' || !state.core.diagnostics.includes(finalDiagnostic));
+    if (isNews) next = reportProjectedDiagnostic(next, finalDiagnostic);
   }
   return next;
 }
@@ -1644,24 +1655,51 @@ function reconcileChatConversations(
   return next;
 }
 
+/**
+ * The transcript's order is authoritative: core keeps it sequence-sorted even
+ * when a backfill prepends older exchanges, so replayed entries are emitted in
+ * transcript order rather than appended wherever the conversation happens to
+ * end. Local entries (typed questions, in-flight placeholders) have no
+ * sequence, so each keeps its place ahead of the replayed entry it preceded.
+ * A transcript entry the conversation has not seen is one of two things:
+ * before the last already-seen entry it is backfilled history, which slots in
+ * at its transcript index above the locals typed while its newer neighbour
+ * was on screen; after it, it is tail growth, which lands below the pending
+ * question that asked for it.
+ */
 function reconcileChatTranscript(
   conversation: ConversationEntry[],
   transcript: TranscriptEntry[],
 ): ConversationEntry[] {
-  const byId = new Map(transcript.map(entry => [entry.id, entry]));
-  const present = new Set<string>();
-  const updated = conversation.map(entry => {
-    const replacement = byId.get(entry.id);
-    if (replacement === undefined) return entry;
-    present.add(entry.id);
-    return replacement;
-  });
-  for (const entry of transcript) {
-    if (!present.has(entry.id) && !conversation.some(existing => existing.id === entry.id)) {
-      updated.push(entry);
-    }
+  const replayedIds = new Set(transcript.map(entry => entry.id));
+  const conversationIds = new Set(conversation.map(entry => entry.id));
+  let lastSeen = -1;
+  for (const [index, entry] of transcript.entries()) {
+    if (conversationIds.has(entry.id)) lastSeen = index;
   }
-  return updated.slice(-500);
+  const merged: ConversationEntry[] = [];
+  let at = 0;
+  // Emits conversation entries up to (not including) the copy of `stopId`,
+  // dropping copies the transcript replays: those re-emit, deduplicated, at
+  // their transcript position.
+  const flushConversationBefore = (stopId: string | null): void => {
+    for (; at < conversation.length; at += 1) {
+      const held = conversation[at];
+      if (held === undefined || held.id === stopId) break;
+      if (!replayedIds.has(held.id)) merged.push(held);
+    }
+  };
+  for (const [index, entry] of transcript.entries()) {
+    if (conversationIds.has(entry.id)) {
+      flushConversationBefore(entry.id);
+      if (conversation[at]?.id === entry.id) at += 1;
+    } else if (index > lastSeen) {
+      flushConversationBefore(null);
+    }
+    merged.push(entry);
+  }
+  flushConversationBefore(null);
+  return merged.slice(-500);
 }
 
 export function selectNextAgent(state: SessionState): SessionState {

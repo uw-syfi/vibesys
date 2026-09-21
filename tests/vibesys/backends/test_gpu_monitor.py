@@ -305,13 +305,13 @@ class TestReselectGpu:
             ctx.judge_backend = MagicMock(spec=DockerSandbox)
             kind = SandboxKind.DOCKER
         else:
-            from deepagents.backends import LocalShellBackend  # noqa: PLC0415  # tracked: #288
+            from vs_sandbox import LocalShellSandbox  # noqa: PLC0415  # tracked: #288
 
-            ctx.implementer_backend = MagicMock(spec=LocalShellBackend)
-            ctx.judge_backend = MagicMock(spec=LocalShellBackend)
-            # _env mutated by reselect_device — give it a real dict.
-            ctx.implementer_backend._env = {}  # noqa: SLF001  # tracked: #288
-            ctx.judge_backend._env = {}  # noqa: SLF001  # tracked: #288
+            ctx.implementer_backend = MagicMock(spec=LocalShellSandbox)
+            ctx.judge_backend = MagicMock(spec=LocalShellSandbox)
+            # env mutated by reselect_device — give it a real dict.
+            ctx.implementer_backend.env = {}
+            ctx.judge_backend.env = {}
             kind = SandboxKind.LOCAL
         backend_impl._sandboxes = [  # noqa: SLF001  # tracked: #288
             (kind, ctx.implementer_backend),
@@ -351,15 +351,15 @@ class TestReselectGpu:
         gpu0 = _gpu(0, GPU_A, used=5000)
         gpu1 = _gpu(1, GPU_B, used=100)
         ctx = self._make_ctx(tmp_path, selected_gpu=gpu0, use_docker=False)
-        ctx.implementer_backend._env["CUDA_VISIBLE_DEVICES"] = "0"  # noqa: SLF001  # tracked: #288
-        ctx.judge_backend._env["CUDA_VISIBLE_DEVICES"] = "0"  # noqa: SLF001  # tracked: #288
+        ctx.implementer_backend.env["CUDA_VISIBLE_DEVICES"] = "0"
+        ctx.judge_backend.env["CUDA_VISIBLE_DEVICES"] = "0"
 
         mock_pick.return_value = gpu1
         ctx.reselect_gpu()
 
         assert ctx.selected_gpu is gpu1
-        assert ctx.implementer_backend._env["CUDA_VISIBLE_DEVICES"] == "1"  # noqa: SLF001  # tracked: #288
-        assert ctx.judge_backend._env["CUDA_VISIBLE_DEVICES"] == "1"  # noqa: SLF001  # tracked: #288
+        assert ctx.implementer_backend.env["CUDA_VISIBLE_DEVICES"] == "1"
+        assert ctx.judge_backend.env["CUDA_VISIBLE_DEVICES"] == "1"
 
     @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
     @patch("vibesys.backends.cuda.pick_gpu")
@@ -423,6 +423,6 @@ class TestReselectGpu:
         ctx.reselect_gpu()
 
         assert ctx.selected_gpu is gpu1
-        assert ctx.implementer_backend._env["CUDA_VISIBLE_DEVICES"] == "1"  # noqa: SLF001  # tracked: #288
+        assert ctx.implementer_backend.env["CUDA_VISIBLE_DEVICES"] == "1"
         # Clean up
         ctx.gpu_monitor.stop()

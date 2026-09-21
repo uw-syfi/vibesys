@@ -28,9 +28,7 @@ from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
 
 if TYPE_CHECKING:
-    # Annotation only; deepagents pulls langchain + anthropic (~seconds).
-    from deepagents.backends.protocol import SandboxBackendProtocol
-
+    from vs_sandbox.execution import Sandbox
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
@@ -71,7 +69,6 @@ class LocalBackend:
         host_workspace: str,
         log_path: Path | str | None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
-        passthrough_paths: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
@@ -80,9 +77,9 @@ class LocalBackend:
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
-    ) -> SandboxBackendProtocol:
-        # Deferred: the sandbox classes subclass deepagents' BaseSandbox, which
-        # pulls langchain + anthropic. Registration must stay import-cheap.
+    ) -> Sandbox:
+        # Deferred: importing DockerSandbox registers process-wide signal and
+        # atexit handlers. Registration must stay side-effect free.
         from vs_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
 
         # extra_init_commands is accepted for ComputeBackendImpl protocol
@@ -91,7 +88,6 @@ class LocalBackend:
         # sandbox runs per-launch install commands.
         del attach_accelerator, ephemeral, extra_init_commands
         bind_mounts = list(bind_mounts or [])
-        passthrough_paths = list(passthrough_paths or [])
         extra_env = dict(extra_env or {})
         lifecycle_hooks = lifecycle_hooks or []
 
@@ -117,7 +113,6 @@ class LocalBackend:
                 gpus=None,
                 bind_mounts=bind_mounts,
                 resources=resources,
-                passthrough_paths=passthrough_paths,
                 env=extra_env,
                 log_path=log_path,
                 auth_files=auth_files,

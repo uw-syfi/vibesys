@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable  # noqa: TC003  # tracked: #288
 from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import TYPE_CHECKING, TypeVar
+from typing import TypeVar
 
 from pydantic import BaseModel
 
@@ -13,9 +13,6 @@ from vibesys.agents.contracts import AgentCapabilities, MCPServerSpec
 from vibesys.agents.progress import AgentProgress  # noqa: TC001  # tracked: #288
 from vibesys.agents.scripted_rounds import round_number_from_label, scripted_round_payload
 from vibesys.agents.session_key import AgentSessionKey  # noqa: TC001  # tracked: #288
-
-if TYPE_CHECKING:
-    from langchain_core.tools import BaseTool  # annotation only; avoid eager agent-stack import
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -109,7 +106,6 @@ class StubAgentClient:
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
-        tools: list[BaseTool] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
     ) -> str:
@@ -120,7 +116,6 @@ class StubAgentClient:
             env,
             progress,
             mcp_servers,
-            tools,
             reuse_session,
             session_key,
         )

@@ -2,9 +2,14 @@ export {
   type EventSubscription,
   ServerClient,
   type ServerClientOptions,
-  ServerError,
   type SubscribeOptions,
 } from './client.js';
+export {
+  BackendClientError,
+  type BackendErrorKind,
+  isServerRejection,
+  ServerError,
+} from './errors.js';
 export {
   PersistentEventStream,
   type PersistentEventStreamCallbacks,

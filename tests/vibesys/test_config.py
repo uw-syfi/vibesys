@@ -12,11 +12,6 @@ from vibesys.features import FeatureFlag
 class TestLoadConfigValid:
     @patch.dict(os.environ, {}, clear=False)
     def test_full_config(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        # Clear vertex env vars so they don't override toml values
-        os.environ.pop("VERTEX_SERVICE_ACCOUNT_JSON", None)
-        os.environ.pop("VERTEX_PROJECT", None)
-        os.environ.pop("VERTEX_REGION", None)
-
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("""\
 [model]
@@ -199,53 +194,30 @@ class TestLoadConfigProviderDefault:
         assert config.model.provider is None
 
 
-class TestLoadConfigEnvVars:
-    def test_env_var_fallbacks(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+class TestDeprecatedProviderKeys:
+    def test_accepted_but_ignored_provider_keys_still_load(self, tmp_path):  # noqa: ANN001, ANN201
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("""\
 [model]
-name = "claude-sonnet-4-6"
-provider = "vertex-ai"
+name = "gpt-5.4"
+provider = "openai"
 
 [providers.vertex-ai]
-""")
-        env = {
-            "VERTEX_SERVICE_ACCOUNT_JSON": "/env/key.json",
-            "VERTEX_PROJECT": "env-project",
-            "VERTEX_REGION": "us-central1",
-        }
-        with patch.dict("os.environ", env, clear=False):
-            config = load_config(cfg_file)
-        vx = config.providers.vertex_ai
-        assert vx is not None
-        assert vx.json_path == "/env/key.json"
-        assert vx.project == "env-project"
-        assert vx.region == "us-central1"
-
-    def test_env_vars_override_toml(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        cfg_file = tmp_path / "agent.toml"
-        cfg_file.write_text("""\
-[model]
-name = "claude-sonnet-4-6"
-provider = "vertex-ai"
-
-[providers.vertex-ai]
-json = "~/keys/vertex.json"
-project = "toml-project"
+json = "~/k.json"
+project = "p"
 region = "us-east5"
+
+[providers.openai-compatible]
+base_url = "http://localhost:8000/v1"
+
+[providers.anthropic]
+[providers.google-genai]
+[providers.openai]
 """)
-        env = {
-            "VERTEX_SERVICE_ACCOUNT_JSON": "/env/key.json",
-            "VERTEX_PROJECT": "env-project",
-            "VERTEX_REGION": "us-central1",
-        }
-        with patch.dict("os.environ", env, clear=False):
-            config = load_config(cfg_file)
-        vx = config.providers.vertex_ai
-        assert vx is not None
-        assert vx.json_path == "/env/key.json"
-        assert vx.project == "env-project"
-        assert vx.region == "us-central1"
+        config = load_config(cfg_file)
+        assert config.model.provider == "openai"
+        assert config.providers.openai_compatible is not None
+        assert config.providers.google_genai is not None
 
 
 class TestLoadDotenvFile:

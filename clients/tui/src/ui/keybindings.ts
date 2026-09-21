@@ -83,7 +83,8 @@ export function bindKeybindings(
       controller.state.overlay === null &&
       controller.state.diffViewer === null &&
       controller.state.themePicker === null &&
-      controller.state.chatMenu === null
+      controller.state.chatMenu === null &&
+      controller.state.palette === null
     ) {
       controller.togglePaneZoom();
       key.preventDefault();

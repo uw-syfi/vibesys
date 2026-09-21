@@ -317,6 +317,15 @@ export class SocketSessionController implements SessionController {
    * identity, which leaves `#declaredFloor` as the only signal.
    */
   #storeId: string | null = null;
+  /**
+   * Bumped by every `#resetHistoryFloor`, so an await that spans a
+   * re-bootstrap can tell. A backfill response is addressed in the sequence
+   * numbering of the log that was streaming when the request left; once a
+   * batch swaps the store or raises the floor, that numbering no longer
+   * describes the folded state, and folding the response would splice a
+   * superseded log's events under the live one.
+   */
+  #rebootstrapGeneration = 0;
   #streamProtocolError = false;
 
   constructor(
@@ -426,6 +435,7 @@ export class SocketSessionController implements SessionController {
   async #requestOlderHistory(): Promise<boolean> {
     const floor = this.#state.core.historyAfterSequence;
     const nextFloor = Math.max(0, floor - BACKFILL_CHUNK);
+    const generation = this.#rebootstrapGeneration;
     try {
       const response = await this.client.request({
         type: 'query.events',
@@ -434,6 +444,11 @@ export class SocketSessionController implements SessionController {
         // include the floor itself and stops one above it.
         before_sequence: floor + 1,
       });
+      // A re-bootstrap while the request was in flight replaced the log this
+      // range was addressed in; the response describes the superseded log and
+      // must not fold under the fresh one, nor drag its floor down. The next
+      // ask backfills against the new log's own numbering.
+      if (this.#rebootstrapGeneration !== generation) return false;
       // Spine events replayed with the tail fall inside this range; folding
       // them a second time would duplicate their transcript entries.
       const events = (response.events ?? []).filter(
@@ -1429,6 +1444,7 @@ export class SocketSessionController implements SessionController {
    * declares floor 0, which is the truth about the log now being streamed.
    */
   #resetHistoryFloor(floor: number): number {
+    this.#rebootstrapGeneration += 1;
     this.#historyFloor = floor;
     this.#foldedBelowFloor.clear();
     return floor;

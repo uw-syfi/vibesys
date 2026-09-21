@@ -45,9 +45,9 @@ class DeviceLease:  # noqa: D101  # tracked: #288
         """Env vars to inject into the host-running cli agent runner.
 
         Today this is just the device pin (``CUDA_VISIBLE_DEVICES`` for cuda),
-        derived from whichever device the backend selected.  The deepagents
-        path ignores this; the cli path layers it onto the spawned subprocess
-        env so it sees the same device the sandbox env was built with.
+        derived from whichever device the backend selected.  The cli
+        path layers it onto the spawned subprocess env so it sees the same
+        device the sandbox env was built with.
         """
         dev = self.selected_device
         if dev is None:

@@ -3,18 +3,37 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from deepagents.backends.protocol import ExecuteResponse
+from typing import Protocol
 
 _TRUNCATION_MARKER = "\n...[truncated]...\n"
 
 
 @dataclass
-class SandboxExecutionResult(ExecuteResponse):
-    """An ``ExecuteResponse`` that retains each process stream separately."""
+class SandboxExecutionResult:
+    """A command's combined output, exit code, and each process stream."""
 
+    output: str
+    exit_code: int | None = None
+    truncated: bool = False
     stdout: str = ""
     stderr: str = ""
+
+
+class Sandbox(Protocol):
+    """The command-execution contract every sandbox kind satisfies.
+
+    Container lifetime (``start``/``stop``) is not part of it: only container
+    sandboxes have one.
+    """
+
+    @property
+    def id(self) -> str:
+        """Return a stable identifier for this sandbox instance."""
+        ...
+
+    def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
+        """Run a shell command and return its bounded result."""
+        ...
 
 
 def bounded_execution_result(

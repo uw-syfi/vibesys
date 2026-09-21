@@ -56,9 +56,8 @@ from vs_sandbox import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from deepagents.backends.protocol import SandboxBackendProtocol
-
     from vibesys.backends.base import ContentionMonitor
+    from vs_sandbox.execution import Sandbox
 
 
 # A committed two-file overlay, not a submodule: the contract under test is
@@ -124,7 +123,7 @@ class FakeBackend:
         self.sandbox = MagicMock()
         self.calls: list[tuple[SandboxKind, dict[str, Any]]] = []
 
-    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> SandboxBackendProtocol:  # noqa: ANN401  # tracked: #288
+    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> Sandbox:  # noqa: ANN401  # tracked: #288
         self.calls.append((kind, kwargs))
         if kind is SandboxKind.DOCKER:
             # A real DockerSandbox derives agent_path from (host_workspace,
@@ -150,7 +149,7 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: Any) -> RunEnvir
         workspace=workspace,
         ref_dir=None,
         backend=backend,
-        agent_backend="deepagents",
+        agent_backend="stub",
         cli_provider=None,
         run_id="run-123",
     )
@@ -1038,7 +1037,6 @@ def test_docker_environment_mounts_effective_objective_read_only(tmp_path):  # n
         "/opt/vibesys-runtime/objective.md",
         True,
     ) in _as_mount_tuples(backend.calls[0][1]["resources"])
-    assert "/opt/vibesys-runtime" in backend.calls[0][1]["passthrough_paths"]
     assert session.view.paths.objective == "/opt/vibesys-runtime/objective.md"
 
 
@@ -1070,7 +1068,7 @@ def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path
         cli_provider="codex",
     )
 
-    resources, _symlinks, passthrough = _container_mount_plan(request)
+    resources, _symlinks = _container_mount_plan(request)
 
     assert all(isinstance(resource, HostResource) for resource in resources)
     by_agent_path = {resource.agent_path: resource for resource in resources}
@@ -1090,9 +1088,6 @@ def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path
     framework_resource = by_agent_path["/opt/vibesys"]
     assert framework_resource.access is HostResourceAccess.READ_ONLY
     assert framework_resource.path == request.framework_root
-
-    assert "/opt/vibesys-runtime" in passthrough
-    assert "/opt/vibesys-history" in passthrough
 
 
 @pytest.mark.parametrize("environment_name", ["docker", "modal"])
@@ -1165,7 +1160,7 @@ def test_cli_container_env_and_setup_agree_on_the_container_environment(tmp_path
 
 def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     backend = FakeBackend()
-    request = _request(tmp_path, backend, agent_backend="deepagents", cli_provider="codex")
+    request = _request(tmp_path, backend, agent_backend="stub", cli_provider="codex")
 
     assert _cli_container_env(request) is None
 
@@ -1263,7 +1258,6 @@ def test_docker_environment_exposes_framework_git_history_read_only(tmp_path):  
 
     kwargs = backend.calls[0][1]
     assert (str(history), "/opt/vibesys-history", True) in _as_mount_tuples(kwargs["resources"])
-    assert "/opt/vibesys-history" in kwargs["passthrough_paths"]
     assert kwargs["extra_env"]["VIBESYS_GIT_HISTORY"] == "/opt/vibesys-history"
     assert "/opt/vibesys-history" in session.view.prompt_notes
     assert "hashes without recoverable source are insufficient" in session.view.prompt_notes
@@ -1285,7 +1279,6 @@ def test_docker_environment_uses_environment_bind_mounts(tmp_path):  # noqa: ANN
 
     kwargs = backend.calls[0][1]
     assert (str(model_dir), "/model", True) in _as_mount_tuples(kwargs["resources"])
-    assert "/model" in kwargs["passthrough_paths"]
 
 
 def test_docker_environment_mounts_selected_profiler_support(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -1499,7 +1492,6 @@ def test_modal_environment_prompt_references_runtime_document(tmp_path):  # noqa
         container_path == "/opt/vibesys-runtime/environment.md" and read_only
         for _, container_path, read_only in _as_mount_tuples(backend.calls[0][1]["resources"])
     )
-    assert "/opt/vibesys-runtime" in backend.calls[0][1]["passthrough_paths"]
     # Tell the agent where to look up volume names rather than baking them in.
     assert "meta.json" in runtime
     # No hardcoded model IDs or vibesys-internal volume names should leak
@@ -1683,13 +1675,13 @@ def test_modal_environment_prompt_notes_reuse_workspace_uv_cache(tmp_path):  # n
     assert "excluding `.venv` and `.cache`" in notes
 
 
-def test_modal_environment_with_deepagents_uses_docker_too(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    """The deepagents path also runs locally in Docker now — Modal is a
+def test_modal_environment_with_stub_agent_backend_uses_docker_too(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    """A non-cli agent backend also runs locally in Docker: Modal is a
     dispatch target, not a runtime for the agent."""
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("modal"))
 
-    env.open(_request(tmp_path, backend, agent_backend="deepagents"))
+    env.open(_request(tmp_path, backend, agent_backend="stub"))
 
     assert backend.calls[0][0] is SandboxKind.DOCKER
 

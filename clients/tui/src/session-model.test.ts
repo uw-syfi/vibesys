@@ -6,6 +6,7 @@ import {
   applyActiveExecutionCheckpoint,
   applyEvent,
   applyEventBatch,
+  applyEventPrefix,
   chatDocked,
   chatPaneVisible,
   clearInputError,
@@ -46,6 +47,7 @@ import {
   togglePaneZoom,
   toggleTodos,
   unownedExperimentRounds,
+  updateChatConversation,
   visibleActiveExecutions,
   visibleConversation,
   visiblePhases,
@@ -271,6 +273,170 @@ describe('event batch projection', () => {
       message: 'The current run failed.',
       diagnosticId: 'failure-1',
     });
+  });
+
+  it('keeps a dismissed failure banner closed across post-mortem chat batches', () => {
+    const failed = applyEventBatch(initialSessionState(), [
+      event(1, 'run_started', {
+        kind: 'run_started',
+        outer_loop: 'agent',
+        input: '.',
+        max_rounds: 3,
+      }),
+      {
+        ...event(2, 'run_failed'),
+        diagnostic: {
+          id: 'failure-1',
+          code: 'run_failed',
+          summary: 'The current run failed.',
+          scope: 'run',
+          severity: 'fatal',
+          retryability: 'never',
+        },
+      },
+    ]);
+    expect(failed.errorBanner).not.toBeNull();
+    const dismissed = dismissErrorBanner(failed);
+
+    const chatted = applyEventBatch(dismissed, [
+      chatEvent(3, 'chat', {kind: 'chat', answer: 'The gate exited 1.'}),
+    ]);
+
+    expect(chatted.core.status).toBe('failed');
+    expect(chatted.errorBanner).toBeNull();
+  });
+
+  it('reports the terminal diagnostic once, not once per later fold', () => {
+    const failed = applyEventBatch(initialSessionState(), [
+      {
+        ...event(1, 'run_failed'),
+        diagnostic: {
+          id: 'failure-1',
+          code: 'run_failed',
+          summary: 'The current run failed.',
+          scope: 'run',
+          severity: 'fatal',
+          retryability: 'never',
+        },
+      },
+    ]);
+    expect(failed.errorBanner?.count).toBe(1);
+
+    const chatted = applyEventBatch(
+      applyEventBatch(failed, [chatEvent(2, 'chat', {kind: 'chat', answer: 'first answer'})]),
+      [chatEvent(3, 'chat', {kind: 'chat', answer: 'second answer'})],
+    );
+
+    expect(chatted.errorBanner?.count).toBe(1);
+  });
+
+  it('banners a diagnostic appended while the run is already failed', () => {
+    const failed = applyEventBatch(initialSessionState(), [
+      {
+        ...event(1, 'run_failed'),
+        diagnostic: {
+          id: 'failure-1',
+          code: 'run_failed',
+          summary: 'The current run failed.',
+          scope: 'run',
+          severity: 'fatal',
+          retryability: 'never',
+        },
+      },
+    ]);
+    const dismissed = dismissErrorBanner(failed);
+
+    const worse = applyEventBatch(dismissed, [
+      {
+        ...event(2, 'run_failed'),
+        diagnostic: {
+          id: 'failure-2',
+          code: 'gate_failed',
+          summary: 'The benchmark gate failed.',
+          scope: 'run',
+          severity: 'fatal',
+          retryability: 'never',
+        },
+      },
+    ]);
+
+    expect(worse.errorBanner).toMatchObject({
+      message: 'The benchmark gate failed.',
+      diagnosticId: 'failure-2',
+    });
+  });
+});
+
+describe('chat backfill ordering', () => {
+  it('inserts backfilled exchanges at their transcript position, not the tail', () => {
+    const live = applyEventBatch(
+      initialSessionState(),
+      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      undefined,
+      100,
+      90,
+    );
+    expect(live.chatConversation.map(entry => entry.id)).toEqual(['100']);
+
+    const backfilled = applyEventPrefix(
+      live,
+      [chatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
+      0,
+    );
+
+    const transcript = backfilled.core.chatTranscripts[backfilled.activeChatThreadId] ?? [];
+    expect(transcript.map(entry => entry.id)).toEqual(['10', '100']);
+    expect(backfilled.chatConversation.map(entry => entry.id)).toEqual(['10', '100']);
+    expect(backfilled.chatConversation.map(entry => entry.content)).toEqual([
+      'older answer',
+      'newest answer',
+    ]);
+  });
+
+  it('backfills above a local question instead of splitting it from its answer', () => {
+    const live = applyEventBatch(
+      initialSessionState(),
+      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      undefined,
+      100,
+      90,
+    );
+    const asked = updateChatConversation(live, live.activeChatThreadId, entries => [
+      ...entries,
+      {id: 'chat-user-1', kind: 'user', label: 'You', content: 'why did round 2 regress?'},
+    ]);
+
+    const backfilled = applyEventPrefix(
+      asked,
+      [chatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
+      0,
+    );
+
+    expect(backfilled.chatConversation.map(entry => entry.id)).toEqual([
+      '10',
+      '100',
+      'chat-user-1',
+    ]);
+  });
+
+  it('keeps a pending question above the fresh answer that lands after it', () => {
+    const live = applyEventBatch(
+      initialSessionState(),
+      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      undefined,
+      100,
+      90,
+    );
+    const asked = updateChatConversation(live, live.activeChatThreadId, entries => [
+      ...entries,
+      {id: 'chat-user-1', kind: 'user', label: 'You', content: 'why did round 2 regress?'},
+    ]);
+
+    const answered = applyEventBatch(asked, [
+      chatEvent(101, 'chat', {kind: 'chat', answer: 'follow-up answer'}),
+    ]);
+
+    expect(answered.chatConversation.map(entry => entry.id)).toEqual(['100', 'chat-user-1', '101']);
   });
 });
 

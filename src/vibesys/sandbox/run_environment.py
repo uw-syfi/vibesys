@@ -112,10 +112,8 @@ for attempt in range(5):
 """
 
 if TYPE_CHECKING:
-    # Annotation only; deepagents pulls langchain + anthropic (~seconds).
-    from deepagents.backends.protocol import SandboxBackendProtocol
-
     from vs_project import StateNamespace
+    from vs_sandbox.execution import Sandbox
 
 
 @dataclass(frozen=True)
@@ -208,7 +206,7 @@ class RunEnvironmentRequest:  # noqa: D101  # tracked: #288
 class _AgentPathSandbox(Protocol):
     """The one lookup ``AgentPaths`` construction needs from a started sandbox.
 
-    Narrower than ``SandboxBackendProtocol``: a host-only sandbox never
+    Narrower than ``Sandbox``: a host-only sandbox never
     reaches this contract (``LocalEnvironment`` builds host paths directly),
     while every ``SandboxKind.DOCKER`` build
     (:class:`~vs_sandbox.docker_sandbox.DockerSandbox`) satisfies it.
@@ -218,7 +216,7 @@ class _AgentPathSandbox(Protocol):
 
 
 class RunEnvironmentSession(Protocol):  # noqa: D101  # tracked: #288
-    sandbox: SandboxBackendProtocol
+    sandbox: Sandbox
     view: RunEnvironmentView
 
     def __enter__(self) -> RunEnvironmentSession: ...  # noqa: D105  # tracked: #288
@@ -287,10 +285,10 @@ class _NoopWorkspaceRecovery:
         return CandidateRuntime(view.prompt_notes, view.deployment_namespace)
 
 
-def _start_sandbox(sandbox: SandboxBackendProtocol) -> None:
+def _start_sandbox(sandbox: Sandbox) -> None:
     """Start the container of a sandbox kind that owns one.
 
-    ``SandboxBackendProtocol`` is the command-execution contract and says
+    ``Sandbox`` is the command-execution contract and says
     nothing about container lifetime, so the lookup stays dynamic. Every
     Docker- and Modal-kind sandbox this module builds implements ``start``.
     """
@@ -301,7 +299,7 @@ def _start_sandbox(sandbox: SandboxBackendProtocol) -> None:
     start()
 
 
-def _stop_sandbox(sandbox: SandboxBackendProtocol) -> None:
+def _stop_sandbox(sandbox: Sandbox) -> None:
     """Stop the sandbox's container, if it owns one."""
     stop = getattr(sandbox, "stop", None)
     if callable(stop):
@@ -310,7 +308,7 @@ def _stop_sandbox(sandbox: SandboxBackendProtocol) -> None:
 
 @dataclass
 class _DefaultRunEnvironmentSession:
-    sandbox: SandboxBackendProtocol
+    sandbox: Sandbox
     view: RunEnvironmentView
     stop_on_close: bool = False
     _closed: bool = False
@@ -352,7 +350,6 @@ class LocalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
             host_workspace=str(request.workspace),
             log_path=None,
             bind_mounts=[],
-            passthrough_paths=[],
             extra_env={},
             extra_init_commands=[],
             lifecycle_hooks=lifecycle_hooks,
@@ -406,7 +403,7 @@ class DockerEnvironment:  # noqa: D101  # tracked: #288
             _docker_backend_image(request),
             toolchains=_docker_agent_toolchains(request, tools),
         )
-        resources, docker_symlinks, passthrough = _container_mount_plan(request)
+        resources, docker_symlinks = _container_mount_plan(request)
         resources = resources + _resources_for_mounts(
             _docker_evaluator_tool_mounts(request, tools, container_image=container_image),
             purpose="evaluator tool",
@@ -440,7 +437,6 @@ class DockerEnvironment:  # noqa: D101  # tracked: #288
             log_path=request.log_dir / "docker.log",
             bind_mounts=[],
             resources=resources,
-            passthrough_paths=passthrough,
             extra_env=cli_provider_env,
             auth_files=auth_files,
             lifecycle_hooks=lifecycle_hooks,
@@ -550,7 +546,7 @@ class SkyPilotEnvironmentConfig:
 
 @dataclass
 class _SkyPilotRunEnvironmentSession:
-    sandbox: SandboxBackendProtocol
+    sandbox: Sandbox
     view: RunEnvironmentView
     bridge: SkyPilotBridge
     _closed: bool = False
@@ -674,7 +670,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                 container_image, ensure_pushed=ensure_pushed, backend_label="SkyPilot"
             )
 
-            resources, docker_symlinks, passthrough = _container_mount_plan(request)
+            resources, docker_symlinks = _container_mount_plan(request)
             cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
             cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
             helper_source = Path(__file__).with_name("skypilot_evaluator.py")
@@ -705,14 +701,12 @@ class SkyPilotEnvironment(DockerEnvironment):
             resources.append(
                 _resource_for_mount(str(runtime_document), runtime_path, read_only=True)
             )
-            passthrough.extend(["/opt/vibesys-runtime", "/opt/vibesys-skypilot"])
             sandbox = request.backend.make_sandbox(
                 SandboxKind.DOCKER,
                 host_workspace=str(request.workspace),
                 log_path=request.log_dir / "docker.log",
                 bind_mounts=[],
                 resources=_dedupe_resources(resources),
-                passthrough_paths=passthrough,
                 extra_env=cli_provider_env,
                 auth_files=auth_files,
                 lifecycle_hooks=_symlink_lifecycle_hooks(docker_symlinks),
@@ -835,7 +829,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
             container_image, ensure_pushed=ensure_pushed, backend_label="Modal"
         )
 
-        resources, docker_symlinks, passthrough = _container_mount_plan(request)
+        resources, docker_symlinks = _container_mount_plan(request)
         cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
         cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
         if request.git_history_root is not None:
@@ -859,7 +853,6 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
         resources.append(
             _resource_for_mount(str(runtime_document), runtime_container_path, read_only=True)
         )
-        passthrough.append("/opt/vibesys-runtime")
         evaluator_helper = request.framework_root / "src/vibesys/sandbox/modal_evaluator.py"
         evaluator_container_path = "/opt/vibesys-modal-evaluator.py"
         resources.append(
@@ -893,7 +886,6 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
             log_path=request.log_dir / "docker.log",
             bind_mounts=[],
             resources=resources,
-            passthrough_paths=passthrough,
             extra_env=cli_provider_env,
             auth_files=auth_files,
             lifecycle_hooks=lifecycle_hooks,
@@ -1590,18 +1582,18 @@ def _dedupe_resources(resources: Sequence[HostResource]) -> list[HostResource]:
     return list(seen.values())
 
 
-def _container_mount_plan(  # noqa: C901  # tracked: #288
+def _container_mount_plan(  # tracked: #288
     request: RunEnvironmentRequest,
     *,
     include_cli_provider_mounts: bool = True,
-) -> tuple[list[HostResource], list[tuple[str, str]], list[str]]:
+) -> tuple[list[HostResource], list[tuple[str, str]]]:
     """Build the host resources + setup symlinks for a sandbox.
 
     Returns the resource list the sandbox enforces and exposes through
     :meth:`~vs_sandbox.docker_sandbox.DockerSandbox.agent_path` (workspace
     read-write mapping aside, which the sandbox itself always provides),
-    the setup symlinks a lifecycle hook must create once the container is
-    up, and the container paths virtual-path translation must leave alone.
+    and the setup symlinks a lifecycle hook must create once the container is
+    up.
 
     ``include_cli_provider_mounts`` controls whether CLI auth state and the
     full project tree are added under ``/opt/vibesys-auth`` and
@@ -1635,14 +1627,11 @@ def _container_mount_plan(  # noqa: C901  # tracked: #288
                 skip=skip_environment_mount_symlinks,
             )
 
-    passthrough_paths: list[str] = []
     objective_document = _materialize_effective_objective(request)
     if objective_document is not None:
         bind_mounts.append((str(objective_document), _RUNTIME_OBJECTIVE_CONTAINER_PATH, True))
-        passthrough_paths.append("/opt/vibesys-runtime")
     if request.git_history_root is not None:
         bind_mounts.append((str(request.git_history_root), "/opt/vibesys-history", True))
-        passthrough_paths.append("/opt/vibesys-history")
     for mount in request.environment_bind_mounts:
         resolved = mount.host_path.resolve()
         host_path = _find_mount_root(resolved)
@@ -1654,8 +1643,6 @@ def _container_mount_plan(  # noqa: C901  # tracked: #288
             ancestor_mount = f"/workspace/_mounts/{mount_name}"
             bind_mounts.append((str(host_path), ancestor_mount, mount.read_only))
             symlinks.append((mount.container_path, f"{ancestor_mount}/{rel}"))
-        if mount.container_path.startswith("/"):
-            passthrough_paths.append(mount.container_path)
 
     if request.profiler_support_path and request.profiler_support_name:
         bind_mounts.append(
@@ -1687,7 +1674,7 @@ def _container_mount_plan(  # noqa: C901  # tracked: #288
         bind_mounts.extend(auth_bind_mounts(request.cli_provider))
         bind_mounts.append((str(request.framework_root), "/opt/vibesys", True))
 
-    return _resources_for_mounts(bind_mounts), symlinks, passthrough_paths
+    return _resources_for_mounts(bind_mounts), symlinks
 
 
 def _reference_container_path(request: RunEnvironmentRequest) -> str:
@@ -1982,7 +1969,6 @@ def _docker_evaluator_tool_mounts(
                 bind_mounts=[
                     (str(host_parent), str(_SANDBOX_EVALUATOR_TOOLS_ROOT), False),
                 ],
-                passthrough_paths=[str(_SANDBOX_EVALUATOR_TOOLS_ROOT)],
                 extra_env={},
                 extra_init_commands=_evaluator_container_setup(request),
                 lifecycle_hooks=[EvaluatorToolLifecycleHooks(tools, _SANDBOX_EVALUATOR_TOOLS_ROOT)],

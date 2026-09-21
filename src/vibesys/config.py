@@ -12,7 +12,6 @@ rather than being silently dropped, which is the failure mode the previous
 allowlist loader suffered from.
 """
 
-import os
 import tomllib
 from collections.abc import Mapping  # noqa: TC003  # tracked: #288
 from pathlib import Path
@@ -37,13 +36,10 @@ class _Strict(BaseModel):
 
 class ModelCfg(_Strict):  # noqa: D101  # tracked: #288
     name: str = Field(description="Model identifier, e.g. 'claude-sonnet-4-6'. Required.")
+    # Deprecated: accepted so existing agent.toml files load, but ignored.
     provider: Provider | None = Field(
         default=None,
-        description=(
-            "Provider override. When omitted, auto-detected from the model-name "
-            "prefix: claude-* → anthropic, gpt-*/o1/o3/o4 → openai, "
-            "gemini-*/gemma-* → google-genai."
-        ),
+        description="Deprecated and ignored: the agent CLI provider is selected by [agent].",
     )
 
 
@@ -72,6 +68,7 @@ class ThinkingCfg(_Strict):  # noqa: D101  # tracked: #288
 
 
 class VertexCfg(_Strict):  # noqa: D101  # tracked: #288
+    # Deprecated: accepted so existing agent.toml files load, but ignored.
     # The attribute is ``json_path`` to avoid shadowing ``BaseModel.json``; the
     # TOML key stays ``json`` via the alias.
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -79,25 +76,20 @@ class VertexCfg(_Strict):  # noqa: D101  # tracked: #288
     json_path: str | None = Field(
         default=None,
         alias="json",
-        description=(
-            "Path to the Vertex AI service-account JSON key file. Overridable via "
-            "$VERTEX_SERVICE_ACCOUNT_JSON."
-        ),
+        description=("Path to the Vertex AI service-account JSON key file. Accepted but ignored."),
     )
     project: str | None = Field(
         default=None,
-        description=(
-            "GCP project id. Falls back to the key file's project_id when unset. "
-            "Overridable via $VERTEX_PROJECT."
-        ),
+        description=("GCP project id. Accepted but ignored."),
     )
     region: str = Field(
         default="us-east5",
-        description="Vertex AI region/location. Overridable via $VERTEX_REGION.",
+        description="Vertex AI region/location.",
     )
 
 
 class OpenAICompatCfg(_Strict):  # noqa: D101  # tracked: #288
+    # Deprecated: accepted so existing agent.toml files load, but ignored.
     base_url: str | None = Field(
         default=None,
         description=(
@@ -121,6 +113,8 @@ class _CredEnvProviderCfg(_Strict):
 
 
 class ProvidersCfg(_Strict):  # noqa: D101  # tracked: #288
+    # Deprecated: every [providers.*] table is accepted so existing agent.toml
+    # files load, but none is read.
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     vertex_ai: VertexCfg | None = Field(
@@ -135,16 +129,16 @@ class ProvidersCfg(_Strict):  # noqa: D101  # tracked: #288
     )
     anthropic: _CredEnvProviderCfg | None = Field(
         default=None,
-        description="Anthropic provider marker; credentials from $ANTHROPIC_API_KEY.",
+        description="Anthropic provider marker. Accepted but ignored.",
     )
     google_genai: _CredEnvProviderCfg | None = Field(
         default=None,
         alias="google-genai",
-        description="Google GenAI provider marker; credentials from $GOOGLE_API_KEY.",
+        description="Google GenAI provider marker. Accepted but ignored.",
     )
     openai: _CredEnvProviderCfg | None = Field(
         default=None,
-        description="OpenAI provider marker; credentials from $OPENAI_API_KEY.",
+        description="OpenAI provider marker. Accepted but ignored.",
     )
 
 
@@ -187,8 +181,8 @@ class AgentCfg(_Strict):  # noqa: D101  # tracked: #288
     backend: str | None = Field(
         default=None,
         description=(
-            "Agent runner backend: 'cli' (drive an external coding-agent CLI) or "
-            "'deepagents'. The --agent-backend flag overrides; defaults to 'cli'."
+            "Agent runner backend: 'cli' (drive an external coding-agent CLI). "
+            "The --agent-backend flag overrides; defaults to 'cli'."
         ),
     )
     cli_provider: str | None = Field(
@@ -317,22 +311,6 @@ def _load_dotenv_file(path: Path = PROJECT_ROOT / ".env") -> None:
     load_dotenv(path, override=False)
 
 
-def _apply_vertex_env_overrides(config: Config) -> None:
-    """Let ``VERTEX_*`` env vars override the ``[providers.vertex-ai]`` table.
-
-    Only applied when the section is present, matching prior behavior.
-    """
-    vx = config.providers.vertex_ai
-    if vx is None:
-        return
-    if env_json := os.environ.get("VERTEX_SERVICE_ACCOUNT_JSON"):
-        vx.json_path = env_json
-    if env_project := os.environ.get("VERTEX_PROJECT"):
-        vx.project = env_project
-    if env_region := os.environ.get("VERTEX_REGION"):
-        vx.region = env_region
-
-
 def load_config(path: Path, *, ignored_sections: frozenset[str] = frozenset()) -> Config:
     """Load and validate core configuration from a shared TOML file.
 
@@ -345,6 +323,4 @@ def load_config(path: Path, *, ignored_sections: frozenset[str] = frozenset()) -
     with open(path, "rb") as f:  # noqa: PTH123  # tracked: #288
         raw = {key: value for key, value in tomllib.load(f).items() if key not in ignored_sections}
 
-    config = Config.model_validate(raw)
-    _apply_vertex_env_overrides(config)
-    return config
+    return Config.model_validate(raw)

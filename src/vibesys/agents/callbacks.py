@@ -1,13 +1,9 @@
 import json  # noqa: D100  # tracked: #288
 import time
-import traceback
 import uuid
 from collections import defaultdict, deque
 from collections.abc import Callable
 from typing import Any, TextIO
-
-from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.messages import BaseMessage
 
 from vibesys.agents.progress import AgentProgress
 from vibesys.agents.todos import todos_from_tool_call
@@ -62,7 +58,7 @@ def _default_context_window_lookup(model_name: str | None) -> int | None:
     return None
 
 
-class AgentLogger(BaseCallbackHandler):
+class AgentLogger:
     """Single event adapter for all agent activity: token streaming, tool calls, and tool results.
 
     Every observation is published as typed events through the process-global
@@ -83,31 +79,22 @@ class AgentLogger(BaseCallbackHandler):
         round_label: str | None = None,
         invocation_id: str | None = None,
     ):
-        self._streaming = False
         self._external_text_streaming = False
         # Sticky for the logger's lifetime, which is one turn: whether any
         # assistant text reached the assistant channel from a driver's stream.
         self._streamed_external_text = False
         self._external_text_ends_with_newline = False
         self._log_file = log_file
-        self._call_count = 0
         self._model_name = model_name
         self._agent_label = agent_label
         self._progress = progress
         self._start_time = time.monotonic()
         self._input_tokens = 0
         # Most recent usage dict from the cli backend (see ``update_usage``).
-        # The deepagents path doesn't populate this — it drives ``_input_tokens``
-        # directly via ``on_llm_end``.
         self._latest_usage: dict[str, Any] | None = None
         self._context_window_lookup = context_window_lookup or _default_context_window_lookup
         self._context_window = self._context_window_lookup(model_name)
         self._pending_tool_calls: dict[str, deque[str]] = defaultdict(deque)
-        # In-flight langchain tool runs keyed by run_id: (tool name,
-        # tool_call_id). Recorded in ``on_tool_start`` solely so
-        # ``on_tool_error`` can attribute a failure to the typed tool_call
-        # already emitted from ``on_llm_end``.
-        self._tool_runs: dict[uuid.UUID, tuple[str | None, str | None]] = {}
         self._agent_kind = agent_kind
         self._round_label = round_label
         self._invocation_id = invocation_id
@@ -130,180 +117,6 @@ class AgentLogger(BaseCallbackHandler):
         """Render the status snapshot as the plain-text log prefix."""
         return format_status_prefix(self._status())
 
-    # --- LLM call context (log-file only) ---
-
-    def on_chat_model_start(  # noqa: D102  # tracked: #288
-        self,
-        serialized: dict[str, Any],
-        messages: list[list[BaseMessage]],
-        **kwargs: Any,  # noqa: ANN401, ARG002  # tracked: #288
-    ) -> None:
-        if not self._log_file:
-            return
-        self._call_count += 1
-        flat = messages[0] if messages else []
-
-        # Separator with call number
-        self._log_line(f"\n{'─' * 60}")
-        self._log_line(f"  LLM call #{self._call_count}")
-        self._log_line(f"{'─' * 60}")
-
-        # First call: log model info and system prompt
-        if self._call_count == 1:
-            model_name = self._model_name or (serialized.get("kwargs") or {}).get("model") or ""
-            if not model_name:
-                id_parts = serialized.get("id", [])
-                model_name = "/".join(id_parts) if id_parts else "unknown"
-            self._log_line(f"  Model: {model_name}")
-
-            for msg in flat:
-                if getattr(msg, "type", None) == "system":
-                    self._log_line(f"\n  System prompt:\n{msg.content}")
-                    break
-
-        # Message type summary
-        from collections import Counter  # noqa: PLC0415  # tracked: #288
-
-        type_counts = Counter(getattr(m, "type", "unknown") for m in flat)
-        summary = ", ".join(f"{count} {typ}" for typ, count in sorted(type_counts.items()))
-        self._log_line(f"  Messages: {len(flat)} ({summary})")
-
-        # Last human or tool message (trigger for this call)
-        for msg in reversed(flat):
-            if getattr(msg, "type", None) in ("human", "tool"):
-                content = str(msg.content)
-                if len(content) > 500:  # noqa: PLR2004  # tracked: #288
-                    content = content[:500] + "..."
-                self._log_line(f"  Last {msg.type} message: {content}")
-                break
-
-    # --- LLM token streaming ---
-
-    def on_llm_new_token(self, token: str, **kwargs: Any) -> None:  # noqa: ANN401, ARG002, D102  # tracked: #288
-        if token:
-            status = self._status()
-            self._publish(token, "assistant", status=status)
-            if not self._streaming:
-                self._log_write(format_status_prefix(status))
-            self._log_write(token)
-            self._streaming = True
-
-    def on_llm_end(self, response: Any, **kwargs: Any) -> None:  # noqa: ANN401, ARG002, D102  # tracked: #288
-        was_streaming = self._streaming
-        if self._streaming:
-            # Close the streamed line on every surface: renderers and the
-            # log both need the trailing newline the stream never carried.
-            self._publish("\n", "assistant")
-            self._log_write("\n")
-            self._streaming = False
-
-        msg = response.generations[0][0].message
-
-        # Refresh context-window-usage tracking from the standardized
-        # langchain UsageMetadata field. All chat-model wrappers in
-        # ``models.py`` (ChatAnthropic, ChatOpenAI, ChatGoogleGenerativeAI,
-        # ChatAnthropicVertex) populate this — Vertex Anthropic uses the
-        # exact same ``_create_usage_metadata`` from langchain-anthropic,
-        # so there's no provider-specific shape to handle. The langchain
-        # adapters also fold provider quirks into the field (e.g. Anthropic
-        # adds cache_read/cache_creation tokens back into ``input_tokens``
-        # so it reflects true context size, not just the non-cached portion).
-        #
-        # ``or {}`` handles openai-compatible servers (vLLM, Ollama via
-        # ChatOpenAI with custom base_url) that may omit the usage block —
-        # in that case the count stays at 0 and the prefix shows ``0/<max>``
-        # rather than crashing.
-        usage = getattr(msg, "usage_metadata", None) or {}
-        input_tokens = usage.get("input_tokens") or 0
-        if input_tokens:
-            self._input_tokens = input_tokens
-            self._publish_usage()
-
-        content = msg.content
-
-        # Display thinking blocks if present
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "thinking":
-                    thinking_text = block.get("thinking", "")
-                    if thinking_text:
-                        self._emit_thinking(thinking_text)
-
-        if was_streaming:
-            return
-
-        # Fallback: emit full text for models that don't stream tokens
-        text = msg.text
-        if text:
-            self._publish(text + "\n", "assistant")
-            self._log_line(text)
-        for tc in msg.tool_calls:
-            self._emit_tool_call(tc["name"], tc["args"], call_id=tc.get("id"))
-
-    # --- Tool execution ---
-
-    def on_tool_start(  # noqa: D102  # tracked: #288
-        self,
-        serialized: dict[str, Any],
-        input_str: str,  # noqa: ARG002 - protocol parity
-        *,
-        inputs: dict[str, Any] | None = None,  # noqa: ARG002 - protocol parity
-        **kwargs: Any,  # noqa: ANN401  # tracked: #288
-    ) -> None:
-        # The tool call itself was already emitted from ``on_llm_end``; record
-        # the run only so ``on_tool_error`` can attribute a failure to it.
-        run_id = kwargs.get("run_id")
-        if run_id is not None:
-            self._tool_runs[run_id] = ((serialized or {}).get("name"), kwargs.get("tool_call_id"))
-
-    def on_tool_end(self, output: Any, **kwargs: Any) -> None:  # noqa: ANN401, D102  # tracked: #288
-        self._tool_runs.pop(kwargs.get("run_id"), None)
-        content = output.content if hasattr(output, "content") else str(output)
-        name = getattr(output, "name", None) or "unknown"
-        call_id = getattr(output, "tool_call_id", None)
-        self._emit_tool_result(
-            name,
-            content,
-            call_id=call_id if isinstance(call_id, str) and call_id else None,
-        )
-
-    def on_tool_error(self, error: Any, **kwargs: Any) -> None:  # noqa: ANN401, D102  # tracked: #288
-        lines = [f"Tool error: {error!r}"]
-        if isinstance(error, BaseException):
-            tb = traceback.format_exception(type(error), error, error.__traceback__)
-            if tb:
-                lines.append("".join(tb).strip())
-        text = "\n".join(lines)
-        self._publish(text + "\n", "diagnostic")
-        self._log_line(text)
-
-        # Close the typed tool_call emitted from ``on_llm_end`` so consumers
-        # don't show the tool as running forever. Attribution comes from the
-        # run recorded in ``on_tool_start``, else from the provider call id.
-        name, recorded_call_id = self._tool_runs.pop(kwargs.get("run_id"), (None, None))
-        call_id = kwargs.get("tool_call_id") or recorded_call_id
-        if name is None and call_id is not None:
-            name = next(
-                (n for n, pending in self._pending_tool_calls.items() if call_id in pending),
-                None,
-            )
-        if name is None:
-            # No typed tool_call to close; the diagnostic above is the whole
-            # record, and fabricating an orphan tool_result would mislead.
-            return
-        pending = self._pending_tool_calls.get(name)
-        if not pending or (call_id is not None and call_id not in pending):
-            # A streamed turn emits no typed tool_call (``on_llm_end`` returns
-            # before the emission), so a failure whose call was never queued
-            # has no lifecycle to close either.
-            return
-        self._emit_tool_result(
-            name,
-            f"{type(error).__name__}: {error}" if str(error) else type(error).__name__,
-            call_id=call_id,
-            is_error=True,
-        )
-
     # --- Event emission + log formatting ---
 
     # Tool names whose args contain code content that is already tracked in
@@ -313,7 +126,7 @@ class AgentLogger(BaseCallbackHandler):
             "Write",
             "Edit",  # Claude Code tools
             "write_file",
-            "edit_file",  # deepagents tools
+            "edit_file",  # Gemini and other CLI providers
         }
     )
     # Args that carry bulk code content and should be omitted from the log.
@@ -323,7 +136,7 @@ class AgentLogger(BaseCallbackHandler):
             "old_string",
             "new_string",  # Write/Edit
             "old_text",
-            "new_text",  # deepagents edit variants
+            "new_text",  # edit variants
         }
     )
 
@@ -430,14 +243,10 @@ class AgentLogger(BaseCallbackHandler):
             self._log_file.write(text)
             self._log_file.flush()
 
-    # --- Public hooks for non-langchain event sources ---
+    # --- Public hooks for external-agent drivers ---
     #
-    # The deepagents path drives ``AgentLogger`` via the langchain
-    # ``BaseCallbackHandler`` hooks (``on_llm_new_token``, ``on_tool_end``, …).
-    # External-agent drivers publish normalized ``AgentEvent``s, which
-    # ``_LoggerObserver`` calls through to on this object. Both paths converge
-    # on the same private ``_emit_*`` helpers, so emitted events and log text
-    # are identical regardless of which backend is in use.
+    # Drivers publish normalized ``AgentEvent``s, which ``_LoggerObserver``
+    # calls through to on this object.
 
     def _publish_channel(self, text: str, channel: AgentOutputChannel) -> None:
         """Publish ``text`` verbatim on ``channel`` and mirror it to the log."""
@@ -494,12 +303,10 @@ class AgentLogger(BaseCallbackHandler):
     def update_usage(self, usage: dict[str, Any] | None) -> None:
         """Refresh token tracking from a CLI provider's per-turn usage dict.
 
-        Mirrors the deepagents path (:meth:`on_llm_end`): we overwrite, not
-        accumulate, because the prefix reflects *current context window
-        pressure*, not cumulative spend.  ``input_tokens`` includes cached
-        tokens on every provider — the CLI drivers fold the cache counts in
-        before reporting, matching what ``langchain-anthropic`` does for the
-        deepagents path.
+        We overwrite, not accumulate, because the prefix reflects *current
+        context window pressure*, not cumulative spend.  ``input_tokens``
+        includes cached tokens on every provider: the CLI drivers fold the
+        cache counts in before reporting.
 
         A zero / missing ``input_tokens`` field is treated as "no update"
         so a stale usage block can't clobber the last real reading.
@@ -547,7 +354,7 @@ class AgentLogger(BaseCallbackHandler):
         self._external_text_ends_with_newline = False
 
     def log_tool_call(self, name: str, args: dict[str, Any]) -> None:
-        """Emit a tool invocation the same way the deepagents path does."""
+        """Emit a tool invocation."""
         self._emit_tool_call(name, args)
 
     def log_tool_result(
@@ -558,7 +365,7 @@ class AgentLogger(BaseCallbackHandler):
         is_error: bool = False,
         payload: ToolResultPayload | None = None,
     ) -> None:
-        """Emit a tool result the same way ``on_tool_end`` does."""
+        """Emit a tool result."""
         self._emit_tool_result(name, content, is_error=is_error, payload=payload)
 
     def _publish(

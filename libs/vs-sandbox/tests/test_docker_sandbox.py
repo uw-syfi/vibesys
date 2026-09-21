@@ -776,56 +776,6 @@ class TestContainerIdProperty:
             _ = sandbox.container_id
 
 
-class TestUploadFiles:
-    @patch("subprocess.run")
-    def test_upload_files(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
-        sandbox.start()
-        mock_run.reset_mock()
-
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
-
-        results = sandbox.upload_files([("test.py", b"print('hello')")])
-
-        assert len(results) == 1
-        assert results[0].path == "test.py"
-        assert results[0].error is None
-        # Should have called docker cp
-        assert any("cp" in " ".join(c[0][0]) for c in mock_run.call_args_list)
-
-
-class TestDownloadFiles:
-    @patch("subprocess.run")
-    def test_download_files(self, mock_run, sandbox, tmp_path):  # noqa: ANN001, ANN201, ARG002  # tracked: #288
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
-        sandbox.start()
-        mock_run.reset_mock()
-
-        # Mock docker cp to create the file
-        def mock_docker_cp(cmd, **kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001  # tracked: #288
-            # Simulate docker cp by creating the file in the temp dir
-            if "cp" in cmd:
-                # Extract dest path from command
-                dest = cmd[-1]
-                Path(dest).parent.mkdir(parents=True, exist_ok=True)
-                Path(dest).write_bytes(b"file content")
-            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
-
-        mock_run.side_effect = mock_docker_cp
-
-        results = sandbox.download_files(["test.py"])
-
-        assert len(results) == 1
-        assert results[0].path == "test.py"
-        assert results[0].content == b"file content"
-
-
 class TestContextManager:
     @patch("subprocess.run")
     def test_context_manager(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
@@ -838,66 +788,6 @@ class TestContextManager:
 
         # After exit, container should be stopped
         assert sandbox._container_id is None  # noqa: SLF001  # tracked: #288
-
-
-class TestPathTranslation:
-    def test_absolute_virtual_path_gets_workspace_prefix(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        assert sandbox._vpath("/reference/model") == "/workspace/reference/model"  # noqa: SLF001  # tracked: #288
-
-    def test_root_path_maps_to_workspace(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        assert sandbox._vpath("/") == "/workspace/"  # noqa: SLF001  # tracked: #288
-
-    def test_already_workspace_path_unchanged(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        assert sandbox._vpath("/workspace/foo") == "/workspace/foo"  # noqa: SLF001  # tracked: #288
-
-    def test_workspace_root_unchanged(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        assert sandbox._vpath("/workspace") == "/workspace"  # noqa: SLF001  # tracked: #288
-
-    def test_relative_path_unchanged(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        assert sandbox._vpath("reference/model") == "reference/model"  # noqa: SLF001  # tracked: #288
-
-    def test_passthrough_path_not_rewritten(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        """Paths in passthrough_paths should not get /workspace prepended."""
-        s = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"),
-            image="nvcr.io/nvidia/pytorch:25.04-py3",
-            passthrough_paths=["/model"],
-        )
-        assert s._vpath("/model") == "/model"  # noqa: SLF001  # tracked: #288
-        assert s._vpath("/model/config.json") == "/model/config.json"  # noqa: SLF001  # tracked: #288
-        # Other absolute paths should still be rewritten
-        assert s._vpath("/other") == "/workspace/other"  # noqa: SLF001  # tracked: #288
-
-    @patch("subprocess.run")
-    def test_read_translates_path(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        """read() should translate the path before delegating to BaseSandbox."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
-        sandbox.start()
-        mock_run.reset_mock()
-
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
-
-        with patch.object(
-            type(sandbox).__bases__[0], "read", return_value="content"
-        ) as mock_super_read:
-            sandbox.read("/reference/reference.py")
-            mock_super_read.assert_called_once_with("/workspace/reference/reference.py", 0, 2000)
-
-    @patch("subprocess.run")
-    def test_ls_translates_path(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        """ls_info('/') should translate to /workspace/."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
-        sandbox.start()
-
-        with patch.object(type(sandbox).__bases__[0], "ls_info", return_value=[]) as mock_super_ls:
-            sandbox.ls_info("/")
-            mock_super_ls.assert_called_once_with("/workspace/")
 
 
 class TestCleanupOnExit:
@@ -1024,55 +914,6 @@ class TestCleanupOnExit:
         )
         assert original_calls == [(2, None)]
         assert cleanup_calls == []
-
-
-class TestWrite:
-    @patch("subprocess.run")
-    def test_write_uses_docker_cp(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        """write() should use docker cp instead of shelling out content."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
-        sandbox.start()
-        mock_run.reset_mock()
-
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
-
-        result = sandbox.write("/test.py", "print('hello')")
-
-        assert result.error is None
-        # Should have called mkdir -p then docker cp
-        cmds = [c[0][0] for c in mock_run.call_args_list]
-        assert any("mkdir" in cmd for cmd in cmds)
-        assert any("cp" in cmd for cmd in cmds)
-        # Should NOT have used docker exec bash -c (which would inline content)
-        exec_bash_calls = [c for c in cmds if "exec" in c and "bash" in c and "-c" in c]
-        assert len(exec_bash_calls) == 0
-
-    @patch("subprocess.run")
-    def test_write_large_content(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        """write() should handle content larger than shell arg limit."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="abc123\n", stderr=""
-        )
-        sandbox.start()
-        mock_run.reset_mock()
-
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="", stderr=""
-        )
-
-        large_content = "x" * 500_000
-        result = sandbox.write("/big_file.txt", large_content)
-
-        assert result.error is None
-
-    @patch("subprocess.run")
-    def test_write_without_start_raises(self, mock_run, sandbox):  # noqa: ANN001, ANN201, ARG002  # tracked: #288
-        with pytest.raises(RuntimeError, match="not started"):
-            sandbox.write("/test.py", "content")
 
 
 class TestEnvVars:

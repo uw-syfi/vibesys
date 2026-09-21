@@ -60,8 +60,8 @@ def get(
 
 
 # Deferred until get() so importing this module stays cheap. The backend
-# modules themselves must stay cheap too: they defer deepagents (langchain +
-# anthropic) to first sandbox construction, so registration costs milliseconds.
+# modules themselves defer DockerSandbox (process-wide signal and atexit
+# handlers) to first sandbox construction, so registration stays side-effect free.
 def _register_defaults() -> None:
     from vibesys.backends.cuda import CudaBackend  # noqa: PLC0415  # tracked: #288
     from vibesys.backends.local import cpu_backend, metal_backend  # noqa: PLC0415  # tracked: #288

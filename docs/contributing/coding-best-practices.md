@@ -34,7 +34,9 @@ path.
 - `tach.toml` freezes the current Python module graph, and CI runs
   `uv run tach check`. A new cross-module import fails until you add the edge
   to `depends_on` in the same PR, so the reviewer sees it. Add an edge only when
-  the dependency is deliberate. The goal is to only ever remove edges. There are
+  the dependency is deliberate. The goal is to only ever remove edges. Cycles
+  are forbidden (`forbid_circular_dependencies`): move shared code down instead
+  of adding an upward edge. There are
   no layers: every module, including `entrypoints` and each `server.*` module,
   lists explicit edges. `entrypoints` is the composition root, with both a
   server path and a direct headless path into core. Upward imports (core to

@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from vibesys import boot_trace
-from vibesys import objective as _objective
 from vibesys.agents.provider_policy import SHIPPED_PROVIDERS
 from vibesys.config import Config, load_config
 from vibesys.constants import (
@@ -35,6 +34,7 @@ from vibesys.constants import (
     DomainName,
 )
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.evaluators import objective as _objective
 from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.loops.metrics import MetricSpace, Objective
@@ -613,7 +613,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--agent-backend",
-        choices=["deepagents", "cli"],
+        choices=["cli"],
         default=None,
         help=(
             "Which agent backend implementation to use. Overrides "
@@ -1883,7 +1883,7 @@ def _parse_command_flag(raw: str, flag: str) -> tuple[str, ...]:
 
 def _synthesize_standalone_input(args: argparse.Namespace) -> Path:
     """Materialize standalone-input flags into a bundle and return its path."""
-    from vibesys.input_synthesis import (  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.input_synthesis import (  # noqa: PLC0415  # tracked: #288
         InputSynthesisError,
         SynthesizedInputSpec,
         synthesize_input_bundle,

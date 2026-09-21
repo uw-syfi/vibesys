@@ -36,9 +36,7 @@ from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
 
 if TYPE_CHECKING:
-    # Annotation only; deepagents pulls langchain + anthropic (~seconds).
-    from deepagents.backends.protocol import SandboxBackendProtocol
-
+    from vs_sandbox.execution import Sandbox
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
@@ -115,7 +113,6 @@ class TrainiumBackend:
         host_workspace: str,
         log_path: Path | str | None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
-        passthrough_paths: list[str] | None = None,
         extra_env: dict[str, str] | None = None,
         extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
@@ -124,13 +121,12 @@ class TrainiumBackend:
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
-    ) -> SandboxBackendProtocol:
-        # Deferred: the sandbox classes subclass deepagents' BaseSandbox, which
-        # pulls langchain + anthropic. Registration must stay import-cheap.
+    ) -> Sandbox:
+        # Deferred: importing DockerSandbox registers process-wide signal and
+        # atexit handlers. Registration must stay side-effect free.
         from vs_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
 
         bind_mounts = list(bind_mounts or [])
-        passthrough_paths = list(passthrough_paths or [])
         extra_env = dict(extra_env or {})
         lifecycle_hooks = lifecycle_hooks or []
         # Accepted for ComputeBackendImpl protocol parity but unused: neither
@@ -164,12 +160,10 @@ class TrainiumBackend:
 
         if kind is SandboxKind.DOCKER:
             # Persistent host-side compile cache → container, kept out of
-            # the container's /workspace project mount (and registered as a
-            # passthrough so virtual-path translation leaves it unchanged).
+            # the container's /workspace project mount.
             host_cache = self.log_dir / "neuron-compile-cache"
             host_cache.mkdir(parents=True, exist_ok=True)
             bind_mounts.append((str(host_cache), _CACHE_CONTAINER_PATH, False))
-            passthrough_paths.append(_CACHE_CONTAINER_PATH)
 
             # neuronx-cc writes large intermediates to its temp/workdir (TMPDIR).
             # Left on the container overlay these grow many GB per round and are
@@ -178,7 +172,6 @@ class TrainiumBackend:
             host_tmp = self.log_dir / "neuron-tmp"
             host_tmp.mkdir(parents=True, exist_ok=True)
             bind_mounts.append((str(host_tmp), _TMP_CONTAINER_PATH, False))
-            passthrough_paths.append(_TMP_CONTAINER_PATH)
 
             return DockerSandbox(
                 host_workspace=host_workspace,
@@ -196,7 +189,6 @@ class TrainiumBackend:
                 auto_remove=True,
                 bind_mounts=bind_mounts,
                 resources=resources,
-                passthrough_paths=passthrough_paths,
                 env=env,
                 log_path=log_path,
                 auth_files=auth_files,

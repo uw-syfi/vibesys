@@ -89,16 +89,14 @@ def supported_cli_providers(driver_name: str) -> tuple[str, ...]:
     )
 
 
-def build_agent_client(  # noqa: C901, PLR0912, PLR0913
+def build_agent_client(  # noqa: C901, PLR0913
     config: Config,
     *,
     agent_backend: str | None,
     cli_provider: str | None,
     backends: dict[str, Any] | None,
-    skills: list[str],
     skill_source_dirs: list[Path],
     compute_backend: ComputeBackend | None = None,
-    model: Any,  # noqa: ANN401
     model_name: str,
     run_log_file: TextIO | None,
     use_docker: bool,
@@ -122,22 +120,6 @@ def build_agent_client(  # noqa: C901, PLR0912, PLR0913
         raise SystemExit(  # noqa: TRY003  # tracked: #288
             "local project execution requires the CLI agent backend so VibeSys can "
             "enforce nested read-only and hidden paths"
-        )
-
-    if backend == "deepagents":
-        if backends is None:
-            raise SystemExit(  # noqa: TRY003  # tracked: #288
-                "internal error: build_agent_client called with backend='deepagents' "
-                "but no backends dict was provided"
-            )
-        from vibesys.agents.deepagents_runner import DeepAgentsClient  # noqa: PLC0415
-
-        return DeepAgentsClient(
-            model=model,
-            backends=backends,
-            skills=skills,
-            model_name=model_name,
-            run_log_file=run_log_file,
         )
 
     if backend == "stub":

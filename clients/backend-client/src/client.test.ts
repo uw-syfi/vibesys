@@ -3,7 +3,8 @@ import {randomUUID} from 'node:crypto';
 import {unlink} from 'node:fs/promises';
 import {createServer, type Server, type Socket} from 'node:net';
 import {join} from 'node:path';
-import {ServerClient, type ServerClientOptions, ServerError} from './client.js';
+import {ServerClient, type ServerClientOptions} from './client.js';
+import {BackendClientError, ServerError} from './errors.js';
 
 let socketPath: string | undefined;
 
@@ -87,6 +88,8 @@ describe('ServerClient', () => {
         await expect(rejected).rejects.toBeInstanceOf(ServerError);
         await expect(rejected).rejects.toMatchObject({
           name: 'ServerError',
+          kind: 'rejected',
+          retryable: false,
           message: 'invalid request',
           diagnostic: {
             id: 'request-1',
@@ -101,9 +104,9 @@ describe('ServerClient', () => {
     await withServer(
       socket => socket.once('data', () => socket.destroy()),
       async client => {
-        await expect(client.request({type: 'query.snapshot'})).rejects.toThrow(
-          'Server disconnected',
-        );
+        const rejected = client.request({type: 'query.snapshot'});
+        await expect(rejected).rejects.toThrow('Server disconnected');
+        await expect(rejected).rejects.toMatchObject({kind: 'disconnected', retryable: true});
       },
     );
   });
@@ -112,9 +115,9 @@ describe('ServerClient', () => {
     await withServer(
       socket => socket.once('data', () => socket.write('{not-json}\n')),
       async client => {
-        await expect(client.request({type: 'query.snapshot'})).rejects.toThrow(
-          'Invalid server response JSON',
-        );
+        const rejected = client.request({type: 'query.snapshot'});
+        await expect(rejected).rejects.toThrow('Invalid server response JSON');
+        await expect(rejected).rejects.toMatchObject({kind: 'parse', retryable: false});
       },
     );
   });
@@ -139,9 +142,9 @@ describe('ServerClient', () => {
     await withServer(
       socket => socket.on('data', () => undefined),
       async client => {
-        await expect(client.request({type: 'query.snapshot'})).rejects.toThrow(
-          'Server request timed out after 20ms',
-        );
+        const rejected = client.request({type: 'query.snapshot'});
+        await expect(rejected).rejects.toThrow('Server request timed out after 20ms');
+        await expect(rejected).rejects.toMatchObject({kind: 'timeout', retryable: true});
       },
       {requestTimeoutMs: 20},
     );
@@ -356,10 +359,124 @@ describe('ServerClient', () => {
         });
         await expect(disconnect).resolves.toMatchObject({
           message: expect.stringContaining('Unknown server event-stream message'),
+          kind: 'parse',
+          retryable: false,
         });
       },
     );
   });
+
+  it('rejects the subscription as a server rejection on an old-server Response line', async () => {
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          if (request['type'] !== 'subscribe') return;
+          // An old server rejects a subscribe carrying an unknown field the
+          // way it rejects any request: a Response line on the same socket.
+          socket.write(
+            `${JSON.stringify({
+              protocol_version: 1,
+              request_id: request['request_id'],
+              timestamp: new Date().toISOString(),
+              ok: false,
+              error: 'Extra inputs are not permitted: tail',
+              diagnostic: {
+                id: 'request-1',
+                code: 'invalid_request',
+                summary: 'Extra inputs are not permitted: tail',
+                scope: 'request',
+                severity: 'error',
+              },
+            })}\n`,
+            () => socket.end(),
+          );
+        }),
+      async client => {
+        const rejected = client.subscribe(0, () => undefined, noopDisconnect, {tail: 1_000});
+        await expect(rejected).rejects.toBeInstanceOf(ServerError);
+        await expect(rejected).rejects.toMatchObject({
+          name: 'ServerError',
+          kind: 'rejected',
+          retryable: false,
+          message: 'Extra inputs are not permitted: tail',
+          diagnostic: {id: 'request-1', code: 'invalid_request'},
+        });
+      },
+    );
+  });
+
+  it('rejects the subscription with the refusal when a protocol error precedes the handshake', async () => {
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          if (request['type'] !== 'subscribe') return;
+          socket.write(
+            `${JSON.stringify({
+              type: 'protocol_error',
+              code: 'stream_failed',
+              message: 'Event stream failed',
+              diagnostic: {
+                id: 'stream-1',
+                code: 'stream_failed',
+                summary: 'Event stream failed',
+                scope: 'protocol',
+                severity: 'error',
+              },
+            })}\n`,
+            () => socket.end(),
+          );
+        }),
+      async client => {
+        const messages: string[] = [];
+        const rejected = client.subscribe(
+          0,
+          message => messages.push(String(message.type)),
+          noopDisconnect,
+        );
+        await expect(rejected).rejects.toBeInstanceOf(ServerError);
+        await expect(rejected).rejects.toMatchObject({
+          kind: 'rejected',
+          retryable: false,
+          message: 'Event stream failed',
+          diagnostic: {id: 'stream-1'},
+        });
+        // The refusal is still delivered as a message, as it is after the
+        // handshake, so consumers see one shape wherever it lands.
+        expect(messages).toEqual(['protocol_error']);
+      },
+    );
+  });
+
+  it('types a stream that closes before the handshake as a transport disconnect', async () => {
+    await withServer(
+      socket => socket.once('data', () => socket.end()),
+      async client => {
+        const rejected = client.subscribe(0, () => undefined, noopDisconnect);
+        await expect(rejected).rejects.toBeInstanceOf(BackendClientError);
+        await expect(rejected).rejects.toMatchObject({
+          kind: 'disconnected',
+          retryable: true,
+          message: 'Server event stream disconnected before subscription',
+        });
+      },
+    );
+  });
+
+  it('types the subscription handshake timeout', async () => {
+    await withServer(
+      socket => socket.on('data', () => undefined),
+      async client => {
+        await expect(client.subscribe(0, () => undefined, noopDisconnect)).rejects.toMatchObject({
+          name: 'BackendClientError',
+          kind: 'timeout',
+          retryable: true,
+          message: 'Server subscription timed out after 40ms',
+        });
+      },
+      {connectTimeoutMs: 40},
+    );
+  });
+
   it('keeps retrying until a socket that does not exist yet accepts', async () => {
     socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
     const server = createServer(socket =>
@@ -383,9 +500,12 @@ describe('ServerClient', () => {
   it('reports the last connection failure when the backend never listens', async () => {
     socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
 
-    await expect(
-      ServerClient.connect(socketPath, {connectTimeoutMs: 120, connectRetryIntervalMs: 20}),
-    ).rejects.toThrow(/Timed out connecting to server after 120ms: .*ENOENT/);
+    const rejected = ServerClient.connect(socketPath, {
+      connectTimeoutMs: 120,
+      connectRetryIntervalMs: 20,
+    });
+    await expect(rejected).rejects.toThrow(/Timed out connecting to server after 120ms: .*ENOENT/);
+    await expect(rejected).rejects.toMatchObject({kind: 'timeout', retryable: true});
   });
 
   it('stops retrying once the deadline passes', async () => {

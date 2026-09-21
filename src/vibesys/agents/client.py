@@ -38,8 +38,6 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
-    from langchain_core.tools import BaseTool
-
     from vibesys.agents.callbacks import AgentLogger
     from vibesys.agents.progress import AgentProgress
     from vibesys.constants import ComputeBackend
@@ -250,12 +248,10 @@ class AgentClient:
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
-        tools: list[BaseTool] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
     ) -> T:
         """Run one turn and parse its structured response."""
-        del tools  # In-process tools remain a deepagents-only compatibility path.
         result, logger = self._invoke_turn(
             kind=kind,
             workspace=workspace,
@@ -301,12 +297,10 @@ class AgentClient:
         invocation_id: str | None = None,
         progress: AgentProgress | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
-        tools: list[BaseTool] | None = None,
         reuse_session: bool | None = None,
         session_key: AgentSessionKey | None = None,
     ) -> str:
         """Run one conversational turn without a structured-output requirement."""
-        del tools
         result, logger = self._invoke_turn(
             kind=kind,
             workspace=workspace,

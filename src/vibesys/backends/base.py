@@ -7,7 +7,7 @@ A ``ComputeBackendImpl`` knows how to:
 2. Optionally watch the platform for issues (CUDA: nvidia-smi contention).
 3. Optionally migrate compute mid-run (CUDA: re-pick a less-loaded GPU).
 
-Sandbox classes (``DockerSandbox``, ``LocalShellBackend``)
+Sandbox classes (``DockerSandbox``, ``LocalShellSandbox``)
 stay backend-agnostic: they accept image/env/gpus as plain parameters.  The
 compute backend supplies the right values for its platform inside
 ``make_sandbox``.
@@ -22,13 +22,12 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from vibesys.constants import ComputeBackend  # noqa: TC001  # tracked: #288
 from vibesys.profilers import ProfilerKind  # noqa: TC001  # tracked: #288
 from vs_sandbox.lifecycle import SandboxLifecycle
+from vs_sandbox.local_shell import LocalShellSandbox
 
 if TYPE_CHECKING:
     from collections.abc import Sequence  # tracked: #288
 
-    # Annotation only; deepagents pulls langchain + anthropic (~seconds).
-    from deepagents.backends.protocol import SandboxBackendProtocol
-
+    from vs_sandbox.execution import Sandbox
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
 
@@ -68,7 +67,6 @@ class ComputeBackendImpl(Protocol):
         host_workspace: str,
         log_path: Path | str | None,
         bind_mounts: list[tuple[str, str, bool]],
-        passthrough_paths: list[str],
         extra_env: dict[str, str],
         extra_init_commands: list[str] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
@@ -77,7 +75,7 @@ class ComputeBackendImpl(Protocol):
         container_image: str | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
-    ) -> SandboxBackendProtocol:
+    ) -> Sandbox:
         """Construct (do not start) a sandbox configured for this backend.
 
         ``extra_init_commands`` is ignored by every current backend: a
@@ -129,21 +127,12 @@ def make_local_shell_sandbox(
     host_workspace: str,
     env: dict[str, str],
     lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
-) -> SandboxBackendProtocol:
-    """Construct deepagents' local-shell sandbox, importing deepagents on first use.
+) -> LocalShellSandbox:
+    """Construct the unconfined local-shell sandbox and run its lifecycle hooks.
 
     Every backend builds the local sandbox the same way, so the construction
-    lives here once. The import is deferred because ``deepagents`` pulls
-    langchain + anthropic (seconds on a cold import) and ``backends.get`` runs
-    on the startup path, before an application can list experiments.
+    lives here once.
     """
-    from deepagents.backends import LocalShellBackend  # noqa: PLC0415  # tracked: #288
-
-    sandbox = LocalShellBackend(
-        root_dir=host_workspace,
-        virtual_mode=True,
-        inherit_env=True,
-        env=env,
-    )
+    sandbox = LocalShellSandbox(host_workspace, env=env, inherit_env=True)
     SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
     return sandbox

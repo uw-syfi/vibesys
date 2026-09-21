@@ -1,4 +1,5 @@
 import type {EventSubscription, SubscribeOptions} from './client.js';
+import {isServerRejection} from './errors.js';
 import type {ServerMessage} from './protocol.js';
 
 /**
@@ -154,16 +155,23 @@ export class PersistentEventStream {
 
   /**
    * Subscribes from sequence 0. With a tail configured it probes for the field
-   * and falls back to a full replay, since a server that predates `tail`
-   * rejects it; the fallback's own failure is the one reported, so one boot
-   * never raises two banners.
+   * and falls back to a full replay only when the server rejects it, since
+   * that is what a server that predates `tail` does; the fallback's own
+   * failure is the one reported, so one boot never raises two banners. A
+   * transport failure is not a verdict on the field: it is reported as the
+   * outage it is, and the next attempt, if the caller's loop has one, probes
+   * with the tail intact.
    */
   async #bootstrapDial(): Promise<boolean> {
     if (this.#tail !== undefined) {
       try {
         return await this.#dial(0, false, {tail: this.#tail});
-      } catch {
-        // Expected against a server without `tail`; fall through to full replay.
+      } catch (error) {
+        if (!isServerRejection(error)) {
+          this.#emit({status: 'disconnected', error: toError(error)});
+          return false;
+        }
+        // The server refused `tail`; fall through to a full replay.
       }
     }
     try {
@@ -179,8 +187,12 @@ export class PersistentEventStream {
    * cursor belongs to so the server drops it if the store was swapped while the
    * stream was down. A server that predates the field rejects it, so the known
    * store falls back to a plain cursor resume rather than failing the reconnect.
-   * A failure is otherwise silent: the disconnect banner is already up and
-   * accurate, and the next attempt, if the schedule has one, speaks for itself.
+   * Only that explicit rejection downgrades the resume: a transport failure
+   * says nothing about the field, and dropping the store name on one would let
+   * a swapped store accept the stale cursor, so the attempt just fails and the
+   * schedule retries with the store intact. A failure is otherwise silent: the
+   * disconnect banner is already up and accurate, and the next attempt, if the
+   * schedule has one, speaks for itself.
    */
   async #resumeDial(): Promise<boolean> {
     const cursor = this.#active().cursor();
@@ -188,9 +200,9 @@ export class PersistentEventStream {
     if (storeId) {
       try {
         return await this.#dial(cursor, true, {storeId});
-      } catch {
-        // Expected against a server without `store_id` on subscribe; fall
-        // through to a cursor-only resume.
+      } catch (error) {
+        if (!isServerRejection(error)) return false;
+        // The server refused `store_id`; fall through to a cursor-only resume.
       }
     }
     try {
