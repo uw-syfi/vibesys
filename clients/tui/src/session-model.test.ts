@@ -1,5 +1,5 @@
 import {describe, expect, it, test} from 'bun:test';
-import type {RunEvent, RunStatus} from '@vibesys/backend-client';
+import type {RunEvent, RunSnapshot, RunStatus} from '@vibesys/backend-client';
 import {hasRunEnded} from '@vibesys/core-state';
 import type {SessionState} from './session-model.js';
 import {
@@ -7,9 +7,11 @@ import {
   applyEvent,
   applyEventBatch,
   applyEventPrefix,
+  applySnapshot,
   chatDocked,
   chatPaneVisible,
   clearInputError,
+  closeNotepad,
   closePane,
   closeThemePicker,
   cyclePaneFocus,
@@ -22,6 +24,7 @@ import {
   focusedPane,
   focusPane,
   focusRound,
+  hydrateNotepad,
   hypothesisPlanningActivity,
   initialSessionState,
   leaveExperimentDrilldown,
@@ -30,7 +33,9 @@ import {
   moveExperimentSelection,
   moveHypothesisRoundSelection,
   moveThemeSelection,
+  notepadPromotionText,
   openChat,
+  openNotepad,
   openPane,
   openThemePicker,
   reportError,
@@ -41,6 +46,7 @@ import {
   selectRound,
   setChatDockFits,
   setExperiments,
+  setNotepadText,
   setPaneContent,
   setTheme,
   showDetail,
@@ -2255,6 +2261,96 @@ describe('theme picker', () => {
     expect(setTheme(opened, 'light').themeName).toBe('light');
     // Re-applying the active theme is still an answer to the picker.
     expect(setTheme(opened, 'dark').themePicker).toBeNull();
+  });
+});
+
+describe('notepad', () => {
+  it('opens closed, empty, and unstamped', () => {
+    const state = initialSessionState();
+
+    expect(state.notepad).toEqual({open: false, text: '', createdAt: null, updatedAt: null});
+  });
+
+  it('opens over the palette and theme picker, leaving the run underneath alone', () => {
+    const opened = openNotepad(openThemePicker(initialSessionState()));
+
+    expect(opened.notepad.open).toBe(true);
+    expect(opened.themePicker).toBeNull();
+  });
+
+  it('is a no-op when already open', () => {
+    const opened = openNotepad(initialSessionState());
+
+    expect(openNotepad(opened)).toBe(opened);
+  });
+
+  it('closes without discarding the typed text', () => {
+    const typed = setNotepadText(
+      openNotepad(initialSessionState()),
+      'watch the retry budget',
+      't0',
+    );
+
+    const closed = closeNotepad(typed);
+
+    expect(closed.notepad.open).toBe(false);
+    expect(closed.notepad.text).toBe('watch the retry budget');
+  });
+
+  it('is a no-op when already closed', () => {
+    const state = initialSessionState();
+
+    expect(closeNotepad(state)).toBe(state);
+  });
+
+  it('stamps createdAt on the first keystroke and updatedAt on every one after', () => {
+    const first = setNotepadText(openNotepad(initialSessionState()), 'a', 't0');
+    expect(first.notepad.createdAt).toBe('t0');
+    expect(first.notepad.updatedAt).toBe('t0');
+
+    const second = setNotepadText(first, 'ab', 't1');
+    expect(second.notepad.createdAt).toBe('t0');
+    expect(second.notepad.updatedAt).toBe('t1');
+  });
+
+  it('does not touch state for a no-change keystroke', () => {
+    const first = setNotepadText(openNotepad(initialSessionState()), 'a', 't0');
+
+    expect(setNotepadText(first, 'a', 't1')).toBe(first);
+  });
+
+  it('hydrates from a saved record only when one is given', () => {
+    const opened = openNotepad(initialSessionState());
+    const record = {runId: 'run-1', text: 'from disk', createdAt: 't0', updatedAt: 't1'};
+
+    const hydrated = hydrateNotepad(opened, record);
+    expect(hydrated.notepad.text).toBe('from disk');
+    expect(hydrated.notepad.createdAt).toBe('t0');
+    expect(hydrated.notepad.updatedAt).toBe('t1');
+
+    expect(hydrateNotepad(opened, null)).toBe(opened);
+  });
+
+  it('promotes trimmed text, and nothing for an empty or whitespace-only note', () => {
+    expect(notepadPromotionText(initialSessionState())).toBeNull();
+
+    const blank = setNotepadText(openNotepad(initialSessionState()), '   ', 't0');
+    expect(notepadPromotionText(blank)).toBeNull();
+
+    const written = setNotepadText(openNotepad(initialSessionState()), '  fix the cache  ', 't0');
+    expect(notepadPromotionText(written)).toBe('fix the cache');
+  });
+
+  it('latches the run id from the first snapshot and keeps it across later ones', () => {
+    const snapshot: RunSnapshot = {run_id: 'run-1', sequence: 1, status: 'running'};
+    const state = applySnapshot(initialSessionState(), snapshot);
+
+    expect(state.runId).toBe('run-1');
+
+    // A reconnect resends the same run's snapshot; the id must not move out
+    // from under an open notepad mid-session.
+    const resent: RunSnapshot = {run_id: 'run-1', sequence: 2, status: 'running'};
+    expect(applySnapshot(state, resent).runId).toBe('run-1');
   });
 });
 

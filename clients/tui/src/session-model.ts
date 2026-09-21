@@ -30,12 +30,20 @@ import {
   type TodoItem,
   type TranscriptEntry,
 } from '@vibesys/core-state';
+import type {NoteRecord} from './notes-store.js';
 import {agentRuntimeLabel} from './ui/agent-runtime-label.js';
 import {DEFAULT_THEME_NAME, THEME_NAMES, type ThemeName} from './ui/theme.js';
 
 export interface SessionState {
   /** Pure projection of backend snapshots, events, and execution checkpoints. */
   readonly core: CoreState;
+  /**
+   * The active run's id, latched from the first snapshot the backend sends
+   * (`RunSnapshot.run_id`). `CoreState` has no notion of run identity, so this
+   * lives here rather than there; it exists to key the notepad's on-disk
+   * note to the run it was written against (`notes-store.ts`).
+   */
+  runId: string | null;
   /** False after the frontend loses a trustworthy backend event stream. */
   eventStreamAvailable: boolean;
   selectedRound: number | null;
@@ -113,6 +121,13 @@ export interface SessionState {
   themePicker: ThemePicker | null;
   /** Non-null while the command palette is open as a keyboard selection. */
   palette: {readonly query: string; readonly selected: number} | null;
+  /**
+   * The private notepad. Unlike the other modals above, closing it does not
+   * null the state out: the operator's text has to survive `Esc` (and a
+   * later reopen, and a TUI restart against the same run) without being
+   * promoted, so `open` is its own flag rather than presence-as-open.
+   */
+  notepad: NotepadState;
   /** Root-level error state, independent of the active transcript or log view. */
   errorBanner: ErrorBannerState | null;
   /**
@@ -254,6 +269,20 @@ interface ThemePicker {
 }
 
 /**
+ * The private notepad's state. `open` gates the modal; `text` is the
+ * operator's freeform scratch note for the active run, kept across a close so
+ * `Esc` never loses a draft. `createdAt`/`updatedAt` are null until the first
+ * keystroke, matching a run that has never had a note written for it
+ * (`notes-store.ts#readNote` returns `null` in that case too).
+ */
+export interface NotepadState {
+  open: boolean;
+  text: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/**
  * One row of the inline menu anchored to the chat composer. Only `model`,
  * `custom`, and `thread` rows are selectable; headers and notes are structure.
  */
@@ -368,6 +397,7 @@ export interface ConversationEntry {
 export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): SessionState {
   return {
     core: initialCoreState(),
+    runId: null,
     eventStreamAvailable: true,
     selectedRound: null,
     selectedAgentKind: null,
@@ -399,6 +429,7 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     chatDockFits: true,
     themePicker: null,
     palette: null,
+    notepad: {open: false, text: '', createdAt: null, updatedAt: null},
     errorBanner: null,
     inputError: null,
   };
@@ -1468,7 +1499,13 @@ export function setTheme(state: SessionState, themeName: ThemeName): SessionStat
 
 /** Opens the theme list as a selection, starting on the active theme. */
 export function openThemePicker(state: SessionState): SessionState {
-  return {...state, overlay: null, palette: null, themePicker: {selected: state.themeName}};
+  return {
+    ...state,
+    overlay: null,
+    palette: null,
+    notepad: {...state.notepad, open: false},
+    themePicker: {selected: state.themeName},
+  };
 }
 
 /**
@@ -1491,9 +1528,82 @@ export function closeThemePicker(state: SessionState): SessionState {
   return {...state, themePicker: null};
 }
 
+/**
+ * Loads whatever this run's note already held (from `notes-store.ts`, if the
+ * run has one) before the modal opens, so a note written before a TUI
+ * restart, or before the current process's `/note` was first pressed, is
+ * there rather than blank. `record` is `null` for a run with no saved note.
+ */
+export function hydrateNotepad(state: SessionState, record: NoteRecord | null): SessionState {
+  if (record === null) return state;
+  return {
+    ...state,
+    notepad: {
+      ...state.notepad,
+      text: record.text,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    },
+  };
+}
+
+/**
+ * Opens the notepad. Text carries over from any prior session on this run.
+ * Excludes the palette and theme picker the same way they exclude each
+ * other: all three are single keyboard-focused overlays, so only one takes
+ * the keys at a time. The docked or modal chat is a separate pane rather than
+ * an overlay in that sense (`openChat` does not null either of them either),
+ * so it is left as it was.
+ */
+export function openNotepad(state: SessionState): SessionState {
+  if (state.notepad.open) return state;
+  return {
+    ...state,
+    overlay: null,
+    palette: null,
+    themePicker: null,
+    notepad: {...state.notepad, open: true},
+  };
+}
+
+/** Closes the notepad without discarding its text or touching promotion. */
+export function closeNotepad(state: SessionState): SessionState {
+  if (!state.notepad.open) return state;
+  return {...state, notepad: {...state.notepad, open: false}};
+}
+
+/** Every keystroke in the notepad's editor lands here. */
+export function setNotepadText(state: SessionState, text: string, timestamp: string): SessionState {
+  if (text === state.notepad.text) return state;
+  return {
+    ...state,
+    notepad: {
+      ...state.notepad,
+      text,
+      createdAt: state.notepad.createdAt ?? timestamp,
+      updatedAt: timestamp,
+    },
+  };
+}
+
+/**
+ * The text a promotion action hands to a composer: `null` for an empty (or
+ * all-whitespace) note, since promoting nothing would just pre-fill the
+ * composer with blank text and still close the notepad on the operator.
+ */
+export function notepadPromotionText(state: SessionState): string | null {
+  const trimmed = state.notepad.text.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
 export function applySnapshot(state: SessionState, snapshot: RunSnapshot): SessionState {
   const core = reduceSnapshot(state.core, snapshot);
-  return core === state.core ? state : {...state, core};
+  // Latched rather than reassigned: a reconnect resends the same run's
+  // snapshot, and the run id is what the notepad is keyed by, so it should
+  // never move out from under an open notepad mid-session.
+  const runId = state.runId ?? snapshot.run_id;
+  if (core === state.core && runId === state.runId) return state;
+  return {...state, core, runId};
 }
 
 /** Record transport health as frontend state without rewriting backend-derived facts. */

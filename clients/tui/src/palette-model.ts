@@ -7,7 +7,13 @@ export function activeCommandSurface(state: SessionState): 'command' | 'chat' {
 
 /** Opens the command palette, starting on an empty query with nothing typed yet. */
 export function openPalette(state: SessionState): SessionState {
-  return {...state, overlay: null, themePicker: null, palette: {query: '', selected: 0}};
+  return {
+    ...state,
+    overlay: null,
+    themePicker: null,
+    notepad: {...state.notepad, open: false},
+    palette: {query: '', selected: 0},
+  };
 }
 
 export function closePalette(state: SessionState): SessionState {

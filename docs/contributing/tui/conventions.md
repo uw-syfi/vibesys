@@ -286,8 +286,14 @@ the binding and the key-help line says so.
 Proposed prefixes and single keys; of these, only `F1` is bound to its
 proposed meaning today. The TUI's only prefix is `/`, and it means command
 (`/help`, `/theme`, `/open-round`), not search. There is no search and no `:`
-prefix. `F1` opens the command palette, and `F2`, `F3` and `F4` toggle todos,
-the latest prompt, and pane zoom.
+prefix. `F1` opens the command palette, `F2`, `F3` and `F4` toggle todos, the
+latest prompt, and pane zoom, and `F5` opens the private notepad (`/note`,
+#805): the same sequential-function-key precedent as `F2`-`F4`, the next free
+slot after them. Inside the notepad, `F6` and `F7` promote its text to an
+unsent steer or chat draft; those two are scoped to the notepad's own modal
+rather than global, the same tier as a key whose meaning already changes by
+context elsewhere in this table (e.g. the arrows), so they are not listed here
+as single global keys.
 
 | Key | Proposed meaning | Source | Bound to today |
 | --- | --- | --- | --- |

@@ -13,6 +13,7 @@ export type CommandSection = 'general' | 'run' | 'view' | 'chat';
 /** A stable identifier per command, used where code needs the name without spelling it. */
 export type CommandId =
   | 'help'
+  | 'note'
   | 'chat'
   | 'pause'
   | 'resume'
@@ -35,6 +36,7 @@ export type CommandId =
  */
 export type ParsedCommand =
   | {kind: 'help'}
+  | {kind: 'note'}
   | {kind: 'openChat'; chatMessage?: string}
   | {kind: 'toggle'; toggle: 'todos' | 'prompt'}
   | {kind: 'theme'; themeName?: ThemeName}
@@ -133,6 +135,16 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     surfaces: BOTH,
     section: 'general',
     parse: () => ({kind: 'help'}),
+  },
+  {
+    id: 'note',
+    name: '/note',
+    description: 'Open your private notepad for this run',
+    args: 'none',
+    surfaces: BOTH,
+    section: 'general',
+    keybinding: 'F5',
+    parse: () => ({kind: 'note'}),
   },
   {
     id: 'chat',

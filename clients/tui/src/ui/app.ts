@@ -35,6 +35,7 @@ import {
   renderHeader,
 } from './header.js';
 import {bindKeybindings} from './keybindings.js';
+import {NotepadView} from './notepad.js';
 import {OverlayView} from './overlay.js';
 import {PaletteView} from './palette.js';
 import {RightPaneView, rightPaneWidth, splitFits} from './right-pane.js';
@@ -49,7 +50,7 @@ export interface OpenTuiApp {
 }
 
 /** Which of the client's editors currently holds the cursor. */
-type FocusTarget = 'command' | 'chat' | 'modal';
+type FocusTarget = 'command' | 'chat' | 'modal' | 'notepad';
 
 // `help` is one row and clips rather than wraps, so a hint added here costs the
 // hints behind it on a narrow terminal, which is exactly where the resize keys
@@ -250,6 +251,8 @@ export function createOpenTuiApp(
   const rightPane = new RightPaneView(renderer, theme, () => controller.focusPane('right'));
   const themePicker = new ThemePickerView(renderer, theme);
   const palette = new PaletteView(renderer, theme);
+  const notepad = new NotepadView(renderer, theme);
+  notepad.onTextChange = text => controller.setNoteText(text);
   // Scrolling back past the rendered window materializes the next block of
   // history. The viewport owns scroll position, so it absorbs the height the
   // revealed cards add and the reader keeps looking at the same content.
@@ -350,6 +353,7 @@ export function createOpenTuiApp(
   root.add(overlay.output);
   root.add(themePicker.output);
   root.add(palette.output);
+  root.add(notepad.output);
   root.add(chat.output);
   renderer.root.add(root);
   commandInput.focus();
@@ -374,6 +378,7 @@ export function createOpenTuiApp(
     rightPane.applyTheme(theme);
     themePicker.applyTheme(theme);
     palette.applyTheme(theme);
+    notepad.applyTheme(theme);
     conversation.applyTheme(theme, markdownStyle);
     chat.applyTheme(theme, markdownStyle);
     chatPane.applyTheme(theme, markdownStyle);
@@ -570,18 +575,30 @@ export function createOpenTuiApp(
         state.diffViewer !== null ||
         state.chatOpen ||
         state.themePicker !== null ||
-        state.palette !== null,
+        state.palette !== null ||
+        state.notepad.open,
     );
     themePicker.render(state);
     palette.render(state);
+    notepad.render(state);
     chat.render(state);
     conversationActivityBar.render(state, !showLog);
-    // One cursor, three places it can be. The modal owns it while it is open;
+    // One cursor, four places it can be. The notepad and the modal chat each
+    // own it while open (the notepad takes priority: `session-model.ts`'s
+    // `openNotepad` closes the palette and theme picker but the two do not
+    // exclude the modal chat, so both could in principle be open at once);
     // otherwise it belongs to whichever input the pane focus points at.
-    const target: FocusTarget = state.chatOpen ? 'modal' : chatInputFocused ? 'chat' : 'command';
+    const target: FocusTarget = state.notepad.open
+      ? 'notepad'
+      : state.chatOpen
+        ? 'modal'
+        : chatInputFocused
+          ? 'chat'
+          : 'command';
     if (target !== focusTarget) {
       focusTarget = target;
-      if (target === 'modal') chat.focus();
+      if (target === 'notepad') notepad.focus();
+      else if (target === 'modal') chat.focus();
       else if (target === 'chat') chatPane.focusComposer();
       else commandInput.focus();
     }
@@ -656,6 +673,22 @@ export function createOpenTuiApp(
       } else {
         commandInput.setValue(prefill.text);
       }
+    },
+    promoteNotepadToSteer: () => {
+      const prefill = controller.promoteNoteToSteerDraft();
+      if (prefill === null) return;
+      // Unsent: this fills the command bar's buffer exactly as `/steer `
+      // pre-filled by the palette does above, so the operator still has to
+      // review and press Enter before anything reaches an agent.
+      commandInput.setValue(`/steer ${prefill.text}`);
+    },
+    promoteNotepadToChat: () => {
+      const prefill = controller.promoteNoteToChatDraft();
+      if (prefill === null) return;
+      // `promoteNoteToChatDraft` already opened chat; sync the draft the same
+      // way `runPaletteSelection` does for a chat-surface command above.
+      chatDraft.value = prefill.text;
+      render(lastState);
     },
   });
   // Pane widths come from the terminal, so a resize has to redraw even though

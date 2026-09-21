@@ -32,6 +32,7 @@ it, so it has no slash name of its own.
 | --- | --- | --- |
 | `/help` | Show this help. Lists the commands available on the current surface. | |
 | Command palette | Lists every command the way `/help` does, but keyboard-navigable: type to filter, arrows to move, Enter to run the highlighted command. | `F1` |
+| `/note` | Open your private notepad for this run. Freeform text; see [Notepad](#notepad) below for persistence and promotion. | `F5` |
 | `/chat` | Open experiment chat. Puts the pane keys on the docked chat, or opens it as a modal where it cannot dock; `/chat <question>` asks immediately. Command bar only, since the chat has nothing to open. | |
 | | Every command below works in the chat too, and does the same thing as in the command bar. | |
 | `/pause` | Pause after the current agent call. Takes effect once the current call finishes. | |
@@ -183,12 +184,29 @@ modal they used before panes existed. That modal is the same surface as the
 pane, so it keeps the pane's title and its focus marker rather than reading as a
 generic dialog. The layout re-flows on resize in either direction.
 
-`/help`, `/theme`, the round diff viewer, and errors stay modal. While any of
-them is open, a scrim dims the entire screen behind it, so the modal is the
-only surface left at full contrast and the operator can tell where a keystroke
-will land. The scrim is a translucent paint on an absolutely positioned box
-that joins no flex row: the background keeps every character where it was, and
-closing restores it exactly.
+`/help`, `/note`, `/theme`, the round diff viewer, and errors stay modal. While
+any of them is open, a scrim dims the entire screen behind it, so the modal is
+the only surface left at full contrast and the operator can tell where a
+keystroke will land. The scrim is a translucent paint on an absolutely
+positioned box that joins no flex row: the background keeps every character
+where it was, and closing restores it exactly.
+
+### Notepad
+
+`/note` or `F5` opens a private, per-run scratchpad: a plain text field for
+notes that are yours alone. A line starting with `/` inside the notepad is
+just text, never a command; nothing here parses it. Typing persists to
+`$VIBESYS_STATE_HOME/tui/notes/<run-id>.json` (default
+`~/.vibesys/tui/notes/`), outside `run-events.jsonl`, so a note survives a TUI
+restart against the same run but is not part of the run's journal, a replay,
+or an exported bundle.
+
+The note never reaches an agent on its own. `F6` closes the notepad and drops
+its text, unsent, into the command bar's `/steer` draft; `F7` closes it, opens
+chat, and drops the text, unsent, into the chat draft. Either way the operator
+still has to review the draft and press Enter, the same as anything typed
+there directly. `Esc` closes the notepad without promoting anything, keeping
+the text for next time.
 
 ### Experiment chat
 

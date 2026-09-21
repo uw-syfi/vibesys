@@ -52,6 +52,7 @@ import {
   clearAgentSelection,
   clearEntrySelection,
   clearInputError,
+  closeNotepad,
   closeOverlays,
   closePane,
   closeThemePicker,
@@ -69,9 +70,11 @@ import {
   moveHypothesisRoundSelection,
   moveThemeSelection,
   normalizeFocus,
+  notepadPromotionText,
   openChat,
   openExperimentLog,
   openHypothesisDetail,
+  openNotepad,
   openPane,
   type PaneFocus,
   type PaneView,
@@ -86,6 +89,7 @@ import {
   selectPreviousRound,
   setChatDockFits,
   setExperiments,
+  setNotepadText,
   setPaneContent,
   setTheme,
   switchChatThread,
@@ -6314,6 +6318,7 @@ describe('box fills', () => {
     'chat-overlay',
     'command-input-suggestions',
     'palette',
+    'notepad',
   ]);
 
   /** One per composer, and a composer is built per surface, so match the suffix. */
@@ -7728,6 +7733,123 @@ describe('command palette', () => {
   });
 });
 
+describe('notepad', () => {
+  it('opens with F5, over the command bar', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    const frame = await testRenderer.waitForFrame(value => value.includes('Notepad'));
+
+    expect(controller.state.notepad.open).toBe(true);
+    expect(frame).toContain('Never sent to an agent unless you promote it below.');
+    expect(frame).toContain('F6: steer (unsent)');
+    expect(frame).toContain('F7: chat (unsent)');
+  });
+
+  it('treats a leading / inside the notepad as plain text, never a command', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    await testRenderer.waitForFrame(value => value.includes('Notepad'));
+
+    await testRenderer.mockInput.typeText('/steer this looks like a command');
+    const frame = await frameAfter(testRenderer);
+
+    // The text landed in the notepad's own editor rather than being parsed:
+    // no command ran, and the notepad is still open.
+    expect(frame).toContain('/steer this looks like a command');
+    expect(controller.submissions).toEqual([]);
+    expect(controller.chatSubmissions).toEqual([]);
+    expect(controller.state.notepad.open).toBe(true);
+
+    // Enter inside the notepad inserts a newline (OpenTUI's default textarea
+    // binding), rather than submitting anything: still no command ran.
+    testRenderer.mockInput.pressEnter();
+    await frameAfter(testRenderer);
+    expect(controller.submissions).toEqual([]);
+    expect(controller.state.notepad.open).toBe(true);
+  });
+
+  it('F6 promotes the note, unsent, into the command bar and closes the notepad', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    await testRenderer.waitForFrame(value => value.includes('Notepad'));
+    await testRenderer.mockInput.typeText('fix the retry budget');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F6');
+    await testRenderer.waitForFrame(() => !controller.state.notepad.open);
+
+    expect(controller.submissions).toEqual([]);
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.value).toBe('/steer fix the retry budget');
+  });
+
+  it('F7 promotes the note, unsent, into the chat draft and closes the notepad', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    // The docked chat, so `openChat` (which `promoteNoteToChatDraft` calls)
+    // focuses the dock rather than opening the standalone chat modal.
+    controller.publish({...controller.state, experimentLog: emptyLog()});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    await testRenderer.waitForFrame(value => value.includes('Notepad'));
+    await testRenderer.mockInput.typeText('ask about the flaky retry');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F7');
+    await testRenderer.waitForFrame(() => !controller.state.notepad.open);
+
+    expect(controller.chatSubmissions).toEqual([]);
+    const editor = testRenderer.renderer.root.findDescendantById('chat-dock-composer-editor');
+    expect(editor).toBeInstanceOf(TextareaRenderable);
+    if (!(editor instanceof TextareaRenderable)) throw new Error('composer editor was missing');
+    expect(editor.plainText).toBe('ask about the flaky retry');
+  });
+
+  it('Esc closes the notepad without promoting anything', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    await testRenderer.waitForFrame(value => value.includes('Notepad'));
+    await testRenderer.mockInput.typeText('a private thought');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('ESCAPE');
+    const frame = await frameAfterEscape(testRenderer);
+
+    expect(controller.state.notepad.open).toBe(false);
+    expect(controller.state.notepad.text).toBe('a private thought');
+    expect(frame).not.toContain('a private thought');
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.value).toBe('');
+  });
+});
+
 /** The renderable behind a screen region, for asserting what a scrim covers. */
 function boxOf(testRenderer: TestRendererSetup, id: string): Renderable {
   const found = testRenderer.renderer.root.findDescendantById(id);
@@ -8100,6 +8222,34 @@ class FakeController implements SessionController {
     // (`session-model.ts#setChatWidthOverride`).
     if (this.state.chatWidthOverride === width) return;
     this.publish({...this.state, chatWidthOverride: width});
+  }
+
+  /** Records written through the fake `setNoteText`, indexed by run id. */
+  readonly notesWritten: Record<string, string> = {};
+
+  openNotepad(): void {
+    this.publish(openNotepad(this.state));
+  }
+  closeNotepad(): void {
+    this.publish(closeNotepad(this.state));
+  }
+  setNoteText(text: string): void {
+    const next = setNotepadText(this.state, text, 'test-timestamp');
+    this.publish(next);
+    const runId = this.state.runId;
+    if (runId !== null) this.notesWritten[runId] = next.notepad.text;
+  }
+  promoteNoteToSteerDraft(): {text: string} | null {
+    const text = notepadPromotionText(this.state);
+    if (text === null) return null;
+    this.publish(closeNotepad(this.state));
+    return {text};
+  }
+  promoteNoteToChatDraft(): {text: string} | null {
+    const text = notepadPromotionText(this.state);
+    if (text === null) return null;
+    this.publish(openChat(closeNotepad(this.state)));
+    return {text};
   }
 
   /** Rows the fake server returns for query.experiments. */

@@ -92,6 +92,8 @@ function stubActions(): KeybindingActions {
     clearTransientStatus: () => {},
     showClipboardStatus: () => {},
     runPaletteSelection: () => {},
+    promoteNotepadToSteer: () => {},
+    promoteNotepadToChat: () => {},
   };
 }
 

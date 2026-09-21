@@ -56,6 +56,10 @@ export interface KeybindingActions {
   showClipboardStatus(result: Exclude<ClipboardCopyResult, 'no-selection'>): void;
   /** Enter in the palette: runs the highlighted command, or drops it into the composer it opened over. */
   runPaletteSelection(): void;
+  /** F6 in the notepad: closes it and drops its text, unsent, into the command bar's `/steer` draft. */
+  promoteNotepadToSteer(): void;
+  /** F7 in the notepad: closes it, opens chat, and drops its text, unsent, into the chat draft. */
+  promoteNotepadToChat(): void;
 }
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
@@ -84,7 +88,8 @@ export function bindKeybindings(
       controller.state.diffViewer === null &&
       controller.state.themePicker === null &&
       controller.state.chatMenu === null &&
-      controller.state.palette === null
+      controller.state.palette === null &&
+      controller.state.notepad.open === false
     ) {
       controller.togglePaneZoom();
       key.preventDefault();
@@ -101,9 +106,41 @@ export function bindKeybindings(
       controller.state.diffViewer === null &&
       controller.state.themePicker === null &&
       controller.state.chatMenu === null &&
-      controller.state.palette === null
+      controller.state.palette === null &&
+      controller.state.notepad.open === false
     ) {
       controller.openPalette();
+      key.preventDefault();
+      return;
+    }
+    // The private notepad (#805): the next free function key after F1-F4
+    // (tui/conventions.md#Naming). Guarded the same way F1 and F4 are, so
+    // none of the four steal a key another open modal already owns.
+    if (
+      key.name === 'f5' &&
+      controller.state.chatOpen === false &&
+      controller.state.overlay === null &&
+      controller.state.diffViewer === null &&
+      controller.state.themePicker === null &&
+      controller.state.chatMenu === null &&
+      controller.state.palette === null &&
+      controller.state.notepad.open === false
+    ) {
+      controller.openNotepad();
+      key.preventDefault();
+      return;
+    }
+    // The notepad owns the keys while it is open, the same way the palette
+    // does below, with one difference: its editor is a genuine focused
+    // `TextareaRenderable` (`ui/notepad.ts`), not a virtual query string this
+    // router types into. So only the keys the notepad itself defines are
+    // handled here; everything else falls through without `preventDefault`,
+    // reaching the editor through OpenTUI's own focus-based delivery instead.
+    if (controller.state.notepad.open) {
+      if (key.name === 'escape') controller.closeNotepad();
+      else if (key.name === 'f6') actions.promoteNotepadToSteer();
+      else if (key.name === 'f7') actions.promoteNotepadToChat();
+      else return;
       key.preventDefault();
       return;
     }

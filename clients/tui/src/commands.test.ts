@@ -22,6 +22,7 @@ const names = (commands: readonly {name: string}[]): string[] =>
 /** The commands both surfaces resolve identically, so parity is asserted once. */
 const SHARED = [
   '/help',
+  '/note',
   '/pause',
   '/resume',
   '/stop',
@@ -37,6 +38,7 @@ const SHARED = [
 describe('parseCommand', () => {
   it('parses the command surface into discriminated actions', () => {
     expect(onCommand('/help')).toEqual({kind: 'help'});
+    expect(onCommand('/note')).toEqual({kind: 'note'});
     expect(onCommand('/pause')).toEqual({kind: 'request', request: {type: 'command.pause'}});
     expect(onCommand('/resume')).toEqual({kind: 'request', request: {type: 'command.resume'}});
     expect(onCommand('/stop')).toEqual({kind: 'request', request: {type: 'command.stop'}});
@@ -391,6 +393,7 @@ describe('suggestions filtered by surface', () => {
   it('suggests the command-bar commands in registry order', () => {
     expect(names(suggestSlashCommands('/', {surface: 'command'}))).toEqual([
       '/help',
+      '/note',
       '/chat',
       '/pause',
       '/resume',
