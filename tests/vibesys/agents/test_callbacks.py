@@ -6,7 +6,7 @@ from vibesys.constants import DIM, RED
 from vibesys.events import AgentOutputChunkData, ToolCallData, ToolResultData
 from vibesys.render.sink import output_sink
 from vs_agent.api import AgentEvent, AgentEventKind, RoundProgress
-from vs_agent.api.testing import AgentLogger
+from vs_agent.callbacks import AgentLogger
 from vs_agent.client import _LoggerObserver
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")

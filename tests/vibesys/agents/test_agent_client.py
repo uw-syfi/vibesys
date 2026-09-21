@@ -21,16 +21,18 @@ from vs_agent.api import (
     AgentClient,
     AgentEvent,
     AgentEventKind,
+    AgentSessionKey,
+    AgentUsage,
+    SessionScope,
+)
+from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentObserver,
     AgentSession,
-    AgentSessionKey,
     AgentSessionSpec,
     AgentTurnRequest,
     AgentTurnResult,
-    AgentUsage,
     SessionDisposition,
-    SessionScope,
 )
 
 

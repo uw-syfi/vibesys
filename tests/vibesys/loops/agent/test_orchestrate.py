@@ -59,7 +59,8 @@ from vibesys.schemas import (
     Verdict,
 )
 from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionScope
-from vs_agent.api.testing import FakeAgentClient, FakeInvocation, StubAgentClient
+from vs_agent.api.testing import FakeAgentClient, FakeInvocation
+from vs_agent.stub_runner import StubAgentClient
 from vs_loop_state.agent import RoundRecord
 from vs_project import Project, serialize_round
 from vs_sandbox import SandboxExecutionResult

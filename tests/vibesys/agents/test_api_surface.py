@@ -15,7 +15,8 @@ import sys
 import vs_agent.api
 import vs_agent.api.testing
 from vs_agent.api import AgentClient, AgentClientProtocol
-from vs_agent.api.testing import FakeAgentClient, StubAgentClient
+from vs_agent.api.testing import FakeAgentClient
+from vs_agent.stub_runner import StubAgentClient
 
 
 def _protocol_members(protocol: type) -> set[str]:

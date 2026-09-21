@@ -24,11 +24,9 @@ from vibesys.events import CommandResultPayload, JsonResultPayload
 from vibesys.schemas import JudgeResponse
 from vs_agent.api import (
     AgentEvent,
-    AgentExecutionPolicy,
-    AgentSessionSpec,
-    AgentTurnRequest,
     MCPServerSpec,
 )
+from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
 from vs_agent.drivers import omnigent as driver_subject
 from vs_agent.drivers._omnigent_runtime import OmnigentAsyncRuntime
 from vs_agent.drivers.omnigent import (

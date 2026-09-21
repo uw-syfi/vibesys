@@ -22,7 +22,7 @@ from vibesys.events import (
 )
 from vibesys.render.sink import OutputSink
 from vibesys.run.event_journal import EventJournal
-from vs_agent.api.testing import AgentLogger
+from vs_agent.callbacks import AgentLogger
 
 
 def _collect(sink: OutputSink) -> tuple[list[CoreEvent], Callable[[], None]]:

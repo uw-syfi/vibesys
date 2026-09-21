@@ -43,12 +43,11 @@ from vs_agent.api import (
     AgentCapabilities,
     AgentClient,
     AgentSessionKey,
-    AgentTurnRequest,
-    AgentTurnResult,
     DurableSessionStore,
     SessionScope,
 )
 from vs_agent.api.testing import FakeAgentClient
+from vs_agent.contracts import AgentTurnRequest, AgentTurnResult
 from vs_loop_state import PlainLoopCursor
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 from vs_sandbox import HostResourceAccess, SandboxLifecycle

@@ -30,10 +30,12 @@ from pydantic import BaseModel
 from vs_agent.api import (
     AgentEvent,
     AgentEventKind,
+    MCPServerSpec,
+)
+from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnRequest,
-    MCPServerSpec,
     SessionDisposition,
 )
 from vs_agent.drivers import agentshim as agentshim_driver
@@ -43,7 +45,7 @@ from vs_sandbox import HostResource, HostResourceAccess
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from vs_agent.api import AgentSession
+    from vs_agent.contracts import AgentSession
 
 ENABLE_ENV = "VIBESYS_E2E_AGENTS"
 

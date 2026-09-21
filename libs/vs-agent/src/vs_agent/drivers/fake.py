@@ -208,14 +208,6 @@ class FakeDriver:
         self._sessions.clear()
 
 
-def supported_providers() -> list[str]:
-    """Return the provider names the fake driver accepts.
-
-    The fake drives nothing, so provider selection only labels the run.
-    """
-    return ["mock"]
-
-
 # --- event builders ---------------------------------------------------------
 
 
