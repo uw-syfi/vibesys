@@ -42,7 +42,6 @@ from vibesys.api import (
     create_session,
     load_config,
 )
-from vibesys.constants import PROJECT_ROOT
 from vibesys.evaluators import objective as _objective
 from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.loops.metrics import MetricSpace, Objective
@@ -81,8 +80,6 @@ from vs_project import (
 if TYPE_CHECKING:
     from vibesys.loops.evolve.search_policy import OpenEvolveSearchConfig
 
-__all__ = ["PROJECT_ROOT"]
-
 _load_objective = _objective.load_objective
 _with_operator_constraints = _objective.with_operator_constraints
 
@@ -116,7 +113,7 @@ class _RunArgumentParser(argparse.ArgumentParser):
 
 
 @dataclass(frozen=True)
-class CliInvocation:  # tracked: #288
+class CliInvocation:  # noqa: D101  # tracked: #288
     loop_kind: str
     args: argparse.Namespace
 
@@ -880,7 +877,7 @@ def _prepare_stub_agent_smoke_defaults(argv: list[str]) -> list[str]:
     return argv
 
 
-def run_environment_spec_from_args(  # tracked: #288
+def run_environment_spec_from_args(  # noqa: D103  # tracked: #288
     args: argparse.Namespace,
     *,
     build_task_docker_image: bool = False,

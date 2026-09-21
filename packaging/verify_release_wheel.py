@@ -37,6 +37,7 @@ FRAMEWORK_PACKAGES = (
     "vibesys",
     "entrypoints",
     "server",
+    "vs_agent",
     "vs_evaluator_protocol",
     "vs_feature_flags",
     "vs_github",
@@ -48,6 +49,7 @@ FRAMEWORK_PACKAGES = (
 )
 _INTERNAL_DISTRIBUTIONS = frozenset(
     {
+        "vs-agent",
         "vs-evaluator-protocol",
         "vs-feature-flags",
         "vs-github",
@@ -62,6 +64,7 @@ _PACKAGE_SOURCE_ROOTS = {
     Path("src/vibesys"): PurePosixPath("vibesys"),
     Path("src/entrypoints"): PurePosixPath("entrypoints"),
     Path("src/server"): PurePosixPath("server"),
+    Path("libs/vs-agent/src/vs_agent"): PurePosixPath("vs_agent"),
     Path("libs/vs-evaluator-protocol/src/vs_evaluator_protocol"): PurePosixPath(
         "vs_evaluator_protocol"
     ),
