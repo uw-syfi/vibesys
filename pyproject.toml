@@ -171,11 +171,11 @@ roots = ["src", "libs", "scripts", "packaging", "sdk"]
 # The agent loop: round orchestration, agent invocation, and result handling in
 # one module. The largest single refactor target in the repo.
 "src/vibesys/loops/agent/loop.py" = 3704
-# CLI entry point; every subcommand's argument wiring lives here. Grew +4 when
-# config/errors/constants value types were routed through vibesys.api: ruff
-# expands the larger vibesys.api import to one-per-line. Net removed three
-# deep-import module edges (vibesys.config/errors/constants) from entrypoints.
-"src/entrypoints/headless.py" = 2647
+# CLI entry point; every subcommand's argument wiring lives here. Grew +7 when
+# config/errors value types were routed through vibesys.api: ruff expands the
+# larger vibesys.api import to one-per-line. That removed the vibesys.config and
+# vibesys.errors deep-import edges from entrypoints.
+"src/entrypoints/headless.py" = 2650
 # Sandbox run environment: setup, execution, and teardown across strategies.
 "src/vibesys/sandbox/run_environment.py" = 2239
 
