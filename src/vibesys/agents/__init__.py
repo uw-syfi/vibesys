@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from .contracts import AgentClientProtocol
     from .session_store import SessionStore
     from .sink import AgentEventSink
+    from .spec import AgentSpec
 
 __all__ = [
     "AgentClient",
@@ -49,12 +50,10 @@ def __getattr__(name: str) -> Any:  # noqa: ANN401
 def build_agent_client(  # noqa: PLR0913
     config: Config,
     *,
-    agent_backend: str | None,
-    cli_provider: str | None,
+    spec: AgentSpec,
     backends: dict[str, Any] | None,
     skill_source_dirs: list[Path],
     compute_backend: ComputeBackend | None = None,
-    model_name: str,
     run_log_file: TextIO | None,
     use_docker: bool,
     log_dir: Path | None = None,
@@ -69,12 +68,10 @@ def build_agent_client(  # noqa: PLR0913
 
     return build(
         config,
-        agent_backend=agent_backend,
-        cli_provider=cli_provider,
+        spec=spec,
         backends=backends,
         skill_source_dirs=skill_source_dirs,
         compute_backend=compute_backend,
-        model_name=model_name,
         run_log_file=run_log_file,
         use_docker=use_docker,
         log_dir=log_dir,

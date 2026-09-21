@@ -13,7 +13,8 @@ the resource-handoff seam) so it never has to import their private home modules.
 from __future__ import annotations
 
 from vibesys.agents import build_agent_client
-from vibesys.agents.factory import supported_cli_providers
+from vibesys.agents.catalog import DriverInfo, agent_catalog
+from vibesys.agents.spec import AgentBackend, AgentSpec, Driver
 from vibesys.api._readmodel import project_committed_run_view
 from vibesys.api.contracts import (
     AgentEnvironment,
@@ -60,8 +61,10 @@ from vibesys.run.run_control import RunStopped
 
 __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
+    "AgentBackend",
     "AgentEnvironment",
     "AgentExecutionStartedData",
+    "AgentSpec",
     "CandidateDisposition",
     "ComputeBackend",
     "Config",
@@ -70,6 +73,8 @@ __all__ = [
     "CoreEvent",
     "CoreEventType",
     "DomainName",
+    "Driver",
+    "DriverInfo",
     "EventSink",
     "EventStatus",
     "HypothesisRoundView",
@@ -96,6 +101,7 @@ __all__ = [
     "RunStore",
     "RunView",
     "RunWorkspace",
+    "agent_catalog",
     "build_agent_client",
     "create_session",
     "default_request",
@@ -104,6 +110,5 @@ __all__ = [
     "open_run_store",
     "output_sink",
     "project_committed_run_view",
-    "supported_cli_providers",
     "validate",
 ]

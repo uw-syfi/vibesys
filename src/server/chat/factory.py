@@ -19,7 +19,7 @@ from server.chat.session import (
 )
 from server.events import ChatThreadCreatedData
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.api import build_agent_client, output_sink
+from vibesys.api import AgentSpec, build_agent_client, output_sink
 from vs_agent import AgentSessionKey, SessionScope
 from vs_project import RunLogger
 from vs_sandbox import HostResource, HostResourceAccess
@@ -130,14 +130,19 @@ def build_chat_agent(
         config = env.config.model_copy(
             update={"agent": env.config.agent.model_copy(update={"driver": selection.driver})}
         )
+        agent_spec = AgentSpec.from_config(
+            config,
+            backend=attachment.agent_backend,
+            driver=selection.driver,
+            provider=selection.provider,
+            model=selection.model,
+        )
         client = build_agent_client(
             config,
-            agent_backend=attachment.agent_backend,
-            cli_provider=selection.provider,
+            spec=agent_spec,
             backends=env.backends,
             skill_source_dirs=list(env.skill_source_dirs),
             compute_backend=env.compute_backend,
-            model_name=selection.model,
             run_log_file=logger.writer,
             use_docker=env.use_docker,
             log_dir=attachment.log_dir,

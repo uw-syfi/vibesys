@@ -27,7 +27,7 @@ from server.events import (
 from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
-from vibesys.api import CoreEventType, output_sink, supported_cli_providers
+from vibesys.api import CoreEventType, Driver, agent_catalog, output_sink
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -284,7 +284,7 @@ class RunIntegrationAdapter:
             resolved_driver = driver or defaults.driver
             resolved_provider = provider or defaults.provider
             resolved_model = model or defaults.model
-            supported = supported_cli_providers(resolved_driver)
+            supported = agent_catalog()[Driver(resolved_driver)].providers
             if resolved_provider not in supported:
                 raise ValueError(  # noqa: TRY003
                     f"agent driver {resolved_driver!r} does not support provider "

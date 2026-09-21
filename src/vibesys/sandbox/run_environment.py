@@ -40,9 +40,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
+from vibesys.agents.spec import AgentBackend
 from vibesys.backends import SandboxKind
 from vibesys.backends.base import ComputeBackendImpl  # noqa: TC001  # tracked: #288
-from vibesys.constants import DEFAULT_AGENT_BACKEND, PROJECT_ROOT
+from vibesys.constants import PROJECT_ROOT
 from vibesys.domains.environment import EnvironmentBindMount  # noqa: TC001  # tracked: #288
 from vibesys.evaluators import (
     PROJECT_ROOT_TOKEN,
@@ -1666,7 +1667,7 @@ def _container_mount_plan(  # tracked: #288
 
     if (
         include_cli_provider_mounts
-        and (request.agent_backend or DEFAULT_AGENT_BACKEND) == "cli"
+        and (request.agent_backend or AgentBackend.CLI) == AgentBackend.CLI
         and request.cli_provider
     ):
         from vibesys.agents.cli_docker import auth_bind_mounts  # noqa: PLC0415  # tracked: #288
@@ -1741,7 +1742,7 @@ def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, s
         ValueError: if *request.cli_provider* has neither a staged auth file
             nor a usable auth environment variable on this host.
     """
-    effective_agent = request.agent_backend or DEFAULT_AGENT_BACKEND
+    effective_agent = request.agent_backend or AgentBackend.CLI
     if effective_agent != "cli" or not request.cli_provider:
         return None
     from vibesys.agents.cli_docker import (  # noqa: PLC0415  # tracked: #288
