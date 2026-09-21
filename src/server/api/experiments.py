@@ -13,13 +13,15 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from threading import RLock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from server.api.protocol import ExperimentCursor, ExperimentUpdate, HypothesisEntry, HypothesisRound
 
 if TYPE_CHECKING:
     from vibesys.api import HypothesisRoundView, HypothesisView, RunView
+
+_StrategyDisposition = Literal["available", "parked", "abandoned"]
 
 
 def build_experiment_log(run_view: RunView) -> list[HypothesisEntry]:
@@ -28,6 +30,26 @@ def build_experiment_log(run_view: RunView) -> list[HypothesisEntry]:
         (_to_hypothesis_entry(hypothesis) for hypothesis in run_view.hypotheses),
         key=lambda entry: (entry.first_round, entry.hypothesis_id),
     )
+
+
+def _strategy_disposition(value: str) -> _StrategyDisposition:
+    """Narrow `HypothesisView.strategy_disposition` back to its closed set.
+
+    `vibesys.api.HypothesisView` widens this to plain `str` at the API
+    boundary rather than leaking core's own `HypothesisStrategy` enum (see
+    its docstring); the only producer of the value
+    (`vibesys.api._readmodel`, from `Hypothesis.strategy.value`) writes
+    exactly one of these three strings, so an unrecognized value here means
+    the boundary DTO's contract was violated upstream.
+    """
+    if value == "available":
+        return "available"
+    if value == "parked":
+        return "parked"
+    if value == "abandoned":
+        return "abandoned"
+    message = f"unknown hypothesis strategy disposition: {value!r}"
+    raise ValueError(message)
 
 
 def _to_hypothesis_entry(hypothesis: HypothesisView) -> HypothesisEntry:
@@ -52,7 +74,7 @@ def _to_hypothesis_entry(hypothesis: HypothesisView) -> HypothesisEntry:
         perf_baseline_commit=hypothesis.perf_baseline_commit,
         perf_delta_reason=hypothesis.perf_delta_reason,
         kept=hypothesis.kept,
-        strategy_disposition=hypothesis.strategy_disposition,
+        strategy_disposition=_strategy_disposition(hypothesis.strategy_disposition),
         strategy_reason=hypothesis.strategy_reason,
         active=hypothesis.active,
     )

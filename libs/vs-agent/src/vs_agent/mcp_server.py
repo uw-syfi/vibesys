@@ -15,11 +15,14 @@ from mcp.server.fastmcp import FastMCP
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from typing import Any
+
+    from pydantic import BaseModel
 
     from vs_agent.tools import ToolSpec
 
 
-def _make_tool_function(spec: ToolSpec) -> Callable[..., str]:
+def _make_tool_function[T: BaseModel](spec: ToolSpec[T]) -> Callable[..., str]:
     """Build a plain function FastMCP can introspect for ``spec``'s flat schema.
 
     FastMCP derives a tool's JSON schema from the registered function's own
@@ -53,7 +56,7 @@ def _make_tool_function(spec: ToolSpec) -> Callable[..., str]:
         args = spec.input_schema(**kwargs)
         return spec.handler(args)
 
-    tool_function.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+    tool_function.__signature__ = inspect.Signature(  # ty: ignore[unresolved-attribute]  # tracked: #288
         parameters, return_annotation=str
     )
     tool_function.__name__ = spec.name
@@ -61,12 +64,12 @@ def _make_tool_function(spec: ToolSpec) -> Callable[..., str]:
     return tool_function
 
 
-def register_tool(mcp: FastMCP, spec: ToolSpec) -> None:
+def register_tool[T: BaseModel](mcp: FastMCP, spec: ToolSpec[T]) -> None:
     """Register one :class:`ToolSpec` on ``mcp`` with a flattened argument schema."""
     mcp.add_tool(_make_tool_function(spec), name=spec.name, description=spec.description)
 
 
-def serve_stdio(tools: Sequence[ToolSpec], *, server_name: str = "vibesys") -> None:
+def serve_stdio(tools: Sequence[ToolSpec[Any]], *, server_name: str = "vibesys") -> None:
     """Run a stdio MCP server exposing ``tools``.
 
     Builds a :class:`FastMCP` instance, registers each tool programmatically,

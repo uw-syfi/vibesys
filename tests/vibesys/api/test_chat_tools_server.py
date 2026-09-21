@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import pytest
@@ -123,8 +123,18 @@ def _server(tools: tuple[ToolSpec, ...]) -> FastMCP:
 
 
 async def _call(server: FastMCP, name: str, **kwargs: object) -> str:
-    """Invoke an MCP tool and return its string result (see vs_issue_board's helper)."""
-    _, structured = await server.call_tool(name, kwargs)
+    """Invoke an MCP tool and return its string result (see vs_issue_board's helper).
+
+    ``FastMCP.call_tool`` is declared as returning
+    ``Sequence[ContentBlock] | dict[str, Any]``, but for a tool with an
+    output schema (every tool here, since each returns plain ``str``) its
+    implementation actually returns a ``(content_blocks, structured_dict)``
+    tuple; the declared return type just doesn't reflect that case (see
+    ``vs_agent``'s ``test_tools.py::_call_tool``, the same cast). The cast
+    documents the real, narrower shape instead of widening the result to
+    ``Any``.
+    """
+    _, structured = cast("tuple[object, dict[str, Any]]", await server.call_tool(name, kwargs))
     return structured["result"]
 
 

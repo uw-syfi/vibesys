@@ -21,19 +21,24 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class ToolSpec:
+class ToolSpec[T: BaseModel]:
     """One tool a :func:`vs_agent.mcp_server.serve_stdio` server registers.
 
     ``handler`` is only ever built and invoked inside the subprocess that
     runs the server, so it may close over live objects (an open store, a
     read-model) that must not cross the subprocess boundary. It receives one
     validated ``input_schema`` instance and returns the tool result text.
+
+    Generic over the concrete ``input_schema``/``handler`` argument type ``T``
+    so each construction site keeps its handler's real parameter type (a
+    ``BaseModel`` subclass) instead of widening it to ``BaseModel``, which
+    would let a handler for one tool's schema be paired with another's.
     """
 
     name: str
     description: str
-    input_schema: type[BaseModel]
-    handler: Callable[[BaseModel], str]
+    input_schema: type[T]
+    handler: Callable[[T], str]
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,6 +11,8 @@ from tests.server.support import build_server_parts
 from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
 from server.api.workspace_git import WorkspacePatchReader
+from vibesys.api._readmodel import project_run_view
+from vibesys.api.contracts import RunStatus
 from vibesys.loops.agent.model import AgentRunState, Hypothesis
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.run.git_events import NullGitTrackerEvents
@@ -21,6 +23,8 @@ from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vibesys.api import RunView
 
 
 class _RoundFields(TypedDict, total=False):
@@ -80,6 +84,22 @@ def _hypothesis(
     }
     fields.update(overrides)
     return Hypothesis(**fields)
+
+
+def _view(state: AgentRunState, *, run_id: str = "run-1") -> RunView:
+    """Project a hand-built `AgentRunState` into the `RunView` `DesignLog.rounds` reads.
+
+    `DesignLog.rounds` now consumes `vibesys.api`'s `RunView`, not raw core
+    state directly (see `server.api.experiments._view`, the same fixture
+    pattern), so a state fixture built by hand still needs this projection
+    step before reaching it.
+    """
+    return project_run_view(
+        state,
+        run_id=run_id,
+        status=RunStatus.ACTIVE,
+        experiment_revision=state.experiment_revision,
+    )
 
 
 def _git(workspace: Path, *args: str) -> str:
@@ -162,7 +182,7 @@ def test_design_log_derives_per_round_file_changes(tmp_path: Path) -> None:
         ]
     )
 
-    first_entry, second_entry = _tracked(workspace).rounds(state, baseline=baseline)
+    first_entry, second_entry = _tracked(workspace).rounds(_view(state), baseline=baseline)
 
     # Each entry publishes the same derived base its file list was diffed
     # against, so a patch query can only name ranges the log itself used.
@@ -193,7 +213,7 @@ def test_design_log_publishes_only_the_round_and_its_files(tmp_path: Path) -> No
     )
 
     (entry,) = DesignLog(workspace=tmp_path, diff=lambda _base, _head: "", patch=_no_patch).rounds(
-        state, baseline="0" * 40
+        _view(state), baseline="0" * 40
     )
 
     assert entry.model_dump() == {
@@ -233,7 +253,7 @@ def test_design_log_measures_a_reverted_hypothesis_from_its_parent(tmp_path: Pat
         ]
     )
 
-    _, second_entry = _tracked(workspace).rounds(state, baseline=baseline)
+    _, second_entry = _tracked(workspace).rounds(_view(state), baseline=baseline)
 
     # Against round 1 the range would also claim queue.rs reverted; against
     # the hypothesis's own parent it is exactly the new file.
@@ -258,7 +278,7 @@ def test_design_log_leaves_unresolvable_ranges_unknown(tmp_path: Path) -> None:
         ]
     )
 
-    entries = _tracked(workspace).rounds(state, baseline="0" * 40)
+    entries = _tracked(workspace).rounds(_view(state), baseline="0" * 40)
 
     # Round 1 recorded no checkpoint; round 2's range does not resolve in a
     # repository that never held those objects. Both stay None, never [].
@@ -285,7 +305,7 @@ def test_design_log_never_passes_a_non_hex_commit_to_git(tmp_path: Path) -> None
     )
 
     entries = DesignLog(workspace=tmp_path, diff=diff, patch=_no_patch).rounds(
-        state, baseline="--upload-pack=sh"
+        _view(state), baseline="--upload-pack=sh"
     )
 
     assert attempted == []
@@ -345,7 +365,7 @@ def test_design_log_drops_a_rename_out_of_framework_memory(tmp_path: Path) -> No
 
     (entry,) = DesignLog(
         workspace=tmp_path, diff=lambda _base, _head: output, patch=_no_patch
-    ).rounds(state, baseline="0" * 40)
+    ).rounds(_view(state), baseline="0" * 40)
 
     assert entry.files is not None
     assert [(change.change, change.path) for change in entry.files] == [("modified", "src/lib.rs")]
@@ -373,8 +393,8 @@ def test_design_log_caches_each_commit_range(tmp_path: Path) -> None:
     )
     design = DesignLog(workspace=tmp_path, diff=diff, patch=_no_patch)
 
-    first = design.rounds(state, baseline="0" * 40)
-    second = design.rounds(state, baseline="0" * 40)
+    first = design.rounds(_view(state), baseline="0" * 40)
+    second = design.rounds(_view(state), baseline="0" * 40)
 
     # Every range is immutable once its checkpoint exists, so the repeat
     # projection runs no git at all.
@@ -401,8 +421,8 @@ def test_design_log_retries_a_failed_range(tmp_path: Path) -> None:
     )
     design = DesignLog(workspace=tmp_path, diff=diff, patch=_no_patch)
 
-    (failed,) = design.rounds(state, baseline="0" * 40)
-    (recovered,) = design.rounds(state, baseline="0" * 40)
+    (failed,) = design.rounds(_view(state), baseline="0" * 40)
+    (recovered,) = design.rounds(_view(state), baseline="0" * 40)
 
     assert failed.files is None
     assert recovered.files is not None
@@ -431,8 +451,8 @@ def test_design_log_evicts_oldest_ranges_past_capacity(tmp_path: Path) -> None:
         ]
     )
 
-    design.rounds(state, baseline="0" * 40)
-    design.rounds(state, baseline="0" * 40)
+    design.rounds(_view(state), baseline="0" * 40)
+    design.rounds(_view(state), baseline="0" * 40)
 
     # Capacity 1 holds only the newest range, so each pass evicts the entry
     # the next pass asks for first and every range runs again.

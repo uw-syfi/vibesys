@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from typing import Any, cast
 
 import pytest
 from mcp.server.fastmcp import FastMCP
@@ -30,6 +31,11 @@ def _echo_handler(args: BaseModel) -> str:
     return args.text.upper() if args.shout else args.text
 
 
+def _shout_handler(args: BaseModel) -> str:
+    assert isinstance(args, _EchoArgs)
+    return args.text.upper()
+
+
 async def _list_tool_names(server: FastMCP) -> set[str]:
     tools = await server.list_tools()
     return {t.name for t in tools}
@@ -38,10 +44,15 @@ async def _list_tool_names(server: FastMCP) -> set[str]:
 async def _call_tool(server: FastMCP, name: str, **kwargs: object) -> str:
     """Invoke an MCP tool and return its string result.
 
-    ``FastMCP.call_tool`` returns ``(content_blocks, structured_dict)``; for
-    our string-returning tools the structured dict is ``{"result": "..."}``.
+    ``FastMCP.call_tool`` is declared as returning
+    ``Sequence[ContentBlock] | dict[str, Any]``, but for a tool with an
+    output schema (every tool here, since each returns plain ``str``) its
+    implementation (``FuncMetadata.convert_result``) actually returns a
+    ``(content_blocks, structured_dict)`` tuple; the declared return type
+    just doesn't reflect that case. The cast documents the real, narrower
+    shape instead of widening the result to ``Any``.
     """
-    _, structured = await server.call_tool(name, kwargs)
+    _, structured = cast("tuple[object, dict[str, Any]]", await server.call_tool(name, kwargs))
     return structured["result"]
 
 
@@ -107,13 +118,13 @@ class TestValueSemantics:
         )
 
         with pytest.raises(dataclasses.FrozenInstanceError):
-            spec.name = "renamed"  # type: ignore[misc]
+            spec.name = "renamed"  # ty: ignore[invalid-assignment]
 
     def test_stdio_server_descriptor_is_frozen(self) -> None:
         descriptor = StdioServerDescriptor(name="vibesys-thing", command="python")
 
         with pytest.raises(dataclasses.FrozenInstanceError):
-            descriptor.command = "python3"  # type: ignore[misc]
+            descriptor.command = "python3"  # ty: ignore[invalid-assignment]
 
     def test_equal_tool_specs_compare_equal(self) -> None:
         first = ToolSpec(
@@ -211,7 +222,7 @@ class TestRegisterTool:
                 name="shout",
                 description="Always shout.",
                 input_schema=_EchoArgs,
-                handler=lambda args: args.text.upper(),  # type: ignore[union-attr]
+                handler=_shout_handler,
             ),
         )
 

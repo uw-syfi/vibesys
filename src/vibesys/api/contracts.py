@@ -1,11 +1,9 @@
 """Public contracts for `vibesys.api`: DTOs, enums, and the event sink.
 
 No behavior lives here. Types that already exist in vibesys core are
-re-exported instead of duplicated; see each re-export's note for where it
-currently lives and when it is due to relocate. `WorkspaceHandle` is
-deliberately not a type defined here: a run's workspace is expressed as
-`vs_sandbox.HostResource` (see `vibesys.api.session.RunWorkspace`) to avoid a
-lib -> core cycle.
+re-exported instead of duplicated. `WorkspaceHandle` is deliberately not a
+type defined here: a run's workspace is expressed as `vs_sandbox.HostResource`
+(see `vibesys.api.session.RunWorkspace`) to avoid a lib -> core cycle.
 """
 
 from __future__ import annotations
@@ -26,11 +24,8 @@ from vibesys.events import CoreEvent, EventStatus
 if TYPE_CHECKING:
     from vs_sandbox import HostResource, ProjectPathPolicy, Sandbox
 
-# Wave 5 (lib moves): Objective/MetricSpace live in vibesys.loops.metrics
-# today because the metric-comparison logic they carry is loop code. The
-# lib-move wave relocates the pure DTOs (Objective, MetricSpace) to
-# vs_loop_state and leaves comparison logic behind; re-export from there once
-# that move lands.
+# Objective/MetricSpace live in vibesys.loops.metrics because the
+# metric-comparison logic they carry is loop code.
 from vibesys.loops.evolve.search_policy import OpenEvolveSearchConfig
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.profilers import ProfilerKind
@@ -165,11 +160,7 @@ class RunRequest(BaseModel):
 
 
 class RunResult(BaseModel):
-    """Terminal outcome of one run.
-
-    TODO(wave-3): extend with a final metrics/candidate summary once
-    `RunView`/`RunStore` grow the semantic facts to source it from.
-    """
+    """Terminal outcome of one run."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -325,16 +316,53 @@ class AgentEnvironment(Protocol):
     `skill_source_dirs`, `project_path_policy`, `host_resources`), the opened
     sandbox's shape (`backends`, `use_docker`, `isolated`), its path
     translation (`agent_path`), and its lifetime (`close`).
+
+    Every data member is a read-only property, not a plain attribute: no
+    caller writes any of them, and this protocol's sole real implementation
+    (`vibesys.api.session._OpenedAgentEnvironment`) is a frozen dataclass, so
+    a plain attribute (implicitly read-write) would make it structurally
+    incompatible with this protocol.
     """
 
-    config: Config
-    compute_backend: ComputeBackend
-    skill_source_dirs: tuple[Path, ...]
-    project_path_policy: ProjectPathPolicy
-    host_resources: tuple[HostResource, ...]
-    backends: dict[str, Sandbox] | None
-    use_docker: bool
-    isolated: bool
+    @property
+    def config(self) -> Config:
+        """This environment's agent configuration."""
+        ...
+
+    @property
+    def compute_backend(self) -> ComputeBackend:
+        """The compute backend this environment was opened for."""
+        ...
+
+    @property
+    def skill_source_dirs(self) -> tuple[Path, ...]:
+        """Directories a sibling agent should load skills from."""
+        ...
+
+    @property
+    def project_path_policy(self) -> ProjectPathPolicy:
+        """The path policy governing this environment's project access."""
+        ...
+
+    @property
+    def host_resources(self) -> tuple[HostResource, ...]:
+        """Host resources mounted into this environment."""
+        ...
+
+    @property
+    def backends(self) -> dict[str, Sandbox] | None:
+        """Sandbox handles for this environment's execution surfaces, if sandboxed."""
+        ...
+
+    @property
+    def use_docker(self) -> bool:
+        """Whether this environment's CLI runs sandboxed under Docker."""
+        ...
+
+    @property
+    def isolated(self) -> bool:
+        """Whether this environment runs with an isolated (non-host-mounted) workspace."""
+        ...
 
     def agent_path(self, host: Path) -> str:
         """Map a host path to its path inside this environment's sandbox."""
