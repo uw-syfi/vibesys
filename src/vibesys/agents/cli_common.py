@@ -12,14 +12,17 @@ import json
 import shutil
 from collections.abc import Callable  # noqa: TC003  # tracked: #288
 from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
 
 from pydantic import BaseModel  # noqa: TC002  # tracked: #288
 
 from vibesys.agents.provider_policy import cli_skill_dirs
+from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
 from vibesys.constants import ComputeBackend  # noqa: TC001  # tracked: #288
-from vibesys.render.log import log_and_print
 from vibesys.skills import foreign_platform_names, is_platforms_parent
+
+if TYPE_CHECKING:
+    from vibesys.agents.sink import AgentEventSink
 
 # Per-provider CLI skill-discovery paths, matching upstream
 # vibesys-skills install.sh conventions. Each CLI tool auto-loads skills from
@@ -69,6 +72,7 @@ def materialize_skills(  # noqa: C901  # tracked: #288
     *,
     compute_backend: ComputeBackend | None = None,
     log_file: TextIO | None = None,
+    event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
 ) -> None:
     """Copy each skill directory into the workspace and CLI discovery paths.
 
@@ -117,12 +121,14 @@ def materialize_skills(  # noqa: C901  # tracked: #288
                         dest.unlink()
                 shutil.copytree(src_skill, dest, symlinks=True, ignore=skip_ignore)
             except OSError as exc:
+                message = (
+                    f"[skills] failed to materialize {src_skill} -> "
+                    f"{dest}: {type(exc).__name__}: {exc}"
+                )
+                event_sink.agent_output(message + "\n", channel="diagnostic")
                 if log_file is not None:
-                    log_and_print(
-                        f"[skills] failed to materialize {src_skill} -> "
-                        f"{dest}: {type(exc).__name__}: {exc}",
-                        log_file,
-                    )
+                    log_file.write(message + "\n")
+                    log_file.flush()
 
 
 def build_schema_hint(response_cls: type[BaseModel]) -> str:

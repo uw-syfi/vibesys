@@ -229,12 +229,14 @@ class TestComposition:
         sink.agent_output("standalone")
 
     def test_logger_metadata_survives_subprocess_thread_emission(self):  # noqa: ANN201  # tracked: #288
+        from vibesys.render.sink import output_sink  # noqa: PLC0415  # tracked: #288
+
         logger = AgentLogger(
             agent_kind="chat",
             round_label="experiment-chat",
             invocation_id="chat-invocation",
+            event_sink=output_sink(),
         )
-        from vibesys.render.sink import output_sink  # noqa: PLC0415  # tracked: #288
 
         events, unsubscribe = _collect(output_sink())
         try:

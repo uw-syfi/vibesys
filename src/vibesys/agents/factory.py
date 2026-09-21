@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from vibesys.agents.client import AgentClient, AgentDiagnosticLog
 from vibesys.agents.provider_policy import DEFAULT_CLI_PROVIDER
+from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
 from vibesys.constants import DEFAULT_AGENT_BACKEND
 
 if TYPE_CHECKING:
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
 
     from vibesys.agents.contracts import AgentClientProtocol
     from vibesys.agents.session_store import SessionStore
+    from vibesys.agents.sink import AgentEventSink
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
     from vs_sandbox import HostResource, ProjectPathPolicy
@@ -105,6 +107,7 @@ def build_agent_client(  # noqa: C901, PLR0913
     project_path_policy: ProjectPathPolicy | None = None,
     require_host_sandbox: bool = False,
     session_store: SessionStore | None = None,
+    events: AgentEventSink = NULL_AGENT_EVENT_SINK,
 ) -> AgentClientProtocol:
     """Build the configured application-level agent service."""
     host_resources = tuple(host_resources)
@@ -125,7 +128,7 @@ def build_agent_client(  # noqa: C901, PLR0913
     if backend == "stub":
         from vibesys.agents.stub_runner import StubAgentClient  # noqa: PLC0415
 
-        return StubAgentClient()
+        return StubAgentClient(event_sink=events)
 
     if backend != "cli":
         raise SystemExit(f"unknown agent backend: {backend!r}")  # noqa: TRY003  # tracked: #288
@@ -222,4 +225,5 @@ def build_agent_client(  # noqa: C901, PLR0913
         containerized=use_docker,
         driver_log=driver_log,
         session_store=session_store,
+        event_sink=events,
     )

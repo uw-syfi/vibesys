@@ -930,6 +930,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 project_path_policy=project_path_policy,
                 require_host_sandbox=not session.view.cli_sandboxed,
                 host_resources=agent_host_resources,
+                events=output_sink(),
             )
         teardown_stack.callback(agent_client.close)
 
@@ -1174,6 +1175,7 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
         # container access; recomputing is impossible here because a candidate
         # context carries neither the profiler domain nor the task name.
         host_resources=parent.agent_host_resources,
+        events=output_sink(),
     )
     teardown_stack.callback(agent_client.close)
 

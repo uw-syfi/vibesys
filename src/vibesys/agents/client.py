@@ -30,8 +30,8 @@ from vibesys.agents.provider_policy import DEFAULT_CLI_PROVIDER
 from vibesys.agents.runner import parse_typed_response_text
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.agents.session_store import NullSessionStore, SessionStore
+from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
 from vibesys.events import CommandResultPayload, JsonResultPayload
-from vibesys.render.log import log_and_print, log_json_and_print, log_prompt_markdown_and_print
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -40,7 +40,9 @@ if TYPE_CHECKING:
 
     from vibesys.agents.callbacks import AgentLogger
     from vibesys.agents.progress import AgentProgress
+    from vibesys.agents.sink import AgentEventSink
     from vibesys.constants import ComputeBackend
+    from vibesys.events import AgentOutputChannel
     from vs_sandbox import HostResource, ProjectPathPolicy
 
 T = TypeVar("T", bound=BaseModel)
@@ -56,16 +58,35 @@ class _CachedSession:
     provider_session_id: str | None = None
 
 
+def _emit_and_log(
+    sink: AgentEventSink,
+    text: str,
+    log_file: TextIO | None,
+    *,
+    channel: AgentOutputChannel = "diagnostic",
+) -> None:
+    """Publish ``text`` on ``channel`` and write it in full to ``log_file``.
+
+    Display (including any truncation) is the subscribed renderer's job;
+    the log always receives the untruncated text.
+    """
+    sink.agent_output(text + "\n", channel=channel)
+    if log_file:
+        log_file.write(text + "\n")
+        log_file.flush()
+
+
 class AgentDiagnosticLog:
     """Mutable diagnostic destination shared by a client and its driver."""
 
-    def __init__(self, stream: TextIO | None) -> None:
+    def __init__(self, stream: TextIO | None, *, event_sink: AgentEventSink | None = None) -> None:
         """Create a log target backed by ``stream``."""
         self.stream = stream
+        self._sink = event_sink if event_sink is not None else NULL_AGENT_EVENT_SINK
 
     def __call__(self, message: str) -> None:
         """Write one driver diagnostic to the current run log."""
-        log_and_print(message, self.stream)
+        _emit_and_log(self._sink, message, self.stream)
 
 
 def _publish_final_text(logger: AgentLogger, text: str) -> None:
@@ -177,10 +198,12 @@ class AgentClient:
         driver_log: AgentDiagnosticLog | None = None,
         driver_name: str | None = None,
         session_store: SessionStore | None = None,
+        event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
     ) -> None:
         """Create a client that owns ``driver`` and every session it creates."""
         self._driver = driver
         self._driver_name = driver_name
+        self._sink = event_sink
         self._session_store: SessionStore = session_store or NullSessionStore()
         self._provider = provider
         self._skills = tuple(skills)
@@ -269,20 +292,26 @@ class AgentClient:
         label = agent_label(kind)
         parsed = parse_typed_response_text(result.text, response_cls)
         if parsed is None:
-            log_and_print(f"\n=== {label} ROUND OUTPUT (missing response) ===", self._run_log_file)
-            log_and_print(
+            _emit_and_log(
+                self._sink,
+                f"\n=== {label} ROUND OUTPUT (missing response) ===",
+                self._run_log_file,
+            )
+            _emit_and_log(
+                self._sink,
                 f"No structured response received from {label.lower()}.",
                 self._run_log_file,
             )
             if result.text and not logger.streamed_external_text_this_turn():
-                log_and_print(
+                _emit_and_log(
+                    self._sink,
                     f"\n=== {label} ROUND OUTPUT (raw output) ===",
                     self._run_log_file,
                 )
                 _publish_final_text(logger, result.text)
             return fallback_factory()
-        log_and_print(f"\n=== {label} ROUND OUTPUT ===", self._run_log_file)
-        log_json_and_print(parsed.model_dump_json(indent=2), self._run_log_file)
+        _emit_and_log(self._sink, f"\n=== {label} ROUND OUTPUT ===", self._run_log_file)
+        _emit_and_log(self._sink, parsed.model_dump_json(indent=2), self._run_log_file)
         return parsed
 
     def invoke_text(  # noqa: PLR0913
@@ -317,15 +346,21 @@ class AgentClient:
         )
         label = agent_label(kind)
         if result.text:
-            log_and_print(f"\n=== {label} ROUND OUTPUT ===", self._run_log_file)
+            _emit_and_log(self._sink, f"\n=== {label} ROUND OUTPUT ===", self._run_log_file)
             # A driver that streams assistant text has already delivered this
             # answer, chunk by chunk and attributed to the turn. Printing it
             # again here would render it twice, the second time unattributed.
             if not logger.streamed_external_text_this_turn():
                 _publish_final_text(logger, result.text)
         else:
-            log_and_print(f"\n=== {label} ROUND OUTPUT (missing response) ===", self._run_log_file)
-            log_and_print(f"No response received from {label.lower()}.", self._run_log_file)
+            _emit_and_log(
+                self._sink,
+                f"\n=== {label} ROUND OUTPUT (missing response) ===",
+                self._run_log_file,
+            )
+            _emit_and_log(
+                self._sink, f"No response received from {label.lower()}.", self._run_log_file
+            )
         return result.text
 
     def _invoke_turn(  # noqa: PLR0913
@@ -382,16 +417,25 @@ class AgentClient:
             agent_kind=kind,
             round_label=round_label,
             invocation_id=invocation_id,
+            event_sink=self._sink,
         )
-        log_and_print(f"\n=== {label} ROUND START: {round_label} ===", self._run_log_file)
-        log_and_print(
+        _emit_and_log(
+            self._sink, f"\n=== {label} ROUND START: {round_label} ===", self._run_log_file
+        )
+        _emit_and_log(
+            self._sink,
             f"driver: {self.driver_name or type(self._driver).__name__}, provider: {spec.provider}, "
             f"model: {model}, reasoning_effort: {reasoning_effort or 'provider_default'}, "
             f"cwd: {workspace}",
             self._run_log_file,
         )
-        log_and_print("--- input ---", self._run_log_file)
-        log_prompt_markdown_and_print(f"{system_prompt}\n\n{user_prompt}", self._run_log_file)
+        _emit_and_log(self._sink, "--- input ---", self._run_log_file)
+        _emit_and_log(
+            self._sink,
+            f"{system_prompt}\n\n{user_prompt}",
+            self._run_log_file,
+            channel="prompt",
+        )
         reuse = reuse_session if reuse_session is not None else True
         # An unscoped call still needs one live conversation per role, but a
         # bare role is not a conversation a later process could identify, so the
@@ -408,8 +452,10 @@ class AgentClient:
             )
         except Exception as exc:
             observer.close()
-            log_and_print(f"\n=== {label} ROUND ERROR: {round_label} ===", self._run_log_file)
-            log_and_print(f"{type(exc).__name__}: {exc}", self._run_log_file)
+            _emit_and_log(
+                self._sink, f"\n=== {label} ROUND ERROR: {round_label} ===", self._run_log_file
+            )
+            _emit_and_log(self._sink, f"{type(exc).__name__}: {exc}", self._run_log_file)
             raise
         finally:
             observer.close()
@@ -450,7 +496,8 @@ class AgentClient:
             with target.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(record) + "\n")
         except OSError as exc:
-            log_and_print(
+            _emit_and_log(
+                self._sink,
                 f"[usage] failed to append {target}: {type(exc).__name__}: {exc}",
                 self._run_log_file,
             )
@@ -644,6 +691,7 @@ class AgentClient:
             list(spec.skills),
             compute_backend=self._compute_backend,
             log_file=self._run_log_file,
+            event_sink=self._sink,
         )
         return self._driver.create_session(spec)
 
