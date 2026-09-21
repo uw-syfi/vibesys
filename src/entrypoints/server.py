@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, NoReturn
 
 from entrypoints import headless
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
-from vibesys.errors import ConfigurationError
+from vibesys.api import ConfigurationError
 from vibesys.repository import (
     generate_experiment_name,
     repository_name_from_experiment,
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Callable
 
-    from vibesys.config import Config
+    from vibesys.api import Config
 
 
 def _control_socket_from_argv(argv: list[str]) -> Path | None:

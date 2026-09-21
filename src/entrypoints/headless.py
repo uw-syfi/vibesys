@@ -27,19 +27,26 @@ from typing import TYPE_CHECKING, NoReturn
 
 from vibesys import boot_trace
 from vibesys.agents.provider_policy import SHIPPED_PROVIDERS
-from vibesys.api import LoopKind, ResumeRef, RunRequest, RunResult, create_session
-from vibesys.config import Config, load_config
-from vibesys.constants import (
+from vibesys.api import (
     KNOWN_COMPUTE_BACKENDS,
-    PROJECT_ROOT,
     ComputeBackend,
+    Config,
+    ConfigurationDiagnostic,
+    ConfigurationError,
     DomainName,
+    LoopKind,
+    ProfilerKind,
+    ResumeRef,
+    RunRequest,
+    RunResult,
+    create_session,
+    load_config,
 )
-from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.constants import PROJECT_ROOT
 from vibesys.evaluators import objective as _objective
 from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.loops.metrics import MetricSpace, Objective
-from vibesys.profilers import CLI_PROFILER_CHOICES, ProfilerKind, coerce_profiler_kind
+from vibesys.profilers import CLI_PROFILER_CHOICES, coerce_profiler_kind
 from vibesys.render.headless import HeadlessRenderer
 from vibesys.repository import (
     REPOSITORY_SLUG,
