@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from vibesys.api.store import open_run_store
-from vs_agent import ToolSpec, serve_stdio
+from vs_agent.api import ToolSpec, serve_stdio
 from vs_project import Project
 
 if TYPE_CHECKING:

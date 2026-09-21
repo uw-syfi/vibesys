@@ -166,10 +166,10 @@ Docker's layer cache is what makes a repeat build of either image cheap;
 immutable manifest ID rather than keeping a manifest of its own.
 
 CLI and toolchain versions are not in the Dockerfile: they are build args
-supplied from `vs_agent.provider_policy` (`NODE_VERSION`,
-`CLI_VERSIONS`, `RUST_TOOLCHAIN_VERSION`, `GO_TOOLCHAIN_VERSION`), so a
-version bump is a one-line change in one module instead of an edit to the
-Dockerfile itself.
+supplied through the library's public API, `vs_agent.api` (`NODE_VERSION`,
+`CLI_VERSIONS`, `RUST_TOOLCHAIN_VERSION`, `GO_TOOLCHAIN_VERSION`; defined in the
+library's `provider_policy` module), so a version bump is a one-line change in
+one module instead of an edit to the Dockerfile itself.
 
 A task Dockerfile that needs the backend's base image declares `ARG
 BASE_IMAGE` and `FROM ${BASE_IMAGE}`; `agent_image` always passes
@@ -342,7 +342,8 @@ backend = "cli"
 driver = "mock"
 ```
 
-Two playbooks, both in `vs_agent.drivers.mock`:
+Two playbooks, defined in the library's `drivers.mock` module and re-exported
+from the public `vs_agent.api.testing` surface:
 
 - `ScriptedPlaybook` synthesizes a turn from configurable counts: assistant
   text chunks, thinking chunks, tool call/result pairs of a chosen payload

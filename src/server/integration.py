@@ -28,8 +28,7 @@ from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
 from vibesys.api import CoreEventType, output_sink
-from vs_agent.catalog import agent_catalog
-from vs_agent.spec import Driver
+from vs_agent.api import Driver, agent_catalog
 
 if TYPE_CHECKING:
     from collections.abc import Callable

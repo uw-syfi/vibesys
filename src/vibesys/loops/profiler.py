@@ -22,7 +22,7 @@ from vibesys.events import FrameworkSource
 from vibesys.profilers import ProfilerKind, profiler_definition, require_profiler_kind
 from vibesys.render.sink import output_sink
 from vibesys.schemas import ProfilerSummary
-from vs_agent.contracts import MCPServerSpec
+from vs_agent.api import MCPServerSpec
 
 if TYPE_CHECKING:
     from vibesys.run import LoopContext

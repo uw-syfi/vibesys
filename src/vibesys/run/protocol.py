@@ -24,8 +24,7 @@ if TYPE_CHECKING:
     from vibesys.run.event_journal import EventJournal
     from vibesys.run.git_tracker import GitTracker
     from vibesys.run.state import RunState
-    from vs_agent.contracts import AgentClientProtocol
-    from vs_agent.progress import AgentProgress
+    from vs_agent.api import AgentClientProtocol, AgentProgress
     from vs_project import Project, StateTransition
 
 T = TypeVar("T", bound=BaseModel)

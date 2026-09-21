@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
-from vs_agent.contracts import MCPServerSpec
+from vs_agent.api import MCPServerSpec
 from vs_agent.drivers import _omnigent_mcp as subject
 from vs_agent.drivers._omnigent_mcp import OmnigentMCPError, OmnigentMCPTools
 

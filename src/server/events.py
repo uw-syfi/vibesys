@@ -27,7 +27,7 @@ from server.run_lifecycle import RunStatus
 # used directly below. CommandResultPayload and JsonResultPayload are only the
 # ToolResultPayload union members; re-exported here (like vs_loop_state's
 # enums in vibesys.schemas) so existing importers of server.events keep working.
-from vs_agent.events import (
+from vs_agent.api import (
     AgentOutputChannel,
     AgentStatusData,
     CommandResultPayload,  # noqa: F401

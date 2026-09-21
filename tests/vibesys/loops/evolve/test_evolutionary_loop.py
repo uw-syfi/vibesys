@@ -59,7 +59,7 @@ from vibesys.run import EventJournal, GitTracker, LoopContext, RunState, RunStat
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentSpec
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
-from vs_agent import AgentClient
+from vs_agent.api import AgentClient
 from vs_project import EvolveRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:

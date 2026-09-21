@@ -211,3 +211,11 @@ depends_on = []
 [[modules]]
 path = "vs_github"
 depends_on = []
+
+# vs_agent exposes only its `api` subpackage (public surface) and
+# `api.testing` (owned test doubles). External modules must import from there,
+# never from vs_agent internals. Probed: this flags top-level AND deep imports;
+# tests are outside tach scope. See libs/vs-agent/src/vs_agent/api/.
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_agent"]

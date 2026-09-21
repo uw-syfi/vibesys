@@ -63,7 +63,7 @@ from vibesys.sandbox.modal_evaluator import encode_setup_command
 from vibesys.skypilot.bridge import SkyPilotBridge
 from vibesys.skypilot.config import load_cluster_profiles, resolve_profile
 from vibesys.skypilot.runner import SkyPilotJobRunner, stable_cluster_name
-from vs_agent.spec import AgentBackend
+from vs_agent.api import AgentBackend
 from vs_project import RunEnvironmentRecord, RunResourceRequest
 from vs_sandbox import (
     BeforeReadyContext,
@@ -414,7 +414,7 @@ class DockerEnvironment:  # noqa: D101  # tracked: #288
         auth_files: list[tuple[str, str]] = []
         if resolved_cli is not None:
             provider, cli_provider_env = resolved_cli
-            from vs_agent.cli_docker import auth_copy_paths  # noqa: PLC0415  # tracked: #288
+            from vs_agent.api import auth_copy_paths  # noqa: PLC0415  # tracked: #288
 
             auth_files = auth_copy_paths(provider)
         cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
@@ -1670,7 +1670,7 @@ def _container_mount_plan(  # tracked: #288
         and (request.agent_backend or AgentBackend.CLI) == AgentBackend.CLI
         and request.cli_provider
     ):
-        from vs_agent.cli_docker import auth_bind_mounts  # noqa: PLC0415  # tracked: #288
+        from vs_agent.api import auth_bind_mounts  # noqa: PLC0415  # tracked: #288
 
         bind_mounts.extend(auth_bind_mounts(request.cli_provider))
         bind_mounts.append((str(request.framework_root), "/opt/vibesys", True))
@@ -1745,7 +1745,7 @@ def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, s
     effective_agent = request.agent_backend or AgentBackend.CLI
     if effective_agent != "cli" or not request.cli_provider:
         return None
-    from vs_agent.cli_docker import (  # noqa: PLC0415  # tracked: #288
+    from vs_agent.api import (  # noqa: PLC0415  # tracked: #288
         DOCKER_PROVIDER_ENV,
         auth_env_passthrough,
         auth_env_vars,
@@ -1790,7 +1790,7 @@ def _cli_provider_env_and_auth_files(
     if resolved_cli is None:
         return {}, []
     provider, cli_provider_env = resolved_cli
-    from vs_agent.cli_docker import auth_copy_paths  # noqa: PLC0415  # tracked: #288
+    from vs_agent.api import auth_copy_paths  # noqa: PLC0415  # tracked: #288
 
     return cli_provider_env, auth_copy_paths(provider)
 

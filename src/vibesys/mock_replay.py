@@ -25,9 +25,14 @@ from vibesys.events import (
     ToolResultData,
     UsageUpdateData,
 )
-from vs_agent.contracts import AgentEvent, AgentEventKind, AgentUsage
-from vs_agent.drivers.mock import MockDriverError, ReplayPlaybook
-from vs_agent.todos import todos_from_tool_call
+from vs_agent.api import (
+    AgentEvent,
+    AgentEventKind,
+    AgentUsage,
+    MockDriverError,
+    ReplayPlaybook,
+    todos_from_tool_call,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator

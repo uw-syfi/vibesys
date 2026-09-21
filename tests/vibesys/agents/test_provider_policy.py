@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import agentshim
 
 from vibesys.constants import PROJECT_ROOT
-from vs_agent.provider_policy import SHIPPED_PROVIDERS
+from vs_agent.api import SHIPPED_PROVIDERS
 
 if TYPE_CHECKING:
     from pathlib import Path

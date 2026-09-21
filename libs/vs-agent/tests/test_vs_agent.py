@@ -2,7 +2,7 @@
 
 import pytest
 
-from vs_agent import AgentSelection, AgentSessionKey, SessionScope
+from vs_agent.api import AgentSelection, AgentSessionKey, SessionScope
 
 
 def test_session_key_serializes_to_the_stored_form() -> None:

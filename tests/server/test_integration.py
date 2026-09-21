@@ -34,7 +34,7 @@ from vibesys.events import (
     EventStatus as CoreEventStatus,
 )
 from vibesys.render import output_sink
-from vs_agent.session_key import AgentSessionKey, SessionScope
+from vs_agent.api import AgentSessionKey, SessionScope
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:

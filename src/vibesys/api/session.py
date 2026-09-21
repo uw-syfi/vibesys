@@ -24,8 +24,7 @@ from vibesys.loops.roles import expected_agent_roles
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.skills import platform_skill_selection
-from vs_agent import expose_as_tools
-from vs_agent.contracts import MCPServerSpec
+from vs_agent.api import MCPServerSpec, expose_as_tools
 from vs_project import Project
 from vs_sandbox import HostResource, HostResourceAccess
 

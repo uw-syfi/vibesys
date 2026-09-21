@@ -14,8 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vs_agent.catalog import agent_catalog
-from vs_agent.spec import Driver
+from vs_agent.api import Driver, agent_catalog
 
 ChatModelSource = Literal["run", "role", "suggested"]
 

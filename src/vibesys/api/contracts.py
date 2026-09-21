@@ -19,7 +19,7 @@ from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.input_manifest import InputBundle
 from vibesys.events import CoreEvent, EventStatus
-from vs_agent.contracts import MCPServerSpec
+from vs_agent.api import MCPServerSpec
 
 if TYPE_CHECKING:
     from vibesys.skills import SkillSelection

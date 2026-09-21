@@ -22,7 +22,7 @@ import pytest
 
 from vibesys.events import CommandResultPayload, JsonResultPayload
 from vibesys.schemas import JudgeResponse
-from vs_agent.contracts import (
+from vs_agent.api import (
     AgentEvent,
     AgentExecutionPolicy,
     AgentSessionSpec,

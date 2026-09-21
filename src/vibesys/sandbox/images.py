@@ -23,7 +23,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from vs_agent import provider_policy
+from vs_agent.api import (
+    CLI_VERSIONS,
+    GO_TOOLCHAIN_VERSION,
+    NODE_VERSION,
+    RUST_TOOLCHAIN_VERSION,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
@@ -208,12 +213,12 @@ def agent_image(  # noqa: PLR0913  # tracked: #288
     )
 
     build_args: list[str] = ["--build-arg", f"BASE_IMAGE={base}"]
-    build_args += ["--build-arg", f"NODE_VERSION={provider_policy.NODE_VERSION}"]
-    for provider, version in provider_policy.CLI_VERSIONS.items():
+    build_args += ["--build-arg", f"NODE_VERSION={NODE_VERSION}"]
+    for provider, version in CLI_VERSIONS.items():
         build_args += ["--build-arg", f"{provider.upper()}_VERSION={version}"]
     build_args += ["--build-arg", f"TOOLCHAINS={' '.join(sorted(set(toolchains)))}"]
-    build_args += ["--build-arg", f"RUST_VERSION={provider_policy.RUST_TOOLCHAIN_VERSION}"]
-    build_args += ["--build-arg", f"GO_VERSION={provider_policy.GO_TOOLCHAIN_VERSION}"]
+    build_args += ["--build-arg", f"RUST_VERSION={RUST_TOOLCHAIN_VERSION}"]
+    build_args += ["--build-arg", f"GO_VERSION={GO_TOOLCHAIN_VERSION}"]
     build_args += ["--build-arg", f"PIP_EXTRAS={' '.join(sorted(set(pip_extras)))}"]
 
     target = _BuildTarget(

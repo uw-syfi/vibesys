@@ -7,7 +7,7 @@ from vibesys.context import _RunContext
 from vibesys.run import RunPaths
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.schemas import JudgeResponse, Verdict
-from vs_agent.progress import CandidateProgress, RoundProgress
+from vs_agent.api import CandidateProgress, RoundProgress
 
 
 def _judge_fallback() -> JudgeResponse:

@@ -39,7 +39,7 @@ from agentshim.testing import (
 from vibesys.events import CommandResultPayload
 from vibesys.schemas import ImplementerResponse, JudgeResponse
 from vs_agent import docker_executor
-from vs_agent.contracts import (
+from vs_agent.api import (
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
-    from vs_agent.contracts import AgentSession
+    from vs_agent.api import AgentSession
 
 SCRIPTED_PROVIDERS = ("claude", "codex", "gemini", "opencode")
 """Every provider VibeSys ships, each scripted in its own stream format.

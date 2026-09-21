@@ -10,7 +10,7 @@ from server.chat.prompts import experiment_chat_system_prompt
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.config import Config
 from vibesys.skills import NULL_SKILL_SELECTION
-from vs_agent.contracts import MCPServerSpec
+from vs_agent.api import MCPServerSpec
 from vs_sandbox import HostResource, HostResourceAccess, ProjectPathPolicy
 
 _FAKE_TOOL_SERVERS = (

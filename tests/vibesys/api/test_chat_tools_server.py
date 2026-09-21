@@ -22,14 +22,14 @@ from vibesys.api.store import open_run_store
 from vibesys.loops.agent.model import AgentRunState, Hypothesis, HypothesisReview
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.schemas import OrchestratorPlan
-from vs_agent.mcp_server import register_tool
+from vs_agent.api import register_tool
 from vs_loop_state import RoundRecord
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_agent import ToolSpec
+    from vs_agent.api import ToolSpec
 
 NOW = datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC)
 UNIQUE = UUID("12345678-1234-5678-1234-567812345678")

@@ -123,10 +123,13 @@ from vibesys.skills import (
     build_skill_catalog,
     resolve_skill_selections,
 )
-from vs_agent.base import ResponseFallback
-from vs_agent.progress import RoundProgress
-from vs_agent.session_key import AgentSessionKey, SessionScope
-from vs_agent.spec import AgentBackend
+from vs_agent.api import (
+    AgentBackend,
+    AgentSessionKey,
+    ResponseFallback,
+    RoundProgress,
+    SessionScope,
+)
 from vs_loop_state.agent import PerfProvenance, RoundHistory, RoundRecord
 from vs_project import AgentRunConfiguration
 

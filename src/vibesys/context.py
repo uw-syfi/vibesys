@@ -93,12 +93,16 @@ from vibesys.sandbox.run_environment import (
     make_run_environment_spec,
 )
 from vibesys.skills import platform_skill_selection
-from vs_agent import AgentClientProtocol, build_agent_client
-from vs_agent.factory import agent_driver_supports_mcp_servers
-from vs_agent.host_resource_declarations import task_agent_host_resources
-from vs_agent.progress import AgentProgress
-from vs_agent.session_store import AgentSessionState, DurableSessionStore
-from vs_agent.spec import AgentBackend
+from vs_agent.api import (
+    AgentBackend,
+    AgentClientProtocol,
+    AgentProgress,
+    AgentSessionState,
+    DurableSessionStore,
+    agent_driver_supports_mcp_servers,
+    build_agent_client,
+    task_agent_host_resources,
+)
 from vs_project import (
     Project,
     RunConfiguration,
