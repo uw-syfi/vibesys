@@ -332,9 +332,10 @@ rows.
 ## Mock driver
 
 `driver = "mock"` is test infrastructure. It satisfies the same driver
-contract while streaming a deterministic playbook, so tests exercise the real
-`AgentClient` -> `OutputSink` -> server integration -> transport path without an agent
-CLI, a model, or a network. It never writes events, state, or files itself.
+contract while streaming an explicitly scripted turn, so tests exercise the
+real `AgentClient` -> `OutputSink` -> server integration -> transport path
+without an agent CLI, a model, or a network. It never writes events, state, or
+files itself.
 
 ```toml
 [agent]
@@ -342,11 +343,10 @@ backend = "cli"
 driver = "mock"
 ```
 
-`ScriptedPlaybook`, defined in the library's `drivers.mock` module and
-re-exported from the public `vs_agent.api.testing` surface, synthesizes a turn
-from configurable counts: assistant text chunks, thinking chunks, tool
-call/result pairs of a chosen payload size, todo snapshots, and usage
-updates, with optional per-event pacing.
+`FakeDriver`, defined in the library's internal `drivers.fake` module, takes
+an explicit `turn=[...]` (or `turns=[[...], ...]` for a sequence of distinct
+turns) built from its event-builder functions: `assistant_text`, `thinking`,
+`tool_call`, `tool_result`, `todo_write`, and `usage`.
 
 Structured turns are answered from `vs_agent.scripted_rounds`, which the
 stub agent client shares, so a scripted run completes loop rounds on the happy

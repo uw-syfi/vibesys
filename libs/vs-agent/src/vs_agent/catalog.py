@@ -51,7 +51,7 @@ def agent_catalog() -> Mapping[Driver, DriverInfo]:
     from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # avoid import cycle
         supported_providers as agentshim_providers,
     )
-    from vs_agent.drivers.mock import (  # noqa: PLC0415  # avoid import cycle
+    from vs_agent.drivers.fake import (  # noqa: PLC0415  # avoid import cycle
         supported_providers as mock_providers,
     )
     from vs_agent.omnigent.providers import (  # noqa: PLC0415  # avoid import cycle
