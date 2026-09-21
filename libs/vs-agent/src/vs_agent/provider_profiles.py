@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import agentshim
-
 if TYPE_CHECKING:
     from agentshim import ProviderProfile
 
@@ -22,8 +20,15 @@ if TYPE_CHECKING:
 def provider_profile(provider: str) -> ProviderProfile:
     """Return the agentshim profile for *provider*.
 
+    Imports ``agentshim`` lazily: this module is reachable from
+    :mod:`vs_agent.api`'s eager exports (through :mod:`vs_agent.provider_policy`,
+    :mod:`vs_agent.spec`, and others), and importing :mod:`vs_agent.api` must
+    not pull in ``agentshim``.
+
     Raises:
         ValueError: if agentshim does not register *provider*. The message
             names the provider and the registered alternatives.
     """
+    import agentshim  # noqa: PLC0415
+
     return agentshim.get_provider(provider).profile

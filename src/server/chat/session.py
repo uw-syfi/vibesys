@@ -19,8 +19,7 @@ if TYPE_CHECKING:
 
     from server.controller import RunController
     from server.execution import ExecutionTracker
-    from vs_agent import AgentSessionKey
-    from vs_agent.contracts import MCPServerSpec
+    from vs_agent.api import AgentSessionKey, MCPServerSpec
 
 
 class ChatAgentClient(Protocol):

@@ -16,10 +16,8 @@ from server.chat.prompts import (
 )
 from server.chat.session import ExperimentChatDependencies, ExperimentChatSession
 from server.events import EventType
-from vs_agent.client import AgentClient
-from vs_agent.contracts import MCPServerSpec
+from vs_agent.api import AgentClient, AgentSessionKey, MCPServerSpec, SessionScope
 from vs_agent.drivers import agentshim as agentshim_driver
-from vs_agent.session_key import AgentSessionKey, SessionScope
 
 if TYPE_CHECKING:
     from collections.abc import Callable

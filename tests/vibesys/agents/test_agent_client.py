@@ -16,21 +16,22 @@ from vibesys.events import (
     ToolResultData,
 )
 from vibesys.render.sink import output_sink
-from vs_agent.client import AgentClient
-from vs_agent.contracts import (
+from vs_agent.api import (
     AgentCapabilities,
+    AgentClient,
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
     AgentObserver,
     AgentSession,
+    AgentSessionKey,
     AgentSessionSpec,
     AgentTurnRequest,
     AgentTurnResult,
     AgentUsage,
     SessionDisposition,
+    SessionScope,
 )
-from vs_agent.session_key import AgentSessionKey, SessionScope
 
 
 class _Response(BaseModel):

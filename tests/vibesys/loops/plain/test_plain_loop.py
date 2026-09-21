@@ -26,8 +26,7 @@ from vibesys.schemas import (
     PerfTrend,
     Verdict,
 )
-from vs_agent import AgentClient
-from vs_agent.contracts import AgentCapabilities
+from vs_agent.api import AgentCapabilities, AgentClient
 from vs_issue_board import IssueBoard, IssueStatus
 from vs_project import RUN_SCHEMA_VERSION, Project, RunEnvironmentRecord
 

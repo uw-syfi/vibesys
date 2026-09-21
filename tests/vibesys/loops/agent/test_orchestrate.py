@@ -58,9 +58,8 @@ from vibesys.schemas import (
     ValidationRecipeArtifact,
     Verdict,
 )
-from vs_agent import AgentClient, AgentClientProtocol
-from vs_agent.session_key import AgentSessionKey, SessionScope
-from vs_agent.stub_runner import StubAgentClient
+from vs_agent.api import AgentClient, AgentClientProtocol, AgentSessionKey, SessionScope
+from vs_agent.api.testing import StubAgentClient
 from vs_loop_state.agent import RoundRecord
 from vs_project import Project, serialize_round
 from vs_sandbox import SandboxExecutionResult

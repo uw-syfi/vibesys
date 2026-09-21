@@ -9,16 +9,18 @@ import pytest
 
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.config import Config
-from vs_agent import build_agent_client
-from vs_agent.catalog import agent_catalog
-from vs_agent.client import AgentClient
+from vs_agent.api import (
+    AgentClient,
+    Driver,
+    agent_catalog,
+    agent_driver_supports_mcp_servers,
+    build_agent_client,
+)
+from vs_agent.api.testing import MockDriver
 from vs_agent.drivers.agentshim import AgentShimDriver
-from vs_agent.drivers.mock import MockDriver
 from vs_agent.drivers.omnigent import OmnigentDriver, OmnigentDriverError
-from vs_agent.factory import agent_driver_supports_mcp_servers
 from vs_agent.omnigent import supported_providers
 from vs_agent.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
-from vs_agent.spec import Driver
 from vs_sandbox import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:

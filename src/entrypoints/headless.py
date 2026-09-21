@@ -64,7 +64,7 @@ from vibesys.sandbox.run_environment import (
 )
 from vibesys.sandbox.task_image import build_task_image
 from vibesys.skills import resolve_skill_source_dirs
-from vs_agent.provider_policy import SHIPPED_PROVIDERS
+from vs_agent.api import SHIPPED_PROVIDERS
 from vs_github import GitHubCLI, GitHubCLIError
 from vs_project import (
     AgentRunConfiguration,

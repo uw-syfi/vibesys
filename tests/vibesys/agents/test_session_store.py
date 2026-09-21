@@ -15,23 +15,22 @@ from pathlib import Path
 
 import pytest
 
-from vs_agent.client import AgentClient
-from vs_agent.contracts import (
+from vs_agent.api import (
     AgentCapabilities,
+    AgentClient,
     AgentExecutionPolicy,
     AgentObserver,
     AgentSession,
+    AgentSessionKey,
     AgentSessionSpec,
+    AgentSessionState,
     AgentTurnRequest,
     AgentTurnResult,
-    SessionDisposition,
-    session_spec_fingerprint,
-)
-from vs_agent.session_key import AgentSessionKey, SessionScope
-from vs_agent.session_store import (
-    AgentSessionState,
     DurableSessionStore,
     NullSessionStore,
+    SessionDisposition,
+    SessionScope,
+    session_spec_fingerprint,
 )
 from vs_project import (
     PlainRunConfiguration,

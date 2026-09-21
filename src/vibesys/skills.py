@@ -12,7 +12,7 @@ import yaml
 
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
 from vibesys.schemas import SkillResourceSelection  # noqa: TC001  # tracked: #288
-from vs_agent.skills import NULL_SKILL_SELECTION, SkillSelection  # noqa: F401
+from vs_agent.api import NULL_SKILL_SELECTION, SkillSelection  # noqa: F401
 
 SIDECAR_NAME = ".vibesys.toml"
 _FRONTMATTER_DELIMITER = "---"

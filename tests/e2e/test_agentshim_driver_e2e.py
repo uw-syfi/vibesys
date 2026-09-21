@@ -27,7 +27,7 @@ import agentshim
 import pytest
 from pydantic import BaseModel
 
-from vs_agent.contracts import (
+from vs_agent.api import (
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
@@ -43,7 +43,7 @@ from vs_sandbox import HostResource, HostResourceAccess
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from vs_agent.contracts import AgentSession
+    from vs_agent.api import AgentSession
 
 ENABLE_ENV = "VIBESYS_E2E_AGENTS"
 

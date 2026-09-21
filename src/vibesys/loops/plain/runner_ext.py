@@ -22,14 +22,14 @@ from typing import Any, TextIO, TypeVar
 from pydantic import BaseModel
 
 from vibesys.loops.plain.mcp_config import build_issue_mcp_spec
-from vs_agent.client import AgentClient
-from vs_agent.contracts import (  # noqa: TC001
+from vs_agent.api import (
     AgentCapabilities,
+    AgentClient,
     AgentClientProtocol,
+    AgentProgress,
+    AgentSessionKey,
     MCPServerSpec,
 )
-from vs_agent.progress import AgentProgress  # noqa: TC001
-from vs_agent.session_key import AgentSessionKey  # noqa: TC001
 from vs_issue_board import IssueType
 
 T = TypeVar("T", bound=BaseModel)

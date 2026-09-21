@@ -25,13 +25,8 @@ from vibesys.events import (
 from vibesys.mock_replay import build_replay_playbook
 from vibesys.render.sink import output_sink
 from vibesys.schemas import OrchestratorPlan
-from vs_agent.client import AgentClient
-from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
-from vs_agent.drivers.mock import (
-    MockDriver,
-    MockDriverError,
-    ScriptedPlaybook,
-)
+from vs_agent.api import AgentClient, AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
+from vs_agent.api.testing import MockDriver, MockDriverError, ScriptedPlaybook
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

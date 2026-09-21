@@ -17,8 +17,7 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel
 
-from vs_agent.mcp_server import register_tool
-from vs_agent.tools import StdioServerDescriptor, ToolSpec, expose_as_tools
+from vs_agent.api import StdioServerDescriptor, ToolSpec, expose_as_tools, register_tool
 
 
 class _EchoArgs(BaseModel):

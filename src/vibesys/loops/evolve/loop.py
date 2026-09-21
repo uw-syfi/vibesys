@@ -89,8 +89,7 @@ from vibesys.sandbox.run_environment import (
     run_environment_record,
 )
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
-from vs_agent.progress import CandidateProgress
-from vs_agent.spec import AgentBackend
+from vs_agent.api import AgentBackend, CandidateProgress
 from vs_project import EvolveRunConfiguration
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "evolve"

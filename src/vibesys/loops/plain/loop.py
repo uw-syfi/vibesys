@@ -55,8 +55,7 @@ from vibesys.schemas import (
     PerfTrend,
     Verdict,
 )
-from vs_agent.progress import RoundProgress
-from vs_agent.spec import AgentBackend
+from vs_agent.api import AgentBackend, RoundProgress
 from vs_issue_board import (
     Issue,
     IssueBoard,

@@ -39,14 +39,15 @@ from vibesys.run import (
     RunStateNamespace,
 )
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
-from vs_agent.client import AgentClient
-from vs_agent.contracts import (
+from vs_agent.api import (
     AgentCapabilities,
+    AgentClient,
+    AgentSessionKey,
     AgentTurnRequest,
     AgentTurnResult,
+    DurableSessionStore,
+    SessionScope,
 )
-from vs_agent.session_key import AgentSessionKey, SessionScope
-from vs_agent.session_store import DurableSessionStore
 from vs_loop_state import PlainLoopCursor
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 from vs_sandbox import HostResourceAccess, SandboxLifecycle

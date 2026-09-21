@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.input_project import materialize_input_project
 from vibesys.skills import foreign_platform_names, is_platforms_parent
-from vs_agent.provider_policy import cli_skill_dirs
+from vs_agent.api import cli_skill_dirs
 
 if TYPE_CHECKING:
     from vibesys.backends.base import ComputeBackendImpl

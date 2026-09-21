@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING
 
-from vs_agent import AgentSelection  # noqa: TC001  # tracked: #288
+from vs_agent.api import AgentSelection  # noqa: TC001  # tracked: #288
 
 if TYPE_CHECKING:
     from vs_project import Project
