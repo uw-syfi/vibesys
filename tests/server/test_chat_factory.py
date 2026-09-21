@@ -11,6 +11,7 @@ from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.config import Config
 from vibesys.skills import NULL_SKILL_SELECTION
 from vs_agent.api import MCPServerSpec
+from vs_agent.api.testing import FakeAgentClient
 from vs_sandbox import HostResource, HostResourceAccess, ProjectPathPolicy
 
 _FAKE_TOOL_SERVERS = (
@@ -27,14 +28,6 @@ if TYPE_CHECKING:
     import pytest
 
     from vibesys.skills import SkillSelection
-
-
-class _Client:
-    def __init__(self) -> None:
-        self.closed = False
-
-    def close(self) -> None:
-        self.closed = True
 
 
 @dataclass
@@ -127,9 +120,9 @@ def test_host_chat_agent_receives_read_only_server_state(
     shared_state_dir = attachment.log_dir.parent / "server" / "chat"
     shared_state_dir.mkdir(parents=True)
     captured: dict[str, Any] = {}
-    client = _Client()
+    client = FakeAgentClient()
 
-    def fake_build_agent_client(*_args: object, **kwargs: object) -> _Client:
+    def fake_build_agent_client(*_args: object, **kwargs: object) -> FakeAgentClient:
         captured.update(kwargs)
         return client
 
@@ -171,9 +164,9 @@ def test_container_chat_agent_mounts_server_state_read_only(
     shared_state_dir = attachment.log_dir.parent / "server" / "chat"
     shared_state_dir.mkdir(parents=True)
     captured: dict[str, Any] = {}
-    client = _Client()
+    client = FakeAgentClient()
 
-    def fake_build_agent_client(*_args: object, **kwargs: object) -> _Client:
+    def fake_build_agent_client(*_args: object, **kwargs: object) -> FakeAgentClient:
         captured.update(kwargs)
         return client
 
