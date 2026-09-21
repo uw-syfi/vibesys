@@ -683,8 +683,11 @@ def test_profiler_validation_uses_the_selected_environment(
     args = cli._build_agent_parser().parse_args(  # noqa: SLF001
         ["--input", str(project), "--profiler", "nsys"]
     )
-    environment = Mock(supported_profiler_kinds=frozenset({ProfilerKind.TORCH, ProfilerKind.NONE}))
-    monkeypatch.setattr(cli, "build_run_environment", Mock(return_value=environment))
+    monkeypatch.setattr(
+        cli,
+        "supported_profilers",
+        Mock(return_value=frozenset({ProfilerKind.TORCH, ProfilerKind.NONE})),
+    )
 
     with pytest.raises(ConfigurationError, match="run environment 'local'"):
         cli._validate_agent(args)  # noqa: SLF001

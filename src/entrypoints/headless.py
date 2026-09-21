@@ -23,47 +23,52 @@ import tomllib
 from collections.abc import Callable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import NoReturn
 
-from vibesys import boot_trace
 from vibesys.api import (
+    CLI_PROFILER_CHOICES,
     KNOWN_COMPUTE_BACKENDS,
+    PROJECT_ROOT,
+    REPOSITORY_SLUG,
     ComputeBackend,
     Config,
     ConfigurationDiagnostic,
     ConfigurationError,
     DomainName,
+    HeadlessRenderer,
+    InputBundle,
+    InputSynthesisError,
     LoopKind,
+    MetricSpace,
+    Objective,
+    OpenEvolveSearchConfig,
     ProfilerKind,
+    RepositoryVisibility,
     ResumeRef,
+    RunEnvironmentSpec,
     RunRequest,
     RunResult,
+    SynthesizedInputSpec,
+    boot_trace,
+    build_task_image,
+    coerce_profiler_kind,
     create_session,
-    load_config,
-)
-from vibesys.constants import PROJECT_ROOT
-from vibesys.evaluators import objective as _objective
-from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
-from vibesys.loops.metrics import MetricSpace, Objective
-from vibesys.profilers import CLI_PROFILER_CHOICES, coerce_profiler_kind
-from vibesys.render.headless import HeadlessRenderer
-from vibesys.repository import (
-    REPOSITORY_SLUG,
-    RepositoryVisibility,
+    default_skill_roots,
+    experiment_origin_matches,
     generate_experiment_name,
-    repository_name_from_experiment,
-    validate_experiment_name,
-)
-from vibesys.resource_paths import default_skill_roots
-from vibesys.run.experiment_repo import ExperimentRepository
-from vibesys.sandbox.run_environment import (
-    RunEnvironmentSpec,
-    build_run_environment,
+    load_config,
+    load_input_bundle,
+    load_objective,
+    load_project_task,
     make_run_environment_spec,
+    repository_name_from_experiment,
+    resolve_skill_source_dirs,
     run_environment_record,
+    supported_profilers,
+    synthesize_input_bundle,
+    validate_experiment_name,
+    with_operator_constraints,
 )
-from vibesys.sandbox.task_image import build_task_image
-from vibesys.skills import resolve_skill_source_dirs
 from vs_agent.api import SHIPPED_PROVIDERS
 from vs_github import GitHubCLI, GitHubCLIError
 from vs_project import (
@@ -78,13 +83,10 @@ from vs_project import (
     RunSchemaMigrationRequiredError,
 )
 
-if TYPE_CHECKING:
-    from vibesys.loops.evolve.search_policy import OpenEvolveSearchConfig
-
 __all__ = ["PROJECT_ROOT"]
 
-_load_objective = _objective.load_objective
-_with_operator_constraints = _objective.with_operator_constraints
+_load_objective = load_objective
+_with_operator_constraints = with_operator_constraints
 
 _OUTER_LOOPS = ("agent", "profile-guided", "plain", "evolve")
 _MODALITIES = (
@@ -953,7 +955,7 @@ def run_environment_spec_from_args(  # tracked: #288
 def _validate_run_environment_profiler(args: argparse.Namespace) -> None:
     """Validate profiler compatibility through the selected adapter contract."""
     spec = run_environment_spec_from_args(args)
-    supported = build_run_environment(spec).supported_profiler_kinds
+    supported = supported_profilers(spec)
     if supported is None or args.profiler in supported:
         return
     allowed = ", ".join(sorted(kind.value for kind in supported))
@@ -1110,7 +1112,7 @@ def _reuse_cloned_project(remote: str, destination: Path) -> Path:
     expected_origin = remote.removesuffix(".git").rstrip("/")
     actual_origin = existing_origin.stdout.strip().removesuffix(".git").rstrip("/")
     origin_matches = existing_origin.returncode == 0 and (
-        ExperimentRepository(destination, lambda _message: None).origin_matches(remote)
+        experiment_origin_matches(destination, remote)
         if REPOSITORY_SLUG.fullmatch(remote)
         else actual_origin == expected_origin
     )
@@ -1889,12 +1891,6 @@ def _parse_command_flag(raw: str, flag: str) -> tuple[str, ...]:
 
 def _synthesize_standalone_input(args: argparse.Namespace) -> Path:
     """Materialize standalone-input flags into a bundle and return its path."""
-    from vibesys.evaluators.input_synthesis import (  # noqa: PLC0415  # tracked: #288
-        InputSynthesisError,
-        SynthesizedInputSpec,
-        synthesize_input_bundle,
-    )
-
     missing = [
         flag
         for flag, present in (
@@ -2325,10 +2321,6 @@ def _validate_evolve(args: argparse.Namespace) -> None:  # noqa: C901  # tracked
 def _resolve_openevolve_options(
     args: argparse.Namespace,
 ) -> tuple[str | None, OpenEvolveSearchConfig | None]:
-    from vibesys.loops.evolve.search_policy import (  # noqa: PLC0415  # tracked: #288
-        OpenEvolveSearchConfig,  # tracked: #288
-    )
-
     openevolve_defaults = OpenEvolveSearchConfig()
     openevolve_values = (
         args.openevolve_population_size,

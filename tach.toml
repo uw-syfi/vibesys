@@ -24,10 +24,11 @@
 # `server.*` module. Order is enforced by the explicit edges: `server.runtime`
 # sits on top, then transport, api, integration, chat, controller, execution,
 # journal, events, diagnostics at the bottom; a lower module must not list a
-# higher one. `entrypoints` is the composition root: it reaches core both
-# through `server` and directly (headless local mode), so it lists both. Upward
-# imports (core importing server/entrypoints, server importing entrypoints)
-# fail because the edge is undeclared.
+# higher one. `entrypoints` is the composition root: it reaches core only
+# through the `vibesys.api` facade, for both the server path and the headless
+# path, so it lists no core-internal module. Upward imports (core importing
+# server/entrypoints, server importing entrypoints) fail because the edge is
+# undeclared.
 #
 # Libs form a DAG by review: every lib edge is explicit here. The edges are
 # `vs_project` -> `vs_loop_state` and `vs_agent` -> {`vs_sandbox`,
@@ -54,7 +55,7 @@ forbid_circular_dependencies = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_project", "vs_github", "vibesys", "vibesys.api", "vibesys.evaluators", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_agent", "server.runtime", "server.settings"]
+depends_on = ["vs_project", "vs_github", "vibesys.api", "vs_agent", "server.runtime", "server.settings"]
 
 [[modules]]
 path = "server"

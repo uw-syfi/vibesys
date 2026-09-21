@@ -38,8 +38,9 @@ path.
   are forbidden (`forbid_circular_dependencies`): move shared code down instead
   of adding an upward edge. There are
   no layers: every module, including `entrypoints` and each `server.*` module,
-  lists explicit edges. `entrypoints` is the composition root, with both a
-  server path and a direct headless path into core. Upward imports (core to
+  lists explicit edges. `entrypoints` is the composition root; both its server
+  and headless paths reach core only through the `vibesys.api` facade, so it
+  lists no core-internal `vibesys.*` module. Upward imports (core to
   server, server to entrypoints, a `server.*` module to a higher one) fail
   because the edge is undeclared. Tach is the single boundary tool. The libs
   DAG holds because every lib edge is explicit (only `vs_project` to

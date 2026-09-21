@@ -101,13 +101,7 @@ graph TD
 graph TD
     entrypoints --> server.runtime
     entrypoints --> server.settings
-    entrypoints --> vibesys
     entrypoints --> vibesys.api
-    entrypoints --> vibesys.evaluators
-    entrypoints --> vibesys.loops
-    entrypoints --> vibesys.render
-    entrypoints --> vibesys.run
-    entrypoints --> vibesys.sandbox
     entrypoints --> vs_agent
     entrypoints --> vs_github
     entrypoints --> vs_project
