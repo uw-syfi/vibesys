@@ -42,7 +42,7 @@ from vibesys.agents.contracts import (
 )
 from vibesys.agents.host_resource_declarations import declare_agent_host_resources
 from vibesys.agents.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS, is_codex
-from vibesys.events import CommandResultPayload
+from vs_agent.events import CommandResultPayload
 from vs_sandbox import build_host_sandbox
 
 if TYPE_CHECKING:

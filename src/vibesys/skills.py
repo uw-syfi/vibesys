@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Callable, Iterable, Sequence  # noqa: TC003  # tracked: #288
+from collections.abc import Iterable, Sequence  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -12,6 +12,7 @@ import yaml
 
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
 from vibesys.schemas import SkillResourceSelection  # noqa: TC001  # tracked: #288
+from vs_agent.skills import NULL_SKILL_SELECTION, SkillSelection  # noqa: F401
 
 SIDECAR_NAME = ".vibesys.toml"
 _FRONTMATTER_DELIMITER = "---"
@@ -24,25 +25,6 @@ PLATFORM_SKELETON: tuple[str, ...] = ("floor.md", "hardware.md", "profiler.md")
 
 # Parent path of the per-backend directories inside a skill.
 PLATFORMS_PARENT: tuple[str, str] = ("references", "platforms")
-
-
-@dataclass(frozen=True)
-class SkillSelection:
-    """Caller-supplied policy for which skill directories to skip while copying.
-
-    ``skip_dir`` mirrors :func:`shutil.copytree`'s ``ignore`` callable
-    signature: given the directory being copied and the names in it, return the
-    subset to skip. Core injects the prune policy as data so the agent package
-    need not resolve it from domain knowledge (compute backends) it should not
-    have.
-    """
-
-    skip_dir: Callable[[str, list[str]], set[str]]
-
-
-#: The no-op selection: skip nothing beyond whatever the mechanism already
-#: excludes. The default so call sites need not build a lambda themselves.
-NULL_SKILL_SELECTION = SkillSelection(skip_dir=lambda _src_dir, _names: set())
 
 
 def foreign_platform_names(compute_backend: ComputeBackend | None) -> frozenset[str]:

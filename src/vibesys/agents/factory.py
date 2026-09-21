@@ -8,7 +8,7 @@ from vibesys.agents.catalog import agent_catalog
 from vibesys.agents.client import AgentClient, AgentDiagnosticLog
 from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
 from vibesys.agents.spec import AgentBackend, Driver
-from vibesys.skills import NULL_SKILL_SELECTION
+from vs_agent.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from vibesys.agents.session_store import SessionStore
     from vibesys.agents.sink import AgentEventSink
     from vibesys.agents.spec import AgentSpec
-    from vibesys.skills import SkillSelection
+    from vs_agent.skills import SkillSelection
     from vs_sandbox import HostResource, ProjectPathPolicy
 
 

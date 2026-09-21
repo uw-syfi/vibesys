@@ -17,11 +17,11 @@ from pydantic import BaseModel  # noqa: TC002  # tracked: #288
 
 from vibesys.agents.provider_policy import cli_skill_dirs
 from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
-from vibesys.skills import NULL_SKILL_SELECTION
+from vs_agent.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
     from vibesys.agents.sink import AgentEventSink
-    from vibesys.skills import SkillSelection
+    from vs_agent.skills import SkillSelection
 
 # Per-provider CLI skill-discovery paths, matching upstream
 # vibesys-skills install.sh conventions. Each CLI tool auto-loads skills from

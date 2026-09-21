@@ -23,6 +23,19 @@ from server.event_index import (
 )
 from server.run_lifecycle import RunStatus
 
+# AgentOutputChannel, AgentStatusData, TodoItemData, and ToolResultPayload are
+# used directly below. CommandResultPayload and JsonResultPayload are only the
+# ToolResultPayload union members; re-exported here (like vs_loop_state's
+# enums in vibesys.schemas) so existing importers of server.events keep working.
+from vs_agent.events import (
+    AgentOutputChannel,
+    AgentStatusData,
+    CommandResultPayload,  # noqa: F401
+    JsonResultPayload,  # noqa: F401
+    TodoItemData,
+    ToolResultPayload,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from typing import BinaryIO
@@ -81,9 +94,6 @@ class EventStatus(StrEnum):  # noqa: D101  # tracked: #288
 
 OutputStream = Literal["stdout", "stderr"]
 """Which host stream a captured line of server output came from."""
-
-AgentOutputChannel = Literal["assistant", "analysis", "tool", "diagnostic", "prompt"]
-"""Presentation channel for streamed agent output."""
 
 
 class GateKind(StrEnum):
@@ -256,21 +266,6 @@ class PhaseData(EventPayload):  # noqa: D101  # tracked: #288
     attempt: int | None = None
 
 
-class AgentStatusData(EventPayload):
-    """Structured progress readings for one agent invocation.
-
-    Carried on presentation events so renderers can format their own status
-    prefix (e.g. ``[Round 3/24 | Implementer | 12.3s | 20k/1.0M]``) without
-    the server baking any layout or styling into the payload.
-    """
-
-    progress: str | None = None
-    agent_label: str | None = None
-    elapsed_seconds: float = 0.0
-    input_tokens: int = 0
-    context_window: int | None = None
-
-
 class AgentOutputChunkData(EventPayload):  # noqa: D101  # tracked: #288
     kind: Literal["agent_output_chunk"] = "agent_output_chunk"
     channel: AgentOutputChannel
@@ -286,31 +281,6 @@ class ToolCallData(EventPayload):  # noqa: D101  # tracked: #288
     status: AgentStatusData | None = None
 
 
-class CommandResultPayload(EventPayload):
-    """Structured result of a command-style tool execution."""
-
-    kind: Literal["command"] = "command"
-    stdout: str
-    stderr: str
-    exit_code: int | None = None
-    duration: float | None = None
-    """Wall-clock execution time in seconds."""
-
-
-class JsonResultPayload(EventPayload):
-    """A tool result that is a JSON object or array, already parsed."""
-
-    kind: Literal["json"] = "json"
-    value: dict[str, Any] | list[Any]
-
-
-ToolResultPayload = Annotated[
-    CommandResultPayload | JsonResultPayload,
-    Field(discriminator="kind"),
-]
-"""Typed structure a producer preserved alongside the raw result text."""
-
-
 class ToolResultData(EventPayload):  # noqa: D101  # tracked: #288
     kind: Literal["tool_result"] = "tool_result"
     tool: str
@@ -320,14 +290,6 @@ class ToolResultData(EventPayload):  # noqa: D101  # tracked: #288
     # ``content`` stays the raw, always-present text (fidelity, logs, replay).
     # Frontends render ``payload`` when present and fall back to ``content``.
     payload: ToolResultPayload | None = None
-
-
-class TodoItemData(EventPayload):  # noqa: D101  # tracked: #288
-    content: str
-    # Expected values are "pending" / "in_progress" / "completed", but the
-    # field stays open: todo payloads originate from agent tool calls, and an
-    # unknown status must degrade in the renderer, not fail event emission.
-    status: str
 
 
 class TodoUpdateData(EventPayload):  # noqa: D101  # tracked: #288
