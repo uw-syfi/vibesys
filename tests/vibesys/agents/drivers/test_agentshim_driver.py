@@ -42,10 +42,12 @@ from vs_agent import docker_executor
 from vs_agent.api import (
     AgentEvent,
     AgentEventKind,
+    MCPServerSpec,
+)
+from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnRequest,
-    MCPServerSpec,
     SessionDisposition,
 )
 from vs_agent.drivers import agentshim as subject
@@ -55,7 +57,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
-    from vs_agent.api import AgentSession
+    from vs_agent.contracts import AgentSession
 
 SCRIPTED_PROVIDERS = ("claude", "codex", "gemini", "opencode")
 """Every provider VibeSys ships, each scripted in its own stream format.

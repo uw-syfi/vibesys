@@ -18,18 +18,20 @@ import pytest
 from vs_agent.api import (
     AgentCapabilities,
     AgentClient,
+    AgentSessionKey,
+    AgentSessionState,
+    DurableSessionStore,
+    NullSessionStore,
+    SessionScope,
+)
+from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentObserver,
     AgentSession,
-    AgentSessionKey,
     AgentSessionSpec,
-    AgentSessionState,
     AgentTurnRequest,
     AgentTurnResult,
-    DurableSessionStore,
-    NullSessionStore,
     SessionDisposition,
-    SessionScope,
     session_spec_fingerprint,
 )
 from vs_project import (

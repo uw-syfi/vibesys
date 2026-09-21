@@ -15,7 +15,7 @@ from vibesys.schemas import (
     Verdict,
 )
 from vs_agent.api import AgentClient, build_agent_client
-from vs_agent.api.testing import AgentLogger
+from vs_agent.callbacks import AgentLogger
 from vs_agent.drivers.agentshim import AgentShimDriver
 from vs_sandbox import ProjectPathPolicy
 

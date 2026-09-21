@@ -24,7 +24,8 @@ from vibesys.events import (
 )
 from vibesys.render.sink import output_sink
 from vibesys.schemas import OrchestratorPlan
-from vs_agent.api import AgentClient, AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
+from vs_agent.api import AgentClient
+from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
 from vs_agent.drivers.fake import (
     FakeDriver,
     FakeDriverError,

@@ -6,7 +6,7 @@ from vibesys.schemas import (
     Verdict,
 )
 from vs_agent.api import AgentSessionKey, SessionScope
-from vs_agent.api.testing import StubAgentClient
+from vs_agent.stub_runner import StubAgentClient
 
 
 def test_stub_runner_returns_valid_agent_loop_responses(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288

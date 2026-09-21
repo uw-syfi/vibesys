@@ -8,7 +8,7 @@ into that contract, and the ``AgentLogger`` hook that publishes it.
 from vibesys.events import CoreEvent, TodoItemData, TodoUpdateData
 from vibesys.render.sink import output_sink
 from vs_agent.api import todos_from_tool_call
-from vs_agent.api.testing import AgentLogger
+from vs_agent.callbacks import AgentLogger
 
 
 class TestProviderShapes:
