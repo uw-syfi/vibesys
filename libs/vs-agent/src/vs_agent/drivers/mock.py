@@ -9,27 +9,15 @@ driver's events take. The mock never writes an event, a state file, or a log its
 Anything it wrote directly would be a path integration tests then stop
 covering.
 
-Two playbooks:
-
 ``ScriptedPlaybook``
     Synthesize a deterministic turn: assistant text chunks, tool call/result
     pairs of a configured size, a todo snapshot, and a usage update. Volume
     and pacing are knobs, so the same driver serves a fast unit test and a
     deliberately event-heavy boot fixture.
 
-``ReplayPlaybook``
-    Re-emit a pre-converted, pre-timed sequence of driver events, optionally
-    honoring recorded inter-event gaps. Useful when a synthetic stream is not
-    representative enough of what a real run produced. Converting a recorded
-    run's ``run-events.jsonl`` into this shape is core's job (core events are
-    a core concept), so it lives in :func:`vibesys.mock_replay.build_replay_playbook`
-    rather than here.
-
-Both playbooks answer a structured turn with
+The playbook answers a structured turn with
 :func:`~vs_agent.scripted_rounds.scripted_round_payload`, so a scripted
-run completes loop rounds on the happy path. A replay reproduces the recorded
-*event stream*; its turn result still comes from the scripted artifacts,
-because a recorded event log does not carry the agent's structured answer.
+run completes loop rounds on the happy path.
 """
 
 from __future__ import annotations
@@ -131,28 +119,10 @@ class ScriptedPlaybook:
             )
 
 
-@dataclass(frozen=True, slots=True)
-class ReplayPlaybook:
-    """Re-emit a pre-converted, pre-timed sequence of driver events.
-
-    ``events`` pairs each :class:`AgentEvent` with the gap, in seconds, to
-    wait *before* emitting it (``0`` for the first event, or when gaps were
-    dropped). Build one from a recorded run's event log with
-    :func:`vibesys.mock_replay.build_replay_playbook`, which owns the
-    core-event conversion and gap/speed math; this dataclass itself carries
-    no knowledge of core events.
-    """
-
-    events: tuple[tuple[AgentEvent, float], ...] = ()
-
-
-Playbook = ScriptedPlaybook | ReplayPlaybook
-
-
 class MockSession:
     """One mock conversation. Its only state is how many turns it has run."""
 
-    def __init__(self, *, spec: AgentSessionSpec, playbook: Playbook) -> None:
+    def __init__(self, *, spec: AgentSessionSpec, playbook: ScriptedPlaybook) -> None:
         """Create a session bound to ``playbook`` for ``spec``'s role."""
         self._spec = spec
         self._playbook = playbook
@@ -173,11 +143,7 @@ class MockSession:
         # artifacts line up with the round the caller thinks it is running.
         # An unlabelled turn falls back to this session's turn count.
         round_index = round_number_from_label(request.label) if request.label else self._turns
-        events = (
-            _scripted_events(self._playbook, self._spec, round_index)
-            if isinstance(self._playbook, ScriptedPlaybook)
-            else _replayed_events(self._playbook)
-        )
+        events = _scripted_events(self._playbook, self._spec, round_index)
         for event in events:
             if observer is not None:
                 observer.on_event(event)
@@ -212,9 +178,9 @@ class MockSession:
 class MockDriver:
     """Create mock sessions that stream a playbook instead of running an agent."""
 
-    def __init__(self, playbook: Playbook | None = None) -> None:
+    def __init__(self, playbook: ScriptedPlaybook | None = None) -> None:
         """Create a driver whose sessions all run ``playbook``."""
-        self._playbook: Playbook = playbook if playbook is not None else ScriptedPlaybook()
+        self._playbook: ScriptedPlaybook = playbook if playbook is not None else ScriptedPlaybook()
         self._sessions: list[MockSession] = []
         self._closed = False
 
@@ -380,20 +346,3 @@ def _scripted_turn_text(request: AgentTurnRequest, round_index: int) -> str:
             "vs_agent.scripted_rounds so scripted runs keep covering this role"
         )
     return json.dumps(payload)
-
-
-# --- replay mode -----------------------------------------------------------
-
-
-def _replayed_events(playbook: ReplayPlaybook) -> Iterator[AgentEvent]:
-    """Re-emit ``playbook``'s already-converted, already-timed events.
-
-    Conversion from a recorded run's core events, and the speed/max-gap
-    timing math, both happened when the playbook was built (see
-    :func:`vibesys.mock_replay.build_replay_playbook`); this driver only
-    knows how to wait and emit.
-    """
-    for event, gap in playbook.events:
-        if gap > 0:
-            time.sleep(gap)
-        yield event
