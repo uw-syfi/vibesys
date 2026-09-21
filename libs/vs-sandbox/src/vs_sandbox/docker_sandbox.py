@@ -10,6 +10,7 @@ import re
 import shlex
 import signal
 import subprocess
+import threading
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -124,7 +125,12 @@ def _sigint_handler(signum: int, frame: FrameType | None) -> None:
     _original_sigint(signum, frame)
 
 
-signal.signal(signal.SIGINT, _sigint_handler)
+# Python only permits installing signal handlers from the main thread. This
+# module may first be imported off the main thread (a run dispatched via
+# asyncio.to_thread imports the Docker backend lazily), so skip registration
+# there rather than raise; atexit cleanup above still runs on process exit.
+if threading.current_thread() is threading.main_thread():
+    signal.signal(signal.SIGINT, _sigint_handler)
 
 
 def _first_component_below(home: str, destination: str) -> str:
