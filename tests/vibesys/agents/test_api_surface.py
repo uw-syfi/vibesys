@@ -15,7 +15,7 @@ import sys
 import vs_agent.api
 import vs_agent.api.testing
 from vs_agent.api import AgentClient, AgentClientProtocol
-from vs_agent.api.testing import StubAgentClient
+from vs_agent.api.testing import FakeAgentClient, StubAgentClient
 
 
 def _protocol_members(protocol: type) -> set[str]:
@@ -78,6 +78,7 @@ def test_stub_fake_conforms_to_client_protocol() -> None:
     assert required, "expected a non-empty protocol member set"
     for member in required:
         assert hasattr(StubAgentClient, member), f"stub missing {member!r}"
+        assert hasattr(FakeAgentClient, member), f"fake missing {member!r}"
         assert hasattr(AgentClient, member), f"real client missing {member!r}"
 
 
