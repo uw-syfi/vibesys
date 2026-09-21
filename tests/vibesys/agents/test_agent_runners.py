@@ -11,6 +11,7 @@ from vibesys.agents import build_agent_client
 from vibesys.agents.callbacks import AgentLogger
 from vibesys.agents.client import AgentClient
 from vibesys.agents.drivers.agentshim import AgentShimDriver
+from vibesys.agents.spec import AgentSpec
 from vibesys.config import Config
 from vibesys.render.log import log_json_and_print, log_prompt_markdown_and_print
 from vibesys.schemas import (
@@ -23,6 +24,35 @@ from vs_sandbox import ProjectPathPolicy
 def _agent_config(**agent) -> Config:  # noqa: ANN003  # tracked: #288
     """Minimal valid Config carrying just an ``[agent]`` section for runner tests."""
     return Config.model_validate({"model": {"name": "m"}, "agent": agent})
+
+
+def _build_client(  # noqa: ANN202, PLR0913
+    config,  # noqa: ANN001  # tracked: #288
+    *,
+    agent_backend=None,  # noqa: ANN001  # tracked: #288
+    cli_provider=None,  # noqa: ANN001  # tracked: #288
+    model_name="m",  # noqa: ANN001  # tracked: #288
+    backends=None,  # noqa: ANN001  # tracked: #288
+    skill_source_dirs=None,  # noqa: ANN001  # tracked: #288
+    use_docker=False,  # noqa: ANN001  # tracked: #288
+    **kwargs,  # noqa: ANN003  # tracked: #288
+):
+    """Resolve an :class:`AgentSpec` the way application config does, then build."""
+    spec = AgentSpec.from_config(
+        config,
+        backend=agent_backend,
+        provider=cli_provider,
+        model=model_name,
+    )
+    return build_agent_client(
+        config,
+        spec=spec,
+        backends=backends,
+        skill_source_dirs=skill_source_dirs if skill_source_dirs is not None else [],
+        run_log_file=None,
+        use_docker=use_docker,
+        **kwargs,
+    )
 
 
 def _judge_fallback() -> JudgeResponse:
@@ -61,69 +91,40 @@ class TestBuildAgentClient:
     """Tests for :func:`build_agent_client`."""
 
     def test_build_agent_client_default_is_cli(self):  # noqa: ANN201  # tracked: #288
-        runner = build_agent_client(
+        runner = _build_client(
             _agent_config(),
-            agent_backend=None,
-            cli_provider=None,
             backends={
                 "implementer": MagicMock(),
                 "judge": MagicMock(),
                 "perf_eval": MagicMock(),
             },
-            skill_source_dirs=[],
-            model_name="m",
-            run_log_file=None,
-            use_docker=False,
         )
         assert runner.backend_name == "cli"
         assert runner.provider == "codex"
 
     def test_build_agent_client_cli_provider_from_config(self):  # noqa: ANN201  # tracked: #288
-        runner = build_agent_client(
-            _agent_config(backend="cli", cli_provider="claude"),
-            agent_backend=None,
-            cli_provider=None,
-            backends=None,
-            skill_source_dirs=[],
-            model_name="m",
-            run_log_file=None,
-            use_docker=False,
-        )
+        runner = _build_client(_agent_config(backend="cli", cli_provider="claude"))
         assert runner.backend_name == "cli"
         assert runner.provider == "claude"
 
     def test_build_agent_client_cli_defaults_to_codex(self):  # noqa: ANN201  # tracked: #288
         """When backend=cli and no provider specified, defaults to codex."""
-        runner = build_agent_client(
-            _agent_config(backend="cli"),
-            agent_backend=None,
-            cli_provider=None,
-            backends=None,
-            skill_source_dirs=[],
-            model_name="m",
-            run_log_file=None,
-            use_docker=False,
-        )
+        runner = _build_client(_agent_config(backend="cli"))
         assert runner.backend_name == "cli"
         assert runner.provider == "codex"
 
     def test_build_agent_client_cli_docker_returns_a_containerized_driver(self):  # noqa: ANN201  # tracked: #288
         """cli backend + docker returns an AgentClient over a containerized AgentShim driver."""
-        from unittest.mock import MagicMock  # noqa: PLC0415  # tracked: #288
-
         mock_backends = {
             "implementer": MagicMock(),
             "judge": MagicMock(),
             "perf_eval": MagicMock(),
         }
-        runner = build_agent_client(
+        runner = _build_client(
             _agent_config(),
             agent_backend="cli",
             cli_provider="claude",
             backends=mock_backends,
-            skill_source_dirs=[],
-            model_name="m",
-            run_log_file=None,
             use_docker=True,
         )
         assert isinstance(runner, AgentClient)
@@ -131,44 +132,38 @@ class TestBuildAgentClient:
         assert runner._driver._docker_sandboxes is mock_backends  # noqa: SLF001
 
     def test_build_agent_client_rejects_unsupported_docker_provider(self):  # noqa: ANN201  # tracked: #288
-        with pytest.raises(SystemExit, match="not yet supported with --docker"):
-            build_agent_client(
+        """A provider unknown to agentshim is rejected building the spec.
+
+        Previously this was only enforced for ``--docker``
+        (``DOCKER_PROVIDER_ENV``). ``AgentSpec`` now validates every provider
+        against ``agent_catalog()``, which agentshim resolves from the same
+        shipped-provider list ``DOCKER_PROVIDER_ENV`` is built from, so any
+        provider that clears this check already has a docker env entry.
+        """
+        with pytest.raises(ValueError, match="nonexistent"):
+            _build_client(
                 _agent_config(),
                 agent_backend="cli",
                 cli_provider="nonexistent",
                 backends={},
-                skill_source_dirs=[],
-                model_name="m",
-                run_log_file=None,
                 use_docker=True,
             )
 
     def test_build_agent_client_rejects_unknown_backend(self):  # noqa: ANN201  # tracked: #288
-        with pytest.raises(SystemExit, match="unknown agent backend"):
-            build_agent_client(
-                _agent_config(),
-                agent_backend="bogus",
-                cli_provider=None,
-                backends=None,
-                skill_source_dirs=[],
-                model_name="m",
-                run_log_file=None,
-                use_docker=False,
-            )
+        """An ``AgentSpec`` rejects a backend string outside {cli, stub} at construction."""
+        with pytest.raises(ValueError, match="bogus"):
+            AgentSpec.from_config(_agent_config(), backend="bogus")
 
     def test_required_project_enforcement_rejects_non_cli_backend(self):  # noqa: ANN201  # tracked: #288
-        with pytest.raises(SystemExit, match="requires the CLI agent backend"):
-            build_agent_client(
-                _agent_config(backend="unsupported"),
-                agent_backend=None,
-                cli_provider=None,
-                backends={"implementer": MagicMock()},
-                skill_source_dirs=[],
-                model_name="m",
-                run_log_file=None,
-                use_docker=False,
-                require_host_sandbox=True,
-            )
+        """An unsupported ``[agent].backend`` value is rejected building the spec.
+
+        Previously this was caught later, inside ``build_agent_client``, and
+        only when ``require_host_sandbox`` was set. ``AgentBackend`` now has
+        exactly two members (cli, stub), so an unsupported backend string is
+        rejected unconditionally, as soon as an ``AgentSpec`` is resolved.
+        """
+        with pytest.raises(ValueError, match="unsupported"):
+            AgentSpec.from_config(_agent_config(backend="unsupported"))
 
     def test_required_workspace_enforcement_permits_omnigent(self):  # noqa: ANN201
         config = Config.model_validate(
@@ -182,33 +177,13 @@ class TestBuildAgentClient:
             }
         )
 
-        runner = build_agent_client(
-            config,
-            agent_backend=None,
-            cli_provider=None,
-            backends=None,
-            skill_source_dirs=[],
-            model_name="m",
-            run_log_file=None,
-            use_docker=False,
-            require_host_sandbox=True,
-        )
+        runner = _build_client(config, require_host_sandbox=True)
 
         assert isinstance(runner, AgentClient)
         assert type(runner._driver).__name__ == "OmnigentDriver"  # noqa: SLF001
 
     def test_required_project_enforcement_permits_stub(self):  # noqa: ANN201  # tracked: #288
-        runner = build_agent_client(
-            _agent_config(backend="stub"),
-            agent_backend=None,
-            cli_provider=None,
-            backends=None,
-            skill_source_dirs=[],
-            model_name="m",
-            run_log_file=None,
-            use_docker=False,
-            require_host_sandbox=True,
-        )
+        runner = _build_client(_agent_config(backend="stub"), require_host_sandbox=True)
 
         assert runner.backend_name == "stub"
 
@@ -218,15 +193,8 @@ class TestBuildAgentClient:
             hidden_paths=(".state/local",),
         )
 
-        runner = build_agent_client(
+        runner = _build_client(
             _agent_config(backend="cli", cli_provider="codex"),
-            agent_backend=None,
-            cli_provider=None,
-            backends=None,
-            skill_source_dirs=[],
-            model_name="m",
-            run_log_file=None,
-            use_docker=False,
             project_path_policy=policy,
             require_host_sandbox=True,
         )
@@ -244,16 +212,7 @@ class TestBuildAgentClient:
 
     @staticmethod
     def _cli_client(config, *, model_name):  # noqa: ANN001, ANN205  # tracked: #288
-        return build_agent_client(
-            config,
-            agent_backend=None,
-            cli_provider=None,
-            backends=None,
-            skill_source_dirs=[],
-            model_name=model_name,
-            run_log_file=None,
-            use_docker=False,
-        )
+        return _build_client(config, model_name=model_name)
 
     @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
     def test_cli_backend_uses_model_name(self, provider):  # noqa: ANN001, ANN201  # tracked: #288
@@ -356,15 +315,8 @@ class TestBuildAgentClientBackendSelection:
     """
 
     def _build(self, config, *, agent_backend=None, cli_provider=None):  # noqa: ANN001, ANN202  # tracked: #288
-        return build_agent_client(
-            config,
-            agent_backend=agent_backend,
-            cli_provider=cli_provider,
-            backends=None,
-            skill_source_dirs=[],
-            model_name="",
-            run_log_file=None,
-            use_docker=False,
+        return _build_client(
+            config, agent_backend=agent_backend, cli_provider=cli_provider, model_name=""
         )
 
     def test_default_backend_is_cli_with_empty_config(self):  # noqa: ANN201  # tracked: #288

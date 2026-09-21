@@ -18,11 +18,11 @@ from typing import Any, Literal
 
 from vibesys import constants
 from vibesys.agents.base import ResponseFallback
-from vibesys.agents.factory import resolve_agent_driver
 from vibesys.agents.progress import RoundProgress
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
+from vibesys.agents.spec import AgentBackend, resolve_agent_driver
 from vibesys.config import Config, as_config
-from vibesys.constants import DEFAULT_AGENT_BACKEND, DEFAULT_COMPUTE_BACKEND, ComputeBackend
+from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.context import create_run_context
 from vibesys.domains.base import DomainDefinition, DomainRole
 from vibesys.domains.registry import resolve_domain
@@ -2383,7 +2383,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     resolved_agent_backend = (
         "stub"
         if agent_backend == "stub"
-        else agent_backend or normalized_config.agent.backend or DEFAULT_AGENT_BACKEND
+        else str(agent_backend or normalized_config.agent.backend or AgentBackend.CLI)
     )
     project_configuration = AgentRunConfiguration(
         outer_loop=outer_loop,
@@ -2393,7 +2393,9 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         model=normalized_config.model.name,
         agent_backend=resolved_agent_backend,
         agent_driver=(
-            resolve_agent_driver(normalized_config) if resolved_agent_backend == "cli" else None
+            resolve_agent_driver(normalized_config).value
+            if resolved_agent_backend == "cli"
+            else None
         ),
         cli_provider=(
             cli_provider or normalized_config.agent.cli_provider or "codex"

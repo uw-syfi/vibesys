@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from vibesys.agents.catalog import agent_catalog
 from vibesys.agents.client import AgentClient, AgentDiagnosticLog
-from vibesys.agents.provider_policy import DEFAULT_CLI_PROVIDER
 from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
-from vibesys.constants import DEFAULT_AGENT_BACKEND
+from vibesys.agents.spec import AgentBackend, Driver, resolve_agent_driver
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -17,24 +17,10 @@ if TYPE_CHECKING:
     from vibesys.agents.contracts import AgentClientProtocol
     from vibesys.agents.session_store import SessionStore
     from vibesys.agents.sink import AgentEventSink
+    from vibesys.agents.spec import AgentSpec
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
     from vs_sandbox import HostResource, ProjectPathPolicy
-
-DEFAULT_AGENT_DRIVER = "agentshim"
-
-AGENT_DRIVERS: tuple[str, ...] = ("agentshim", "omnigent", "mock")
-"""Every driver this application configuration can select.
-
-``mock`` is test infrastructure: it satisfies the same driver contract while
-streaming a deterministic playbook, so integration tests exercise the real
-client, sink, and application integration path without an agent CLI.
-"""
-
-
-def resolve_agent_driver(config: Config) -> str:
-    """Resolve the configured agent driver, defaulting to agentshim."""
-    return config.agent.driver or DEFAULT_AGENT_DRIVER
 
 
 def agent_driver_supports_mcp_servers(
@@ -48,16 +34,16 @@ def agent_driver_supports_mcp_servers(
     incompatible feature before creating a project or driver resources.
     Non-CLI backends do not use the external-driver contract.
     """
-    backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
-    if backend != "cli":
+    backend = agent_backend or config.agent.backend or AgentBackend.CLI
+    if backend != AgentBackend.CLI:
         return None
 
     driver_name = resolve_agent_driver(config)
-    if driver_name == "omnigent":
+    if driver_name is Driver.OMNIGENT:
         from vibesys.agents.drivers.omnigent import OMNIGENT_CAPABILITIES  # noqa: PLC0415
 
         return OMNIGENT_CAPABILITIES.mcp_servers
-    if driver_name == "mock":
+    if driver_name is Driver.MOCK:
         from vibesys.agents.drivers.mock import MOCK_CAPABILITIES  # noqa: PLC0415
 
         return MOCK_CAPABILITIES.mcp_servers
@@ -67,39 +53,13 @@ def agent_driver_supports_mcp_servers(
     return AGENTSHIM_CAPABILITIES.mcp_servers
 
 
-def supported_cli_providers(driver_name: str) -> tuple[str, ...]:
-    """Return the provider names one external driver supports.
-
-    Raises ``ValueError`` for an unknown driver so callers validating a
-    requested driver/provider pair reject both halves before building
-    anything.
-    """
-    if driver_name == "omnigent":
-        from vibesys.agents.omnigent.providers import supported_providers  # noqa: PLC0415
-
-        return tuple(supported_providers())
-    if driver_name == "agentshim":
-        from vibesys.agents.drivers.agentshim import supported_providers  # noqa: PLC0415
-
-        return tuple(supported_providers())
-    if driver_name == "mock":
-        from vibesys.agents.drivers.mock import supported_providers  # noqa: PLC0415
-
-        return tuple(supported_providers())
-    raise ValueError(  # noqa: TRY003  # tracked: #288
-        f"unknown agent driver {driver_name!r}; expected one of: {', '.join(AGENT_DRIVERS)}"
-    )
-
-
 def build_agent_client(  # noqa: C901, PLR0913
     config: Config,
     *,
-    agent_backend: str | None,
-    cli_provider: str | None,
+    spec: AgentSpec,
     backends: dict[str, Any] | None,
     skill_source_dirs: list[Path],
     compute_backend: ComputeBackend | None = None,
-    model_name: str,
     run_log_file: TextIO | None,
     use_docker: bool,
     log_dir: Path | None = None,
@@ -109,61 +69,51 @@ def build_agent_client(  # noqa: C901, PLR0913
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
 ) -> AgentClientProtocol:
-    """Build the configured application-level agent service."""
+    """Build the configured application-level agent service from ``spec``."""
     host_resources = tuple(host_resources)
     agent_cfg = config.agent
-    backend = agent_backend or agent_cfg.backend or DEFAULT_AGENT_BACKEND
+    backend = spec.backend
 
-    if backend != "cli" and agent_cfg.driver is not None:
+    if backend != AgentBackend.CLI and agent_cfg.driver is not None:
         raise SystemExit(  # noqa: TRY003  # tracked: #288
-            f"agent driver {agent_cfg.driver!r} is valid only with backend='cli', not {backend!r}"
+            f"agent driver {agent_cfg.driver!r} is valid only with backend='cli', "
+            f"not {backend.value!r}"
         )
 
-    if require_host_sandbox and backend not in {"cli", "stub"}:
+    if require_host_sandbox and backend not in {AgentBackend.CLI, AgentBackend.STUB}:
         raise SystemExit(  # noqa: TRY003  # tracked: #288
             "local project execution requires the CLI agent backend so VibeSys can "
             "enforce nested read-only and hidden paths"
         )
 
-    if backend == "stub":
+    if backend is AgentBackend.STUB:
         from vibesys.agents.stub_runner import StubAgentClient  # noqa: PLC0415
 
         return StubAgentClient(event_sink=events)
 
-    if backend != "cli":
-        raise SystemExit(f"unknown agent backend: {backend!r}")  # noqa: TRY003  # tracked: #288
+    if backend != AgentBackend.CLI:
+        raise SystemExit(f"unknown agent backend: {backend.value!r}")  # noqa: TRY003  # tracked: #288
 
-    driver_name = resolve_agent_driver(config)
-    provider = cli_provider or agent_cfg.cli_provider or DEFAULT_CLI_PROVIDER
+    driver_name = spec.driver
+    provider = spec.provider
     timeout = agent_cfg.cli_timeout
     driver_log = AgentDiagnosticLog(run_log_file)
 
-    if driver_name == "mock":
+    if use_docker and not agent_catalog()[driver_name].supports_docker:
+        raise SystemExit(  # noqa: TRY003  # tracked: #288
+            f"agent.driver={driver_name.value!r} is not supported with --docker"
+        )
+
+    if driver_name == Driver.MOCK:
         from vibesys.agents.drivers.mock import MockDriver  # noqa: PLC0415
 
-        # The mock runs no agent, so the provider name only labels the run.
-        provider = "mock"
         driver = MockDriver()
-    elif driver_name == "omnigent":
-        if use_docker:
-            raise SystemExit(  # noqa: TRY003  # tracked: #288
-                "agent.driver='omnigent' is not supported with --docker"
-            )
+    elif driver_name == Driver.OMNIGENT:
         from vibesys.agents.drivers.omnigent import (  # noqa: PLC0415
             OmnigentDriver,
             OmnigentDriverError,
         )
-        from vibesys.agents.omnigent.providers import (  # noqa: PLC0415
-            OMNIGENT_PROVIDER_EXECUTORS,
-            supported_providers,
-        )
 
-        if provider not in OMNIGENT_PROVIDER_EXECUTORS:
-            raise OmnigentDriverError(  # noqa: TRY003
-                f"Omnigent does not support agent provider {provider!r}; "
-                f"supported providers: {supported_providers()}. Select "
-                "agent.driver='agentshim' for other providers."
-            )
         if host_resources:
             raise OmnigentDriverError(  # noqa: TRY003
                 "Omnigent cannot enforce the requested VibeSys host-resource "
@@ -198,19 +148,12 @@ def build_agent_client(  # noqa: C901, PLR0913
         provider=provider,
         skills=skill_source_dirs,
         compute_backend=compute_backend,
-        model_name=model_name or provider,
+        model_name=spec.model or provider,
         timeout=timeout,
         run_log_file=run_log_file,
         log_dir=log_dir,
-        default_reasoning_effort=config.thinking.level,
-        role_models={
-            role: configured
-            for role, configured in {
-                "orchestrator": agent_cfg.outer.model,
-                "implementer": agent_cfg.inner.model,
-            }.items()
-            if configured is not None
-        },
+        default_reasoning_effort=spec.reasoning_effort,
+        role_models=spec.role_models,
         role_reasoning_efforts={
             role: configured
             for role, configured in {
