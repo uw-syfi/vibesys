@@ -116,11 +116,10 @@ def test_legacy_active_hypothesis_backfills_framework_revert_commit():  # noqa: 
     assert _backfill_revert_commit(state, records) is False
 
 
-# RoundRecord's persistence and rollback resolution (RoundHistory) now live
-# in libs/vs-loop-state; see its own tests
-# (libs/vs-loop-state/tests/test_vs_loop_state_agent.py) for that coverage,
-# including the failed-child, implementation-failed, and distant-rollback
-# cases previously duplicated here.
+# RoundRecord's persistence and rollback resolution (RoundHistory) live in
+# libs/vs-loop-state; see its own tests
+# (libs/vs-loop-state/tests/test_vs_loop_state_agent.py) for the
+# failed-child, implementation-failed, and distant-rollback coverage.
 
 
 @pytest.fixture
@@ -279,7 +278,7 @@ def _new_orchestrate_fake() -> FakeAgentClient:
     ``SUPPORTED``/``DISPROVEN`` cadence would change how many rounds start a
     new hypothesis. So every orchestrate test builds its fake from here
     rather than a bare ``FakeAgentClient()``, even when it enqueues nothing
-    else, to keep that cadence identical to the old harness's.
+    else, to keep that cadence identical across every orchestrate test.
     """
     fake = FakeAgentClient()
     fake.set_response("orchestrator", _orchestrator_default)
@@ -298,8 +297,7 @@ def _orchestrator_turns(
     Multi-agent rounds call ``kind="orchestrator"`` twice per new hypothesis:
     once for the pre-round profiling decision, once for the plan. Both share
     the ``"orchestrator"`` kind, so ``FakeAgentClient.enqueue`` needs them in
-    that call order, not grouped by schema the way the old per-schema queues
-    were. ``pre_decisions[i]`` pairs with ``plans[i]``; a shorter/omitted
+    that call order, not grouped by schema. ``pre_decisions[i]`` pairs with ``plans[i]``; a shorter/omitted
     ``pre_decisions`` fills with the harness's permissive default.
     """
     pre = list(pre_decisions or [])
@@ -4530,11 +4528,9 @@ def test_loop_generic_auto_profiler_resolves_to_macos_cpu(tmp_path, ref_file):  
 
 
 def test_loop_asks_whether_to_profile_before_the_first_plan(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    """Round 1 routes through the same decision as every other round.
-
-    It used to skip that decision outright, which also skipped the profiler
-    nested under it: the round holding the least evidence was the one round
-    where nothing could ask for measurement.
+    """Round 1 routes through the same profiling decision as every other round,
+    so it can still request a profiler measurement even though it has the
+    least history to go on.
     """
     fake = _new_orchestrate_fake()
     fake.enqueue(

@@ -1,13 +1,12 @@
 """In-memory, configurable :class:`AgentClientProtocol` test double.
 
-``StubAgentClient`` gives every test the same scripted rounds with zero
-configuration. That fidelity is not enough for tests that need to assert what
-a caller actually sent (prompts, MCP servers, session keys), inject specific
-or failing responses, or observe streamed output and session-reuse behavior.
-``FakeAgentClient`` covers that: zero-config it behaves like the stub
-(scripted structured responses, a fixed default text), and every call is
-recorded as a :class:`FakeInvocation` so a test can assert on it directly
-instead of spying on constructor kwargs.
+Where :class:`~vs_agent.stub_runner.StubAgentClient` returns the same scripted
+rounds with no configuration, ``FakeAgentClient`` lets a test assert what a
+caller actually sent (prompts, MCP servers, session keys), inject specific or
+failing responses, and observe streamed output and session-reuse behavior.
+Zero-config it behaves like the stub (scripted structured responses, a fixed
+default text); every call is recorded as a :class:`FakeInvocation` for direct
+assertions.
 
 This module stays schema-agnostic (no ``vibesys`` core imports) and driver-
 agnostic (no ``agentshim``/``omnigent`` imports): callers enqueue already-
@@ -117,7 +116,7 @@ class FakeAgentClient:
     default sentence. Configured through the chained ``enqueue``/``set_*``/
     ``fail``/``on_invoke`` methods, it can return specific responses per agent
     ``kind``, fail on demand, stream output through the injected event sink,
-    and track provider-session reuse, all without spying on caller kwargs.
+    and track provider-session reuse.
     """
 
     backend_name = "fake"
@@ -156,8 +155,7 @@ class FakeAgentClient:
 
         self.calls: list[FakeInvocation] = []
         #: Streams passed to :meth:`set_log_file`, in call order, so a test can
-        #: assert the run logger was wired to the client (a vibesys policy)
-        #: without spying on a mock.
+        #: assert the run logger was wired to the client.
         self.log_files: list[object] = []
 
         self._queues: dict[str, list[QueuedResponse]] = {}
@@ -504,10 +502,8 @@ class FakeAgentClient:
             return response_cls.model_validate(scripted)
         value = _materialize_response(source, invocation)
         if isinstance(value, BaseModel):
-            # An already-built BaseModel is trusted as-is, matching
-            # StubAgentClient's structured-return contract: the caller chose
-            # to enqueue a model instance instead of a dict, so it is on the
-            # hook for it matching ``response_cls``.
+            # A model instance is returned as-is; the caller enqueued it (rather
+            # than a dict) and owns it matching ``response_cls``.
             return value  # ty: ignore[invalid-return-type]  # tracked: #288
         return response_cls.model_validate(value)
 
