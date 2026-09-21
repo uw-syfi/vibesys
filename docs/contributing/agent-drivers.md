@@ -342,14 +342,11 @@ backend = "cli"
 driver = "mock"
 ```
 
-Two playbooks, defined in the library's `drivers.mock` module and re-exported
-from the public `vs_agent.api.testing` surface:
-
-- `ScriptedPlaybook` synthesizes a turn from configurable counts: assistant
-  text chunks, thinking chunks, tool call/result pairs of a chosen payload
-  size, todo snapshots, and usage updates, with optional per-event pacing.
-- `ReplayPlaybook` re-emits a recorded run's `run-events.jsonl` at a
-  configurable speed (`0` replays as fast as the consumer accepts events).
+`ScriptedPlaybook`, defined in the library's `drivers.mock` module and
+re-exported from the public `vs_agent.api.testing` surface, synthesizes a turn
+from configurable counts: assistant text chunks, thinking chunks, tool
+call/result pairs of a chosen payload size, todo snapshots, and usage
+updates, with optional per-event pacing.
 
 Structured turns are answered from `vs_agent.scripted_rounds`, which the
 stub agent client shares, so a scripted run completes loop rounds on the happy

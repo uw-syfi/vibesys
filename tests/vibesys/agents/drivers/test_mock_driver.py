@@ -22,7 +22,6 @@ from vibesys.events import (
     ToolResultData,
     UsageUpdateData,
 )
-from vibesys.mock_replay import build_replay_playbook
 from vibesys.render.sink import output_sink
 from vibesys.schemas import OrchestratorPlan
 from vs_agent.api import AgentClient, AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
@@ -251,88 +250,3 @@ def test_a_closed_driver_refuses_new_sessions(tmp_path):  # noqa: ANN001, ANN201
                 policy=AgentExecutionPolicy(require_enforcement=False),
             )
         )
-
-
-def test_replay_mode_round_trips_a_recorded_event_log(tmp_path, sink_events):  # noqa: ANN001, ANN201
-    recording = tmp_path / "run-events.jsonl"
-    recorded = _record(MockDriver(ScriptedPlaybook(tool_calls=2, todo_updates=1)), tmp_path)
-    recording.write_text("".join(event.model_dump_json() + "\n" for event in recorded))
-    sink_events.clear()
-
-    _invoke_plan(MockDriver(build_replay_playbook(recording)), tmp_path)
-
-    def shape(events: list[CoreEvent]) -> list[tuple[str, str]]:
-        return [
-            (event.type.value, _label(event))
-            for event in events
-            if event.type
-            in {
-                CoreEventType.TOOL_CALL,
-                CoreEventType.TOOL_RESULT,
-                CoreEventType.TODO_UPDATE,
-                CoreEventType.USAGE_UPDATE,
-            }
-        ]
-
-    assert shape(sink_events) == shape(recorded)
-
-
-def test_replay_mode_reproduces_assistant_and_analysis_text(tmp_path, sink_events):  # noqa: ANN001, ANN201
-    recording = tmp_path / "run-events.jsonl"
-    recorded = _record(MockDriver(ScriptedPlaybook(text_chunks=3, thinking_chunks=2)), tmp_path)
-    recording.write_text("".join(event.model_dump_json() + "\n" for event in recorded))
-    sink_events.clear()
-
-    _invoke_plan(MockDriver(build_replay_playbook(recording)), tmp_path)
-
-    def channels(events: list[CoreEvent]) -> list[str]:
-        return [
-            event.data.channel
-            for event in events
-            if event.type is CoreEventType.AGENT_OUTPUT_CHUNK
-            and isinstance(event.data, AgentOutputChunkData)
-            and event.data.channel in {"assistant", "analysis"}
-        ]
-
-    assert channels(sink_events) == channels(recorded)
-
-
-def test_replay_mode_rejects_a_missing_recording(tmp_path):  # noqa: ANN001, ANN201
-    with pytest.raises(MockDriverError, match="replay event log not found"):
-        build_replay_playbook(tmp_path / "absent.jsonl")
-
-
-def test_replay_mode_skips_a_truncated_trailing_record(tmp_path, sink_events):  # noqa: ANN001, ANN201
-    recording = tmp_path / "run-events.jsonl"
-    recorded = _record(MockDriver(ScriptedPlaybook(tool_calls=1, todo_updates=0)), tmp_path)
-    body = "".join(event.model_dump_json() + "\n" for event in recorded)
-    recording.write_text(body + '{"type": "tool_call", "timestamp"')
-    sink_events.clear()
-
-    _invoke_plan(MockDriver(build_replay_playbook(recording)), tmp_path)
-
-    assert _of_type(sink_events, CoreEventType.TOOL_CALL)
-
-
-def _label(event: CoreEvent) -> str:
-    data = event.data
-    if isinstance(data, ToolCallData):
-        return data.tool
-    if isinstance(data, ToolResultData):
-        return data.content
-    if isinstance(data, TodoUpdateData):
-        return ",".join(f"{item.content}:{item.status}" for item in data.todos)
-    if isinstance(data, UsageUpdateData):
-        return str(data.input_tokens)
-    return ""
-
-
-def _record(driver: MockDriver, workspace: Path) -> list[CoreEvent]:
-    """Capture one scripted turn's sink events as a run-events recording."""
-    collected: list[CoreEvent] = []
-    unsubscribe = output_sink().subscribe(collected.append)
-    try:
-        _invoke_plan(driver, workspace)
-    finally:
-        unsubscribe()
-    return collected

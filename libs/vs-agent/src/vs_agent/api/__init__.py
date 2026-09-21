@@ -38,7 +38,6 @@ from vs_agent.contracts import (
     SessionDisposition,
     session_spec_fingerprint,
 )
-from vs_agent.drivers.mock import MockDriverError, ReplayPlaybook
 from vs_agent.events import (
     AgentOutputChannel,
     AgentStatusData,
@@ -119,10 +118,8 @@ __all__ = [
     "DurableSessionStore",
     "JsonResultPayload",
     "MCPServerSpec",
-    "MockDriverError",
     "NullAgentEventSink",
     "NullSessionStore",
-    "ReplayPlaybook",
     "ResponseFallback",
     "RoundProgress",
     "SessionDisposition",
