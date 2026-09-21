@@ -32,6 +32,7 @@ from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.agents.session_store import NullSessionStore, SessionStore
 from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
 from vibesys.events import CommandResultPayload, JsonResultPayload
+from vibesys.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -41,8 +42,8 @@ if TYPE_CHECKING:
     from vibesys.agents.callbacks import AgentLogger
     from vibesys.agents.progress import AgentProgress
     from vibesys.agents.sink import AgentEventSink
-    from vibesys.constants import ComputeBackend
     from vibesys.events import AgentOutputChannel
+    from vibesys.skills import SkillSelection
     from vs_sandbox import HostResource, ProjectPathPolicy
 
 T = TypeVar("T", bound=BaseModel)
@@ -183,7 +184,7 @@ class AgentClient:
         *,
         provider: str | None = None,
         skills: Iterable[Path] = (),
-        compute_backend: ComputeBackend | None = None,
+        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
         model_name: str | None = None,
         timeout: int | None = None,
         run_log_file: TextIO | None = None,
@@ -207,7 +208,7 @@ class AgentClient:
         self._session_store: SessionStore = session_store or NullSessionStore()
         self._provider = provider
         self._skills = tuple(skills)
-        self._compute_backend = compute_backend
+        self._skill_selection = skill_selection
         self._model_name = model_name
         self._timeout = timeout
         self._run_log_file = run_log_file
@@ -689,7 +690,7 @@ class AgentClient:
         materialize_skills(
             spec.workspace,
             list(spec.skills),
-            compute_backend=self._compute_backend,
+            selection=self._skill_selection,
             log_file=self._run_log_file,
             event_sink=self._sink,
         )

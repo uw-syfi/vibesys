@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
 from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING, TextIO
 
@@ -18,11 +17,11 @@ from pydantic import BaseModel  # noqa: TC002  # tracked: #288
 
 from vibesys.agents.provider_policy import cli_skill_dirs
 from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
-from vibesys.constants import ComputeBackend  # noqa: TC001  # tracked: #288
-from vibesys.skills import foreign_platform_names, is_platforms_parent
+from vibesys.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
     from vibesys.agents.sink import AgentEventSink
+    from vibesys.skills import SkillSelection
 
 # Per-provider CLI skill-discovery paths, matching upstream
 # vibesys-skills install.sh conventions. Each CLI tool auto-loads skills from
@@ -50,27 +49,16 @@ def discover_skill_dirs(root: Path) -> list[Path]:
     return [p.parent for p in root.rglob("SKILL.md")]
 
 
-def _platform_prune_ignore(
-    compute_backend: ComputeBackend | None,
-) -> Callable[[str, list[str]], set[str]]:
-    """Build a ``copytree`` ignore callable that prunes foreign platforms."""
-    skip_names = {".git", "repos", "__pycache__"}
-    foreign = foreign_platform_names(compute_backend)
-
-    def _ignore(src_dir: str, names: list[str]) -> set[str]:
-        ignored = {name for name in names if name in skip_names}
-        if foreign and is_platforms_parent(src_dir):
-            ignored |= {name for name in names if name in foreign}
-        return ignored
-
-    return _ignore
+#: Directories every materialized copy always skips, regardless of caller
+#: policy: repo metadata, checked-out sub-repos, and bytecode caches.
+_GENERIC_SKIP_NAMES = frozenset({".git", "repos", "__pycache__"})
 
 
 def materialize_skills(  # noqa: C901  # tracked: #288
     workspace: Path,
     skill_dirs: list[Path],
     *,
-    compute_backend: ComputeBackend | None = None,
+    selection: SkillSelection = NULL_SKILL_SELECTION,
     log_file: TextIO | None = None,
     event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
 ) -> None:
@@ -82,8 +70,9 @@ def materialize_skills(  # noqa: C901  # tracked: #288
     convention, plus the VibeSys-only ``.cursor/skills``). The root copy
     preserves the documented ``<skill-name>/references/...`` paths used by
     prompts and agents, while the hidden copies support native CLI discovery.
-    When a compute backend is set, foreign ``references/platforms/<backend>/``
-    directories are omitted from every materialized copy.
+    ``selection`` additionally omits whatever directories the caller's policy
+    names (e.g. foreign ``references/platforms/<backend>/`` directories) from
+    every materialized copy; this function has no opinion on what those are.
 
     Existing destinations are replaced on every invocation so skill edits are
     picked up across iterations and after candidate checkpoint rollback. Errors
@@ -104,7 +93,10 @@ def materialize_skills(  # noqa: C901  # tracked: #288
     if not discovered:
         return
 
-    skip_ignore = _platform_prune_ignore(compute_backend)
+    def skip_ignore(src_dir: str, names: list[str]) -> set[str]:
+        ignored = {name for name in names if name in _GENERIC_SKIP_NAMES}
+        ignored |= selection.skip_dir(src_dir, names)
+        return ignored
 
     for target_rel in (".", *CLI_SKILL_DIRS):
         target_root = workspace / target_rel

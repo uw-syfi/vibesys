@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from vibesys.skills import NULL_SKILL_SELECTION
+
 from .base import ResponseFallback
 from .progress import AgentProgress, CandidateProgress, RoundProgress
 from .sink import NULL_AGENT_EVENT_SINK
@@ -14,7 +16,7 @@ if TYPE_CHECKING:
     from typing import TextIO
 
     from vibesys.config import Config
-    from vibesys.constants import ComputeBackend
+    from vibesys.skills import SkillSelection
     from vs_sandbox import HostResource, ProjectPathPolicy
 
     from .client import AgentClient
@@ -53,7 +55,7 @@ def build_agent_client(  # noqa: PLR0913
     spec: AgentSpec,
     backends: dict[str, Any] | None,
     skill_source_dirs: list[Path],
-    compute_backend: ComputeBackend | None = None,
+    skill_selection: SkillSelection = NULL_SKILL_SELECTION,
     run_log_file: TextIO | None,
     use_docker: bool,
     log_dir: Path | None = None,
@@ -71,7 +73,7 @@ def build_agent_client(  # noqa: PLR0913
         spec=spec,
         backends=backends,
         skill_source_dirs=skill_source_dirs,
-        compute_backend=compute_backend,
+        skill_selection=skill_selection,
         run_log_file=run_log_file,
         use_docker=use_docker,
         log_dir=log_dir,

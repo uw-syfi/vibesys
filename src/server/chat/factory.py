@@ -142,7 +142,7 @@ def build_chat_agent(
             spec=agent_spec,
             backends=env.backends,
             skill_source_dirs=list(env.skill_source_dirs),
-            compute_backend=env.compute_backend,
+            skill_selection=env.skill_selection,
             run_log_file=logger.writer,
             use_docker=env.use_docker,
             log_dir=attachment.log_dir,

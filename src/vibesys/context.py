@@ -97,6 +97,7 @@ from vibesys.sandbox.run_environment import (
     build_run_environment,
     make_run_environment_spec,
 )
+from vibesys.skills import platform_skill_selection
 from vs_project import (
     Project,
     RunConfiguration,
@@ -924,7 +925,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                     "orchestrator": session.sandbox,
                 },
                 skill_source_dirs=skill_source_paths,
-                compute_backend=backend,
+                skill_selection=platform_skill_selection(backend),
                 run_log_file=logger.writer,
                 use_docker=session.view.cli_sandboxed,
                 log_dir=log_dir,
@@ -1170,7 +1171,7 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
             "orchestrator": session.sandbox,
         },
         skill_source_dirs=parent.skill_source_paths,
-        compute_backend=parent.backend,
+        skill_selection=platform_skill_selection(parent.backend),
         run_log_file=logger.writer,
         use_docker=session.view.cli_sandboxed,
         log_dir=log_dir,

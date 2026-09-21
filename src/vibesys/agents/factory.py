@@ -8,6 +8,7 @@ from vibesys.agents.catalog import agent_catalog
 from vibesys.agents.client import AgentClient, AgentDiagnosticLog
 from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
 from vibesys.agents.spec import AgentBackend, Driver, resolve_agent_driver
+from vibesys.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
     from vibesys.agents.sink import AgentEventSink
     from vibesys.agents.spec import AgentSpec
     from vibesys.config import Config
-    from vibesys.constants import ComputeBackend
+    from vibesys.skills import SkillSelection
     from vs_sandbox import HostResource, ProjectPathPolicy
 
 
@@ -59,7 +60,7 @@ def build_agent_client(  # noqa: C901, PLR0913
     spec: AgentSpec,
     backends: dict[str, Any] | None,
     skill_source_dirs: list[Path],
-    compute_backend: ComputeBackend | None = None,
+    skill_selection: SkillSelection = NULL_SKILL_SELECTION,
     run_log_file: TextIO | None,
     use_docker: bool,
     log_dir: Path | None = None,
@@ -147,7 +148,7 @@ def build_agent_client(  # noqa: C901, PLR0913
         driver_name=driver_name,
         provider=provider,
         skills=skill_source_dirs,
-        compute_backend=compute_backend,
+        skill_selection=skill_selection,
         model_name=spec.model or provider,
         timeout=timeout,
         run_log_file=run_log_file,
