@@ -55,3 +55,29 @@ the transformers reference on a tiny random model on CPU (`seed_tests/`).
 Loading the real checkpoint, the 4-GPU split, and its speed on ROCm have not
 been run. Expect the first measurement to be very slow; the accuracy gate is
 the first thing to confirm on the cluster.
+
+## Baseline protocol
+
+Success is judged against the optimized SGLang tree from the #421 campaign,
+not against the seed. Compare paired runs on the same node:
+
+1. Per node, run the SGLang tree and the candidate back to back on the same
+   allocation. Alternate which goes first across nodes.
+2. Each side runs 5 repetitions of `benchmark/run.py`. The first repetition is
+   a warmup and is discarded.
+3. Flush caches before every repetition. For SGLang that is its flush-cache
+   endpoint; for a candidate, restart the server or otherwise start each
+   repetition with no cross-repetition prefix state. Without this, later
+   repetitions inherit prior-turn state that the workload does not offer.
+4. Compare the median of the 4 measured repetitions of
+   `p95_ttft_turn2plus_ms` per node.
+
+The candidate passes when, on every paired node, it first matches the SGLang
+tree within noise, then exceeds it (lower p95 TTFT). Run-to-run spread on one
+node was about 6 percent for identical trees, and identical trees differed by
+tens of percent across nodes, so unpaired or cross-node comparisons are not
+evidence.
+
+Also report `mean_tpot_ms` and `total_token_throughput` for both sides. They are
+not the objective, but a TTFT gain that costs decode speed or throughput is
+reported as a tradeoff.
