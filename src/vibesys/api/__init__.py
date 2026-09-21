@@ -49,8 +49,10 @@ from vibesys.api.session import (
     create_session,
 )
 from vibesys.api.store import RunStore, open_run_store
+from vibesys.constants import KNOWN_COMPUTE_BACKENDS, ComputeBackend, DomainName
 from vibesys.events import AgentExecutionStartedData, CoreEventType
 from vibesys.loops.agent.issue_board import framework_memory_paths
+from vibesys.profilers import ProfilerKind
 from vibesys.render.sink import output_sink
 from vibesys.repository import RepositoryVisibility
 from vibesys.run import RunLogger
@@ -58,14 +60,17 @@ from vibesys.run.integration import RunResourceHandoff
 from vibesys.run.run_control import RunStopped
 
 __all__ = [
+    "KNOWN_COMPUTE_BACKENDS",
     "AgentEnvironment",
     "AgentExecutionStartedData",
     "CandidateDisposition",
+    "ComputeBackend",
     "Config",
     "ConfigurationDiagnostic",
     "ConfigurationError",
     "CoreEvent",
     "CoreEventType",
+    "DomainName",
     "EventSink",
     "EventStatus",
     "HypothesisRoundView",
@@ -75,6 +80,7 @@ __all__ = [
     "MetricSpace",
     "Objective",
     "PerfDeltaReason",
+    "ProfilerKind",
     "RepositoryVisibility",
     "ResumeRef",
     "RoundView",
