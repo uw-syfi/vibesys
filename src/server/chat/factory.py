@@ -19,8 +19,9 @@ from server.chat.session import (
 )
 from server.events import ChatThreadCreatedData
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.api import agent_spec_from_config, build_agent_client, output_sink
+from vibesys.api import agent_spec_from_config, output_sink
 from vs_agent import AgentSessionKey, SessionScope
+from vs_agent.factory import build_agent_client
 from vs_project import RunLogger
 from vs_sandbox import HostResource, HostResourceAccess
 
@@ -31,7 +32,8 @@ if TYPE_CHECKING:
     from server.chat.options import ChatRunSettings
     from server.controller import RunController
     from server.execution import ExecutionTracker
-    from vibesys.api import MCPServerSpec, RunSession
+    from vibesys.api import RunSession
+    from vs_agent.contracts import MCPServerSpec
     from vs_project import Project
 
 

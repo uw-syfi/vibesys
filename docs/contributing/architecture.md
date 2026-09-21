@@ -160,6 +160,7 @@ graph TD
     server.integration --> server.read_model
     server.integration --> server.run_lifecycle
     server.integration --> vibesys.api
+    server.integration --> vs_agent
     server.integration --> vs_project
     server.journal --> server.diagnostics
     server.journal --> server.events

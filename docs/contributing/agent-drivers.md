@@ -166,7 +166,7 @@ Docker's layer cache is what makes a repeat build of either image cheap;
 immutable manifest ID rather than keeping a manifest of its own.
 
 CLI and toolchain versions are not in the Dockerfile: they are build args
-supplied from `vibesys.agents.provider_policy` (`NODE_VERSION`,
+supplied from `vs_agent.provider_policy` (`NODE_VERSION`,
 `CLI_VERSIONS`, `RUST_TOOLCHAIN_VERSION`, `GO_TOOLCHAIN_VERSION`), so a
 version bump is a one-line change in one module instead of an edit to the
 Dockerfile itself.
@@ -342,7 +342,7 @@ backend = "cli"
 driver = "mock"
 ```
 
-Two playbooks, both in `vibesys.agents.drivers.mock`:
+Two playbooks, both in `vs_agent.drivers.mock`:
 
 - `ScriptedPlaybook` synthesizes a turn from configurable counts: assistant
   text chunks, thinking chunks, tool call/result pairs of a chosen payload
@@ -350,7 +350,7 @@ Two playbooks, both in `vibesys.agents.drivers.mock`:
 - `ReplayPlaybook` re-emits a recorded run's `run-events.jsonl` at a
   configurable speed (`0` replays as fast as the consumer accepts events).
 
-Structured turns are answered from `vibesys.agents.scripted_rounds`, which the
+Structured turns are answered from `vs_agent.scripted_rounds`, which the
 stub agent client shares, so a scripted run completes loop rounds on the happy
 path. A response schema with no scripted artifact raises rather than being
 faked. The mock is not offered through the client protocol: driver choice
