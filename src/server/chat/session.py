@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 
     from server.controller import RunController
     from server.execution import ExecutionTracker
-    from vibesys.api import MCPServerSpec
     from vs_agent import AgentSessionKey
+    from vs_agent.contracts import MCPServerSpec
 
 
 class ChatAgentClient(Protocol):

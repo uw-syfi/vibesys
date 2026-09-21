@@ -94,7 +94,7 @@ depends_on = ["server.diagnostics", "server.events", "server.journal", "vibesys.
 
 [[modules]]
 path = "server.integration"
-depends_on = ["server", "server.execution", "server.chat", "server.events", "vibesys.api", "server.read_model", "server.diagnostics", "server.journal", "server.controller", "vs_project", "server.run_lifecycle"]
+depends_on = ["server", "server.execution", "server.chat", "server.events", "vibesys.api", "server.read_model", "server.diagnostics", "server.journal", "server.controller", "vs_project", "server.run_lifecycle", "vs_agent"]
 
 [[modules]]
 path = "server.journal"

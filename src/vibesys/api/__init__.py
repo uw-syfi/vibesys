@@ -26,7 +26,6 @@ from vibesys.api.contracts import (
     HypothesisRoundView,
     HypothesisView,
     LoopKind,
-    MCPServerSpec,
     MetricSpace,
     Objective,
     PerfDeltaReason,
@@ -56,16 +55,11 @@ from vibesys.repository import RepositoryVisibility
 from vibesys.run import RunLogger
 from vibesys.run.integration import RunResourceHandoff
 from vibesys.run.run_control import RunStopped
-from vs_agent import build_agent_client
-from vs_agent.catalog import DriverInfo, agent_catalog
-from vs_agent.spec import AgentBackend, AgentSpec, Driver
 
 __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
-    "AgentBackend",
     "AgentEnvironment",
     "AgentExecutionStartedData",
-    "AgentSpec",
     "CandidateDisposition",
     "ComputeBackend",
     "Config",
@@ -74,14 +68,11 @@ __all__ = [
     "CoreEvent",
     "CoreEventType",
     "DomainName",
-    "Driver",
-    "DriverInfo",
     "EventSink",
     "EventStatus",
     "HypothesisRoundView",
     "HypothesisView",
     "LoopKind",
-    "MCPServerSpec",
     "MetricSpace",
     "Objective",
     "PerfDeltaReason",
@@ -102,9 +93,7 @@ __all__ = [
     "RunStore",
     "RunView",
     "RunWorkspace",
-    "agent_catalog",
     "agent_spec_from_config",
-    "build_agent_client",
     "create_session",
     "default_request",
     "framework_memory_paths",

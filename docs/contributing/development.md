@@ -38,7 +38,7 @@ The main framework boundaries are:
 - `src/server/` owns serving and frontend-specific behavior. It may depend on
   `src/vibesys/`, but the headless core does not depend on it.
 - `src/vibesys/loops/` owns the outer-loop policies and shared loop helpers.
-- `src/vibesys/agents/` owns the agent-runner abstraction and integrations.
+- `libs/vs-agent/` (the `vs_agent` package) owns the agent-runner abstraction and integrations.
 - `src/vibesys/domains/` owns domain-specific prompt context and hooks.
 - `src/vibesys/backends/` owns compute and execution backends.
 - Candidate repositories own target-specific tasks and candidate contracts
