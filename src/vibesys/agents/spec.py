@@ -66,6 +66,8 @@ class AgentSpec:
     model: str | None = None
     role_models: Mapping[str, str] = field(default_factory=dict)
     reasoning_effort: str | None = None
+    cli_timeout: int | None = None
+    role_reasoning_efforts: Mapping[str, str] = field(default_factory=dict)
     execution: AgentExecutionPolicy = field(default_factory=AgentExecutionPolicy)
 
     def __post_init__(self) -> None:
@@ -106,6 +108,13 @@ class AgentSpec:
         agent_cfg = config.agent
         resolved_backend = AgentBackend(backend or agent_cfg.backend or AgentBackend.CLI)
         resolved_driver = Driver(driver) if driver is not None else resolve_agent_driver(config)
+
+        if resolved_backend != AgentBackend.CLI and agent_cfg.driver is not None:
+            raise SystemExit(  # noqa: TRY003  # tracked: #288
+                f"agent driver {agent_cfg.driver!r} is valid only with backend='cli', "
+                f"not {resolved_backend.value!r}"
+            )
+
         resolved_provider = (
             "mock"
             if resolved_driver is Driver.MOCK
@@ -125,4 +134,13 @@ class AgentSpec:
                 if configured is not None
             },
             reasoning_effort=config.thinking.level,
+            cli_timeout=agent_cfg.cli_timeout,
+            role_reasoning_efforts={
+                role: configured
+                for role, configured in {
+                    "orchestrator": agent_cfg.outer.reasoning_effort,
+                    "implementer": agent_cfg.inner.reasoning_effort,
+                }.items()
+                if configured is not None
+            },
         )

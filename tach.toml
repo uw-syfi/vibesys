@@ -135,7 +135,7 @@ depends_on = ["vibesys", "vibesys.agents", "vibesys.backends", "vibesys.domains"
 
 [[modules]]
 path = "vibesys.agents"
-depends_on = ["vibesys", "vibesys.render", "vs_project", "vs_sandbox", "vs_agent"]
+depends_on = ["vibesys", "vibesys.render", "vs_project", "vs_sandbox", "vs_agent", "vs_loop_state"]
 
 [[modules]]
 path = "vibesys.loops"

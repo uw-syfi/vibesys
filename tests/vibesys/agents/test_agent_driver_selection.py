@@ -40,7 +40,6 @@ def _build(  # noqa: PLR0913
 ) -> AgentClient:
     spec = AgentSpec.from_config(config, model=model_name)
     client = build_agent_client(
-        config,
         spec=spec,
         backends=backends,
         skill_source_dirs=[],
@@ -118,7 +117,8 @@ def test_preflight_capabilities_match_constructed_driver(
     supports_mcp: object,
 ) -> None:
     config = _config(driver=driver, backend="cli", cli_provider="codex")
-    declared = agent_driver_supports_mcp_servers(config, agent_backend=None)
+    spec = AgentSpec.from_config(config)
+    declared = agent_driver_supports_mcp_servers(spec)
     client = _build(config)
 
     assert declared is supports_mcp
@@ -127,8 +127,9 @@ def test_preflight_capabilities_match_constructed_driver(
 
 def test_non_cli_backend_has_no_external_driver_capabilities() -> None:
     config = _config(backend="stub")
+    spec = AgentSpec.from_config(config)
 
-    assert agent_driver_supports_mcp_servers(config, agent_backend=None) is None
+    assert agent_driver_supports_mcp_servers(spec) is None
 
 
 def test_omnigent_selection_passes_model_and_log_dir(tmp_path) -> None:  # noqa: ANN001

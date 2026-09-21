@@ -169,15 +169,18 @@ roots = ["src", "libs", "scripts", "packaging", "sdk"]
 # These counts record the existing debt on 2026-09-13.
 [tool.vibesys.file_length.allowlist]
 # The agent loop: round orchestration, agent invocation, and result handling in
-# one module. The largest single refactor target in the repo.
-"src/vibesys/loops/agent/loop.py" = 3704
+# one module. The largest single refactor target in the repo. Grew +2 when the
+# agent-library refactor swapped DEFAULT_AGENT_BACKEND/resolve_agent_driver for
+# the AgentBackend/Driver enums (ruff re-wrapped the affected lines).
+"src/vibesys/loops/agent/loop.py" = 3706
 # CLI entry point; every subcommand's argument wiring lives here. Grew +7 when
 # config/errors value types were routed through vibesys.api: ruff expands the
 # larger vibesys.api import to one-per-line. That removed the vibesys.config and
 # vibesys.errors deep-import edges from entrypoints.
 "src/entrypoints/headless.py" = 2650
 # Sandbox run environment: setup, execution, and teardown across strategies.
-"src/vibesys/sandbox/run_environment.py" = 2239
+# Grew +1 from the agent-library refactor's AgentBackend enum swap.
+"src/vibesys/sandbox/run_environment.py" = 2240
 
 [tool.ruff]
 line-length = 100

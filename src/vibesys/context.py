@@ -424,6 +424,12 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             resolved_backend = str(agent_backend or config.agent.backend or AgentBackend.CLI)
             resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
             model_name = config.model.name
+            agent_spec = AgentSpec.from_config(
+                config,
+                backend=agent_backend,
+                provider=cli_provider,
+                model=model_name,
+            )
         with boot_trace.span("profiler_preflight"):
             resolved_profiler_kind = resolve_profiler_kind(
                 profiler_kind,
@@ -432,10 +438,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 environment_default_profiler_kind=environment.default_profiler_kind,
                 environment_supported_profiler_kinds=environment.supported_profiler_kinds,
             )
-            driver_supports_mcp = agent_driver_supports_mcp_servers(
-                config,
-                agent_backend=agent_backend,
-            )
+            driver_supports_mcp = agent_driver_supports_mcp_servers(agent_spec)
             if resolved_profiler_kind in ACTIVE_PROFILER_KINDS and driver_supports_mcp is False:
                 driver_name = resolve_agent_driver(config)
                 definition = profiler_definition(resolved_profiler_kind)
@@ -900,14 +903,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             # instead of calling an agent driver directly. The cli
             # backend is rejected if --docker is set; build_agent_client raises
             # SystemExit with a clear message in that case.
-            agent_spec = AgentSpec.from_config(
-                config,
-                backend=agent_backend,
-                provider=cli_provider,
-                model=model_name,
-            )
             agent_client = build_agent_client(
-                config,
                 spec=agent_spec,
                 session_store=agent_session_store,
                 backends={
@@ -1161,7 +1157,6 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
         model=parent.model_name,
     )
     agent_client = build_agent_client(
-        config,
         spec=agent_spec,
         backends={
             "implementer": session.sandbox,
