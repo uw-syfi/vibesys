@@ -17,10 +17,7 @@ from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import Any, Literal
 
 from vibesys import constants
-from vibesys.agents.base import ResponseFallback
-from vibesys.agents.progress import RoundProgress
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
-from vibesys.agents.spec import AgentBackend, resolve_agent_driver
+from vibesys.agent_spec_config import resolve_agent_driver
 from vibesys.config import Config, as_config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.context import create_run_context
@@ -126,6 +123,10 @@ from vibesys.skills import (
     build_skill_catalog,
     resolve_skill_selections,
 )
+from vs_agent.base import ResponseFallback
+from vs_agent.progress import RoundProgress
+from vs_agent.session_key import AgentSessionKey, SessionScope
+from vs_agent.spec import AgentBackend
 from vs_loop_state.agent import PerfProvenance, RoundHistory, RoundRecord
 from vs_project import AgentRunConfiguration
 

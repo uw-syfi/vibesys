@@ -24,8 +24,8 @@ import agentshim
 import pytest
 from agentshim.testing import FakeExecutor, FakeRun
 
-from vibesys.agents import host_resource_declarations
-from vibesys.agents.drivers.agentshim import build_host_executor, confine_to_sandbox
+from vs_agent import host_resource_declarations
+from vs_agent.drivers.agentshim import build_host_executor, confine_to_sandbox
 from vs_sandbox import host_resources
 from vs_sandbox import host_sandbox as hostsandbox
 

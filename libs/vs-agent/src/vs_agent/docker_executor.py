@@ -9,7 +9,7 @@ until Codex resume inside containers is verified fixed upstream; it does not
 belong in agentshim, which models what a provider is documented to do.
 
 The transport itself -- rewriting a command into ``docker exec`` -- is not
-here: :func:`vibesys.agents.drivers.agentshim.confine_to_sandbox` wraps every
+here: :func:`vs_agent.drivers.agentshim.confine_to_sandbox` wraps every
 executor, host or container, through the sandbox's own ``wrap``.
 """
 

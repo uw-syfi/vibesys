@@ -10,9 +10,6 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
-from vibesys.agents import AgentClient, AgentClientProtocol
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
-from vibesys.agents.stub_runner import StubAgentClient
 from vibesys.config import Config, as_config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationError
@@ -61,6 +58,9 @@ from vibesys.schemas import (
     ValidationRecipeArtifact,
     Verdict,
 )
+from vs_agent import AgentClient, AgentClientProtocol
+from vs_agent.session_key import AgentSessionKey, SessionScope
+from vs_agent.stub_runner import StubAgentClient
 from vs_loop_state.agent import RoundRecord
 from vs_project import Project, serialize_round
 from vs_sandbox import SandboxExecutionResult

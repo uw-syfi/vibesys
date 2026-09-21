@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vibesys.agents.contracts import MCPServerSpec
+    from vs_agent.contracts import MCPServerSpec
 
 
 class OmnigentMCPError(RuntimeError):

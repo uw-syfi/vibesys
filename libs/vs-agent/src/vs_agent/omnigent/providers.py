@@ -6,7 +6,7 @@ else. It deliberately does not import ``omnigent`` — the mapping is data, so
 it stays importable and unit-testable without the optional dependency
 installed.
 
-:mod:`vibesys.agents.drivers.omnigent` resolves these entries at session setup.
+:mod:`vs_agent.drivers.omnigent` resolves these entries at session setup.
 
 Coverage against ``omnigent==0.10.0``, verified by inspecting the installed
 package rather than its docs:
@@ -20,7 +20,7 @@ package rather than its docs:
   run a headless turn in a VibeSys workspace.
 
 Both supported entries accept ``cwd``/``model``/``os_env``, which is the
-constructor shape :class:`~vibesys.agents.drivers.omnigent.OmnigentDriver`
+constructor shape :class:`~vs_agent.drivers.omnigent.OmnigentDriver`
 depends on.
 """
 

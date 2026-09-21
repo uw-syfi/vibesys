@@ -1,6 +1,6 @@
 """Issue-tracker runner customization.
 
-Wraps any :class:`~vibesys.agents.contracts.AgentClientProtocol` and injects
+Wraps any :class:`~vs_agent.contracts.AgentClientProtocol` and injects
 tracker access for the ``judge`` and ``perf_eval`` phases. The wrapper
 requires an MCP-capable inner client and hands it an issue-board MCP server
 spec.
@@ -21,15 +21,15 @@ from typing import Any, TextIO, TypeVar
 
 from pydantic import BaseModel
 
-from vibesys.agents.client import AgentClient
-from vibesys.agents.contracts import (  # noqa: TC001
+from vibesys.loops.plain.mcp_config import build_issue_mcp_spec
+from vs_agent.client import AgentClient
+from vs_agent.contracts import (  # noqa: TC001
     AgentCapabilities,
     AgentClientProtocol,
     MCPServerSpec,
 )
-from vibesys.agents.progress import AgentProgress  # noqa: TC001
-from vibesys.agents.session_key import AgentSessionKey  # noqa: TC001
-from vibesys.loops.plain.mcp_config import build_issue_mcp_spec
+from vs_agent.progress import AgentProgress  # noqa: TC001
+from vs_agent.session_key import AgentSessionKey  # noqa: TC001
 from vs_issue_board import IssueType
 
 T = TypeVar("T", bound=BaseModel)

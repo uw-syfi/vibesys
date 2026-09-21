@@ -40,8 +40,7 @@ from typing import Any, Literal, cast
 
 from jinja2 import Environment, FileSystemLoader
 
-from vibesys.agents.progress import CandidateProgress
-from vibesys.agents.spec import AgentBackend, resolve_agent_driver
+from vibesys.agent_spec_config import resolve_agent_driver
 from vibesys.config import Config, as_config
 from vibesys.constants import (
     DEFAULT_COMPUTE_BACKEND,
@@ -90,6 +89,8 @@ from vibesys.sandbox.run_environment import (
     run_environment_record,
 )
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
+from vs_agent.progress import CandidateProgress
+from vs_agent.spec import AgentBackend
 from vs_project import EvolveRunConfiguration
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "evolve"

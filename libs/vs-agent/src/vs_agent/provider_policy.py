@@ -1,6 +1,6 @@
 """VibeSys's own provider decisions.
 
-``agentshim`` (read through :mod:`vibesys.agents.provider_profiles`) owns what
+``agentshim`` (read through :mod:`vs_agent.provider_profiles`) owns what
 a provider *is*: its binary, state directories, auth environment variables,
 skill-discovery paths, and container install recipe. This module owns what
 VibeSys *decides* to do with that: which providers it ships, what a shipped
@@ -17,7 +17,7 @@ new decision (or a change to an existing one) has one place to make it.
 
 from __future__ import annotations
 
-from vibesys.agents import provider_profiles
+from vs_agent import provider_profiles
 
 SHIPPED_PROVIDERS: tuple[str, ...] = ("claude", "codex", "gemini", "opencode")
 """The CLI providers VibeSys ships.
@@ -99,7 +99,7 @@ def cli_skill_dirs() -> tuple[str, ...]:
 
     The union of each shipped provider's ``ProviderProfile.skill_dirs``, in
     :data:`SHIPPED_PROVIDERS` order, plus :data:`_CURSOR_SKILL_DIR`. Resolved
-    at call time (through :mod:`vibesys.agents.provider_profiles`) so a
+    at call time (through :mod:`vs_agent.provider_profiles`) so a
     library upgrade that adds or moves a provider's skill directory changes
     VibeSys behavior without an edit here.
     """

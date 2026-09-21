@@ -9,8 +9,15 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from vibesys.agents.client import AgentClient
-from vibesys.agents.contracts import (
+from vibesys.events import (
+    AgentOutputChunkData,
+    CommandResultPayload,
+    CoreEventType,
+    ToolResultData,
+)
+from vibesys.render.sink import output_sink
+from vs_agent.client import AgentClient
+from vs_agent.contracts import (
     AgentCapabilities,
     AgentEvent,
     AgentEventKind,
@@ -23,14 +30,7 @@ from vibesys.agents.contracts import (
     AgentUsage,
     SessionDisposition,
 )
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
-from vibesys.events import (
-    AgentOutputChunkData,
-    CommandResultPayload,
-    CoreEventType,
-    ToolResultData,
-)
-from vibesys.render.sink import output_sink
+from vs_agent.session_key import AgentSessionKey, SessionScope
 
 
 class _Response(BaseModel):
@@ -149,7 +149,7 @@ def test_session_setup_materializes_skills_once(
     skill = tmp_path / "source-skill"
     calls: list[tuple[Path, list[Path]]] = []
     monkeypatch.setattr(
-        "vibesys.agents.client.materialize_skills",
+        "vs_agent.client.materialize_skills",
         lambda workspace, skills, **_kwargs: calls.append((workspace, skills)),
     )
     spec = _spec(workspace=tmp_path, skills=(skill,))

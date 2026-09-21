@@ -16,10 +16,10 @@ from server.chat.prompts import (
 )
 from server.chat.session import ExperimentChatDependencies, ExperimentChatSession
 from server.events import EventType
-from vibesys.agents.client import AgentClient
-from vibesys.agents.drivers import agentshim as agentshim_driver
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.api import MCPServerSpec
+from vs_agent.client import AgentClient
+from vs_agent.drivers import agentshim as agentshim_driver
+from vs_agent.session_key import AgentSessionKey, SessionScope
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -14,12 +14,12 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.agents.contracts import MCPServerSpec
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.input_manifest import InputBundle
 from vibesys.events import CoreEvent, EventStatus
+from vs_agent.contracts import MCPServerSpec
 
 if TYPE_CHECKING:
     from vibesys.skills import SkillSelection

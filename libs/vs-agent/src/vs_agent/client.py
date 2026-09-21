@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
-from vibesys.agents.cli_common import agent_label, materialize_skills
-from vibesys.agents.contracts import (
+from vs_agent.cli_common import agent_label, materialize_skills
+from vs_agent.contracts import (
     AgentCapabilities,
     AgentDriver,
     AgentEvent,
@@ -26,12 +26,12 @@ from vibesys.agents.contracts import (
     SessionDisposition,
     session_spec_fingerprint,
 )
-from vibesys.agents.provider_policy import DEFAULT_CLI_PROVIDER
-from vibesys.agents.runner import parse_typed_response_text
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
-from vibesys.agents.session_store import NullSessionStore, SessionStore
-from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.events import CommandResultPayload, JsonResultPayload
+from vs_agent.provider_policy import DEFAULT_CLI_PROVIDER
+from vs_agent.runner import parse_typed_response_text
+from vs_agent.session_key import AgentSessionKey, SessionScope
+from vs_agent.session_store import NullSessionStore, SessionStore
+from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
@@ -39,10 +39,10 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
-    from vibesys.agents.callbacks import AgentLogger
-    from vibesys.agents.progress import AgentProgress
-    from vibesys.agents.sink import AgentEventSink
+    from vs_agent.callbacks import AgentLogger
     from vs_agent.events import AgentOutputChannel
+    from vs_agent.progress import AgentProgress
+    from vs_agent.sink import AgentEventSink
     from vs_agent.skills import SkillSelection
     from vs_sandbox import HostResource, ProjectPathPolicy
 
@@ -408,7 +408,7 @@ class AgentClient:
             invocation_id=invocation_id,
             label=round_label,
         )
-        from vibesys.agents.callbacks import AgentLogger  # noqa: PLC0415
+        from vs_agent.callbacks import AgentLogger  # noqa: PLC0415
 
         logger = AgentLogger(
             log_file=self._run_log_file,

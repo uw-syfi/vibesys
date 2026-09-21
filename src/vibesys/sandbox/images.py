@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.agents import provider_policy
+from vs_agent import provider_policy
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
@@ -184,7 +184,7 @@ def agent_image(  # noqa: PLR0913  # tracked: #288
     of the resulting image ID. Otherwise the agent layer is built directly on
     ``base_image``.
 
-    CLI and toolchain versions come from :mod:`vibesys.agents.provider_policy`
+    CLI and toolchain versions come from :mod:`vs_agent.provider_policy`
     and are passed as build args, so a version bump changes this module's
     caller nowhere: rebuilding with an unchanged Dockerfile and unchanged
     build args resolves to the same image from Docker's layer cache.

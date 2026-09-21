@@ -18,14 +18,14 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
     from pathlib import Path
 
-    from vibesys.agents.contracts import AgentClientProtocol
-    from vibesys.agents.progress import AgentProgress
     from vibesys.constants import ComputeBackend
     from vibesys.evaluators.input_manifest import WorkspaceSource
     from vibesys.profilers import ProfilerKind
     from vibesys.run.event_journal import EventJournal
     from vibesys.run.git_tracker import GitTracker
     from vibesys.run.state import RunState
+    from vs_agent.contracts import AgentClientProtocol
+    from vs_agent.progress import AgentProgress
     from vs_project import Project, StateTransition
 
 T = TypeVar("T", bound=BaseModel)

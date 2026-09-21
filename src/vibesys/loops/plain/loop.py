@@ -25,8 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import Any
 
-from vibesys.agents.progress import RoundProgress
-from vibesys.agents.spec import AgentBackend, resolve_agent_driver
+from vibesys.agent_spec_config import resolve_agent_driver
 from vibesys.config import Config, as_config
 from vibesys.constants import (
     DEFAULT_COMPUTE_BACKEND,
@@ -56,6 +55,8 @@ from vibesys.schemas import (
     PerfTrend,
     Verdict,
 )
+from vs_agent.progress import RoundProgress
+from vs_agent.spec import AgentBackend
 from vs_issue_board import (
     Issue,
     IssueBoard,

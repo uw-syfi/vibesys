@@ -5,11 +5,11 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from typing import Any, TextIO
 
-from vibesys.agents.progress import AgentProgress
-from vibesys.agents.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
-from vibesys.agents.todos import todos_from_tool_call
 from vs_agent._format import format_status_prefix
 from vs_agent.events import AgentOutputChannel, AgentStatusData, ToolResultPayload
+from vs_agent.progress import AgentProgress
+from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
+from vs_agent.todos import todos_from_tool_call
 
 ContextWindowLookup = Callable[[str | None], int | None]
 """Resolves a model name to its context window size in tokens.
@@ -62,7 +62,7 @@ class AgentLogger:
     """Single event adapter for all agent activity: token streaming, tool calls, and tool results.
 
     Every observation is published as typed events through the injected
-    :class:`~vibesys.agents.sink.AgentEventSink` (rendered by whichever surface is
+    :class:`~vs_agent.sink.AgentEventSink` (rendered by whichever surface is
     composed, such as a headless renderer or application subscriber) and, when ``log_file``
     is provided, written untruncated as plain text to the durable run log.
     ``AgentLogger`` itself never writes to the terminal.

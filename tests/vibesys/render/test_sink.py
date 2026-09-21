@@ -4,7 +4,6 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from vibesys.agents.callbacks import AgentLogger
 from vibesys.events import (
     AgentOutputChunkData,
     CommandResultPayload,
@@ -23,6 +22,7 @@ from vibesys.events import (
 )
 from vibesys.render.sink import OutputSink
 from vibesys.run.event_journal import EventJournal
+from vs_agent.callbacks import AgentLogger
 
 
 def _collect(sink: OutputSink) -> tuple[list[CoreEvent], Callable[[], None]]:

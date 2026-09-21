@@ -9,11 +9,11 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from vibesys.agents.contracts import AgentCapabilities, MCPServerSpec
-from vibesys.agents.progress import AgentProgress  # noqa: TC001  # tracked: #288
-from vibesys.agents.scripted_rounds import round_number_from_label, scripted_round_payload
-from vibesys.agents.session_key import AgentSessionKey  # noqa: TC001  # tracked: #288
-from vibesys.agents.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
+from vs_agent.contracts import AgentCapabilities, MCPServerSpec
+from vs_agent.progress import AgentProgress  # noqa: TC001  # tracked: #288
+from vs_agent.scripted_rounds import round_number_from_label, scripted_round_payload
+from vs_agent.session_key import AgentSessionKey  # noqa: TC001  # tracked: #288
+from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 
 T = TypeVar("T", bound=BaseModel)
 

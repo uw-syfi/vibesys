@@ -16,7 +16,7 @@ each completed turn and clear when a driver reports a restart.
 
 The map is keyed by the stored form of an :class:`AgentSessionKey`, and only
 keys whose scope opts into durability are ever written (see
-:mod:`vibesys.agents.session_key`).
+:mod:`vs_agent.session_key`).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from vibesys.agents.session_key import AgentSessionKey
+from vs_agent.session_key import AgentSessionKey
 from vs_project import ProjectError
 
 if TYPE_CHECKING:
@@ -39,7 +39,7 @@ class ProviderSessionRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    #: Digest of the :class:`~vibesys.agents.contracts.AgentSessionSpec` whose
+    #: Digest of the :class:`~vs_agent.contracts.AgentSessionSpec` whose
     #: turn produced ``session_id``. It is the whole resume decision: a
     #: checkpoint is adopted only by a session built from an identical spec.
     spec_fingerprint: str
@@ -114,7 +114,7 @@ class NullSessionStore:
 
     The default when no durable namespace is wired (ephemeral runs, tests, and
     non-agent loops), so session persistence is opt-in and never a hard
-    dependency of :class:`~vibesys.agents.client.AgentClient`.
+    dependency of :class:`~vs_agent.client.AgentClient`.
     """
 
     def get(self, key: AgentSessionKey) -> ProviderSessionRecord | None:  # noqa: D102, ARG002

@@ -7,17 +7,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys.agents import build_agent_client
-from vibesys.agents.callbacks import AgentLogger
-from vibesys.agents.client import AgentClient
-from vibesys.agents.drivers.agentshim import AgentShimDriver
-from vibesys.agents.spec import AgentSpec
+from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.config import Config
 from vibesys.render.log import log_json_and_print, log_prompt_markdown_and_print
 from vibesys.schemas import (
     JudgeResponse,
     Verdict,
 )
+from vs_agent import build_agent_client
+from vs_agent.callbacks import AgentLogger
+from vs_agent.client import AgentClient
+from vs_agent.drivers.agentshim import AgentShimDriver
 from vs_sandbox import ProjectPathPolicy
 
 
@@ -38,7 +38,7 @@ def _build_client(  # noqa: ANN202, PLR0913
     **kwargs,  # noqa: ANN003  # tracked: #288
 ):
     """Resolve an :class:`AgentSpec` the way application config does, then build."""
-    spec = AgentSpec.from_config(
+    spec = agent_spec_from_config(
         config,
         backend=agent_backend,
         provider=cli_provider,
@@ -151,7 +151,7 @@ class TestBuildAgentClient:
     def test_build_agent_client_rejects_unknown_backend(self):  # noqa: ANN201  # tracked: #288
         """An ``AgentSpec`` rejects a backend string outside {cli, stub} at construction."""
         with pytest.raises(ValueError, match="bogus"):
-            AgentSpec.from_config(_agent_config(), backend="bogus")
+            agent_spec_from_config(_agent_config(), backend="bogus")
 
     def test_required_project_enforcement_rejects_non_cli_backend(self):  # noqa: ANN201  # tracked: #288
         """An unsupported ``[agent].backend`` value is rejected building the spec.
@@ -162,7 +162,7 @@ class TestBuildAgentClient:
         rejected unconditionally, as soon as an ``AgentSpec`` is resolved.
         """
         with pytest.raises(ValueError, match="unsupported"):
-            AgentSpec.from_config(_agent_config(backend="unsupported"))
+            agent_spec_from_config(_agent_config(backend="unsupported"))
 
     def test_required_workspace_enforcement_permits_omnigent(self):  # noqa: ANN201
         config = Config.model_validate(

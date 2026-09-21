@@ -172,7 +172,7 @@ roots = ["src", "libs", "scripts", "packaging", "sdk"]
 # one module. The largest single refactor target in the repo. Grew +2 when the
 # agent-library refactor swapped DEFAULT_AGENT_BACKEND/resolve_agent_driver for
 # the AgentBackend/Driver enums (ruff re-wrapped the affected lines).
-"src/vibesys/loops/agent/loop.py" = 3706
+"src/vibesys/loops/agent/loop.py" = 3707
 # CLI entry point; every subcommand's argument wiring lives here. Grew +7 when
 # config/errors value types were routed through vibesys.api: ruff expands the
 # larger vibesys.api import to one-per-line. That removed the vibesys.config and

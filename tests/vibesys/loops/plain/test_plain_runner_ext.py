@@ -10,10 +10,10 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel
 
-from vibesys.agents.client import AgentClient
-from vibesys.agents.contracts import AgentCapabilities, MCPServerSpec
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.loops.plain.runner_ext import PlainLoopAgentClient
+from vs_agent.client import AgentClient
+from vs_agent.contracts import AgentCapabilities, MCPServerSpec
+from vs_agent.session_key import AgentSessionKey, SessionScope
 
 
 class _Resp(BaseModel):

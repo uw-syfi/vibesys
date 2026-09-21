@@ -9,14 +9,6 @@ import pytest
 from pydantic import BaseModel
 
 from vibesys import boot_trace
-from vibesys.agents.client import AgentClient
-from vibesys.agents.contracts import (
-    AgentCapabilities,
-    AgentTurnRequest,
-    AgentTurnResult,
-)
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
-from vibesys.agents.session_store import DurableSessionStore
 from vibesys.backends.cuda import CudaBackend
 from vibesys.backends.cuda.gpu_monitor import GpuInfo
 from vibesys.config import Config
@@ -47,6 +39,14 @@ from vibesys.run import (
     RunStateNamespace,
 )
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
+from vs_agent.client import AgentClient
+from vs_agent.contracts import (
+    AgentCapabilities,
+    AgentTurnRequest,
+    AgentTurnResult,
+)
+from vs_agent.session_key import AgentSessionKey, SessionScope
+from vs_agent.session_store import DurableSessionStore
 from vs_loop_state import PlainLoopCursor
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 from vs_sandbox import HostResourceAccess, SandboxLifecycle

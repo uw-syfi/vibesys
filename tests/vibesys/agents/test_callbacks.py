@@ -2,13 +2,13 @@ import io
 import re
 from unittest.mock import MagicMock
 
-from vibesys.agents.callbacks import AgentLogger
-from vibesys.agents.client import _LoggerObserver
-from vibesys.agents.contracts import AgentEvent, AgentEventKind
-from vibesys.agents.progress import RoundProgress
 from vibesys.constants import DIM, RED
 from vibesys.events import AgentOutputChunkData, ToolCallData, ToolResultData
 from vibesys.render.sink import output_sink
+from vs_agent.callbacks import AgentLogger
+from vs_agent.client import _LoggerObserver
+from vs_agent.contracts import AgentEvent, AgentEventKind
+from vs_agent.progress import RoundProgress
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -262,7 +262,7 @@ class TestLogFile:
 
 class TestDefaultContextWindowLookup:
     def test_claude_4_6_resolves_to_1m(self):  # noqa: ANN201  # tracked: #288
-        from vibesys.agents.callbacks import (  # noqa: PLC0415  # tracked: #288
+        from vs_agent.callbacks import (  # noqa: PLC0415  # tracked: #288
             _default_context_window_lookup,
         )
 
@@ -271,7 +271,7 @@ class TestDefaultContextWindowLookup:
 
     def test_older_claude_falls_back_to_200k(self):  # noqa: ANN201  # tracked: #288
         # Regression guard: claude- fallback comes after the 4-6 entries
-        from vibesys.agents.callbacks import (  # noqa: PLC0415  # tracked: #288
+        from vs_agent.callbacks import (  # noqa: PLC0415  # tracked: #288
             _default_context_window_lookup,
         )
 
@@ -280,7 +280,7 @@ class TestDefaultContextWindowLookup:
         assert _default_context_window_lookup("claude-opus-4-1") == 200_000
 
     def test_gemini(self):  # noqa: ANN201  # tracked: #288
-        from vibesys.agents.callbacks import (  # noqa: PLC0415  # tracked: #288
+        from vs_agent.callbacks import (  # noqa: PLC0415  # tracked: #288
             _default_context_window_lookup,
         )
 
@@ -288,7 +288,7 @@ class TestDefaultContextWindowLookup:
         assert _default_context_window_lookup("gemini-3-pro") == 1_048_576
 
     def test_gemma(self):  # noqa: ANN201  # tracked: #288
-        from vibesys.agents.callbacks import (  # noqa: PLC0415  # tracked: #288
+        from vs_agent.callbacks import (  # noqa: PLC0415  # tracked: #288
             _default_context_window_lookup,
         )
 
@@ -296,7 +296,7 @@ class TestDefaultContextWindowLookup:
 
     def test_gpt5_4_resolves_to_1m(self):  # noqa: ANN201  # tracked: #288
         # Regression guard: gpt-5.4 entry must come before gpt-5
-        from vibesys.agents.callbacks import (  # noqa: PLC0415  # tracked: #288
+        from vs_agent.callbacks import (  # noqa: PLC0415  # tracked: #288
             _default_context_window_lookup,
         )
 
@@ -304,7 +304,7 @@ class TestDefaultContextWindowLookup:
         assert _default_context_window_lookup("gpt-5.4-pro") == 1_050_000
 
     def test_gpt5_family_falls_back_to_400k(self):  # noqa: ANN201  # tracked: #288
-        from vibesys.agents.callbacks import (  # noqa: PLC0415  # tracked: #288
+        from vs_agent.callbacks import (  # noqa: PLC0415  # tracked: #288
             _default_context_window_lookup,
         )
 
@@ -314,7 +314,7 @@ class TestDefaultContextWindowLookup:
         assert _default_context_window_lookup("gpt-5.2") == 400_000
 
     def test_gpt4_and_o_series(self):  # noqa: ANN201  # tracked: #288
-        from vibesys.agents.callbacks import (  # noqa: PLC0415  # tracked: #288
+        from vs_agent.callbacks import (  # noqa: PLC0415  # tracked: #288
             _default_context_window_lookup,
         )
 
@@ -325,14 +325,14 @@ class TestDefaultContextWindowLookup:
         assert _default_context_window_lookup("o4-mini") == 200_000
 
     def test_unknown_model_returns_none(self):  # noqa: ANN201  # tracked: #288
-        from vibesys.agents.callbacks import (  # noqa: PLC0415  # tracked: #288
+        from vs_agent.callbacks import (  # noqa: PLC0415  # tracked: #288
             _default_context_window_lookup,
         )
 
         assert _default_context_window_lookup("unknown-model-xyz") is None
 
     def test_none_model_name_returns_none(self):  # noqa: ANN201  # tracked: #288
-        from vibesys.agents.callbacks import (  # noqa: PLC0415  # tracked: #288
+        from vs_agent.callbacks import (  # noqa: PLC0415  # tracked: #288
             _default_context_window_lookup,
         )
 
@@ -431,7 +431,7 @@ class TestPrefixFormat:
         assert "0/999k" in out, out
 
     def test_default_lookup_used_when_not_injected(self):  # noqa: ANN201  # tracked: #288
-        from vibesys.agents.callbacks import (  # noqa: PLC0415  # tracked: #288
+        from vs_agent.callbacks import (  # noqa: PLC0415  # tracked: #288
             _default_context_window_lookup,
         )
 
@@ -441,7 +441,7 @@ class TestPrefixFormat:
 
     def test_elapsed_time_advances(self, capsys, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
         # Fake time.monotonic so we can verify the elapsed value reaches the prefix
-        from vibesys.agents import callbacks  # noqa: PLC0415  # tracked: #288
+        from vs_agent import callbacks  # noqa: PLC0415  # tracked: #288
 
         ticks = iter([1000.0, 1308.2])
         monkeypatch.setattr(callbacks.time, "monotonic", lambda: next(ticks))

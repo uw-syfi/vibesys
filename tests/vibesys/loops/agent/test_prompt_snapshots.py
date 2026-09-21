@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from vibesys.agents.cli_common import build_schema_hint
 from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
@@ -28,6 +27,7 @@ from vibesys.schemas import (
     PreRoundDecision,
     SingleAgentRoundResponse,
 )
+from vs_agent.cli_common import build_schema_hint
 
 _ROOT = Path(__file__).resolve().parents[4]
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"

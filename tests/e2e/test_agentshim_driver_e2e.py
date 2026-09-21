@@ -27,7 +27,7 @@ import agentshim
 import pytest
 from pydantic import BaseModel
 
-from vibesys.agents.contracts import (
+from vs_agent.contracts import (
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
@@ -36,14 +36,14 @@ from vibesys.agents.contracts import (
     MCPServerSpec,
     SessionDisposition,
 )
-from vibesys.agents.drivers import agentshim as agentshim_driver
-from vibesys.agents.drivers.agentshim import AgentShimDriver
+from vs_agent.drivers import agentshim as agentshim_driver
+from vs_agent.drivers.agentshim import AgentShimDriver
 from vs_sandbox import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from vibesys.agents.contracts import AgentSession
+    from vs_agent.contracts import AgentSession
 
 ENABLE_ENV = "VIBESYS_E2E_AGENTS"
 
@@ -351,7 +351,7 @@ def _codex_container_id() -> str | None:
 def test_upstream_codex_resume_exit_bug_probe_on_the_host(workspace: Path) -> None:
     """Whether the resumed-turn-never-exits bug is container-specific.
 
-    ``CodexRolloutWatchdogExecutor`` in ``vibesys.agents.docker_executor``
+    ``CodexRolloutWatchdogExecutor`` in ``vs_agent.docker_executor``
     exists because a resumed ``codex exec resume <id> --json`` finishes its
     turn but never exits *inside a container*. This drives the identical
     resumed-turn shape through plain ``agentshim.CliAgent`` on the host --
@@ -392,7 +392,7 @@ def test_upstream_codex_resume_exit_bug_probe_on_the_host(workspace: Path) -> No
 def test_watchdog_retire_signal_resumed_codex_turn_exits_on_its_own_in_a_container() -> None:
     """The real retire signal for ``CodexRolloutWatchdogExecutor``.
 
-    The watchdog (``vibesys.agents.docker_executor.CodexRolloutWatchdogExecutor``)
+    The watchdog (``vs_agent.docker_executor.CodexRolloutWatchdogExecutor``)
     exists only because this does not happen today: a resumed
     ``codex exec --json`` run inside a container finishes its turn but never
     exits, so the ``docker exec`` fronting it blocks until the turn budget is

@@ -15,7 +15,7 @@ from agentshim import (
 )
 from agentshim.testing import FakeExecutor, FakeRun, scripted_turn
 
-from vibesys.agents.docker_executor import (
+from vs_agent.docker_executor import (
     _CODEX_RESUME_TERMINATION_SCRIPT,
     CodexRolloutWatchdogExecutor,
     _codex_resume_argv_matches,
@@ -206,7 +206,7 @@ class TestCodexRolloutWatchdog:
             docker_calls.append(cmd)
             return subprocess.CompletedProcess(cmd, 0, "24190\n", "")
 
-        monkeypatch.setattr("vibesys.agents.docker_executor.subprocess.run", fake_run)
+        monkeypatch.setattr("vs_agent.docker_executor.subprocess.run", fake_run)
         monkeypatch.setattr(
             executor,
             "_read_codex_rollout_completion",
@@ -237,7 +237,7 @@ class TestCodexRolloutWatchdog:
         seen_threads: list[str] = []
 
         monkeypatch.setattr(
-            "vibesys.agents.docker_executor.subprocess.run",
+            "vs_agent.docker_executor.subprocess.run",
             lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, 0, "24190\n", ""),
         )
 
@@ -262,7 +262,7 @@ class TestCodexRolloutWatchdog:
         executor = _impatient(inner, lambda: "container-123", log=logs.append)
 
         monkeypatch.setattr(
-            "vibesys.agents.docker_executor.subprocess.run",
+            "vs_agent.docker_executor.subprocess.run",
             lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, 1, "", ""),
         )
         monkeypatch.setattr(
@@ -332,7 +332,7 @@ class TestCodexRolloutWatchdog:
         executor = _impatient(inner, lambda: "container-123")
 
         monkeypatch.setattr(
-            "vibesys.agents.docker_executor.subprocess.run",
+            "vs_agent.docker_executor.subprocess.run",
             lambda cmd, **_kwargs: subprocess.CompletedProcess(cmd, 0, "24190\n", ""),
         )
         monkeypatch.setattr(
@@ -399,7 +399,7 @@ class TestCodexRolloutReading:
             lambda: "container-123",
             rollout_sessions_root=_ROLLOUT_SESSIONS_ROOT,
         )
-        monkeypatch.setattr("vibesys.agents.docker_executor.subprocess.run", queries)
+        monkeypatch.setattr("vs_agent.docker_executor.subprocess.run", queries)
         return executor._read_codex_rollout_completion("container-123", THREAD_ID)  # noqa: SLF001
 
     def test_no_rollout_file_is_no_evidence(self, monkeypatch: pytest.MonkeyPatch) -> None:
