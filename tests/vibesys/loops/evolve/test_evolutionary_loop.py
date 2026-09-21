@@ -200,7 +200,7 @@ command = ["python", "-c", "print('ok')"]
 
 
 def _judge_response(verdict: Literal["pass", "fail"]) -> JudgeResponse:
-    """The judge response the old mock returned for a given scripted verdict."""
+    """The default judge verdict for a scripted round."""
     return JudgeResponse(
         analysis="ok",
         feedback="" if verdict == "pass" else "needs work",
@@ -219,8 +219,8 @@ def _profiler_response(perf_metric: float, *, perf_unit: str = "tok/s") -> Profi
 
 
 def _default_profiler_responses(n: int, *, start: float = 10.0) -> list[ProfilerSummary]:
-    """The old ``_make_runner`` default: perf starts at 10.0 tok/s and
-    increments by 1 per profiled candidate, so each gets a distinct fitness."""
+    """Perf starts at 10.0 tok/s and increments by 1 per profiled candidate,
+    so each gets a distinct fitness."""
     return [_profiler_response(start + i) for i in range(n)]
 
 
