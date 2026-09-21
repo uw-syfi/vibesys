@@ -399,9 +399,7 @@ def test_only_skypilot_declares_remote_model_weights() -> None:
     docker = build_run_environment(make_run_environment_spec(use_docker=True))
     modal = build_run_environment(make_run_environment_spec(use_modal=True))
     skypilot = build_run_environment(
-        make_run_environment_spec(
-            use_skypilot=True, cluster_profile="gpu", resources=resources
-        )
+        make_run_environment_spec(use_skypilot=True, cluster_profile="gpu", resources=resources)
     )
 
     assert local.provides_remote_model_weights is False
@@ -2087,7 +2085,8 @@ remote_artifact_root = "/remote/vibesys"
     )
 
     class _FakeBridge:
-        def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401  # tracked: #288
+        def __init__(self, **kwargs: object) -> None:
+            del kwargs
             self.socket_path = tmp_path / "fake-bridge.sock"
 
         def start(self) -> None:

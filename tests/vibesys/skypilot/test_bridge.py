@@ -263,9 +263,7 @@ def test_startup_replacement_evidence_applies_only_to_preexisting_invocations(
     assert set(runner.release_names) == {"lease", "old-lease"}
 
 
-def test_terminal_replay_tracks_persisted_cluster_for_release(
-    tmp_path: Path
-) -> None:
+def test_terminal_replay_tracks_persisted_cluster_for_release(tmp_path: Path) -> None:
     namespace = _namespace(tmp_path)
     runner = FakeRunner()
     workspace = tmp_path / "workspace"
@@ -626,9 +624,7 @@ def test_bridge_preserves_a_genuinely_live_invocation_on_replay_inconsistency(
     assert unchanged.job_name == record.job_name
 
 
-def test_job_discovered_during_close_is_cancelled_and_released(
-    tmp_path: Path
-) -> None:
+def test_job_discovered_during_close_is_cancelled_and_released(tmp_path: Path) -> None:
     namespace = _namespace(tmp_path)
     runner = FakeRunner()
     workspace = tmp_path / "workspace"
@@ -664,7 +660,7 @@ def test_job_discovered_during_close_is_cancelled_and_released(
 
 
 def test_bridge_stages_allowlisted_command_streams_and_cleans_up(  # noqa: PLR0915
-    tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -1023,9 +1019,7 @@ def test_stage_workspace_queries_git_ignores_exactly_once(
     assert len(calls) == 1
 
 
-def _bridge_for(
-    tmp_path: Path, state_root: Path | None = None, **kwargs: object
-) -> SkyPilotBridge:
+def _bridge_for(tmp_path: Path, state_root: Path | None = None, **kwargs: object) -> SkyPilotBridge:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     return SkyPilotBridge(

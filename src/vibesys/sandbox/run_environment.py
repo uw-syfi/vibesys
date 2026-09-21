@@ -575,10 +575,7 @@ class SkyPilotEnvironment(DockerEnvironment):
 
     config: SkyPilotEnvironmentConfig
     materialize_local_model_weights = False
-    # Model weights live on persistent cluster storage the remote job already
-    # reaches; the candidate transfer excludes them (see
-    # docs/contributing/remote-slurm-execution.md), so the domain hook must
-    # not require a local model directory or meta.json for this environment.
+    # Weights live on cluster storage, excluded from candidate transfer.
     provides_remote_model_weights = True
     default_profiler_kind = ProfilerKind.NONE
     supported_profiler_kinds: frozenset[ProfilerKind] | None = frozenset(
