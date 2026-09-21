@@ -39,20 +39,14 @@ def agent_catalog() -> Mapping[Driver, DriverInfo]:
       ``vs_agent.provider_policy.SHIPPED_PROVIDERS``).
     - ``omnigent`` reads its executor registry
       (``vs_agent.omnigent.providers.OMNIGENT_PROVIDER_EXECUTORS``).
-    - ``mock`` accepts only its own label; it drives no CLI, so provider
-      selection has nothing else to validate against.
 
     ``supports_docker`` mirrors ``build_agent_client``'s existing gating:
     Omnigent has no container-execution path and is rejected outright with
     ``--docker`` (see ``OmnigentDriverError``'s remedy pointing at
-    ``agent.driver='agentshim'``); AgentShim and the mock have never gated on
-    it.
+    ``agent.driver='agentshim'``); AgentShim has never gated on it.
     """
     from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # avoid import cycle
         supported_providers as agentshim_providers,
-    )
-    from vs_agent.drivers.fake import (  # noqa: PLC0415  # avoid import cycle
-        supported_providers as mock_providers,
     )
     from vs_agent.omnigent.providers import (  # noqa: PLC0415  # avoid import cycle
         supported_providers as omnigent_providers,
@@ -69,11 +63,6 @@ def agent_catalog() -> Mapping[Driver, DriverInfo]:
                 driver=Driver.OMNIGENT,
                 providers=tuple(omnigent_providers()),
                 supports_docker=False,
-            ),
-            Driver.MOCK: DriverInfo(
-                driver=Driver.MOCK,
-                providers=tuple(mock_providers()),
-                supports_docker=True,
             ),
         }
     )

@@ -34,12 +34,6 @@ def agent_spec_from_config(
     Precedence at every field is override, then ``[agent]`` config, then the
     VibeSys default: CLI backend, the agentshim driver, the codex provider. The
     deprecated ``[model].provider`` stays ignored, exactly as it always has.
-
-    ``mock`` drives no CLI, so its provider is always ``"mock"`` regardless of a
-    configured or overridden ``cli_provider``: the mock driver only labels a run
-    with whatever provider was requested, it never runs one, so forcing the
-    label to match what the driver actually is keeps the reported provider
-    truthful.
     """
     agent_cfg = config.agent
     resolved_backend = AgentBackend(backend or agent_cfg.backend or AgentBackend.CLI)
@@ -51,11 +45,7 @@ def agent_spec_from_config(
             f"not {resolved_backend.value!r}"
         )
 
-    resolved_provider = (
-        "mock"
-        if resolved_driver is Driver.MOCK
-        else (provider or agent_cfg.cli_provider or DEFAULT_CLI_PROVIDER)
-    )
+    resolved_provider = provider or agent_cfg.cli_provider or DEFAULT_CLI_PROVIDER
     return AgentSpec(
         backend=resolved_backend,
         driver=resolved_driver,
