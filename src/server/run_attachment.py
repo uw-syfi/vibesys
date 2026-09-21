@@ -1,11 +1,8 @@
-"""Server-owned resources handed off from a live core run.
+"""Server-owned resources describing a live core run.
 
-These dataclasses used to live in `vibesys.run.integration` as the shape of
-the (now-deleted) `RunIntegration.attach_run` port. Core now hands off the
-same facts through the type-erased `vibesys.run.integration.RunResourceHandoff`
-via `RunSession.on_run_resources`; `RunIntegrationAdapter._handle_run_resources`
-converts one into a `RunAttachment` here, which is what `ExperimentChatFactory`
-and its callers still consume unchanged.
+`RunIntegrationAdapter._handle_run_resources` builds a `RunAttachment` from the
+run's resource handoff; `ExperimentChatFactory` and its callers consume it to
+attach an experiment-chat surface to the run.
 """
 
 from __future__ import annotations
