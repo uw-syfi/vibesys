@@ -5,13 +5,14 @@ from pathlib import Path
 
 import pytest
 
+from entrypoints.headless_render import HeadlessRenderer
 from vibesys.evaluators.input_manifest import (
     MANIFEST_NAME,
     InputBundle,
     load_input_bundle,
     load_project_task,
 )
-from vibesys.render import HeadlessRenderer, output_sink
+from vibesys.render import output_sink
 from vs_project import Project, ProjectNotInitializedError
 
 

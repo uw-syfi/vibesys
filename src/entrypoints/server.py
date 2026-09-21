@@ -8,11 +8,8 @@ from typing import TYPE_CHECKING, NoReturn
 
 from entrypoints import headless
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
-from vibesys.api import (
-    ConfigurationError,
-    generate_experiment_name,
-    repository_name_from_experiment,
-)
+from vibesys.api import ConfigurationError
+from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
 from vs_github import GitHubCLI, GitHubCLIError
 
 if TYPE_CHECKING:

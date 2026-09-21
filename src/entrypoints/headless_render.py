@@ -12,17 +12,22 @@ import re
 import sys
 from typing import TextIO
 
-from vibesys.constants import DIM, GREEN, RESET, YELLOW
-from vibesys.events import (
+from vibesys.api import (
     AgentOutputChunkData,
     CoreEvent,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
     ToolResultData,
+    format_framework_event,
+    format_status_prefix,
 )
-from vibesys.render.format import format_status_prefix
-from vibesys.render.run_log import format_framework_event
+
+# Presentation constants owned by this frontend (mirrors vibesys.constants).
+DIM = "\033[2m"
+YELLOW = "\033[33m"
+GREEN = "\033[32m"
+RESET = "\033[0m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 

@@ -1,19 +1,16 @@
-"""Tests for the `vibesys.api` facade growth: re-exports and composition verbs."""
+"""Tests for the `vibesys.api.request` module: re-exports and composition verbs."""
 
 from __future__ import annotations
 
 import subprocess
 from typing import TYPE_CHECKING
 
-import vibesys.api
-from vibesys.api import (
+import vibesys.api.request
+from vibesys.api.request import (
     CLI_PROFILER_CHOICES,
-    PROJECT_ROOT,
     REPOSITORY_SLUG,
-    HeadlessRenderer,
     InputBundle,
     RunEnvironmentSpec,
-    boot_trace,
     build_task_image,
     coerce_profiler_kind,
     default_skill_roots,
@@ -43,9 +40,6 @@ _NAMES = [
     "RunEnvironmentSpec",
     "make_run_environment_spec",
     "build_task_image",
-    "HeadlessRenderer",
-    "boot_trace",
-    "PROJECT_ROOT",
     "CLI_PROFILER_CHOICES",
     "coerce_profiler_kind",
     "REPOSITORY_SLUG",
@@ -59,14 +53,16 @@ _NAMES = [
 ]
 
 
-def test_new_facade_names_are_exported_and_importable() -> None:
-    """Every symbol this task adds is importable from `vibesys.api` and listed in `__all__`."""
-    exported = set(vibesys.api.__all__)
+def test_request_names_are_exported_and_importable() -> None:
+    """Every symbol this module owns is importable from it and listed in `__all__`."""
+    exported = set(vibesys.api.request.__all__)
     for name in _NAMES:
-        assert name in exported, f"{name!r} missing from vibesys.api.__all__"
-        assert hasattr(vibesys.api, name), f"{name!r} not importable from vibesys.api"
+        assert name in exported, f"{name!r} missing from vibesys.api.request.__all__"
+        assert hasattr(vibesys.api.request, name), (
+            f"{name!r} not importable from vibesys.api.request"
+        )
 
-    # Also exercise the direct `from vibesys.api import ...` names bound above,
+    # Also exercise the direct `from vibesys.api.request import ...` names bound above,
     # so an unused-import lint would catch a broken re-export.
     assert InputBundle is not None
     assert load_input_bundle is not None
@@ -76,9 +72,6 @@ def test_new_facade_names_are_exported_and_importable() -> None:
     assert RunEnvironmentSpec is not None
     assert make_run_environment_spec is not None
     assert build_task_image is not None
-    assert HeadlessRenderer is not None
-    assert boot_trace is not None
-    assert PROJECT_ROOT is not None
     assert CLI_PROFILER_CHOICES is not None
     assert coerce_profiler_kind is not None
     assert REPOSITORY_SLUG is not None

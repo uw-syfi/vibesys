@@ -391,7 +391,8 @@ class EventSink(Protocol):
     `vibesys.render.sink.EventHandler` and
     `vibesys.run.event_journal.EventSubscriber`
     (`Callable[[CoreEvent], None]`): any plain function or bound method with
-    this signature satisfies it, including `HeadlessRenderer().handle`.
+    this signature satisfies it, including a headless renderer's bound
+    `.handle` method.
     """
 
     def __call__(self, event: CoreEvent) -> None:

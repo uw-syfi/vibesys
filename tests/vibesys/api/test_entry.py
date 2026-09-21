@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.api import LoopKind, default_request, validate
+from vibesys.api import LoopKind
+from vibesys.api.entry import default_request, validate
 from vs_project import Project
 
 if TYPE_CHECKING:

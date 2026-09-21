@@ -126,7 +126,7 @@ class RunSession(RunQuery, RunWorkspace, RunControl, RunAgentHost, Protocol):
 def create_session(request: RunRequest, *, sink: EventSink) -> RunSession:
     """Build a session for *request*, publishing its event stream to *sink*.
 
-    Headless calls `create_session(req, sink=HeadlessRenderer().handle).start()`
+    Headless calls `create_session(req, sink=renderer.handle).start()`
     then `await session.await_result()`; server does the same with its own
     presentation sink, and reaches optional committed-state/resource-handoff
     seams through `on_committed_view`/`on_run_resources` instead of an
