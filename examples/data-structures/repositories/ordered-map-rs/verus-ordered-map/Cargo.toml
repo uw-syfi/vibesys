@@ -1,0 +1,15 @@
+[package]
+name = "ordered-map-verus"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[package.metadata.verus]
+verify = true
+
+[dependencies]
+verus_builtin_macros = "=0.0.0-2026-08-30-0159"
+vstd = "=0.0.0-2026-08-30-0159"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_keep_ghost)', 'cfg(verus_keep_ghost_body)', 'cfg(verus_verify_core)'] }

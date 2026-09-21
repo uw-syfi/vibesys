@@ -1,0 +1,11 @@
+[package]
+name = "vibesys-verus-ordered-map-benchmark"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ordered-map-verus = { path = __CANDIDATE_PATH__ }
+
+[profile.release]
+panic = "abort"

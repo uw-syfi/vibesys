@@ -1,0 +1,8 @@
+[package]
+name = "vibesys-verus-unordered-map-accuracy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+unordered-map-verus = { path = __CANDIDATE_PATH__ }

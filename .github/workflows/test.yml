@@ -101,15 +101,35 @@ jobs:
               - 'src/vibesys/sandbox/images.py'
               - 'src/vibesys/agents/provider_policy.py'
               - '.github/workflows/test.yml'
-            # What `queue-native` builds and tests: the queue evaluator and its
-            # native runner, the queue and priority-queue reference
-            # candidates, the evaluator SDK, and the microservice evaluator.
+            # What `queue-native` builds and tests: native evaluators, their
+            # starters and data-structure inputs, the evaluator SDK, and the
+            # microservice evaluator.
             evaluators:
               - 'resources/evaluators/queue/**'
               - 'resources/evaluators/microservice/**'
               - 'examples/data-structures/repositories/queue-rs/**'
+              - 'examples/data-structures/repositories/stack-rs/**'
+              - 'examples/data-structures/repositories/unordered-map-rs/**'
+              - 'examples/data-structures/repositories/ordered-map-rs/**'
+              - 'examples/data-structures/stack-spsc/**'
+              - 'examples/data-structures/stack-mpsc/**'
+              - 'examples/data-structures/stack-spmc/**'
+              - 'examples/data-structures/stack-mpmc/**'
+              - 'examples/data-structures/unordered-map-swmr/**'
+              - 'examples/data-structures/unordered-map-mw/**'
+              - 'examples/data-structures/ordered-map-swmr/**'
+              - 'examples/data-structures/ordered-map-mw/**'
               - 'examples/evaluators/priority-queue/**'
+              - 'examples/evaluators/stack/**'
+              - 'examples/evaluators/unordered-map/**'
+              - 'examples/evaluators/ordered-map/**'
               - 'examples/starters/priority-queue-rs/**'
+              - 'examples/starters/stack-rs/**'
+              - 'examples/starters/unordered-map-rs/**'
+              - 'examples/starters/ordered-map-rs/**'
+              - 'examples/baselines/stack-boost-lockfree/**'
+              - 'examples/baselines/unordered-map-tbb/**'
+              - 'examples/baselines/ordered-map-tbb/**'
               - 'sdk/vs-evaluator/vseval/**'
               - '.github/workflows/test.yml'
 
@@ -300,6 +320,9 @@ jobs:
             resources/evaluators/queue/go.sum
             resources/evaluators/microservice/go.sum
             examples/evaluators/priority-queue/go.sum
+            examples/evaluators/stack/go.sum
+            examples/evaluators/unordered-map/go.sum
+            examples/evaluators/ordered-map/go.sum
 
       # Bounded because an apt mirror or a service-restart prompt makes this
       # hang rather than fail: three runs on this branch sat here for tens of
@@ -389,6 +412,90 @@ jobs:
 
       - name: Test priority-queue evaluator
         working-directory: examples/evaluators/priority-queue
+        run: go test -race ./...
+
+      - name: Check stack native runner formatting
+        working-directory: examples/evaluators/stack/native_runner
+        run: cargo fmt -- --check
+
+      - name: Lint stack native runner
+        working-directory: examples/evaluators/stack/native_runner
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test stack native runner
+        working-directory: examples/evaluators/stack/native_runner
+        run: cargo test --locked
+
+      - name: Check stack starter formatting
+        working-directory: examples/starters/stack-rs
+        run: cargo fmt -- --check
+
+      - name: Lint stack starter
+        working-directory: examples/starters/stack-rs
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test stack starter
+        working-directory: examples/starters/stack-rs
+        run: cargo test --locked
+
+      - name: Test stack evaluator
+        working-directory: examples/evaluators/stack
+        run: go test -race ./...
+
+      - name: Check unordered-map native runner formatting
+        working-directory: examples/evaluators/unordered-map/native_runner
+        run: cargo fmt -- --check
+
+      - name: Lint unordered-map native runner
+        working-directory: examples/evaluators/unordered-map/native_runner
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test unordered-map native runner
+        working-directory: examples/evaluators/unordered-map/native_runner
+        run: cargo test --locked
+
+      - name: Check unordered-map starter formatting
+        working-directory: examples/starters/unordered-map-rs
+        run: cargo fmt -- --check
+
+      - name: Lint unordered-map starter
+        working-directory: examples/starters/unordered-map-rs
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test unordered-map starter
+        working-directory: examples/starters/unordered-map-rs
+        run: cargo test --locked
+
+      - name: Test unordered-map evaluator
+        working-directory: examples/evaluators/unordered-map
+        run: go test -race ./...
+
+      - name: Check ordered-map native runner formatting
+        working-directory: examples/evaluators/ordered-map/native_runner
+        run: cargo fmt -- --check
+
+      - name: Lint ordered-map native runner
+        working-directory: examples/evaluators/ordered-map/native_runner
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test ordered-map native runner
+        working-directory: examples/evaluators/ordered-map/native_runner
+        run: cargo test --locked
+
+      - name: Check ordered-map starter formatting
+        working-directory: examples/starters/ordered-map-rs
+        run: cargo fmt -- --check
+
+      - name: Lint ordered-map starter
+        working-directory: examples/starters/ordered-map-rs
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test ordered-map starter
+        working-directory: examples/starters/ordered-map-rs
+        run: cargo test --locked
+
+      - name: Test ordered-map evaluator
+        working-directory: examples/evaluators/ordered-map
         run: go test -race ./...
 
       - name: Test microservice evaluator

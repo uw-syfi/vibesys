@@ -1,0 +1,27 @@
+version = 1
+
+[agent]
+domain = "generic"
+
+[evaluator]
+source = "../../evaluators/stack"
+
+[accuracy]
+command = [
+  "go", "-C", "_evaluator/stack",
+  "run", ".", "check", "--workspace", "../..",
+  "--scenario", "mpsc", "--operations", "24", "--trials", "50",
+]
+timeout_seconds = 120
+
+[benchmark]
+command = [
+  "go", "-C", "_evaluator/stack",
+  "run", ".", "benchmark", "--workspace", "../..",
+  "--scenario", "mpsc", "--repetitions", "3",
+]
+timeout_seconds = 300
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "total_ops_per_sec"

@@ -1,0 +1,27 @@
+version = 1
+
+[agent]
+domain = "generic"
+
+[evaluator]
+source = "../../evaluators/unordered-map"
+
+[accuracy]
+command = [
+  "go", "-C", "_evaluator/unordered-map",
+  "run", ".", "check", "--workspace", "../..",
+  "--scenario", "mw", "--operations", "24", "--trials", "100",
+]
+timeout_seconds = 120
+
+[benchmark]
+command = [
+  "go", "-C", "_evaluator/unordered-map",
+  "run", ".", "benchmark", "--workspace", "../..",
+  "--scenario", "mw", "--repetitions", "3",
+]
+timeout_seconds = 300
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "total_ops_per_sec"

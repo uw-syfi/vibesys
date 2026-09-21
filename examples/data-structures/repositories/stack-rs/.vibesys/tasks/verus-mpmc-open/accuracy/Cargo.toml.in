@@ -1,0 +1,8 @@
+[package]
+name = "vibesys-verus-stack-accuracy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+stack-verus-mpmc = { path = __CANDIDATE_PATH__ }
