@@ -239,16 +239,12 @@ class RunIntegrationAdapter:
         """Convert a core resource handoff into durable attach plus experiment chat.
 
         Registered as this run's sole `RunSession.on_run_resources` listener,
-        bound to *session* by `server.runtime.ServerRuntime.drive`: *handoff*
-        carries the same facts the pre-boundary-refactor `RunAttachment` port
-        argument did, just type-erased at the core/application boundary.
-        *session* is threaded through to `ExperimentChatFactory` so it can
-        open its own agent-construction environment through
-        `vibesys.api.RunSession.open_agent_environment` instead of reading core
-        sandbox internals off the handoff. Durable attach used to be
-        the first action `attach_run` took before building `RunAttachment`;
-        it stays first here so the wire journal is attached before any
-        experiment-chat setup that might read it.
+        bound to *session* by `server.runtime.ServerRuntime.drive`. *session*
+        is threaded through to `ExperimentChatFactory` so it can open its own
+        agent-construction environment through
+        `vibesys.api.RunSession.open_agent_environment`. Durable attach runs
+        first so the wire journal is attached before any experiment-chat setup
+        that might read it.
         """
         self.attach(handoff.log_dir, project=handoff.project, run_id=handoff.run_id)
         attachment = RunAttachment(

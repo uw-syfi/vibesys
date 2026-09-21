@@ -3,8 +3,8 @@
 `RunSession` is sliced into three capability sub-protocols (query, workspace,
 control) plus lifecycle methods, so a consumer can be granted a narrower
 capability than the full session -- for example the chat agent's tool
-projection (`vs_agent.expose_as_tools`, planned for a later wave) grants only
-the slice a given tool needs.
+projection (`vs_agent.expose_as_tools`) grants only the slice a given tool
+needs.
 """
 
 from __future__ import annotations

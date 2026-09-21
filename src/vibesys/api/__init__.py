@@ -1,14 +1,13 @@
 """The public surface of VibeSys core: the only module other packages import.
 
 Everything else under `vibesys.*` is private to core + `entrypoints`. `server.*`
-talks to core only through this module: no deep imports, no escape hatch (see
-the narrow-boundary plan). `entrypoints`, as the composition root that
-assembles a `RunRequest`, still reaches some core internals directly.
+talks to core only through this module: no deep imports, no escape hatch.
+`entrypoints`, as the composition root that assembles a `RunRequest`, still
+reaches some core internals directly.
 
-Most symbols here are contracts and Protocols (the boundary's target shape);
-the rest are re-exports of core-owned types that `server.*` legitimately needs
-(events, control signals, the resource-handoff seam) so it never has to import
-their private home modules.
+Most symbols here are contracts and Protocols; the rest are re-exports of
+core-owned types that `server.*` legitimately needs (events, control signals,
+the resource-handoff seam) so it never has to import their private home modules.
 """
 
 from __future__ import annotations

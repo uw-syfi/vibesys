@@ -20,28 +20,17 @@ if TYPE_CHECKING:
 
 
 def load_config(path: Path, *, ignored_sections: frozenset[str] = frozenset()) -> Config:
-    """Load and validate core configuration from a shared TOML file.
-
-    Delegates directly to `vibesys.config.load_config`; no wave-2 work needed.
-    """
+    """Load and validate core configuration from a shared TOML file."""
     return _load_config(path, ignored_sections=ignored_sections)
 
 
 def validate(request: RunRequest) -> list[ConfigurationDiagnostic]:
     """Return the diagnostics that make *request* unrunnable, if any.
 
-    Wave 2 covers only the structural checks that hold across every loop
-    (input bundle paths actually exist on disk); `RunRequest` itself is a
-    frozen, `extra="forbid"` pydantic model, so field-shape errors already
-    surface as a `pydantic.ValidationError` at construction time and never
-    reach this function.
-
-    TODO(wave-3): fold in the semantic checks `vibesys.context
-    .create_run_context` performs today (profiler/run-environment
-    compatibility, resume/task mismatches, ...). That function raises
-    `ConfigurationError` for the first diagnostic it finds instead of
-    collecting every diagnostic; this entry point needs the collecting
-    variant so callers can report every problem at once.
+    Checks the structural invariants that hold across every loop: the input
+    bundle paths exist on disk. `RunRequest` is a frozen, `extra="forbid"`
+    pydantic model, so field-shape errors already surface as a
+    `pydantic.ValidationError` at construction time and never reach here.
     """
     from vibesys.errors import ConfigurationDiagnostic  # noqa: PLC0415
 
@@ -69,17 +58,9 @@ def validate(request: RunRequest) -> list[ConfigurationDiagnostic]:
 def default_request(project: Project, loop: LoopKind) -> RunRequest:
     """Build the default `RunRequest` for *loop* in *project*.
 
-    So a chat "launch" action doesn't reassemble config by hand. Sources
-    `input_bundle` from the project's own directory
-    (`vibesys.evaluators.input_manifest.load_input_bundle`) and `config` from
-    its `agent.toml`, if any, else the same built-in defaults
-    `entrypoints/headless.py` falls back to.
-
-    TODO(wave-3): restore the project's persisted default `RunConfiguration`
-    (budgets, backend, skills, ...) the way
-    `entrypoints/headless.py::_restore_project_resume_cli_args` does for a
-    resume, instead of leaving every loop-specific field at its `RunRequest`
-    default.
+    Sources `input_bundle` from the project's own directory and `config` from
+    its `agent.toml`, if any, else the built-in defaults. Loop-specific fields
+    are left at their `RunRequest` defaults.
     """
     from vibesys.api.contracts import Config, RunRequest  # noqa: PLC0415
 
