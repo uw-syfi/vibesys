@@ -32,6 +32,20 @@ a validity rule: the judge inspects the submission, and a round that uses
 disallowed engine code is invalid regardless of its metric. Writing your own
 kernels, or calling AITER kernels directly, is fine.
 
+Judge checklist (any hit makes the candidate invalid, whatever its metric):
+
+- An import of `sglang`, `sgl_kernel`, `vllm`, or `tensorrt_llm` in served code,
+  including dynamic imports.
+- Engine files copied, vendored, or translated file by file into the workspace,
+  under any name (compare against your knowledge of those engines' schedulers,
+  model runners, and model files, not just directory names).
+- Engine installs in setup or requirements files, or in the run's logs.
+- A server that only runs because an engine is present in the environment.
+
+`accuracy_checker/engine_scan.py` runs first in the accuracy gate and rejects
+the mechanical cases (imports, install lines, vendored directories). It cannot
+see renamed copies, so the judge still reviews the source.
+
 ## Workload
 
 The benchmark drives many concurrent multi-turn chat sessions against your

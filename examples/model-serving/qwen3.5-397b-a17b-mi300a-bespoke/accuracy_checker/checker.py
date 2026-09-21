@@ -36,6 +36,7 @@ from pathlib import Path
 BUNDLE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BUNDLE_DIR / "benchmark"))
 import launcher  # noqa: E402
+from engine_scan import scan as scan_for_engine_code  # noqa: E402
 
 DEFAULT_PINS_PATH = BUNDLE_DIR / "reference" / "pins.json"
 PINS_SCHEMA_VERSION = 1
@@ -341,6 +342,12 @@ def load_tokenizer(model_path: str):
 async def main_async(args: argparse.Namespace) -> int:
     workspace = Path(args.workspace).resolve()
     log_path = workspace / ".vibesys-accuracy-server.log"
+    engine_findings = scan_for_engine_code(workspace)
+    if engine_findings:
+        print("ACCURACY CHECK FAILED: disallowed engine code (see OBJECTIVE.md):", file=sys.stderr)
+        for finding in engine_findings:
+            print(f"  - {finding}", file=sys.stderr)
+        return 1
     try:
         model_path = args.model_path or launcher.resolve_model_path()
         pins = None if args.skip_pins else load_pins(Path(args.pins))
