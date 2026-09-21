@@ -31,8 +31,8 @@ from vibesys.agents.runner import parse_typed_response_text
 from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.agents.session_store import NullSessionStore, SessionStore
 from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
-from vibesys.events import CommandResultPayload, JsonResultPayload
-from vibesys.skills import NULL_SKILL_SELECTION
+from vs_agent.events import CommandResultPayload, JsonResultPayload
+from vs_agent.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -42,8 +42,8 @@ if TYPE_CHECKING:
     from vibesys.agents.callbacks import AgentLogger
     from vibesys.agents.progress import AgentProgress
     from vibesys.agents.sink import AgentEventSink
-    from vibesys.events import AgentOutputChannel
-    from vibesys.skills import SkillSelection
+    from vs_agent.events import AgentOutputChannel
+    from vs_agent.skills import SkillSelection
     from vs_sandbox import HostResource, ProjectPathPolicy
 
 T = TypeVar("T", bound=BaseModel)

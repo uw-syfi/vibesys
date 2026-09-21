@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from vibesys.skills import NULL_SKILL_SELECTION
+from vs_agent.skills import NULL_SKILL_SELECTION
 
 from .base import ResponseFallback
 from .progress import AgentProgress, CandidateProgress, RoundProgress
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
-    from vibesys.skills import SkillSelection
+    from vs_agent.skills import SkillSelection
     from vs_sandbox import HostResource, ProjectPathPolicy
 
     from .client import AgentClient

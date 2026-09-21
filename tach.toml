@@ -83,7 +83,7 @@ depends_on = []
 
 [[modules]]
 path = "server.events"
-depends_on = ["server.diagnostics", "server.run_lifecycle", "server.event_index"]
+depends_on = ["server.diagnostics", "server.run_lifecycle", "server.event_index", "vs_agent"]
 
 [[modules]]
 path = "server.execution"
@@ -115,11 +115,11 @@ depends_on = ["vibesys.api"]
 
 [[modules]]
 path = "server.tool_payloads"
-depends_on = ["server.events"]
+depends_on = ["server.events", "vs_agent"]
 
 [[modules]]
 path = "vibesys"
-depends_on = ["vs_feature_flags", "vs_loop_state"]
+depends_on = ["vs_feature_flags", "vs_loop_state", "vs_agent"]
 
 [[modules]]
 # The narrow public facade over core (see the vibesys.api boundary plan): the

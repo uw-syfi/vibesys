@@ -8,8 +8,8 @@ from typing import Any, TextIO
 from vibesys.agents.progress import AgentProgress
 from vibesys.agents.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vibesys.agents.todos import todos_from_tool_call
-from vibesys.events import AgentOutputChannel, AgentStatusData, ToolResultPayload
-from vibesys.render.format import format_status_prefix
+from vs_agent._format import format_status_prefix
+from vs_agent.events import AgentOutputChannel, AgentStatusData, ToolResultPayload
 
 ContextWindowLookup = Callable[[str | None], int | None]
 """Resolves a model name to its context window size in tokens.

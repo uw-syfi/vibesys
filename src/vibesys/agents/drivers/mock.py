@@ -50,7 +50,6 @@ from vibesys.agents.scripted_rounds import round_number_from_label, scripted_rou
 from vibesys.agents.todos import todos_from_tool_call
 from vibesys.events import (
     AgentOutputChunkData,
-    CommandResultPayload,
     CoreEvent,
     CoreEventType,
     EventPayload,
@@ -59,6 +58,7 @@ from vibesys.events import (
     ToolResultData,
     UsageUpdateData,
 )
+from vs_agent.events import CommandResultPayload
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator

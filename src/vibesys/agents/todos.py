@@ -11,13 +11,13 @@ Extraction is best-effort by design: payloads originate from agent tool
 calls, so a malformed entry is skipped and an unrecognized payload yields
 "no update" — never an exception into the agent run. Statuses pass through
 as open strings; renderers own the degradation of unknown values (see the
-``TodoItemData.status`` contract in :mod:`vibesys.events`).
+``TodoItemData.status`` contract in :mod:`vs_agent.events`).
 """
 
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from vibesys.events import TodoItemData
+from vs_agent.events import TodoItemData
 
 _Extractor = Callable[[Mapping[str, Any]], list[TodoItemData] | None]
 

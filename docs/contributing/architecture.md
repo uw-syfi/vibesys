@@ -148,6 +148,7 @@ graph TD
     server.events --> server.diagnostics
     server.events --> server.event_index
     server.events --> server.run_lifecycle
+    server.events --> vs_agent
     server.execution --> server.diagnostics
     server.execution --> server.events
     server.execution --> server.journal
@@ -181,13 +182,16 @@ graph TD
     server.runtime --> vibesys.api
     server.settings --> vibesys.api
     server.tool_payloads --> server.events
+    server.tool_payloads --> vs_agent
     server.transport --> server.api
     server.transport --> vs_project
+    vibesys --> vs_agent
     vibesys --> vs_feature_flags
     vibesys --> vs_loop_state
     vibesys.agents --> vibesys
     vibesys.agents --> vibesys.render
     vibesys.agents --> vs_agent
+    vibesys.agents --> vs_loop_state
     vibesys.agents --> vs_project
     vibesys.agents --> vs_sandbox
     vibesys.api --> vibesys
