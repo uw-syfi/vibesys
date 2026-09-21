@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from vibesys.agents.spec import Driver
+from vs_agent.spec import Driver
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -36,9 +36,9 @@ def agent_catalog() -> Mapping[Driver, DriverInfo]:
     that adds or removes a provider changes this without an edit here:
 
     - ``agentshim`` reads its own ``supported_providers()`` (backed by
-      ``vibesys.agents.provider_policy.SHIPPED_PROVIDERS``).
+      ``vs_agent.provider_policy.SHIPPED_PROVIDERS``).
     - ``omnigent`` reads its executor registry
-      (``vibesys.agents.omnigent.providers.OMNIGENT_PROVIDER_EXECUTORS``).
+      (``vs_agent.omnigent.providers.OMNIGENT_PROVIDER_EXECUTORS``).
     - ``mock`` accepts only its own label; it drives no CLI, so provider
       selection has nothing else to validate against.
 
@@ -48,13 +48,13 @@ def agent_catalog() -> Mapping[Driver, DriverInfo]:
     ``agent.driver='agentshim'``); AgentShim and the mock have never gated on
     it.
     """
-    from vibesys.agents.drivers.agentshim import (  # noqa: PLC0415  # avoid import cycle
+    from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # avoid import cycle
         supported_providers as agentshim_providers,
     )
-    from vibesys.agents.drivers.mock import (  # noqa: PLC0415  # avoid import cycle
+    from vs_agent.drivers.mock import (  # noqa: PLC0415  # avoid import cycle
         supported_providers as mock_providers,
     )
-    from vibesys.agents.omnigent.providers import (  # noqa: PLC0415  # avoid import cycle
+    from vs_agent.omnigent.providers import (  # noqa: PLC0415  # avoid import cycle
         supported_providers as omnigent_providers,
     )
 

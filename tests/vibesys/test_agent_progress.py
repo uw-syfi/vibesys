@@ -3,11 +3,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibesys.agents.progress import CandidateProgress, RoundProgress
 from vibesys.context import _RunContext
 from vibesys.run import RunPaths
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.schemas import JudgeResponse, Verdict
+from vs_agent.progress import CandidateProgress, RoundProgress
 
 
 def _judge_fallback() -> JudgeResponse:

@@ -4,7 +4,7 @@ VibeSys consumes the ``agentshim`` library only through its public API. The
 library owns provider knowledge (argv, stream parsing, MCP config files,
 schema dialects, resume flags); this module owns VibeSys policy: sandbox
 confinement, structured-output fallback, conversation budgets, and the
-translation between library events and :mod:`vibesys.agents.contracts`.
+translation between library events and :mod:`vs_agent.contracts`.
 
 One path runs every session, host or container: build (or look up) a
 :class:`~vs_sandbox.WorkspaceSandbox`, wrap a plain ``HostCommandExecutor`` to
@@ -26,8 +26,8 @@ from weakref import WeakSet
 
 import agentshim
 
-from vibesys.agents.cli_common import build_schema_hint
-from vibesys.agents.contracts import (
+from vs_agent.cli_common import build_schema_hint
+from vs_agent.contracts import (
     AgentCapabilities,
     AgentEvent,
     AgentEventKind,
@@ -40,9 +40,9 @@ from vibesys.agents.contracts import (
     MCPServerSpec,
     SessionDisposition,
 )
-from vibesys.agents.host_resource_declarations import declare_agent_host_resources
-from vibesys.agents.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS, is_codex
 from vs_agent.events import CommandResultPayload
+from vs_agent.host_resource_declarations import declare_agent_host_resources
+from vs_agent.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS, is_codex
 from vs_sandbox import build_host_sandbox
 
 if TYPE_CHECKING:
@@ -711,7 +711,7 @@ class AgentShimDriver:
         if sandbox is not None:
             executor = confine_to_sandbox(executor, sandbox, find_binary=find_binary)
         if in_container:
-            from vibesys.agents.docker_executor import CodexRolloutWatchdogExecutor  # noqa: PLC0415
+            from vs_agent.docker_executor import CodexRolloutWatchdogExecutor  # noqa: PLC0415
 
             executor = CodexRolloutWatchdogExecutor(
                 executor,

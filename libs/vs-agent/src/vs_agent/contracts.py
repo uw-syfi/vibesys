@@ -15,8 +15,8 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
-    from vibesys.agents.progress import AgentProgress
-    from vibesys.agents.session_key import AgentSessionKey
+    from vs_agent.progress import AgentProgress
+    from vs_agent.session_key import AgentSessionKey
     from vs_sandbox import HostResource, ProjectPathPolicy
 
 T = TypeVar("T", bound=BaseModel)
@@ -225,7 +225,7 @@ class AgentClientProtocol(Protocol):
     """The agent-service surface the run context and every loop depend on.
 
     Each backend supplies one implementation: the CLI
-    :class:`~vibesys.agents.client.AgentClient`, the deterministic stub, and
+    :class:`~vs_agent.client.AgentClient`, the deterministic stub, and
     the plain loop's tracker wrapper. Attribution
     (``backend_name``, ``driver_name``, ``provider``, ``model_for_kind``) is
     part of this contract because the loop stamps it onto every round record,

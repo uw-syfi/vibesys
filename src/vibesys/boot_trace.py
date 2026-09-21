@@ -35,7 +35,7 @@ the operator's terminal, not a diagnostics channel::
 
 This module imports nothing from VibeSys, so ``main.py`` and ``cli.py`` can
 use it before paying for the framework packages that ``vibesys.context``
-pulls in (``vibesys.agents``, ``vibesys.backends``, ...). There is no
+pulls in (``vs_agent``, ``vibesys.backends``, ...). There is no
 exporter, sampler, or propagation machinery: the span shape is the point, so
 one could be added later without touching call sites.
 """

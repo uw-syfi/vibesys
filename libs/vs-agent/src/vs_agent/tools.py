@@ -5,7 +5,7 @@ itself: it only describes what a subprocess-hosted server would look like.
 A vibesys-owned module (the analogue of
 ``vibesys.loops.plain.mcp_config.build_issue_mcp_spec``) turns a
 :class:`StdioServerDescriptor` into the actual
-``vibesys.agents.contracts.MCPServerSpec`` that a driver launches. This
+``vs_agent.contracts.MCPServerSpec`` that a driver launches. This
 module does not import that type.
 """
 
@@ -46,7 +46,7 @@ class StdioServerDescriptor:
     """A stdio MCP server launch, shaped to map 1:1 onto ``MCPServerSpec``.
 
     Pure data: no live objects, no dependency on
-    ``vibesys.agents.contracts``. A vibesys adapter reads these fields to
+    ``vs_agent.contracts``. A vibesys adapter reads these fields to
     build the actual spec.
     """
 

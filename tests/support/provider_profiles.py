@@ -4,7 +4,7 @@ VibeSys derives its Docker and host-resource tables from
 ``ProviderProfile``. A test of that derivation should fail when the derivation
 changes, not when a library release edits one CLI's install recipe, so tests
 build the profiles they need here and install them through
-``vibesys.agents.provider_profiles``. Tests whose subject *is* a real
+``vs_agent.provider_profiles``. Tests whose subject *is* a real
 provider's declared behaviour read the shipped profile instead.
 """
 
@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from agentshim import McpMechanism, OutputSchemaStyle, ProviderProfile, SchemaDialect
 
-from vibesys.agents import provider_profiles
+from vs_agent import provider_profiles
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

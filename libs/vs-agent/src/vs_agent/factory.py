@@ -4,22 +4,22 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from vibesys.agents.catalog import agent_catalog
-from vibesys.agents.client import AgentClient, AgentDiagnosticLog
-from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
-from vibesys.agents.spec import AgentBackend, Driver
+from vs_agent.catalog import agent_catalog
+from vs_agent.client import AgentClient, AgentDiagnosticLog
+from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
+from vs_agent.spec import AgentBackend, Driver
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
     from typing import TextIO
 
-    from vibesys.agents.contracts import AgentClientProtocol
-    from vibesys.agents.session_store import SessionStore
-    from vibesys.agents.sink import AgentEventSink
-    from vibesys.agents.spec import AgentSpec
+    from vs_agent.contracts import AgentClientProtocol
+    from vs_agent.session_store import SessionStore
+    from vs_agent.sink import AgentEventSink
     from vs_agent.skills import SkillSelection
+    from vs_agent.spec import AgentSpec
     from vs_sandbox import HostResource, ProjectPathPolicy
 
 
@@ -35,15 +35,15 @@ def agent_driver_supports_mcp_servers(spec: AgentSpec) -> bool | None:
 
     driver_name = spec.driver
     if driver_name is Driver.OMNIGENT:
-        from vibesys.agents.drivers.omnigent import OMNIGENT_CAPABILITIES  # noqa: PLC0415
+        from vs_agent.drivers.omnigent import OMNIGENT_CAPABILITIES  # noqa: PLC0415
 
         return OMNIGENT_CAPABILITIES.mcp_servers
     if driver_name is Driver.MOCK:
-        from vibesys.agents.drivers.mock import MOCK_CAPABILITIES  # noqa: PLC0415
+        from vs_agent.drivers.mock import MOCK_CAPABILITIES  # noqa: PLC0415
 
         return MOCK_CAPABILITIES.mcp_servers
 
-    from vibesys.agents.drivers.agentshim import AGENTSHIM_CAPABILITIES  # noqa: PLC0415
+    from vs_agent.drivers.agentshim import AGENTSHIM_CAPABILITIES  # noqa: PLC0415
 
     return AGENTSHIM_CAPABILITIES.mcp_servers
 
@@ -74,7 +74,7 @@ def build_agent_client(  # noqa: PLR0913
         )
 
     if backend is AgentBackend.STUB:
-        from vibesys.agents.stub_runner import StubAgentClient  # noqa: PLC0415
+        from vs_agent.stub_runner import StubAgentClient  # noqa: PLC0415
 
         return StubAgentClient(event_sink=events)
 
@@ -92,11 +92,11 @@ def build_agent_client(  # noqa: PLR0913
         )
 
     if driver_name == Driver.MOCK:
-        from vibesys.agents.drivers.mock import MockDriver  # noqa: PLC0415
+        from vs_agent.drivers.mock import MockDriver  # noqa: PLC0415
 
         driver = MockDriver()
     elif driver_name == Driver.OMNIGENT:
-        from vibesys.agents.drivers.omnigent import (  # noqa: PLC0415
+        from vs_agent.drivers.omnigent import (  # noqa: PLC0415
             OmnigentDriver,
             OmnigentDriverError,
         )
@@ -112,7 +112,7 @@ def build_agent_client(  # noqa: PLR0913
     else:
         docker_sandboxes = None
         if use_docker:
-            from vibesys.agents.cli_docker import DOCKER_PROVIDER_ENV  # noqa: PLC0415
+            from vs_agent.cli_docker import DOCKER_PROVIDER_ENV  # noqa: PLC0415
 
             if provider not in DOCKER_PROVIDER_ENV:
                 raise SystemExit(  # noqa: TRY003  # tracked: #288
@@ -120,7 +120,7 @@ def build_agent_client(  # noqa: PLR0913
                     f"supported: {sorted(DOCKER_PROVIDER_ENV)}"
                 )
             docker_sandboxes = backends
-        from vibesys.agents.drivers.agentshim import AgentShimDriver  # noqa: PLC0415
+        from vs_agent.drivers.agentshim import AgentShimDriver  # noqa: PLC0415
 
         driver = AgentShimDriver(
             provider=provider,

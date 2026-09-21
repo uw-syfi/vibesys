@@ -16,7 +16,6 @@ from server.events import EventStatus, EventType
 from server.integration import _CORE_FAILURE_CONTEXTS
 from server.journal import DIAGNOSTIC_FAILURE_EVENTS
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.events import (
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
@@ -35,6 +34,7 @@ from vibesys.events import (
     EventStatus as CoreEventStatus,
 )
 from vibesys.render import output_sink
+from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:

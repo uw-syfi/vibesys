@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
-from vibesys.agents.contracts import MCPServerSpec
-from vibesys.agents.drivers import _omnigent_mcp as subject
-from vibesys.agents.drivers._omnigent_mcp import OmnigentMCPError, OmnigentMCPTools
+from vs_agent.contracts import MCPServerSpec
+from vs_agent.drivers import _omnigent_mcp as subject
+from vs_agent.drivers._omnigent_mcp import OmnigentMCPError, OmnigentMCPTools
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable

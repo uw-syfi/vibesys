@@ -1,6 +1,6 @@
 """Guard against re-scattering VibeSys's provider decisions.
 
-``vibesys.agents.provider_policy`` is the one place VibeSys states which CLI
+``vs_agent.provider_policy`` is the one place VibeSys states which CLI
 providers it ships and what it decides to do with them. Before it existed,
 the same provider-name literals were hand-copied across the AgentShim driver,
 ``cli_docker``, and the headless entrypoint's ``--cli-provider`` flag, and
@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING
 
 import agentshim
 
-from vibesys.agents.provider_policy import SHIPPED_PROVIDERS
 from vibesys.constants import PROJECT_ROOT
+from vs_agent.provider_policy import SHIPPED_PROVIDERS
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 _PROVIDER_LITERALS = frozenset({"claude", "codex", "gemini", "opencode", "copilot"})
 
 _SCAN_ROOTS = (
-    PROJECT_ROOT / "src" / "vibesys" / "agents",
+    PROJECT_ROOT / "libs" / "vs-agent" / "src" / "vs_agent",
     PROJECT_ROOT / "src" / "entrypoints",
 )
 
@@ -39,23 +39,23 @@ _SCAN_ROOTS = (
 _ALLOWED_LITERALS_BY_PATH: dict[str, frozenset[str] | None] = {
     # The seam that reads agentshim's own provider facts, and the module this
     # test is guarding, both are expected to name providers directly.
-    "src/vibesys/agents/provider_policy.py": None,
-    "src/vibesys/agents/provider_profiles.py": None,
+    "libs/vs-agent/src/vs_agent/provider_policy.py": None,
+    "libs/vs-agent/src/vs_agent/provider_profiles.py": None,
     # Omnigent 0.10 supports exactly claude and codex and exposes no
     # provider-name abstraction of its own; this driver and its package
     # branch on Omnigent's own per-provider attributes (its executor
     # registry, its MCP translation), not on a VibeSys provider decision, so
-    # routing them through vibesys.agents.provider_policy would misstate
+    # routing them through vs_agent.provider_policy would misstate
     # ownership.
-    "src/vibesys/agents/drivers/omnigent.py": None,
+    "libs/vs-agent/src/vs_agent/drivers/omnigent.py": None,
     # docker_executor.py: the Codex rollout watchdog recognizes a resumed
     # `codex exec --json` process and rollout file by name. It is documented
     # provider-behaviour compensation that "stays in VibeSys until the
     # behaviour is verified fixed upstream" (docs/contributing/agent-drivers.md).
-    "src/vibesys/agents/docker_executor.py": frozenset({"codex"}),
+    "libs/vs-agent/src/vs_agent/docker_executor.py": frozenset({"codex"}),
 }
 
-_ALLOWED_DIR_PREFIXES = ("src/vibesys/agents/omnigent/",)
+_ALLOWED_DIR_PREFIXES = ("libs/vs-agent/src/vs_agent/omnigent/",)
 
 
 def _relative_posix(path: Path) -> str:
@@ -102,7 +102,7 @@ def test_no_bare_provider_literals_outside_the_allowlist() -> None:
     violations = _violations()
     assert not violations, (
         "found provider-name literal(s) that should route through "
-        "vibesys.agents.provider_policy instead:\n" + "\n".join(violations)
+        "vs_agent.provider_policy instead:\n" + "\n".join(violations)
     )
 
 

@@ -13,14 +13,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.agents.client import AgentClient
-from vibesys.agents.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
-from vibesys.agents.drivers.mock import (
-    MockDriver,
-    MockDriverError,
-    ReplayPlaybook,
-    ScriptedPlaybook,
-)
 from vibesys.events import (
     AgentOutputChunkData,
     CoreEvent,
@@ -30,8 +22,16 @@ from vibesys.events import (
     ToolResultData,
     UsageUpdateData,
 )
+from vibesys.mock_replay import build_replay_playbook
 from vibesys.render.sink import output_sink
 from vibesys.schemas import OrchestratorPlan
+from vs_agent.client import AgentClient
+from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
+from vs_agent.drivers.mock import (
+    MockDriver,
+    MockDriverError,
+    ScriptedPlaybook,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -264,7 +264,7 @@ def test_replay_mode_round_trips_a_recorded_event_log(tmp_path, sink_events):  #
     recording.write_text("".join(event.model_dump_json() + "\n" for event in recorded))
     sink_events.clear()
 
-    _invoke_plan(MockDriver(ReplayPlaybook(events_path=recording)), tmp_path)
+    _invoke_plan(MockDriver(build_replay_playbook(recording)), tmp_path)
 
     def shape(events: list[CoreEvent]) -> list[tuple[str, str]]:
         return [
@@ -288,7 +288,7 @@ def test_replay_mode_reproduces_assistant_and_analysis_text(tmp_path, sink_event
     recording.write_text("".join(event.model_dump_json() + "\n" for event in recorded))
     sink_events.clear()
 
-    _invoke_plan(MockDriver(ReplayPlaybook(events_path=recording)), tmp_path)
+    _invoke_plan(MockDriver(build_replay_playbook(recording)), tmp_path)
 
     def channels(events: list[CoreEvent]) -> list[str]:
         return [
@@ -303,18 +303,8 @@ def test_replay_mode_reproduces_assistant_and_analysis_text(tmp_path, sink_event
 
 
 def test_replay_mode_rejects_a_missing_recording(tmp_path):  # noqa: ANN001, ANN201
-    driver = MockDriver(ReplayPlaybook(events_path=tmp_path / "absent.jsonl"))
-    session = driver.create_session(
-        AgentSessionSpec(
-            role="orchestrator",
-            provider="mock",
-            workspace=tmp_path,
-            policy=AgentExecutionPolicy(require_enforcement=False),
-        )
-    )
-
     with pytest.raises(MockDriverError, match="replay event log not found"):
-        session.run_turn(AgentTurnRequest(message="go"))
+        build_replay_playbook(tmp_path / "absent.jsonl")
 
 
 def test_replay_mode_skips_a_truncated_trailing_record(tmp_path, sink_events):  # noqa: ANN001, ANN201
@@ -324,7 +314,7 @@ def test_replay_mode_skips_a_truncated_trailing_record(tmp_path, sink_events):  
     recording.write_text(body + '{"type": "tool_call", "timestamp"')
     sink_events.clear()
 
-    _invoke_plan(MockDriver(ReplayPlaybook(events_path=recording)), tmp_path)
+    _invoke_plan(MockDriver(build_replay_playbook(recording)), tmp_path)
 
     assert _of_type(sink_events, CoreEventType.TOOL_CALL)
 

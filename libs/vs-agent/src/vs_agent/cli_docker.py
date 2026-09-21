@@ -4,7 +4,7 @@ Provider facts come from ``agentshim``'s ``ProviderProfile`` at call time:
 state directories, auth environment variables, and which files carry
 credentials. What stays here is VibeSys policy that is not itself a provider
 *decision*. The container environment table lives in
-:mod:`vibesys.agents.provider_policy`; this module imports it.
+:mod:`vs_agent.provider_policy`; this module imports it.
 
 Every containerized CLI path (plain Docker, and Modal/SkyPilot's local editor
 container since #676) now starts from a prebuilt agent image with every
@@ -15,7 +15,7 @@ running shell commands through ``extra_init_commands``. The install-recipe
 machinery this module used to carry for Modal and SkyPilot
 (``docker_init_commands`` and its supporting override tables) is gone now
 that those two also consume the agent image; provider CLI version pins live
-in :mod:`vibesys.agents.provider_policy`, which owns provider decisions.
+in :mod:`vs_agent.provider_policy`, which owns provider decisions.
 """
 
 from __future__ import annotations
@@ -24,11 +24,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from vibesys.agents import provider_profiles
-from vibesys.agents.provider_policy import DOCKER_PROVIDER_ENV
+from vs_agent import provider_profiles
+from vs_agent.provider_policy import DOCKER_PROVIDER_ENV
 from vs_sandbox import AGENT_HOME
 
-# Re-exported for existing importers (``vibesys.agents.factory``,
+# Re-exported for existing importers (``vs_agent.factory``,
 # ``vibesys.sandbox.run_environment``, and this module's own tests reach it as
 # ``cli_docker.DOCKER_PROVIDER_ENV``); the value itself lives in
 # ``provider_policy`` now.

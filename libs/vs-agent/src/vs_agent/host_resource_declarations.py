@@ -8,6 +8,7 @@ resource-import mechanism.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -16,8 +17,7 @@ from collections.abc import Iterable, Mapping  # noqa: TC003  # tracked: #288
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import vibesys
-from vibesys.agents import provider_profiles
+from vs_agent import provider_profiles
 from vs_sandbox import (
     HostResource,
     HostResourceAccess,
@@ -187,9 +187,12 @@ def _agent_runtime(ctx: HostResourceContext) -> Iterable[HostResource]:
         real_node = Path(node).resolve()
         paths.extend((real_node.parent, real_node.parent.parent))
 
-    pkg_file = getattr(vibesys, "__file__", None)
-    if pkg_file:
-        paths.append(Path(pkg_file).resolve().parents[1])
+    # Locate the installed vibesys package by name without importing it: this
+    # leaf library must not depend on core. The grant is best-effort — present
+    # when vibesys is importable, which it is in every real run.
+    vibesys_spec = importlib.util.find_spec("vibesys")
+    if vibesys_spec is not None and vibesys_spec.origin:
+        paths.append(Path(vibesys_spec.origin).resolve().parents[1])
 
     return _resources(paths, purpose="agent and VibeSys runtime")
 

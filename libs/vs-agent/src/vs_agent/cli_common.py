@@ -15,12 +15,12 @@ from typing import TYPE_CHECKING, TextIO
 
 from pydantic import BaseModel  # noqa: TC002  # tracked: #288
 
-from vibesys.agents.provider_policy import cli_skill_dirs
-from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
+from vs_agent.provider_policy import cli_skill_dirs
+from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
-    from vibesys.agents.sink import AgentEventSink
+    from vs_agent.sink import AgentEventSink
     from vs_agent.skills import SkillSelection
 
 # Per-provider CLI skill-discovery paths, matching upstream

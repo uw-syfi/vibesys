@@ -7,17 +7,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibesys.agents import build_agent_client
-from vibesys.agents.catalog import agent_catalog
-from vibesys.agents.client import AgentClient
-from vibesys.agents.drivers.agentshim import AgentShimDriver
-from vibesys.agents.drivers.mock import MockDriver
-from vibesys.agents.drivers.omnigent import OmnigentDriver, OmnigentDriverError
-from vibesys.agents.factory import agent_driver_supports_mcp_servers
-from vibesys.agents.omnigent import supported_providers
-from vibesys.agents.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
-from vibesys.agents.spec import AgentSpec, Driver
+from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.config import Config
+from vs_agent import build_agent_client
+from vs_agent.catalog import agent_catalog
+from vs_agent.client import AgentClient
+from vs_agent.drivers.agentshim import AgentShimDriver
+from vs_agent.drivers.mock import MockDriver
+from vs_agent.drivers.omnigent import OmnigentDriver, OmnigentDriverError
+from vs_agent.factory import agent_driver_supports_mcp_servers
+from vs_agent.omnigent import supported_providers
+from vs_agent.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
+from vs_agent.spec import Driver
 from vs_sandbox import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -38,7 +39,7 @@ def _build(  # noqa: PLR0913
     log_dir: Path | None = None,
     host_resources: Iterable[HostResource] = (),
 ) -> AgentClient:
-    spec = AgentSpec.from_config(config, model=model_name)
+    spec = agent_spec_from_config(config, model=model_name)
     client = build_agent_client(
         spec=spec,
         backends=backends,
@@ -117,7 +118,7 @@ def test_preflight_capabilities_match_constructed_driver(
     supports_mcp: object,
 ) -> None:
     config = _config(driver=driver, backend="cli", cli_provider="codex")
-    spec = AgentSpec.from_config(config)
+    spec = agent_spec_from_config(config)
     declared = agent_driver_supports_mcp_servers(spec)
     client = _build(config)
 
@@ -127,7 +128,7 @@ def test_preflight_capabilities_match_constructed_driver(
 
 def test_non_cli_backend_has_no_external_driver_capabilities() -> None:
     config = _config(backend="stub")
-    spec = AgentSpec.from_config(config)
+    spec = agent_spec_from_config(config)
 
     assert agent_driver_supports_mcp_servers(spec) is None
 

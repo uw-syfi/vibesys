@@ -29,8 +29,11 @@
 # imports (core importing server/entrypoints, server importing entrypoints)
 # fail because the edge is undeclared.
 #
-# Libs form a DAG by review: every lib edge is explicit here, and only
-# `vs_project` -> `vs_loop_state` exists. Reject any other lib-to-lib edge.
+# Libs form a DAG by review: every lib edge is explicit here. The edges are
+# `vs_project` -> `vs_loop_state` and `vs_agent` -> {`vs_sandbox`,
+# `vs_loop_state`, `vs_project`} (vs_agent constructs agents over sandboxes,
+# reads loop-state schemas, and persists agent sessions to project state).
+# Reject any other lib-to-lib edge.
 
 source_roots = [
     "src",
@@ -51,7 +54,7 @@ forbid_circular_dependencies = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_project", "vs_github", "vibesys", "vibesys.api", "vibesys.evaluators", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vibesys.agents", "server.runtime", "server.settings"]
+depends_on = ["vs_project", "vs_github", "vibesys", "vibesys.api", "vibesys.evaluators", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_agent", "server.runtime", "server.settings"]
 
 [[modules]]
 path = "server"
@@ -127,23 +130,19 @@ depends_on = ["vs_feature_flags", "vs_loop_state", "vs_agent"]
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vibesys.agents", "vibesys.domains", "vibesys.evaluators", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_agent", "vs_loop_state", "vs_project", "vs_sandbox"]
+depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_loop_state", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.context"
-depends_on = ["vibesys", "vibesys.agents", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox"]
-
-[[modules]]
-path = "vibesys.agents"
-depends_on = ["vibesys", "vibesys.render", "vs_project", "vs_sandbox", "vs_agent", "vs_loop_state"]
+depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.loops"
-depends_on = ["vibesys", "vibesys.context", "vibesys.agents", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_loop_state", "vs_evaluator_protocol", "vs_issue_board", "vs_sandbox", "vs_project"]
+depends_on = ["vibesys", "vibesys.context", "vs_agent", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_loop_state", "vs_evaluator_protocol", "vs_issue_board", "vs_sandbox", "vs_project"]
 
 [[modules]]
 path = "vibesys.run"
-depends_on = ["vibesys", "vibesys.agents", "vibesys.backends", "vibesys.evaluators", "vibesys.render", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_loop_state", "vs_project"]
+depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.evaluators", "vibesys.render", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_loop_state", "vs_project"]
 
 [[modules]]
 path = "vibesys.domains"
@@ -155,7 +154,7 @@ depends_on = ["vibesys", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.sandbox"
-depends_on = ["vibesys", "vibesys.agents", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vibesys.skypilot", "vs_project", "vs_sandbox"]
+depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vibesys.skypilot", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.skypilot"
@@ -183,7 +182,7 @@ depends_on = []
 
 [[modules]]
 path = "vs_agent"
-depends_on = []
+depends_on = ["vs_sandbox", "vs_loop_state", "vs_project"]
 
 [[modules]]
 path = "vs_project"

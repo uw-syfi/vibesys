@@ -14,8 +14,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys.agents import AgentClient
-from vibesys.agents.contracts import AgentCapabilities
 from vibesys.constants import DomainName
 from vibesys.loops.plain.loop import PlainLoopState
 from vibesys.loops.plain.loop import run_plain_loop as _run_plain_loop
@@ -28,6 +26,8 @@ from vibesys.schemas import (
     PerfTrend,
     Verdict,
 )
+from vs_agent import AgentClient
+from vs_agent.contracts import AgentCapabilities
 from vs_issue_board import IssueBoard, IssueStatus
 from vs_project import RUN_SCHEMA_VERSION, Project, RunEnvironmentRecord
 

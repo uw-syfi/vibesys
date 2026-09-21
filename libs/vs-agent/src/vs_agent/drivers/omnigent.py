@@ -17,8 +17,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
-from vibesys.agents.cli_common import build_schema_hint
-from vibesys.agents.contracts import (
+from vs_agent.cli_common import build_schema_hint
+from vs_agent.contracts import (
     AgentCapabilities,
     AgentEvent,
     AgentEventKind,
@@ -28,23 +28,23 @@ from vibesys.agents.contracts import (
     AgentTurnResult,
     AgentUsage,
 )
-from vibesys.agents.drivers._omnigent_lifecycle import CloseLifecycle as _CloseLifecycle
-from vibesys.agents.drivers._omnigent_lifecycle import LifecycleState as _LifecycleState
-from vibesys.agents.drivers._omnigent_mcp import OmnigentMCPTools as _OmnigentMCPTools
-from vibesys.agents.drivers._omnigent_runtime import (
+from vs_agent.drivers._omnigent_lifecycle import CloseLifecycle as _CloseLifecycle
+from vs_agent.drivers._omnigent_lifecycle import LifecycleState as _LifecycleState
+from vs_agent.drivers._omnigent_mcp import OmnigentMCPTools as _OmnigentMCPTools
+from vs_agent.drivers._omnigent_runtime import (
     OmnigentAsyncRuntime as _OmnigentAsyncRuntime,
 )
-from vibesys.agents.drivers._omnigent_runtime import OmnigentAsyncTask as _OmnigentAsyncTask
-from vibesys.agents.host_resource_declarations import (
+from vs_agent.drivers._omnigent_runtime import OmnigentAsyncTask as _OmnigentAsyncTask
+from vs_agent.events import CommandResultPayload, JsonResultPayload, ToolResultPayload
+from vs_agent.host_resource_declarations import (
     declare_active_rust_toolchain_resources,
     resolve_active_rust_toolchain,
 )
-from vibesys.agents.omnigent.providers import (
+from vs_agent.omnigent.providers import (
     OMNIGENT_PROVIDER_EXECUTORS,
     OmnigentExecutorSpec,
     supported_providers,
 )
-from vs_agent.events import CommandResultPayload, JsonResultPayload, ToolResultPayload
 from vs_sandbox import HostResourceContext
 
 if TYPE_CHECKING:

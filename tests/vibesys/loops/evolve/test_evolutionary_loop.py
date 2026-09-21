@@ -20,7 +20,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys.agents import AgentClient
 from vibesys.config import Config
 from vibesys.constants import DomainName
 from vibesys.context import create_run_context
@@ -60,6 +59,7 @@ from vibesys.run import EventJournal, GitTracker, LoopContext, RunState, RunStat
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentSpec
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
+from vs_agent import AgentClient
 from vs_project import EvolveRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:

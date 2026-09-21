@@ -8,7 +8,7 @@ import pytest
 from tests.support import provider_profiles as fake_profiles
 
 import vibesys
-from vibesys.agents import host_resource_declarations
+from vs_agent import host_resource_declarations
 from vs_sandbox import HostResource, HostResourceAccess, HostResourceContext
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")
@@ -104,7 +104,7 @@ class TestAgentRuntime:
     """The running VibeSys install must be importable inside confinement.
 
     ``import vibesys`` cannot fail here: this test module is itself reached
-    through ``vibesys.agents.host_resource_declarations``, so the package is
+    through ``vs_agent.host_resource_declarations``, so the package is
     already loaded and ``vibesys/__init__.py`` is a docstring-only module with
     no re-exports that could raise. The declaration is unconditional.
     """

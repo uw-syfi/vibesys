@@ -17,8 +17,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibesys.agents import provider_policy
 from vibesys.sandbox.images import _AGENT_DOCKERFILE, _AGENT_IMAGE_DIR, agent_image
+from vs_agent import provider_policy
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence

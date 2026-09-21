@@ -16,12 +16,7 @@ from typing import Any, TextIO, TypeVar, overload
 from pydantic import BaseModel
 
 from vibesys import backends, boot_trace
-from vibesys.agents import AgentClientProtocol, build_agent_client
-from vibesys.agents.factory import agent_driver_supports_mcp_servers
-from vibesys.agents.host_resource_declarations import task_agent_host_resources
-from vibesys.agents.progress import AgentProgress
-from vibesys.agents.session_store import AgentSessionState, DurableSessionStore
-from vibesys.agents.spec import AgentBackend, AgentSpec, resolve_agent_driver
+from vibesys.agent_spec_config import agent_spec_from_config, resolve_agent_driver
 from vibesys.backends.base import ComputeBackendImpl, ContentionMonitor
 from vibesys.config import Config, as_config
 from vibesys.constants import (
@@ -98,6 +93,12 @@ from vibesys.sandbox.run_environment import (
     make_run_environment_spec,
 )
 from vibesys.skills import platform_skill_selection
+from vs_agent import AgentClientProtocol, build_agent_client
+from vs_agent.factory import agent_driver_supports_mcp_servers
+from vs_agent.host_resource_declarations import task_agent_host_resources
+from vs_agent.progress import AgentProgress
+from vs_agent.session_store import AgentSessionState, DurableSessionStore
+from vs_agent.spec import AgentBackend
 from vs_project import (
     Project,
     RunConfiguration,
@@ -424,7 +425,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             resolved_backend = str(agent_backend or config.agent.backend or AgentBackend.CLI)
             resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
             model_name = config.model.name
-            agent_spec = AgentSpec.from_config(
+            agent_spec = agent_spec_from_config(
                 config,
                 backend=agent_backend,
                 provider=cli_provider,
@@ -1150,7 +1151,7 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
     # role-scoped conversations are never checkpointed (they belong to one
     # process). Candidates also share the parent's run ID and local namespace
     # and run concurrently, so a single per-run map would alias them anyway.
-    agent_spec = AgentSpec.from_config(
+    agent_spec = agent_spec_from_config(
         config,
         backend=agent_backend,
         provider=cli_provider,

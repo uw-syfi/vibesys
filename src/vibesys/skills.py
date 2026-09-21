@@ -55,7 +55,7 @@ def platform_skill_selection(compute_backend: ComputeBackend | None) -> SkillSel
     """Build the ``SkillSelection`` that prunes foreign ``platforms/<backend>/`` dirs.
 
     This is the policy half of skill materialization: it knows about compute
-    backends. The agent package (``vibesys.agents.cli_common.materialize_skills``)
+    backends. The agent package (``vs_agent.cli_common.materialize_skills``)
     only knows how to apply a caller-supplied ``SkillSelection``, not what a
     compute backend is.
     """

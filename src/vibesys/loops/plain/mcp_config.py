@@ -1,4 +1,4 @@
-"""Build the :class:`~vibesys.agents.contracts.MCPServerSpec` for the issue tracker.
+"""Build the :class:`~vs_agent.contracts.MCPServerSpec` for the issue tracker.
 
 The issue-loop hands one of these to ``AgentClient.invoke(mcp_servers=...)``
 each phase. The runner then forwards it to the active provider's
@@ -12,7 +12,7 @@ MCP path; everything else is provider-agnostic and lives in the driver.
 
 from __future__ import annotations
 
-from vibesys.agents.contracts import MCPServerSpec
+from vs_agent.contracts import MCPServerSpec
 from vs_issue_board import IssueType  # noqa: TC001  # tracked: #288
 
 
