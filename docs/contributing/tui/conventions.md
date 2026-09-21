@@ -308,3 +308,5 @@ deprecation.
 A PR that adds or moves a binding names the rule it follows. If no rule covers
 it, say so and propose one here in the same change, so the next person inherits
 a decision rather than a precedent.
+
+{/* vibesys-merge-bot test 2: exercises /merge-scoped end to end, safe to revert */}
