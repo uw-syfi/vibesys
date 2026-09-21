@@ -29,17 +29,10 @@ class AgentBackend(StrEnum):
 
 
 class Driver(StrEnum):
-    """External driver that runs a CLI agent provider.
-
-    ``MOCK`` is test infrastructure: it satisfies the same driver contract
-    while streaming a deterministic playbook, so integration tests exercise
-    the real client, sink, and application integration path without an agent
-    CLI.
-    """
+    """External driver that runs a CLI agent provider."""
 
     AGENTSHIM = "agentshim"
     OMNIGENT = "omnigent"
-    MOCK = "mock"
 
 
 @dataclass(frozen=True)
