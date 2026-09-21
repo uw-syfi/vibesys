@@ -10,6 +10,7 @@ from server.chat.prompts import experiment_chat_system_prompt
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.api import MCPServerSpec
 from vibesys.config import Config
+from vibesys.skills import NULL_SKILL_SELECTION
 from vs_sandbox import HostResource, HostResourceAccess, ProjectPathPolicy
 
 _FAKE_TOOL_SERVERS = (
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 
     import pytest
 
+    from vibesys.skills import SkillSelection
+
 
 class _Client:
     def __init__(self) -> None:
@@ -39,7 +42,7 @@ class _FakeAgentEnvironment:
     """Stub `vibesys.api.AgentEnvironment` returned by `_FakeRunSession`."""
 
     config: Config
-    compute_backend: str = "cpu"
+    skill_selection: SkillSelection = NULL_SKILL_SELECTION
     skill_source_dirs: tuple[Path, ...] = ()
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
     host_resources: tuple[HostResource, ...] = ()

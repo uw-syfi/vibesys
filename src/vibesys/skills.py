@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Iterable, Sequence  # noqa: TC003  # tracked: #288
+from collections.abc import Callable, Iterable, Sequence  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -24,6 +24,25 @@ PLATFORM_SKELETON: tuple[str, ...] = ("floor.md", "hardware.md", "profiler.md")
 
 # Parent path of the per-backend directories inside a skill.
 PLATFORMS_PARENT: tuple[str, str] = ("references", "platforms")
+
+
+@dataclass(frozen=True)
+class SkillSelection:
+    """Caller-supplied policy for which skill directories to skip while copying.
+
+    ``skip_dir`` mirrors :func:`shutil.copytree`'s ``ignore`` callable
+    signature: given the directory being copied and the names in it, return the
+    subset to skip. Core injects the prune policy as data so the agent package
+    need not resolve it from domain knowledge (compute backends) it should not
+    have.
+    """
+
+    skip_dir: Callable[[str, list[str]], set[str]]
+
+
+#: The no-op selection: skip nothing beyond whatever the mechanism already
+#: excludes. The default so call sites need not build a lambda themselves.
+NULL_SKILL_SELECTION = SkillSelection(skip_dir=lambda _src_dir, _names: set())
 
 
 def foreign_platform_names(compute_backend: ComputeBackend | None) -> frozenset[str]:
@@ -48,6 +67,24 @@ def is_platforms_parent(directory: Path | str) -> bool:
     dropped.
     """
     return Path(directory).parts[-2:] == PLATFORMS_PARENT
+
+
+def platform_skill_selection(compute_backend: ComputeBackend | None) -> SkillSelection:
+    """Build the ``SkillSelection`` that prunes foreign ``platforms/<backend>/`` dirs.
+
+    This is the policy half of skill materialization: it knows about compute
+    backends. The agent package (``vibesys.agents.cli_common.materialize_skills``)
+    only knows how to apply a caller-supplied ``SkillSelection``, not what a
+    compute backend is.
+    """
+    foreign = foreign_platform_names(compute_backend)
+
+    def _skip_dir(src_dir: str, names: list[str]) -> set[str]:
+        if not foreign or not is_platforms_parent(src_dir):
+            return set()
+        return {name for name in names if name in foreign}
+
+    return SkillSelection(skip_dir=_skip_dir)
 
 
 class SkillMetadataError(ValueError):

@@ -17,6 +17,7 @@ from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.run.integration import RunResourceHandoff
+from vibesys.skills import platform_skill_selection
 from vs_sandbox import HostResource, HostResourceAccess, ProjectPathPolicy
 
 if TYPE_CHECKING:
@@ -94,7 +95,14 @@ def test_open_agent_environment_local_reports_unsandboxed_shape(tmp_path: Path) 
     assert result.use_docker is False
     assert result.isolated is False
     assert result.config is handoff.config
-    assert result.compute_backend is handoff.compute_backend
+    # `skill_selection` wraps a fresh closure per call, so compare behavior
+    # rather than identity: it must prune exactly what the handoff's compute
+    # backend would prune.
+    expected_selection = platform_skill_selection(handoff.compute_backend)
+    sample_names = ["cpu", "cuda", "trainium", "metal", "unrelated"]
+    assert result.skill_selection.skip_dir(
+        "pkg/references/platforms", sample_names
+    ) == expected_selection.skip_dir("pkg/references/platforms", sample_names)
     result.close()
 
 

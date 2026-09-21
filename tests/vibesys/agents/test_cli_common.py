@@ -23,6 +23,7 @@ from vibesys.agents.cli_common import (
 )
 from vibesys.constants import ComputeBackend
 from vibesys.schemas import JudgeResponse
+from vibesys.skills import platform_skill_selection
 
 
 def _skill(root: Path, name: str, body: str = "# skill\n") -> Path:
@@ -200,7 +201,7 @@ class TestPlatformPruning:
 
         ws = tmp_path / "ws"
         ws.mkdir()
-        materialize_skills(ws, [skill_src], compute_backend=compute_backend)
+        materialize_skills(ws, [skill_src], selection=platform_skill_selection(compute_backend))
         return ws / ".claude/skills" / "serving-systems" / "references"
 
     @pytest.mark.parametrize(
