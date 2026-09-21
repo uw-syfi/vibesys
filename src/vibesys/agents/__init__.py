@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from .base import ResponseFallback
 from .progress import AgentProgress, CandidateProgress, RoundProgress
+from .sink import NULL_AGENT_EVENT_SINK
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
     from .client import AgentClient
     from .contracts import AgentClientProtocol
     from .session_store import SessionStore
+    from .sink import AgentEventSink
 
 __all__ = [
     "AgentClient",
@@ -60,6 +62,7 @@ def build_agent_client(  # noqa: PLR0913
     project_path_policy: ProjectPathPolicy | None = None,
     require_host_sandbox: bool = False,
     session_store: SessionStore | None = None,
+    events: AgentEventSink = NULL_AGENT_EVENT_SINK,
 ) -> AgentClientProtocol:
     """Build an agent service through the application composition module."""
     from .factory import build_agent_client as build  # noqa: PLC0415
@@ -79,4 +82,5 @@ def build_agent_client(  # noqa: PLR0913
         project_path_policy=project_path_policy,
         require_host_sandbox=require_host_sandbox,
         session_store=session_store,
+        events=events,
     )

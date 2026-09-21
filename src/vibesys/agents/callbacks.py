@@ -6,10 +6,10 @@ from collections.abc import Callable
 from typing import Any, TextIO
 
 from vibesys.agents.progress import AgentProgress
+from vibesys.agents.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vibesys.agents.todos import todos_from_tool_call
 from vibesys.events import AgentOutputChannel, AgentStatusData, ToolResultPayload
 from vibesys.render.format import format_status_prefix
-from vibesys.render.sink import output_sink
 
 ContextWindowLookup = Callable[[str | None], int | None]
 """Resolves a model name to its context window size in tokens.
@@ -61,8 +61,8 @@ def _default_context_window_lookup(model_name: str | None) -> int | None:
 class AgentLogger:
     """Single event adapter for all agent activity: token streaming, tool calls, and tool results.
 
-    Every observation is published as typed events through the process-global
-    :func:`~vibesys.render.sink.output_sink` (rendered by whichever surface is
+    Every observation is published as typed events through the injected
+    :class:`~vibesys.agents.sink.AgentEventSink` (rendered by whichever surface is
     composed, such as a headless renderer or application subscriber) and, when ``log_file``
     is provided, written untruncated as plain text to the durable run log.
     ``AgentLogger`` itself never writes to the terminal.
@@ -78,6 +78,7 @@ class AgentLogger:
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
+        event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
     ):
         self._external_text_streaming = False
         # Sticky for the logger's lifetime, which is one turn: whether any
@@ -98,6 +99,7 @@ class AgentLogger:
         self._agent_kind = agent_kind
         self._round_label = round_label
         self._invocation_id = invocation_id
+        self._sink = event_sink
 
     def _status(self) -> AgentStatusData:
         """Snapshot the ``[progress | label | elapsed | tokens/max]`` readings.
@@ -145,7 +147,7 @@ class AgentLogger:
     ) -> None:
         resolved_call_id = call_id or uuid.uuid4().hex
         self._pending_tool_calls[name].append(resolved_call_id)
-        output_sink().tool_call(
+        self._sink.tool_call(
             name,
             args,
             call_id=resolved_call_id,
@@ -156,7 +158,7 @@ class AgentLogger:
         )
         todos = todos_from_tool_call(name, args)
         if todos is not None:
-            output_sink().todo_update(
+            self._sink.todo_update(
                 todos,
                 agent_kind=self._agent_kind,
                 round_label=self._round_label,
@@ -204,7 +206,7 @@ class AgentLogger:
                 pending.remove(resolved_call_id)
             except ValueError:
                 pass
-        output_sink().tool_result(
+        self._sink.tool_result(
             name,
             full_text,
             call_id=resolved_call_id,
@@ -374,7 +376,7 @@ class AgentLogger:
         channel: AgentOutputChannel,
         status: AgentStatusData | None = None,
     ) -> None:
-        output_sink().agent_output(
+        self._sink.agent_output(
             content,
             channel=channel,
             status=status if status is not None else self._status(),
@@ -384,7 +386,7 @@ class AgentLogger:
         )
 
     def _publish_usage(self) -> None:
-        output_sink().usage_update(
+        self._sink.usage_update(
             self._input_tokens,
             context_window=self._context_window,
             model=self._model_name,

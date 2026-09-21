@@ -19,7 +19,7 @@ from server.chat.session import (
 )
 from server.events import ChatThreadCreatedData
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.api import build_agent_client
+from vibesys.api import build_agent_client, output_sink
 from vs_agent import AgentSessionKey, SessionScope
 from vs_project import RunLogger
 from vs_sandbox import HostResource, HostResourceAccess
@@ -151,6 +151,7 @@ def build_chat_agent(
                     "server chat transcript",
                 ),
             ),
+            events=output_sink(),
         )
         resources.callback(client.close)
         owner = resources.pop_all()

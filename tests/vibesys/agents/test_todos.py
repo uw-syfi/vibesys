@@ -105,7 +105,7 @@ class TestAgentLoggerPublishing:
         seen: list[CoreEvent] = []
         unsubscribe = output_sink().subscribe(seen.append)
         try:
-            logger = AgentLogger()
+            logger = AgentLogger(event_sink=output_sink())
             logger.on_tool_call("TodoWrite", {"todos": [{"content": "A", "status": "pending"}]})
         finally:
             unsubscribe()
@@ -117,7 +117,7 @@ class TestAgentLoggerPublishing:
         seen: list[CoreEvent] = []
         unsubscribe = output_sink().subscribe(seen.append)
         try:
-            logger = AgentLogger()
+            logger = AgentLogger(event_sink=output_sink())
             logger.on_tool_call("Bash", {"command": "make"})
         finally:
             unsubscribe()
@@ -129,7 +129,7 @@ class TestAgentLoggerPublishing:
         seen: list[CoreEvent] = []
         unsubscribe = output_sink().subscribe(seen.append)
         try:
-            logger = AgentLogger()
+            logger = AgentLogger(event_sink=output_sink())
             logger.on_tool_call("TodoWrite", {"todos": []})
         finally:
             unsubscribe()

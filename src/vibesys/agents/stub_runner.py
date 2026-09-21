@@ -13,6 +13,7 @@ from vibesys.agents.contracts import AgentCapabilities, MCPServerSpec
 from vibesys.agents.progress import AgentProgress  # noqa: TC001  # tracked: #288
 from vibesys.agents.scripted_rounds import round_number_from_label, scripted_round_payload
 from vibesys.agents.session_key import AgentSessionKey  # noqa: TC001  # tracked: #288
+from vibesys.agents.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -22,8 +23,9 @@ class StubAgentClient:
 
     backend_name = "stub"
 
-    def __init__(self) -> None:
+    def __init__(self, *, event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK) -> None:
         """Create a stateless deterministic client."""
+        self._sink = event_sink
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -76,9 +78,7 @@ class StubAgentClient:
         **kwargs: object,
     ) -> T:
         del workspace, system_prompt, user_prompt, progress, kwargs
-        from vibesys.render.sink import output_sink  # noqa: PLC0415  # tracked: #288
-
-        output_sink().agent_output(
+        self._sink.agent_output(
             f"[stub-agent] {round_label}: starting {kind}\n",
             channel="diagnostic",
             agent_kind=kind,
@@ -87,7 +87,7 @@ class StubAgentClient:
         response = scripted_round_payload(
             response_cls.__name__, round_number_from_label(round_label)
         )
-        output_sink().agent_output(
+        self._sink.agent_output(
             f"[stub-agent] {round_label}: completed {kind}\n",
             channel="diagnostic",
             agent_kind=kind,
@@ -119,9 +119,7 @@ class StubAgentClient:
             reuse_session,
             session_key,
         )
-        from vibesys.render.sink import output_sink  # noqa: PLC0415  # tracked: #288
-
-        output_sink().agent_output(
+        self._sink.agent_output(
             f"[stub-agent] investigating: {user_prompt}\n",
             channel="analysis",
             agent_kind=kind,

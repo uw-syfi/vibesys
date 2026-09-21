@@ -59,7 +59,13 @@ def _invoke_plan(  # noqa: ANN202
     The client is left open: the caller may run further turns on the same
     driver, and closing it would close the driver with it.
     """
-    client = AgentClient(driver, driver_name="mock", provider="mock", model_name="mock-model")
+    client = AgentClient(
+        driver,
+        driver_name="mock",
+        provider="mock",
+        model_name="mock-model",
+        event_sink=output_sink(),
+    )
     return client.invoke(
         kind="orchestrator",
         workspace=workspace,
