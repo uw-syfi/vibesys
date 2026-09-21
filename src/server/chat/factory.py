@@ -138,7 +138,6 @@ def build_chat_agent(
             model=selection.model,
         )
         client = build_agent_client(
-            config,
             spec=agent_spec,
             backends=env.backends,
             skill_source_dirs=list(env.skill_source_dirs),

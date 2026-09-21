@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from vibesys.agents.catalog import agent_catalog
 from vibesys.agents.client import AgentClient, AgentDiagnosticLog
 from vibesys.agents.sink import NULL_AGENT_EVENT_SINK
-from vibesys.agents.spec import AgentBackend, Driver, resolve_agent_driver
+from vibesys.agents.spec import AgentBackend, Driver
 from vibesys.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
@@ -19,27 +19,21 @@ if TYPE_CHECKING:
     from vibesys.agents.session_store import SessionStore
     from vibesys.agents.sink import AgentEventSink
     from vibesys.agents.spec import AgentSpec
-    from vibesys.config import Config
     from vibesys.skills import SkillSelection
     from vs_sandbox import HostResource, ProjectPathPolicy
 
 
-def agent_driver_supports_mcp_servers(
-    config: Config,
-    *,
-    agent_backend: str | None,
-) -> bool | None:
+def agent_driver_supports_mcp_servers(spec: AgentSpec) -> bool | None:
     """Return whether the configured external driver supports session MCP.
 
     This query has no runtime side effects, so wiring code can reject an
     incompatible feature before creating a project or driver resources.
     Non-CLI backends do not use the external-driver contract.
     """
-    backend = agent_backend or config.agent.backend or AgentBackend.CLI
-    if backend != AgentBackend.CLI:
+    if spec.backend != AgentBackend.CLI:
         return None
 
-    driver_name = resolve_agent_driver(config)
+    driver_name = spec.driver
     if driver_name is Driver.OMNIGENT:
         from vibesys.agents.drivers.omnigent import OMNIGENT_CAPABILITIES  # noqa: PLC0415
 
@@ -54,8 +48,7 @@ def agent_driver_supports_mcp_servers(
     return AGENTSHIM_CAPABILITIES.mcp_servers
 
 
-def build_agent_client(  # noqa: C901, PLR0913
-    config: Config,
+def build_agent_client(  # noqa: PLR0913
     *,
     spec: AgentSpec,
     backends: dict[str, Any] | None,
@@ -72,14 +65,7 @@ def build_agent_client(  # noqa: C901, PLR0913
 ) -> AgentClientProtocol:
     """Build the configured application-level agent service from ``spec``."""
     host_resources = tuple(host_resources)
-    agent_cfg = config.agent
     backend = spec.backend
-
-    if backend != AgentBackend.CLI and agent_cfg.driver is not None:
-        raise SystemExit(  # noqa: TRY003  # tracked: #288
-            f"agent driver {agent_cfg.driver!r} is valid only with backend='cli', "
-            f"not {backend.value!r}"
-        )
 
     if require_host_sandbox and backend not in {AgentBackend.CLI, AgentBackend.STUB}:
         raise SystemExit(  # noqa: TRY003  # tracked: #288
@@ -97,7 +83,7 @@ def build_agent_client(  # noqa: C901, PLR0913
 
     driver_name = spec.driver
     provider = spec.provider
-    timeout = agent_cfg.cli_timeout
+    timeout = spec.cli_timeout
     driver_log = AgentDiagnosticLog(run_log_file)
 
     if use_docker and not agent_catalog()[driver_name].supports_docker:
@@ -155,14 +141,7 @@ def build_agent_client(  # noqa: C901, PLR0913
         log_dir=log_dir,
         default_reasoning_effort=spec.reasoning_effort,
         role_models=spec.role_models,
-        role_reasoning_efforts={
-            role: configured
-            for role, configured in {
-                "orchestrator": agent_cfg.outer.reasoning_effort,
-                "implementer": agent_cfg.inner.reasoning_effort,
-            }.items()
-            if configured is not None
-        },
+        role_reasoning_efforts=spec.role_reasoning_efforts,
         project_path_policy=project_path_policy,
         host_resources=host_resources,
         require_host_sandbox=require_host_sandbox,

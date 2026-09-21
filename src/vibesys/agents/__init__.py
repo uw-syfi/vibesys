@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
-    from vibesys.config import Config
     from vibesys.skills import SkillSelection
     from vs_sandbox import HostResource, ProjectPathPolicy
 
@@ -50,7 +49,6 @@ def __getattr__(name: str) -> Any:  # noqa: ANN401
 
 
 def build_agent_client(  # noqa: PLR0913
-    config: Config,
     *,
     spec: AgentSpec,
     backends: dict[str, Any] | None,
@@ -69,7 +67,6 @@ def build_agent_client(  # noqa: PLR0913
     from .factory import build_agent_client as build  # noqa: PLC0415
 
     return build(
-        config,
         spec=spec,
         backends=backends,
         skill_source_dirs=skill_source_dirs,

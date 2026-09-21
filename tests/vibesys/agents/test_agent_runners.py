@@ -45,7 +45,6 @@ def _build_client(  # noqa: ANN202, PLR0913
         model=model_name,
     )
     return build_agent_client(
-        config,
         spec=spec,
         backends=backends,
         skill_source_dirs=skill_source_dirs if skill_source_dirs is not None else [],
