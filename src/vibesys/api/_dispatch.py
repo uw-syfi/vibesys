@@ -11,13 +11,56 @@ used at their sole other call site, `entrypoints/headless.py`.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from vibesys.api.contracts import LoopKind
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 
 if TYPE_CHECKING:
     from vibesys.api.contracts import RunRequest
     from vibesys.run.integration import LocalRunIntegration
+
+
+def _required_objective(request: RunRequest) -> str:
+    """Return `request.objective`, which agent/evolve requests must set.
+
+    `RunRequest.objective` is `str | None` only because `_dispatch_plain`
+    never reads it (a plain-loop request has no reason to set it). Every
+    agent/evolve construction site sets it from `InputBundle.objective`
+    (itself non-optional): `vibesys.api.entry.default_request` always passes
+    `bundle.objective`, and `entrypoints/headless.py`'s
+    `_build_agent_request`/`_build_evolve_request` always pass
+    `bundle.objective` (optionally wrapped by `_with_operator_constraints`).
+    Nothing in `RunRequest`'s own type ties `objective` to `loop`, so this
+    turns that cross-field invariant into an explicit, checked contract
+    instead of letting a future construction gap surface as a confusing
+    `TypeError` inside the loop function.
+    """
+    if request.objective is None:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="missing_objective",
+                stage="dispatch",
+                message=f"RunRequest for outer loop {request.loop.value!r} must set objective",
+            )
+        )
+    return request.objective
+
+
+def _agent_outer_loop(loop: LoopKind) -> Literal["agent", "profile-guided"]:
+    """Narrow `loop` to the two values `dispatch_loop` routes to `_dispatch_agent`.
+
+    `dispatch_loop` calls `_dispatch_agent` only for `LoopKind.AGENT`/
+    `LoopKind.PROFILE_GUIDED` (see its routing below); this makes that
+    invariant explicit here instead of letting `loop.value`'s plain `str`
+    widen silently past `run_agent_loop`'s `outer_loop` literal.
+    """
+    if loop is LoopKind.PROFILE_GUIDED:
+        return "profile-guided"
+    assert loop is LoopKind.AGENT, (  # noqa: S101  # dispatch_loop only routes these two here
+        f"_dispatch_agent called with unsupported loop kind: {loop!r}"
+    )
+    return "agent"
 
 
 def resolved_run_id(request: RunRequest) -> str:
@@ -60,7 +103,7 @@ def _dispatch_agent(request: RunRequest, integration: LocalRunIntegration) -> bo
         benchmark_result_protocol=bundle.benchmark_result_protocol,
         accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
         benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
-        objective=request.objective,
+        objective=_required_objective(request),
         metrics=request.metrics,
         max_rounds=request.max_rounds if request.max_rounds is not None else 24,
         max_retries_per_round=request.max_retries_per_round,
@@ -84,7 +127,7 @@ def _dispatch_agent(request: RunRequest, integration: LocalRunIntegration) -> bo
         remote_repo=request.remote_repo,
         repo_visibility=request.repo_visibility,
         integration=integration,
-        outer_loop=request.loop.value,
+        outer_loop=_agent_outer_loop(request.loop),
         profile_guided=bundle.manifest.profile_guided,
     )
 
@@ -110,7 +153,7 @@ def _dispatch_evolve(request: RunRequest, integration: LocalRunIntegration) -> b
         benchmark_result=bundle.benchmark_result,
         benchmark_result_protocol=bundle.benchmark_result_protocol,
         benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
-        objective=request.objective,
+        objective=_required_objective(request),
         max_generations=request.max_generations,
         children_per_generation=request.children_per_generation,
         k_top_inspirations=request.k_top_inspirations,

@@ -52,7 +52,7 @@ def _handoff(
     project: Any = None,  # noqa: ANN401  # Stand-in for vs_project.Project; only .root is used.
 ) -> RunResourceHandoff:
     return RunResourceHandoff(
-        project=cast("Any", project),
+        project=project,
         run_id="run-1",
         workspace=tmp_path / "workspace",
         log_dir=tmp_path / "logs",

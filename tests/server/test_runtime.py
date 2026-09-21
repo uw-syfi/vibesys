@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -23,6 +24,9 @@ from vibesys.events import CoreEventType, EventStatus
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.run.run_control import RunControlChannel
+
+if TYPE_CHECKING:
+    from vibesys.api import RunSession
 
 
 class _SessionControlStub:
@@ -181,7 +185,15 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path):  # noqa: ANN0
 
     def run() -> str:
         with runtime.condition:
-            runtime.session = _SessionControlStub(integration.control)
+            # `_SessionControlStub` implements only the `RunControl` slice of
+            # `RunSession`, which is all this path exercises: `runtime.run`
+            # (unlike `ServerRuntime.drive`) never calls the query/workspace/
+            # agent-host methods on `runtime.session`, only `session_provider`
+            # (itself typed `RunControl | None`, see `server.api.service
+            # .RunApi`). The cast documents that narrower real contract
+            # instead of widening `_SessionControlStub` to satisfy every
+            # `RunSession` member.
+            runtime.session = cast("RunSession", _SessionControlStub(integration.control))
         runtime.api.execute(StopCommand())
         integration.control.raise_if_stopped()
         return "unreachable"

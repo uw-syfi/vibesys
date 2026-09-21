@@ -35,7 +35,7 @@ Tool set:
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -65,7 +65,7 @@ class _StateFileArgs(BaseModel):
     )
 
 
-def _run_summary_tool(store: RunStore, run_id: str) -> ToolSpec:
+def _run_summary_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
         view = store.get_run(run_id)
         return (
@@ -90,7 +90,7 @@ def _run_summary_tool(store: RunStore, run_id: str) -> ToolSpec:
     )
 
 
-def _list_hypotheses_tool(store: RunStore, run_id: str) -> ToolSpec:
+def _list_hypotheses_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
         view = store.get_run(run_id)
         if not view.hypotheses:
@@ -113,7 +113,7 @@ def _list_hypotheses_tool(store: RunStore, run_id: str) -> ToolSpec:
     )
 
 
-def _get_hypothesis_tool(store: RunStore, run_id: str) -> ToolSpec:
+def _get_hypothesis_tool(store: RunStore, run_id: str) -> ToolSpec[_HypothesisArgs]:
     def handler(args: _HypothesisArgs) -> str:
         view = store.get_run(run_id)
         hypothesis = next(
@@ -159,7 +159,7 @@ def _get_hypothesis_tool(store: RunStore, run_id: str) -> ToolSpec:
     )
 
 
-def _list_rounds_tool(store: RunStore, run_id: str) -> ToolSpec:
+def _list_rounds_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
         view = store.get_run(run_id)
         if not view.rounds:
@@ -181,7 +181,7 @@ def _list_rounds_tool(store: RunStore, run_id: str) -> ToolSpec:
     )
 
 
-def _list_state_files_tool(project: Project, run_id: str) -> ToolSpec:
+def _list_state_files_tool(project: Project, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
         snapshot = project.state.portable_run_export(run_id)
         if not snapshot.files:
@@ -199,7 +199,7 @@ def _list_state_files_tool(project: Project, run_id: str) -> ToolSpec:
     )
 
 
-def _read_state_file_tool(project: Project, run_id: str) -> ToolSpec:
+def _read_state_file_tool(project: Project, run_id: str) -> ToolSpec[_StateFileArgs]:
     def handler(args: _StateFileArgs) -> str:
         snapshot = project.state.portable_run_export(run_id)
         for state_file in snapshot.files:
@@ -219,7 +219,7 @@ def _read_state_file_tool(project: Project, run_id: str) -> ToolSpec:
     )
 
 
-def build_tools(store: RunStore, project: Project, run_id: str) -> tuple[ToolSpec, ...]:
+def build_tools(store: RunStore, project: Project, run_id: str) -> tuple[ToolSpec[Any], ...]:
     """Build every read-only tool this server exposes for one run."""
     # Touch the run once up front so a missing run_id fails fast and
     # identically across every tool, instead of six different "get_run" calls
