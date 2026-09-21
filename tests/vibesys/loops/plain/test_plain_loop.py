@@ -10,9 +10,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 from vibesys.constants import DomainName
 from vibesys.loops.plain.loop import PlainLoopState
@@ -26,7 +30,8 @@ from vibesys.schemas import (
     PerfTrend,
     Verdict,
 )
-from vs_agent.api import AgentCapabilities, AgentClient
+from vs_agent.api import AgentCapabilities
+from vs_agent.api.testing import FakeAgentClient
 from vs_issue_board import IssueBoard, IssueStatus
 from vs_project import RUN_SCHEMA_VERSION, Project, RunEnvironmentRecord
 
@@ -73,38 +78,6 @@ def _make_perf_resp(new_issue_ids: list[int] | None = None) -> IssuePerfEvalResp
         throughput_trend=PerfTrend.IMPROVED,
         latency_trend=PerfTrend.IMPROVED,
     )
-
-
-def _make_issue_runner(responses: list, *, backend_name: str = "cli") -> MagicMock:
-    """Mock AgentClient.invoke that yields scripted responses in order.
-
-    The script is consumed left-to-right regardless of ``kind``, so the test
-    just lists responses in the order the loop will call invoke().
-
-    The mock is wrapped in PlainLoopAgentClient inside ``run_plain_loop``,
-    so the calls recorded on this mock reflect what the wrapper passed
-    after injecting MCP server specs.
-    """
-    runner = MagicMock(spec=AgentClient)
-    runner.backend_name = backend_name
-    # Every invocation event carries the client's attribution, so the mock
-    # supplies real strings the event payload can validate.
-    runner.driver_name = "mock"
-    runner.provider = "mock"
-    runner.model_for_kind.return_value = "mock-model"
-    runner.capabilities = AgentCapabilities(
-        mcp_servers=backend_name == "cli",
-    )
-    it = iter(responses)
-
-    def _invoke(*, kind, **kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001  # tracked: #288
-        try:
-            return next(it)
-        except StopIteration as exc:
-            raise AssertionError(f"invoke called beyond scripted responses (kind={kind})") from exc  # noqa: TRY003  # tracked: #288
-
-    runner.invoke.side_effect = _invoke
-    return runner
 
 
 def _run_exp_dir(tmp_path: Path) -> Path:
@@ -173,13 +146,11 @@ def test_bootstrap_creates_initial_feature_issue_on_first_run(  # noqa: ANN201  
     ref_file,  # noqa: ANN001  # tracked: #288
     tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
 ):
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
-    )
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = run_plain_loop(
@@ -220,13 +191,11 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
     """A resumed run with bootstrap_done=True must not re-create the bootstrap issue."""
 
     # --- First run: create the exp dir and the bootstrap issue. ---
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
-    )
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -244,11 +213,11 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
 
     # --- Second run: resume with bootstrap_done=True. ---
     mock_build_runner.reset_mock()
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_perf_resp(new_issue_ids=[]),  # only perf_eval — nothing open to drain
-        ]
-    )
+    fake2 = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake2.enqueue(
+        "perf_eval", _make_perf_resp(new_issue_ids=[])
+    )  # only perf_eval — nothing open to drain
+    mock_build_runner.return_value = fake2
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -277,13 +246,11 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
 def test_judge_pass_closes_issue(mock_build_runner, mock_backend, ref_file, tmp_path):  # noqa: ANN001, ANN201, ARG001  # tracked: #288
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
-    )
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         run_plain_loop(
@@ -313,15 +280,15 @@ def test_judge_fail_increments_attempts_and_keeps_open(  # noqa: ANN201  # track
 ):
     """A FAIL verdict reopens the issue; the next drain pass tries again."""
     # impl1 -> judge1(FAIL) -> drain loops back -> impl2 -> judge2(PASS) -> perf
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="fail", feedback="Missing endpoint."),
-            _make_impl_resp(1, summary="Fixed."),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1), _make_impl_resp(1, summary="Fixed."))
+    fake.enqueue(
+        "judge",
+        _make_judge_resp(1, verdict="fail", feedback="Missing endpoint."),
+        _make_judge_resp(1, verdict="pass"),
     )
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = run_plain_loop(
@@ -353,14 +320,14 @@ def test_issue_blocks_after_max_attempts_exhausted(  # noqa: ANN201  # tracked: 
     tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
 ):
     """With max_attempts_per_issue=2, a fail/fail sequence should mark the issue BLOCKED."""
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="fail", feedback="Still broken."),
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="fail", feedback="Still broken."),
-        ]
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1), _make_impl_resp(1))
+    fake.enqueue(
+        "judge",
+        _make_judge_resp(1, verdict="fail", feedback="Still broken."),
+        _make_judge_resp(1, verdict="fail", feedback="Still broken."),
     )
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = run_plain_loop(
@@ -388,7 +355,7 @@ def test_issue_blocks_after_max_attempts_exhausted(  # noqa: ANN201  # tracked: 
 # ---------------------------------------------------------------------------
 
 
-def _spec_args_to_dict(args: list[str]) -> dict[str, str]:
+def _spec_args_to_dict(args: Sequence[str]) -> dict[str, str]:
     """Parse the policy flags out of an MCP server args list.
 
     The args list is shaped like::
@@ -424,14 +391,11 @@ def test_judge_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
     The PlainLoopAgentClient wrapper injects ``mcp_servers`` (an
     MCPServerSpec) for the inner runner.
     """
-    runner = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ],
-    )
-    mock_build_runner.return_value = runner
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         run_plain_loop(
@@ -445,11 +409,10 @@ def test_judge_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
             max_issues_per_perf_eval=3,
         )
 
-    judge_calls = [c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "judge"]
+    judge_calls = fake.calls_for("judge")
     assert len(judge_calls) == 1
-    kwargs = judge_calls[0].kwargs
+    specs = judge_calls[0].mcp_servers
 
-    specs = kwargs.get("mcp_servers")
     assert specs is not None and len(specs) == 1  # noqa: PT018  # tracked: #288
     spec = specs[0]
     assert spec.name == "vibesys-issues"
@@ -475,14 +438,11 @@ def test_perf_eval_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #
 
     Injected as ``mcp_servers`` (see PlainLoopAgentClient).
     """
-    runner = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ],
-    )
-    mock_build_runner.return_value = runner
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         run_plain_loop(
@@ -496,11 +456,10 @@ def test_perf_eval_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #
             max_issues_per_perf_eval=2,
         )
 
-    perf_calls = [c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "perf_eval"]
+    perf_calls = fake.calls_for("perf_eval")
     assert len(perf_calls) == 1
-    kwargs = perf_calls[0].kwargs
+    specs = perf_calls[0].mcp_servers
 
-    specs = kwargs.get("mcp_servers")
     assert specs is not None and len(specs) == 1  # noqa: PT018  # tracked: #288
     spec = specs[0]
     parsed = _spec_args_to_dict(spec.args)
@@ -521,13 +480,11 @@ def test_judge_phase_calls_store_reload_after_invoke(  # noqa: ANN201  # tracked
 ):
     """After the judge invoke returns, the loop must reload the store so it
     can see any issues the MCP server wrote during the phase."""
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
-    )
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     reload_call_order: list[str] = []
     invoke_call_order: list[str] = []
@@ -538,23 +495,7 @@ def test_judge_phase_calls_store_reload_after_invoke(  # noqa: ANN201  # tracked
         reload_call_order.append("reload")
         return original_reload(self)
 
-    def tracking_invoke(*, kind, **kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001  # tracked: #288
-        invoke_call_order.append(kind)
-        if kind == "implementer":
-            return _make_impl_resp(1)
-        if kind == "judge":
-            return _make_judge_resp(1, verdict="pass")
-        if kind == "perf_eval":
-            return _make_perf_resp(new_issue_ids=[])
-        raise AssertionError(f"unexpected kind: {kind}")  # noqa: TRY003  # tracked: #288
-
-    runner = MagicMock(spec=AgentClient)
-    runner.backend_name = "cli"
-    runner.driver_name = "mock"
-    runner.provider = "mock"
-    runner.model_for_kind.return_value = "mock-model"
-    runner.invoke.side_effect = tracking_invoke
-    mock_build_runner.return_value = runner
+    fake.on_invoke(lambda call: invoke_call_order.append(call.kind))
 
     with (
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
@@ -595,14 +536,11 @@ def test_implementer_invoke_has_no_tracker_kwargs(  # noqa: ANN201  # tracked: #
     and is covered in tests/vibesys/agents/test_agent_runners.py. At the loop level we
     only verify which phases get tracker kwargs.
     """
-    runner = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ],
-    )
-    mock_build_runner.return_value = runner
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         run_plain_loop(
@@ -615,19 +553,19 @@ def test_implementer_invoke_has_no_tracker_kwargs(  # noqa: ANN201  # tracked: #
             max_rounds=1,
         )
 
-    impl_calls = [c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "implementer"]
+    impl_calls = fake.calls_for("implementer")
     assert impl_calls, "expected at least one implementer invoke"
     for c in impl_calls:
         # The injection-point kwarg may be omitted entirely or explicit None.
-        assert not c.kwargs.get("mcp_servers")
+        assert not c.mcp_servers
 
     # The judge and perf_eval invokes both DO receive tracker access.
-    judge_calls = [c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "judge"]
-    perf_calls = [c for c in runner.invoke.call_args_list if c.kwargs.get("kind") == "perf_eval"]
+    judge_calls = fake.calls_for("judge")
+    perf_calls = fake.calls_for("perf_eval")
     assert len(judge_calls) == 1
     assert len(perf_calls) == 1
-    assert judge_calls[0].kwargs["mcp_servers"]
-    assert perf_calls[0].kwargs["mcp_servers"]
+    assert judge_calls[0].mcp_servers
+    assert perf_calls[0].mcp_servers
 
 
 # ---------------------------------------------------------------------------
@@ -644,14 +582,11 @@ def test_perf_eval_runs_after_drain_complete(  # noqa: ANN201  # tracked: #288
     tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
 ):
     """Within one outer iteration, the order of invoke kinds is impl -> judge -> perf_eval."""
-    runner = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
-    )
-    mock_build_runner.return_value = runner
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         run_plain_loop(
@@ -664,11 +599,11 @@ def test_perf_eval_runs_after_drain_complete(  # noqa: ANN201  # tracked: #288
             max_rounds=1,
         )
 
-    kinds = [call.kwargs["kind"] for call in runner.invoke.call_args_list]
+    kinds = [call.kind for call in fake.calls]
     assert kinds == ["implementer", "judge", "perf_eval"]
 
     # Check the response_cls keyword for each phase
-    response_classes = [call.kwargs["response_cls"] for call in runner.invoke.call_args_list]
+    response_classes = [call.response_cls for call in fake.calls]
     assert response_classes == [
         IssueImplementerResponse,
         IssueJudgeResponse,
@@ -676,8 +611,8 @@ def test_perf_eval_runs_after_drain_complete(  # noqa: ANN201  # tracked: #288
     ]
 
     # Sanity: each phase still got a rendered (non-empty) system prompt.
-    for call in runner.invoke.call_args_list:
-        sys_prompt = call.kwargs.get("system_prompt")
+    for call in fake.calls:
+        sys_prompt = call.system_prompt
         assert isinstance(sys_prompt, str) and sys_prompt.strip()  # noqa: PT018  # tracked: #288
 
 
@@ -697,13 +632,11 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
     """Resuming with bootstrap_done=True must not add another bootstrap issue."""
 
     # Phase 1: fresh run to stand up the exp_dir + git repo.
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
-    )
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -722,8 +655,9 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
     # Phase 2: resumed run. No implementer/judge should fire (nothing open),
     # only perf_eval.
     mock_build_runner.reset_mock()
-    runner2 = _make_issue_runner([_make_perf_resp(new_issue_ids=[])])
-    mock_build_runner.return_value = runner2
+    fake2 = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake2.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake2
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -743,7 +677,7 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
     assert len(issues) == 1
     assert issues[0]["created_by"] == "loop:bootstrap"
     # And only perf_eval was invoked during the resume.
-    kinds = [call.kwargs["kind"] for call in runner2.invoke.call_args_list]
+    kinds = [call.kind for call in fake2.calls]
     assert kinds == ["perf_eval"]
 
 
@@ -761,14 +695,14 @@ def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #2
     """
 
     # Phase 1: bootstrap issue fails twice -> BLOCKED, loop bails out.
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="fail", feedback="nope"),
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="fail", feedback="still nope"),
-        ]
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1), _make_impl_resp(1))
+    fake.enqueue(
+        "judge",
+        _make_judge_resp(1, verdict="fail", feedback="nope"),
+        _make_judge_resp(1, verdict="fail", feedback="still nope"),
     )
+    mock_build_runner.return_value = fake
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result1 = run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -791,13 +725,11 @@ def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #2
     # Phase 2: resume. The blocked issue should be reopened with a fresh
     # attempt budget; this time the implementer/judge cycle passes.
     mock_build_runner.reset_mock()
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_impl_resp(1, summary="Fixed."),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
-    )
+    fake2 = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake2.enqueue("implementer", _make_impl_resp(1, summary="Fixed."))
+    fake2.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake2.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake2
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result2 = run_plain_loop(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -837,14 +769,11 @@ def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(  # n
     tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
 ):
     """Bootstrap -> pass -> perf_eval files nothing => run returns True and stops."""
-    runner = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
-    )
-    mock_build_runner.return_value = runner
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = run_plain_loop(
@@ -858,7 +787,7 @@ def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(  # n
         )
 
     assert result is True
-    assert runner.invoke.call_count == 3
+    assert len(fake.calls) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -875,13 +804,11 @@ def test_state_json_written_with_bootstrap_done_after_run(  # noqa: ANN201  # tr
     tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
 ):
     """At the end of a successful run, state.json should reflect bootstrap_done=True."""
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_impl_resp(1),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
-    )
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         run_plain_loop(
@@ -923,13 +850,11 @@ def test_issue_loop_writes_per_issue_markdown_via_callback(  # noqa: ANN201  # t
     local ``plain/issues/INDEX.md`` plus a per-issue MD file are written by the
     store's on_change → render_all callback, with the implementer summary
     and judge analysis surfacing in the per-issue markdown."""
-    mock_build_runner.return_value = _make_issue_runner(
-        [
-            _make_impl_resp(1, summary="Implemented the streaming endpoint."),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
-    )
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1, summary="Implemented the streaming endpoint."))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         run_plain_loop(
@@ -983,20 +908,23 @@ def test_implementer_retry_user_prompt_includes_prior_judge_feedback(  # noqa: A
     second implementer's *user* prompt must include the prior judge
     feedback so the model knows what to fix."""
 
-    runner = _make_issue_runner(
-        [
-            _make_impl_resp(1, summary="First attempt."),
-            _make_judge_resp(
-                1,
-                verdict="fail",
-                feedback="Add streaming support to the /v1/completions endpoint.",
-            ),
-            _make_impl_resp(1, summary="Second attempt."),
-            _make_judge_resp(1, verdict="pass"),
-            _make_perf_resp(new_issue_ids=[]),
-        ]
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue(
+        "implementer",
+        _make_impl_resp(1, summary="First attempt."),
+        _make_impl_resp(1, summary="Second attempt."),
     )
-    mock_build_runner.return_value = runner
+    fake.enqueue(
+        "judge",
+        _make_judge_resp(
+            1,
+            verdict="fail",
+            feedback="Add streaming support to the /v1/completions endpoint.",
+        ),
+        _make_judge_resp(1, verdict="pass"),
+    )
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         run_plain_loop(
@@ -1011,11 +939,10 @@ def test_implementer_retry_user_prompt_includes_prior_judge_feedback(  # noqa: A
         )
 
     # Order: impl1, judge1, impl2, judge2, perf  → second implementer is index 2
-    calls = runner.invoke.call_args_list
-    assert len(calls) == 5
-    second_impl_call = calls[2]
-    assert second_impl_call.kwargs["kind"] == "implementer"
-    second_user_prompt = second_impl_call.kwargs["user_prompt"]
+    assert len(fake.calls) == 5
+    impl_calls = fake.calls_for("implementer")
+    assert len(impl_calls) == 2
+    second_user_prompt = impl_calls[1].user_prompt
 
     # The retry user prompt must surface the prior feedback verbatim.
     assert "Add streaming support to the /v1/completions endpoint." in second_user_prompt
@@ -1023,7 +950,5 @@ def test_implementer_retry_user_prompt_includes_prior_judge_feedback(  # noqa: A
 
     # Sanity: the FIRST implementer's user prompt must NOT contain the
     # feedback section, because there was no prior judge review yet.
-    first_impl_call = calls[0]
-    assert first_impl_call.kwargs["kind"] == "implementer"
-    first_user_prompt = first_impl_call.kwargs["user_prompt"]
+    first_user_prompt = impl_calls[0].user_prompt
     assert "Previous review feedback" not in first_user_prompt

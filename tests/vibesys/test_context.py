@@ -48,6 +48,7 @@ from vs_agent.api import (
     DurableSessionStore,
     SessionScope,
 )
+from vs_agent.api.testing import FakeAgentClient
 from vs_loop_state import PlainLoopCursor
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 from vs_sandbox import HostResourceAccess, SandboxLifecycle
@@ -85,7 +86,9 @@ class _RecordingHooks:
 @pytest.fixture(autouse=True)
 def context_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("vibesys.context.backends.get", lambda *_args, **_kwargs: _FakeBackend())
-    monkeypatch.setattr("vibesys.context.build_agent_client", lambda *_args, **_kwargs: MagicMock())
+    monkeypatch.setattr(
+        "vibesys.context.build_agent_client", lambda *_args, **_kwargs: FakeAgentClient()
+    )
     monkeypatch.setattr(
         "vibesys.context.preflight_profiler_kind",
         lambda kind: ProfilerPreflightResult(kind, True),  # noqa: FBT003
@@ -244,7 +247,7 @@ def _git(project: Path, *args: str) -> str:
 def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path):  # noqa: ANN001, ANN201
     project = tmp_path / "queue"
     evaluator = _write_project(project)
-    runner = MagicMock()
+    runner = FakeAgentClient()
 
     with patch("vibesys.context.build_agent_client", return_value=runner) as build_runner:
         with _create_context(project, evaluator=evaluator) as ctx:
@@ -269,7 +272,7 @@ def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path):  # noqa
         state_paths = Project.open(project).state.sandbox_paths()
         assert state_paths.read_only_path in policy.read_only_paths
         assert state_paths.hidden_path is None
-        runner.close.assert_called_once_with()
+        assert runner.closed
 
     manifest = Project.open(project).state.load_run(ctx.run_id)
     assert manifest.branch == f"vibesys-runs/{ctx.run_id}"
@@ -865,12 +868,12 @@ def test_log_switch_retargets_stderr_tee(tmp_path):  # noqa: ANN001, ANN201
         run_log_path=ctx.logger.path,
     )
     original_file = ctx.logger.file
-    ctx.agent_client = MagicMock()
+    ctx.agent_client = FakeAgentClient()
 
     ctx.switch_log_file("round001")
 
     assert original_file.closed
-    ctx.agent_client.set_log_file.assert_called_once_with(ctx.logger.writer)
+    assert ctx.agent_client.log_files == [ctx.logger.writer]
     print("\033[31mcolored diagnostic\033[0m", file=sys.stderr)  # noqa: T201
     ctx.logger.close()
     assert sys.stderr is original_stderr
@@ -889,7 +892,7 @@ def test_agent_client_gets_a_machine_local_provider_session_store(tmp_path):  # 
     evaluator = _write_project(project)
 
     with (
-        patch("vibesys.context.build_agent_client", return_value=MagicMock()) as build_runner,
+        patch("vibesys.context.build_agent_client", return_value=FakeAgentClient()) as build_runner,
         _create_context(project, evaluator=evaluator) as ctx,
     ):
         store = build_runner.call_args.kwargs["session_store"]
@@ -915,7 +918,9 @@ def test_evolve_candidate_clients_get_no_provider_session_store(tmp_path):  # no
     with _create_context(project, evaluator=evaluator) as parent:
         parent_commit = parent.git.current_sha()
         assert parent_commit is not None
-        with patch("vibesys.context.build_agent_client", return_value=MagicMock()) as build_runner:
+        with patch(
+            "vibesys.context.build_agent_client", return_value=FakeAgentClient()
+        ) as build_runner:
             candidate = create_candidate_context(
                 parent,
                 config=Config.model_validate({"model": {"name": "gpt-test"}}),

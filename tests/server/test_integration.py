@@ -35,33 +35,13 @@ from vibesys.events import (
 )
 from vibesys.render import output_sink
 from vs_agent.api import AgentSessionKey, SessionScope
+from vs_agent.api.testing import FakeAgentClient
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.api import RunSession
-
-
-class _ChatClient:
-    """Record chat invocations and return a deterministic answer."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
-    def invoke_text(self, **kwargs: Any) -> str:  # noqa: ANN401
-        self.calls.append(kwargs)
-        return "It improved in round 2."
-
-    def provider_session_id(self, session_key: AgentSessionKey) -> str | None:
-        """Report no conversation, so every turn carries the full prompt."""
-        del session_key
-        return None
-
-    def last_turn_provider_session_id(self, session_key: AgentSessionKey) -> str | None:
-        """Report no conversation, matching ``provider_session_id``."""
-        del session_key
-        return None
 
 
 def _project_run(root: Path) -> tuple[Project, str]:
@@ -359,7 +339,7 @@ def test_track_started_does_not_double_track_a_repeated_start_event(
 
 def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa: ANN001, ANN201
     project, run_id = _project_run(tmp_path / "project")
-    client = _ChatClient()
+    client = FakeAgentClient().set_text("chat", "It improved in round 2.")
     closed: list[str] = []
 
     def build_agent(
@@ -400,23 +380,24 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa
 
     assert response.chat is not None
     assert response.chat.answer == "It improved in round 2."
-    assert client.calls[0]["reuse_session"] is True
-    assert client.calls[0]["session_key"] == AgentSessionKey(SessionScope.CHAT, "default")
-    assert client.calls[0]["user_prompt"] == "what improved?"
+    call = client.calls_for("chat")[0]
+    assert call.reuse_session is True
+    assert call.session_key == AgentSessionKey(SessionScope.CHAT, "default")
+    assert call.user_prompt == "what improved?"
     transcript = project.state.log_directory(run_id).parent / "server/chat/conversation.jsonl"
     assert json.loads(transcript.read_text()) == {
         "question": "what improved?",
         "answer": "It improved in round 2.",
     }
     assert not (project.root / ".vibesys/server").exists()
-    assert str(transcript.parent) in client.calls[0]["system_prompt"]
+    assert str(transcript.parent) in call.system_prompt
     detach()
     assert closed == ["closed"]
 
 
 def test_non_cli_run_rejects_new_chat_threads(tmp_path):  # noqa: ANN001, ANN201
     project, run_id = _project_run(tmp_path / "project")
-    client = _ChatClient()
+    client = FakeAgentClient()
 
     def build_agent(
         _session: RunSession,
