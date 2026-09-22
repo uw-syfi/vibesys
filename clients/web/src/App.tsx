@@ -157,7 +157,7 @@ export function App({session}: {session: WorkspaceSession}) {
           onSelect={select}
           onRetry={() => void session.load('experiments')}
         />
-        <div className="center">
+        <main className="center">
           <Log
             key={selected ?? 'none'}
             state={runId === null ? 'loading' : 'ready'}
@@ -179,7 +179,7 @@ export function App({session}: {session: WorkspaceSession}) {
               onSend={text => session.command({type: 'command.steer', text})}
             />
           ) : null}
-        </div>
+        </main>
         <Inspector
           model={inspector}
           mode={wide ? 'aside' : tablet ? 'drawer' : 'sheet'}
