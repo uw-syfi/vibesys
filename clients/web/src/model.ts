@@ -23,6 +23,9 @@ export interface RailRow {
   live: RoundSummary | null;
 }
 
+/** `error` is a failed first load: the rail shows only the error, no skeleton. */
+export type RailState = 'loading' | 'error' | 'unattached' | 'ready';
+
 export interface RailModel {
   rows: RailRow[];
   /** `max_rounds` minus the latest started round; null when unknown or the run ended. */

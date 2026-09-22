@@ -8,6 +8,7 @@ import {
   logGroups,
   needsOlder,
   railModel,
+  railState,
   showsChanges,
   steers,
   steersNeedOlder,
@@ -128,14 +129,6 @@ export function App({session}: {session: WorkspaceSession}) {
     );
   }
 
-  const experimentsResponse = queries.experiments.response;
-  const railState =
-    experimentsResponse === null
-      ? 'loading'
-      : experimentsResponse.experiments_ready === false
-        ? 'unattached'
-        : 'ready';
-
   return (
     <div className="app">
       <a className="skip" href="#log">
@@ -156,7 +149,7 @@ export function App({session}: {session: WorkspaceSession}) {
       />
       <div className="shell">
         <Rail
-          state={railState}
+          state={railState(queries.experiments.response, queries.experiments.error)}
           model={rail}
           selected={selected}
           error={queries.experiments.error}

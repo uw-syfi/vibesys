@@ -21,6 +21,7 @@ import {
   pathShortener,
   prose,
   railModel,
+  railState,
   runControl,
   showsChanges,
   steers,
@@ -149,6 +150,15 @@ test('rail rows: statuses, values, official, incumbent, rounds left', () => {
     [[1, 'failed']],
     'the run ended inside round 1',
   );
+});
+
+test('rail state: loading, unattached, ready, and a failed first load', () => {
+  const experiments = (ready: boolean) => ({request_id: 'q', ok: true, experiments_ready: ready});
+  assert.equal(railState(null, null), 'loading');
+  assert.equal(railState(experiments(false), null), 'unattached');
+  assert.equal(railState(experiments(true), null), 'ready');
+  assert.equal(railState(null, 'Experiments unavailable'), 'error', 'the error alone, no skeleton');
+  assert.equal(railState(experiments(true), 'down'), 'ready', 'a failed refetch keeps its rows');
 });
 
 test('R0: a baseline row only with a baseline value, the incumbent until the first kept round', () => {

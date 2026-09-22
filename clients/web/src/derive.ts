@@ -4,6 +4,7 @@ import type {
   HypothesisEntry,
   HypothesisRound,
   PerformanceContext,
+  ProtocolResponse,
   RunEvent,
 } from '@vibesys/backend-client/browser';
 import {
@@ -27,6 +28,7 @@ import type {
   ProsePart,
   RailModel,
   RailRow,
+  RailState,
   RoundStatus,
   RunControl,
   RunPulse,
@@ -155,6 +157,12 @@ export function railModel(
       ? null
       : Math.max(0, core.maxRounds - latest);
   return {rows, roundsLeft};
+}
+
+/** What the rail shows from the experiments query: `experiments_ready: false` is unattached. */
+export function railState(experiments: ProtocolResponse | null, error: string | null): RailState {
+  if (experiments === null) return error === null ? 'loading' : 'error';
+  return experiments.experiments_ready === false ? 'unattached' : 'ready';
 }
 
 export function steers(captured: readonly RunEvent[]): Steers {

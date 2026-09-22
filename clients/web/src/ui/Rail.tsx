@@ -11,12 +11,12 @@ import {
   Trophy,
 } from 'lucide-react';
 import {useEffect, useRef} from 'react';
-import type {RailModel, RailRow, RoundStatus} from '../model.js';
+import type {RailModel, RailRow, RailState, RoundStatus} from '../model.js';
 import {Elapsed} from './Elapsed.js';
 import './Rail.css';
 
 export interface RailProps {
-  state: 'loading' | 'unattached' | 'ready';
+  state: RailState;
   model: RailModel;
   selected: number | null;
   /** The experiments query failed; shown under the rows with Retry. */
@@ -70,21 +70,17 @@ export function Rail({state, model, selected, error, hint, onSelect, onRetry}: R
   }, [selected, state]);
   // Roving tabindex: the selected row is the rail's one Tab stop.
   const stop = model.rows.some(row => row.round === selected) ? selected : model.rows[0]?.round;
-  // A failed first load shows only the error, not the skeleton and "Loading rounds" too.
-  const loading = state === 'loading' && error === null;
 
   return (
     <nav className="rail" aria-label="Rounds">
-      {state === 'loading' ? (
-        loading ? (
-          <ol className="rail-rows" aria-hidden="true">
-            {['a', 'b', 'c', 'd'].map(key => (
-              <li key={key}>
-                <span className="rrow skel" />
-              </li>
-            ))}
-          </ol>
-        ) : null
+      {state === 'error' ? null : state === 'loading' ? (
+        <ol className="rail-rows" aria-hidden="true">
+          {['a', 'b', 'c', 'd'].map(key => (
+            <li key={key}>
+              <span className="rrow skel" />
+            </li>
+          ))}
+        </ol>
       ) : state === 'unattached' ? (
         <p className="rail-note">Waiting for the project to attach</p>
       ) : model.rows.length === 0 ? (
@@ -120,7 +116,7 @@ export function Rail({state, model, selected, error, hint, onSelect, onRetry}: R
           </button>
         </p>
       )}
-      {loading ? <p className="sr-only">Loading rounds</p> : null}
+      {state === 'loading' ? <p className="sr-only">Loading rounds</p> : null}
     </nav>
   );
 }
