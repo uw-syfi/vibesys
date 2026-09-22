@@ -4,6 +4,24 @@ import type {Theme} from './theme.js';
 
 const HINT = 'F6: steer (unsent) · F7: chat (unsent) · Esc: close · / is inert';
 
+// `generate_run_id` (`vs_project/_state.py`) builds ids as
+// `{date}-{time}-{8-hex-suffix}-{slug}`: sortable and collision-safe, not
+// meant for a person to read at a glance.
+const RUN_ID_PATTERN = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})\d{2}-[0-9a-f]{8}-(.+)$/;
+
+/**
+ * Where a run id matches the generator's shape, show the slug (the one part
+ * an operator actually chose) and a plain UTC timestamp instead of the raw
+ * digits. Anything that doesn't match — test fixtures, hand-written ids — is
+ * shown as-is rather than mangled by a partial parse.
+ */
+export function formatRunLabel(runId: string): string {
+  const match = RUN_ID_PATTERN.exec(runId);
+  if (match === null) return runId;
+  const [, year, month, day, hour, minute, slug] = match;
+  return `${slug} · ${year}-${month}-${day} ${hour}:${minute} UTC`;
+}
+
 /**
  * The private operator notepad (#805). Deliberately a modal rather than a
  * new permanent pane, per the issue's own roadmap discussion: this is scratch
@@ -136,7 +154,7 @@ export class NotepadView {
     }
     if (this.#renderedRunId !== state.runId) {
       this.#renderedRunId = state.runId;
-      const run = state.runId ?? 'unknown run';
+      const run = state.runId === null ? 'unknown run' : formatRunLabel(state.runId);
       this.#metaRun.content = `Run ${run}`;
     }
   }
