@@ -225,6 +225,8 @@ test('the trend plots one point per measured round, spaced by round number', () 
   assert.equal(model.points[0]?.y, 32);
   assert.equal(model.points.at(-1)?.y, 4);
   assert.deepEqual([model.first, model.last], ['1K', '1.315K'], 'the rail rows write them so');
+  // The name says the span the curve covers, so no count can disagree with the rows.
+  assert.deepEqual([model.firstRound, model.lastRound], [1, 8]);
   // One row without a number would otherwise poison every coordinate.
   const bogus = [...SERIES, {round: 9, perf_metric: Number.NaN, perf_unit: '', passed: true}];
   assert.equal(trendModel(bogus, STUB_CONTEXT)?.points.length, 6);
@@ -235,6 +237,7 @@ test('the trend starts at R0 only when the objective records a baseline', () => 
   const model = trendModel(SERIES, BASELINE);
   assert.equal(model?.points.length, 7);
   assert.equal(model?.first, '900');
+  assert.deepEqual([model?.firstRound, model?.lastRound], [0, 8], 'the span starts at R0');
   assert.equal(model?.points[0]?.x, 3, 'R0 is the leftmost point');
   assert.equal(model?.points[0]?.y, 32, 'and the lowest, so the curve rises out of it');
 });

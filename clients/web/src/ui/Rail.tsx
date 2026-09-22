@@ -130,7 +130,7 @@ export function Rail({state, model, selected, error, hint, trend, onSelect, onRe
  * labels and no tooltip, only the two ends of its own scale. The phone strip hides it (CSS).
  */
 function Trend({model}: {model: TrendModel}) {
-  const {points, first, last} = model;
+  const {points, first, last, firstRound, lastRound} = model;
   const dot = points.at(-1);
   if (dot === undefined) return null;
   return (
@@ -142,7 +142,9 @@ function Trend({model}: {model: TrendModel}) {
         viewBox="0 0 100 36"
         preserveAspectRatio="none"
         role="img"
-        aria-label={`Metric trend: ${first} to ${last} over ${points.length} rounds`}
+        // The span the curve covers, not a count of points: a round with no value has no point,
+        // so any count would disagree with the rows above.
+        aria-label={`Metric trend: ${first} to ${last}, R${firstRound} to R${lastRound}`}
       >
         <polyline points={points.map(point => `${point.x},${point.y}`).join(' ')} />
         <path className="tdot" d={`M${dot.x},${dot.y}h0`} />

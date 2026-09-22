@@ -52,13 +52,15 @@ test('the trend is one named polyline and a dot; it repeats no row and takes no 
         ],
         first: '900',
         last: '1.315K',
+        firstRound: 0,
+        lastRound: 8,
       }}
       onSelect={() => {}}
       onRetry={() => {}}
     />,
   );
   assert.match(html, /<svg class="tplot"[^>]*role="img"/);
-  assert.match(html, /aria-label="Metric trend: 900 to 1\.315K over 3 rounds"/);
+  assert.match(html, /aria-label="Metric trend: 900 to 1\.315K, R0 to R8"/);
   assert.match(html, /<polyline points="3,32 50,18 97,4"><\/polyline>/);
   assert.match(html, /<path class="tdot" d="M97,4h0"><\/path>/);
   // The endpoints are the plot's own scale, and its name already said them: announce once.

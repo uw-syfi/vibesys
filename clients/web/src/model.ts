@@ -45,6 +45,9 @@ export interface TrendModel {
   /** First and last plotted values, compact, as the rail rows write them. */
   first: string;
   last: string;
+  /** The rounds those two values belong to: the span the curve covers. */
+  firstRound: number;
+  lastRound: number;
 }
 
 /** How the arrow between two columns of the agent graph is toned. */

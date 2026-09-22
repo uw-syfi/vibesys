@@ -317,6 +317,8 @@ export function trendModel(
     })),
     first: formatValue(head.value),
     last: formatValue(tail.value),
+    firstRound: head.round,
+    lastRound: tail.round,
   };
 }
 

@@ -242,7 +242,7 @@ const REPLAY = [
     after: async page => {
       await rail(page, 1).click();
       // The curve starts from the invented baseline, so this is the frame that shows R0 on it.
-      await page.getByRole('img', {name: 'Metric trend: 900 to 1.315K over 7 rounds'}).waitFor();
+      await page.getByRole('img', {name: 'Metric trend: 900 to 1.315K, R0 to R8'}).waitFor();
     },
     expect: ['R0', '+11.1%', 'vs R0'],
   },
