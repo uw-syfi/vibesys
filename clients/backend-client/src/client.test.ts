@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {unlink} from 'node:fs/promises';
 import {createServer, type Server, type Socket} from 'node:net';
 import {join} from 'node:path';
-import {ServerClient, type ServerClientOptions} from './client.js';
+import {type ControlChannelState, ServerClient, type ServerClientOptions} from './client.js';
 import {BackendClientError, ServerError} from './errors.js';
 
 let socketPath: string | undefined;
@@ -100,14 +100,17 @@ describe('ServerClient', () => {
     );
   });
 
-  it('rejects pending requests when the server disconnects', async () => {
+  it('fails an in-flight request once the reconnect schedule cannot recover', async () => {
     await withServer(
       socket => socket.once('data', () => socket.destroy()),
       async client => {
+        // An idempotent request is held for resend across a drop; with no
+        // schedule to redial on, the outage exhausts at once and it fails typed.
         const rejected = client.request({type: 'query.snapshot'});
-        await expect(rejected).rejects.toThrow('Server disconnected');
+        await expect(rejected).rejects.toThrow('Server is disconnected');
         await expect(rejected).rejects.toMatchObject({kind: 'disconnected', retryable: true});
       },
+      {reconnectDelaysMs: []},
     );
   });
 
@@ -616,7 +619,218 @@ describe('ServerClient', () => {
       {closeGraceMs: 30},
     );
   });
+
+  it('redials the control channel and does not resend a non-idempotent request', async () => {
+    let connections = 0;
+    const seen: string[] = [];
+    const states: ControlChannelState[] = [];
+    await withServer(
+      socket => {
+        connections += 1;
+        const attempt = connections;
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          seen.push(request['type'] as string);
+          if (attempt === 1) {
+            socket.destroy();
+            return;
+          }
+          socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+        });
+      },
+      async client => {
+        // A steer is not idempotent, so the drop fails it rather than resending.
+        await expect(client.request({type: 'command.steer', text: 'x'})).rejects.toMatchObject({
+          kind: 'disconnected',
+        });
+        await waitFor(() => client.connected);
+        const response = await client.request({type: 'query.snapshot'});
+        expect(response.snapshot?.status).toBe('running');
+        // The steer reached only the first connection; the redial did not repeat it.
+        expect(seen).toEqual(['command.steer', 'query.snapshot']);
+        expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+      },
+      {reconnectDelaysMs: [0], onConnectionState: state => states.push(state)},
+    );
+  });
+
+  it('holds an idempotent request across a drop and resends it on recovery', async () => {
+    let connections = 0;
+    await withServer(
+      socket => {
+        connections += 1;
+        const attempt = connections;
+        socket.on('error', () => undefined);
+        if (attempt === 1) {
+          // Drop the request without answering, so it must ride the recovery.
+          socket.once('data', () => socket.destroy());
+          return;
+        }
+        respondToLines(socket, request =>
+          socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`),
+        );
+      },
+      async client => {
+        const response = await client.request({type: 'command.pause'});
+        expect(response.ok).toBe(true);
+        expect(connections).toBeGreaterThanOrEqual(2);
+      },
+      {reconnectDelaysMs: [0]},
+    );
+  });
+
+  it('resolves an in-flight request whose response arrives before the drop', async () => {
+    await withServer(
+      socket => {
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          // Answer, then immediately drop: the response wins the race.
+          socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+          socket.destroy();
+        });
+      },
+      async client => {
+        const response = await client.request({type: 'query.snapshot'});
+        expect(response.snapshot?.status).toBe('running');
+      },
+      {reconnectDelaysMs: []},
+    );
+  });
+
+  it('discards the late response of an aborted request and stays routable', async () => {
+    let serverSocket: Socket | undefined;
+    const deferred: Record<string, unknown>[] = [];
+    await withServer(
+      socket => {
+        serverSocket = socket;
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          if (request['type'] === 'query.snapshot') {
+            // Hold the snapshot answer back; the caller aborts before it lands.
+            deferred.push(request);
+            return;
+          }
+          socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+        });
+      },
+      async client => {
+        const controller = new AbortController();
+        const aborted = client
+          .request({type: 'query.snapshot'}, {signal: controller.signal})
+          .catch(error => error);
+        await waitFor(() => deferred.length === 1);
+        controller.abort();
+        expect((await aborted).name).toBe('AbortError');
+        // The abandoned request's late response must resolve nothing.
+        serverSocket?.write(
+          `${JSON.stringify(successResponse(deferred[0]?.['request_id'] as string))}\n`,
+        );
+        // A later request on the same channel still works and is not misrouted.
+        const response = await client.request({type: 'command.pause'});
+        expect(response.ok).toBe(true);
+      },
+      {reconnectDelaysMs: []},
+    );
+  });
+
+  it('aborts an in-flight dedicated chat with the abort reason', async () => {
+    await withServer(
+      socket => {
+        socket.on('error', () => undefined);
+        // Accept the chat connection but never answer, so it is still in flight.
+        respondToLines(socket, () => undefined);
+      },
+      async client => {
+        const controller = new AbortController();
+        const chat = client
+          .request({type: 'query.chat', text: 'hang'}, {signal: controller.signal})
+          .catch(error => error);
+        controller.abort();
+        expect((await chat).name).toBe('AbortError');
+      },
+      {closeGraceMs: 30},
+    );
+  });
+
+  it('routes a request onto a dedicated connection with no deadline when asked', async () => {
+    let connections = 0;
+    await withServer(
+      socket => {
+        connections += 1;
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          // Answer only after the control deadline would have fired; the no-timer
+          // dedicated path is the only one that survives it.
+          setTimeout(
+            () =>
+              socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`),
+            40,
+          );
+        });
+      },
+      async client => {
+        const response = await client.request(
+          {type: 'query.snapshot'},
+          {dedicatedConnection: true},
+        );
+        expect(response.snapshot?.status).toBe('running');
+        expect(connections).toBe(2);
+      },
+      {requestTimeoutMs: 20},
+    );
+  });
+
+  it('honors a per-call timeout override', async () => {
+    await withServer(
+      socket => socket.on('data', () => undefined),
+      async client => {
+        // The client default is 30s; the per-call override must win.
+        const rejected = client.request({type: 'query.snapshot'}, {timeoutMs: 20});
+        await expect(rejected).rejects.toThrow('Server request timed out after 20ms');
+      },
+    );
+  });
+
+  it('reconnect() revives a channel that a protocol fault took down', async () => {
+    let connections = 0;
+    await withServer(
+      socket => {
+        connections += 1;
+        const attempt = connections;
+        socket.on('error', () => undefined);
+        respondToLines(socket, request => {
+          if (attempt === 1) {
+            // An unreadable response is a protocol fault, not a transient drop:
+            // it fails the request typed and stays down until asked to revive.
+            socket.write('{not-json}\n');
+            return;
+          }
+          socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+        });
+      },
+      async client => {
+        await expect(client.request({type: 'query.snapshot'})).rejects.toMatchObject({
+          kind: 'parse',
+        });
+        expect(client.connected).toBe(false);
+        client.reconnect();
+        await waitFor(() => client.connected);
+        const response = await client.request({type: 'query.snapshot'});
+        expect(response.snapshot?.status).toBe('running');
+      },
+      {reconnectDelaysMs: [0]},
+    );
+  });
 });
+
+/** Poll until `predicate` holds, since the client uses real timers, not fakes. */
+async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('waitFor timed out');
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+}
 
 async function withServer(
   onConnection: (socket: Socket) => void,

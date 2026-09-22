@@ -1,4 +1,5 @@
 import {
+  DEFAULT_RECONNECT_DELAYS_MS,
   type EventSubscription,
   type ExperimentCursor,
   PersistentEventStream,
@@ -259,14 +260,6 @@ export interface ServerTransport {
 const BOOTSTRAP_TAIL = 1_000;
 const BACKFILL_CHUNK = 1_000;
 
-/**
- * Backoff between reconnect attempts after the event stream drops. The
- * schedule is finite: a server that refuses this many dials in a row is not
- * coming back on its own, and the disconnect banner stays up as the
- * persistent answer. A successful resubscribe resets the count, so the next
- * outage gets the full schedule again.
- */
-const RECONNECT_DELAYS_MS: readonly number[] = [500, 1_000, 2_000, 4_000, 8_000];
 type EventBatchMessage = Extract<ServerMessage, {events: RunEvent[]}>;
 type ProtocolErrorMessage = Extract<ServerMessage, {message: string}>;
 
@@ -361,7 +354,7 @@ export class SocketSessionController implements SessionController {
      * per outage. Handed to the stream, and injected by tests so a retry is
      * immediate instead of half a second away.
      */
-    reconnectDelaysMs: readonly number[] = RECONNECT_DELAYS_MS,
+    reconnectDelaysMs: readonly number[] = DEFAULT_RECONNECT_DELAYS_MS,
   ) {
     this.#state = initialSessionState(themeName);
     this.#stream = new PersistentEventStream(client, {

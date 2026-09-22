@@ -1,4 +1,6 @@
+export {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 export {
+  type ControlChannelState,
   type EventSubscription,
   ServerClient,
   type ServerClientOptions,
@@ -39,3 +41,11 @@ export type {
   ServerMessage,
   TuiDefaults,
 } from './protocol.js';
+export {
+  type AbortSignalLike,
+  DEFAULT_REQUEST_POLICY,
+  REQUEST_POLICIES,
+  type RequestOptions,
+  type RequestPolicy,
+  resolveRequestPolicy,
+} from './request-policy.js';

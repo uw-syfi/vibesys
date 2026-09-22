@@ -1,3 +1,4 @@
+import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 import type {EventSubscription, SubscribeOptions} from './client.js';
 import {isServerRejection} from './errors.js';
 import type {ServerMessage} from './protocol.js';
@@ -73,8 +74,6 @@ export interface PersistentEventStreamOptions {
   reconnectDelaysMs?: readonly number[];
 }
 
-const DEFAULT_RECONNECT_DELAYS_MS: readonly number[] = [500, 1_000, 2_000, 4_000, 8_000];
-
 function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
@@ -93,12 +92,11 @@ function toError(value: unknown): Error {
 export class PersistentEventStream {
   readonly #transport: StreamTransport;
   readonly #tail: number | undefined;
-  readonly #reconnectDelaysMs: readonly number[];
+  readonly #backoff: BackoffSchedule;
 
   #callbacks: PersistentEventStreamCallbacks | null = null;
   #subscription: EventSubscription | null = null;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  #reconnectAttempt = 0;
   /**
    * Identifies the live dial. Each subscribe attempt takes the next value, so a
    * message or disconnect from a subscription the loop has already moved past
@@ -122,7 +120,7 @@ export class PersistentEventStream {
   constructor(transport: StreamTransport, options: PersistentEventStreamOptions = {}) {
     this.#transport = transport;
     this.#tail = options.tail;
-    this.#reconnectDelaysMs = options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS;
+    this.#backoff = new BackoffSchedule(options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS);
   }
 
   /**
@@ -264,9 +262,8 @@ export class PersistentEventStream {
 
   #scheduleReconnect(): void {
     if (this.#reconnectTimer !== null) return;
-    const delay = this.#reconnectDelaysMs[this.#reconnectAttempt];
+    const delay = this.#backoff.next();
     if (delay === undefined) return;
-    this.#reconnectAttempt += 1;
     this.#reconnectTimer = setTimeout(() => {
       this.#reconnectTimer = null;
       void this.#reconnectNow();
@@ -288,7 +285,7 @@ export class PersistentEventStream {
       const recovered = this.#bootstrapped ? await this.#resumeDial() : await this.#bootstrapDial();
       if (this.#closed) return;
       if (recovered) {
-        this.#reconnectAttempt = 0;
+        this.#backoff.reset();
         this.#disconnectedReported = false;
         this.#emit({status: 'connected'});
       } else {
@@ -313,7 +310,7 @@ export class PersistentEventStream {
     if (this.#closed || this.#callbacks === null) return;
     if (this.#reconnectTimer !== null || this.#reconnecting) return;
     if (!this.#active().shouldReconnect()) return;
-    this.#reconnectAttempt = 0;
+    this.#backoff.reset();
     void this.#reconnectNow();
   }
 
