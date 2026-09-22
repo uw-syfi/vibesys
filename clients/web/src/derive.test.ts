@@ -385,6 +385,24 @@ test('log groups: an "Attempt N" divider marks only the start of a retry', () =>
       ['judge', 2, null],
     ],
   );
+  // A plan reprompt (`round-N-retry-K-plan`) retries the plan call, not the round.
+  const reprompted = fold([
+    event(1, 'phase_started', 'round-1-plan', 'orchestrator'),
+    event(2, 'agent_output_chunk', 'round-1-plan', 'orchestrator'),
+    event(3, 'phase_started', 'round-1-retry-1-plan', 'orchestrator'),
+    event(4, 'agent_output_chunk', 'round-1-retry-1-plan', 'orchestrator'),
+    event(5, 'phase_started', 'round-1-retry-12-plan', 'orchestrator'),
+    event(6, 'agent_output_chunk', 'round-1-retry-12-plan', 'orchestrator'),
+    event(7, 'phase_started', 'round-1-retry-1-implementer', 'implementer'),
+    event(8, 'agent_output_chunk', 'round-1-retry-1-implementer', 'implementer'),
+  ]);
+  assert.deepEqual(
+    logGroups(reprompted, [], 1, null).map(group => [group.role, group.attempt, group.divider]),
+    [
+      ['orchestrator', 1, null],
+      ['implementer', 1, null],
+    ],
+  );
 });
 
 test('inspector: hypothesis, delta vs the incumbent of that time, judge verdict words, changes', () => {

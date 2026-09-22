@@ -284,8 +284,9 @@ function toolLabel(entry: TranscriptEntry): [string, string | null] {
   }
 }
 
+/** `round-N-retry-K[-role]` is attempt K; `round-N-retry-K-plan` is a plan reprompt, attempt 1. */
 function attemptOf(roundLabel: string | null | undefined): number {
-  const match = roundLabel?.match(/retry-(\d+)/);
+  const match = roundLabel?.match(/-retry-(\d+)(?!\d|-plan)/);
   return match ? Number(match[1]) : 1;
 }
 
