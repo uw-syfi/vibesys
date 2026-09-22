@@ -3,11 +3,13 @@ import {
   type ProtocolResponse,
   type RequestInput,
   type RunEvent,
+  ServerError,
   type ServerMessage,
   type StreamTransport,
 } from '@vibesys/backend-client/browser';
 import {
   type CoreState,
+  hasRunEnded,
   initialCoreState,
   reduceEvent,
   reduceEventBatch,
@@ -27,7 +29,8 @@ export interface QueryState {
   error: string | null;
 }
 
-export type QueryName = 'experiments' | 'performance' | 'design';
+export type QueryName = 'experiments' | 'design' | 'performance';
+export type CommandAction = 'pause' | 'resume' | 'steer';
 type Command = Extract<RequestInput, {type?: 'command.pause' | 'command.resume' | 'command.steer'}>;
 
 export interface WorkspaceState {
@@ -35,14 +38,35 @@ export interface WorkspaceState {
   runId: string | null;
   connection: 'connecting' | 'connected' | 'disconnected' | 'error';
   connectionError: string | null;
+  /** The reconnect schedule is exhausted (or the boot dial failed): only `reconnect()` helps. */
+  canRetry: boolean;
   snapshotError: string | null;
   queries: Record<QueryName, QueryState>;
-  command: {sending: boolean; ack: ProtocolResponse['ack']; error: string | null};
+  /** Enablement comes from `core.status`; this only guards double sends and keeps the last failure. */
+  command: {sending: boolean; error: {action: CommandAction; message: string} | null};
+  /** Events core-state drops or does not keep (see `CAPTURED_TYPES`), ascending by sequence. */
+  captured: readonly RunEvent[];
   historyLoading: boolean;
   historyError: string | null;
 }
 
+export interface WorkspaceSessionOptions {
+  reconnectDelaysMs?: readonly number[];
+}
+
+/** Steers (`control`), judge verdicts, and the run's start and end, recorded before each fold. */
+export const CAPTURED_TYPES: ReadonlySet<string> = new Set([
+  'control',
+  'judge_result',
+  'run_started',
+  'run_finished',
+  'run_failed',
+  'run_interrupted',
+  'configuration_failed',
+]);
+const RECONNECT_DELAYS_MS: readonly number[] = [500, 1_000, 2_000, 4_000, 8_000];
 const emptyQuery = (): QueryState => ({response: null, loading: true, error: null});
+const idleCommand = (): WorkspaceState['command'] => ({sending: false, error: null});
 
 /** Owns browser subscriptions and query state; core-state owns the event projection. */
 export class WorkspaceSession {
@@ -51,9 +75,11 @@ export class WorkspaceSession {
     runId: null,
     connection: 'connecting',
     connectionError: null,
+    canRetry: false,
     snapshotError: null,
-    queries: {experiments: emptyQuery(), performance: emptyQuery(), design: emptyQuery()},
-    command: {sending: false, ack: null, error: null},
+    queries: {experiments: emptyQuery(), design: emptyQuery(), performance: emptyQuery()},
+    command: idleCommand(),
+    captured: [],
     historyLoading: false,
     historyError: null,
   };
@@ -64,11 +90,18 @@ export class WorkspaceSession {
   #declaredFloor: number | null = null;
   #historyGeneration = 0;
   #runGeneration = 0;
+  #failedDials = 0;
   #spine = new Set<number>();
   #fetches = new Map<QueryName, Promise<void>>();
   #refreshPending = new Set<QueryName>();
+  readonly #reconnectDelaysMs: readonly number[];
 
-  constructor(private readonly client: WorkspaceClient) {}
+  constructor(
+    private readonly client: WorkspaceClient,
+    options: WorkspaceSessionOptions = {},
+  ) {
+    this.#reconnectDelaysMs = options.reconnectDelaysMs ?? RECONNECT_DELAYS_MS;
+  }
 
   getSnapshot = (): WorkspaceState => this.#state;
 
@@ -77,49 +110,76 @@ export class WorkspaceSession {
     return () => this.#listeners.delete(listener);
   };
 
+  /** Subscribes; the bootstrap batch then triggers the one round of queries. */
   async start(): Promise<void> {
-    await Promise.all([this.reconnect(), this.refresh()]);
+    await this.reconnect();
   }
 
   async reconnect(): Promise<void> {
     if (this.#closed || this.#reconnecting) return;
     this.#reconnecting = true;
     try {
-      this.#set({connection: 'connecting', connectionError: null});
+      this.#failedDials = 0;
+      this.#set({connection: 'connecting', connectionError: null, canRetry: false});
       const old = this.#stream;
       this.#stream = null;
       await old?.close();
       if (this.#closed) return;
       // Each new stream bootstraps; automatic reconnects resume its existing cursor.
       this.#declaredFloor = null;
-      const stream = new PersistentEventStream(this.client, {tail: 300});
+      const transport: StreamTransport = {
+        subscribe: async (after, onMessage, onDisconnect, options) => {
+          try {
+            return await this.client.subscribe(after, onMessage, onDisconnect, options);
+          } catch (error) {
+            // A tail dial is the boot probe that falls back within the same attempt,
+            // so only dials without `tail` count against the reconnect schedule.
+            if (options?.tail === undefined && this.#stream === stream) {
+              this.#failedDials += 1;
+              if (this.#failedDials >= this.#reconnectDelaysMs.length) this.#set({canRetry: true});
+            }
+            throw error;
+          }
+        },
+      };
+      const stream = new PersistentEventStream(transport, {
+        tail: 300,
+        reconnectDelaysMs: this.#reconnectDelaysMs,
+      });
       this.#stream = stream;
       await stream.subscribe({
         cursor: () => this.#state.core.sequence,
-        shouldReconnect: () => !this.#closed && this.#state.connection !== 'error',
+        shouldReconnect: () =>
+          !this.#closed && this.#state.connection !== 'error' && !hasRunEnded(this.#state.core),
         onMessage: (message, {resumed}) => {
           if (this.#stream === stream) this.#onMessage(message, resumed);
         },
         onConnectionState: state => {
           if (this.#stream !== stream || this.#state.connection === 'error') return;
+          if (state.status === 'connected') this.#failedDials = 0;
           this.#set({
             connection: state.status,
             connectionError: state.status === 'disconnected' ? state.error.message : null,
+            canRetry: false,
           });
-          if (state.status === 'connected') void this.refresh();
         },
       });
+      // A failed boot dial never arms the reconnect loop, so Retry is the only way on.
+      if (this.#stream === stream && this.#state.connection === 'disconnected') {
+        this.#set({canRetry: true});
+      }
     } finally {
       this.#reconnecting = false;
     }
   }
 
+  /** Snapshot, experiments, design, and performance: once per bootstrap batch, or from a Retry. */
   async refresh(): Promise<void> {
     await Promise.all([
       this.#snapshot(),
       this.load('experiments'),
-      this.load('performance'),
       this.load('design'),
+      this.load('performance'),
     ]);
   }
 
@@ -155,7 +215,9 @@ export class WorkspaceSession {
       .then(
         response => {
           if (generation !== this.#runGeneration) return;
-          this.#query(name, {response, loading: false, error: null});
+          // Only `performance_context` (objective, baseline) is used; the series is dropped.
+          const kept = name === 'performance' ? {...response, performance: []} : response;
+          this.#query(name, {response: kept, loading: false, error: null});
         },
         error => {
           if (generation !== this.#runGeneration) return;
@@ -177,18 +239,24 @@ export class WorkspaceSession {
 
   async command(input: Command): Promise<boolean> {
     if (this.#state.command.sending || this.#state.connection !== 'connected') return false;
+    const action: CommandAction =
+      input.type === 'command.pause'
+        ? 'pause'
+        : input.type === 'command.resume'
+          ? 'resume'
+          : 'steer';
     const generation = this.#runGeneration;
-    this.#set({command: {sending: true, ack: null, error: null}});
+    this.#set({command: {sending: true, error: null}});
     try {
       const response = await this.client.request(input);
       if (generation !== this.#runGeneration) return false;
       if (!response.ack) throw new Error('The backend returned no command acknowledgment.');
-      this.#set({command: {sending: false, ack: response.ack, error: null}});
       // An acknowledgment is not a lifecycle transition. Only events/snapshots set status.
+      this.#set({command: idleCommand()});
       return true;
     } catch (error) {
       if (generation !== this.#runGeneration) return false;
-      this.#set({command: {sending: false, ack: null, error: errorMessage(error)}});
+      this.#set({command: {sending: false, error: {action, message: commandMessage(error)}}});
       return false;
     }
   }
@@ -209,7 +277,10 @@ export class WorkspaceSession {
       const events = (response.events ?? []).filter(
         event => event.sequence === undefined || !this.#spine.has(event.sequence),
       );
-      this.#set({core: reduceEventPrefix(this.#state.core, events, nextFloor)});
+      this.#set({
+        captured: capture(this.#state.captured, events),
+        core: reduceEventPrefix(this.#state.core, events, nextFloor),
+      });
     } catch (error) {
       if (generation !== this.#historyGeneration) return;
       this.#set({historyError: errorMessage(error)});
@@ -238,26 +309,29 @@ export class WorkspaceSession {
         this.#set({
           runId: message.run_id,
           core: initialCoreState(),
+          captured: [],
           snapshotError: null,
-          queries: {experiments: emptyQuery(), performance: emptyQuery(), design: emptyQuery()},
-          command: {sending: false, ack: null, error: null},
+          queries: {experiments: emptyQuery(), design: emptyQuery(), performance: emptyQuery()},
+          command: idleCommand(),
           historyLoading: false,
           historyError: null,
         });
         // A resume requested the old run's cursor and can omit the entire new run.
-        // Replacing the stream also rejects remaining messages from that dial.
+        // Replacing the stream also rejects remaining messages from that dial; its
+        // bootstrap batch then runs the queries.
         if (resumed) {
           void this.reconnect();
-          void this.refresh();
           return;
         }
-        void this.refresh();
       }
       this.#set({runId: message.run_id, connection: 'connected', connectionError: null});
     } else if (message.type === 'protocol_error') {
       this.#set({connection: 'error', connectionError: `${message.code}: ${message.message}`});
     } else if (message.type === 'event') {
-      this.#set({core: reduceEvent(this.#state.core, message.event)});
+      this.#set({
+        captured: capture(this.#state.captured, [message.event]),
+        core: reduceEvent(this.#state.core, message.event),
+      });
       this.#invalidate([message.event]);
     } else if (message.type === 'event_batch') {
       const declared = message.history_after_sequence ?? 0;
@@ -277,6 +351,8 @@ export class WorkspaceSession {
       }
       const fold = reset ? reduceEventRebootstrap : reduceEventBatch;
       this.#set({
+        // core-state drops control events, so record them before folding.
+        captured: capture(reset ? [] : this.#state.captured, message.events),
         core: fold(
           this.#state.core,
           message.events,
@@ -285,22 +361,17 @@ export class WorkspaceSession {
           floor,
         ),
       });
-      this.#invalidate(message.events);
-      // A bootstrap can replace a concurrently loaded snapshot. Refresh liveness after it.
-      if (reset) void this.#snapshot();
+      // A bootstrap is the one time every query runs; its replayed invalidations are history.
+      if (reset) void this.refresh();
+      else this.#invalidate(message.events);
     }
   }
 
   #invalidate(events: readonly RunEvent[]): void {
-    if (events.some(event => event.type === 'experiments_changed')) {
-      void this.load('experiments');
-      void this.load('design');
-      void this.load('performance');
-    } else if (
-      events.some(event => event.type === 'round_finished' || event.type === 'benchmark_result')
-    ) {
-      void this.load('performance');
-    }
+    if (!events.some(event => event.type === 'experiments_changed')) return;
+    void this.load('experiments');
+    void this.load('design');
+    void this.load('performance');
   }
 
   #query(name: QueryName, query: QueryState): void {
@@ -312,6 +383,23 @@ export class WorkspaceSession {
     this.#state = {...this.#state, ...patch};
     for (const listener of this.#listeners) listener();
   }
+}
+
+/** Adds captured event types not yet held, keeping sequence order. Returns `held` when nothing is new. */
+function capture(held: readonly RunEvent[], events: readonly RunEvent[]): readonly RunEvent[] {
+  const seen = new Set(held.map(event => event.sequence));
+  const added = events.filter(
+    event =>
+      CAPTURED_TYPES.has(event.type) && event.sequence !== undefined && !seen.has(event.sequence),
+  );
+  if (added.length === 0) return held;
+  return [...held, ...added].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
+}
+
+function commandMessage(error: unknown): string {
+  return error instanceof ServerError
+    ? (error.diagnostic?.summary ?? error.message)
+    : errorMessage(error);
 }
 
 function errorMessage(error: unknown): string {

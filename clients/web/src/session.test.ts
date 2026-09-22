@@ -1,11 +1,12 @@
 import {strict as assert} from 'node:assert';
 import {test} from 'node:test';
-import type {
-  ProtocolResponse,
-  RequestInput,
-  RunEvent,
-  ServerMessage,
-  SubscribeOptions,
+import {
+  type ProtocolResponse,
+  type RequestInput,
+  type RunEvent,
+  ServerError,
+  type ServerMessage,
+  type SubscribeOptions,
 } from '@vibesys/backend-client/browser';
 import {type WorkspaceClient, WorkspaceSession} from './session.js';
 
@@ -36,6 +37,7 @@ class FakeClient implements WorkspaceClient {
   requests: RequestInput[] = [];
   closed = false;
   closedSubscriptions = 0;
+  refuseDials = false;
   replies: (input: RequestInput) => Promise<ProtocolResponse> = async input => {
     if (input.type === 'query.snapshot')
       return response({snapshot: {run_id: 'run-1', sequence: 0, status: 'starting'}});
@@ -61,8 +63,17 @@ class FakeClient implements WorkspaceClient {
     this.messages.push(onMessage);
     this.disconnect = onDisconnect;
     this.subscriptions.push({after, options});
+    if (this.refuseDials) throw new Error('dial refused');
     onMessage({type: 'subscribed', run_id: this.runId, request_id: 'sub', latest_sequence: 0});
-    if (this.replay) onMessage(this.replay(after));
+    // Like the gateway, every subscription starts with one batch, empty or not.
+    onMessage(
+      this.replay?.(after) ?? {
+        type: 'event_batch',
+        events: [],
+        through_sequence: after,
+        active_executions: [],
+      },
+    );
     return {
       close: async () => {
         this.closedSubscriptions += 1;
@@ -99,7 +110,7 @@ test('replays and deduplicates events; command acknowledgment never changes life
     await session.command({type: 'command.pause', mode: 'after_current_agent_call'}),
     true,
   );
-  assert.equal(session.getSnapshot().command.ack?.status, 'pending');
+  assert.deepEqual(session.getSnapshot().command, {sending: false, error: null});
   assert.equal(session.getSnapshot().core.status, 'running');
   client.emit({type: 'event', event: status(3, 'paused')});
   assert.equal(session.getSnapshot().core.status, 'paused');
@@ -261,7 +272,10 @@ test('a refresh during an outstanding query is not lost, and errors allow retrie
     throw new Error('request failed');
   };
   assert.equal(await session.command({type: 'command.steer', text: 'keep the baseline'}), false);
-  assert.equal(session.getSnapshot().command.error, 'request failed');
+  assert.deepEqual(session.getSnapshot().command.error, {
+    action: 'steer',
+    message: 'request failed',
+  });
   await session.load('design');
   assert.equal(session.getSnapshot().queries.design.error, 'request failed');
   client.replies = previous;
@@ -321,7 +335,7 @@ for (const failOldRequests of [false, true]) {
     );
     assert.equal(session.getSnapshot().runId, 'run-2');
     assert.equal(session.getSnapshot().core.sequence, 3);
-    assert.equal(session.getSnapshot().command.ack, null);
+    assert.deepEqual(session.getSnapshot().command, {sending: false, error: null});
 
     for (const request of pending) {
       if (failOldRequests) request.reject(new Error('old run failed'));
@@ -351,7 +365,7 @@ for (const failOldRequests of [false, true]) {
     assert.equal(state.queries.design.response?.design?.[0]?.files?.[0]?.path, 'new.ts');
     assert.equal(state.snapshotError, null);
     assert.equal(state.historyError, null);
-    assert.deepEqual(state.command, {sending: false, ack: null, error: null});
+    assert.deepEqual(state.command, {sending: false, error: null});
     for (const query of Object.values(state.queries)) assert.equal(query.error, null);
     await session.close();
   });
@@ -386,5 +400,177 @@ test('protocol errors disable commands and remain visible until an explicit reco
   await session.reconnect();
   assert.equal(session.getSnapshot().connection, 'connected');
   assert.equal(session.getSnapshot().connectionError, null);
+  await session.close();
+});
+
+const experimentsChanged = (sequence: number): RunEvent => ({
+  sequence,
+  type: 'experiments_changed',
+  timestamp: '2026-09-21T12:00:00Z',
+  data: {kind: 'experiments_changed', reason: 'round_persisted'},
+});
+const roundFinished = (sequence: number): RunEvent => ({
+  sequence,
+  type: 'round_finished',
+  round_label: 'round-1',
+  timestamp: '2026-09-21T12:00:00Z',
+  data: {kind: 'round_finished', attempts: 1, judge_verdict: 'pass'},
+});
+const control = (sequence: number, text: string, value: 'pending' | 'consumed'): RunEvent => ({
+  sequence,
+  type: 'control',
+  text,
+  status: value,
+  timestamp: '2026-09-21T12:00:00Z',
+});
+const queryCounts = (client: FakeClient): Record<string, number> => {
+  const counts: Record<string, number> = {};
+  for (const {type} of client.requests) {
+    if (type?.startsWith('query.')) counts[type] = (counts[type] ?? 0) + 1;
+  }
+  return counts;
+};
+
+test('query budget: four queries per bootstrap, three per experiments_changed, none otherwise', async () => {
+  const client = new FakeClient();
+  client.replay = after => ({
+    type: 'event_batch',
+    events: after === 0 ? [status(1, 'running'), experimentsChanged(2), roundFinished(3)] : [],
+    through_sequence: Math.max(after, 3),
+    active_executions: [],
+  });
+  const previous = client.replies;
+  client.replies = async input =>
+    input.type === 'query.performance'
+      ? response({
+          performance: [{round: 1, perf_metric: 1000, perf_unit: 'ops', passed: true}],
+          performance_context: {objective_description: 'Go fast.', objective_baseline_value: 900},
+        })
+      : previous(input);
+  const session = new WorkspaceSession(client, {reconnectDelaysMs: [1]});
+  await session.start();
+  await settle();
+  const bootstrap = {
+    'query.snapshot': 1,
+    'query.experiments': 1,
+    'query.design': 1,
+    'query.performance': 1,
+  };
+  assert.deepEqual(queryCounts(client), bootstrap, 'replayed invalidations are history');
+  const performance = session.getSnapshot().queries.performance.response;
+  assert.deepEqual(performance?.performance, [], 'the series is dropped');
+  assert.equal(performance?.performance_context?.objective_baseline_value, 900);
+  client.emit({type: 'event', event: roundFinished(4)});
+  client.emit({type: 'event', event: status(5, 'paused')});
+  await settle();
+  assert.deepEqual(queryCounts(client), bootstrap, 'rounds and status changes query nothing');
+  client.emit({type: 'event', event: experimentsChanged(6)});
+  await settle();
+  const invalidated = {
+    'query.snapshot': 1,
+    'query.experiments': 2,
+    'query.design': 2,
+    'query.performance': 2,
+  };
+  assert.deepEqual(queryCounts(client), invalidated);
+  client.disconnect?.(new Error('offline'));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(client.subscriptions.at(-1)?.after, 6, 'the reconnect resumed the cursor');
+  assert.deepEqual(queryCounts(client), invalidated, 'a resumed stream refetches nothing');
+  await session.close();
+});
+
+test('records control events core-state drops, deduplicated, and resets them with the projection', async () => {
+  const client = new FakeClient();
+  const session = new WorkspaceSession(client);
+  await session.start();
+  const texts = () =>
+    session.getSnapshot().captured.map(event => `${event.sequence} ${event.text}`);
+  client.emit({
+    type: 'event_batch',
+    events: [status(1, 'running'), control(2, '/steer: Keep the baseline', 'pending')],
+    through_sequence: 2,
+  });
+  client.emit({type: 'event', event: control(2, '/steer: Keep the baseline', 'pending')});
+  client.emit({type: 'event', event: control(3, '/steer', 'consumed')});
+  assert.deepEqual(texts(), ['2 /steer: Keep the baseline', '3 /steer']);
+  assert.equal(session.getSnapshot().core.transcript.length, 0, 'core-state keeps no trace');
+  const held = session.getSnapshot().captured;
+  client.emit({type: 'event', event: output(4, 'hello')});
+  assert.equal(session.getSnapshot().captured, held, 'other events keep the array identity');
+  client.emit({
+    type: 'event_batch',
+    events: [control(30, '/steer: After the attach', 'pending')],
+    history_after_sequence: 20,
+    through_sequence: 30,
+  });
+  assert.deepEqual(texts(), ['30 /steer: After the attach'], 'a raised floor rebuilds the record');
+  const previous = client.replies;
+  client.replies = async input =>
+    input.type === 'query.events'
+      ? response({events: [control(12, '/steer: Older', 'pending'), output(13, 'older')]})
+      : previous(input);
+  await session.loadOlder();
+  assert.deepEqual(texts(), ['12 /steer: Older', '30 /steer: After the attach']);
+  await session.close();
+});
+
+test('Retry appears only once the reconnect schedule is exhausted; an ended run never redials', async () => {
+  const client = new FakeClient();
+  const session = new WorkspaceSession(client, {reconnectDelaysMs: [1, 1]});
+  await session.start();
+  client.refuseDials = true;
+  client.disconnect?.(new Error('offline'));
+  assert.equal(session.getSnapshot().connection, 'disconnected');
+  assert.equal(session.getSnapshot().canRetry, false, 'still reconnecting');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(client.subscriptions.length, 3, 'the boot dial plus both scheduled dials');
+  assert.equal(session.getSnapshot().canRetry, true);
+  client.refuseDials = false;
+  await session.reconnect();
+  assert.equal(session.getSnapshot().connection, 'connected');
+  assert.equal(session.getSnapshot().canRetry, false);
+  client.emit({
+    type: 'event',
+    event: {
+      sequence: 9,
+      type: 'run_finished',
+      status: 'completed',
+      timestamp: '2026-09-21T12:00:00Z',
+    },
+  });
+  const dials = client.subscriptions.length;
+  client.disconnect?.(new Error('backend exited'));
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(client.subscriptions.length, dials, 'no redial after the run ended');
+  assert.equal(session.getSnapshot().connection, 'connected', 'no banner for lifecycle cleanup');
+  await session.close();
+});
+
+test('a failed command keeps its diagnostic summary until the next command', async () => {
+  const client = new FakeClient();
+  const session = new WorkspaceSession(client);
+  await session.start();
+  const previous = client.replies;
+  client.replies = async input => {
+    if (input.type === 'command.pause') {
+      throw new ServerError('Pause rejected', {
+        code: 'illegal_transition',
+        summary: 'The run is not running.',
+        scope: 'request',
+      });
+    }
+    return previous(input);
+  };
+  assert.equal(
+    await session.command({type: 'command.pause', mode: 'after_current_agent_call'}),
+    false,
+  );
+  assert.deepEqual(session.getSnapshot().command, {
+    sending: false,
+    error: {action: 'pause', message: 'The run is not running.'},
+  });
+  assert.equal(await session.command({type: 'command.steer', text: 'Keep going'}), true);
+  assert.deepEqual(session.getSnapshot().command, {sending: false, error: null});
   await session.close();
 });
