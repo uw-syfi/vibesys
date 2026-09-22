@@ -127,8 +127,9 @@ const queued = () =>
     design: STUB_DESIGN.filter(round => round.round < 3),
     clock: '2026-09-21T20:34:43Z',
   });
-// The recording's loop advertises four roles; this is every role the backend's tables know, so a
-// round wide enough to overflow the graph needs no invented one.
+// An invented loop shape, the way the `baseline` scenario invents a baseline value: the agent
+// loop's four roles plus `perf_eval`, which belongs to the `plain` loop. No recording runs five
+// roles in a round, and five is what it takes to overflow the graph row at 1440.
 const FIVE_ROLES = ['orchestrator', 'implementer', 'judge', 'profiler', 'perf_eval'];
 const rail = (page, round) =>
   page.getByRole('navigation', {name: 'Rounds'}).getByRole('button', {name: new RegExp(`^R${round}\\b`)});
@@ -138,6 +139,22 @@ const REPLAY = [
   {
     name: 'live',
     fixture: live(),
+    // The graph's four columns fit at 1440 and not at 1024 or 390, and neither resize crosses a
+    // media query: React renders nothing, so only the row's own ResizeObserver can notice the
+    // narrower scrollport. Without it the row overflows at 1024 with no fade to say so.
+    each: async (page, width) => {
+      // The fade follows the observer, so it lands a frame or two after the resize.
+      const wanted = width === 1440 ? null : 'end';
+      await page
+        .waitForFunction(
+          want => (document.querySelector('.gflow')?.getAttribute('data-more') ?? null) === want,
+          wanted,
+          {timeout: 3000},
+        )
+        .catch(() => {
+          throw new Error(`the fade at ${width} never became ${wanted}`);
+        });
+    },
     expect: [
       'queue-rs',
       'Optimize a single-producer, single-consumer bounded FIFO queue.',

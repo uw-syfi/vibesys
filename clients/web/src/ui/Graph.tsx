@@ -1,3 +1,4 @@
+import type {AgentPhaseStatus} from '@vibesys/core-state';
 import {useCallback, useLayoutEffect, useRef, useState} from 'react';
 import {titleCase} from '../derive.js';
 import type {GraphColumn, GraphNode} from '../model.js';
@@ -11,6 +12,11 @@ export interface GraphProps {
 /** The edge the row has more columns past, which the fade marks; undefined when it all fits. */
 type More = 'start' | 'end' | 'both' | undefined;
 
+/** The live agent is "Running", the word the rail's tooltip and the live region already use. */
+function statusWord(status: AgentPhaseStatus): string {
+  return status === 'active' ? 'Running' : titleCase(status);
+}
+
 /**
  * The selected round's agent pipeline, above the log and outside its scroller: a column per agent
  * kind in loop order, the agents of a kind stacked inside it, and an arrow to the next kind toned
@@ -19,7 +25,7 @@ type More = 'start' | 'end' | 'both' | undefined;
  * tree; the nodes are a status display and take no focus.
  */
 export function Graph({round, columns}: GraphProps) {
-  const row = useRef<HTMLOListElement>(null);
+  const row = useRef<HTMLOListElement | null>(null);
   const [more, setMore] = useState<More>(undefined);
 
   const measure = useCallback(() => {
@@ -30,28 +36,40 @@ export function Graph({round, columns}: GraphProps) {
     setMore(room <= 1 ? undefined : at <= 1 ? 'end' : at >= room - 1 ? 'start' : 'both');
   }, []);
 
-  // The columns change with the round and with the events that start and finish an agent.
-  useLayoutEffect(measure);
-  // A width change does not: a resize inside a breakpoint, or the drawer, renders nothing at all.
+  // A callback ref, not an effect: the row exists only once a round has agents, which is later
+  // than the first commit, and an effect with stable deps runs before that and never again.
+  const attach = useCallback(
+    (node: HTMLOListElement | null) => {
+      row.current = node;
+      if (node === null) return;
+      const observer = new ResizeObserver(measure);
+      observer.observe(node);
+      return () => {
+        observer.disconnect();
+        row.current = null;
+      };
+    },
+    [measure],
+  );
+
+  // scrollWidth follows the column and card counts, and neither changes the row's own size, so
+  // the observer never fires for them. A new `columns` is the only other thing that can.
   useLayoutEffect(() => {
-    const node = row.current;
-    if (node === null) return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [measure]);
+    if (columns.length > 0) measure();
+  }, [columns, measure]);
 
   if (round === null || columns.length === 0) return null;
   return (
     <section className="graph">
       <div className="col">
         <ol
-          ref={row}
+          ref={attach}
           className="gflow"
           data-more={more}
           aria-label={`Round ${round} agents`}
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: the row scrolls sideways, and not every browser focuses a scroll container on its own.
-          tabIndex={0}
+          // A tab stop only while it scrolls: not every browser focuses a scroll container on
+          // its own, and a row that fits has nothing for the keyboard to do.
+          tabIndex={more === undefined ? -1 : 0}
           onScroll={measure}
         >
           {columns.map(column => (
@@ -66,9 +84,16 @@ export function Graph({round, columns}: GraphProps) {
                   >
                     <span className="grole trunc">
                       {node.role}
-                      {node.count > 1 ? <span className="gn">{` ×${node.count}`}</span> : null}
+                      {node.count > 1 ? (
+                        <>
+                          {/* U+00D7 is punctuation: a screen reader may drop it or say "times",
+                              so the count is a word of its own for them. */}
+                          <span className="sr-only">{` ${node.count} runs`}</span>
+                          <span className="gn" aria-hidden="true">{` ×${node.count}`}</span>
+                        </>
+                      ) : null}
                     </span>
-                    <span className="gstat">{titleCase(node.status)}</span>
+                    <span className="gstat">{statusWord(node.status)}</span>
                     <Runtime node={node} />
                   </li>
                 ))}

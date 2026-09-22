@@ -54,15 +54,26 @@ test('the graph marks one live node, names role, status and runtime, and takes n
   const html = renderToStaticMarkup(<Graph round={3} columns={COLUMNS} />);
   assert.equal(html.match(/aria-current="step"/g)?.length, 1);
   assert.match(html, /aria-label="Round 3 agents"/);
-  assert.match(html, /Implementer.*Active.*gpt-5\.1-codex-max/s);
-  // A collapsed card says how many agents it stands for, in its name as well as on screen.
-  assert.match(html, /Orchestrator<span class="gn"> ×2<\/span>/);
+  // The live agent reads "Running", as the rail and the live region call it.
+  assert.match(html, /Implementer.*Running.*gpt-5\.1-codex-max/s);
+  assert.equal(html.includes('Active'), false);
+  assert.match(html, /Judge.*Pending/s);
+  // A collapsed card says how many agents it stands for on screen, and in words for a reader
+  // that drops the multiplication sign.
+  assert.match(html, /<span class="sr-only"> 2 runs<\/span>/);
+  assert.match(html, /<span class="gn" aria-hidden="true"> ×2<\/span>/);
   assert.equal(html.includes('×1'), false);
-  // Nodes are a status display: no control, and the one tab stop is the scrolling row itself,
-  // so a keyboard can reach a column that is off screen.
-  assert.equal(html.match(/tabindex="0"/g)?.length, 1);
-  assert.match(html, /<ol class="gflow"[^>]*tabindex="0"/);
+  assert.equal(html.includes('1 runs'), false);
+  // Nodes are a status display: no control anywhere, and nothing focusable but the row.
   assert.equal(html.includes('button'), false);
+  assert.equal(html.match(/tabindex/g)?.length, 1);
+});
+
+test('the row is a tab stop only once it has somewhere to scroll', () => {
+  // Server-rendered, so nothing is measured yet: the row is not in the tab order.
+  const html = renderToStaticMarkup(<Graph round={3} columns={COLUMNS} />);
+  assert.match(html, /<ol class="gflow"[^>]*tabindex="-1"/);
+  assert.equal(html.includes('data-more'), false);
 });
 
 test('the runtime line shows the model; the harness rides in the tooltip and the name', () => {

@@ -64,8 +64,11 @@
   border: 4px solid transparent;
   border-left: 6px solid var(--edge);
 }
+/* --border-strong is 2.0:1 on the dark canvas and 1.8:1 on the light one, so an idle arrow was
+   all but invisible. --text-subtle is the token for graphics, at 4.05:1, and still far quieter
+   than the done and live arrows (8.5:1 and up). */
 .gcol[data-edge='idle'] {
-  --edge: var(--border-strong);
+  --edge: var(--text-subtle);
 }
 .gcol[data-edge='done'] {
   --edge: var(--status-completed);
@@ -77,10 +80,13 @@
   --edge: var(--status-failed);
 }
 
-/* One card per agent run. A fixed width keeps the row a grid; each line is cut, never wrapped. */
+/* One card per agent run. A fixed width keeps the row a grid; each line is cut, never wrapped.
+   The height is the three-line card even when there is no runtime to put on the third line, the
+   way the TUI reserves that row, so every role label in the row sits on one line. */
 .gnode {
   display: grid;
   width: 150px;
+  min-height: 71px;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
