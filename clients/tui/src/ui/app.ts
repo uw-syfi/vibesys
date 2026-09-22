@@ -680,7 +680,15 @@ export function createOpenTuiApp(
       // Unsent: this fills the command bar's buffer exactly as `/steer `
       // pre-filled by the palette does above, so the operator still has to
       // review and press Enter before anything reaches an agent.
-      commandInput.setValue(`/steer ${prefill.text}`);
+      //
+      // The command bar is a single-line `InputRenderable`, which silently
+      // strips `\n`/`\r` on assignment rather than rejecting or wrapping
+      // them (unlike the chat draft below, a real multi-line textarea). A
+      // multi-line note promoted here needs its line breaks turned into
+      // spaces first, or the words on either side of every break would
+      // otherwise glue together into an unreadable, unintended instruction.
+      const singleLine = prefill.text.replace(/\s*\n+\s*/g, ' ');
+      commandInput.setValue(`/steer ${singleLine}`);
     },
     promoteNotepadToChat: () => {
       const prefill = controller.promoteNoteToChatDraft();

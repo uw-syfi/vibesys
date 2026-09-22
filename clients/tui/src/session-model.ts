@@ -275,7 +275,7 @@ interface ThemePicker {
  * keystroke, matching a run that has never had a note written for it
  * (`notes-store.ts#readNote` returns `null` in that case too).
  */
-export interface NotepadState {
+interface NotepadState {
   open: boolean;
   text: string;
   createdAt: string | null;

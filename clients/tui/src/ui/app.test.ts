@@ -7800,6 +7800,33 @@ describe('notepad', () => {
     expect(input.value).toBe('/steer fix the retry budget');
   });
 
+  it('F6 joins a multi-line note with spaces rather than gluing lines together', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    await testRenderer.waitForFrame(value => value.includes('Notepad'));
+    await testRenderer.mockInput.typeText('line one');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.mockInput.typeText('line two');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F6');
+    await testRenderer.waitForFrame(() => !controller.state.notepad.open);
+
+    // The command bar is a single-line `InputRenderable`, which silently
+    // drops `\n`/`\r` on assignment rather than rejecting them. Without
+    // joining lines with a space first, this would land as the unreadable
+    // "line oneline two" instead.
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.value).toBe('/steer line one line two');
+  });
+
   it('F7 promotes the note, unsent, into the chat draft and closes the notepad', async () => {
     const testRenderer = await createTestRenderer({width: 140, height: 40});
     const controller = new FakeController(initialSessionState());
