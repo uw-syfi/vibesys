@@ -104,11 +104,14 @@ jobs:
               - 'README.md'
               - '.github/workflows/*.yml'
             # The agent image build: its Dockerfile, the module that builds
-            # it, and the version pins it takes as build args.
+            # it, the version pins it takes as build args, and the Docker
+            # sandbox backend the conformance test in the agent-image job
+            # exercises against the built image.
             agent_image:
               - 'src/vibesys/sandbox/images/**'
               - 'src/vibesys/sandbox/images.py'
               - 'src/vibesys/agents/provider_policy.py'
+              - 'libs/vs-sandbox/**'
               - '.github/workflows/test.yml'
             # What `queue-native` builds and tests: the queue evaluator and its
             # native runner, the queue and priority-queue reference
@@ -494,9 +497,13 @@ jobs:
           go -C "$GITHUB_WORKSPACE/examples/microservices/hotel-correctness/.vibesys/tasks/compose/evaluator" run ./cmd/hotel-correctness --mode accuracy --workload "$GITHUB_WORKSPACE/examples/microservices/hotel-correctness/.vibesys/tasks/compose/benchmark/workload.toml" --validate-only
 
   # Builds the CPU agent image for real and runs every shipped CLI inside it
-  # as the non-root `agent` user (issue #675). ubuntu-latest ships Docker, so
-  # no separate engine setup is needed. Filtered narrowly: only a change that
-  # can actually change the image's contents pays for this job's build time.
+  # as the non-root `agent` user (issue #675), then reuses that same build to
+  # prove the Docker sandbox backend enforces the shared resource-list
+  # contract (the Docker case of test_sandbox_conformance.py's suite, which
+  # needs a real image and container instead of a skip-when-unavailable
+  # backend). ubuntu-latest ships Docker, so no separate engine setup is
+  # needed. Filtered narrowly: only a change that can actually change the
+  # image's contents or the sandbox backend pays for this job's build time.
   agent-image:
     needs: changes
     if: needs.changes.outputs.agent_image == 'true'
@@ -517,10 +524,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Build the CPU agent image and run every shipped CLI in it
+      - name: Build the CPU agent image, run every shipped CLI in it, and prove the Docker sandbox contract
         env:
           VIBESYS_E2E_DOCKER: "1"
-        run: uv run pytest tests/e2e/test_agent_image_e2e.py -v -s --no-cov
+        run: >-
+          uv run pytest tests/e2e/test_agent_image_e2e.py
+          libs/vs-sandbox/tests/test_docker_conformance_e2e.py -v -s --no-cov
 
   # Several tests read clients/ directly (packaging, theme, and distribution
   # tests), so a TypeScript-only change still needs this job. Documentation-only
