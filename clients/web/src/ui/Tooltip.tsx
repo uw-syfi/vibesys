@@ -15,12 +15,14 @@ export function Tooltip() {
     tip.hidden = true;
     document.body.append(tip);
     let anchor: HTMLElement | null = null;
+    let leaving = 0;
     // A control whose tip changes under the pointer (Pause becomes Resume) re-shows it.
     const retip = new MutationObserver(() => {
       if (anchor) show(anchor);
     });
 
     const show = (element: HTMLElement) => {
+      clearTimeout(leaving);
       anchor = element;
       retip.disconnect();
       retip.observe(element, {attributeFilter: ['data-tip']});
@@ -48,6 +50,7 @@ export function Tooltip() {
       element.setAttribute('aria-describedby', 'tip');
     };
     const hide = () => {
+      clearTimeout(leaving);
       retip.disconnect();
       anchor?.removeAttribute('aria-describedby');
       anchor = null;
@@ -55,11 +58,17 @@ export function Tooltip() {
     };
     const find = (event: Event) =>
       event.target instanceof Element ? event.target.closest<HTMLElement>('[data-tip]') : null;
+    // The tip is hoverable (WCAG 1.4.13): it hides only once the pointer has left both it and its
+    // anchor, after a short delay that covers the gap between them.
     const over = (event: Event) => {
-      const element = find(event);
-      if (element === anchor) return;
-      if (element) show(element);
-      else hide();
+      const onTip = event.target instanceof Node && tip.contains(event.target);
+      const element = onTip ? anchor : find(event);
+      if (element === anchor) clearTimeout(leaving);
+      else if (element) show(element);
+      else {
+        clearTimeout(leaving);
+        leaving = window.setTimeout(hide, 100);
+      }
     };
     const focus = (event: Event) => {
       const element = find(event);
@@ -80,6 +89,7 @@ export function Tooltip() {
       document.removeEventListener('focusout', hide);
       document.removeEventListener('keydown', key);
       document.removeEventListener('scroll', hide, true);
+      clearTimeout(leaving);
       retip.disconnect();
       tip.remove();
     };

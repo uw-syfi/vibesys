@@ -617,9 +617,18 @@ export function runControl(
 
 const TERMINAL = new Set(['run_finished', 'run_failed', 'run_interrupted', 'configuration_failed']);
 
-/** The objective's first sentence (up to the first `.`, `!`, or `?` before a space or line end). */
+/**
+ * The objective as tooltip text, and its first sentence (up to the first `.`, `!`, or `?` before a
+ * space or line end). Soft wraps become spaces; paragraph breaks and list-item lines (`- `, `* `,
+ * `1. `) stay; inline backticks are dropped.
+ */
 function objective(text: string | null | undefined): HeaderModel['objective'] {
-  const full = text?.trim();
+  const full = text
+    ?.split(/\n[ \t]*\n/)
+    .map(paragraph => paragraph.trim().replace(/[ \t]*\n(?![ \t]*(?:[-*] |\d+\. ))[ \t]*/g, ' '))
+    .filter(Boolean)
+    .join('\n\n')
+    .replace(/`([^`]*)`/g, '$1');
   if (!full) return null;
   const line = full.split('\n')[0] ?? full;
   // ponytail: an abbreviation such as "e.g." ends the sentence early; the tooltip has the rest.

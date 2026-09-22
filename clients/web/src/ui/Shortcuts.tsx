@@ -50,9 +50,11 @@ export function Shortcuts({onNext, onPrevious, onToggleRun}: ShortcutsProps) {
         return;
       }
       if (!enabled) return;
-      if (event.key === 'j') actions.current.onNext();
-      else if (event.key === 'k') actions.current.onPrevious();
-      else if (event.key === 'p') actions.current.onToggleRun();
+      // Caps Lock and Shift still count; Ctrl, Meta, and Alt returned above.
+      const letter = event.key.toLowerCase();
+      if (letter === 'j') actions.current.onNext();
+      else if (letter === 'k') actions.current.onPrevious();
+      else if (letter === 'p') actions.current.onToggleRun();
       else if (event.key === '/') document.getElementById('steer')?.focus();
       else return;
       event.preventDefault();

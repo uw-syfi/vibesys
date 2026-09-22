@@ -60,8 +60,9 @@
     flex-wrap: wrap;
     height: auto;
     min-height: 56px;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+    row-gap: 2px;
+    column-gap: var(--space-3);
+    padding: var(--space-2) var(--space-2) var(--space-3) var(--space-4);
   }
   .run-ctl {
     min-width: 0;

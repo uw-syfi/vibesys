@@ -36,6 +36,7 @@ export function Header({model, error, onControl}: HeaderProps) {
         <Elapsed
           className="elapsed"
           tip="Run elapsed"
+          side={null}
           live={endedAt === null}
           ms={now =>
             (endedAt === null ? now.getTime() : Date.parse(endedAt)) - Date.parse(startedAt)

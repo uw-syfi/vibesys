@@ -229,6 +229,33 @@ test('header: project basename, run clock bounds', () => {
   });
 });
 
+test('header objective: soft wraps joined, paragraphs and list items kept, backticks stripped', () => {
+  const wrapped = {
+    objective_description: [
+      'Optimize a bounded SPSC',
+      'queue. Metric: `total_ops_per_sec`.',
+      '',
+      'Preserve the interface:',
+      '- Provide `./queue-candidate.so`.',
+      '* Export the copying',
+      '  C ABI.',
+      '1. Stay',
+      'linearizable.',
+    ].join('\n'),
+  };
+  assert.deepEqual(headerModel(fold(STUB), [], 'connected', wrapped).objective, {
+    first: 'Optimize a bounded SPSC queue.',
+    full: [
+      'Optimize a bounded SPSC queue. Metric: total_ops_per_sec.',
+      '',
+      'Preserve the interface:',
+      '- Provide ./queue-candidate.so.',
+      '* Export the copying C ABI.',
+      '1. Stay linearizable.',
+    ].join('\n'),
+  });
+});
+
 test('steers: pending until a consumed control event, then placed at the consuming call', () => {
   assert.deepEqual(steers(captured(upTo(STUB, 212))), {
     pending: [{id: 'steer-212', text: 'Try caching VALUE instead of recomputing it.'}],
