@@ -1,6 +1,5 @@
 import {
   DEFAULT_RECONNECT_DELAYS_MS,
-  type EventSubscription,
   type ExperimentCursor,
   PersistentEventStream,
   type ProtocolResponse,
@@ -8,8 +7,8 @@ import {
   type RunEvent,
   ServerError,
   type ServerMessage,
+  type ServerTransport,
   type StreamConnectionState,
-  type SubscribeOptions,
 } from '@vibesys/backend-client';
 import {DEFAULT_CHAT_THREAD_ID, hasRunEnded} from '@vibesys/core-state';
 import type {StartupTrace} from './boot-trace.js';
@@ -237,17 +236,6 @@ export interface SessionController {
   /** Loads the chunk of history just older than what is folded. Resolves false when history is already complete. */
   loadOlderHistory(): Promise<boolean>;
   subscribe(listener: (state: SessionState) => void): () => void;
-}
-
-export interface ServerTransport {
-  request(input: RequestInput): Promise<ProtocolResponse>;
-  subscribe(
-    afterSequence: number,
-    onMessage: (message: ServerMessage) => void,
-    onDisconnect: (error: Error) => void,
-    options?: SubscribeOptions,
-  ): Promise<EventSubscription>;
-  close(): Promise<void>;
 }
 
 /**

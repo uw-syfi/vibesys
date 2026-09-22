@@ -3,8 +3,8 @@ import {randomUUID} from 'node:crypto';
 import {unlink} from 'node:fs/promises';
 import {createServer, type Server, type Socket} from 'node:net';
 import {join} from 'node:path';
+import {BackendClientError, ServerError} from '../errors.js';
 import {type ControlChannelState, ServerClient, type ServerClientOptions} from './client.js';
-import {BackendClientError, ServerError} from './errors.js';
 
 let socketPath: string | undefined;
 

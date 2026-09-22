@@ -107,6 +107,17 @@ module.exports = {
       to: {dependencyTypes: ['core']},
     },
     {
+      // The default (`.`) entry must bundle for a browser, so nothing it reaches
+      // may import a Node builtin. Only `backend-client/src/node/` may: the
+      // node-socket transport lives there, behind the `./node` export. Everything
+      // above that seam (protocol, folds, backoff, request policy, the transport
+      // interface) stays runtime-neutral. This mirrors core-state-has-no-node-runtime.
+      name: 'backend-client-neutral-has-no-node-runtime',
+      severity: 'error',
+      from: {path: '^backend-client/src/', pathNot: ['^backend-client/src/node/', TEST_FILE]},
+      to: {dependencyTypes: ['core']},
+    },
+    {
       name: 'core-state-has-no-ui-runtime',
       severity: 'error',
       from: {path: '^core-state/src/'},

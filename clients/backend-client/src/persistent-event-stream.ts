@@ -1,7 +1,7 @@
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
-import type {EventSubscription, SubscribeOptions} from './client.js';
 import {isServerRejection} from './errors.js';
 import type {ServerMessage} from './protocol.js';
+import type {EventSubscription, SubscribeOptions} from './transport.js';
 
 /**
  * The slice of `ServerClient` a persistent stream drives. Both the production

@@ -9,12 +9,13 @@ import {
   type RunEvent,
   ServerError,
   type ServerMessage,
+  type ServerTransport,
   type SubscribeOptions,
 } from '@vibesys/backend-client';
 import {resolveStartupTrace} from './boot-trace.js';
 import {fuzzyMatchCommands} from './commands.js';
 import {readNote, writeNote} from './notes-store.js';
-import {type ServerTransport, SocketSessionController} from './session-controller.js';
+import {SocketSessionController} from './session-controller.js';
 import {chatPaneFocused, chatPaneVisible, experimentLogVisible} from './session-model.js';
 
 /** The command-bar palette's current matches, by name, for asserting on what `/help` offers. */

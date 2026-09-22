@@ -1,25 +1,21 @@
-import {randomUUID} from 'node:crypto';
 import {createConnection, type Socket} from 'node:net';
-import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
-import {BackendClientError, ServerError} from './errors.js';
-import {NewlineFramer} from './newline-framer.js';
+import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from '../backoff.js';
+import {BackendClientError, ServerError} from '../errors.js';
+import {NewlineFramer} from '../newline-framer.js';
 import type {
   Diagnostic,
   ProtocolRequest,
   ProtocolResponse,
   RequestInput,
   ServerMessage,
-} from './protocol.js';
+} from '../protocol.js';
 import {
   type AbortSignalLike,
   type RequestOptions,
   type RequestPolicy,
   resolveRequestPolicy,
-} from './request-policy.js';
-
-export interface EventSubscription {
-  close(): Promise<void>;
-}
+} from '../request-policy.js';
+import type {EventSubscription, SubscribeOptions} from '../transport.js';
 
 /**
  * Whether the control channel holds a live connection, mirroring the
@@ -56,22 +52,6 @@ export interface ServerClientOptions {
    * frontend disable the controls a dropped channel cannot carry.
    */
   onConnectionState?: (state: ControlChannelState) => void;
-}
-
-export interface SubscribeOptions {
-  /**
-   * Replay at most this many of the newest events instead of the whole history.
-   * A server that predates the field forbids it and rejects the subscription,
-   * which is exactly how a caller probes for the capability.
-   */
-  tail?: number;
-  /**
-   * The store the caller's `afterSequence` numbers, carried by a resume so the
-   * server can tell whether that cursor still belongs to the live store. Sent
-   * only when non-empty; a server that predates the field forbids it and
-   * rejects the subscription, so the caller falls back to a plain resume.
-   */
-  storeId?: string;
 }
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
@@ -216,7 +196,7 @@ export class ServerClient {
       return Promise.reject(disconnectedError('Client is closed'));
     }
     const policy = resolveRequestPolicy(input.type, options);
-    const requestId = randomUUID();
+    const requestId = globalThis.crypto.randomUUID();
     const request = {
       protocol_version: 1,
       request_id: requestId,
@@ -355,7 +335,7 @@ export class ServerClient {
     socket.write(
       `${JSON.stringify({
         protocol_version: 1,
-        request_id: randomUUID(),
+        request_id: globalThis.crypto.randomUUID(),
         timestamp: new Date().toISOString(),
         type: 'subscribe',
         after_sequence: afterSequence,
@@ -738,7 +718,7 @@ export class ServerClient {
       // Mint a fresh id: the id the request last carried was written to a socket
       // that is now destroyed, so reusing it could let a late frame from that
       // dead socket match this resend. A never-reused id closes that off.
-      const nextId = randomUUID();
+      const nextId = globalThis.crypto.randomUUID();
       entry.request = {...entry.request, request_id: nextId};
       entry.requestId = nextId;
       this.#send(entry);
@@ -788,7 +768,7 @@ function dialSocket(path: string, timeoutMs: number, timeoutMessage: string): Pr
  * `retryable`, never on the code.
  */
 function dialFailure(error: Error): BackendClientError {
-  const code = (error as NodeJS.ErrnoException).code;
+  const code = (error as {code?: string}).code;
   return new BackendClientError('disconnected', error.message, {
     retryable: code !== undefined && RETRYABLE_CONNECT_CODES.has(code),
     cause: error,

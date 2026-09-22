@@ -1,5 +1,4 @@
 import {describe, expect, it} from 'bun:test';
-import type {EventSubscription} from './client.js';
 import {BackendClientError, ServerError} from './errors.js';
 import {
   PersistentEventStream,
@@ -8,6 +7,7 @@ import {
   type StreamTransport,
 } from './persistent-event-stream.js';
 import type {RunEvent, ServerMessage} from './protocol.js';
+import type {EventSubscription} from './transport.js';
 
 /** Lets a zero-delay reconnect timer and its subscribe settle. */
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 1));

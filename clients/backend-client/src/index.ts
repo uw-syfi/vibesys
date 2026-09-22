@@ -1,12 +1,5 @@
 export {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 export {
-  type ControlChannelState,
-  type EventSubscription,
-  ServerClient,
-  type ServerClientOptions,
-  type SubscribeOptions,
-} from './client.js';
-export {
   BackendClientError,
   type BackendErrorKind,
   isServerRejection,
@@ -49,3 +42,4 @@ export {
   type RequestPolicy,
   resolveRequestPolicy,
 } from './request-policy.js';
+export type {EventSubscription, ServerTransport, SubscribeOptions} from './transport.js';
