@@ -53,7 +53,9 @@ export function Composer({pending, disabled, error, onSend}: ComposerProps) {
             value={text}
             onChange={event => setText(event.target.value)}
             onKeyDown={event => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              // Safari ends the composition before the Enter that commits it; keyCode 229 marks it.
+              const composing = event.nativeEvent.isComposing || event.keyCode === 229;
+              if (event.key === 'Enter' && !event.shiftKey && !composing) {
                 event.preventDefault();
                 void send();
               }

@@ -58,6 +58,9 @@ export function Inspector({
   onRetryDesign,
 }: InspectorProps) {
   const dialog = useRef<HTMLDialogElement>(null);
+  // Whether the pointer went down on the backdrop: a selection dragged out of the panel ends in a
+  // click on the dialog too, and must not close it.
+  const pressed = useRef(false);
   // Crossing 1024 px swaps the dialog for the aside and back; the new dialog node must reopen, or
   // `open` stays true with nothing shown and no row click can open it again.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `mode` re-runs this for the new node.
@@ -92,8 +95,11 @@ export function Inspector({
       className={`insp insp-${mode}`}
       aria-label={label}
       onClose={onClose}
+      onPointerDown={event => {
+        pressed.current = event.target === event.currentTarget;
+      }}
       onClick={event => {
-        if (event.target === event.currentTarget) event.currentTarget.close();
+        if (pressed.current && event.target === event.currentTarget) event.currentTarget.close();
       }}
     >
       <div className="insp-inner">
@@ -128,7 +134,8 @@ function Body({
   return (
     <div className="insp-body">
       {hypothesis === null ? null : (
-        <header>
+        // Not <header>: inside the dialog that would be a second banner landmark.
+        <div>
           {hypothesis.id === null ? null : <p className="hid mono">{hypothesis.id}</p>}
           {hypothesis.title === null ? null : <h2>{hypothesis.title}</h2>}
           {hypothesis.claim === null ? null : (
@@ -136,7 +143,7 @@ function Body({
               <Prose paragraphs={prose(hypothesis.claim)} />
             </div>
           )}
-        </header>
+        </div>
       )}
       {metric === null && delta === null ? null : (
         <section className="sec" aria-label="Measurement">
@@ -214,6 +221,7 @@ function Body({
                   <li key={file.path} className="file">
                     <span className="ic" data-tip={tip}>
                       <Icon {...icon} />
+                      <span className="sr-only">{tip}</span>
                     </span>
                     <code className="trunc">{file.path}</code>
                   </li>
