@@ -22,6 +22,7 @@ import {
   prose,
   railModel,
   runControl,
+  showsChanges,
   steers,
   steersNeedOlder,
 } from './derive.js';
@@ -328,6 +329,18 @@ test('log groups: role groups, collapse, in-flight row, tool rows from typed pay
   );
 });
 
+test('log groups: the acting role shows before its first entry', () => {
+  // queue-rs at 263: the implementer has started and said nothing yet.
+  const groups = logGroups(fold(upTo(QUEUE, 263)), [], 1, QUEUE_RUN);
+  assert.deepEqual(
+    groups.map(group => [group.role, group.collapsed, group.active, group.items.length === 0]),
+    [
+      ['orchestrator', true, false, false],
+      ['implementer', false, true, true],
+    ],
+  );
+});
+
 test('log groups: an "Attempt N" divider marks only the start of a retry', () => {
   const event = (sequence: number, type: RunEvent['type'], label: string, kind: string) =>
     ({
@@ -445,6 +458,35 @@ test('inspector: hypothesis, delta vs the incumbent of that time, judge verdict 
     ],
     'the verdict is a word; a passed attempt under a rejected round reads Rejected',
   );
+});
+
+test('inspector: the metric heads a delta, never stands alone', () => {
+  const rows = railModel(fold(STUB), STUB_EXPERIMENTS, BASELINE).rows;
+  const at = (round: number) =>
+    inspectorModel(rows, STUB_EXPERIMENTS, STUB_DESIGN, captured(STUB), round, BASELINE);
+  assert.deepEqual(
+    [0, 1, 3].map(round => [round, at(round).metric?.name ?? null, at(round).delta?.value ?? null]),
+    [
+      [0, null, null],
+      [1, 'median_tok_per_sec', '+11.1%'],
+      [3, null, null],
+    ],
+    'R0 and a round without a value have no delta, so no metric heading',
+  );
+});
+
+test('changes: only a finished round past R0 shows them, or their load error', () => {
+  const rows = railModel(fold(upTo(STUB, 205)), before(3), BASELINE).rows;
+  assert.deepEqual(
+    rows.map(row => [row.round, showsChanges(row)]),
+    [
+      [0, false],
+      [1, true],
+      [2, true],
+      [3, false],
+    ],
+  );
+  assert.equal(showsChanges(undefined), false);
 });
 
 test('announcements: status changes and new rounds, nothing on first load', () => {

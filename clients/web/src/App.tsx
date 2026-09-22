@@ -8,6 +8,7 @@ import {
   logGroups,
   needsOlder,
   railModel,
+  showsChanges,
   steers,
   steersNeedOlder,
 } from './derive.js';
@@ -190,7 +191,11 @@ export function App({session}: {session: WorkspaceSession}) {
           mode={wide ? 'aside' : tablet ? 'drawer' : 'sheet'}
           open={inspectorOpen}
           judgePending={roundHidden && historyLoading}
-          designError={queries.design.error}
+          designError={
+            showsChanges(rail.rows.find(row => row.round === selected))
+              ? queries.design.error
+              : null
+          }
           onClose={() => setInspectorOpen(false)}
           onRetryDesign={() => void session.load('design')}
         />

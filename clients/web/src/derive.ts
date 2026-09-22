@@ -376,8 +376,15 @@ export function logGroups(
     group.items.push(row.item);
     if (row.item.kind === 'tool') group.calls += 1;
   }
-  const groups = drafts.filter(group => group.items.length > 0);
   const live = !hasRunEnded(core) && latestRound(core) === round;
+  const acting = (role: string) =>
+    live &&
+    active.some(execution => execution.agentKind === role && execution.roundNumber === round);
+  // A role without entries shows only while it acts, so the log names who is working before
+  // its first entry.
+  const groups = drafts.filter(
+    (group, index) => group.items.length > 0 || (index === drafts.length - 1 && acting(group.role)),
+  );
   groups.forEach((group, index) => {
     const previous = groups[index - 1];
     const last = index === groups.length - 1;
@@ -386,12 +393,7 @@ export function logGroups(
         ? group.attempt
         : null;
     group.collapsed = !last;
-    group.active =
-      last &&
-      live &&
-      active.some(
-        execution => execution.agentKind === group.role && execution.roundNumber === round,
-      );
+    group.active = last && acting(group.role);
     const prose = group.items.filter(item => item.kind === 'prose').at(-1);
     const tool = group.items.filter(item => item.kind === 'tool').at(-1);
     group.summary =
@@ -508,19 +510,26 @@ export function inspectorModel(
   // The incumbent of that time: the latest kept round (or R0) before this one with a value.
   const incumbent = incumbentBefore(rows, round);
   const changes = design.find(candidate => candidate.round === round);
+  const delta = live
+    ? {value: null, vs: incumbent, tip: null}
+    : measuredDelta(facts, round, incumbent, context);
   return {
     round,
     hypothesis: entry === undefined ? null : hypothesisText(entry),
-    metric: name === null ? null : {name, direction},
-    delta: live
-      ? {value: null, vs: incumbent, tip: null}
-      : measuredDelta(facts, round, incumbent, context),
+    // The metric names the delta; with no delta it would head nothing.
+    metric: name === null || delta === null ? null : {name, direction},
+    delta,
     judge: judgeAttempts(captured, round, row?.status),
     changes:
-      !live && row !== undefined && changes?.files != null
+      showsChanges(row) && changes?.files != null
         ? {commit: changes.commit ?? null, files: changes.files}
         : null,
   };
+}
+
+/** Changes resolve when a round ends, and R0 has none: only finished rounds past R0 show them. */
+export function showsChanges(row: RailRow | undefined): boolean {
+  return row !== undefined && row.round > 0 && row.status !== 'running' && row.status !== 'paused';
 }
 
 /** Title and claim, with a title the server derived from the claim folded into the claim. */

@@ -95,6 +95,8 @@
     grid-template-columns: auto auto auto;
     grid-template-areas: 'ico id off' 'val val val';
     justify-content: start;
+    /* A chip without a value keeps its id on the top line with the others. */
+    align-content: start;
     column-gap: 3px;
     width: auto;
     height: auto;
