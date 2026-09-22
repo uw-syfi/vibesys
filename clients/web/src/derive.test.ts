@@ -715,7 +715,8 @@ test('agent graph: columns in first-mention order, stacked agents, pending roles
     graph.map(column => column.nodes[0]?.role),
     ['Orchestrator', 'Implementer', 'Judge', 'Profiler'],
   );
-  assert.equal(graph[1]?.nodes[0]?.runtime, 'Claude Code (claude-opus-5)');
+  assert.equal(graph[1]?.nodes[0]?.runtime, 'claude-opus-5');
+  assert.equal(graph[1]?.nodes[0]?.runtimeTip, 'Claude Code (claude-opus-5)');
   // Judge and profiler are pending because run_started advertised them: run-map seeds them from
   // core.expectedRoles, and nothing here re-derives that list.
   assert.deepEqual(core.expectedRoles, ['orchestrator', 'implementer', 'judge', 'profiler']);
@@ -731,7 +732,7 @@ test('agent graph: edge tones for live, idle, done, and failed', () => {
   assert.deepEqual(edges(fold(STUB), 3), ['done', 'done', null]);
 });
 
-test('agent graph: runtime label from provider, model, both, or neither', () => {
+test('agent graph: the card shows the model, the tooltip pairs it with the harness', () => {
   const core = withPhases([
     phase({kind: 'implementer', status: 'active', provider: 'codex', model: 'gpt-5.1-codex-max'}),
     phase({kind: 'judge', provider: 'stub'}),
@@ -739,9 +740,16 @@ test('agent graph: runtime label from provider, model, both, or neither', () => 
     phase({kind: 'perf_eval'}),
   ]);
   const graph = agentGraph(core, 1);
+  // Model and harness: the model shows, the pair goes to the tooltip. Either alone shows alone
+  // and needs no tooltip. Neither shows no runtime line.
   assert.deepEqual(
-    graph.map(column => column.nodes[0]?.runtime),
-    ['Codex (gpt-5.1-codex-max)', 'Stub', 'gemini-3-pro', null],
+    graph.map(column => [column.nodes[0]?.runtime, column.nodes[0]?.runtimeTip]),
+    [
+      ['gpt-5.1-codex-max', 'Codex (gpt-5.1-codex-max)'],
+      ['Stub', null],
+      ['gemini-3-pro', null],
+      [null, null],
+    ],
   );
   assert.deepEqual(
     graph.map(column => column.nodes[0]?.role),
@@ -756,7 +764,7 @@ test('agent graph: adjacent agents that say the same thing collapse into one cou
       1,
     )[0]?.nodes.map(node => [node.status, node.runtime, node.count]);
   const claude = {provider: 'claude', model: 'claude-opus-5'};
-  const opus = 'Claude Code (claude-opus-5)';
+  const opus = 'claude-opus-5';
   // Two identical agents are one fact stated twice.
   assert.deepEqual(
     run([
@@ -791,7 +799,18 @@ test('agent graph: adjacent agents that say the same thing collapse into one cou
     ]),
     [
       ['completed', opus, 1],
-      ['completed', 'Claude Code (claude-sonnet-5)', 1],
+      ['completed', 'claude-sonnet-5', 1],
+    ],
+  );
+  // The card shows only the model, so the same model on two harnesses must not merge.
+  assert.deepEqual(
+    run([
+      {status: 'completed', ...claude},
+      {status: 'completed', provider: 'codex', model: 'claude-opus-5'},
+    ]),
+    [
+      ['completed', opus, 1],
+      ['completed', opus, 1],
     ],
   );
   // Only adjacent agents collapse: an odd one out keeps the two around it apart.

@@ -127,6 +127,9 @@ const queued = () =>
     design: STUB_DESIGN.filter(round => round.round < 3),
     clock: '2026-09-21T20:34:43Z',
   });
+// The recording's loop advertises four roles; this is every role the backend's tables know, so a
+// round wide enough to overflow the graph needs no invented one.
+const FIVE_ROLES = ['orchestrator', 'implementer', 'judge', 'profiler', 'perf_eval'];
 const rail = (page, round) =>
   page.getByRole('navigation', {name: 'Rounds'}).getByRole('button', {name: new RegExp(`^R${round}\\b`)});
 
@@ -141,10 +144,24 @@ const REPLAY = [
       'Pause',
       'Measure baseline vs ring, 3 reps each',
       'Pending',
-      // Graph only: a role the round has not reached, and what the live agent runs on.
+      // Graph only: a role the round has not reached, and the model the live agent runs on.
       'Profiler',
-      'Claude Code (claude-opus-5)',
+      'claude-opus-5',
     ],
+  },
+  {
+    // Five roles overflow the graph row at every width, which is what the edge fade marks.
+    name: 'many-agents',
+    fixture: queue(
+      upTo(QUEUE, 623).map(event =>
+        event.data?.kind === 'run_started'
+          ? {...event, data: {...event.data, expected_roles: FIVE_ROLES}}
+          : event,
+      ),
+      {active: QUEUE_ACTIVE},
+    ),
+    widths: [1440],
+    expect: ['Profiler', 'Perf eval'],
   },
   {
     name: 'pausing',

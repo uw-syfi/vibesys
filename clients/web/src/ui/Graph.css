@@ -15,6 +15,23 @@
 .gflow:focus-visible {
   outline-offset: -2px;
 }
+/* More columns than fit: the row fades out at the edge there is more to scroll to. Focus drops
+   the fade, so the ring stays whole on the side the fade would have cut. */
+.gflow:not(:focus-visible)[data-more='end'] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
+.gflow:not(:focus-visible)[data-more='start'] {
+  mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+}
+.gflow:not(:focus-visible)[data-more='both'] {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 32px,
+    #000 calc(100% - 32px),
+    transparent
+  );
+}
 .gcol {
   display: flex;
   flex: none;

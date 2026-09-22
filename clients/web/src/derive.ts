@@ -81,8 +81,11 @@ const HARNESSES: Record<string, string> = {
 };
 
 /**
- * `Claude Code (claude-opus-5)`: the harness an agent ran on and the model as the backend
- * recorded it. Null when the phase recorded neither.
+ * What an agent ran on. The card has room for one of the two, so it shows the model id
+ * (`claude-opus-5`), which is the fact that varies between agents; the harness rarely does. When
+ * both are recorded, `tip` pairs them (`Claude Code (claude-opus-5)`) for the tooltip and the
+ * accessible name. A phase with no model shows the harness instead, and one with neither shows
+ * no runtime line at all.
  *
  * ponytail: the TUI's `agent-runtime-label.ts` also prettifies the model id (`GPT 5.1 Codex Max`)
  * from a table of acronyms. That table has to learn every new model, so this keeps the recorded
@@ -91,12 +94,13 @@ const HARNESSES: Record<string, string> = {
 function runtimeLabel(
   provider: string | null | undefined,
   model: string | null | undefined,
-): string | null {
+): {runtime: string | null; tip: string | null} {
   const recorded = provider?.trim();
   const harness = recorded ? (HARNESSES[recorded.toLowerCase()] ?? titleCase(recorded)) : null;
   const name = model?.trim() || null;
-  if (harness !== null && name !== null) return `${harness} (${name})`;
-  return harness ?? name;
+  if (name === null) return {runtime: harness, tip: null};
+  if (harness === null) return {runtime: name, tip: null};
+  return {runtime: name, tip: `${harness} (${name})`};
 }
 
 const BROKEN = new Set<AgentPhase['status']>(['failed', 'cancelled', 'interrupted']);
@@ -123,9 +127,15 @@ function edgeTone(left: readonly AgentPhase[], right: readonly AgentPhase[]): Ed
 function graphNodes(phases: readonly AgentPhase[], kind: string): GraphNode[] {
   const nodes: GraphNode[] = [];
   for (const [row, phase] of phases.entries()) {
-    const runtime = runtimeLabel(phase.provider, phase.model);
+    const {runtime, tip} = runtimeLabel(phase.provider, phase.model);
     const open = nodes.at(-1);
-    if (open !== undefined && open.status === phase.status && open.runtime === runtime) {
+    // Both halves, so one model run on two harnesses stays two cards.
+    if (
+      open !== undefined &&
+      open.status === phase.status &&
+      open.runtime === runtime &&
+      open.runtimeTip === tip
+    ) {
       open.count += 1;
       continue;
     }
@@ -134,6 +144,7 @@ function graphNodes(phases: readonly AgentPhase[], kind: string): GraphNode[] {
       role: titleCase(kind),
       status: phase.status,
       runtime,
+      runtimeTip: tip,
       count: 1,
     });
   }

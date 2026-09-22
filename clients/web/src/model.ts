@@ -42,8 +42,10 @@ export interface GraphNode {
   /** Title-cased agent kind, e.g. `Implementer`. */
   role: string;
   status: AgentPhaseStatus;
-  /** `Claude Code (claude-opus-5)`; null when the phase recorded neither harness nor model. */
+  /** The model id, or the harness when no model was recorded; null when neither was. */
   runtime: string | null;
+  /** `Claude Code (claude-opus-5)` when the card shows only half of it; null when it shows all. */
+  runtimeTip: string | null;
   /** Adjacent agents of the kind sharing this status and runtime; 1 for a lone agent. */
   count: number;
 }
