@@ -1,0 +1,16 @@
+# Pareto frontier over aggregate throughput and multi-turn tail latency. Each
+# `name` must exactly match a metric `benchmark/run.py` declares in its result
+# protocol `hello` record (METRIC_SPECS), and an objective must be a required
+# metric there, or the round is rejected.
+
+# Primary axis: also the headline scalar the loop reports and ranks a single
+# reading by. Aggregate output tokens per second across all concurrent
+# sessions over the whole run's wall clock.
+[[objective]]
+name = "total_token_throughput"
+direction = "max"
+
+# Latency axis: 95th percentile time-to-first-token over turn 2 and later.
+[[objective]]
+name = "p95_ttft_turn2plus_ms"
+direction = "min"

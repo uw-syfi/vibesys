@@ -1,0 +1,24 @@
+version = 1
+
+[agent]
+domain = "llm-serving"
+
+[resources]
+nodes = 1
+accelerators_per_node = 4
+accelerator_backend = "rocm"
+
+# Both programs boot the candidate's `python3 server.py` themselves (startup
+# budget 5400s) and run from the workspace root.
+[accuracy]
+command = ["python3", "accuracy_checker/checker.py"]
+timeout_seconds = 7200
+
+# Two objectives (see objectives.toml), so the single-scalar [benchmark.result]
+# block cannot represent the result: the benchmark speaks the evaluator result
+# protocol instead. VibeSys appends `--vs-output <path>` and reads the complete
+# metric row from the record stream written there.
+[benchmark]
+command = ["python3", "benchmark/run.py", "--repetitions", "1"]
+timeout_seconds = 9000
+result_protocol = 2

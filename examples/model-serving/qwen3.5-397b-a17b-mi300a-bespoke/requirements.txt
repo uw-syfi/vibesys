@@ -1,0 +1,9 @@
+# torch, triton, and AITER come from the image (see
+# examples/model-serving/images/rocm-mi30x-engine-free/). Pure-python extras only.
+transformers>=4.53.2
+tokenizers
+safetensors
+aiohttp
+fastapi
+uvicorn
+numpy
