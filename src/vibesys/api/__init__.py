@@ -36,7 +36,7 @@ from vibesys.api.contracts import (
 from vibesys.api.entry import load_config
 from vibesys.api.session import RunControl, RunSession, create_session
 from vibesys.api.store import RunStore, open_run_store
-from vibesys.constants import KNOWN_COMPUTE_BACKENDS, PROJECT_ROOT, ComputeBackend, DomainName
+from vibesys.constants import KNOWN_COMPUTE_BACKENDS, ComputeBackend, DomainName
 from vibesys.events import (
     AgentExecutionStartedData,
     AgentOutputChunkData,
@@ -57,7 +57,6 @@ from vibesys.run.run_control import RunStopped
 
 __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
-    "PROJECT_ROOT",
     "AgentExecutionStartedData",
     "AgentOutputChunkData",
     "ComputeBackend",

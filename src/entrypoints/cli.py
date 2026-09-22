@@ -32,7 +32,6 @@ from typing import NoReturn
 from headless import run as headless_run
 from vibesys.api import (
     KNOWN_COMPUTE_BACKENDS,
-    PROJECT_ROOT,
     ComputeBackend,
     Config,
     ConfigurationDiagnostic,
@@ -88,7 +87,10 @@ from vs_project import (
     RunSchemaMigrationRequiredError,
 )
 
-__all__ = ["PROJECT_ROOT"]
+# Empty on purpose: this module's functions are imported by name where needed,
+# not star-imported. Defining `__all__` also scopes pydocstyle's public-API
+# docstring checks to it, so the module's `# tracked: #288` helpers stay exempt.
+__all__: list[str] = []
 
 _load_objective = load_objective
 _with_operator_constraints = with_operator_constraints

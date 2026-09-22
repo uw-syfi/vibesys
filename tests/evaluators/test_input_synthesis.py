@@ -133,10 +133,9 @@ def _agent_args(argv: list[str]):  # noqa: ANN202  # tracked: #288
     return cli._build_agent_parser().parse_args(argv)  # noqa: SLF001  # tracked: #288
 
 
-def test_standalone_flags_synthesize_bundle(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_standalone_flags_synthesize_bundle(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
-    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
     args = _agent_args(
         [
             "--input-objective",
@@ -204,10 +203,9 @@ def test_standalone_flags_reject_unsafe_fresh_experiment_name(
     assert not (tmp_path / "outside").exists()
 
 
-def test_objective_file_is_read(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_objective_file_is_read(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
-    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
     objective_file = tmp_path / "OBJ.md"
     objective_file.write_text("From a file.\n")
     args = _agent_args(
@@ -276,10 +274,9 @@ def test_incomplete_standalone_flags_error():  # noqa: ANN201  # tracked: #288
         cli._validate_target_inputs(args)  # noqa: SLF001  # tracked: #288
 
 
-def test_both_objective_forms_rejected(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_both_objective_forms_rejected(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
-    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
     objective_file = tmp_path / "OBJ.md"
     objective_file.write_text("file\n")
     args = _agent_args(
