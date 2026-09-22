@@ -38,6 +38,7 @@ class FakeClient implements WorkspaceClient {
   closed = false;
   closedSubscriptions = 0;
   refuseDials = false;
+  withholdBatch = false;
   replies: (input: RequestInput) => Promise<ProtocolResponse> = async input => {
     if (input.type === 'query.snapshot')
       return response({snapshot: {run_id: 'run-1', sequence: 0, status: 'starting'}});
@@ -66,14 +67,16 @@ class FakeClient implements WorkspaceClient {
     if (this.refuseDials) throw new Error('dial refused');
     onMessage({type: 'subscribed', run_id: this.runId, request_id: 'sub', latest_sequence: 0});
     // Like the gateway, every subscription starts with one batch, empty or not.
-    onMessage(
-      this.replay?.(after) ?? {
-        type: 'event_batch',
-        events: [],
-        through_sequence: after,
-        active_executions: [],
-      },
-    );
+    if (!this.withholdBatch) {
+      onMessage(
+        this.replay?.(after) ?? {
+          type: 'event_batch',
+          events: [],
+          through_sequence: after,
+          active_executions: [],
+        },
+      );
+    }
     return {
       close: async () => {
         this.closedSubscriptions += 1;
@@ -574,3 +577,19 @@ test('a failed command keeps its diagnostic summary until the next command', asy
   assert.deepEqual(session.getSnapshot().command, {sending: false, error: null});
   await session.close();
 });
+
+for (const reconnectDelaysMs of [[1], []]) {
+  test(`Retry stays reachable when the stream drops before its first batch (${reconnectDelaysMs.length} scheduled dials)`, async () => {
+    const client = new FakeClient();
+    client.withholdBatch = true;
+    const session = new WorkspaceSession(client, {reconnectDelaysMs});
+    await session.start();
+    assert.equal(session.getSnapshot().connection, 'connected');
+    client.refuseDials = true;
+    client.disconnect?.(new Error('offline'));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(session.getSnapshot().connection, 'disconnected');
+    assert.equal(session.getSnapshot().canRetry, true, 'the schedule is exhausted');
+    await session.close();
+  });
+}

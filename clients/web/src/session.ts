@@ -160,7 +160,10 @@ export class WorkspaceSession {
           this.#set({
             connection: state.status,
             connectionError: state.status === 'disconnected' ? state.error.message : null,
-            canRetry: false,
+            // A bootstrap dial reports its failure after the wrapper counted it, so derive, not reset.
+            canRetry:
+              state.status === 'disconnected' &&
+              this.#failedDials >= this.#reconnectDelaysMs.length,
           });
         },
       });
