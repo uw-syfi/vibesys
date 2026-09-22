@@ -23,6 +23,7 @@ import type {
   EdgeTone,
   EndedWord,
   GraphColumn,
+  GraphNode,
   HeaderModel,
   InspectorModel,
   JudgeAttempt,
@@ -114,6 +115,32 @@ function edgeTone(left: readonly AgentPhase[], right: readonly AgentPhase[]): Ed
 }
 
 /**
+ * A column's cards. Adjacent agents of the kind that share a status and a runtime say the same
+ * thing, so they become one card with a count; the loop running the orchestrator twice a round is
+ * the common case. Agents that differ in either stay separate cards, and only adjacent ones
+ * collapse, so a failure between two successes keeps all three.
+ */
+function graphNodes(phases: readonly AgentPhase[], kind: string): GraphNode[] {
+  const nodes: GraphNode[] = [];
+  for (const [row, phase] of phases.entries()) {
+    const runtime = runtimeLabel(phase.provider, phase.model);
+    const open = nodes.at(-1);
+    if (open !== undefined && open.status === phase.status && open.runtime === runtime) {
+      open.count += 1;
+      continue;
+    }
+    nodes.push({
+      id: phase.executionId ?? `${kind}-${row}`,
+      role: titleCase(kind),
+      status: phase.status,
+      runtime,
+      count: 1,
+    });
+  }
+  return nodes;
+}
+
+/**
  * The round's agent pipeline: one column per agent kind in the order the round first mentions
  * them, the agents of that kind stacked inside it, and the tone of the arrow to the next kind.
  *
@@ -132,12 +159,7 @@ export function agentGraph(core: CoreState, round: number | null): GraphColumn[]
     const next = columns[index + 1];
     return {
       kind: column.kind,
-      nodes: column.phases.map((phase, row) => ({
-        id: phase.executionId ?? `${phase.kind}-${row}`,
-        role: titleCase(phase.kind),
-        status: phase.status,
-        runtime: runtimeLabel(phase.provider, phase.model),
-      })),
+      nodes: graphNodes(column.phases, column.kind),
       edge: next === undefined ? null : edgeTone(column.phases, next.phases),
     };
   });

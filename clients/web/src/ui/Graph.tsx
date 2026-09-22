@@ -10,8 +10,9 @@ export interface GraphProps {
 /**
  * The selected round's agent pipeline, above the log and outside its scroller: a column per agent
  * kind in loop order, the agents of a kind stacked inside it, and an arrow to the next kind toned
- * by how that handover went. The arrows are drawn in CSS, so they stay out of the accessibility
- * tree; the nodes are a status display and take no focus.
+ * by how that handover went. Adjacent agents that say the same thing arrive as one card with a
+ * count. The arrows are drawn in CSS, so they stay out of the accessibility tree; the nodes are a
+ * status display and take no focus.
  */
 export function Graph({round, columns}: GraphProps) {
   if (round === null || columns.length === 0) return null;
@@ -34,10 +35,16 @@ export function Graph({round, columns}: GraphProps) {
                     data-status={node.status}
                     aria-current={node.status === 'active' ? 'step' : undefined}
                   >
-                    <span className="grole">{node.role}</span>
+                    <span className="grole trunc">
+                      {node.role}
+                      {node.count > 1 ? <span className="gn">{` ×${node.count}`}</span> : null}
+                    </span>
                     <span className="gstat">{titleCase(node.status)}</span>
                     {node.runtime === null ? null : (
-                      <span className="grun mono">{node.runtime}</span>
+                      // One line: the tooltip carries the label whole when the card cuts it.
+                      <span className="grun mono trunc" data-tip={node.runtime}>
+                        {node.runtime}
+                      </span>
                     )}
                   </li>
                 ))}

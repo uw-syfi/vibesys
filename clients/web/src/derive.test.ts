@@ -707,13 +707,9 @@ test('agent graph: columns in first-mention order, stacked agents, pending roles
   // queue-rs at 623: the orchestrator has run twice, the implementer is working.
   const core = fold(upTo(QUEUE, 623));
   assert.deepEqual(kinds(core, 1), ['orchestrator', 'implementer', 'judge', 'profiler']);
-  // The loop runs the orchestrator twice a round, so its column already stacks two agents.
-  assert.deepEqual(statuses(core, 1), [
-    ['completed', 'completed'],
-    ['active'],
-    ['pending'],
-    ['pending'],
-  ]);
+  // The loop runs the orchestrator twice a round; both calls say the same thing, so they collapse
+  // into one counted card (the stacking cases are in the collapse test below).
+  assert.deepEqual(statuses(core, 1), [['completed'], ['active'], ['pending'], ['pending']]);
   const graph = agentGraph(core, 1);
   assert.deepEqual(
     graph.map(column => column.nodes[0]?.role),
@@ -750,6 +746,71 @@ test('agent graph: runtime label from provider, model, both, or neither', () => 
   assert.deepEqual(
     graph.map(column => column.nodes[0]?.role),
     ['Implementer', 'Judge', 'Profiler', 'Perf eval'],
+  );
+});
+
+test('agent graph: adjacent agents that say the same thing collapse into one counted card', () => {
+  const run = (patches: Array<Partial<AgentPhase>>) =>
+    agentGraph(
+      withPhases(patches.map(patch => phase({kind: 'orchestrator', ...patch}))),
+      1,
+    )[0]?.nodes.map(node => [node.status, node.runtime, node.count]);
+  const claude = {provider: 'claude', model: 'claude-opus-5'};
+  const opus = 'Claude Code (claude-opus-5)';
+  // Two identical agents are one fact stated twice.
+  assert.deepEqual(
+    run([
+      {status: 'completed', ...claude},
+      {status: 'completed', ...claude},
+    ]),
+    [['completed', opus, 2]],
+  );
+  assert.deepEqual(
+    run([
+      {status: 'completed', ...claude},
+      {status: 'completed', ...claude},
+      {status: 'completed', ...claude},
+    ]),
+    [['completed', opus, 3]],
+  );
+  // A different status or a different model is a different fact: both stack.
+  assert.deepEqual(
+    run([
+      {status: 'completed', ...claude},
+      {status: 'active', ...claude},
+    ]),
+    [
+      ['completed', opus, 1],
+      ['active', opus, 1],
+    ],
+  );
+  assert.deepEqual(
+    run([
+      {status: 'completed', ...claude},
+      {status: 'completed', provider: 'claude', model: 'claude-sonnet-5'},
+    ]),
+    [
+      ['completed', opus, 1],
+      ['completed', 'Claude Code (claude-sonnet-5)', 1],
+    ],
+  );
+  // Only adjacent agents collapse: an odd one out keeps the two around it apart.
+  assert.deepEqual(
+    run([
+      {status: 'completed', ...claude},
+      {status: 'failed', ...claude},
+      {status: 'completed', ...claude},
+    ]),
+    [
+      ['completed', opus, 1],
+      ['failed', opus, 1],
+      ['completed', opus, 1],
+    ],
+  );
+  // The recorded run: both of the round's orchestrator calls completed on the same harness.
+  assert.deepEqual(
+    agentGraph(fold(upTo(QUEUE, 623)), 1).map(column => column.nodes.map(node => node.count)),
+    [[2], [1], [1], [1]],
   );
 });
 

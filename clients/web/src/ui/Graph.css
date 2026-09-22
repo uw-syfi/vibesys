@@ -60,7 +60,7 @@
   --edge: var(--status-failed);
 }
 
-/* One card per agent. A fixed width keeps the row a grid; the runtime wraps inside it. */
+/* One card per agent run. A fixed width keeps the row a grid; each line is cut, never wrapped. */
 .gnode {
   display: grid;
   width: 150px;
@@ -80,13 +80,15 @@
 .grole {
   font-weight: 500;
 }
+/* How many adjacent agents of the kind this one card stands for. */
+.gn {
+  color: var(--text-muted);
+  font-weight: 400;
+}
 .gstat,
 .grun {
   color: var(--text-muted);
   font-size: var(--text-xs);
-}
-.grun {
-  overflow-wrap: anywhere;
 }
 .gnode[data-status='active'] .gstat {
   color: var(--status-running);

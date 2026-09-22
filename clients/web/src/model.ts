@@ -35,15 +35,17 @@ export interface RailModel {
 /** How the arrow between two columns of the agent graph is toned. */
 export type EdgeTone = 'idle' | 'done' | 'live' | 'failed';
 
-/** One agent of a round: a card in the agent graph. */
+/** A card in the agent graph: one agent, or the run of adjacent agents that say the same thing. */
 export interface GraphNode {
-  /** The agent's execution id, or its kind and row while it is still pending. */
+  /** The first agent's execution id, or its kind and row while it is still pending. */
   id: string;
   /** Title-cased agent kind, e.g. `Implementer`. */
   role: string;
   status: AgentPhaseStatus;
   /** `Claude Code (claude-opus-5)`; null when the phase recorded neither harness nor model. */
   runtime: string | null;
+  /** Adjacent agents of the kind sharing this status and runtime; 1 for a lone agent. */
+  count: number;
 }
 
 /** One agent kind: the agents of that kind stacked, and the arrow to the next kind. */
