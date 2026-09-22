@@ -18,7 +18,10 @@ module.exports = {
       severity: 'error',
       from: {path: '^clients/backend-client/src/'},
       to: {
-        path: ['^clients/(?:core-state|tui)/', '/node_modules/@vibesys/(?:core-state|tui)/'],
+        path: [
+          '^clients/(?:core-state|tui|web)/',
+          '/node_modules/@vibesys/(?:core-state|tui|web)/',
+        ],
       },
     },
     {
@@ -37,6 +40,36 @@ module.exports = {
       severity: 'error',
       from: {path: '^clients/core-state/src/'},
       to: {path: ['^clients/tui/', '/node_modules/@vibesys/tui/']},
+    },
+    {
+      name: 'shared-state-does-not-depend-on-web',
+      severity: 'error',
+      from: {path: '^clients/core-state/src/'},
+      to: {path: ['^clients/web/', '/node_modules/@vibesys/web/']},
+    },
+    {
+      name: 'frontends-are-independent',
+      severity: 'error',
+      from: {path: '^clients/(tui|web)/src/'},
+      to: {
+        path: ['^clients/(?:tui|web)/', '/node_modules/@vibesys/(?:tui|web)/'],
+        pathNot: ['^clients/$1/', '/node_modules/@vibesys/$1/'],
+      },
+    },
+    {
+      name: 'web-has-no-node-runtime',
+      severity: 'error',
+      from: {path: '^clients/web/src/', pathNot: '\\.test\\.[cm]?[jt]sx?$'},
+      to: {dependencyTypes: ['core']},
+    },
+    {
+      name: 'web-uses-browser-backend-client',
+      severity: 'error',
+      from: {path: '^clients/web/src/'},
+      to: {
+        path: '^clients/backend-client/src/(?:index|client)\\.ts$',
+        dependencyTypesNot: ['type-only'],
+      },
     },
     {
       name: 'workspace-packages-use-public-exports',

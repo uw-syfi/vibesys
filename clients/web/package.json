@@ -1,0 +1,30 @@
+{
+  "name": "@vibesys/web",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "pnpm --filter @vibesys/web^... build",
+    "dev": "vite --host 127.0.0.1",
+    "prebuild": "pnpm --filter @vibesys/web^... build",
+    "build": "tsc --noEmit && vite build",
+    "precheck": "pnpm --filter @vibesys/web^... build",
+    "check": "tsc --noEmit",
+    "pretest": "pnpm --filter @vibesys/web^... build",
+    "test": "bun test src",
+    "preview": "vite preview --host 127.0.0.1 --port 5173 --strictPort"
+  },
+  "dependencies": {
+    "@vibesys/backend-client": "workspace:*",
+    "@vibesys/core-state": "workspace:*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

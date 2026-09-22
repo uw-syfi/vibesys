@@ -3,6 +3,7 @@
     "baseUrl": ".",
     "paths": {
       "@vibesys/backend-client": ["clients/backend-client/src/index.ts"],
+      "@vibesys/backend-client/browser": ["clients/backend-client/src/browser.ts"],
       "@vibesys/core-state": ["clients/core-state/src/index.ts"],
       "@vibesys/tui": ["clients/tui/src/index.ts"]
     }
