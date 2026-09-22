@@ -25,7 +25,8 @@ const HINT = 'F6: steer (unsent) · F7: chat (unsent) · Esc: close · / is iner
  */
 export class NotepadView {
   readonly output: BoxRenderable;
-  readonly #meta: TextRenderable;
+  readonly #metaRun: TextRenderable;
+  readonly #metaNote: TextRenderable;
   readonly #editor: TextareaRenderable;
   readonly #hint: TextRenderable;
   #renderedText: string | null = null;
@@ -53,14 +54,30 @@ export class NotepadView {
       // sits over the palette (35), the highest of the other overlays.
       zIndex: 40,
     });
-    this.#meta = new TextRenderable(renderer, {
-      id: 'notepad-meta',
+    // Two tiers, the same split the header uses for its own metadata
+    // (`header.ts#headerSpanStyle`): the run identity is the one fact this
+    // line exists to report, so it is read at full `textPrimary` weight; the
+    // note below it is supporting detail and recedes to `textMuted`. Neither
+    // drops to `textSubtle`, which the theme reserves for punctuation and
+    // rules rather than words (`theme.ts`).
+    this.#metaRun = new TextRenderable(renderer, {
+      id: 'notepad-meta-run',
       width: '100%',
       height: 1,
       flexShrink: 0,
       wrapMode: 'none',
       truncate: true,
-      fg: theme.textSubtle,
+      fg: theme.textPrimary,
+    });
+    this.#metaNote = new TextRenderable(renderer, {
+      id: 'notepad-meta-note',
+      content: 'Saved locally · kept out of run-events.jsonl',
+      width: '100%',
+      height: 1,
+      flexShrink: 0,
+      wrapMode: 'none',
+      truncate: true,
+      fg: theme.textMuted,
     });
     this.#editor = new TextareaRenderable(renderer, {
       id: 'notepad-editor',
@@ -82,7 +99,8 @@ export class NotepadView {
       wrapMode: 'none',
       truncate: true,
     });
-    this.output.add(this.#meta);
+    this.output.add(this.#metaRun);
+    this.output.add(this.#metaNote);
     this.output.add(this.#editor);
     this.output.add(this.#hint);
   }
@@ -93,7 +111,8 @@ export class NotepadView {
   applyTheme(theme: Theme): void {
     this.output.borderColor = theme.info;
     this.output.backgroundColor = theme.canvas;
-    this.#meta.fg = theme.textSubtle;
+    this.#metaRun.fg = theme.textPrimary;
+    this.#metaNote.fg = theme.textMuted;
     this.#hint.fg = theme.textSubtle;
     this.#editor.textColor = theme.textPrimary;
     this.#editor.focusedTextColor = theme.textStrong;
@@ -118,7 +137,7 @@ export class NotepadView {
     if (this.#renderedRunId !== state.runId) {
       this.#renderedRunId = state.runId;
       const run = state.runId ?? 'unknown run';
-      this.#meta.content = `Run ${run} · saved locally, outside run-events.jsonl`;
+      this.#metaRun.content = `Run ${run}`;
     }
   }
 
