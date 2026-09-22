@@ -15,13 +15,14 @@ from server.chat.factory import ChatAgentResources, ExperimentChatFactory
 from server.chat.manager import ChatAnswer, ChatThreadHandle
 from server.chat.options import ChatRunSettings
 from server.events import ChatThreadCreatedData, EventType, make_event
-from vibesys.run.integration import AgentSelection
+from server.run_attachment import AgentSelection
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vibesys.run.integration import RunAttachment
+    from server.run_attachment import RunAttachment
+    from vibesys.api import RunSession
 
 
 def _remember_thread(parts: ServerParts, thread_id: str = "thread-1") -> ChatThreadCreatedData:
@@ -353,7 +354,9 @@ class _Project:
 def _factory_for_test(
     parts: ServerParts,
     tmp_path: Path,
-    build_agent: Callable[[RunAttachment, AgentSelection, str | None, Path], ChatAgentResources],
+    build_agent: Callable[
+        [RunSession, RunAttachment, AgentSelection, str | None, Path], ChatAgentResources
+    ],
 ) -> ExperimentChatFactory:
     defaults = ChatRunSettings(driver="agentshim", provider="codex", model="gpt-test")
 
@@ -373,9 +376,9 @@ def _factory_for_test(
         project=cast("Any", _Project(_ProjectState(tmp_path / "chat"))),
         run_id="run-1",
         workspace=tmp_path,
-        log_dir=tmp_path,
         defaults=defaults,
         resolve_selection=resolve_selection,
+        session=cast("Any", object()),
         attachment=cast("Any", object()),
         build_agent=build_agent,
         fallback=lambda _question: "fallback",
@@ -393,6 +396,7 @@ def test_factory_closes_session_finishing_after_close_once(tmp_path: Path) -> No
         close_calls += 1
 
     def build_agent(
+        _session: RunSession,
         _attachment: RunAttachment,
         _selection: AgentSelection,
         _thread_id: str | None,
@@ -408,6 +412,7 @@ def test_factory_closes_session_finishing_after_close_once(tmp_path: Path) -> No
             environment=dict,
             progress=lambda: None,
             agent_shared_state_dir=str(shared_state_dir),
+            mcp_servers=(),
         )
 
     factory = _factory_for_test(parts, tmp_path, build_agent)

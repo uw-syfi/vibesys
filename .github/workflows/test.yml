@@ -270,6 +270,10 @@ jobs:
         working-directory: clients
         run: pnpm check:ts-architecture
 
+      - name: Check TypeScript unused code and dependencies
+        working-directory: clients
+        run: pnpm check:knip
+
       - name: Check generated protocol bindings
         working-directory: clients
         run: |

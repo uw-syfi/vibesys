@@ -1,13 +1,13 @@
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-from vibesys.agents.progress import CandidateProgress, RoundProgress
 from vibesys.context import _RunContext
 from vibesys.run import RunPaths
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.schemas import JudgeResponse, Verdict
+from vs_agent.api import CandidateProgress, RoundProgress
+from vs_agent.api.testing import FakeAgentClient
 
 
 def _judge_fallback() -> JudgeResponse:
@@ -22,7 +22,7 @@ def _make_context(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
-) -> tuple[_RunContext, MagicMock]:
+) -> tuple[_RunContext, FakeAgentClient]:
     ctx = object.__new__(_RunContext)
     ctx.integration = LocalRunIntegration()
     request.addfinalizer(ctx.integration.close)
@@ -34,13 +34,10 @@ def _make_context(
         run_log_path=tmp_path / "run.log",
     )
     monkeypatch.setattr(ctx, "gpu_env", dict)
-    client = MagicMock()
-    client.invoke.return_value = _judge_fallback()
-    # Every invocation event carries the client's attribution, so the mock
+    # Every invocation event carries the client's attribution, so the fake
     # supplies real strings the event payload can validate.
-    client.driver_name = "mock"
-    client.provider = "mock"
-    client.model_for_kind.return_value = "mock-model"
+    client = FakeAgentClient(driver_name="mock", provider="mock", model="mock-model")
+    client.set_response("judge", _judge_fallback())
     ctx.agent_client = client
     return ctx, client
 
@@ -86,7 +83,7 @@ def test_run_context_injects_current_progress(
             round_label="judge #1",
         )
 
-    assert client.invoke.call_args.kwargs["progress"] is progress
+    assert client.calls_for("judge")[0].progress is progress
 
 
 def test_run_context_explicit_progress_overrides_scope(
@@ -109,4 +106,4 @@ def test_run_context_explicit_progress_overrides_scope(
             progress=explicit,
         )
 
-    assert client.invoke.call_args.kwargs["progress"] is explicit
+    assert client.calls_for("judge")[0].progress is explicit

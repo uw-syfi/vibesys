@@ -1,0 +1,37 @@
+{
+  "id": "protocol-error-then-close",
+  "title": "A bootstrap failure is acknowledged, then reported in band, then the connection closes",
+  "description": "The server acks the accepted subscribe with `subscribed`, then a replay failure reaches the client as a `protocol_error` frame, then the connection closes. The error is an in-band frame, not a close code, and the client suppresses its disconnect callback because the close is the expected consequence.",
+  "role": "subscribe",
+  "transports": [
+    "unix",
+    "websocket"
+  ],
+  "decisions": [
+    "WP-PROTOCOL-ERROR",
+    "WP-SUBSCRIBE-ACK",
+    "WP-DISCONNECT"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "subscribe",
+        "after_sequence": 0
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "subscribed"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "protocol_error",
+        "code": "stream_failed"
+      }
+    }
+  ]
+}

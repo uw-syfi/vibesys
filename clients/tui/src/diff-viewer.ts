@@ -255,7 +255,7 @@ function loadedPatch(viewer: DiffViewerState): string | null {
 }
 
 /** git's own line grammar: `+++`/`---` are file headers, not content lines. */
-export function diffLineTone(line: string): DiffLineTone {
+function diffLineTone(line: string): DiffLineTone {
   if (line.startsWith('@@')) return 'hunk';
   if (line.startsWith('+++') || line.startsWith('---')) return 'meta';
   if (line.startsWith('+')) return 'add';

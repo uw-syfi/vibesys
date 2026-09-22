@@ -37,7 +37,7 @@ from tests.support.example_registry import (
     unregistered_examples,
 )
 
-from entrypoints.headless import _run_validate
+from entrypoints.cli import _run_validate
 from vibesys.errors import ConfigurationError
 from vibesys.run.project_policy import build_project_path_policy, trusted_project_input_paths
 from vs_project import Project

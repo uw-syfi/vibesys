@@ -39,7 +39,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import NoReturn
 
-from vibesys import boot_trace
+from vibesys.api import boot_trace
 
 _MIN_NODE_MAJOR = 20
 

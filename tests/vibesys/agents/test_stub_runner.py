@@ -1,5 +1,3 @@
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
-from vibesys.agents.stub_runner import StubAgentClient
 from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,
@@ -7,6 +5,8 @@ from vibesys.schemas import (
     PreRoundDecision,
     Verdict,
 )
+from vs_agent.api import AgentSessionKey, SessionScope
+from vs_agent.stub_runner import StubAgentClient
 
 
 def test_stub_runner_returns_valid_agent_loop_responses(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288

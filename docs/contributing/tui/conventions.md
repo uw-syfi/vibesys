@@ -258,10 +258,14 @@ border has to omit both.
 
 ## Proposed: movement and naming
 
-Nothing in this section is implemented. It is where the movement and naming
-arguments landed, recorded so they are not reopened per PR. A PR that adopts one
-of these lines moves it up into [Rules in force](#rules-in-force) in the same
-change.
+Nothing in this section is implemented. [#711](https://github.com/uw-syfi/vibesys/issues/711)'s
+[keybinding matrix](./keybinding-matrix.md) supersedes the naming table this
+section used to carry: see that document for the full six-source comparison
+(Claude Code, Codex, Vim, LazyVim, GNU Readline, WCAG 2.2), its explicitly
+recorded conflicts, and, per binding, whether it can hold while the composer
+is focused and non-empty. A PR that adopts one of these lines moves it up
+into [Rules in force](#rules-in-force) in the same change, citing the matrix
+entry it follows.
 
 ### Movement
 
@@ -271,40 +275,48 @@ strip and the transcript, `↑` and `↓` move within whichever of the two holds
 focus, and `Tab` / `Shift+Tab` step through agents once the command input's
 completion has declined the key.
 
-CUA says the opposite: **arrows move within the focused pane, and Tab moves
-between panes**. A binding that makes an arrow key change which pane is focused
-makes the same key mean two levels of movement depending on where you are, which
-is what `←` and `→` do now. That is the asymmetry this rule would fix.
+CUA says arrows move within the focused pane and Tab moves between panes,
+which is one fix for the asymmetry above, but not the only precedent: the
+matrix's [Conflicts](./keybinding-matrix.md#conflicts) section records at
+least three different rules, across the sources it compares, for splitting
+within-pane movement from between-pane movement. CUA is a candidate, not a
+settled answer. Until a PR names which rule it follows, `Ctrl+W` is the
+binding and the key-help line says so.
 
-The replacement keymap exists on the unmerged `adi/tui-keymap-defaults` branch,
-which has no PR: `DEFAULT_KEYMAP` binds `paneNext` to `Tab` and `Ctrl+Right`,
-and `panePrevious` to `Shift+Tab` and `Ctrl+Left`. Until that lands, `Ctrl+W` is
-the binding and the key-help line says so.
+The replacement keymap on the unmerged `adi/tui-keymap-defaults` branch (no
+PR, and premature by #711's own account) binds `paneNext` to `Tab` and
+`Ctrl+Right`, and `panePrevious` to `Shift+Tab` and `Ctrl+Left`. It is
+evidence of the failure mode #711 exists to avoid, implementing a keymap
+before this comparison existed, not a shortcut past it.
 
 ### Naming
 
-Proposed prefixes and single keys; of these, only `F1` is bound to its
-proposed meaning today. The TUI's only prefix is `/`, and it means command
-(`/help`, `/theme`, `/open-round`), not search. There is no search and no `:`
-prefix. `F1` opens the command palette, and `F2`, `F3` and `F4` toggle todos,
-the latest prompt, and pane zoom.
+Candidate prefixes and single keys are compared, per source and context, in
+the matrix's [command entry](./keybinding-matrix.md#command-entry),
+[help](./keybinding-matrix.md#help), and [search](./keybinding-matrix.md#search)
+sections. Of the keys those sections discuss, only `F1` is bound to its
+candidate meaning today, opening the command palette. The TUI's only prefix
+is `/`, and it means command (`/help`, `/theme`, `/open-round`), not search.
+There is no search and no `:` prefix; `F2`, `F3`, and `F4` toggle todos, the
+latest prompt, and pane zoom, and `F5` opens the private notepad (`/note`,
+#805): the same sequential-function-key precedent as `F2`-`F4`, the next free
+slot after them. Inside the notepad, `F6` and `F7` promote its text to an
+unsent steer or chat draft; those two are scoped to the notepad's own modal
+rather than global, the same tier as a key whose meaning already changes by
+context elsewhere in this table (e.g. the arrows), so they are not listed here
+as single global keys.
 
-| Key | Proposed meaning | Source | Bound to today |
-| --- | --- | --- | --- |
-| `/` | Search within the focused content | `less`, `vi`, `man`, `htop`, `tig`, `k9s` | Command prefix |
-| `:` | Command | `vi` | Nothing |
-| `?` | Help | `less`, `htop`, `tig`, `lazygit` | Nothing (`/help` instead) |
-| `q` | Quit a read-only view | `less`, `man`, `htop` | Nothing |
-| `Tab` / `Shift+Tab` | Next / previous pane | CUA | Next / previous agent |
-| `F1` | Help | CUA | Command palette (`/help`) |
-
-`/` for search is about as strong as unwritten consensus gets, which is the
-argument for moving commands to `:`. It is a proposal rather than a rule because
-it renames every typed command, so it needs its own change and its own
-deprecation.
+`/` for search is about as strong as unwritten cross-tool consensus gets,
+which is the argument for moving commands to `:`. It remains a proposal
+rather than a rule because it renames every typed command, so it needs its
+own change and its own deprecation, and because the matrix's
+[Conflicts](./keybinding-matrix.md#conflicts) section records that `:` is not
+free either (Claude Code binds bare `:name:` to emoji shortcodes).
 
 ## Applying this
 
 A PR that adds or moves a binding names the rule it follows. If no rule covers
 it, say so and propose one here in the same change, so the next person inherits
 a decision rather than a precedent.
+
+{/* vibesys-merge-bot test 2: exercises /merge-scoped end to end, safe to revert */}

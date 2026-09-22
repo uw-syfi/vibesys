@@ -1,7 +1,10 @@
-"""Project performance-plot context from authoritative run state.
+"""Project performance-plot context from a run's `RunView`.
 
 Like the experiment log, this is a one-way projection: recorded measurement
 facts and manifest objectives are copied onto the wire, never recomputed.
+`vibesys.api`'s `HypothesisView` already carries the headline measurement
+each hypothesis recorded (see `vibesys.api._readmodel`); this module only
+selects the newest one and reshapes it into the wire DTO.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ from typing import TYPE_CHECKING, Literal
 from server.api.protocol import PerformanceContext
 
 if TYPE_CHECKING:
-    from vibesys.loops.agent.model import AgentRunState, HypothesisMeasurement
+    from vibesys.api import HypothesisView, RunView
 
 # The objective document is operator-authored markdown of arbitrary length,
 # and the payload must stay bounded, so only one capped paragraph is sent.
@@ -19,7 +22,7 @@ _DESCRIPTION_LIMIT = 280
 
 
 def build_performance_context(
-    state: AgentRunState | None,
+    run_view: RunView | None,
     *,
     objectives: tuple[str, ...],
     objective_description: str | None = None,
@@ -29,22 +32,32 @@ def build_performance_context(
     Before any measurement exists the manifest objectives alone can name the
     metric and its direction, so the section can render from round zero.
     """
-    measurement = _latest_measurement(state)
-    metric = measurement.metric if measurement is not None else primary_objective_metric(objectives)
+    measurement = _latest_measurement(run_view)
+    metric = (
+        measurement.perf_metric_name
+        if measurement is not None
+        else primary_objective_metric(objectives)
+    )
     if metric is None and objective_description is None:
         return None
-    direction = measurement.direction if measurement is not None else None
+    direction = measurement.perf_direction if measurement is not None else None
     if direction is None and metric is not None:
         direction = metric_directions(objectives).get(metric)
     return PerformanceContext(
         objective_metric=metric,
-        objective_unit=measurement.unit if measurement is not None else None,
+        objective_unit=measurement.perf_unit if measurement is not None else None,
         objective_direction=direction,
         # Baseline facts are copied as one tuple from the same measurement so
         # the value can never pair with another comparison's round or commit.
-        objective_baseline_value=measurement.baseline_value if measurement is not None else None,
-        objective_baseline_round=measurement.baseline_round if measurement is not None else None,
-        objective_baseline_commit=measurement.baseline_commit if measurement is not None else None,
+        objective_baseline_value=(
+            measurement.perf_baseline_value if measurement is not None else None
+        ),
+        objective_baseline_round=(
+            measurement.perf_baseline_round if measurement is not None else None
+        ),
+        objective_baseline_commit=(
+            measurement.perf_baseline_commit if measurement is not None else None
+        ),
         objective_description=objective_description,
     )
 
@@ -85,14 +98,22 @@ def metric_directions(encoded: tuple[str, ...]) -> dict[str, Literal["max", "min
     return directions
 
 
-def _latest_measurement(state: AgentRunState | None) -> HypothesisMeasurement | None:
-    if state is None:
+def _latest_measurement(run_view: RunView | None) -> HypothesisView | None:
+    """Return the hypothesis whose headline measurement is the newest.
+
+    Selects by `HypothesisView.perf_metric_round`, the round that produced
+    that hypothesis's own measurement, matching the prior
+    `HypothesisMeasurement.round` selection field-for-field.
+    """
+    if run_view is None:
         return None
-    latest: HypothesisMeasurement | None = None
-    for hypothesis in state.hypotheses:
-        measurement = hypothesis.measurement
-        if measurement is None:
+    latest: HypothesisView | None = None
+    latest_round: int | None = None
+    for hypothesis in run_view.hypotheses:
+        round_number = hypothesis.perf_metric_round
+        if round_number is None:
             continue
-        if latest is None or measurement.round > latest.round:
-            latest = measurement
+        if latest_round is None or round_number > latest_round:
+            latest = hypothesis
+            latest_round = round_number
     return latest

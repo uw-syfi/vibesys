@@ -31,7 +31,7 @@ clients/tui/dev/mock-ui.sh            # replay the bundled fixture
 
 | Flag | Effect |
 | --- | --- |
-| `--speed N` | Wall-clock divisor from the recorded timestamps. `0` delivers everything at once. Default `8`. |
+| `--speed N` | Wall-clock divisor from the recorded timestamps. `0` delivers everything left as one live batch. Default `8`. |
 | `--max-gap MS` | Caps any single gap, so a four-minute agent turn does not stall the replay. Default `400`. |
 | `--paused` | Hold before the first live event; `/resume` in the TUI starts it. |
 | `--bootstrap N` | Deliver the first N events instantly as recorded history, then stream the rest. |
@@ -92,7 +92,11 @@ re-record ever makes the diff noise a real problem, mark them then.
 | `queue-rs-payloads.jsonl` | 628 | Every one of its 105 `tool_result` events carries a typed `payload` (`kind: "command"`), and it has 214 `agent_execution_activity_changed` events. This is the one to use for tool-result rendering work. It ends in `run_interrupted`/`run_failed`, so it also exercises the error banner. |
 | `framework-events.jsonl` | 18 | Synthetic (see below). The #692 typed framework events: gate pairs including a reused pass and a failure with `output_tail`, a benchmark measurement, all three `workspace_snapshot` aspects, `run_configured`, and a `framework_warning` with its lifted diagnostic. |
 
-Neither carries `todo_update` events, so the todo strip stays empty on both.
+Across all fixtures, 29 of the 35 `RunEvent` kinds occur at least once. Six
+never do: `chat_thread_created`, `configuration_failed`, `control`, `output`,
+`run_status_changed`, and `todo_update`. Rendering driven by those kinds (the
+todo strip among them, which stays empty on every fixture) cannot be exercised
+by replay until a capture records them; #834 tracks closing that gap.
 
 `bad-cpp` predates the current schema: its records omit `execution_id`,
 `chat_thread_id`, and `diagnostic`, and every `tool_result` has `payload: null`.
@@ -171,8 +175,29 @@ Relevant if you extend `mock-server.ts`:
   (one per `subscribe`), and one per `query.chat`. Connections are handled
   independently; none is closed early.
 - On `subscribe`, order is `subscribed`, then a bootstrap `event_batch`, then
-  live batches. `history_after_sequence: 0` tells the TUI it holds the whole
-  history and suppresses backfill requests.
+  live batches. `after_sequence`, `tail`, and `store_id` follow `_stream` in
+  `src/server/transport/unix_jsonl.py`: a resume replays from its cursor
+  instead of repeating the bootstrap; a `store_id` naming some other store
+  drops the cursor and replays from zero; `tail` raises the floor to
+  `latest - tail` and prepends the run-level spine from at or below it; and a
+  tail outrun by one wake's worth of events is bootstrapped again mid-stream.
+  Every batch carries `history_after_sequence`, the floor its bootstrap
+  declared: 0 means nothing was withheld, and a floor above 0 is what makes
+  the TUI backfill below it.
+- A live batch carries every event due at one wake, so bursts, `--bootstrap`
+  resumes, and `--speed 0` reach the client as multi-event batches, the way
+  the real stream loop sends everything since its last `wait_for_change` as
+  one `EventBatchMessage`.
+- Response envelopes are stamped from the replay clock, the newest delivered
+  event's recorded timestamp, not the wall clock. That makes a whole session
+  byte-deterministic: replaying one fixture twice yields identical envelopes,
+  which is asserted in `harness.test.ts`.
+- Not simulated: a mid-stream store swap (the replay serves one store, so a
+  store-mismatch rebootstrap happens only at subscribe time), the real
+  server's rejection of unknown request fields (the schema says
+  `additionalProperties: false`; the mock ignores extras, so the client's
+  old-server `tail` probe fallback never triggers here), and `query.events`
+  long-polling via `timeout_ms` (answered immediately).
 - The recorded `run-events.jsonl` line format is exactly the `RunEvent` that
   goes on the wire, so replay is re-enveloping lines into `event_batch`, after
   the legacy translation above. Re-enveloping alone was wrong for a legacy
@@ -195,9 +220,12 @@ Relevant if you extend `mock-server.ts`:
 `harness.test.ts` covers the parts that only exist at runtime: process
 lifetime, by driving `mock-ui.sh` with a client that exits before it
 subscribes; the liveness checkpoint, by folding a real bootstrap batch plus the
-snapshot query that follows it through `@vibesys/core-state`; and the legacy
+snapshot query that follows it through `@vibesys/core-state`; the legacy
 translation, by replaying `bad-cpp-round1` over a real socket and folding the
-executions back out with the client's own reducer. It runs with the TUI's own
+executions back out with the client's own reducer; and the subscription
+semantics above, by driving a reconnect-resume, a store-id mismatch, a tail
+bootstrap with its spine, a multi-event live batch that outruns a tail bound
+mid-stream, and a byte-identical two-run replay. It runs with the TUI's own
 suite (`pnpm --dir clients/tui test`). The fixtures, the static response bodies,
 and the canonicalization golden are checked separately, in
 `tests/server/test_tui_dev_harness.py`.

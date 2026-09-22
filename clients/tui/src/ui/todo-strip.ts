@@ -51,18 +51,18 @@ export function todoStripHeight(state: SessionState): number {
   return shown + (hidden > 0 ? 1 : 0) + 2;
 }
 
-export function todoMarker(status: string): string {
+function todoMarker(status: string): string {
   return STATUS_MARKER[status] ?? UNKNOWN_MARKER;
 }
 
-export function todoColor(status: string, theme: Theme): string {
+function todoColor(status: string, theme: Theme): string {
   if (status === 'pending') return theme.textSubtle;
   if (status === 'in_progress') return theme.warning;
   if (status === 'completed') return theme.success;
   return theme.textMuted;
 }
 
-export function todoTitle(todos: TodoItem[]): string {
+function todoTitle(todos: TodoItem[]): string {
   const completed = todos.filter(todo => todo.status === 'completed').length;
   return `Todo ${completed}/${todos.length}`;
 }

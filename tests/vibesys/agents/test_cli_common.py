@@ -14,15 +14,16 @@ from pathlib import Path  # noqa: TC003  # tracked: #288
 
 import pytest
 
-from vibesys.agents.cli_common import (
+from vibesys.constants import ComputeBackend
+from vibesys.schemas import JudgeResponse
+from vibesys.skills import platform_skill_selection
+from vs_agent.cli_common import (
     CLI_SKILL_DIRS,
     agent_label,
     build_schema_hint,
     discover_skill_dirs,
     materialize_skills,
 )
-from vibesys.constants import ComputeBackend
-from vibesys.schemas import JudgeResponse
 
 
 def _skill(root: Path, name: str, body: str = "# skill\n") -> Path:
@@ -140,7 +141,7 @@ class TestMaterializeSkills:
         def _boom(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202  # tracked: #288
             raise OSError("disk on fire")  # noqa: TRY003  # tracked: #288
 
-        monkeypatch.setattr("vibesys.agents.cli_common.shutil.copytree", _boom)
+        monkeypatch.setattr("vs_agent.cli_common.shutil.copytree", _boom)
 
         materialize_skills(ws, [src], log_file=log)
 
@@ -154,7 +155,7 @@ class TestMaterializeSkills:
         ws = tmp_path / "ws"
         ws.mkdir()
         monkeypatch.setattr(
-            "vibesys.agents.cli_common.shutil.copytree",
+            "vs_agent.cli_common.shutil.copytree",
             lambda *a, **k: (_ for _ in ()).throw(OSError("nope")),  # noqa: ARG005  # tracked: #288
         )
 
@@ -200,7 +201,7 @@ class TestPlatformPruning:
 
         ws = tmp_path / "ws"
         ws.mkdir()
-        materialize_skills(ws, [skill_src], compute_backend=compute_backend)
+        materialize_skills(ws, [skill_src], selection=platform_skill_selection(compute_backend))
         return ws / ".claude/skills" / "serving-systems" / "references"
 
     @pytest.mark.parametrize(

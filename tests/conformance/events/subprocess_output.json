@@ -1,0 +1,8 @@
+{
+  "protocol_version": 1,
+  "type": "subprocess_output",
+  "sequence": 30,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "text": "line of output"
+}

@@ -9,12 +9,16 @@
     "check:ts": "biome check .",
     "check:ts-architecture": "depcruise --config .dependency-cruiser.cjs backend-client/src core-state/src core-state/bench tui/src tui/dev tui/benchmarks scripts && node scripts/check_ts_package_manifests.mjs",
     "test:ts-architecture": "node --test scripts/check_ts_architecture.test.mjs",
+    "check:conformance": "node scripts/check_conformance_corpus.mjs",
+    "test:conformance": "node --test scripts/check_conformance_corpus.test.mjs",
+    "check:knip": "knip",
     "build:clients": "pnpm --filter @vibesys/tui... build",
     "check:clients": "pnpm --filter @vibesys/backend-client check && pnpm --filter @vibesys/core-state check && pnpm --filter @vibesys/tui check",
-    "test:clients": "pnpm test:ts-architecture && pnpm --filter @vibesys/backend-client test && pnpm --filter @vibesys/core-state test && pnpm --filter @vibesys/tui test"
+    "test:clients": "pnpm test:ts-architecture && pnpm test:conformance && pnpm --filter @vibesys/backend-client test && pnpm --filter @vibesys/core-state test && pnpm --filter @vibesys/tui test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",
-    "dependency-cruiser": "16.10.4"
+    "dependency-cruiser": "16.10.4",
+    "knip": "6.37.0"
   }
 }

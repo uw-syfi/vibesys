@@ -19,6 +19,12 @@
  * path (control, event stream, and one per chat question), so connections are
  * handled independently and none of them is closed early.
  *
+ * `subscribe` honors `after_sequence`, `tail`, and `store_id` with the real
+ * transport's bootstrap and rebootstrap semantics, a live batch carries every
+ * event due at one wake, and response timestamps come from the replay clock,
+ * so client-side reconnect, backfill, and batch handling can be driven here
+ * and replays stay byte-deterministic.
+ *
  * The response bodies live in `mock-responses.json` rather than in this file so
  * `tests/server/test_tui_dev_harness.py` can validate the exact bytes that go
  * on the wire against the Python protocol contract.
@@ -295,6 +301,49 @@ function gapMs(previous: RunEventRecord, next: RunEventRecord, options: Options)
   return Math.min(Math.max(to - from, 0) / options.speed, options.maxGapMs);
 }
 
+/**
+ * Mirrors `_BOOTSTRAP_SPINE_TYPES` in `src/server/journal.py`: the run-level
+ * events a tail-bounded bootstrap replays from at or below its floor, so a
+ * client can still derive lifecycle state the tail suffix cannot carry.
+ */
+const BOOTSTRAP_SPINE_TYPES = new Set([
+  'run_started',
+  'run_status_changed',
+  'run_finished',
+  'run_failed',
+  'run_interrupted',
+  'configuration_failed',
+  'round_finished',
+  'experiments_changed',
+  'chat_thread_created',
+]);
+
+/**
+ * One event-stream subscription and its resume state.
+ *
+ * `afterSequence`, `tail`, and `storeId` are the dial's own arguments, kept
+ * because a mid-stream rebootstrap replays them exactly, the way
+ * `_rebootstrap` in `src/server/transport/unix_jsonl.py` re-passes the
+ * original request. `cursor` is the sequence of the newest event this
+ * subscriber has been sent, and `reportedFloor` is the floor its last
+ * bootstrap declared, which every following batch repeats.
+ */
+interface Subscriber {
+  readonly socket: Socket;
+  readonly afterSequence: number;
+  readonly tail: number | null;
+  readonly storeId: string | null;
+  cursor: number;
+  reportedFloor: number;
+}
+
+/** One bootstrap batch, as `Replay.bootstrapFor` computes it. */
+interface Bootstrap {
+  events: RunEventRecord[];
+  throughSequence: number;
+  reportedFloor: number;
+}
+
 function writeLine(socket: Socket, payload: unknown): void {
   if (socket.destroyed) return;
   socket.write(`${JSON.stringify(payload)}\n`);
@@ -324,16 +373,39 @@ function readLines(socket: Socket, onLine: (line: Record<string, unknown>) => vo
 class Replay {
   readonly events: RunEventRecord[];
   readonly #options: Options;
-  readonly #subscribers = new Set<Socket>();
+  readonly #subscribers = new Set<Subscriber>();
+  /**
+   * The replay clock's timeline: when each event is due, in milliseconds of
+   * streaming time, as the cumulative recorded gaps scaled by `--speed` and
+   * capped by `--max-gap`. Computed once from the fixture, so pacing derives
+   * from the recording rather than from accumulated per-event sleeps: a late
+   * timer wake coalesces the overdue events into one batch instead of
+   * stretching the whole replay.
+   */
+  readonly #dueAtMs: number[];
   #cursor = 0;
   #started = false;
   #paused: boolean;
   #timer: ReturnType<typeof setTimeout> | null = null;
+  /** Timeline origin for `#dueAtMs`, shifted so no event waits out a pause. */
+  #dueBaseMs = 0;
+  /** Streaming time accumulated across completed running stretches. */
+  #elapsedLiveMs = 0;
+  /** Wall-clock anchor of the current running stretch; `null` while paused. */
+  #runningSinceMs: number | null = null;
 
   constructor(events: RunEventRecord[], options: Options) {
     this.events = events;
     this.#options = options;
     this.#paused = options.startPaused;
+    this.#dueAtMs = [];
+    let due = 0;
+    for (let index = 0; index < events.length; index += 1) {
+      const previous = events[index - 1];
+      const event = events[index];
+      if (previous !== undefined && event !== undefined) due += gapMs(previous, event, options);
+      this.#dueAtMs.push(due);
+    }
   }
 
   get runId(): string {
@@ -345,10 +417,26 @@ class Replay {
    *
    * A real server swaps stores when it attaches a run's durable log, and the
    * client re-folds when the id changes. The mock replays a finished log from
-   * the start, so its id is constant and no batch ever asks for a re-fold.
+   * the start, so its id is constant and no live batch ever asks for a
+   * re-fold; a resume that names some other store is still honored, because
+   * `bootstrapFor` drops its cursor the way the real bootstrap does.
    */
   get storeId(): string {
     return `mock-store-${this.runId}`;
+  }
+
+  /**
+   * The replay clock: the recorded timestamp of the newest delivered event,
+   * or the fixture's opening timestamp before anything has been delivered.
+   *
+   * Responses stamp this instead of wall-clock time. The real server stamps
+   * its own `now`, which is the one envelope field a replayed session cannot
+   * reproduce; deriving it from the recording keeps the whole session
+   * byte-deterministic, which is what full-envelope snapshot tests need.
+   */
+  clockNow(): string {
+    const newest = this.events[this.#cursor - 1] ?? this.events[0];
+    return stringOr(newest?.timestamp, '1970-01-01T00:00:00+00:00');
   }
 
   /**
@@ -374,9 +462,9 @@ class Replay {
   }
 
   /**
-   * Backfill range, in current-pass numbering. The stream advertises
-   * `history_after_sequence: 0`, so the client should never need this; it is
-   * answered correctly rather than left to disagree with the live stream.
+   * Backfill range, in current-pass numbering. A tail-bounded subscription
+   * advertises a floor above zero and the TUI backfills below it through
+   * `query.events`, so this must agree with what the live stream withheld.
    */
   eventsInRange(after: number, before: number | null): RunEventRecord[] {
     return this.events.filter(event => {
@@ -385,25 +473,78 @@ class Replay {
     });
   }
 
+  /**
+   * One bootstrap batch for a new or restarted subscription, over the events
+   * delivered so far.
+   *
+   * Mirrors `RunApi.subscription_bootstrap` plus the floor rule of
+   * `_write_bootstrap` in `src/server/transport/unix_jsonl.py`:
+   *
+   * - A resume naming a store this replay is not describes a cursor into a
+   *   log that is gone, so the cursor is dropped and the replay starts over.
+   * - With `tail` the floor rises to `latest - tail`, and the batch prepends
+   *   the run-level spine from at or below the floor, the way
+   *   `EventJournal.checkpoint_locked` does under `bootstrap_spine`.
+   * - The reported floor stays 0 without `tail`: the caller asked for
+   *   everything from its own cursor onward, so nothing was withheld.
+   */
+  bootstrapFor(afterSequence: number, tail: number | null, storeId: string | null): Bootstrap {
+    const after =
+      storeId !== null && storeId !== '' && storeId !== this.storeId ? 0 : afterSequence;
+    const latest = this.latestSequence;
+    const floor = tail === null ? after : Math.max(after, latest - tail);
+    const delivered = this.delivered;
+    const spine =
+      tail !== null && floor > 0
+        ? delivered.filter(
+            event =>
+              (event.sequence ?? 0) <= floor &&
+              event.type !== undefined &&
+              BOOTSTRAP_SPINE_TYPES.has(event.type),
+          )
+        : [];
+    return {
+      events: [...spine, ...delivered.filter(event => (event.sequence ?? 0) > floor)],
+      throughSequence: latest,
+      reportedFloor: tail === null ? 0 : floor,
+    };
+  }
+
+  /** The `event_batch` envelope every delivery path sends. */
+  batchMessage(
+    events: RunEventRecord[],
+    throughSequence: number,
+    reportedFloor: number,
+  ): Record<string, unknown> {
+    return {
+      type: 'event_batch',
+      events,
+      through_sequence: throughSequence,
+      active_executions: this.activeExecutions,
+      store_id: this.storeId,
+      history_after_sequence: reportedFloor,
+    };
+  }
+
   /** Called once the last event-stream subscriber has gone. */
   onLastSubscriberGone: (() => void) | null = null;
   /** Called when a subscriber arrives, so a pending exit can be called off. */
   onSubscriberArrived: (() => void) | null = null;
 
-  addSubscriber(socket: Socket): void {
+  addSubscriber(subscriber: Subscriber): void {
     this.onSubscriberArrived?.();
-    this.#subscribers.add(socket);
-    socket.on('close', () => {
-      this.#subscribers.delete(socket);
+    this.#subscribers.add(subscriber);
+    subscriber.socket.on('close', () => {
+      this.#subscribers.delete(subscriber);
       if (this.#subscribers.size === 0) this.onLastSubscriberGone?.();
     });
   }
 
-  broadcast(message: unknown): void {
-    for (const socket of this.#subscribers) writeLine(socket, message);
-  }
-
   pause(): void {
+    if (this.#runningSinceMs !== null) {
+      this.#elapsedLiveMs += Date.now() - this.#runningSinceMs;
+      this.#runningSinceMs = null;
+    }
     this.#paused = true;
     if (this.#timer !== null) {
       clearTimeout(this.#timer);
@@ -414,6 +555,7 @@ class Replay {
   resume(): void {
     if (!this.#paused) return;
     this.#paused = false;
+    this.#runningSinceMs = Date.now();
     this.#step();
   }
 
@@ -421,11 +563,6 @@ class Replay {
     return this.#paused;
   }
 
-  /**
-   * Emits everything the bootstrap covers, then schedules the rest. Called once
-   * the first subscriber arrives so a replay never runs out before anyone sees
-   * it.
-   */
   /**
    * Advances the cursor over the bootstrap block without emitting it, so a
    * caller can send those events as recorded history in one batch.
@@ -444,29 +581,92 @@ class Replay {
   start(): void {
     if (this.#started) return;
     this.#started = true;
-    if (!this.#paused) this.#step();
+    if (this.#paused) return;
+    this.#runningSinceMs = Date.now();
+    this.#step();
   }
 
+  /** Streaming time elapsed so far, with paused stretches excluded. */
+  #elapsedMs(): number {
+    const running = this.#runningSinceMs === null ? 0 : Date.now() - this.#runningSinceMs;
+    return this.#elapsedLiveMs + running;
+  }
+
+  /**
+   * One wake of the live loop: deliver every event due by now as a single
+   * batch, then sleep until the next one is due.
+   *
+   * The real server's stream loop sends everything that landed since its last
+   * `wait_for_change` wake as one `event_batch` (`_stream` in
+   * `src/server/transport/unix_jsonl.py`), so bursts routinely reach a client
+   * as batches of more than one event. Batching by due time reproduces that:
+   * at `--speed 0` every remaining event is due at once and the whole replay
+   * is one batch, and at interactive speeds sub-tick recorded gaps coalesce.
+   */
   #step(): void {
     if (this.#paused) return;
     if (this.#cursor >= this.events.length) return;
-    const event = this.events[this.#cursor];
-    if (event === undefined) return;
-    this.#cursor += 1;
-    this.broadcast({
-      type: 'event_batch',
-      events: [event],
-      through_sequence: event.sequence,
-      active_executions: this.activeExecutions,
-      store_id: this.storeId,
-    });
-    if (this.#options.verbose) {
-      process.stderr.write(`mock: seq ${String(event.sequence)} ${String(event.type)}\n`);
+    // The next event never waits out a pause: pull the timeline forward so it
+    // is due exactly now, and later gaps keep their recorded meaning.
+    const elapsed = this.#elapsedMs();
+    const firstDue = this.#dueAtMs[this.#cursor] ?? 0;
+    if (firstDue - this.#dueBaseMs > elapsed) this.#dueBaseMs = firstDue - elapsed;
+    const batch: RunEventRecord[] = [];
+    while (this.#cursor < this.events.length) {
+      const event = this.events[this.#cursor];
+      const due = (this.#dueAtMs[this.#cursor] ?? 0) - this.#dueBaseMs;
+      if (event === undefined || due > elapsed) break;
+      batch.push(event);
+      this.#cursor += 1;
     }
-    const next = this.events[this.#cursor];
-    const delay = next === undefined ? 0 : gapMs(event, next, this.#options);
-    this.#timer = setTimeout(() => this.#step(), delay);
+    this.#deliver(batch);
+    const nextDue = this.#dueAtMs[this.#cursor];
+    if (nextDue === undefined) return;
+    this.#timer = setTimeout(
+      () => this.#step(),
+      Math.max(nextDue - this.#dueBaseMs - this.#elapsedMs(), 0),
+    );
     this.#timer.unref?.();
+  }
+
+  /**
+   * Sends one live batch, per subscription rather than as one broadcast.
+   *
+   * Mirrors the `_stream` loop in `src/server/transport/unix_jsonl.py`: a
+   * subscription whose tail bound is smaller than what landed since its
+   * cursor is bootstrapped again at a fresh floor rather than sent a window
+   * the bound was meant to exclude, and every batch repeats the floor its
+   * bootstrap declared.
+   */
+  #deliver(batch: RunEventRecord[]): void {
+    if (batch.length === 0) return;
+    const latest = this.latestSequence;
+    if (this.#options.verbose) {
+      const first = batch[0]?.sequence;
+      const label =
+        batch.length === 1
+          ? `${String(first)} ${String(batch[0]?.type)}`
+          : `${String(first)}..${String(batch.at(-1)?.sequence)} (${String(batch.length)} events)`;
+      process.stderr.write(`mock: seq ${label}\n`);
+    }
+    for (const subscriber of this.#subscribers) {
+      if (subscriber.tail !== null && latest - subscriber.cursor > subscriber.tail) {
+        const bootstrap = this.bootstrapFor(
+          subscriber.afterSequence,
+          subscriber.tail,
+          subscriber.storeId,
+        );
+        subscriber.cursor = bootstrap.throughSequence;
+        subscriber.reportedFloor = bootstrap.reportedFloor;
+        writeLine(
+          subscriber.socket,
+          this.batchMessage(bootstrap.events, bootstrap.throughSequence, bootstrap.reportedFloor),
+        );
+        continue;
+      }
+      subscriber.cursor = latest;
+      writeLine(subscriber.socket, this.batchMessage(batch, latest, subscriber.reportedFloor));
+    }
   }
 }
 
@@ -485,11 +685,22 @@ function processExists(pid: number): boolean {
   }
 }
 
-function ok(requestId: unknown, body: Record<string, unknown> = {}): Record<string, unknown> {
+/**
+ * A successful response envelope.
+ *
+ * `timestamp` is the caller's, which passes the replay clock: stamping
+ * wall-clock time here was the one nondeterministic byte in an otherwise
+ * replayable session, so any full-envelope comparison would have flaked.
+ */
+function ok(
+  requestId: unknown,
+  timestamp: string,
+  body: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     protocol_version: 1,
     request_id: requestId,
-    timestamp: new Date().toISOString(),
+    timestamp,
     ok: true,
     ...body,
   };
@@ -520,27 +731,43 @@ function main(): void {
       const type = request['type'];
       switch (type) {
         case 'subscribe': {
-          // Order matters: `subscribed` resolves the client's promise, and the
-          // bootstrap batch must follow it on the same connection.
-          replay.addSubscriber(socket);
+          // The resume arguments the real transport honors. A fresh boot
+          // sends `after_sequence: 0` with an optional `tail`; a reconnect
+          // sends its cursor and the store that cursor numbers.
+          const afterRaw = request['after_sequence'];
+          const after = typeof afterRaw === 'number' ? afterRaw : 0;
+          const tailRaw = request['tail'];
+          const tail = typeof tailRaw === 'number' ? tailRaw : null;
+          const storeRaw = request['store_id'];
+          const requestedStore = typeof storeRaw === 'string' ? storeRaw : null;
           // Prime first: `latest_sequence` and the bootstrap batch must both
           // describe the same set of events.
           replay.primeBootstrap();
+          const bootstrap = replay.bootstrapFor(after, tail, requestedStore);
+          // Order matters: `subscribed` resolves the client's promise, and the
+          // bootstrap batch must follow it on the same connection, ahead of
+          // any live batch.
           writeLine(socket, {
             type: 'subscribed',
             request_id: id,
             run_id: replay.runId,
-            latest_sequence: replay.latestSequence,
+            latest_sequence: bootstrap.throughSequence,
           });
-          writeLine(socket, {
-            type: 'event_batch',
-            events: replay.delivered,
-            through_sequence: replay.latestSequence,
-            active_executions: replay.activeExecutions,
-            store_id: replay.storeId,
-            // 0 means the stream carries its whole history, so the TUI never
-            // asks for a backfill it cannot get.
-            history_after_sequence: 0,
+          writeLine(
+            socket,
+            replay.batchMessage(
+              bootstrap.events,
+              bootstrap.throughSequence,
+              bootstrap.reportedFloor,
+            ),
+          );
+          replay.addSubscriber({
+            socket,
+            afterSequence: after,
+            tail,
+            storeId: requestedStore,
+            cursor: bootstrap.throughSequence,
+            reportedFloor: bootstrap.reportedFloor,
           });
           replay.start();
           return;
@@ -550,7 +777,7 @@ function main(): void {
           const template = responseBody(type)['snapshot'];
           writeLine(
             socket,
-            ok(id, {
+            ok(id, replay.clockNow(), {
               snapshot: withValues(template, {
                 run_id: replay.runId,
                 sequence: replay.latestSequence,
@@ -572,7 +799,7 @@ function main(): void {
           const template = responseBody(type)['tui_defaults'];
           writeLine(
             socket,
-            ok(id, {
+            ok(id, replay.clockNow(), {
               tui_defaults: withValues(template, theme === undefined ? {} : {theme}),
             }),
           );
@@ -581,7 +808,11 @@ function main(): void {
         case 'query.experiments': {
           writeLine(
             socket,
-            ok(id, withValues(responseBody(type), {experiments, experiments_ready: true})),
+            ok(
+              id,
+              replay.clockNow(),
+              withValues(responseBody(type), {experiments, experiments_ready: true}),
+            ),
           );
           return;
         }
@@ -591,20 +822,24 @@ function main(): void {
           const before = typeof beforeRaw === 'number' ? beforeRaw : null;
           writeLine(
             socket,
-            ok(id, withValues(responseBody(type), {events: replay.eventsInRange(after, before)})),
+            ok(
+              id,
+              replay.clockNow(),
+              withValues(responseBody(type), {events: replay.eventsInRange(after, before)}),
+            ),
           );
           return;
         }
         case 'query.performance': {
-          writeLine(socket, ok(id, responseBody(type)));
+          writeLine(socket, ok(id, replay.clockNow(), responseBody(type)));
           return;
         }
         case 'query.chat_options': {
-          writeLine(socket, ok(id, responseBody(type)));
+          writeLine(socket, ok(id, replay.clockNow(), responseBody(type)));
           return;
         }
         case 'query.chat_thread_create': {
-          writeLine(socket, ok(id, responseBody(type)));
+          writeLine(socket, ok(id, replay.clockNow(), responseBody(type)));
           return;
         }
         case 'query.chat': {
@@ -614,7 +849,7 @@ function main(): void {
           const question = request['question'];
           writeLine(
             socket,
-            ok(id, {
+            ok(id, replay.clockNow(), {
               chat: withValues(responseBody(type)['chat'], {
                 question: typeof question === 'string' ? question : '',
               }),
@@ -628,21 +863,21 @@ function main(): void {
         // Anything else renders in the client as `undefined: <status>`.
         case 'command.pause': {
           replay.pause();
-          writeLine(socket, ok(id, responseBody(type)));
+          writeLine(socket, ok(id, replay.clockNow(), responseBody(type)));
           return;
         }
         case 'command.resume': {
           replay.resume();
-          writeLine(socket, ok(id, responseBody(type)));
+          writeLine(socket, ok(id, replay.clockNow(), responseBody(type)));
           return;
         }
         case 'command.stop': {
           replay.pause();
-          writeLine(socket, ok(id, responseBody(type)));
+          writeLine(socket, ok(id, replay.clockNow(), responseBody(type)));
           return;
         }
         case 'command.steer': {
-          writeLine(socket, ok(id, responseBody(type)));
+          writeLine(socket, ok(id, replay.clockNow(), responseBody(type)));
           return;
         }
         default: {

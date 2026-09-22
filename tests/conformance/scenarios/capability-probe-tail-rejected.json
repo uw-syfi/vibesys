@@ -1,0 +1,30 @@
+{
+  "id": "capability-probe-tail-rejected",
+  "title": "An old server rejects the tail field",
+  "description": "A subscribe carrying tail against a server that predates the field is rejected as a Response with ok false; the client falls back to a full replay. This is the capability probe.",
+  "role": "subscribe",
+  "transports": [
+    "unix",
+    "websocket"
+  ],
+  "decisions": [
+    "WP-CAPABILITY-PROBE"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "subscribe",
+        "after_sequence": 0,
+        "tail": 50
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "response",
+        "ok": false
+      }
+    }
+  ]
+}

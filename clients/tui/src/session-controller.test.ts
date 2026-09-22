@@ -1,4 +1,7 @@
-import {describe, expect, it} from 'bun:test';
+import {afterEach, beforeEach, describe, expect, it} from 'bun:test';
+import {mkdtempSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {
   type EventSubscription,
   type ProtocolResponse,
@@ -10,8 +13,9 @@ import {
 } from '@vibesys/backend-client';
 import {resolveStartupTrace} from './boot-trace.js';
 import {fuzzyMatchCommands} from './commands.js';
+import {readNote, writeNote} from './notes-store.js';
 import {type ServerTransport, SocketSessionController} from './session-controller.js';
-import {chatPaneVisible, experimentLogVisible} from './session-model.js';
+import {chatPaneFocused, chatPaneVisible, experimentLogVisible} from './session-model.js';
 
 /** The command-bar palette's current matches, by name, for asserting on what `/help` offers. */
 function paletteNames(controller: SocketSessionController): string[] {
@@ -2082,6 +2086,152 @@ describe('session controller', () => {
     expect(tailed.state.core.historyAfterSequence).toBe(0);
     expect(tailed.state.core.transcript).toEqual(replayed.state.core.transcript);
     expect(tailed.state.core.rounds).toEqual(replayed.state.core.rounds);
+  });
+});
+
+/**
+ * The private notepad (#805): a local, per-run scratchpad that never reaches
+ * an agent except through the two explicit "promote to draft" actions, and
+ * even then only once the operator sends the pre-filled composer themselves.
+ * `FakeTransport`'s snapshot always answers `run_id: 'run'` (below), so every
+ * test here starts with `controller.start()` to latch that id before opening
+ * the notepad.
+ */
+describe('notepad', () => {
+  let stateHome: string;
+  const savedStateHome = process.env['VIBESYS_STATE_HOME'];
+
+  beforeEach(() => {
+    stateHome = mkdtempSync(join(tmpdir(), 'vs-controller-notepad-test-'));
+    process.env['VIBESYS_STATE_HOME'] = stateHome;
+  });
+
+  afterEach(() => {
+    if (savedStateHome === undefined) delete process.env['VIBESYS_STATE_HOME'];
+    else process.env['VIBESYS_STATE_HOME'] = savedStateHome;
+    rmSync(stateHome, {recursive: true, force: true});
+  });
+
+  it('opens empty for a run with no saved note', async () => {
+    const controller = new SocketSessionController(new FakeTransport());
+    await controller.start();
+
+    controller.openNotepad();
+
+    expect(controller.state.notepad.open).toBe(true);
+    expect(controller.state.notepad.text).toBe('');
+  });
+
+  it('hydrates from a note already saved for this run', async () => {
+    writeNote({runId: 'run', text: 'from a previous session', createdAt: 't0', updatedAt: 't0'});
+    const controller = new SocketSessionController(new FakeTransport());
+    await controller.start();
+
+    controller.openNotepad();
+
+    expect(controller.state.notepad.text).toBe('from a previous session');
+  });
+
+  it('persists every keystroke, surviving a restart against the same run', async () => {
+    const controller = new SocketSessionController(new FakeTransport());
+    await controller.start();
+    controller.openNotepad();
+
+    controller.setNoteText('watch the retry budget');
+
+    // A read with nothing cached, as a fresh process attached to the same
+    // run would do.
+    expect(readNote('run')?.text).toBe('watch the retry budget');
+
+    const restarted = new SocketSessionController(new FakeTransport());
+    await restarted.start();
+    restarted.openNotepad();
+    expect(restarted.state.notepad.text).toBe('watch the retry budget');
+  });
+
+  it('does not write to disk before a run id is known', () => {
+    const controller = new SocketSessionController(new FakeTransport());
+    // No start(): no snapshot has landed, so there is no run id yet.
+    controller.openNotepad();
+
+    controller.setNoteText('too early to save');
+
+    expect(controller.state.notepad.text).toBe('too early to save');
+    expect(readNote('run')).toBeNull();
+  });
+
+  it('promotes to a steer draft: closes the notepad, returns the trimmed text, sends nothing', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    const bootRequests = transport.requests.length;
+    controller.openNotepad();
+    controller.setNoteText('  fix the cache invalidation  ');
+
+    const prefill = controller.promoteNoteToSteerDraft();
+
+    expect(prefill).toEqual({text: 'fix the cache invalidation'});
+    expect(controller.state.notepad.open).toBe(false);
+    expect(transport.requests.slice(bootRequests)).toEqual([]);
+  });
+
+  it('promotes to a chat draft: closes the notepad, focuses chat, sends nothing', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    const bootRequests = transport.requests.length;
+    controller.openNotepad();
+    controller.setNoteText('ask about the flaky retry');
+
+    const prefill = controller.promoteNoteToChatDraft();
+
+    expect(prefill).toEqual({text: 'ask about the flaky retry'});
+    expect(controller.state.notepad.open).toBe(false);
+    // Chat is docked by default (the landing view), so opening it focuses the
+    // dock rather than setting the standalone `chatOpen` modal flag; either
+    // way, this is the same `openChat` a chat-surface command runs.
+    expect(chatPaneFocused(controller.state)).toBe(true);
+    expect(transport.requests.slice(bootRequests)).toEqual([]);
+  });
+
+  it('returns null for an empty or whitespace-only note, leaving the notepad open', async () => {
+    const controller = new SocketSessionController(new FakeTransport());
+    await controller.start();
+    controller.openNotepad();
+
+    expect(controller.promoteNoteToSteerDraft()).toBeNull();
+    expect(controller.promoteNoteToChatDraft()).toBeNull();
+    expect(controller.state.notepad.open).toBe(true);
+  });
+
+  /**
+   * The hard requirement: a note reaches an agent only through an explicit
+   * promotion the operator then explicitly sends, never as a side effect of
+   * writing it, opening it, or promoting it.
+   */
+  it('never lands notepad text in a backend request unless the operator explicitly sends it', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    const bootRequests = transport.requests.length;
+    controller.openNotepad();
+    controller.setNoteText('SECRET_ONLY_FOR_MY_EYES');
+
+    const prefill = controller.promoteNoteToSteerDraft();
+    expect(prefill?.text).toBe('SECRET_ONLY_FOR_MY_EYES');
+    // Writing, opening, and promoting the note are all purely local.
+    expect(transport.requests.slice(bootRequests)).toEqual([]);
+
+    // Unrelated traffic must not carry it either.
+    await controller.submitCommand('/steer an unrelated instruction');
+    await controller.sendChat('an unrelated question');
+    expect(JSON.stringify(transport.requests)).not.toContain('SECRET_ONLY_FOR_MY_EYES');
+
+    // Only the operator explicitly sending the pre-filled composer (here,
+    // `/steer` with the promoted text, exactly as `app.ts` fills the command
+    // bar) puts it on the wire.
+    await controller.submitCommand(`/steer ${prefill?.text}`);
+    expect(JSON.stringify(transport.requests)).toContain('SECRET_ONLY_FOR_MY_EYES');
   });
 });
 

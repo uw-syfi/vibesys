@@ -827,7 +827,7 @@ export class AgentMapView {
  * Edge cells grouped into horizontal runs of one tone, so a straight edge is
  * one renderable rather than one per cell.
  */
-export function edgeRuns(
+function edgeRuns(
   graph: AgentGraph,
 ): Array<{x: number; y: number; glyphs: string; tone: EdgeTone}> {
   const sorted = [...graph.cells].sort((a, b) => a.y - b.y || a.x - b.x);
@@ -871,7 +871,7 @@ function cellKey(x: number, y: number): string {
  * acceptable today because a live inbound edge onto a stacked column is rare;
  * extend to multi-run paths if that combination becomes common.
  */
-export function flowRuns(nodes: GraphNode[], runs: readonly EdgeRun[]): Set<EdgeRun> {
+function flowRuns(nodes: GraphNode[], runs: readonly EdgeRun[]): Set<EdgeRun> {
   const departures = new Map<string, AgentPhase>();
   const arrivals = new Set<string>();
   for (const node of nodes) {
@@ -909,7 +909,7 @@ export function flowRuns(nodes: GraphNode[], runs: readonly EdgeRun[]): Set<Edge
  * Neither shows today because execution is sequential: at most one edge feeds
  * an active node at a time.
  */
-export function paintEdgeFlow(
+function paintEdgeFlow(
   glyphs: string,
   tick: number,
   liveColor: string,
@@ -929,7 +929,7 @@ export function paintEdgeFlow(
 }
 
 /** `4 agents · 1 active · 2 done`, with failures and skips only when they exist. */
-export function phaseSummary(phases: AgentPhase[]): string {
+function phaseSummary(phases: AgentPhase[]): string {
   const count = (status: AgentPhase['status']): number =>
     phases.filter(phase => phase.status === status).length;
   const parts = [

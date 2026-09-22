@@ -10,9 +10,6 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
-from vibesys.agents import AgentClient, AgentClientProtocol
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
-from vibesys.agents.stub_runner import StubAgentClient
 from vibesys.config import Config, as_config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationError
@@ -61,6 +58,9 @@ from vibesys.schemas import (
     ValidationRecipeArtifact,
     Verdict,
 )
+from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionScope
+from vs_agent.api.testing import FakeAgentClient, FakeInvocation
+from vs_agent.stub_runner import StubAgentClient
 from vs_loop_state.agent import RoundRecord
 from vs_project import Project, serialize_round
 from vs_sandbox import SandboxExecutionResult
@@ -117,11 +117,10 @@ def test_legacy_active_hypothesis_backfills_framework_revert_commit():  # noqa: 
     assert _backfill_revert_commit(state, records) is False
 
 
-# RoundRecord's persistence and rollback resolution (RoundHistory) now live
-# in libs/vs-loop-state; see its own tests
-# (libs/vs-loop-state/tests/test_vs_loop_state_agent.py) for that coverage,
-# including the failed-child, implementation-failed, and distant-rollback
-# cases previously duplicated here.
+# RoundRecord's persistence and rollback resolution (RoundHistory) live in
+# libs/vs-loop-state; see its own tests
+# (libs/vs-loop-state/tests/test_vs_loop_state_agent.py) for the
+# failed-child, implementation-failed, and distant-rollback coverage.
 
 
 @pytest.fixture
@@ -175,134 +174,139 @@ def _single_agent_round(perf_metric: float | None) -> SingleAgentRoundResponse:
     )
 
 
-def _make_orchestrate_runner(  # noqa: ANN202, C901, PLR0913  # tracked: #288
-    *,
-    pre_decisions: list[PreRoundDecision] | None = None,
-    plans: list[OrchestratorPlan] | None = None,
-    implementer_outcomes: list[HypothesisOutcome] | None = None,
-    judge_verdicts: list[str] | None = None,
-    profiler_responses: list[ProfilerSummary] | None = None,
-    implementer_perf_metrics: list[float | None] | None = None,
-    single_agent_perf_metrics: list[float | None] | None = None,
-    implementer_skill_updates: list[list[SkillResourceSelection]] | None = None,
-    implementer_validation_artifacts: list[str | None] | None = None,
-    implementer_next_steps: list[str] | None = None,
-    implementer_parse_failures: list[bool] | None = None,
-):
-    """Build a MagicMock AgentClient whose invoke() returns scripted responses.
+def _default_pre_round_decision() -> PreRoundDecision:
+    """The pre-round decision an unconfigured orchestrator turn returns."""
+    return PreRoundDecision(need_profile=False, profile_focus="", reasoning="default skip")
 
-    Arguments are consumed-in-order queues keyed by the agent kind / response
-    class. Defaults: when the plan queue is exhausted, the harness returns a
-    permissive no-op plan and lets the loop's ``max_rounds`` bound the test.
-    Judge verdicts default to pass; the profiler is not called.
 
-    ``implementer_parse_failures`` marks turns whose output does not parse.
-    Those return ``fallback_factory()`` — the contract every real runner obeys
-    for an unparseable response — instead of a scripted response.
+def _default_orchestrator_plan() -> OrchestratorPlan:
+    """The permissive no-op plan an unconfigured orchestrator turn returns.
+
+    Tests that only care about a few rounds enqueue those and let this default
+    fill the rest; the loop's ``max_rounds`` bounds how many of those run.
     """
-    pre_q = list(pre_decisions or [])
-    plan_q = list(plans or [])
-    outcome_q = list(implementer_outcomes or [])
-    judge_q = list(judge_verdicts or [])
-    prof_q = list(profiler_responses or [])
-    impl_perf_q = list(implementer_perf_metrics or [])
-    single_agent_perf_q = list(single_agent_perf_metrics or [])
-    impl_skill_q = list(implementer_skill_updates or [])
-    impl_validation_q = list(implementer_validation_artifacts or [])
-    impl_next_step_q = list(implementer_next_steps or [])
-    impl_parse_failure_q = list(implementer_parse_failures or [])
-    counters = {"impl": 0, "judge": 0, "orch_pre": 0, "orch_plan": 0, "prof": 0}
+    return OrchestratorPlan(
+        task="noop (harness default)",
+        pass_criteria="no criteria",  # noqa: S106  # tracked: #288
+        reasoning="default noop plan — the loop's max_rounds bounds the test",
+    )
 
-    runner = MagicMock(spec=AgentClient)
-    runner.backend_name = "cli"
-    # The loop records implementer attribution on each round; give the mock
-    # real strings so the RoundRecord (str | None fields) validates.
-    runner.driver_name = "mock"
-    runner.provider = "mock"
-    runner.model_for_kind.return_value = "mock-model"
 
-    def _invoke(*, kind, response_cls, fallback_factory, **kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001, PLR0911  # tracked: #288
-        if kind == "orchestrator" and response_cls is PreRoundDecision:
-            counters["orch_pre"] += 1
-            return (
-                pre_q.pop(0)
-                if pre_q
-                else PreRoundDecision(
-                    need_profile=False, profile_focus="", reasoning="default skip"
-                )
-            )
-        if kind == "orchestrator" and response_cls is OrchestratorPlan:
-            counters["orch_plan"] += 1
-            if plan_q:
-                return plan_q.pop(0)
-            return OrchestratorPlan(
-                task="noop (harness default)",
-                pass_criteria="no criteria",  # noqa: S106  # tracked: #288
-                reasoning="default noop plan — the loop's max_rounds bounds the test",
-            )
-        if kind == "implementer" and response_cls is SingleAgentRoundResponse:
-            counters["impl"] += 1
-            return _single_agent_round(single_agent_perf_q.pop(0) if single_agent_perf_q else None)
-        if kind == "implementer":
-            counters["impl"] += 1
-            if impl_parse_failure_q and impl_parse_failure_q.pop(0):
-                return fallback_factory()
-            outcome = outcome_q.pop(0) if outcome_q else HypothesisOutcome.NOMINATED
-            perf_metric = impl_perf_q.pop(0) if impl_perf_q else None
-            skill_updates = impl_skill_q.pop(0) if impl_skill_q else []
-            validation_artifact = impl_validation_q.pop(0) if impl_validation_q else None
-            next_step = (
-                impl_next_step_q.pop(0)
-                if impl_next_step_q
-                else (
-                    "continue experiment"
-                    if outcome
-                    in {
-                        HypothesisOutcome.CONTINUE,
-                        HypothesisOutcome.IMPLEMENTATION_FAILED,
-                        HypothesisOutcome.INCONCLUSIVE,
-                    }
-                    else ""
-                )
-            )
-            return ImplementerResponse(
-                summary="Done.",
-                expected_behavior="ok",
-                hypothesis_outcome=outcome,
-                evidence="targeted evidence",
-                next_step=next_step,
-                perf_metric=perf_metric,
-                perf_unit="tok/s" if perf_metric is not None else None,
-                metrics={"aggregate_throughput": perf_metric, "p99_latency_ms": 87.0}
-                if perf_metric is not None
-                else {},
-                evaluation_artifact="benchmark/summary.json" if perf_metric is not None else None,
-                skill_context_updates=skill_updates,
-                validation_recipe_artifact=validation_artifact,
-            )
-        if kind == "judge":
-            idx = counters["judge"]
-            counters["judge"] += 1
-            v = judge_q[idx] if idx < len(judge_q) else "pass"
-            return JudgeResponse(
-                analysis="ok",
-                feedback="" if v == "pass" else "needs work",
-                verdict=Verdict.PASS if v == "pass" else Verdict.FAIL,
-            )
-        if kind == "profiler":
-            counters["prof"] += 1
-            if prof_q:
-                return prof_q.pop(0)
-            return ProfilerSummary(
-                analysis="ok",
-                bottlenecks="none",
-                suggestions="none",
-            )
-        raise AssertionError(f"unexpected kind: {kind}, response_cls={response_cls}")  # noqa: TRY003  # tracked: #288
+def _orchestrator_default(call: FakeInvocation) -> PreRoundDecision | OrchestratorPlan:
+    """Route an unconfigured orchestrator turn to the right default by schema.
 
-    runner.invoke.side_effect = _invoke
-    runner.counters = counters  # test introspection
-    return runner
+    ``kind="orchestrator"`` covers two response schemas (the pre-round
+    profiling decision and the round's plan); this mirrors that dispatch for
+    whichever one FakeAgentClient's queue/constant has nothing left for.
+    """
+    if call.response_cls is PreRoundDecision:
+        return _default_pre_round_decision()
+    return _default_orchestrator_plan()
+
+
+def _default_profiler_summary() -> ProfilerSummary:
+    """The profiler response an unconfigured profiler turn returns."""
+    return ProfilerSummary(analysis="ok", bottlenecks="none", suggestions="none")
+
+
+def _judge_response(verdict: str = "pass") -> JudgeResponse:
+    """One judge turn's response for ``verdict in {"pass", "fail"}``."""
+    return JudgeResponse(
+        analysis="ok",
+        feedback="" if verdict == "pass" else "needs work",
+        verdict=Verdict.PASS if verdict == "pass" else Verdict.FAIL,
+    )
+
+
+def _implementer_response(
+    outcome: HypothesisOutcome = HypothesisOutcome.NOMINATED,
+    *,
+    perf_metric: float | None = None,
+    skill_updates: list[SkillResourceSelection] | None = None,
+    validation_artifact: str | None = None,
+    next_step: str | None = None,
+) -> ImplementerResponse:
+    """One multi-agent implementer turn's response.
+
+    ``next_step`` defaults to a continuation note for outcomes that keep the
+    hypothesis alive (``CONTINUE``/``IMPLEMENTATION_FAILED``/``INCONCLUSIVE``)
+    and to "" for terminal outcomes, matching what a real implementer turn
+    reports.
+    """
+    if next_step is None:
+        next_step = (
+            "continue experiment"
+            if outcome
+            in {
+                HypothesisOutcome.CONTINUE,
+                HypothesisOutcome.IMPLEMENTATION_FAILED,
+                HypothesisOutcome.INCONCLUSIVE,
+            }
+            else ""
+        )
+    return ImplementerResponse(
+        summary="Done.",
+        expected_behavior="ok",
+        hypothesis_outcome=outcome,
+        evidence="targeted evidence",
+        next_step=next_step,
+        perf_metric=perf_metric,
+        perf_unit="tok/s" if perf_metric is not None else None,
+        metrics={"aggregate_throughput": perf_metric, "p99_latency_ms": 87.0}
+        if perf_metric is not None
+        else {},
+        evaluation_artifact="benchmark/summary.json" if perf_metric is not None else None,
+        skill_context_updates=skill_updates or [],
+        validation_recipe_artifact=validation_artifact,
+    )
+
+
+def _calls_for_response(
+    fake: FakeAgentClient, kind: str, response_cls: type
+) -> list[FakeInvocation]:
+    """Recorded ``kind`` calls narrowed to ``response_cls`` (orchestrator's two schemas)."""
+    return [call for call in fake.calls_for(kind) if call.response_cls is response_cls]
+
+
+def _new_orchestrate_fake() -> FakeAgentClient:
+    """A FakeAgentClient with this loop's default response for each kind.
+
+    Round progression in :func:`run_agent_loop` depends on *which* default
+    fires when a queue empties: an implementer turn that isn't explicitly
+    enqueued must still report ``HypothesisOutcome.NOMINATED`` (a terminal
+    outcome that ends the hypothesis every round) rather than
+    FakeAgentClient's zero-config scripted rounds, whose ``CONTINUE``/
+    ``SUPPORTED``/``DISPROVEN`` cadence would change how many rounds start a
+    new hypothesis. So every orchestrate test builds its fake from here
+    rather than a bare ``FakeAgentClient()``, even when it enqueues nothing
+    else, to keep that cadence identical across every orchestrate test.
+    """
+    fake = FakeAgentClient()
+    fake.set_response("orchestrator", _orchestrator_default)
+    fake.set_response("profiler", _default_profiler_summary())
+    fake.set_response("judge", _judge_response("pass"))
+    fake.set_response("implementer", _implementer_response())
+    return fake
+
+
+def _orchestrator_turns(
+    plans: Sequence[OrchestratorPlan],
+    pre_decisions: Sequence[PreRoundDecision] | None = None,
+) -> list[PreRoundDecision | OrchestratorPlan]:
+    """Interleave a pre-round decision before each plan, in real call order.
+
+    Multi-agent rounds call ``kind="orchestrator"`` twice per new hypothesis:
+    once for the pre-round profiling decision, once for the plan. Both share
+    the ``"orchestrator"`` kind, so ``FakeAgentClient.enqueue`` needs them in
+    that call order, not grouped by schema. ``pre_decisions[i]`` pairs with ``plans[i]``; a shorter/omitted
+    ``pre_decisions`` fills with the harness's permissive default.
+    """
+    pre = list(pre_decisions or [])
+    turns: list[PreRoundDecision | OrchestratorPlan] = []
+    for i, plan in enumerate(plans):
+        turns.append(pre[i] if i < len(pre) else _default_pre_round_decision())
+        turns.append(plan)
+    return turns
 
 
 class _AgentLoopArguments(TypedDict, total=False):
@@ -1538,13 +1542,20 @@ def test_invalid_hypothesis_update_is_not_written_to_progress(tmp_path, ref_file
         reasoning="exercise fail-closed validation",
     )
     # The first rejection triggers one corrective reprompt; a second invalid
-    # plan fails closed.
-    runner = _make_orchestrate_runner(plans=[invalid_plan, invalid_plan.model_copy(deep=True)])
+    # plan fails closed. Both attempts land in round one, so only one
+    # pre-round decision precedes them.
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        invalid_plan,
+        invalid_plan.model_copy(deep=True),
+    )
 
     with pytest.raises(ValueError, match="unknown hypothesis"):
-        _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1)
+        _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1)
 
-    assert runner.counters["orch_plan"] == 2
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 2
     project = _created_project(tmp_path)
     assert not list(project.rglob("plans/round-0001.json"))
     assert all(
@@ -1553,33 +1564,38 @@ def test_invalid_hypothesis_update_is_not_written_to_progress(tmp_path, ref_file
 
 
 def test_reused_hypothesis_id_is_reprompted_once_and_recovers(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="already-used",
-                task="complete the first investigation",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="create the identifier",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="already-used",
-                task="incorrectly reuse the identifier",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="exercise unique identity validation",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="corrected-id",
-                task="proceed with a fresh identifier",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="corrected after the reprompt",
-            ),
-        ]
+    # Round one's plan is accepted; round two's first attempt collides and is
+    # reprompted within the same round, so only two pre-round decisions
+    # precede the three plan attempts.
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="already-used",
+            task="complete the first investigation",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="create the identifier",
+        ),
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="already-used",
+            task="incorrectly reuse the identifier",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="exercise unique identity validation",
+        ),
+        OrchestratorPlan(
+            hypothesis_id="corrected-id",
+            task="proceed with a fresh identifier",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="corrected after the reprompt",
+        ),
     )
 
-    _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=2)
+    _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=2)
 
     # Round 2's invalid plan costs one corrective reprompt, not the run.
-    assert runner.counters["orch_plan"] == 3
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 3
     project = _created_project(tmp_path)
     plan_artifacts = list(project.rglob("plans/round-0002.json"))
     assert len(plan_artifacts) == 1
@@ -1590,36 +1606,40 @@ def test_reused_hypothesis_id_is_reprompted_once_and_recovers(tmp_path, ref_file
 
 
 def test_reused_hypothesis_id_after_failed_reprompt_is_not_written(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="already-used",
-                task="complete the first investigation",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="create the identifier",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="already-used",
-                task="incorrectly reuse the identifier",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="exercise unique identity validation",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="already-used",
-                task="reuse the identifier again after correction",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="ignore the corrective feedback",
-            ),
-        ]
+    # Round two's rejected attempt and its single corrective retry both land
+    # in round two, so only two pre-round decisions precede the three plans.
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="already-used",
+            task="complete the first investigation",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="create the identifier",
+        ),
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="already-used",
+            task="incorrectly reuse the identifier",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="exercise unique identity validation",
+        ),
+        OrchestratorPlan(
+            hypothesis_id="already-used",
+            task="reuse the identifier again after correction",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="ignore the corrective feedback",
+        ),
     )
 
     with pytest.raises(ValueError, match="already used"):
-        _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=2)
+        _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=2)
 
     # Exactly one reprompt: round one's plan, round two's rejected plan, and
     # its single corrective retry. A third plan call for round two would mean
     # the loop kept re-asking an agent that already ignored the correction.
-    assert runner.counters["orch_plan"] == 3
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 3
     project = _created_project(tmp_path)
     assert not list(project.rglob("plans/round-0002.json"))
     assert all(
@@ -2064,11 +2084,14 @@ def test_framework_local_validation_fails_and_restores_mutation(tmp_path):  # no
 
 
 def test_loop_runs_local_validation_only_after_judge_pass(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        implementer_outcomes=[HypothesisOutcome.NOMINATED],
-        implementer_validation_artifacts=["validation-recipes.json"],
-        judge_verdicts=["pass"],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "implementer",
+        _implementer_response(
+            HypothesisOutcome.NOMINATED, validation_artifact="validation-recipes.json"
+        ),
     )
+    fake.enqueue("judge", _judge_response("pass"))
 
     with patch(
         "vibesys.loops.agent.loop._run_framework_validation_gate",
@@ -2077,7 +2100,7 @@ def test_loop_runs_local_validation_only_after_judge_pass(tmp_path, ref_file):  
         _invoke_orchestrate(
             tmp_path,
             ref_file,
-            runner,
+            fake,
             max_rounds=1,
             judge_every=1,
             official_eval_every=10,
@@ -2085,7 +2108,7 @@ def test_loop_runs_local_validation_only_after_judge_pass(tmp_path, ref_file):  
 
     validation_gate.assert_called_once()
     assert validation_gate.call_args.kwargs["recipe_artifact"] == "validation-recipes.json"
-    assert runner.counters["judge"] == 1
+    assert len(fake.calls_for("judge")) == 1
 
 
 def test_framework_accuracy_gate_rejects_checker_failure(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -2554,7 +2577,7 @@ def test_official_protocol_benchmark_row_becomes_the_round_metrics(tmp_path, ref
     # A protocol bundle declares no [benchmark.result] table, so the round
     # record must still mark the official evaluation and take its objective
     # row from the benchmark's complete measurement.
-    runner = _make_orchestrate_runner()
+    fake = _new_orchestrate_fake()
 
     with patch(
         "vibesys.loops.agent.loop._run_framework_benchmark",
@@ -2567,7 +2590,7 @@ def test_official_protocol_benchmark_row_becomes_the_round_metrics(tmp_path, ref
         _invoke_orchestrate(
             tmp_path,
             ref_file,
-            runner,
+            fake,
             max_rounds=1,
             judge_every=10,
             benchmark_result_protocol=2,
@@ -2595,40 +2618,40 @@ def test_official_protocol_benchmark_row_becomes_the_round_metrics(tmp_path, ref
 
 
 def test_loop_round_one_no_profile_runs_one_round(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    """Round 1 skips pre-round-decision (no existing code), proposes one task,
-    implementer+judge both pass. With max_rounds=1 the loop stops there."""
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                task="Build FastAPI server",
-                pass_criteria="/health returns 200",  # noqa: S106  # tracked: #288
-                reasoning="cold start",
-            ),
-        ],
+    """Round 1 proposes one task, implementer+judge both pass. With
+    max_rounds=1 the loop stops there."""
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            task="Build FastAPI server",
+            pass_criteria="/health returns 200",  # noqa: S106  # tracked: #288
+            reasoning="cold start",
+        ),
     )
-    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1)
+    result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1)
     assert result is True
-    # No pre-round decision on round 1 (no existing code).
-    assert runner.counters["orch_plan"] == 1
-    assert runner.counters["impl"] == 1
-    assert runner.counters["judge"] == 1
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 1
+    assert len(fake.calls_for("implementer")) == 1
+    assert len(fake.calls_for("judge")) == 1
 
 
 def test_resume_at_completed_limit_finalizes_without_replaying_agents(
     tmp_path: Path,
     ref_file: str,
 ) -> None:
-    first_runner = _make_orchestrate_runner()
-    assert _invoke_orchestrate(tmp_path, ref_file, first_runner, max_rounds=1) is True
+    first_fake = _new_orchestrate_fake()
+    assert _invoke_orchestrate(tmp_path, ref_file, first_fake, max_rounds=1) is True
 
     project_path = _created_project(tmp_path)
     run_id = _run_id(project_path)
-    resumed_runner = _make_orchestrate_runner()
+    resumed_fake = _new_orchestrate_fake()
     assert (
         _invoke_orchestrate(
             tmp_path,
             str(project_path / "resume-input"),
-            resumed_runner,
+            resumed_fake,
             exp_name=run_id,
             existing=True,
             start_round=2,
@@ -2637,29 +2660,24 @@ def test_resume_at_completed_limit_finalizes_without_replaying_agents(
         is True
     )
 
-    assert resumed_runner.counters == {
-        "impl": 0,
-        "judge": 0,
-        "orch_pre": 0,
-        "orch_plan": 0,
-        "prof": 0,
-    }
+    assert resumed_fake.calls == []
 
 
 def test_continuing_hypothesis_uses_unified_run_state(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="continue-canonical",
-                task="continue the bounded experiment",
-                pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
-                reasoning="one more implementation step is required",
-            )
-        ],
-        implementer_outcomes=[HypothesisOutcome.CONTINUE],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="continue-canonical",
+            task="continue the bounded experiment",
+            pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+            reasoning="one more implementation step is required",
+        ),
     )
+    fake.enqueue("implementer", _implementer_response(HypothesisOutcome.CONTINUE))
 
-    assert _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1) is True
+    assert _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1) is True
 
     active = _active_hypothesis(tmp_path)
     assert active is not None
@@ -2669,20 +2687,21 @@ def test_continuing_hypothesis_uses_unified_run_state(tmp_path, ref_file):  # no
 
 def test_orchestrator_title_is_normalized_after_the_structured_call(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     raw_title = "  " + ("A" * 50 + " " + "B" * 20) + "  "
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="normalize-title",
-                title=raw_title,
-                task="normalize the title",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="exercise title normalization",
-            )
-        ],
-        implementer_outcomes=[HypothesisOutcome.CONTINUE],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="normalize-title",
+            title=raw_title,
+            task="normalize the title",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="exercise title normalization",
+        ),
     )
+    fake.enqueue("implementer", _implementer_response(HypothesisOutcome.CONTINUE))
 
-    assert _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1) is True
+    assert _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1) is True
 
     active = _active_hypothesis(tmp_path)
     assert active is not None
@@ -2690,19 +2709,20 @@ def test_orchestrator_title_is_normalized_after_the_structured_call(tmp_path, re
 
 
 def test_orchestrator_title_stays_empty_when_the_model_gives_none(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="no-title",
-                task="proceed without a title",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="exercise the empty-title passthrough",
-            )
-        ],
-        implementer_outcomes=[HypothesisOutcome.CONTINUE],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="no-title",
+            task="proceed without a title",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="exercise the empty-title passthrough",
+        ),
     )
+    fake.enqueue("implementer", _implementer_response(HypothesisOutcome.CONTINUE))
 
-    assert _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1) is True
+    assert _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1) is True
 
     active = _active_hypothesis(tmp_path)
     assert active is not None
@@ -2713,18 +2733,19 @@ def test_resume_migrates_legacy_hypothesis_state_without_losing_continuation(
     tmp_path: Path,
     ref_file: str,
 ) -> None:
-    first_runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="legacy-continuation",
-                task="finish the interrupted change",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="exercise migration at the loop boundary",
-            )
-        ],
-        implementer_outcomes=[HypothesisOutcome.CONTINUE],
+    first_fake = _new_orchestrate_fake()
+    first_fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="legacy-continuation",
+            task="finish the interrupted change",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="exercise migration at the loop boundary",
+        ),
     )
-    assert _invoke_orchestrate(tmp_path, ref_file, first_runner, max_rounds=1) is True
+    first_fake.enqueue("implementer", _implementer_response(HypothesisOutcome.CONTINUE))
+    assert _invoke_orchestrate(tmp_path, ref_file, first_fake, max_rounds=1) is True
 
     project_path = _created_project(tmp_path)
     project = Project.open(project_path)
@@ -2819,15 +2840,12 @@ def test_resume_migrates_legacy_hypothesis_state_without_losing_continuation(
         capture_output=True,
     )
 
-    resumed_runner = _make_orchestrate_runner(
-        plans=[],
-        implementer_outcomes=[HypothesisOutcome.NOMINATED],
-    )
+    resumed_fake = _new_orchestrate_fake()
     assert (
         _invoke_orchestrate(
             tmp_path,
             str(project_path / "resume-input"),
-            resumed_runner,
+            resumed_fake,
             exp_name=run_id,
             existing=True,
             start_round=2,
@@ -2840,7 +2858,7 @@ def test_resume_migrates_legacy_hypothesis_state_without_losing_continuation(
     migrated_hypothesis = migrated.by_id("legacy-continuation")
     assert migrated_hypothesis is not None
     assert [record.round_number for record in migrated_hypothesis.rounds] == [1, 2]
-    assert resumed_runner.counters["orch_plan"] == 0
+    assert len(_calls_for_response(resumed_fake, "orchestrator", OrchestratorPlan)) == 0
     assert not (portable_root / "hypotheses.json").exists()
     assert not (portable_root / "rounds").exists()
     assert not (local_root / "active.json").exists()
@@ -2850,20 +2868,21 @@ def test_agent_roles_reference_framework_owned_effective_objective(tmp_path, ref
     effective = (
         "Optimize the service.\n\n## Operator constraints\n\n- simultaneous exact H100/BF16\n"
     )
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                task="Optimize the BF16 path",
-                pass_criteria="BF16 remains active",  # noqa: S106  # tracked: #288
-                reasoning="respect the hard precision constraint",
-            )
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            task="Optimize the BF16 path",
+            pass_criteria="BF16 remains active",  # noqa: S106  # tracked: #288
+            reasoning="respect the hard precision constraint",
+        ),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         objective=effective,
         max_rounds=1,
     )
@@ -2876,10 +2895,10 @@ def test_agent_roles_reference_framework_owned_effective_objective(tmp_path, ref
         / "effective-objective.md"
     )
     assert objective_path.read_text() == effective
-    for call in runner.invoke.call_args_list:
-        if call.kwargs.get("kind") not in {"orchestrator", "implementer", "judge"}:
+    for call in fake.calls:
+        if call.kind not in {"orchestrator", "implementer", "judge"}:
             continue
-        prompt = call.kwargs["system_prompt"]
+        prompt = call.system_prompt
         assert str(objective_path) in prompt
         assert "simultaneous exact H100/BF16" not in prompt
 
@@ -2897,23 +2916,27 @@ def test_implementer_skill_updates_survive_a_renewed_continuation_prompt(tmp_pat
         resource_paths=["references/transport.md"],
         purpose="Replace the request-local transport boundary.",
     )
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="transport-boundary",
-                task="Replace request-local fanout.",
-                pass_criteria="The direct path activates.",  # noqa: S106  # tracked: #288
-                reasoning="The residual is host-side.",
-            )
-        ],
-        implementer_outcomes=[HypothesisOutcome.CONTINUE, HypothesisOutcome.NOMINATED],
-        implementer_skill_updates=[[selection], []],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="transport-boundary",
+            task="Replace request-local fanout.",
+            pass_criteria="The direct path activates.",  # noqa: S106  # tracked: #288
+            reasoning="The residual is host-side.",
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.CONTINUE, skill_updates=[selection]),
+        _implementer_response(HypothesisOutcome.NOMINATED, skill_updates=[]),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         judge_every=10,
         skills_dirs=[str(skill)],
@@ -2921,44 +2944,40 @@ def test_implementer_skill_updates_survive_a_renewed_continuation_prompt(tmp_pat
 
     calls = [
         call
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("session_key")
-        == AgentSessionKey(SessionScope.HYPOTHESIS, "transport-boundary")
+        for call in fake.calls
+        if call.session_key == AgentSessionKey(SessionScope.HYPOTHESIS, "transport-boundary")
     ]
     assert len(calls) == 2
-    assert "portable/references/transport.md" not in calls[0].kwargs["system_prompt"]
-    assert "portable/SKILL.md" in calls[1].kwargs["system_prompt"]
-    assert "portable/references/transport.md" in calls[1].kwargs["system_prompt"]
+    assert "portable/references/transport.md" not in calls[0].system_prompt
+    assert "portable/SKILL.md" in calls[1].system_prompt
+    assert "portable/references/transport.md" in calls[1].system_prompt
 
-    plan_path = calls[1].kwargs["workspace"] / "progress-artifacts" / "plans" / "round-0002.json"
+    plan_path = calls[1].workspace / "progress-artifacts" / "plans" / "round-0002.json"
     persisted = OrchestratorPlan.model_validate_json(plan_path.read_text())
     assert persisted.recommended_skills == [selection]
-    assert runner.counters["prof"] == 0
+    assert len(fake.calls_for("profiler")) == 0
 
 
 def test_loop_judge_retry_then_pass(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """Judge fails once, implementer retries, judge passes. Loop bounded by max_rounds=1."""
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                task="Build server",
-                pass_criteria="tests pass",  # noqa: S106  # tracked: #288
-                reasoning="cold start",
-            ),
-        ],
-        judge_verdicts=["fail", "pass"],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            task="Build server",
+            pass_criteria="tests pass",  # noqa: S106  # tracked: #288
+            reasoning="cold start",
+        ),
     )
-    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1, max_retries_per_round=3)
+    fake.enqueue("judge", _judge_response("fail"), _judge_response("pass"))
+    result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1, max_retries_per_round=3)
     assert result is True
-    assert runner.counters["impl"] == 2
-    assert runner.counters["judge"] == 2
-    implementer_calls = [
-        call
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("response_cls") is ImplementerResponse
-    ]
-    assert "Same-round retry boundary" not in implementer_calls[0].kwargs["system_prompt"]
-    retry_prompt = implementer_calls[1].kwargs["system_prompt"]
+    assert len(fake.calls_for("implementer")) == 2
+    assert len(fake.calls_for("judge")) == 2
+    implementer_calls = fake.calls_for("implementer")
+    assert "Same-round retry boundary" not in implementer_calls[0].system_prompt
+    retry_prompt = implementer_calls[1].system_prompt
     assert "Same-round retry boundary" in retry_prompt
     assert "round-0001-attempt-01-implementer.json" in retry_prompt
     assert "remains consumed" in retry_prompt
@@ -2971,28 +2990,25 @@ def test_unparseable_implementer_response_consumes_a_retry(tmp_path, ref_file): 
     complete on a fail-closed response that no agent authored, burning a round
     without spending any of ``max_retries_per_round``.
     """
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                task="Build server",
-                pass_criteria="tests pass",  # noqa: S106  # tracked: #288
-                reasoning="cold start",
-            ),
-        ],
-        implementer_parse_failures=[True],
-        implementer_outcomes=[HypothesisOutcome.NOMINATED],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            task="Build server",
+            pass_criteria="tests pass",  # noqa: S106  # tracked: #288
+            reasoning="cold start",
+        ),
     )
+    fake.enqueue_parse_failure("implementer")
+    fake.enqueue("implementer", _implementer_response(HypothesisOutcome.NOMINATED))
 
-    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1, max_retries_per_round=3)
+    result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1, max_retries_per_round=3)
 
     assert result is True
-    assert runner.counters["impl"] == 2
-    assert runner.counters["judge"] == 1
-    implementer_labels = [
-        call.kwargs["round_label"]
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("response_cls") is ImplementerResponse
-    ]
+    assert len(fake.calls_for("implementer")) == 2
+    assert len(fake.calls_for("judge")) == 1
+    implementer_labels = [call.round_label for call in fake.calls_for("implementer")]
     assert implementer_labels == [
         "round-1-retry-1-implementer",
         "round-1-retry-2-implementer",
@@ -3007,40 +3023,34 @@ def test_timed_out_implementer_persists_fail_closed_attempt_and_retries(
     ref_file: str,
 ) -> None:
     """A CLI timeout is durable attempt evidence, not a campaign-level failure."""
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                task="Build server",
-                pass_criteria="tests pass",  # noqa: S106  # tracked: #288
-                reasoning="cold start",
-            ),
-        ],
-        implementer_outcomes=[HypothesisOutcome.NOMINATED],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            task="Build server",
+            pass_criteria="tests pass",  # noqa: S106  # tracked: #288
+            reasoning="cold start",
+        ),
     )
-    delegate = runner.invoke.side_effect
-    timed_out = False
-
-    def invoke_with_timeout(**kwargs):  # noqa: ANN003, ANN202  # tracked: #288
-        nonlocal timed_out
-        if kwargs["kind"] == "implementer" and not timed_out:
-            timed_out = True
-            runner.counters["impl"] += 1
-            raise subprocess.TimeoutExpired(cmd=["agent", "secret-argument"], timeout=3600)
-        return delegate(**kwargs)
-
-    runner.invoke.side_effect = invoke_with_timeout
+    fake.fail(
+        "implementer",
+        subprocess.TimeoutExpired(cmd=["agent", "secret-argument"], timeout=3600),
+        times=1,
+    )
+    fake.enqueue("implementer", _implementer_response(HypothesisOutcome.NOMINATED))
 
     result = _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=1,
         max_retries_per_round=2,
     )
 
     assert result is True
-    assert runner.counters["impl"] == 2
-    assert runner.counters["judge"] == 1
+    assert len(fake.calls_for("implementer")) == 2
+    assert len(fake.calls_for("judge")) == 1
     project = _created_project(tmp_path)
     artifact = next(project.rglob("round-0001-attempt-01-implementer.json"))
     payload = json.loads(artifact.read_text())
@@ -3048,12 +3058,8 @@ def test_timed_out_implementer_persists_fail_closed_attempt_and_retries(
     assert payload["perf_metric"] is None
     assert "3600 seconds" in payload["evidence"]
     assert "secret-argument" not in artifact.read_text()
-    implementer_calls = [
-        call
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("response_cls") is ImplementerResponse
-    ]
-    assert "round-0001-attempt-01-implementer.json" in implementer_calls[1].kwargs["system_prompt"]
+    implementer_calls = fake.calls_for("implementer")
+    assert "round-0001-attempt-01-implementer.json" in implementer_calls[1].system_prompt
 
 
 def test_implementer_start_marker_precedes_the_invocation(
@@ -3061,56 +3067,50 @@ def test_implementer_start_marker_precedes_the_invocation(
     ref_file: str,
 ) -> None:
     """A process killed mid-invoke must not resume under the killed label."""
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                task="Build server",
-                pass_criteria="tests pass",  # noqa: S106  # tracked: #288
-                reasoning="cold start",
-            ),
-        ],
-        implementer_outcomes=[HypothesisOutcome.NOMINATED],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            task="Build server",
+            pass_criteria="tests pass",  # noqa: S106  # tracked: #288
+            reasoning="cold start",
+        ),
     )
-    delegate = runner.invoke.side_effect
-
-    def invoke_killed_mid_implementer(**kwargs):  # noqa: ANN003, ANN202  # tracked: #288
-        if kwargs["kind"] == "implementer":
-            raise RuntimeError("killed mid-invoke")  # noqa: TRY003  # tracked: #288
-        return delegate(**kwargs)
-
-    runner.invoke.side_effect = invoke_killed_mid_implementer
+    fake.fail("implementer", RuntimeError("killed mid-invoke"))
 
     # The loop does not catch this, so the attempt ends exactly where an
     # external kill would end it: after the marker, before any artifact.
     with pytest.raises(RuntimeError, match="killed mid-invoke"):
-        _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1, max_retries_per_round=2)
+        _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1, max_retries_per_round=2)
 
     project = _created_project(tmp_path)
     markers = list(project.rglob("round-0001-attempt-01-implementer.started.json"))
     assert len(markers) == 1
     assert not list(project.rglob("round-0001-attempt-01-implementer.json"))
-    workspace = runner.invoke.call_args_list[0].kwargs["workspace"]
+    workspace = fake.calls[0].workspace
     assert issue_board.next_implementer_attempt(workspace / "progress.md", 1) == 2
 
 
 def test_unparseable_implementer_responses_commit_fail_closed_once_exhausted(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """Only genuine retry exhaustion may commit the synthesized response."""
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                task="Build server",
-                pass_criteria="tests pass",  # noqa: S106  # tracked: #288
-                reasoning="cold start",
-            ),
-        ],
-        implementer_parse_failures=[True, True],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            task="Build server",
+            pass_criteria="tests pass",  # noqa: S106  # tracked: #288
+            reasoning="cold start",
+        ),
     )
+    fake.enqueue_parse_failure("implementer", count=2)
 
-    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1, max_retries_per_round=2)
+    result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1, max_retries_per_round=2)
 
     assert result is True
-    assert runner.counters["impl"] == 2
-    assert runner.counters["judge"] == 0
+    assert len(fake.calls_for("implementer")) == 2
+    assert len(fake.calls_for("judge")) == 0
     rounds = _round_payloads(tmp_path)
     assert len(rounds) == 1
     assert rounds[0]["passed"] is False
@@ -3120,83 +3120,97 @@ def test_unparseable_implementer_responses_commit_fail_closed_once_exhausted(tmp
 
 def test_agent_authored_inconclusive_completes_the_round(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """A parsed ``inconclusive`` turn is real evidence and keeps sparse review."""
-    runner = _make_orchestrate_runner(
-        implementer_outcomes=[HypothesisOutcome.INCONCLUSIVE] * 2,
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.INCONCLUSIVE),
+        _implementer_response(HypothesisOutcome.INCONCLUSIVE),
     )
 
     result = _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         judge_every=10,
         max_retries_per_round=3,
     )
 
     assert result is True
-    assert runner.counters["impl"] == 2  # one attempt per round, no retries burned
-    assert runner.counters["judge"] == 1  # mandatory final-round review only
+    assert len(fake.calls_for("implementer")) == 2  # one attempt per round, no retries burned
+    assert len(fake.calls_for("judge")) == 1  # mandatory final-round review only
     rounds = _round_payloads(tmp_path)
     assert [round_data["reviewed"] for round_data in rounds] == [False, True]
 
 
 def test_loop_defers_judge_until_cadence_and_always_reviews_final_round(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="graph-decode",
-                hypothesis="graph replay removes launch overhead",
-                task=f"continue graph work {round_number}",
-                pass_criteria="activation evidence is real",  # noqa: S106  # tracked: #288
-                reasoning="continue one causal experiment",
-            )
-            for round_number in range(1, 4)
-        ],
-        implementer_outcomes=[HypothesisOutcome.CONTINUE] * 3,
+    # CONTINUE keeps the same hypothesis (and its round-1 plan) active for up
+    # to two more rounds, so only round 1's orchestrator call ever happens.
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="graph-decode",
+            hypothesis="graph replay removes launch overhead",
+            task="continue graph work 1",
+            pass_criteria="activation evidence is real",  # noqa: S106  # tracked: #288
+            reasoning="continue one causal experiment",
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.CONTINUE),
     )
 
     result = _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=3,
         judge_every=2,
     )
 
     assert result is True
-    assert runner.counters["impl"] == 3
-    assert runner.counters["judge"] == 2  # cadence round 2 + mandatory final round 3
+    assert len(fake.calls_for("implementer")) == 3
+    assert len(fake.calls_for("judge")) == 2  # cadence round 2 + mandatory final round 3
     rounds = _round_payloads(tmp_path)
     assert [round_data["reviewed"] for round_data in rounds] == [False, True, True]
     assert "Independent review deferred" in (_created_project(tmp_path) / "progress.md").read_text()
 
 
 def test_nominated_candidate_gets_early_review(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        implementer_outcomes=[HypothesisOutcome.NOMINATED],
-    )
+    # NOMINATED is the harness's own implementer default, so an unconfigured
+    # fake already reproduces it every round.
+    fake = _new_orchestrate_fake()
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         judge_every=10,
     )
 
-    assert runner.counters["judge"] >= 1
+    assert len(fake.calls_for("judge")) >= 1
 
 
 def test_official_gates_run_on_candidate_cadence_and_final_round(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        implementer_outcomes=[HypothesisOutcome.NOMINATED] * 4,
-        implementer_perf_metrics=[10.0, 20.0, 30.0, 40.0],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=10.0),
+        _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=20.0),
+        _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=30.0),
+        _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=40.0),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=4,
         judge_every=10,
         official_eval_every=3,
@@ -3220,29 +3234,34 @@ def test_official_gates_run_on_candidate_cadence_and_final_round(tmp_path, ref_f
 
 
 def test_orchestrator_can_request_official_evaluation_before_cadence(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="checkpoint-now",
-                task="finish a likely new best",
-                pass_criteria="targeted comparison passes",  # noqa: S106  # tracked: #288
-                request_official_evaluation=True,
-                reasoning="the next branch needs a verified parent",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="continue-after-checkpoint",
-                task="make another improvement",
-                pass_criteria="targeted comparison passes",  # noqa: S106  # tracked: #288
-                reasoning="continue from verified evidence",
-            ),
-        ],
-        implementer_outcomes=[HypothesisOutcome.NOMINATED] * 2,
+    # NOMINATED is terminal, so each round starts a fresh hypothesis and
+    # consumes the next plan.
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="checkpoint-now",
+                    task="finish a likely new best",
+                    pass_criteria="targeted comparison passes",  # noqa: S106  # tracked: #288
+                    request_official_evaluation=True,
+                    reasoning="the next branch needs a verified parent",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="continue-after-checkpoint",
+                    task="make another improvement",
+                    pass_criteria="targeted comparison passes",  # noqa: S106  # tracked: #288
+                    reasoning="continue from verified evidence",
+                ),
+            ]
+        ),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         official_eval_every=10,
         _accuracy_gate_results=[None, None],
@@ -3256,41 +3275,47 @@ def test_orchestrator_can_request_official_evaluation_before_cadence(tmp_path, r
 
 
 def test_supported_hypothesis_is_reviewed_without_global_gates_and_closes(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="diagnostic-one",
-                hypothesis="the diagnostic identifies the bottleneck",
-                task="collect the scoped evidence",
-                pass_criteria="retain the diagnostic artifact",  # noqa: S106  # tracked: #288
-                reasoning="finish one bounded diagnostic",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="mechanism-two",
-                hypothesis="a new mechanism can use that evidence",
-                task="start the next experiment",
-                pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
-                reasoning="the prior diagnostic is complete",
-            ),
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.SUPPORTED,
-            HypothesisOutcome.SUPPORTED,
-        ],
+    # SUPPORTED is terminal, so each round starts a fresh hypothesis.
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="diagnostic-one",
+                    hypothesis="the diagnostic identifies the bottleneck",
+                    task="collect the scoped evidence",
+                    pass_criteria="retain the diagnostic artifact",  # noqa: S106  # tracked: #288
+                    reasoning="finish one bounded diagnostic",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="mechanism-two",
+                    hypothesis="a new mechanism can use that evidence",
+                    task="start the next experiment",
+                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    reasoning="the prior diagnostic is complete",
+                ),
+            ]
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.SUPPORTED),
+        _implementer_response(HypothesisOutcome.SUPPORTED),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         judge_every=10,
         _accuracy_gate_results=[None],
     )
 
-    assert runner.counters["orch_plan"] == 2
-    assert runner.counters["impl"] == 2
-    assert runner.counters["judge"] == 2
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 2
+    assert len(fake.calls_for("implementer")) == 2
+    assert len(fake.calls_for("judge")) == 2
     rounds = _round_payloads(tmp_path)
     # A supportive declaration without a trusted measurement closes the
     # hypothesis as unmeasured, never as proven.
@@ -3303,27 +3328,29 @@ def test_supported_hypothesis_is_reviewed_without_global_gates_and_closes(tmp_pa
 
 
 def test_cadence_pass_keeps_a_continuing_hypothesis_active(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="multi-round-experiment",
-                hypothesis="one causal claim needs multiple rounds",
-                task="run the experiment",
-                pass_criteria="retain auditable evidence",  # noqa: S106  # tracked: #288
-                reasoning="start one bounded experiment",
-            )
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.NOMINATED,
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="multi-round-experiment",
+            hypothesis="one causal claim needs multiple rounds",
+            task="run the experiment",
+            pass_criteria="retain auditable evidence",  # noqa: S106  # tracked: #288
+            reasoning="start one bounded experiment",
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.NOMINATED),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=3,
         judge_every=2,
     )
@@ -3331,9 +3358,9 @@ def test_cadence_pass_keeps_a_continuing_hypothesis_active(tmp_path, ref_file): 
     # Round 2's cadence review validates the provisional implementation but
     # must not hand design ownership back to the outer agent. The same inner
     # agent finishes the hypothesis and nominates it in round 3.
-    assert runner.counters["orch_plan"] == 1
-    assert runner.counters["impl"] == 3
-    assert runner.counters["judge"] == 2
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 1
+    assert len(fake.calls_for("implementer")) == 3
+    assert len(fake.calls_for("judge")) == 2
     rounds = _round_payloads(tmp_path)
     assert [round_data["hypothesis_outcome"] for round_data in rounds] == [
         "continue",
@@ -3343,32 +3370,34 @@ def test_cadence_pass_keeps_a_continuing_hypothesis_active(tmp_path, ref_file): 
 
 
 def test_implementation_failure_with_repair_keeps_hypothesis_active(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="repairable-mechanism",
-                hypothesis="the mechanism helps after its runtime defect is repaired",
-                task="implement and test the mechanism",
-                pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
-                reasoning="one persistent hypothesis",
-            )
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.IMPLEMENTATION_FAILED,
-            HypothesisOutcome.NOMINATED,
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="repairable-mechanism",
+            hypothesis="the mechanism helps after its runtime defect is repaired",
+            task="implement and test the mechanism",
+            pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+            reasoning="one persistent hypothesis",
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.IMPLEMENTATION_FAILED),
+        _implementer_response(HypothesisOutcome.NOMINATED),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         judge_every=10,
     )
 
-    assert runner.counters["orch_plan"] == 1
-    assert runner.counters["impl"] == 2
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 1
+    assert len(fake.calls_for("implementer")) == 2
     rounds = _round_payloads(tmp_path)
     assert [round_data["hypothesis_id"] for round_data in rounds] == [
         "repairable-mechanism",
@@ -3381,40 +3410,45 @@ def test_implementation_failure_with_repair_keeps_hypothesis_active(tmp_path, re
 
 
 def test_repeated_implementation_failures_return_control_to_designer(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="repair-lease",
-                hypothesis="the mechanism helps after target-only repairs",
-                task="implement and repair the mechanism",
-                pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
-                reasoning="start one persistent implementation lease",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="designer-review",
-                hypothesis="compare the stalled repair against alternatives",
-                task="choose the next bounded experiment",
-                pass_criteria="retain a reviewed direction",  # noqa: S106  # tracked: #288
-                reasoning="the repair lease expired",
-            ),
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.IMPLEMENTATION_FAILED,
-            HypothesisOutcome.IMPLEMENTATION_FAILED,
-            HypothesisOutcome.IMPLEMENTATION_FAILED,
-            HypothesisOutcome.NOMINATED,
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="repair-lease",
+                    hypothesis="the mechanism helps after target-only repairs",
+                    task="implement and repair the mechanism",
+                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    reasoning="start one persistent implementation lease",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="designer-review",
+                    hypothesis="compare the stalled repair against alternatives",
+                    task="choose the next bounded experiment",
+                    pass_criteria="retain a reviewed direction",  # noqa: S106  # tracked: #288
+                    reasoning="the repair lease expired",
+                ),
+            ]
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.IMPLEMENTATION_FAILED),
+        _implementer_response(HypothesisOutcome.IMPLEMENTATION_FAILED),
+        _implementer_response(HypothesisOutcome.IMPLEMENTATION_FAILED),
+        _implementer_response(HypothesisOutcome.NOMINATED),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=4,
         judge_every=10,
     )
 
-    assert runner.counters["orch_plan"] == 2
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 2
     rounds = _round_payloads(tmp_path)
     assert [round_data["hypothesis_id"] for round_data in rounds] == [
         "repair-lease",
@@ -3425,40 +3459,45 @@ def test_repeated_implementation_failures_return_control_to_designer(tmp_path, r
 
 
 def test_repeated_continue_outcomes_return_control_to_designer(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="self-renewing-lease",
-                hypothesis="the mechanism needs several implementation steps",
-                task="implement and test the mechanism",
-                pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
-                reasoning="start one bounded implementation lease",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="review-after-continue",
-                hypothesis="compare the unfinished mechanism against alternatives",
-                task="choose the next bounded experiment",
-                pass_criteria="retain a reviewed direction",  # noqa: S106  # tracked: #288
-                reasoning="the continuation lease expired",
-            ),
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.NOMINATED,
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="self-renewing-lease",
+                    hypothesis="the mechanism needs several implementation steps",
+                    task="implement and test the mechanism",
+                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    reasoning="start one bounded implementation lease",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="review-after-continue",
+                    hypothesis="compare the unfinished mechanism against alternatives",
+                    task="choose the next bounded experiment",
+                    pass_criteria="retain a reviewed direction",  # noqa: S106  # tracked: #288
+                    reasoning="the continuation lease expired",
+                ),
+            ]
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.NOMINATED),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=4,
         judge_every=10,
     )
 
-    assert runner.counters["orch_plan"] == 2
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 2
     rounds = _round_payloads(tmp_path)
     assert [round_data["hypothesis_id"] for round_data in rounds] == [
         "self-renewing-lease",
@@ -3469,37 +3508,50 @@ def test_repeated_continue_outcomes_return_control_to_designer(tmp_path, ref_fil
 
 
 def test_repeated_rejected_reviews_return_control_to_designer(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="rejected-review-lease",
-                hypothesis="the candidate needs bounded evidence repair",
-                task="repair and present the evidence",
-                pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
-                reasoning="start one bounded review-repair lease",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="review-after-rejections",
-                hypothesis="compare the repeatedly rejected work against alternatives",
-                task="choose the next bounded experiment",
-                pass_criteria="retain a reviewed direction",  # noqa: S106  # tracked: #288
-                reasoning="the review-repair lease expired",
-            ),
-        ],
-        implementer_outcomes=[HypothesisOutcome.NOMINATED] * 4,
-        judge_verdicts=["fail", "fail", "fail", "pass"],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="rejected-review-lease",
+                    hypothesis="the candidate needs bounded evidence repair",
+                    task="repair and present the evidence",
+                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    reasoning="start one bounded review-repair lease",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="review-after-rejections",
+                    hypothesis="compare the repeatedly rejected work against alternatives",
+                    task="choose the next bounded experiment",
+                    pass_criteria="retain a reviewed direction",  # noqa: S106  # tracked: #288
+                    reasoning="the review-repair lease expired",
+                ),
+            ]
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        *[_implementer_response(HypothesisOutcome.NOMINATED) for _ in range(4)],
+    )
+    fake.enqueue(
+        "judge",
+        _judge_response("fail"),
+        _judge_response("fail"),
+        _judge_response("fail"),
+        _judge_response("pass"),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=4,
         max_retries_per_round=1,
         judge_every=1,
     )
 
-    assert runner.counters["orch_plan"] == 2
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 2
     rounds = _round_payloads(tmp_path)
     assert [round_data["hypothesis_id"] for round_data in rounds] == [
         "rejected-review-lease",
@@ -3510,32 +3562,34 @@ def test_repeated_rejected_reviews_return_control_to_designer(tmp_path, ref_file
 
 
 def test_resolvable_inconclusive_result_keeps_hypothesis_active(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="variance-boundary",
-                hypothesis="one repeat resolves the causal classification",
-                task="measure and repeat only if ambiguous",
-                pass_criteria="retain a variance-aware classification",  # noqa: S106  # tracked: #288
-                reasoning="one persistent hypothesis",
-            )
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.INCONCLUSIVE,
-            HypothesisOutcome.NOMINATED,
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="variance-boundary",
+            hypothesis="one repeat resolves the causal classification",
+            task="measure and repeat only if ambiguous",
+            pass_criteria="retain a variance-aware classification",  # noqa: S106  # tracked: #288
+            reasoning="one persistent hypothesis",
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.INCONCLUSIVE),
+        _implementer_response(HypothesisOutcome.NOMINATED),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         judge_every=10,
     )
 
-    assert runner.counters["orch_plan"] == 1
-    assert runner.counters["impl"] == 2
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 1
+    assert len(fake.calls_for("implementer")) == 2
     rounds = _round_payloads(tmp_path)
     assert [round_data["hypothesis_id"] for round_data in rounds] == [
         "variance-boundary",
@@ -3548,37 +3602,42 @@ def test_resolvable_inconclusive_result_keeps_hypothesis_active(tmp_path, ref_fi
 
 
 def test_cadence_review_is_not_duplicated_for_provisional_retry(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="stable-hypothesis",
-                hypothesis="same causal claim",
-                task="continue the experiment",
-                pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
-                reasoning="one hypothesis across rounds",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="replacement-hypothesis",
-                hypothesis="next causal claim",
-                task="finish the replacement experiment",
-                pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
-                reasoning="the prior claim passed review",
-            ),
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.NOMINATED,
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.NOMINATED,
-        ],
-        judge_verdicts=["fail", "pass"],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="stable-hypothesis",
+                    hypothesis="same causal claim",
+                    task="continue the experiment",
+                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    reasoning="one hypothesis across rounds",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="replacement-hypothesis",
+                    hypothesis="next causal claim",
+                    task="finish the replacement experiment",
+                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    reasoning="the prior claim passed review",
+                ),
+            ]
+        ),
     )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.NOMINATED),
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.NOMINATED),
+    )
+    fake.enqueue("judge", _judge_response("fail"), _judge_response("pass"))
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=4,
         max_retries_per_round=2,
         judge_every=3,
@@ -3587,8 +3646,8 @@ def test_cadence_review_is_not_duplicated_for_provisional_retry(tmp_path, ref_fi
     # Round 3 receives one cadence review.  Its provisional retry carries the
     # feedback forward without paying for the same independent audit again.
     # The final-round nomination is still reviewed immediately.
-    assert runner.counters["impl"] == 5
-    assert runner.counters["judge"] == 2
+    assert len(fake.calls_for("implementer")) == 5
+    assert len(fake.calls_for("judge")) == 2
 
     # Round 3's final attempt is an unreviewed continuation: the cadence review
     # judged attempt 1 (a different implementation), then attempt 2 deferred
@@ -3621,32 +3680,34 @@ def test_gate_retry_does_not_persist_the_previous_attempts_pass(tmp_path, ref_fi
     record describes attempt 2, so it must carry ``deferred`` rather than
     attempt 1's stale ``pass`` (issue #503).
     """
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="gate-retry",
-                hypothesis="the gate rejects a stale checkpoint",
-                task="Build",
-                pass_criteria="tests",  # noqa: S106  # tracked: #288
-                reasoning="start",
-            )
-        ],
-        judge_verdicts=["pass"],
-        implementer_parse_failures=[False, True],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="gate-retry",
+            hypothesis="the gate rejects a stale checkpoint",
+            task="Build",
+            pass_criteria="tests",  # noqa: S106  # tracked: #288
+            reasoning="start",
+        ),
     )
+    fake.enqueue("implementer", _implementer_response(HypothesisOutcome.NOMINATED))
+    fake.enqueue_parse_failure("implementer")
+    fake.enqueue("judge", _judge_response("pass"))
 
     result = _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=1,
         max_retries_per_round=2,
         _accuracy_gate_results=["checker rejected history"],
     )
 
     assert result is True
-    assert runner.counters["impl"] == 2
-    assert runner.counters["judge"] == 1
+    assert len(fake.calls_for("implementer")) == 2
+    assert len(fake.calls_for("judge")) == 1
     rounds = _round_payloads(tmp_path)
     assert len(rounds) == 1
     assert rounds[0]["passed"] is False
@@ -3663,39 +3724,44 @@ def test_gate_retry_does_not_persist_the_previous_attempts_pass(tmp_path, ref_fi
 
 
 def test_unreviewed_terminal_outcome_returns_control_to_designer(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="falsified-path",
-                hypothesis="first claim",
-                task="test first claim",
-                pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
-                reasoning="first experiment",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="replacement-path",
-                hypothesis="second claim",
-                task="test second claim",
-                pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
-                reasoning="replacement experiment",
-            ),
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.DISPROVEN,
-            HypothesisOutcome.NOMINATED,
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="falsified-path",
+                    hypothesis="first claim",
+                    task="test first claim",
+                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    reasoning="first experiment",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="replacement-path",
+                    hypothesis="second claim",
+                    task="test second claim",
+                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    reasoning="replacement experiment",
+                ),
+            ]
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.DISPROVEN),
+        _implementer_response(HypothesisOutcome.NOMINATED),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         judge_every=10,
     )
 
-    assert runner.counters["orch_plan"] == 2
-    assert runner.counters["judge"] == 1  # only the replacement, on the final round
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 2
+    assert len(fake.calls_for("judge")) == 1  # only the replacement, on the final round
     rounds = _round_payloads(tmp_path)
     assert [round_data["hypothesis_id"] for round_data in rounds] == [
         "falsified-path",
@@ -3705,26 +3771,21 @@ def test_unreviewed_terminal_outcome_returns_control_to_designer(tmp_path, ref_f
         "disproven",
         "unmeasured",
     ]
-    plan_calls = [
-        call
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("response_cls") is OrchestratorPlan
-    ]
+    plan_calls = _calls_for_response(fake, "orchestrator", OrchestratorPlan)
     assert "latest progress entry contains a regression or terminal-workspace notice" in (
-        plan_calls[1].kwargs["system_prompt"].replace("\n", " ").lower()
+        plan_calls[1].system_prompt.replace("\n", " ").lower()
     )
 
 
 def test_reviewed_disproof_skips_framework_gates(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        implementer_outcomes=[HypothesisOutcome.DISPROVEN],
-        judge_verdicts=["pass"],
-    )
+    fake = _new_orchestrate_fake()
+    fake.enqueue("implementer", _implementer_response(HypothesisOutcome.DISPROVEN))
+    fake.enqueue("judge", _judge_response("pass"))
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=1,
         judge_every=1,
         _accuracy_gate_results=[None],
@@ -3739,43 +3800,48 @@ def test_reviewed_disproof_skips_framework_gates(tmp_path, ref_file):  # noqa: A
 
 
 def test_disproven_retry_after_failed_review_returns_control_to_designer(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="falsified-after-review",
-                hypothesis="first claim",
-                task="test first claim",
-                pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
-                reasoning="first experiment",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="replacement-after-review",
-                hypothesis="second claim",
-                task="test second claim",
-                pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
-                reasoning="replacement experiment",
-            ),
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.NOMINATED,
-            HypothesisOutcome.DISPROVEN,
-            HypothesisOutcome.NOMINATED,
-        ],
-        judge_verdicts=["fail", "pass", "pass"],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="falsified-after-review",
+                    hypothesis="first claim",
+                    task="test first claim",
+                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    reasoning="first experiment",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="replacement-after-review",
+                    hypothesis="second claim",
+                    task="test second claim",
+                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    reasoning="replacement experiment",
+                ),
+            ]
+        ),
     )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.NOMINATED),
+        _implementer_response(HypothesisOutcome.DISPROVEN),
+        _implementer_response(HypothesisOutcome.NOMINATED),
+    )
+    fake.enqueue("judge", _judge_response("fail"), _judge_response("pass"), _judge_response("pass"))
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         max_retries_per_round=2,
         judge_every=10,
     )
 
-    assert runner.counters["orch_plan"] == 2
-    assert runner.counters["impl"] == 3
-    assert runner.counters["judge"] == 3
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 2
+    assert len(fake.calls_for("implementer")) == 3
+    assert len(fake.calls_for("judge")) == 3
     rounds = _round_payloads(tmp_path)
     assert [round_data["hypothesis_id"] for round_data in rounds] == [
         "falsified-after-review",
@@ -3789,59 +3855,58 @@ def test_disproven_retry_after_failed_review_returns_control_to_designer(tmp_pat
 
 
 def test_role_session_policy_is_explicit_and_hypothesis_scoped(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="stable-hypothesis",
-                hypothesis="same claim",
-                task="continue",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="same experiment",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="stable-hypothesis",
-                hypothesis="same claim",
-                task="finish",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="same experiment",
-            ),
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.NOMINATED,
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="stable-hypothesis",
+                    hypothesis="same claim",
+                    task="continue",
+                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    reasoning="same experiment",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="stable-hypothesis",
+                    hypothesis="same claim",
+                    task="finish",
+                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    reasoning="same experiment",
+                ),
+            ]
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.NOMINATED),
     )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         judge_every=10,
     )
 
-    calls = runner.invoke.call_args_list
-    plan_calls = [call for call in calls if call.kwargs.get("response_cls") is OrchestratorPlan]
-    implementer_calls = [
-        call for call in calls if call.kwargs.get("response_cls") is ImplementerResponse
-    ]
-    judge_calls = [call for call in calls if call.kwargs.get("response_cls") is JudgeResponse]
+    plan_calls = _calls_for_response(fake, "orchestrator", OrchestratorPlan)
+    implementer_calls = fake.calls_for("implementer")
+    judge_calls = fake.calls_for("judge")
     # The outer designer hands off one causal claim and is not re-invoked
     # while the implementer reports that same hypothesis as continuing.
     assert len(plan_calls) == 1
     assert len(implementer_calls) == 2
-    assert all(call.kwargs["reuse_session"] is False for call in plan_calls)
-    assert all(call.kwargs["reuse_session"] is True for call in implementer_calls)
-    assert {call.kwargs["session_key"] for call in implementer_calls} == {
+    assert all(call.reuse_session is False for call in plan_calls)
+    assert all(call.reuse_session is True for call in implementer_calls)
+    assert {call.session_key for call in implementer_calls} == {
         AgentSessionKey(SessionScope.HYPOTHESIS, "stable-hypothesis")
     }
-    assert (
-        "Required continuation from the previous round"
-        not in implementer_calls[0].kwargs["system_prompt"]
-    )
-    assert "continue experiment" in implementer_calls[1].kwargs["system_prompt"]
-    assert "do not merely restate prior work" in implementer_calls[1].kwargs["user_prompt"]
-    assert all(call.kwargs["reuse_session"] is False for call in judge_calls)
+    assert "Required continuation from the previous round" not in implementer_calls[0].system_prompt
+    assert "continue experiment" in implementer_calls[1].system_prompt
+    assert "do not merely restate prior work" in implementer_calls[1].user_prompt
+    assert all(call.reuse_session is False for call in judge_calls)
 
     rounds = _round_payloads(tmp_path)
     assert [round_data["hypothesis_id"] for round_data in rounds] == [
@@ -3859,40 +3924,37 @@ def test_rejected_terminal_submission_cannot_schedule_framework_gate_as_next_ste
     ref_file,  # noqa: ANN001  # tracked: #288
 ):
     forbidden_step = "Run the framework-owned accuracy evaluation."
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="gate-ownership",
-                hypothesis="candidate is ready",
-                task="prepare candidate evidence",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="framework owns official gates",
-            )
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.NOMINATED,
-            HypothesisOutcome.NOMINATED,
-        ],
-        implementer_next_steps=[forbidden_step, ""],
-        judge_verdicts=["fail", "pass"],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="gate-ownership",
+            hypothesis="candidate is ready",
+            task="prepare candidate evidence",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="framework owns official gates",
+        ),
     )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.NOMINATED, next_step=forbidden_step),
+        _implementer_response(HypothesisOutcome.NOMINATED, next_step=""),
+    )
+    fake.enqueue("judge", _judge_response("fail"), _judge_response("pass"))
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         max_retries_per_round=1,
         judge_every=1,
     )
 
-    implementer_calls = [
-        call
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("response_cls") is ImplementerResponse
-    ]
+    implementer_calls = fake.calls_for("implementer")
     assert len(implementer_calls) == 2
-    retry_prompt = implementer_calls[1].kwargs["system_prompt"]
+    retry_prompt = implementer_calls[1].system_prompt
     assert forbidden_step not in retry_prompt
     assert "Current review delta" in retry_prompt
     assert "needs work" in retry_prompt
@@ -3900,34 +3962,39 @@ def test_rejected_terminal_submission_cannot_schedule_framework_gate_as_next_ste
 
 
 def test_hypothesis_revert_is_applied_once_across_continuation_rounds(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="seed",
-                task="establish parent",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="seed checkpoint",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="continued-repair",
-                hypothesis_updates=[
-                    HypothesisStrategyUpdate(
-                        hypothesis_id="seed",
-                        disposition="abandoned",
-                        reason="The later evidence invalidated this direction.",
-                    )
-                ],
-                task="start from parent and continue",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                revert_to_round=1,
-                reasoning="discard a later branch once",
-            ),
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.NOMINATED,
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.NOMINATED,
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="seed",
+                    task="establish parent",
+                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    reasoning="seed checkpoint",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="continued-repair",
+                    hypothesis_updates=[
+                        HypothesisStrategyUpdate(
+                            hypothesis_id="seed",
+                            disposition="abandoned",
+                            reason="The later evidence invalidated this direction.",
+                        )
+                    ],
+                    task="start from parent and continue",
+                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    revert_to_round=1,
+                    reasoning="discard a later branch once",
+                ),
+            ]
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.NOMINATED),
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.NOMINATED),
     )
 
     with patch(
@@ -3936,7 +4003,7 @@ def test_hypothesis_revert_is_applied_once_across_continuation_rounds(tmp_path, 
         _invoke_orchestrate(
             tmp_path,
             ref_file,
-            runner,
+            fake,
             max_rounds=3,
             judge_every=10,
         )
@@ -3950,47 +4017,42 @@ def test_hypothesis_revert_is_applied_once_across_continuation_rounds(tmp_path, 
     assert "progress-artifacts" in checkout_tree.call_args_list[1].kwargs["preserve_paths"]
     repair_calls = [
         call
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("response_cls") is ImplementerResponse
-        and call.kwargs.get("session_key")
-        == AgentSessionKey(SessionScope.HYPOTHESIS, "continued-repair")
+        for call in fake.calls_for("implementer")
+        if call.session_key == AgentSessionKey(SessionScope.HYPOTHESIS, "continued-repair")
     ]
     assert len(repair_calls) == 2
     assert all(
-        "framework already materialized" in call.kwargs["system_prompt"].lower()
+        "framework already materialized" in call.system_prompt.lower() for call in repair_calls
+    )
+    assert all(
+        "do not re-run checkout" in call.system_prompt.lower()
+        or "do not repeat restoration" in call.system_prompt.lower()
         for call in repair_calls
     )
     assert all(
-        "do not re-run checkout" in call.kwargs["system_prompt"].lower()
-        or "do not repeat restoration" in call.kwargs["system_prompt"].lower()
-        for call in repair_calls
-    )
-    assert all(
-        "reuse valid retained parent rows"
-        in call.kwargs["system_prompt"].replace("\n", " ").lower()
+        "reuse valid retained parent rows" in call.system_prompt.replace("\n", " ").lower()
         or "do not repeat restoration or parent measurement"
-        in call.kwargs["system_prompt"].replace("\n", " ").lower()
+        in call.system_prompt.replace("\n", " ").lower()
         for call in repair_calls
     )
     judge_calls = [
         call
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("response_cls") is JudgeResponse
-        and call.kwargs.get("round_label", "").startswith(("round-2-", "round-3-"))
+        for call in fake.calls_for("judge")
+        if call.round_label.startswith(("round-2-", "round-3-"))
     ]
     assert judge_calls
     assert all(
-        "framework authoritatively materialized" in call.kwargs["system_prompt"].lower()
+        "framework authoritatively materialized" in call.system_prompt.lower()
         for call in judge_calls
     )
     assert all(
         "do not demand candidate-supplied git proof"
-        in call.kwargs["system_prompt"].replace("\n", " ").lower()
+        in call.system_prompt.replace("\n", " ").lower()
         for call in judge_calls
     )
     assert all(
         "duplicate measurement of a trustworthy retained parent row"
-        in call.kwargs["system_prompt"].replace("\n", " ")
+        in call.system_prompt.replace("\n", " ")
         for call in judge_calls
     )
     project = _created_project(tmp_path)
@@ -4003,27 +4065,32 @@ def test_hypothesis_revert_is_applied_once_across_continuation_rounds(tmp_path, 
 
 
 def test_failed_hypothesis_revert_is_retried_and_not_claimed_as_applied(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="seed",
-                task="establish parent",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="seed checkpoint",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="retry-rollback",
-                task="start from parent",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                revert_to_round=1,
-                reasoning="restore parent",
-            ),
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.NOMINATED,
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.NOMINATED,
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="seed",
+                    task="establish parent",
+                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    reasoning="seed checkpoint",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="retry-rollback",
+                    task="start from parent",
+                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    revert_to_round=1,
+                    reasoning="restore parent",
+                ),
+            ]
+        ),
+    )
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.NOMINATED),
+        _implementer_response(HypothesisOutcome.CONTINUE),
+        _implementer_response(HypothesisOutcome.NOMINATED),
     )
 
     with patch(
@@ -4033,7 +4100,7 @@ def test_failed_hypothesis_revert_is_retried_and_not_claimed_as_applied(tmp_path
         _invoke_orchestrate(
             tmp_path,
             ref_file,
-            runner,
+            fake,
             max_rounds=3,
             judge_every=10,
         )
@@ -4041,23 +4108,24 @@ def test_failed_hypothesis_revert_is_retried_and_not_claimed_as_applied(tmp_path
     assert checkout_tree.call_count == 3
     retry_calls = [
         call
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("response_cls") is ImplementerResponse
-        and call.kwargs.get("session_key")
-        == AgentSessionKey(SessionScope.HYPOTHESIS, "retry-rollback")
+        for call in fake.calls_for("implementer")
+        if call.session_key == AgentSessionKey(SessionScope.HYPOTHESIS, "retry-rollback")
     ]
     assert len(retry_calls) == 2
-    assert "framework already materialized" not in retry_calls[0].kwargs["system_prompt"].lower()
-    assert "framework already materialized" in retry_calls[1].kwargs["system_prompt"].lower()
+    assert "framework already materialized" not in retry_calls[0].system_prompt.lower()
+    assert "framework already materialized" in retry_calls[1].system_prompt.lower()
 
 
 def test_judge_audited_implementer_metrics_are_recorded(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(implementer_perf_metrics=[321.5])
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "implementer", _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=321.5)
+    )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=1,
         judge_every=10,
     )
@@ -4072,15 +4140,11 @@ def test_judge_audited_implementer_metrics_are_recorded(tmp_path, ref_file):  # 
     assert rounds[0]["evaluation_artifact"] == "benchmark/summary.json"
     assert rounds[0]["profile_skipped"] is False
 
-    judge_call = next(
-        call
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("response_cls") is JudgeResponse
-    )
-    assert "321.5 tok/s" not in judge_call.kwargs["system_prompt"]
-    assert "benchmark/summary.json" not in judge_call.kwargs["system_prompt"]
+    judge_call = fake.calls_for("judge")[0]
+    assert "321.5 tok/s" not in judge_call.system_prompt
+    assert "benchmark/summary.json" not in judge_call.system_prompt
     evidence_files = list(
-        judge_call.kwargs["workspace"].glob(
+        judge_call.workspace.glob(
             "progress-artifacts/evidence/round-0001-attempt-01-implementer.json"
         )
     )
@@ -4089,9 +4153,8 @@ def test_judge_audited_implementer_metrics_are_recorded(tmp_path, ref_file):  # 
     assert evidence.perf_metric == 321.5
     assert evidence.perf_unit == "tok/s"
     assert evidence.evaluation_artifact == "benchmark/summary.json"
-    assert (
-        evidence_files[0].relative_to(judge_call.kwargs["workspace"]).as_posix()
-        in (judge_call.kwargs["system_prompt"])
+    assert evidence_files[0].relative_to(judge_call.workspace).as_posix() in (
+        judge_call.system_prompt
     )
 
 
@@ -4100,7 +4163,7 @@ def test_official_framework_benchmark_scalar_populates_round_metrics(tmp_path, r
 
     # No implementer-reported perf: accepted_metrics stays empty, so the only
     # objective row can come from the official framework benchmark's scalar.
-    runner = _make_orchestrate_runner()
+    fake = _new_orchestrate_fake()
 
     with patch(
         "vibesys.loops.agent.loop._run_framework_benchmark",
@@ -4109,7 +4172,7 @@ def test_official_framework_benchmark_scalar_populates_round_metrics(tmp_path, r
         _invoke_orchestrate(
             tmp_path,
             ref_file,
-            runner,
+            fake,
             max_rounds=1,
             judge_every=10,
             benchmark_result=BenchmarkResult(
@@ -4129,23 +4192,27 @@ def test_official_framework_benchmark_scalar_populates_round_metrics(tmp_path, r
 def test_official_regression_disproves_and_drops_queue_candidate(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
 
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="m2-preallocated-spsc-ring",
-                hypothesis="preallocation improves queue throughput",
-                task="establish the measured parent",
-                pass_criteria="queue remains correct",  # noqa: S106  # tracked: #288
-                reasoning="establish the parent",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="m3-pow2-mask-addressing",
-                hypothesis="mask addressing improves queue throughput",
-                task="replace modulo with mask addressing",
-                pass_criteria="queue remains correct",  # noqa: S106  # tracked: #288
-                reasoning="test the next mechanism",
-            ),
-        ]
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="m2-preallocated-spsc-ring",
+                    hypothesis="preallocation improves queue throughput",
+                    task="establish the measured parent",
+                    pass_criteria="queue remains correct",  # noqa: S106  # tracked: #288
+                    reasoning="establish the parent",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="m3-pow2-mask-addressing",
+                    hypothesis="mask addressing improves queue throughput",
+                    task="replace modulo with mask addressing",
+                    pass_criteria="queue remains correct",  # noqa: S106  # tracked: #288
+                    reasoning="test the next mechanism",
+                ),
+            ]
+        ),
     )
     benchmark_results = [
         FrameworkBenchmarkOutcome(
@@ -4167,7 +4234,7 @@ def test_official_regression_disproves_and_drops_queue_candidate(tmp_path, ref_f
         _invoke_orchestrate(
             tmp_path,
             ref_file,
-            runner,
+            fake,
             max_rounds=2,
             official_eval_every=1,
             benchmark_result=BenchmarkResult(
@@ -4195,36 +4262,46 @@ def test_official_regression_disproves_and_drops_queue_candidate(tmp_path, ref_f
 
 
 def test_loop_retries_when_framework_accuracy_gate_fails(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[OrchestratorPlan(task="Build", pass_criteria="tests", reasoning="start")],  # noqa: S106  # tracked: #288
-        judge_verdicts=["pass", "pass"],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(task="Build", pass_criteria="tests", reasoning="start"),  # noqa: S106  # tracked: #288
     )
+    fake.enqueue("judge", _judge_response("pass"), _judge_response("pass"))
 
     result = _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=1,
         max_retries_per_round=2,
         _accuracy_gate_results=["checker rejected history", None],
     )
 
     assert result is True
-    assert runner.counters["impl"] == 2
-    assert runner.counters["judge"] == 2
+    assert len(fake.calls_for("implementer")) == 2
+    assert len(fake.calls_for("judge")) == 2
 
 
 def test_framework_gate_retry_preserves_judge_approved_metrics(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        plans=[OrchestratorPlan(task="Build", pass_criteria="tests", reasoning="start")],  # noqa: S106  # tracked: #288
-        judge_verdicts=["pass", "pass"],
-        implementer_perf_metrics=[321.5, None],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(task="Build", pass_criteria="tests", reasoning="start"),  # noqa: S106  # tracked: #288
+    )
+    fake.enqueue("judge", _judge_response("pass"), _judge_response("pass"))
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=321.5),
+        _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=None),
     )
 
     result = _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=1,
         max_retries_per_round=2,
         _accuracy_gate_results=["wrapper failed", None],
@@ -4241,13 +4318,9 @@ def test_framework_gate_retry_preserves_judge_approved_metrics(tmp_path, ref_fil
     assert rounds[0]["evaluation_artifact"] == "benchmark/summary.json"
     assert rounds[0]["profile_skipped"] is False
 
-    implementer_calls = [
-        call
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("response_cls") is ImplementerResponse
-    ]
+    implementer_calls = fake.calls_for("implementer")
     assert len(implementer_calls) == 2
-    retry_prompt = implementer_calls[1].kwargs["system_prompt"]
+    retry_prompt = implementer_calls[1].system_prompt
     assert "Framework gate revalidation" in retry_prompt
     assert "321.5 tok/s" in retry_prompt
     assert "behavior-affecting repair invalidates stale metrics" in retry_prompt
@@ -4256,108 +4329,94 @@ def test_framework_gate_retry_preserves_judge_approved_metrics(tmp_path, ref_fil
 
 def test_loop_exhaustion_carries_to_next_round(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """Review exhaustion returns to the same implementer, not the designer."""
-    seen_plan_prompts: list[str] = []
-    seen_implementer_prompts: list[str] = []
-    original_runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                task="Build the whole server with every optimization",
-                pass_criteria="impossibly strict",  # noqa: S106  # tracked: #288
-                reasoning="ambitious",
-            ),
-            OrchestratorPlan(
-                task="Just get /health working",
-                pass_criteria="/health returns 200",  # noqa: S106  # tracked: #288
-                reasoning="backed off after exhaustion",
-            ),
-        ],
-        judge_verdicts=["fail", "fail", "pass"],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    task="Build the whole server with every optimization",
+                    pass_criteria="impossibly strict",  # noqa: S106  # tracked: #288
+                    reasoning="ambitious",
+                ),
+                OrchestratorPlan(
+                    task="Just get /health working",
+                    pass_criteria="/health returns 200",  # noqa: S106  # tracked: #288
+                    reasoning="backed off after exhaustion",
+                ),
+            ]
+        ),
     )
-
-    # Wrap invoke so we can capture the orchestrator plan prompts.
-    real_invoke = original_runner.invoke.side_effect
-
-    def spy_invoke(*, kind, response_cls, **kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
-        if kind == "orchestrator" and response_cls is OrchestratorPlan:
-            seen_plan_prompts.append(kwargs.get("system_prompt", ""))
-        if kind == "implementer" and response_cls is ImplementerResponse:
-            seen_implementer_prompts.append(kwargs.get("system_prompt", ""))
-        return real_invoke(kind=kind, response_cls=response_cls, **kwargs)
-
-    original_runner.invoke.side_effect = spy_invoke
+    fake.enqueue("judge", _judge_response("fail"), _judge_response("fail"), _judge_response("pass"))
 
     result = _invoke_orchestrate(
         tmp_path,
         ref_file,
-        original_runner,
+        fake,
         max_rounds=2,
         max_retries_per_round=2,
     )
     assert result is True
     # 2 attempts on round 1 (both fail) + 1 attempt on round 2 (pass).
-    assert original_runner.counters["impl"] == 3
+    assert len(fake.calls_for("implementer")) == 3
     # The outer designer is hands-off. Round 2 reuses the active plan and the
     # persistent implementer receives the independent judge's last feedback.
+    seen_plan_prompts = [
+        call.system_prompt for call in _calls_for_response(fake, "orchestrator", OrchestratorPlan)
+    ]
+    seen_implementer_prompts = [call.system_prompt for call in fake.calls_for("implementer")]
     assert len(seen_plan_prompts) == 1
     assert "needs work" in seen_implementer_prompts[2]
 
 
 def test_loop_orchestrator_requests_profile_before_plan(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """If PreRoundDecision.need_profile is True, profiler runs before the plan call."""
-    call_order: list[str] = []
-    profiler_prompts: list[str] = []
-    runner = _make_orchestrate_runner(
-        pre_decisions=[
-            PreRoundDecision(need_profile=False, profile_focus="", reasoning="read the source"),
-            PreRoundDecision(need_profile=True, profile_focus="kernels", reasoning="need data"),
-        ],
-        plans=[
-            # Round 1 plan: its own decision declined, so no profile precedes it.
-            OrchestratorPlan(
-                task="Build server",
-                pass_criteria="ok",  # noqa: S106  # tracked: #288
-                reasoning="start",
-            ),
-            # Round 2 plan — uses profiler summary.
-            OrchestratorPlan(
-                task="Optimize decode",
-                pass_criteria="graph replay",  # noqa: S106  # tracked: #288
-                reasoning="profile showed launch overhead",
-            ),
-        ],
-        profiler_responses=[
-            ProfilerSummary(
-                analysis="launch-bound",
-                bottlenecks="host-side sync",
-                suggestions="cuda graph",
-                perf_metric=5.0,
-                perf_unit="req/s",
-            ),
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        PreRoundDecision(need_profile=False, profile_focus="", reasoning="read the source"),
+        # Round 1 plan: its own decision declined, so no profile precedes it.
+        OrchestratorPlan(
+            task="Build server",
+            pass_criteria="ok",  # noqa: S106  # tracked: #288
+            reasoning="start",
+        ),
+        PreRoundDecision(need_profile=True, profile_focus="kernels", reasoning="need data"),
+        # Round 2 plan — uses profiler summary.
+        OrchestratorPlan(
+            task="Optimize decode",
+            pass_criteria="graph replay",  # noqa: S106  # tracked: #288
+            reasoning="profile showed launch overhead",
+        ),
+    )
+    fake.enqueue(
+        "profiler",
+        ProfilerSummary(
+            analysis="launch-bound",
+            bottlenecks="host-side sync",
+            suggestions="cuda graph",
+            perf_metric=5.0,
+            perf_unit="req/s",
+        ),
     )
 
-    real_invoke = runner.invoke.side_effect
-
-    def spy_invoke(*, kind, response_cls, **kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
-        if kind == "orchestrator" and response_cls is OrchestratorPlan:
-            call_order.append("plan")
-        elif kind == "profiler":
-            call_order.append("profiler")
-            profiler_prompts.append(kwargs.get("system_prompt", ""))
-        elif kind == "orchestrator" and response_cls is PreRoundDecision:
-            call_order.append("pre")
-        return real_invoke(kind=kind, response_cls=response_cls, **kwargs)
-
-    runner.invoke.side_effect = spy_invoke
-
-    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=2)
+    result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=2)
     assert result is True
     # Round 1: pre declined → just plan. Round 2: pre → profiler → plan.
+    call_order = []
+    for call in fake.calls:
+        if call.kind == "orchestrator" and call.response_cls is OrchestratorPlan:
+            call_order.append("plan")
+        elif call.kind == "profiler":
+            call_order.append("profiler")
+        elif call.kind == "orchestrator" and call.response_cls is PreRoundDecision:
+            call_order.append("pre")
     assert call_order == ["pre", "plan", "pre", "profiler", "plan"]
     plan_idx = [i for i, c in enumerate(call_order) if c == "plan"]
     prof_idx = call_order.index("profiler")
     # Profiler must come BEFORE the round-2 plan call.
     assert prof_idx < plan_idx[1]
+    profiler_prompts = [call.system_prompt for call in fake.calls_for("profiler")]
     assert "Recent campaign context" in profiler_prompts[0]
     assert "The durable progress artifact is `progress.md`" in profiler_prompts[0]
     assert "Round 1" not in profiler_prompts[0]
@@ -4365,66 +4424,88 @@ def test_loop_orchestrator_requests_profile_before_plan(tmp_path, ref_file):  # 
 
 
 def test_loop_skips_profiler_when_pre_round_decision_says_no(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        pre_decisions=[
-            PreRoundDecision(need_profile=False, profile_focus="", reasoning="benchmark is enough"),
-        ],
-        plans=[
-            OrchestratorPlan(task="Build server", pass_criteria="ok", reasoning="start"),  # noqa: S106  # tracked: #288
-            OrchestratorPlan(task="Use benchmark evidence", pass_criteria="ok", reasoning="skip"),  # noqa: S106  # tracked: #288
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(task="Build server", pass_criteria="ok", reasoning="start"),  # noqa: S106  # tracked: #288
+                OrchestratorPlan(
+                    task="Use benchmark evidence",
+                    pass_criteria="ok",  # noqa: S106  # tracked: #288
+                    reasoning="skip",
+                ),
+            ],
+            [
+                PreRoundDecision(
+                    need_profile=False, profile_focus="", reasoning="benchmark is enough"
+                ),
+            ],
+        ),
     )
 
-    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=2)
+    result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=2)
 
     assert result is True
     # Both rounds decide, including round 1; neither asked for a profile.
-    assert runner.counters["orch_pre"] == 2
-    assert runner.counters["prof"] == 0
+    assert len(_calls_for_response(fake, "orchestrator", PreRoundDecision)) == 2
+    assert len(fake.calls_for("profiler")) == 0
 
 
 def test_loop_skips_profiler_when_profiler_kind_is_none(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        pre_decisions=[
-            PreRoundDecision(need_profile=True, profile_focus="kernels", reasoning="would help"),
-        ],
-        plans=[
-            OrchestratorPlan(task="Build server", pass_criteria="ok", reasoning="start"),  # noqa: S106  # tracked: #288
-            OrchestratorPlan(
-                task="Use benchmark evidence",
-                pass_criteria="ok",  # noqa: S106  # tracked: #288
-                reasoning="disabled",  # noqa: RUF100, S106  # tracked: #288
-            ),
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(task="Build server", pass_criteria="ok", reasoning="start"),  # noqa: S106  # tracked: #288
+                OrchestratorPlan(
+                    task="Use benchmark evidence",
+                    pass_criteria="ok",  # noqa: S106  # tracked: #288
+                    reasoning="disabled",  # noqa: RUF100, S106  # tracked: #288
+                ),
+            ],
+            [
+                PreRoundDecision(
+                    need_profile=True, profile_focus="kernels", reasoning="would help"
+                ),
+            ],
+        ),
     )
 
     result = _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         profiler_kind=ProfilerKind.NONE,
     )
 
     assert result is True
     # Both rounds decide, including round 1; neither asked for a profile.
-    assert runner.counters["orch_pre"] == 2
-    assert runner.counters["prof"] == 0
+    assert len(_calls_for_response(fake, "orchestrator", PreRoundDecision)) == 2
+    assert len(fake.calls_for("profiler")) == 0
 
 
 def test_loop_generic_auto_profiler_resolves_to_macos_cpu(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner(
-        pre_decisions=[
-            PreRoundDecision(need_profile=True, profile_focus="kernels", reasoning="would help"),
-        ],
-        plans=[
-            OrchestratorPlan(task="Build queue", pass_criteria="ok", reasoning="start"),  # noqa: S106  # tracked: #288
-            OrchestratorPlan(
-                task="Use benchmark evidence",
-                pass_criteria="ok",  # noqa: S106  # tracked: #288
-                reasoning="generic",  # noqa: RUF100, S106  # tracked: #288
-            ),
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(task="Build queue", pass_criteria="ok", reasoning="start"),  # noqa: S106  # tracked: #288
+                OrchestratorPlan(
+                    task="Use benchmark evidence",
+                    pass_criteria="ok",  # noqa: S106  # tracked: #288
+                    reasoning="generic",  # noqa: RUF100, S106  # tracked: #288
+                ),
+            ],
+            [
+                PreRoundDecision(
+                    need_profile=True, profile_focus="kernels", reasoning="would help"
+                ),
+            ],
+        ),
     )
 
     with (
@@ -4437,67 +4518,61 @@ def test_loop_generic_auto_profiler_resolves_to_macos_cpu(tmp_path, ref_file):  
         result = _invoke_orchestrate(
             tmp_path,
             ref_file,
-            runner,
+            fake,
             max_rounds=2,
             domain=DomainName.GENERIC,
         )
 
     assert result is True
-    assert runner.counters["orch_pre"] == 2
-    assert runner.counters["prof"] == 1
+    assert len(_calls_for_response(fake, "orchestrator", PreRoundDecision)) == 2
+    assert len(fake.calls_for("profiler")) == 1
 
 
 def test_loop_asks_whether_to_profile_before_the_first_plan(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    """Round 1 routes through the same decision as every other round.
-
-    It used to skip that decision outright, which also skipped the profiler
-    nested under it: the round holding the least evidence was the one round
-    where nothing could ask for measurement.
+    """Round 1 routes through the same profiling decision as every other round,
+    so it can still request a profiler measurement even though it has the
+    least history to go on.
     """
-    call_order: list[str] = []
-    plan_prompts: list[str] = []
-    pre_prompts: list[str] = []
-    runner = _make_orchestrate_runner(
-        pre_decisions=[
-            PreRoundDecision(need_profile=True, profile_focus="decode", reasoning="it runs"),
-        ],
-        plans=[
-            OrchestratorPlan(
-                task="Cut the measured hotspot",
-                pass_criteria="ok",  # noqa: S106  # tracked: #288
-                reasoning="the profile named it",
-            ),
-        ],
-        profiler_responses=[
-            ProfilerSummary(
-                analysis="decode is launch-bound",
-                bottlenecks="host-side sync",
-                suggestions="cuda graph",
-                perf_metric=5.0,
-                perf_unit="req/s",
-            ),
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        PreRoundDecision(need_profile=True, profile_focus="decode", reasoning="it runs"),
+        OrchestratorPlan(
+            task="Cut the measured hotspot",
+            pass_criteria="ok",  # noqa: S106  # tracked: #288
+            reasoning="the profile named it",
+        ),
     )
-    real_invoke = runner.invoke.side_effect
+    fake.enqueue(
+        "profiler",
+        ProfilerSummary(
+            analysis="decode is launch-bound",
+            bottlenecks="host-side sync",
+            suggestions="cuda graph",
+            perf_metric=5.0,
+            perf_unit="req/s",
+        ),
+    )
 
-    def spy_invoke(*, kind, response_cls, **kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
-        if kind == "profiler":
-            call_order.append("profiler")
-        elif kind == "orchestrator" and response_cls is OrchestratorPlan:
-            call_order.append("plan")
-            plan_prompts.append(kwargs.get("system_prompt", ""))
-        elif kind == "orchestrator" and response_cls is PreRoundDecision:
-            call_order.append("pre")
-            pre_prompts.append(kwargs.get("system_prompt", ""))
-        return real_invoke(kind=kind, response_cls=response_cls, **kwargs)
-
-    runner.invoke.side_effect = spy_invoke
-
-    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1)
+    result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1)
 
     assert result is True
     # The decision precedes the profiler, which precedes the plan it informs.
+    call_order = []
+    for call in fake.calls:
+        if call.kind == "profiler":
+            call_order.append("profiler")
+        elif call.kind == "orchestrator" and call.response_cls is OrchestratorPlan:
+            call_order.append("plan")
+        elif call.kind == "orchestrator" and call.response_cls is PreRoundDecision:
+            call_order.append("pre")
     assert call_order == ["pre", "profiler", "plan"]
+    pre_prompts = [
+        call.system_prompt for call in _calls_for_response(fake, "orchestrator", PreRoundDecision)
+    ]
+    plan_prompts = [
+        call.system_prompt for call in _calls_for_response(fake, "orchestrator", OrchestratorPlan)
+    ]
     # Round 1 is told it has no history and may establish runnability itself.
     assert "This is\nround 1" in pre_prompts[0]
     assert "one cheap check" in pre_prompts[0]
@@ -4514,46 +4589,42 @@ def test_loop_first_round_profiles_only_when_its_decision_asks(tmp_path, ref_fil
     decision is what keeps that run from spending the turn, so a declined
     round 1 must reach its plan with no profiler call at all.
     """
-    runner = _make_orchestrate_runner(
-        pre_decisions=[
-            PreRoundDecision(
-                need_profile=False,
-                profile_focus="",
-                reasoning="nothing runs yet; round 1 must make it build",
-            ),
-        ],
-        plans=[
-            OrchestratorPlan(
-                task="Make the service build",
-                pass_criteria="compiles",  # noqa: S106  # tracked: #288
-                reasoning="no measurable system yet",
-            ),
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        PreRoundDecision(
+            need_profile=False,
+            profile_focus="",
+            reasoning="nothing runs yet; round 1 must make it build",
+        ),
+        OrchestratorPlan(
+            task="Make the service build",
+            pass_criteria="compiles",  # noqa: S106  # tracked: #288
+            reasoning="no measurable system yet",
+        ),
     )
 
-    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1)
+    result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1)
 
     assert result is True
-    assert runner.counters["orch_pre"] == 1
-    assert runner.counters["prof"] == 0
+    assert len(_calls_for_response(fake, "orchestrator", PreRoundDecision)) == 1
+    assert len(fake.calls_for("profiler")) == 0
 
 
 def test_loop_records_the_first_round_decision_in_the_progress_artifact(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """Round 1's reasoning is auditable rather than an unrecorded skip."""
-    runner = _make_orchestrate_runner(
-        pre_decisions=[
-            PreRoundDecision(
-                need_profile=False,
-                profile_focus="",
-                reasoning="the candidate does not build yet",
-            ),
-        ],
-        plans=[
-            OrchestratorPlan(task="Make it build", pass_criteria="ok", reasoning="broken"),  # noqa: S106  # tracked: #288
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        PreRoundDecision(
+            need_profile=False,
+            profile_focus="",
+            reasoning="the candidate does not build yet",
+        ),
+        OrchestratorPlan(task="Make it build", pass_criteria="ok", reasoning="broken"),  # noqa: S106  # tracked: #288
     )
 
-    _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1)
+    _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1)
 
     progress = (_created_project(tmp_path) / "progress.md").read_text()
     assert "## Round 1 — Orchestrator (pre-round)" in progress
@@ -4563,30 +4634,32 @@ def test_loop_records_the_first_round_decision_in_the_progress_artifact(tmp_path
 def test_loop_runs_full_max_rounds_budget(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """With the ``done`` field removed, the loop always exhausts max_rounds.
     A single-round budget yields one implementer + judge call, no more."""
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                task="Build server",
-                pass_criteria="ok",  # noqa: S106  # tracked: #288
-                reasoning="round 1",
-            )
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            task="Build server",
+            pass_criteria="ok",  # noqa: S106  # tracked: #288
+            reasoning="round 1",
+        ),
     )
-    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1)
+    result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1)
     assert result is True
-    assert runner.counters["impl"] == 1
-    assert runner.counters["judge"] == 1
+    assert len(fake.calls_for("implementer")) == 1
+    assert len(fake.calls_for("judge")) == 1
 
 
 def test_loop_max_rounds_terminates(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """Loop exits after max_rounds and reports success (the loop always runs
     to budget; there is no early-stop signal)."""
     plans = [OrchestratorPlan(task=f"t{i}", pass_criteria="p", reasoning="r") for i in range(10)]  # noqa: S106  # tracked: #288
-    runner = _make_orchestrate_runner(plans=plans)
-    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=3)
+    fake = _new_orchestrate_fake()
+    fake.enqueue("orchestrator", *_orchestrator_turns(plans))
+    result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=3)
     assert result is True
-    assert runner.counters["orch_plan"] == 3
-    assert runner.counters["impl"] == 3
+    assert len(_calls_for_response(fake, "orchestrator", OrchestratorPlan)) == 3
+    assert len(fake.calls_for("implementer")) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -4595,7 +4668,7 @@ def test_loop_max_rounds_terminates(tmp_path, ref_file):  # noqa: ANN001, ANN201
 
 
 def test_cli_loads_objective_md_from_ref_parent(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from entrypoints.headless import _load_objective  # noqa: PLC0415  # tracked: #288
+    from entrypoints.cli import _load_objective  # noqa: PLC0415  # tracked: #288
     from vibesys.evaluators.input_manifest import (  # noqa: PLC0415  # tracked: #288
         load_input_bundle,
     )
@@ -4634,7 +4707,7 @@ def test_cli_missing_objective_md_errors(tmp_path):  # noqa: ANN001, ANN201  # t
 
 def test_cli_rejects_modal_with_nsys_profiler(tmp_path, ref_file):  # noqa: ANN001, ANN201, ARG001  # tracked: #288
     """--modal only supports torch profiler."""
-    from entrypoints.headless import (  # noqa: PLC0415  # tracked: #288
+    from entrypoints.cli import (  # noqa: PLC0415  # tracked: #288
         _build_agent_parser,
         _validate_agent,
     )
@@ -4842,28 +4915,29 @@ def test_detect_plateau_streak_must_be_recent():  # noqa: ANN201  # tracked: #28
 
 def test_loop_creates_roadmap_md_in_project(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """The first round of a fresh run seeds roadmap.md at the project root."""
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                task="Build server",
-                pass_criteria="/health 200",  # noqa: S106  # tracked: #288
-                reasoning="cold start",
-            ),
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            task="Build server",
+            pass_criteria="/health 200",  # noqa: S106  # tracked: #288
+            reasoning="cold start",
+        ),
     )
-    result = _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1)
+    result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1)
     assert result is True
     text = (_created_project(tmp_path) / "roadmap.md").read_text()
     assert "## Major" in text
 
 
 def test_loop_can_create_scannable_directory_memory(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_orchestrate_runner()
+    fake = _new_orchestrate_fake()
 
     result = _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=1,
         memory_layout="directories",
     )
@@ -4879,22 +4953,17 @@ def test_loop_can_create_scannable_directory_memory(tmp_path, ref_file):  # noqa
 def test_loop_threads_roadmap_into_orchestrator_prompt(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """The orchestrator's plan prompt must include the current roadmap.md
     contents so the orchestrator can update them."""
-    seen_prompts: list[str] = []
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(task="t", pass_criteria="p", reasoning="r"),  # noqa: S106  # tracked: #288
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(task="t", pass_criteria="p", reasoning="r"),  # noqa: S106  # tracked: #288
     )
-    real = runner.invoke.side_effect
 
-    def spy(*, kind, response_cls, **kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
-        if kind == "orchestrator" and response_cls is OrchestratorPlan:
-            seen_prompts.append(kwargs.get("system_prompt", ""))
-        return real(kind=kind, response_cls=response_cls, **kwargs)
-
-    runner.invoke.side_effect = spy
-
-    _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1)
+    _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1)
+    seen_prompts = [
+        call.system_prompt for call in _calls_for_response(fake, "orchestrator", OrchestratorPlan)
+    ]
     assert len(seen_prompts) == 1
     prompt = seen_prompts[0]
     # Roadmap section header must be present, and so must the seed scaffold.
@@ -4906,7 +4975,6 @@ def test_loop_threads_roadmap_into_orchestrator_prompt(tmp_path, ref_file):  # n
 def test_loop_threads_plateau_warning_into_prompt(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """When the prior rounds plateau on framework-measured perf, the
     orchestrator's next prompt must include the plateau warning."""
-    seen_prompts: list[str] = []
     # Five rounds: round 1 is cold-start (no profiler), rounds 2-4 produce
     # flat perf metrics, and round 5 is the round under test (its plan call
     # should see the plateau warning).
@@ -4914,51 +4982,27 @@ def test_loop_threads_plateau_warning_into_prompt(tmp_path, ref_file):  # noqa: 
         OrchestratorPlan(task=f"r{i}", pass_criteria="p", reasoning=f"r{i}")  # noqa: S106  # tracked: #288
         for i in range(1, 6)  # noqa: RUF100, S106  # tracked: #288
     ]
-    runner = _make_orchestrate_runner(
-        pre_decisions=[
-            PreRoundDecision(need_profile=True, profile_focus="x", reasoning="ok"),
-        ]
-        * 4,  # rounds 2-5
-        plans=plans,
-        profiler_responses=[
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            plans,
+            [PreRoundDecision(need_profile=True, profile_focus="x", reasoning="ok")] * 4,
+        ),
+    )
+    fake.enqueue(
+        "profiler",
+        *[
             ProfilerSummary(
                 analysis="a",
                 bottlenecks="b",
                 suggestions="s",
-                perf_metric=42.0,
+                perf_metric=metric,
                 perf_unit="tok/s",
-            ),
-            ProfilerSummary(
-                analysis="a",
-                bottlenecks="b",
-                suggestions="s",
-                perf_metric=42.1,
-                perf_unit="tok/s",
-            ),
-            ProfilerSummary(
-                analysis="a",
-                bottlenecks="b",
-                suggestions="s",
-                perf_metric=41.9,
-                perf_unit="tok/s",
-            ),
-            ProfilerSummary(
-                analysis="a",
-                bottlenecks="b",
-                suggestions="s",
-                perf_metric=42.05,
-                perf_unit="tok/s",
-            ),
+            )
+            for metric in (42.0, 42.1, 41.9, 42.05)
         ],
     )
-    real = runner.invoke.side_effect
-
-    def spy(*, kind, response_cls, **kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
-        if kind == "orchestrator" and response_cls is OrchestratorPlan:
-            seen_prompts.append(kwargs.get("system_prompt", ""))
-        return real(kind=kind, response_cls=response_cls, **kwargs)
-
-    runner.invoke.side_effect = spy
 
     # The plateau signal is built from framework measurements only, so the
     # readings have to come from the benchmark gate. Round one measures
@@ -4980,11 +5024,14 @@ def test_loop_threads_plateau_warning_into_prompt(tmp_path, ref_file):  # noqa: 
         _invoke_orchestrate(
             tmp_path,
             ref_file,
-            runner,
+            fake,
             max_rounds=5,
             official_eval_every=1,
             benchmark_result_protocol=2,
         )
+    seen_prompts = [
+        call.system_prompt for call in _calls_for_response(fake, "orchestrator", OrchestratorPlan)
+    ]
     assert len(seen_prompts) == 5
     # Rounds 1-4 have <3 valid perf records before each plan call → no
     # warning yet (round 1: 0 perf; round 2: 0 perf; round 3: 1 perf; round 4: 2 perf).
@@ -5008,37 +5055,40 @@ def test_self_reported_numbers_do_not_raise_a_plateau_warning(tmp_path, ref_file
     declares no benchmark result contract gets no plateau warning at all,
     because the framework has measured nothing to detect a plateau in.
     """
-    seen_prompts: list[str] = []
     plans = [
         OrchestratorPlan(task=f"r{i}", pass_criteria="p", reasoning=f"r{i}")  # noqa: S106  # tracked: #288
         for i in range(1, 6)  # noqa: RUF100, S106  # tracked: #288
     ]
-    runner = _make_orchestrate_runner(
-        pre_decisions=[PreRoundDecision(need_profile=True, profile_focus="x", reasoning="ok")] * 4,
-        plans=plans,
-        profiler_responses=[
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            plans,
+            [PreRoundDecision(need_profile=True, profile_focus="x", reasoning="ok")] * 4,
+        ),
+    )
+    fake.enqueue(
+        "profiler",
+        *[
             ProfilerSummary(
-                analysis="a",
-                bottlenecks="b",
-                suggestions="s",
-                perf_metric=value,
-                perf_unit="tok/s",
+                analysis="a", bottlenecks="b", suggestions="s", perf_metric=value, perf_unit="tok/s"
             )
             for value in (42.0, 42.1, 41.9, 42.05)
         ],
-        implementer_perf_metrics=[None, 42.0, 42.1, 41.9, 42.05],
     )
-    real = runner.invoke.side_effect
+    fake.enqueue(
+        "implementer",
+        *[
+            _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=metric)
+            for metric in (None, 42.0, 42.1, 41.9, 42.05)
+        ],
+    )
 
-    def spy(*, kind, response_cls, **kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
-        if kind == "orchestrator" and response_cls is OrchestratorPlan:
-            seen_prompts.append(kwargs.get("system_prompt", ""))
-        return real(kind=kind, response_cls=response_cls, **kwargs)
+    _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=5, official_eval_every=1)
 
-    runner.invoke.side_effect = spy
-
-    _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=5, official_eval_every=1)
-
+    seen_prompts = [
+        call.system_prompt for call in _calls_for_response(fake, "orchestrator", OrchestratorPlan)
+    ]
     assert len(seen_prompts) == 5
     assert [round_data["perf_provenance"] for round_data in _round_payloads(tmp_path)][1:] == [
         "implementer"
@@ -5053,12 +5103,10 @@ def test_completed_round_records_which_implementer_produced_it(tmp_path, ref_fil
     the portable record carries only the attribution needed to tell whether a
     resumed run is continuing the same configuration.
     """
-    runner = _make_orchestrate_runner()
-    runner.driver_name = "agentshim"
-    runner.provider = "codex"
-    runner.model_for_kind.return_value = "gpt-5.6-sol"
+    fake = _new_orchestrate_fake()
+    fake.set_attribution(driver_name="agentshim", provider="codex", model="gpt-5.6-sol")
 
-    _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1)
+    _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1)
 
     round_one = _round_payloads(tmp_path)[0]
     assert round_one["implementer_driver"] == "agentshim"
@@ -5093,9 +5141,12 @@ def test_round_records_stamp_who_produced_the_headline_metric(tmp_path, ref_file
     number is trustworthy cannot tell the agent's self-report from a
     framework-owned measurement, which is what #479 is about.
     """
-    runner = _make_orchestrate_runner(implementer_perf_metrics=[321.5])
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "implementer", _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=321.5)
+    )
 
-    _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1, judge_every=10)
+    _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1, judge_every=10)
 
     rounds = _round_payloads(tmp_path)
     assert rounds[0]["official_evaluation"] is True
@@ -5105,7 +5156,10 @@ def test_round_records_stamp_who_produced_the_headline_metric(tmp_path, ref_file
 
 def test_framework_measured_round_is_stamped_framework(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """The framework benchmark's number overrides the agent's, stamp included."""
-    runner = _make_orchestrate_runner(implementer_perf_metrics=[321.5])
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "implementer", _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=321.5)
+    )
 
     with patch(
         "vibesys.loops.agent.loop._run_framework_benchmark",
@@ -5118,7 +5172,7 @@ def test_framework_measured_round_is_stamped_framework(tmp_path, ref_file):  # n
         _invoke_orchestrate(
             tmp_path,
             ref_file,
-            runner,
+            fake,
             max_rounds=1,
             judge_every=10,
             benchmark_result_protocol=2,
@@ -5132,9 +5186,9 @@ def test_framework_measured_round_is_stamped_framework(tmp_path, ref_file):  # n
 
 def test_a_round_with_no_headline_metric_carries_no_provenance(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """The invariant: provenance is set exactly when a metric is recorded."""
-    runner = _make_orchestrate_runner(implementer_perf_metrics=[None])
+    fake = _new_orchestrate_fake()
 
-    _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=1, judge_every=10)
+    _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1, judge_every=10)
 
     rounds = _round_payloads(tmp_path)
     assert rounds[0]["perf_metric"] is None
@@ -5148,12 +5202,13 @@ def test_single_agent_self_reported_metric_is_stamped_implementer(tmp_path, ref_
     the agent's own report by construction. Nothing about that round makes it
     more trustworthy than the multi-agent implementer's number.
     """
-    runner = _make_orchestrate_runner(single_agent_perf_metrics=[123.5])
+    fake = _new_orchestrate_fake()
+    fake.enqueue("implementer", _single_agent_round(123.5))
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=1,
         inner_loop="single-agent",
     )
@@ -5165,7 +5220,8 @@ def test_single_agent_self_reported_metric_is_stamped_implementer(tmp_path, ref_
 
 def test_single_agent_framework_benchmark_overrides_and_stamps_framework(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """A framework benchmark replaces the single agent's number and its stamp."""
-    runner = _make_orchestrate_runner(single_agent_perf_metrics=[123.5])
+    fake = _new_orchestrate_fake()
+    fake.enqueue("implementer", _single_agent_round(123.5))
 
     with patch(
         "vibesys.loops.agent.loop._run_framework_benchmark",
@@ -5178,7 +5234,7 @@ def test_single_agent_framework_benchmark_overrides_and_stamps_framework(tmp_pat
         _invoke_orchestrate(
             tmp_path,
             ref_file,
-            runner,
+            fake,
             max_rounds=1,
             inner_loop="single-agent",
             benchmark_result_protocol=2,
@@ -5191,12 +5247,13 @@ def test_single_agent_framework_benchmark_overrides_and_stamps_framework(tmp_pat
 
 def test_single_agent_round_without_a_metric_carries_no_provenance(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """The invariant holds on the single-agent path as well."""
-    runner = _make_orchestrate_runner(single_agent_perf_metrics=[None])
+    fake = _new_orchestrate_fake()
+    fake.enqueue("implementer", _single_agent_round(None))
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=1,
         inner_loop="single-agent",
     )
@@ -5215,27 +5272,27 @@ def test_framework_measured_improvement_resolves_proven(tmp_path, ref_file):  # 
     beats its causal baseline must resolve `proven`, or this change would have
     made the resolution unreachable rather than honest.
     """
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="baseline-claim",
-                hypothesis="first causal claim",
-                task="establish the baseline",
-                pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
-                reasoning="first experiment",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="improvement-claim",
-                hypothesis="second causal claim",
-                task="beat the baseline",
-                pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
-                reasoning="second experiment",
-            ),
-        ],
-        implementer_outcomes=[
-            HypothesisOutcome.NOMINATED,
-            HypothesisOutcome.NOMINATED,
-        ],
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        *_orchestrator_turns(
+            [
+                OrchestratorPlan(
+                    hypothesis_id="baseline-claim",
+                    hypothesis="first causal claim",
+                    task="establish the baseline",
+                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    reasoning="first experiment",
+                ),
+                OrchestratorPlan(
+                    hypothesis_id="improvement-claim",
+                    hypothesis="second causal claim",
+                    task="beat the baseline",
+                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    reasoning="second experiment",
+                ),
+            ]
+        ),
     )
 
     with patch(
@@ -5256,7 +5313,7 @@ def test_framework_measured_improvement_resolves_proven(tmp_path, ref_file):  # 
         _invoke_orchestrate(
             tmp_path,
             ref_file,
-            runner,
+            fake,
             max_rounds=2,
             judge_every=1,
             official_eval_every=1,
@@ -5288,44 +5345,44 @@ def test_reprompted_plan_is_labelled_as_a_retry_of_the_same_round(tmp_path, ref_
     framework invents that neither parses drops the retry out of the operator's
     view of the round.
     """
-    runner = _make_orchestrate_runner(
-        plans=[
-            OrchestratorPlan(
-                hypothesis_id="already-used",
-                task="complete the first investigation",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="create the identifier",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="already-used",
-                hypothesis_updates=[
-                    HypothesisStrategyUpdate(
-                        hypothesis_id="already-used",
-                        disposition="parked",
-                        reason="names the new hypothesis, which is also rejected",
-                    )
-                ],
-                task="incorrectly reuse the identifier",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="exercise unique identity validation",
-            ),
-            OrchestratorPlan(
-                hypothesis_id="corrected-id",
-                task="proceed with a fresh identifier",
-                pass_criteria="review",  # noqa: S106  # tracked: #288
-                reasoning="corrected after the reprompt",
-            ),
-        ]
+    # Round two's first attempt collides and is reprompted within the same
+    # round, so only two pre-round decisions precede the three plan attempts.
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "orchestrator",
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="already-used",
+            task="complete the first investigation",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="create the identifier",
+        ),
+        _default_pre_round_decision(),
+        OrchestratorPlan(
+            hypothesis_id="already-used",
+            hypothesis_updates=[
+                HypothesisStrategyUpdate(
+                    hypothesis_id="already-used",
+                    disposition="parked",
+                    reason="names the new hypothesis, which is also rejected",
+                )
+            ],
+            task="incorrectly reuse the identifier",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="exercise unique identity validation",
+        ),
+        OrchestratorPlan(
+            hypothesis_id="corrected-id",
+            task="proceed with a fresh identifier",
+            pass_criteria="review",  # noqa: S106  # tracked: #288
+            reasoning="corrected after the reprompt",
+        ),
     )
 
-    _invoke_orchestrate(tmp_path, ref_file, runner, max_rounds=2)
+    _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=2)
 
-    plan_calls = [
-        call
-        for call in runner.invoke.call_args_list
-        if call.kwargs.get("response_cls") is OrchestratorPlan
-    ]
-    assert [call.kwargs["round_label"] for call in plan_calls] == [
+    plan_calls = _calls_for_response(fake, "orchestrator", OrchestratorPlan)
+    assert [call.round_label for call in plan_calls] == [
         "round-1-plan",
         "round-2-plan",
         "round-2-retry-1-plan",
@@ -5333,7 +5390,7 @@ def test_reprompted_plan_is_labelled_as_a_retry_of_the_same_round(tmp_path, ref_
 
     # The corrective prompt names what was rejected, so the orchestrator does
     # not have to guess which identifier collided.
-    corrective = plan_calls[2].kwargs["user_prompt"]
+    corrective = plan_calls[2].user_prompt
     assert "already-used" in corrective
     assert "never reuse an identifier used earlier in this run" in corrective.lower()
 
@@ -5343,12 +5400,17 @@ def test_round_finished_events_carry_profile_skipped(tmp_path, ref_file):  # noq
     # Round 1 reports no metric: no fresh profile ran, so the round is marked
     # skipped with no perf reading. Round 2 is the final round, whose forced
     # official evaluation records a fresh 321.5.
-    runner = _make_orchestrate_runner(implementer_perf_metrics=[None, 321.5])
+    fake = _new_orchestrate_fake()
+    fake.enqueue(
+        "implementer",
+        _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=None),
+        _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=321.5),
+    )
 
     _invoke_orchestrate(
         tmp_path,
         ref_file,
-        runner,
+        fake,
         max_rounds=2,
         judge_every=10,
     )

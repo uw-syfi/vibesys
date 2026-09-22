@@ -166,10 +166,10 @@ Docker's layer cache is what makes a repeat build of either image cheap;
 immutable manifest ID rather than keeping a manifest of its own.
 
 CLI and toolchain versions are not in the Dockerfile: they are build args
-supplied from `vibesys.agents.provider_policy` (`NODE_VERSION`,
-`CLI_VERSIONS`, `RUST_TOOLCHAIN_VERSION`, `GO_TOOLCHAIN_VERSION`), so a
-version bump is a one-line change in one module instead of an edit to the
-Dockerfile itself.
+supplied through the library's public API, `vs_agent.api` (`NODE_VERSION`,
+`CLI_VERSIONS`, `RUST_TOOLCHAIN_VERSION`, `GO_TOOLCHAIN_VERSION`; defined in the
+library's `provider_policy` module), so a version bump is a one-line change in
+one module instead of an edit to the Dockerfile itself.
 
 A task Dockerfile that needs the backend's base image declares `ARG
 BASE_IMAGE` and `FROM ${BASE_IMAGE}`; `agent_image` always passes
@@ -332,9 +332,10 @@ rows.
 ## Mock driver
 
 `driver = "mock"` is test infrastructure. It satisfies the same driver
-contract while streaming a deterministic playbook, so tests exercise the real
-`AgentClient` -> `OutputSink` -> server integration -> transport path without an agent
-CLI, a model, or a network. It never writes events, state, or files itself.
+contract while streaming an explicitly scripted turn, so tests exercise the
+real `AgentClient` -> `OutputSink` -> server integration -> transport path
+without an agent CLI, a model, or a network. It never writes events, state, or
+files itself.
 
 ```toml
 [agent]
@@ -342,15 +343,12 @@ backend = "cli"
 driver = "mock"
 ```
 
-Two playbooks, both in `vibesys.agents.drivers.mock`:
+`FakeDriver`, defined in the library's internal `drivers.fake` module, takes
+an explicit `turn=[...]` (or `turns=[[...], ...]` for a sequence of distinct
+turns) built from its event-builder functions: `assistant_text`, `thinking`,
+`tool_call`, `tool_result`, `todo_write`, and `usage`.
 
-- `ScriptedPlaybook` synthesizes a turn from configurable counts: assistant
-  text chunks, thinking chunks, tool call/result pairs of a chosen payload
-  size, todo snapshots, and usage updates, with optional per-event pacing.
-- `ReplayPlaybook` re-emits a recorded run's `run-events.jsonl` at a
-  configurable speed (`0` replays as fast as the consumer accepts events).
-
-Structured turns are answered from `vibesys.agents.scripted_rounds`, which the
+Structured turns are answered from `vs_agent.scripted_rounds`, which the
 stub agent client shares, so a scripted run completes loop rounds on the happy
 path. A response schema with no scripted artifact raises rather than being
 faked. The mock is not offered through the client protocol: driver choice

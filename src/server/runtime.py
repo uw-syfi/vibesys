@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import signal
 import threading
 from contextlib import suppress
@@ -9,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.api.service import RunApi
 from server.chat.manager import ChatManager
-from server.controller import RunController, RunStopped
+from server.controller import RunController
 from server.diagnostics import (
     Diagnostic,
     DiagnosticRetryability,
@@ -29,13 +30,14 @@ from server.integration import RunIntegrationAdapter
 from server.journal import EventJournal
 from server.read_model import RunInspector
 from server.transport.unix_jsonl import UnixJsonlServer
-from vibesys.errors import ConfigurationError
+from vibesys.api import ConfigurationError, RunStopped, create_session
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from server.settings import InteractiveSetupDefaults
+    from vibesys.api import RunRequest, RunResult, RunSession
 
 
 _TERMINAL_EVENT_TYPES = frozenset(
@@ -81,9 +83,43 @@ class ServerRuntime:
             self.journal,
             self.chat,
             self.integration,
+            session_provider=lambda: self.session,
             tui_defaults=tui_defaults,
         )
         self.chat.enable_terminal_retention()
+        self.session: RunSession | None = None
+
+    def drive(self, request: RunRequest) -> RunResult:
+        """Build and run *request*'s session, retaining it while it is live.
+
+        This is `headless._execute_run_request`'s body, relocated so the
+        server builds the `RunRequest` and calls `vibesys.api.create_session`
+        itself instead of going through `headless.dispatch`. The sink is
+        `self.integration.project_event` directly: `self.integration` no
+        longer subscribes its own core event journal (see
+        `server.integration.RunIntegrationAdapter`), so the session's own
+        `LocalRunIntegration` is the only journal in this run's path.
+        `self.session` is stored and cleared under `self.condition`, the lock
+        the transport threads synchronize on; `self.api`'s `session_provider`
+        reads it to route steer/pause/resume/stop to the live run. The
+        resource-handoff listener closes over `session` itself so
+        `RunIntegrationAdapter._handle_run_resources` can thread it into
+        `ExperimentChatFactory`, which opens its own agent-construction
+        environment through `session.open_agent_environment(...)`.
+        """
+        session = create_session(request, sink=self.integration.project_event)
+        session.on_committed_view(self.api._observe_committed_state)  # noqa: SLF001
+        session.on_run_resources(
+            lambda handoff: self.integration._handle_run_resources(session, handoff)  # noqa: SLF001
+        )
+        with self.condition:
+            self.session = session
+        session.start()
+        try:
+            return asyncio.run(session.await_result())
+        finally:
+            with self.condition:
+                self.session = None
 
     def run(self, run: Callable[[], Any]) -> Any:  # noqa: ANN401, PLR0915
         """Serve requests while executing ``run`` in the calling thread."""

@@ -30,7 +30,7 @@ import {
   reduceEventBatch,
   reduceSnapshot,
 } from '@vibesys/core-state';
-import {canonicalJournalEvents, readJournalRecords} from './journal.js';
+import {canonicalJournalEvents, type RunEventRecord, readJournalRecords} from './journal.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MOCK_UI = join(HERE, 'mock-ui.sh');
@@ -196,6 +196,83 @@ function countByType(events: readonly RunEvent[], type: string): number {
   return events.filter(event => event.type === type).length;
 }
 
+/**
+ * The run-level spine a tail-bounded bootstrap prepends, duplicated from
+ * `_BOOTSTRAP_SPINE_TYPES` in `src/server/journal.py` rather than imported
+ * from `mock-server.ts`, which runs the server's `main` on import.
+ */
+const SPINE_TYPES = new Set([
+  'run_started',
+  'run_status_changed',
+  'run_finished',
+  'run_failed',
+  'run_interrupted',
+  'configuration_failed',
+  'round_finished',
+  'experiments_changed',
+  'chat_thread_created',
+]);
+
+/** The canonical stream the mock serves for `fixture`, computed the same way. */
+function canonicalFixture(fixture: string): RunEventRecord[] {
+  return canonicalJournalEvents(readJournalRecords(join(FIXTURE_DIR, fixture)));
+}
+
+/** What a tail-bounded bootstrap owes: the spine at or below `floor`, then the rest. */
+function spineBootstrap(events: RunEventRecord[], floor: number): RunEventRecord[] {
+  return [
+    ...events.filter(event => (event.sequence ?? 0) <= floor && SPINE_TYPES.has(event.type ?? '')),
+    ...events.filter(event => (event.sequence ?? 0) > floor),
+  ];
+}
+
+interface Collected {
+  /** Raw lines, for byte-level comparisons. */
+  lines: string[];
+  messages: Record<string, unknown>[];
+}
+
+/**
+ * Collects every line the server writes on `socket`, keeping the raw bytes
+ * alongside the parse. Attached before the request goes out, unlike a late
+ * `nextMessage`, so a multi-message exchange cannot lose its earlier lines.
+ */
+function collectMessages(socket: Socket): Collected {
+  const collected: Collected = {lines: [], messages: []};
+  let buffer = '';
+  socket.setEncoding('utf8');
+  socket.on('data', chunk => {
+    buffer += chunk;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line) continue;
+      collected.lines.push(line);
+      collected.messages.push(JSON.parse(line) as Record<string, unknown>);
+    }
+  });
+  return collected;
+}
+
+function eventBatches(collected: Collected): Record<string, unknown>[] {
+  return collected.messages.filter(message => message['type'] === 'event_batch');
+}
+
+/**
+ * Subscribes on a fresh connection with `fields` merged into the request and
+ * resolves once the bootstrap batch has arrived.
+ */
+async function subscribeCollecting(
+  socketPath: string,
+  fields: Record<string, unknown>,
+): Promise<{socket: Socket; collected: Collected}> {
+  const socket = await connect(socketPath);
+  const collected = collectMessages(socket);
+  request(socket, {request_id: 'sub-1', type: 'subscribe', ...fields});
+  await waitFor('the bootstrap batch', async () => eventBatches(collected).length > 0);
+  return {socket, collected};
+}
+
 test(
   'terminates the mock server when the client exits before it subscribes',
   async () => {
@@ -335,6 +412,222 @@ test(
     expect(countByType(all, 'agent_execution_finished')).toBe(3);
     expect(countByType(all, 'invocation_started')).toBe(0);
     expect(countByType(all, 'invocation_finished')).toBe(0);
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  'resumes a reconnect from after_sequence instead of replaying the bootstrap',
+  async () => {
+    const directory = scratchDirectory('vs-mock-resume-');
+    const socketPath = join(directory, 'mock.sock');
+    await startMockServer(socketPath, [
+      '--fixture',
+      'queue-rs-payloads.jsonl',
+      '--bootstrap',
+      String(MID_EXECUTION_BOOTSTRAP),
+      '--paused',
+    ]);
+    const delivered = canonicalFixture('queue-rs-payloads.jsonl').slice(0, MID_EXECUTION_BOOTSTRAP);
+    const through = delivered.at(-1)?.sequence ?? 0;
+
+    const boot = await subscribeCollecting(socketPath, {});
+    const bootstrap = eventBatches(boot.collected)[0];
+    expect(bootstrap?.['events']).toEqual(delivered);
+    const store = bootstrap?.['store_id'] as string;
+    // The stream drops, as on a suspend or a crashed client.
+    boot.socket.destroy();
+
+    // The client redials with its fold's cursor and the store that numbered it
+    // (`PersistentEventStream`), here from mid-bootstrap: the canonical stream
+    // has sequence gaps, so what is owed is events after the cursor, not a
+    // count of them.
+    const cursor = delivered[24]?.sequence ?? 0;
+    const resumed = await subscribeCollecting(socketPath, {
+      after_sequence: cursor,
+      store_id: store,
+    });
+    const subscribed = resumed.collected.messages.find(message => message['type'] === 'subscribed');
+    expect(subscribed?.['latest_sequence']).toBe(through);
+    const backfill = eventBatches(resumed.collected)[0];
+    expect(backfill?.['events']).toEqual(delivered.slice(25));
+    expect(backfill?.['through_sequence']).toBe(through);
+    expect(backfill?.['history_after_sequence']).toBe(0);
+    resumed.socket.destroy();
+
+    // A cursor already at the head owes nothing: an empty batch, not a replay.
+    const caughtUp = await subscribeCollecting(socketPath, {
+      after_sequence: through,
+      store_id: store,
+    });
+    const empty = eventBatches(caughtUp.collected)[0];
+    expect(empty?.['events']).toEqual([]);
+    expect(empty?.['through_sequence']).toBe(through);
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  'rebootstraps a resume whose store id does not match the live store',
+  async () => {
+    const directory = scratchDirectory('vs-mock-storeid-');
+    const socketPath = join(directory, 'mock.sock');
+    await startMockServer(socketPath, [
+      '--fixture',
+      'queue-rs-payloads.jsonl',
+      '--bootstrap',
+      String(MID_EXECUTION_BOOTSTRAP),
+      '--paused',
+    ]);
+    const delivered = canonicalFixture('queue-rs-payloads.jsonl').slice(0, MID_EXECUTION_BOOTSTRAP);
+    const through = delivered.at(-1)?.sequence ?? 0;
+
+    // A caught-up cursor, but into some other store: it numbers a log this
+    // server is not serving, so honoring it would silently skip the whole run.
+    // `subscription_bootstrap` drops the cursor and replays from zero.
+    const {collected} = await subscribeCollecting(socketPath, {
+      after_sequence: through,
+      store_id: 'a-store-this-server-never-served',
+    });
+    const batch = eventBatches(collected)[0];
+    expect(batch?.['events']).toEqual(delivered);
+    expect(batch?.['through_sequence']).toBe(through);
+    // The batch names the live store, so the client re-keys its fold to it.
+    expect(batch?.['store_id']).toBe(`mock-store-${delivered[0]?.run_id ?? ''}`);
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  'bounds a tail subscription and prepends the run spine below its floor',
+  async () => {
+    const directory = scratchDirectory('vs-mock-tail-');
+    const socketPath = join(directory, 'mock.sock');
+    await startMockServer(socketPath, [
+      '--fixture',
+      'queue-rs-payloads.jsonl',
+      '--bootstrap',
+      String(MID_EXECUTION_BOOTSTRAP),
+      '--paused',
+    ]);
+    const delivered = canonicalFixture('queue-rs-payloads.jsonl').slice(0, MID_EXECUTION_BOOTSTRAP);
+    const latest = delivered.at(-1)?.sequence ?? 0;
+    const tail = 10;
+    const floor = latest - tail;
+
+    const {collected} = await subscribeCollecting(socketPath, {tail});
+    const batch = eventBatches(collected)[0];
+    const expected = spineBootstrap(delivered, floor);
+    // Preconditions on the fixture: the spine below the floor is non-empty and
+    // most history is elided, so this exercises the bound, not a full replay.
+    const spine = delivered.filter(
+      event => (event.sequence ?? 0) <= floor && SPINE_TYPES.has(event.type ?? ''),
+    );
+    expect(spine).not.toHaveLength(0);
+    expect(expected.length).toBeLessThan(delivered.length);
+    expect(batch?.['events']).toEqual(expected);
+    // The declared floor is what tells the TUI to backfill below it.
+    expect(batch?.['history_after_sequence']).toBe(floor);
+    expect(batch?.['through_sequence']).toBe(latest);
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  'delivers a resumed burst as one multi-event batch and rebootstraps an outrun tail',
+  async () => {
+    const directory = scratchDirectory('vs-mock-burst-');
+    const socketPath = join(directory, 'mock.sock');
+    await startMockServer(socketPath, [
+      '--fixture',
+      'queue-rs-payloads.jsonl',
+      '--bootstrap',
+      String(MID_EXECUTION_BOOTSTRAP),
+      '--paused',
+      '--speed',
+      '0',
+    ]);
+    const canonical = canonicalFixture('queue-rs-payloads.jsonl');
+    const final = canonical.at(-1)?.sequence ?? 0;
+    const tail = 10;
+
+    const unbounded = await subscribeCollecting(socketPath, {});
+    const bounded = await subscribeCollecting(socketPath, {tail});
+    const control = await connect(socketPath);
+    const resumed = nextMessage(control, message => message['request_id'] === 'resume-1');
+    request(control, {request_id: 'resume-1', type: 'command.resume'});
+    await resumed;
+    await waitFor(
+      'both live batches',
+      async () =>
+        eventBatches(unbounded.collected).length >= 2 &&
+        eventBatches(bounded.collected).length >= 2,
+    );
+
+    // At --speed 0 the whole remainder is due at one wake, so it reaches the
+    // unbounded subscription as a single batch, the way `_stream` sends
+    // everything since its last `wait_for_change` in one `EventBatchMessage`.
+    const live = eventBatches(unbounded.collected)[1];
+    const remainder = canonical.slice(MID_EXECUTION_BOOTSTRAP);
+    expect(remainder.length).toBeGreaterThan(1);
+    expect(live?.['events']).toEqual(remainder);
+    expect(live?.['through_sequence']).toBe(final);
+    expect(live?.['history_after_sequence']).toBe(0);
+
+    // The tail subscription cannot take that batch: more landed in one wake
+    // than its bound was willing to replay, so it is bootstrapped again at a
+    // fresh floor rather than sent the window the bound was meant to exclude.
+    const floor = final - tail;
+    const reboot = eventBatches(bounded.collected)[1];
+    expect(reboot?.['history_after_sequence']).toBe(floor);
+    expect(reboot?.['events']).toEqual(spineBootstrap(canonical, floor));
+    expect(reboot?.['through_sequence']).toBe(final);
+  },
+  TEST_TIMEOUT_MS,
+);
+
+test(
+  'replays byte-identical envelopes across two runs of the same fixture',
+  async () => {
+    const canonical = canonicalFixture('queue-rs-payloads.jsonl');
+    const final = canonical.at(-1)?.sequence ?? 0;
+    const transcript = async (label: string): Promise<string[]> => {
+      const directory = scratchDirectory(`vs-mock-replay-${label}-`);
+      const socketPath = join(directory, 'mock.sock');
+      await startMockServer(socketPath, [
+        '--fixture',
+        'queue-rs-payloads.jsonl',
+        '--bootstrap',
+        String(MID_EXECUTION_BOOTSTRAP),
+        '--speed',
+        '0',
+      ]);
+      const stream = await subscribeCollecting(socketPath, {});
+      await waitFor('the replay to finish', async () =>
+        eventBatches(stream.collected).some(batch => batch['through_sequence'] === final),
+      );
+      // Control answers after the stream is done, so the replay clock reads
+      // the same instant in both runs.
+      const control = await connect(socketPath);
+      const answers = collectMessages(control);
+      request(control, {request_id: 'snap-1', type: 'query.snapshot'});
+      request(control, {request_id: 'perf-1', type: 'query.performance'});
+      await waitFor('both control answers', async () => answers.messages.length >= 2);
+      return [...stream.collected.lines, ...answers.lines];
+    };
+
+    const first = await transcript('a');
+    const second = await transcript('b');
+    // Full envelopes, not just event payloads: subscribed, both batches, and
+    // the control responses, byte for byte.
+    expect(second).toEqual(first);
+    // The envelope clock is the recording's, not the wall's: after the replay
+    // has finished, responses are stamped with the final event's timestamp.
+    const snapshot = JSON.parse(first.find(line => line.includes('"snap-1"')) ?? '{}') as Record<
+      string,
+      unknown
+    >;
+    expect(snapshot['timestamp']).toBe(canonical.at(-1)?.timestamp);
   },
   TEST_TIMEOUT_MS,
 );

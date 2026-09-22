@@ -5,29 +5,23 @@ access for ``judge`` and ``perf_eval`` phases by materializing an
 MCPServerSpec. Implementer phase passes through.
 """
 
-from unittest.mock import MagicMock
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
 
-from vibesys.agents.client import AgentClient
-from vibesys.agents.contracts import AgentCapabilities, MCPServerSpec
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
 from vibesys.loops.plain.runner_ext import PlainLoopAgentClient
+from vs_agent.api import (
+    AgentCapabilities,
+    AgentSessionKey,
+    MCPServerSpec,
+    SessionScope,
+)
+from vs_agent.api.testing import FakeAgentClient
 
 
 class _Resp(BaseModel):
     """Minimal response model for exercising the wrapper's typed invoke."""
-
-
-def _mock_runner(backend_name: str) -> MagicMock:
-    runner = MagicMock(spec=AgentClient)
-    runner.backend_name = backend_name
-    runner.capabilities = AgentCapabilities(
-        mcp_servers=backend_name == "cli",
-    )
-    runner.invoke.return_value = "ok"
-    return runner
 
 
 # ---------------------------------------------------------------------------
@@ -37,13 +31,26 @@ def _mock_runner(backend_name: str) -> MagicMock:
 
 class TestCliBackend:
     def test_judge_receives_mcp_server_spec(self):  # noqa: ANN201
-        inner = _mock_runner("cli")
+        inner = FakeAgentClient(
+            backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
+        )
         wrapper = PlainLoopAgentClient(inner, max_issues_per_perf_eval=3)
 
-        wrapper.invoke(response_cls=_Resp, kind="judge", iteration=7, round_label="r")
+        wrapper.invoke(
+            response_cls=_Resp,
+            kind="judge",
+            iteration=7,
+            round_label="r",
+            workspace=Path("/workspace"),
+            system_prompt="sys",
+            user_prompt="user",
+            fallback_factory=_Resp,
+        )
 
-        kwargs = inner.invoke.call_args.kwargs
-        specs = kwargs["mcp_servers"]
+        judge_calls = inner.calls_for("judge")
+        assert len(judge_calls) == 1
+        specs = judge_calls[0].mcp_servers
+        assert specs is not None
         assert len(specs) == 1
         spec = specs[0]
         assert isinstance(spec, MCPServerSpec)
@@ -58,13 +65,27 @@ class TestCliBackend:
         assert spec.args[i_at + 1] == "bug"
 
     def test_perf_eval_receives_mcp_server_spec_with_all_types(self):  # noqa: ANN201
-        inner = _mock_runner("cli")
+        inner = FakeAgentClient(
+            backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
+        )
         wrapper = PlainLoopAgentClient(inner, max_issues_per_perf_eval=4)
 
-        wrapper.invoke(response_cls=_Resp, kind="perf_eval", iteration=2, round_label="r")
+        wrapper.invoke(
+            response_cls=_Resp,
+            kind="perf_eval",
+            iteration=2,
+            round_label="r",
+            workspace=Path("/workspace"),
+            system_prompt="sys",
+            user_prompt="user",
+            fallback_factory=_Resp,
+        )
 
-        kwargs = inner.invoke.call_args.kwargs
-        spec = kwargs["mcp_servers"][0]
+        perf_calls = inner.calls_for("perf_eval")
+        assert len(perf_calls) == 1
+        specs = perf_calls[0].mcp_servers
+        assert specs is not None
+        spec = specs[0]
         assert "perf_eval" in spec.args
         i_cap = spec.args.index("--cap")
         assert spec.args[i_cap + 1] == "4"
@@ -80,8 +101,10 @@ class TestCliBackend:
 
 class TestPassThrough:
     def test_text_turn_delegates_to_inner_client(self, tmp_path):  # noqa: ANN001, ANN201
-        inner = _mock_runner("cli")
-        inner.invoke_text.return_value = "answer"
+        inner = FakeAgentClient(
+            backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
+        )
+        inner.set_text("chat", "answer")
         wrapper = PlainLoopAgentClient(inner, max_issues_per_perf_eval=3)
 
         result = wrapper.invoke_text(
@@ -93,44 +116,72 @@ class TestPassThrough:
         )
 
         assert result == "answer"
-        inner.invoke_text.assert_called_once_with(
-            kind="chat",
-            workspace=tmp_path,
-            system_prompt="system",
-            user_prompt="question",
-            round_label="chat",
-            env=None,
-            invocation_id=None,
-            progress=None,
-            mcp_servers=None,
-            reuse_session=None,
-            session_key=None,
-        )
+        calls = inner.calls_for("chat")
+        assert len(calls) == 1
+        call = calls[0]
+        assert call.method == "invoke_text"
+        assert call.workspace == tmp_path
+        assert call.system_prompt == "system"
+        assert call.user_prompt == "question"
+        assert call.round_label == "chat"
+        assert call.env is None
+        assert call.invocation_id is None
+        assert call.progress is None
+        assert call.mcp_servers is None
+        assert call.reuse_session is None
+        assert call.session_key is None
 
     def test_implementer_passes_through(self):  # noqa: ANN201
-        inner = _mock_runner("cli")
+        inner = FakeAgentClient(
+            backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
+        )
         wrapper = PlainLoopAgentClient(inner, max_issues_per_perf_eval=3)
 
-        wrapper.invoke(response_cls=_Resp, kind="implementer", round_label="r")
+        wrapper.invoke(
+            response_cls=_Resp,
+            kind="implementer",
+            round_label="r",
+            workspace=Path("/workspace"),
+            system_prompt="sys",
+            user_prompt="user",
+            fallback_factory=_Resp,
+        )
 
-        kwargs = inner.invoke.call_args.kwargs
-        assert kwargs["kind"] == "implementer"
-        assert kwargs["mcp_servers"] is None
+        impl_calls = inner.calls_for("implementer")
+        assert len(impl_calls) == 1
+        assert impl_calls[0].mcp_servers is None
 
     def test_iteration_kwarg_is_consumed_not_forwarded(self):  # noqa: ANN201
         """The wrapper consumes ``iteration=`` and must not pass it to the
-        inner client, whose public invoke API has no such kwarg."""
-        inner = _mock_runner("cli")
+        inner client, whose public invoke API has no such kwarg.
+
+        ``FakeAgentClient.invoke`` has no ``iteration`` parameter, so a leak
+        would already raise ``TypeError`` from the call below.
+        """
+        inner = FakeAgentClient(
+            backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
+        )
         wrapper = PlainLoopAgentClient(inner, max_issues_per_perf_eval=3)
 
-        wrapper.invoke(response_cls=_Resp, kind="judge", iteration=1, round_label="r")
+        wrapper.invoke(
+            response_cls=_Resp,
+            kind="judge",
+            iteration=1,
+            round_label="r",
+            workspace=Path("/workspace"),
+            system_prompt="sys",
+            user_prompt="user",
+            fallback_factory=_Resp,
+        )
 
-        assert "iteration" not in inner.invoke.call_args.kwargs
+        assert inner.calls_for("judge")
 
     def test_extra_kwargs_are_forwarded(self):  # noqa: ANN201
         """Caller-supplied kwargs (workspace, system_prompt, etc.) must
         reach the inner runner unchanged."""
-        inner = _mock_runner("cli")
+        inner = FakeAgentClient(
+            backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
+        )
         wrapper = PlainLoopAgentClient(inner, max_issues_per_perf_eval=3)
 
         wrapper.invoke(
@@ -141,19 +192,20 @@ class TestPassThrough:
             system_prompt="sys",
             user_prompt="user",
             round_label="r",
+            fallback_factory=_Resp,
         )
 
-        kwargs = inner.invoke.call_args.kwargs
-        assert kwargs["workspace"] == "/tmp/ws"  # noqa: S108  # tracked: #288
-        assert kwargs["system_prompt"] == "sys"
-        assert kwargs["user_prompt"] == "user"
-        assert kwargs["round_label"] == "r"
+        call = inner.calls_for("judge")[0]
+        assert call.workspace == "/tmp/ws"  # noqa: S108  # tracked: #288
+        assert call.system_prompt == "sys"
+        assert call.user_prompt == "user"
+        assert call.round_label == "r"
 
 
 class TestValidation:
     def test_judge_without_iteration_raises(self):  # noqa: ANN201
         wrapper = PlainLoopAgentClient(
-            _mock_runner("cli"),
+            FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)),
             max_issues_per_perf_eval=3,
         )
         with pytest.raises(ValueError, match="iteration"):
@@ -161,7 +213,7 @@ class TestValidation:
 
     def test_perf_eval_without_iteration_raises(self):  # noqa: ANN201
         wrapper = PlainLoopAgentClient(
-            _mock_runner("cli"),
+            FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)),
             max_issues_per_perf_eval=3,
         )
         with pytest.raises(ValueError, match="iteration"):
@@ -170,26 +222,29 @@ class TestValidation:
 
 class TestBackendName:
     def test_backend_name_proxies_inner(self):  # noqa: ANN201
-        wrapper = PlainLoopAgentClient(_mock_runner("cli"), max_issues_per_perf_eval=3)
+        wrapper = PlainLoopAgentClient(
+            FakeAgentClient(backend_name="cli"), max_issues_per_perf_eval=3
+        )
         assert wrapper.backend_name == "cli"
 
 
 class TestCapabilities:
     def test_client_without_mcp_cannot_host_tracker_tools(self):  # noqa: ANN201
-        wrapper = PlainLoopAgentClient(_mock_runner("stub"), max_issues_per_perf_eval=3)
+        wrapper = PlainLoopAgentClient(
+            FakeAgentClient(backend_name="stub"), max_issues_per_perf_eval=3
+        )
         with pytest.raises(RuntimeError, match="cannot expose issue-board tools"):
             wrapper.invoke(response_cls=_Resp, kind="judge", iteration=1, round_label="r")
 
 
 class TestProviderConversation:
     def test_conversation_accessors_proxy_inner(self):  # noqa: ANN201
-        inner = _mock_runner("cli")
-        inner.provider_session_id.return_value = "session-1"
-        inner.last_turn_provider_session_id.return_value = "session-2"
-        wrapper = PlainLoopAgentClient(inner, max_issues_per_perf_eval=3)
+        inner = FakeAgentClient(
+            backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
+        )
         key = AgentSessionKey(SessionScope.CHAT, "thread-a")
+        inner.set_session(key, provider_session_id="session-1", last_turn="session-2")
+        wrapper = PlainLoopAgentClient(inner, max_issues_per_perf_eval=3)
 
         assert wrapper.provider_session_id(key) == "session-1"
         assert wrapper.last_turn_provider_session_id(key) == "session-2"
-        inner.provider_session_id.assert_called_once_with(key)
-        inner.last_turn_provider_session_id.assert_called_once_with(key)

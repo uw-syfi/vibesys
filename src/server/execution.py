@@ -31,6 +31,8 @@ from server.events import (
     ToolResultData,
     json_value,
 )
+from vibesys.api import AgentExecutionStartedData as CoreAgentExecutionStartedData
+from vibesys.api import CoreEvent
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -172,9 +174,16 @@ class ExecutionTracker:
         driver: str | None,
         provider: str | None,
         model: str | None,
+        execution_id: str | None = None,
     ) -> ExecutionHandle:
-        """Allocate and track an execution while the shared lock is held."""
-        execution_id = uuid.uuid4().hex
+        """Allocate and track an execution while the shared lock is held.
+
+        ``execution_id`` lets a caller that already minted an identity (core,
+        through the ``AGENT_EXECUTION_STARTED`` projection) supply it; direct
+        callers that have no identity of their own keep getting one minted
+        here.
+        """
+        execution_id = execution_id or uuid.uuid4().hex
         attempt = _attempt_from_label(round_label)
         activity = AgentExecutionActivityData(
             mode="thinking", summary=_initial_activity_summary(kind)
@@ -325,6 +334,55 @@ class ExecutionTracker:
             )
         self._discard_locked(execution_id)
         return active, controlled
+
+    def track_started(self, event: CoreEvent) -> None:
+        """Track a core-minted execution start; no-op if already tracked.
+
+        Core mints the execution id and emits ``AGENT_EXECUTION_STARTED``
+        itself (see ``vibesys.context._RunContext.invoke``); this projects
+        that event into the same ``ActiveAgentExecution`` checkpoint
+        ``start_locked`` builds. The guard against an already-active id
+        covers a caller (``RunController.start_agent_execution``) that has
+        already allocated the execution before core's event arrives, so the
+        two allocation paths never double-track the same identity.
+        """
+        if (
+            event.execution_id is None
+            or event.agent_kind is None
+            or event.round_label is None
+            or not isinstance(event.data, CoreAgentExecutionStartedData)
+        ):
+            return
+        data = event.data
+        activity = AgentExecutionActivityData(
+            mode=data.activity.mode, summary=data.activity.summary, tool=data.activity.tool
+        )
+        active = ActiveAgentExecution(
+            execution_id=event.execution_id,
+            agent_kind=event.agent_kind,
+            round_label=event.round_label,
+            stage=data.stage,
+            attempt=data.attempt,
+            assignment=data.user_prompt,
+            started_at=event.timestamp,
+            activity=activity,
+            driver=data.driver,
+            provider=data.provider,
+            model=data.model,
+        )
+        with self._condition:
+            if event.execution_id in self._active:
+                return
+            self._active[event.execution_id] = active
+            self._controlled_ids.add(event.execution_id)
+            self._current_kind, self._current_round = event.agent_kind, event.round_label
+
+    def discard_finished(self, event: CoreEvent) -> None:
+        """Drop a core-projected execution's tracking state once it finishes."""
+        if event.execution_id is None:
+            return
+        with self._condition:
+            self._discard_locked(event.execution_id)
 
     def interrupt_controlled_locked(self) -> None:
         """Interrupt all controlled executions during run termination."""

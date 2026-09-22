@@ -12,6 +12,7 @@ import yaml
 
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
 from vibesys.schemas import SkillResourceSelection  # noqa: TC001  # tracked: #288
+from vs_agent.api import NULL_SKILL_SELECTION, SkillSelection  # noqa: F401
 
 SIDECAR_NAME = ".vibesys.toml"
 _FRONTMATTER_DELIMITER = "---"
@@ -48,6 +49,24 @@ def is_platforms_parent(directory: Path | str) -> bool:
     dropped.
     """
     return Path(directory).parts[-2:] == PLATFORMS_PARENT
+
+
+def platform_skill_selection(compute_backend: ComputeBackend | None) -> SkillSelection:
+    """Build the ``SkillSelection`` that prunes foreign ``platforms/<backend>/`` dirs.
+
+    This is the policy half of skill materialization: it knows about compute
+    backends. The agent package (``vs_agent.cli_common.materialize_skills``)
+    only knows how to apply a caller-supplied ``SkillSelection``, not what a
+    compute backend is.
+    """
+    foreign = foreign_platform_names(compute_backend)
+
+    def _skip_dir(src_dir: str, names: list[str]) -> set[str]:
+        if not foreign or not is_platforms_parent(src_dir):
+            return set()
+        return {name for name in names if name in foreign}
+
+    return SkillSelection(skip_dir=_skip_dir)
 
 
 class SkillMetadataError(ValueError):

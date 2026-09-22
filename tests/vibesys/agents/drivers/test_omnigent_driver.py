@@ -20,16 +20,16 @@ from typing import Any, ClassVar
 
 import pytest
 
-from vibesys.agents.contracts import (
+from vibesys.events import CommandResultPayload, JsonResultPayload
+from vibesys.schemas import JudgeResponse
+from vs_agent.api import (
     AgentEvent,
-    AgentExecutionPolicy,
-    AgentSessionSpec,
-    AgentTurnRequest,
     MCPServerSpec,
 )
-from vibesys.agents.drivers import omnigent as driver_subject
-from vibesys.agents.drivers._omnigent_runtime import OmnigentAsyncRuntime
-from vibesys.agents.drivers.omnigent import (
+from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
+from vs_agent.drivers import omnigent as driver_subject
+from vs_agent.drivers._omnigent_runtime import OmnigentAsyncRuntime
+from vs_agent.drivers.omnigent import (
     _TOOL_EXECUTOR_ATTR,
     OmnigentDriver,
     OmnigentDriverError,
@@ -37,9 +37,7 @@ from vibesys.agents.drivers.omnigent import (
     _build_os_tools,
     _LifecycleState,
 )
-from vibesys.agents.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
-from vibesys.events import CommandResultPayload, JsonResultPayload
-from vibesys.schemas import JudgeResponse
+from vs_agent.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
 from vs_sandbox import HostResource, ProjectPathPolicy
 
 omnigent = pytest.importorskip("omnigent")
@@ -1200,7 +1198,7 @@ def test_os_policy_exposes_control_dotdirs_and_keeps_hidden_dotfiles_masked(
     )
     driver = OmnigentDriver()
     monkeypatch.setattr(
-        "vibesys.agents.drivers.omnigent.declare_active_rust_toolchain_resources",
+        "vs_agent.drivers.omnigent.declare_active_rust_toolchain_resources",
         lambda *_args, **_kwargs: (HostResource(toolchain, purpose="Rust toolchain"),),
     )
 
@@ -1296,7 +1294,7 @@ def test_codex_executor_disables_native_tools(
     rust_sysroot = tmp_path / "rust"
     target_libdir = rust_sysroot / "lib" / "rustlib" / "x86_64-unknown-linux-gnu" / "lib"
     monkeypatch.setattr(
-        "vibesys.agents.drivers.omnigent.resolve_active_rust_toolchain",
+        "vs_agent.drivers.omnigent.resolve_active_rust_toolchain",
         lambda _context, *, workspace: (rust_sysroot, target_libdir),  # noqa: ARG005
     )
 
@@ -1314,7 +1312,7 @@ def test_codex_executor_disables_native_tools(
         )
 
     monkeypatch.setattr(
-        "vibesys.agents.drivers.omnigent._build_os_tools",
+        "vs_agent.drivers.omnigent._build_os_tools",
         build_tools,
     )
 

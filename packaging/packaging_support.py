@@ -16,6 +16,7 @@ PACKAGE_SOURCE_ROOTS = (
     Path("libs/vs-project/src"),
     Path("libs/vs-prompts/src"),
     Path("libs/vs-sandbox/src"),
+    Path("libs/vs-agent/src"),
 )
 _BUILD_AND_CACHE_DIRECTORIES = frozenset(
     {

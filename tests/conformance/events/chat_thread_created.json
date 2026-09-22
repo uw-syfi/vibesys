@@ -1,0 +1,8 @@
+{
+  "protocol_version": 1,
+  "type": "chat_thread_created",
+  "sequence": 7,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "chat_thread_id": "thread-1"
+}

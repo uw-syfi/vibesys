@@ -1,0 +1,38 @@
+{
+  "id": "resume-after-drop",
+  "title": "Resume from a cursor naming its store",
+  "description": "After a drop the client resubscribes from its last folded sequence, carrying the store_id that sequence belongs to; the server continues the same store and the batch echoes it.",
+  "role": "subscribe",
+  "transports": [
+    "unix",
+    "websocket"
+  ],
+  "decisions": [
+    "WP-CAPABILITY-PROBE",
+    "WP-SUBSCRIBE-ACK",
+    "WP-ROLES"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "subscribe",
+        "after_sequence": 120,
+        "store_id": "store-a"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "subscribed"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "event_batch",
+        "store_id": "store-a"
+      }
+    }
+  ]
+}

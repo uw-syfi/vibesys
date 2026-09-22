@@ -5,10 +5,10 @@ tests pin the adapter that translates each CLI provider's tool convention
 into that contract, and the ``AgentLogger`` hook that publishes it.
 """
 
-from vibesys.agents.callbacks import AgentLogger
-from vibesys.agents.todos import todos_from_tool_call
 from vibesys.events import CoreEvent, TodoItemData, TodoUpdateData
 from vibesys.render.sink import output_sink
+from vs_agent.api import todos_from_tool_call
+from vs_agent.callbacks import AgentLogger
 
 
 class TestProviderShapes:
@@ -105,7 +105,7 @@ class TestAgentLoggerPublishing:
         seen: list[CoreEvent] = []
         unsubscribe = output_sink().subscribe(seen.append)
         try:
-            logger = AgentLogger()
+            logger = AgentLogger(event_sink=output_sink())
             logger.on_tool_call("TodoWrite", {"todos": [{"content": "A", "status": "pending"}]})
         finally:
             unsubscribe()
@@ -117,7 +117,7 @@ class TestAgentLoggerPublishing:
         seen: list[CoreEvent] = []
         unsubscribe = output_sink().subscribe(seen.append)
         try:
-            logger = AgentLogger()
+            logger = AgentLogger(event_sink=output_sink())
             logger.on_tool_call("Bash", {"command": "make"})
         finally:
             unsubscribe()
@@ -129,7 +129,7 @@ class TestAgentLoggerPublishing:
         seen: list[CoreEvent] = []
         unsubscribe = output_sink().subscribe(seen.append)
         try:
-            logger = AgentLogger()
+            logger = AgentLogger(event_sink=output_sink())
             logger.on_tool_call("TodoWrite", {"todos": []})
         finally:
             unsubscribe()

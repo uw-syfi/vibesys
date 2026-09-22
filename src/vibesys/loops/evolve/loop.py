@@ -40,11 +40,9 @@ from typing import Any, Literal, cast
 
 from jinja2 import Environment, FileSystemLoader
 
-from vibesys.agents.factory import resolve_agent_driver
-from vibesys.agents.progress import CandidateProgress
+from vibesys.agent_spec_config import resolve_agent_driver
 from vibesys.config import Config, as_config
 from vibesys.constants import (
-    DEFAULT_AGENT_BACKEND,
     DEFAULT_COMPUTE_BACKEND,
     ComputeBackend,
     DomainName,
@@ -84,13 +82,14 @@ from vibesys.loops.profiler import invoke_profiler
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.render.sink import output_sink
-from vibesys.run import LoopContext, RepositoryVisibility, RunIntegration, RunStateNamespace
+from vibesys.run import LocalRunIntegration, LoopContext, RepositoryVisibility, RunStateNamespace
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
     run_environment_record,
 )
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
+from vs_agent.api import AgentBackend, CandidateProgress
 from vs_project import EvolveRunConfiguration
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "evolve"
@@ -1489,7 +1488,7 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     openevolve_config: OpenEvolveSearchConfig | None = None,
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
-    integration: RunIntegration | None = None,
+    integration: LocalRunIntegration | None = None,
 ) -> bool:
     """Run an LLM-driven evolutionary search.
 
@@ -1516,8 +1515,8 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     run_environment = run_environment or make_run_environment_spec()
     normalized_config = as_config(config)
     selected_policy = SearchPolicyName(search_policy).value if search_policy is not None else None
-    resolved_agent_backend = (
-        agent_backend or normalized_config.agent.backend or DEFAULT_AGENT_BACKEND
+    resolved_agent_backend = str(
+        agent_backend or normalized_config.agent.backend or AgentBackend.CLI
     )
     run_configuration = EvolveRunConfiguration(
         outer_loop="evolve",
@@ -1525,7 +1524,9 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         model=normalized_config.model.name,
         agent_backend=resolved_agent_backend,
         agent_driver=(
-            resolve_agent_driver(normalized_config) if resolved_agent_backend == "cli" else None
+            resolve_agent_driver(normalized_config).value
+            if resolved_agent_backend == "cli"
+            else None
         ),
         cli_provider=cli_provider or normalized_config.agent.cli_provider or "codex",
         cli_timeout=normalized_config.agent.cli_timeout,

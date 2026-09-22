@@ -15,10 +15,10 @@ import sqlite3
 
 import pytest
 
-from vibesys.agents.runner import parse_typed_response_text
 from vibesys.schemas import (
     ProfilerResponse,
 )
+from vs_agent.runner import parse_typed_response_text
 
 # ---------------------------------------------------------------------------
 # ProfilerResponse model tests

@@ -1,0 +1,9 @@
+{
+  "protocol_version": 1,
+  "type": "agent_execution_started",
+  "sequence": 3,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "execution_id": "exec-1",
+  "agent_kind": "implementer"
+}

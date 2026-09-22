@@ -11,7 +11,6 @@ import {
   type ActiveAgentExecution,
   type ActiveExecutionCheckpoint,
   type AgentPhase,
-  type ChatThread,
   type CoreDiagnostic,
   type CoreRunStatus,
   type CoreState,
@@ -31,12 +30,20 @@ import {
   type TodoItem,
   type TranscriptEntry,
 } from '@vibesys/core-state';
+import type {NoteRecord} from './notes-store.js';
 import {agentRuntimeLabel} from './ui/agent-runtime-label.js';
 import {DEFAULT_THEME_NAME, THEME_NAMES, type ThemeName} from './ui/theme.js';
 
 export interface SessionState {
   /** Pure projection of backend snapshots, events, and execution checkpoints. */
   readonly core: CoreState;
+  /**
+   * The active run's id, latched from the first snapshot the backend sends
+   * (`RunSnapshot.run_id`). `CoreState` has no notion of run identity, so this
+   * lives here rather than there; it exists to key the notepad's on-disk
+   * note to the run it was written against (`notes-store.ts`).
+   */
+  runId: string | null;
   /** False after the frontend loses a trustworthy backend event stream. */
   eventStreamAvailable: boolean;
   selectedRound: number | null;
@@ -114,6 +121,13 @@ export interface SessionState {
   themePicker: ThemePicker | null;
   /** Non-null while the command palette is open as a keyboard selection. */
   palette: {readonly query: string; readonly selected: number} | null;
+  /**
+   * The private notepad. Unlike the other modals above, closing it does not
+   * null the state out: the operator's text has to survive `Esc` (and a
+   * later reopen, and a TUI restart against the same run) without being
+   * promoted, so `open` is its own flag rather than presence-as-open.
+   */
+  notepad: NotepadState;
   /** Root-level error state, independent of the active transcript or log view. */
   errorBanner: ErrorBannerState | null;
   /**
@@ -125,8 +139,8 @@ export interface SessionState {
   inputError: string | null;
 }
 
-export type ErrorSeverity = 'recoverable' | 'fatal';
-export type ErrorScope =
+type ErrorSeverity = 'recoverable' | 'fatal';
+type ErrorScope =
   | 'configuration'
   | 'invocation'
   | 'phase'
@@ -160,7 +174,7 @@ export type RoundFocus = 'rounds' | 'agents' | 'transcript';
  * hypothesis id rather than a row index so a refresh that inserts rows keeps
  * the operator on the same hypothesis.
  */
-export interface ExperimentLogState {
+interface ExperimentLogState {
   entries: HypothesisEntry[];
   selectedId: string | null;
   /** The transient planning activity is selected instead of a recorded claim. */
@@ -174,7 +188,7 @@ export interface ExperimentLogState {
 }
 
 /** UI-only navigation state for the selected hypothesis summary. */
-export interface HypothesisDetail {
+interface HypothesisDetail {
   entryKey: string;
   selectedRound: number | null;
 }
@@ -197,7 +211,7 @@ export type ExperimentIndexItem =
  * client shows the ordinary per-round trajectory, filtered to these rounds,
  * and the log table steps aside without losing its selection.
  */
-export interface HypothesisScope {
+interface HypothesisScope {
   id: string;
   label: string;
   /**
@@ -233,7 +247,7 @@ export interface RightPane {
  */
 export type PaneFocus = 'chat' | 'left' | 'right';
 
-export interface LayoutState {
+interface LayoutState {
   /** null means no visualization pane: the left side has the rest of the row. */
   right: RightPane | null;
   focus: PaneFocus;
@@ -250,8 +264,22 @@ export interface LayoutState {
  */
 export type PaneId = 'agents' | 'chat' | 'experiments' | 'performance' | 'todos' | 'transcript';
 
-export interface ThemePicker {
+interface ThemePicker {
   selected: ThemeName;
+}
+
+/**
+ * The private notepad's state. `open` gates the modal; `text` is the
+ * operator's freeform scratch note for the active run, kept across a close so
+ * `Esc` never loses a draft. `createdAt`/`updatedAt` are null until the first
+ * keystroke, matching a run that has never had a note written for it
+ * (`notes-store.ts#readNote` returns `null` in that case too).
+ */
+interface NotepadState {
+  open: boolean;
+  text: string;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 /**
@@ -275,7 +303,7 @@ export type ChatMenuRow =
  * `query.chat_options` response verbatim. The reducers live in
  * `chat-menu.ts`.
  */
-export interface ChatMenu {
+interface ChatMenu {
   kind: 'model' | 'resume';
   title: string;
   rows: ChatMenuRow[];
@@ -369,6 +397,7 @@ export interface ConversationEntry {
 export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): SessionState {
   return {
     core: initialCoreState(),
+    runId: null,
     eventStreamAvailable: true,
     selectedRound: null,
     selectedAgentKind: null,
@@ -400,6 +429,7 @@ export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): 
     chatDockFits: true,
     themePicker: null,
     palette: null,
+    notepad: {open: false, text: '', createdAt: null, updatedAt: null},
     errorBanner: null,
     inputError: null,
   };
@@ -453,10 +483,6 @@ export function chatPaneFocused(state: SessionState): boolean {
   return chatPaneVisible(state) && state.layout.focus === 'chat';
 }
 
-export function rightPaneFocused(state: SessionState): boolean {
-  return state.layout.right !== null && state.layout.focus === 'right';
-}
-
 export function setChatDockFits(state: SessionState, fits: boolean): SessionState {
   if (state.chatDockFits === fits) return state;
   const layout =
@@ -485,11 +511,6 @@ function deriveActiveChat(state: SessionState): SessionState {
     return state;
   }
   return {...state, chatConversation, chatPending};
-}
-
-/** Every thread the run knows about, the implicit default first. */
-export function chatThreads(state: SessionState): ChatThread[] {
-  return state.core.chatThreads;
 }
 
 /**
@@ -526,7 +547,7 @@ export function chatThreadHeading(
  * The active thread's runtime, e.g. `"Codex (GPT 5.5)"`. Null for a thread the
  * backend has not described, which is the default thread before any answer.
  */
-export function chatThreadRuntimeLabel(
+function chatThreadRuntimeLabel(
   state: SessionState,
   threadId: string = state.activeChatThreadId,
 ): string | null {
@@ -1056,7 +1077,7 @@ function hypothesisLabel(entry: HypothesisEntry): string {
   return `${hypothesisTitle(entry)} · ${range}`;
 }
 
-export function selectedExperiment(state: SessionState): HypothesisEntry | null {
+function selectedExperiment(state: SessionState): HypothesisEntry | null {
   const log = state.experimentLog;
   if (log === null || log.selectedId === null) return null;
   const index = log.entries.map(entryKey).indexOf(log.selectedId);
@@ -1234,7 +1255,7 @@ function planningStage(
   return null;
 }
 
-export const PANE_TITLES: Record<PaneView, string> = {
+const PANE_TITLES: Record<PaneView, string> = {
   perf: 'Performance',
   design: 'Design changes',
 };
@@ -1392,7 +1413,7 @@ export function todoListFocused(state: SessionState): boolean {
  * focus only moves to a pane this returns true for, so the keys and the agent
  * filter can never land on a pane the operator cannot see.
  */
-export function roundPaneVisible(state: SessionState, pane: RoundFocus): boolean {
+function roundPaneVisible(state: SessionState, pane: RoundFocus): boolean {
   if (experimentLogVisible(state)) return false;
   const zoomed = state.layout.zoomedPane;
   if (pane === 'agents') {
@@ -1448,7 +1469,7 @@ export function togglePaneZoom(state: SessionState): SessionState {
  * Every pane the content row can be given to in the active view. The expanded
  * todo list is deliberately absent: it can hold the keys, but not the row.
  */
-export function visiblePaneIds(state: SessionState): PaneId[] {
+function visiblePaneIds(state: SessionState): PaneId[] {
   if (experimentLogVisible(state)) {
     return [
       ...(chatPaneVisible(state) ? (['chat'] as const) : []),
@@ -1478,7 +1499,13 @@ export function setTheme(state: SessionState, themeName: ThemeName): SessionStat
 
 /** Opens the theme list as a selection, starting on the active theme. */
 export function openThemePicker(state: SessionState): SessionState {
-  return {...state, overlay: null, palette: null, themePicker: {selected: state.themeName}};
+  return {
+    ...state,
+    overlay: null,
+    palette: null,
+    notepad: {...state.notepad, open: false},
+    themePicker: {selected: state.themeName},
+  };
 }
 
 /**
@@ -1501,9 +1528,82 @@ export function closeThemePicker(state: SessionState): SessionState {
   return {...state, themePicker: null};
 }
 
+/**
+ * Loads whatever this run's note already held (from `notes-store.ts`, if the
+ * run has one) before the modal opens, so a note written before a TUI
+ * restart, or before the current process's `/note` was first pressed, is
+ * there rather than blank. `record` is `null` for a run with no saved note.
+ */
+export function hydrateNotepad(state: SessionState, record: NoteRecord | null): SessionState {
+  if (record === null) return state;
+  return {
+    ...state,
+    notepad: {
+      ...state.notepad,
+      text: record.text,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    },
+  };
+}
+
+/**
+ * Opens the notepad. Text carries over from any prior session on this run.
+ * Excludes the palette and theme picker the same way they exclude each
+ * other: all three are single keyboard-focused overlays, so only one takes
+ * the keys at a time. The docked or modal chat is a separate pane rather than
+ * an overlay in that sense (`openChat` does not null either of them either),
+ * so it is left as it was.
+ */
+export function openNotepad(state: SessionState): SessionState {
+  if (state.notepad.open) return state;
+  return {
+    ...state,
+    overlay: null,
+    palette: null,
+    themePicker: null,
+    notepad: {...state.notepad, open: true},
+  };
+}
+
+/** Closes the notepad without discarding its text or touching promotion. */
+export function closeNotepad(state: SessionState): SessionState {
+  if (!state.notepad.open) return state;
+  return {...state, notepad: {...state.notepad, open: false}};
+}
+
+/** Every keystroke in the notepad's editor lands here. */
+export function setNotepadText(state: SessionState, text: string, timestamp: string): SessionState {
+  if (text === state.notepad.text) return state;
+  return {
+    ...state,
+    notepad: {
+      ...state.notepad,
+      text,
+      createdAt: state.notepad.createdAt ?? timestamp,
+      updatedAt: timestamp,
+    },
+  };
+}
+
+/**
+ * The text a promotion action hands to a composer: `null` for an empty (or
+ * all-whitespace) note, since promoting nothing would just pre-fill the
+ * composer with blank text and still close the notepad on the operator.
+ */
+export function notepadPromotionText(state: SessionState): string | null {
+  const trimmed = state.notepad.text.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
 export function applySnapshot(state: SessionState, snapshot: RunSnapshot): SessionState {
   const core = reduceSnapshot(state.core, snapshot);
-  return core === state.core ? state : {...state, core};
+  // Latched rather than reassigned: a reconnect resends the same run's
+  // snapshot, and the run id is what the notepad is keyed by, so it should
+  // never move out from under an open notepad mid-session.
+  const runId = state.runId ?? snapshot.run_id;
+  if (core === state.core && runId === state.runId) return state;
+  return {...state, core, runId};
 }
 
 /** Record transport health as frontend state without rewriting backend-derived facts. */
@@ -1602,6 +1702,20 @@ export function applyEventRebootstrap(
   );
 }
 
+/**
+ * Whether `status` ends a run the way `failed` does: with a terminal
+ * diagnostic the operator did not ask for and should see, unlike a clean
+ * `completed` or an operator-requested `stopped`.
+ *
+ * `interrupted` (a signal, or the launcher ending the run) belongs here too:
+ * before core state told it apart from `failed`, an interrupted run already
+ * bannered this way, and the reason/signal `run_interrupted` carries is exactly
+ * the kind of detail this banner exists to surface.
+ */
+function endedWithBannerableFailure(status: CoreState['status']): boolean {
+  return status === 'failed' || status === 'interrupted';
+}
+
 /** The UI transition shared by both ways of folding a backend checkpoint. */
 function applyReducedCore(state: SessionState, core: CoreState): SessionState {
   if (core === state.core) return state;
@@ -1610,7 +1724,7 @@ function applyReducedCore(state: SessionState, core: CoreState): SessionState {
     core,
     chatConversations: reconcileChatConversations(state.chatConversations, core.chatTranscripts),
   });
-  if (core.status === 'failed') {
+  if (endedWithBannerableFailure(core.status)) {
     // Warnings never banner, so a trailing warning must not mask the failure:
     // surface the last diagnostic that can.
     const finalDiagnostic = core.diagnostics.filter(d => d.severity !== 'warning').at(-1);
@@ -1624,7 +1738,8 @@ function applyReducedCore(state: SessionState, core: CoreState): SessionState {
     // `latestDiagnosticChange` relies on.
     const isNews =
       finalDiagnostic !== undefined &&
-      (state.core.status !== 'failed' || !state.core.diagnostics.includes(finalDiagnostic));
+      (!endedWithBannerableFailure(state.core.status) ||
+        !state.core.diagnostics.includes(finalDiagnostic));
     if (isNews) next = reportProjectedDiagnostic(next, finalDiagnostic);
   }
   return next;
@@ -2083,6 +2198,7 @@ export function runStatusLabel(status: CoreRunStatus): string {
     case 'stopped':
     case 'completed':
     case 'failed':
+    case 'interrupted':
       return status;
     default: {
       const unhandled: never = status;

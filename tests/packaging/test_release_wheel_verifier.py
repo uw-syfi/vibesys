@@ -12,6 +12,7 @@ import subprocess
 import zipfile
 from pathlib import Path
 
+import packaging_support
 import pytest
 import verify_release_wheel as verifier
 from wheel_targets import TARGETS
@@ -20,6 +21,8 @@ FRAMEWORK_PACKAGES = (
     "vibesys",
     "entrypoints",
     "server",
+    "headless",
+    "vs_agent",
     "vs_evaluator_protocol",
     "vs_feature_flags",
     "vs_github",
@@ -52,6 +55,8 @@ dependencies = ["example>=1"]
         "vibesys": "src/vibesys",
         "entrypoints": "src/entrypoints",
         "server": "src/server",
+        "headless": "src/headless",
+        "vs_agent": "libs/vs-agent/src/vs_agent",
         "vs_evaluator_protocol": "libs/vs-evaluator-protocol/src/vs_evaluator_protocol",
         "vs_feature_flags": "libs/vs-feature-flags/src/vs_feature_flags",
         "vs_github": "libs/vs-github/src/vs_github",
@@ -91,6 +96,8 @@ def _packaged_source_files(source_root: Path) -> dict[str, bytes]:
         "src/vibesys": "vibesys",
         "src/entrypoints": "entrypoints",
         "src/server": "server",
+        "src/headless": "headless",
+        "libs/vs-agent/src/vs_agent": "vs_agent",
         "libs/vs-evaluator-protocol/src/vs_evaluator_protocol": "vs_evaluator_protocol",
         "libs/vs-feature-flags/src/vs_feature_flags": "vs_feature_flags",
         "libs/vs-github/src/vs_github": "vs_github",
@@ -224,6 +231,22 @@ def _append_directory(wheel: Path, name: str) -> None:
     directory.external_attr = (stat.S_IFDIR | 0o755) << 16
     with zipfile.ZipFile(wheel, "a") as archive:
         archive.writestr(directory, b"")
+
+
+def test_framework_packages_match_distribution_discovery() -> None:
+    # The wheel build stages packages from packaging_support.discover_distribution_packages
+    # (setup.py), which auto-discovers any src/*/ package. The verifier keeps an
+    # independent hardcoded FRAMEWORK_PACKAGES as a cross-check against the built wheel's
+    # own top_level.txt, so the two lists must agree. They only diverge when a new
+    # top-level package is added (e.g. #902's src/headless): the build ships it, the
+    # verifier does not, and the release-wheel matrix that would catch it is skipped on
+    # src-only PRs. Assert the agreement here, in the always-run test job, so the drift
+    # fails on the PR that introduces the package instead of silently on a later one.
+    repo_root = Path(verifier.__file__).resolve().parents[1]
+    discovered, _ = packaging_support.discover_distribution_packages(repo_root)
+    top_level = {name.partition(".")[0] for name in discovered}
+
+    assert set(verifier.FRAMEWORK_PACKAGES) == top_level
 
 
 def test_complete_spread_layout_wheel_passes(release_fixture: tuple[Path, Path]) -> None:

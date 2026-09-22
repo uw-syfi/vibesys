@@ -5,9 +5,10 @@ how a candidate reading relates to the reading it is compared against. It
 lives here, rather than in ``vibesys``, so a round record can store the
 comparison the framework made without this library depending on loop code.
 
-Unlike ``hypothesis_outcome`` and ``candidate_disposition``, which name
-``vibesys``-owned vocabularies and are therefore persisted as plain strings,
-the ordering of two numbers is fully described here, so it is a real enum.
+Unlike ``hypothesis_outcome`` and ``candidate_disposition``, which
+``RoundRecord`` persists as plain strings so a legacy record with a retired
+value still loads (see ``vs_loop_state.agent``), the ordering of two numbers
+has no such compatibility concern, so it is a real enum.
 """
 
 from __future__ import annotations

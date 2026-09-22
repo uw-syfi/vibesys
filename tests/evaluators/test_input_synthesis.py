@@ -128,15 +128,14 @@ def test_synthesize_escapes_special_characters_in_commands(tmp_path):  # noqa: A
 
 
 def _agent_args(argv: list[str]):  # noqa: ANN202  # tracked: #288
-    import entrypoints.headless as cli  # noqa: PLC0415  # tracked: #288
+    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
     return cli._build_agent_parser().parse_args(argv)  # noqa: SLF001  # tracked: #288
 
 
-def test_standalone_flags_synthesize_bundle(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
-    import entrypoints.headless as cli  # noqa: PLC0415  # tracked: #288
+def test_standalone_flags_synthesize_bundle(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
-    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
     args = _agent_args(
         [
             "--input-objective",
@@ -172,7 +171,7 @@ def test_standalone_flags_reject_unsafe_fresh_experiment_name(
     monkeypatch: pytest.MonkeyPatch,
     unsafe_name: str,
 ) -> None:
-    import entrypoints.headless as cli  # noqa: PLC0415  # tracked: #288
+    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
     monkeypatch.setattr(cli.sys, "prefix", str(tmp_path / ".venv"))
     runs_dir = tmp_path / "selected-runs"
@@ -204,10 +203,9 @@ def test_standalone_flags_reject_unsafe_fresh_experiment_name(
     assert not (tmp_path / "outside").exists()
 
 
-def test_objective_file_is_read(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
-    import entrypoints.headless as cli  # noqa: PLC0415  # tracked: #288
+def test_objective_file_is_read(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
-    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
     objective_file = tmp_path / "OBJ.md"
     objective_file.write_text("From a file.\n")
     args = _agent_args(
@@ -233,7 +231,7 @@ def test_objective_file_is_read(tmp_path, monkeypatch):  # noqa: ANN001, ANN201 
 def test_input_conflicts_with_standalone_flags(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     args = _agent_args(["--input", str(tmp_path), "--input-domain", "generic"])
 
-    import entrypoints.headless as cli  # noqa: PLC0415  # tracked: #288
+    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
     with pytest.raises(ConfigurationError, match="cannot be combined"):
         cli._validate_target_inputs(args)  # noqa: SLF001  # tracked: #288
@@ -260,7 +258,7 @@ def test_missing_current_project_and_standalone_flags_errors(
     monkeypatch.chdir(tmp_path)
     args = _agent_args([])
 
-    import entrypoints.headless as cli  # noqa: PLC0415  # tracked: #288
+    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
     with pytest.raises(ConfigurationError, match="Current directory is not a VibeSys project"):
         cli._validate_target_inputs(args)  # noqa: SLF001  # tracked: #288
@@ -270,16 +268,15 @@ def test_incomplete_standalone_flags_error():  # noqa: ANN201  # tracked: #288
     # Objective + domain but no evaluator commands.
     args = _agent_args(["--input-objective", "x", "--input-domain", "generic"])
 
-    import entrypoints.headless as cli  # noqa: PLC0415  # tracked: #288
+    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
     with pytest.raises(ConfigurationError, match="standalone input requires"):
         cli._validate_target_inputs(args)  # noqa: SLF001  # tracked: #288
 
 
-def test_both_objective_forms_rejected(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
-    import entrypoints.headless as cli  # noqa: PLC0415  # tracked: #288
+def test_both_objective_forms_rejected(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
-    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
     objective_file = tmp_path / "OBJ.md"
     objective_file.write_text("file\n")
     args = _agent_args(

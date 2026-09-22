@@ -44,6 +44,7 @@ import {
   moveDiffHunk,
   openDiffViewer,
 } from './diff-viewer.js';
+import {readNote, writeNote} from './notes-store.js';
 import {
   activeCommandSurface,
   closePalette,
@@ -65,6 +66,7 @@ import {
   clearAgentSelection,
   clearEntrySelection,
   clearInputError,
+  closeNotepad,
   closeOverlays,
   closePane,
   closeThemePicker,
@@ -78,6 +80,7 @@ import {
   failPane,
   focusPane,
   focusRound,
+  hydrateNotepad,
   initialSessionState,
   leaveExperimentDrilldown,
   leaveHypothesisDetail,
@@ -88,9 +91,11 @@ import {
   moveHypothesisRoundSelection,
   moveThemeSelection,
   normalizeFocus,
+  notepadPromotionText,
   openChat,
   openExperimentLog,
   openHypothesisDetail,
+  openNotepad,
   openPane,
   openThemePicker,
   type PaneFocus,
@@ -113,6 +118,7 @@ import {
   setDesignLog,
   setExperiments,
   setGraphWidthOverride,
+  setNotepadText,
   setPaneContent,
   setTheme,
   showDetail,
@@ -214,6 +220,19 @@ export interface SessionController {
    * blind at what the operator meant.
    */
   executePaletteSelection(): {text: string; surface: CommandSurface} | null;
+  /** Opens the private notepad, hydrated from disk if this run already has a saved note. */
+  openNotepad(): void;
+  closeNotepad(): void;
+  /** Every keystroke in the notepad's editor; persists the note as it types. */
+  setNoteText(text: string): void;
+  /**
+   * Closes the notepad and returns its text for the caller to drop, unsent,
+   * into the command bar's `/steer` draft. Returns null for an empty note, so
+   * the caller has nothing to pre-fill and the notepad is left open.
+   */
+  promoteNoteToSteerDraft(): {text: string} | null;
+  /** As `promoteNoteToSteerDraft`, but for the chat composer's draft; also opens chat. */
+  promoteNoteToChatDraft(): {text: string} | null;
   /** Loads the chunk of history just older than what is folded. Resolves false when history is already complete. */
   loadOlderHistory(): Promise<boolean>;
   subscribe(listener: (state: SessionState) => void): () => void;
@@ -616,6 +635,66 @@ export class SocketSessionController implements SessionController {
 
   #paletteContext(): {surface: CommandSurface; chatDocked: boolean} {
     return {surface: activeCommandSurface(this.#state), chatDocked: chatPaneVisible(this.#state)};
+  }
+
+  /**
+   * Opens the notepad, hydrated from `notes-store.ts` on the first open of a
+   * run that already has a saved note (a restart, or a reconnect that landed
+   * on the same run). Later opens in the same process reuse in-memory state,
+   * so a read here never clobbers text the operator is mid-edit on.
+   */
+  openNotepad(): void {
+    const runId = this.#state.runId;
+    const record = runId === null ? null : readNote(runId);
+    this.#setState(openNotepad(hydrateNotepad(this.#state, record)));
+  }
+
+  closeNotepad(): void {
+    this.#setState(closeNotepad(this.#state));
+  }
+
+  /**
+   * Persists on every keystroke rather than only on close: an operator who
+   * quits the TUI outright (not just `Esc`) should not lose a note, and a
+   * sidecar write is cheap enough that debouncing it is not worth the extra
+   * state. Nothing is written for a run the client has no id for yet (early
+   * in boot, before the first snapshot lands).
+   */
+  setNoteText(text: string): void {
+    const timestamp = new Date().toISOString();
+    const next = setNotepadText(this.#state, text, timestamp);
+    this.#setState(next);
+    const runId = this.#state.runId;
+    if (runId !== null && next.notepad.createdAt !== null) {
+      writeNote({
+        runId,
+        text: next.notepad.text,
+        createdAt: next.notepad.createdAt,
+        updatedAt: next.notepad.updatedAt ?? timestamp,
+      });
+    }
+  }
+
+  /**
+   * Hands the note's text to the caller and closes the notepad; the caller
+   * (`app.ts`) drops it into the command bar's buffer, unsent, the same way
+   * the palette's own text-taking commands are pre-filled. Never submits on
+   * the operator's behalf: this is the one path a note is allowed to reach an
+   * agent by, and it still requires the operator to review and press Enter.
+   */
+  promoteNoteToSteerDraft(): {text: string} | null {
+    const text = notepadPromotionText(this.#state);
+    if (text === null) return null;
+    this.#setState(closeNotepad(this.#state));
+    return {text};
+  }
+
+  /** As `promoteNoteToSteerDraft`, but for the chat composer; also opens chat. */
+  promoteNoteToChatDraft(): {text: string} | null {
+    const text = notepadPromotionText(this.#state);
+    if (text === null) return null;
+    this.#setState(openChat(closeNotepad(this.#state)));
+    return {text};
   }
 
   closeChat(): void {
@@ -1287,6 +1366,9 @@ export class SocketSessionController implements SessionController {
         return this.#setState(reportError(this.#state, action.error, {scope: 'input'}));
       case 'help':
         this.openPalette();
+        return;
+      case 'note':
+        this.openNotepad();
         return;
       case 'openChat':
         this.#setState(openChat(this.#state));

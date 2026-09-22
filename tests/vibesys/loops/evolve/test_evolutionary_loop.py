@@ -20,7 +20,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vibesys.agents import AgentClient
 from vibesys.config import Config
 from vibesys.constants import DomainName
 from vibesys.context import create_run_context
@@ -59,7 +58,8 @@ from vibesys.render.sink import output_sink
 from vibesys.run import EventJournal, GitTracker, LoopContext, RunState, RunStateNamespace
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentSpec
-from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
+from vibesys.schemas import JudgeResponse, ProfilerSummary, Verdict
+from vs_agent.api.testing import FakeAgentClient
 from vs_project import EvolveRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
@@ -199,100 +199,69 @@ command = ["python", "-c", "print('ok')"]
     return str(ref)
 
 
-def _make_runner(  # noqa: ANN202, C901, PLR0913  # tracked: #288
-    *,
-    judge_verdicts: list[str] | None = None,
-    profiler_responses: list[ProfilerSummary] | None = None,
-    capture_mutator_prompts: list[str] | None = None,
-    capture_judge_prompts: list[str] | None = None,
-    capture_profiler_prompts: list[str] | None = None,
-    mutator_writes: bool = False,
-):
-    """Build a MagicMock AgentClient with scripted responses.
+def _judge_response(verdict: Literal["pass", "fail"]) -> JudgeResponse:
+    """The default judge verdict for a scripted round."""
+    return JudgeResponse(
+        analysis="ok",
+        feedback="" if verdict == "pass" else "needs work",
+        verdict=Verdict.PASS if verdict == "pass" else Verdict.FAIL,
+    )
 
-    The mutator (``kind="implementer"`` + ``response_cls=MutatorResponse``)
-    always returns a stub MutatorResponse. Judge verdicts default to
-    ``"pass"``; profiler responses default to a fitness of ``10.0 tok/s``
-    incrementing by 1 per call so each child has a distinct perf number.
+
+def _profiler_response(perf_metric: float, *, perf_unit: str = "tok/s") -> ProfilerSummary:
+    return ProfilerSummary(
+        analysis="ok",
+        bottlenecks="none",
+        suggestions="none",
+        perf_metric=perf_metric,
+        perf_unit=perf_unit,
+    )
+
+
+def _default_profiler_responses(n: int, *, start: float = 10.0) -> list[ProfilerSummary]:
+    """Perf starts at 10.0 tok/s and increments by 1 per profiled candidate,
+    so each gets a distinct fitness."""
+    return [_profiler_response(start + i) for i in range(n)]
+
+
+def _mutator_writes_callback(fake: FakeAgentClient):  # noqa: ANN202  # tracked: #288
+    """Build an ``on_invoke`` callback that simulates a real mutator edit.
+
+    Without a file change the cold-start snapshot is a no-op and no commit is
+    recorded, so tests exercising WIP-seed/commit behavior need the workspace
+    to actually change on every mutator (``kind="implementer"``) call.
     """
-    judge_q = list(judge_verdicts or [])
-    prof_q = list(profiler_responses or [])
-    counters = {"mutator": 0, "judge": 0, "profiler": 0}
 
-    runner = MagicMock(spec=AgentClient)
-    runner.backend_name = "cli"
-    # Every invocation event carries the client's attribution, so the mock
-    # supplies real strings the event payload can validate.
-    runner.driver_name = "mock"
-    runner.provider = "mock"
-    runner.model_for_kind.return_value = "mock-model"
+    def _write(call):  # noqa: ANN001, ANN202  # tracked: #288
+        if call.kind != "implementer":
+            return
+        n = len(fake.calls_for("implementer"))
+        (call.workspace / f"mutant_{n}.py").write_text(f"# mutant {n}\n")
 
-    def _invoke(*, kind, response_cls, fallback_factory, system_prompt="", **kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001  # tracked: #288
-        if response_cls is MutatorResponse:
-            counters["mutator"] += 1
-            if capture_mutator_prompts is not None:
-                capture_mutator_prompts.append(system_prompt)
-            # Simulate a real edit so the cold-start snapshot has something to
-            # commit (a WIP repair-seed). Without a file change the snapshot is
-            # a no-op and no commit is recorded.
-            if mutator_writes:
-                workspace = kwargs.get("workspace")
-                if workspace is not None:
-                    (Path(workspace) / f"mutant_{counters['mutator']}.py").write_text(
-                        f"# mutant {counters['mutator']}\n"
-                    )
-            return MutatorResponse(
-                summary=f"mutator call {counters['mutator']}",
-                hypothesis="should be faster",
-                expected_behavior="ok",
-            )
-        if kind == "judge":
-            if capture_judge_prompts is not None:
-                capture_judge_prompts.append(system_prompt)
-            idx = counters["judge"]
-            counters["judge"] += 1
-            v = judge_q[idx] if idx < len(judge_q) else "pass"
-            return JudgeResponse(
-                analysis="ok",
-                feedback="" if v == "pass" else "needs work",
-                verdict=Verdict.PASS if v == "pass" else Verdict.FAIL,
-            )
-        if kind == "profiler":
-            if capture_profiler_prompts is not None:
-                capture_profiler_prompts.append(system_prompt)
-            idx = counters["profiler"]
-            counters["profiler"] += 1
-            if idx < len(prof_q):
-                return prof_q[idx]
-            return ProfilerSummary(
-                analysis="ok",
-                bottlenecks="none",
-                suggestions="none",
-                perf_metric=10.0 + idx,
-                perf_unit="tok/s",
-            )
-        raise AssertionError(  # noqa: TRY003  # tracked: #288
-            f"unexpected agent_runner.invoke call: kind={kind} response_cls={response_cls}"
-        )
-
-    runner.invoke.side_effect = _invoke
-    runner.counters = counters
-    return runner
+    return _write
 
 
 def _invoke_loop(
     tmp_path: Path,
     ref_file: str,
-    runner: MagicMock,
+    runner: FakeAgentClient,
     *,
+    accuracy_gate: MagicMock | None = None,
     _accuracy_gate_feedbacks: list[str | None] | None = None,
     **kwargs: Unpack[_EvolveLoopKwargs],
 ) -> bool:
-    """Shared plumbing — patch context globals, run the loop, return result."""
-    accuracy_gate = MagicMock(return_value=None)
-    if _accuracy_gate_feedbacks is not None:
-        accuracy_gate.side_effect = list(_accuracy_gate_feedbacks)
-    runner.accuracy_gate = accuracy_gate
+    """Shared plumbing — patch context globals, run the loop, return result.
+
+    ``accuracy_gate`` patches in for the real framework accuracy gate
+    (``vibesys.loops.evolve.loop._run_framework_accuracy_gate``); it is never
+    read off the agent client. Pass a pre-built ``MagicMock`` when the caller
+    needs to inspect its calls afterward; otherwise one is built here from
+    ``_accuracy_gate_feedbacks`` (or accepts everything by default).
+    """
+    if accuracy_gate is None:
+        accuracy_gate = MagicMock(return_value=None)
+        if _accuracy_gate_feedbacks is not None:
+            accuracy_gate.side_effect = list(_accuracy_gate_feedbacks)
     defaults: _EvolveLoopKwargs = {
         "config": Config.model_validate({"model": {"name": "claude-sonnet-4-6"}}),
         "exp_name": "test-evolve",
@@ -323,8 +292,9 @@ def _invoke_loop(
 def _invoke_bootstrap(
     tmp_path: Path,
     ref_file: str,
-    runner: MagicMock,
+    runner: FakeAgentClient,
     *,
+    accuracy_gate: MagicMock | None = None,
     _accuracy_gate_feedbacks: list[str | None] | None = None,
     **kwargs: Unpack[_EvolveLoopKwargs],
 ) -> bool:
@@ -336,6 +306,7 @@ def _invoke_bootstrap(
             tmp_path,
             ref_file,
             runner,
+            accuracy_gate=accuracy_gate,
             _accuracy_gate_feedbacks=_accuracy_gate_feedbacks,
             **overrides,
         )
@@ -392,7 +363,7 @@ def _evolution_state_store(project_root: Path) -> EvolutionStateStore:
 def test_bootstrap_succeeds_first_try(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """Bootstrap produces the first passing implementation as a generation-0
     seed with parent_id=None and a perf_metric from the profiler."""
-    runner = _make_runner()
+    runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(1))
     result = _invoke_bootstrap(
         tmp_path,
         ref_file,
@@ -416,7 +387,7 @@ def test_bootstrap_fails_all_attempts_returns_false(tmp_path, ref_file):  # noqa
     """When every bootstrap attempt fails the judge, the run aborts before the
     generation loop and returns False. Failed attempts are never profiled, and
     with no mutator edits they record no commit."""
-    runner = _make_runner(judge_verdicts=["fail", "fail"])
+    runner = FakeAgentClient().enqueue("judge", _judge_response("fail"), _judge_response("fail"))
     result = _invoke_bootstrap(
         tmp_path,
         ref_file,
@@ -424,9 +395,9 @@ def test_bootstrap_fails_all_attempts_returns_false(tmp_path, ref_file):  # noqa
         bootstrap_max_attempts=2,
     )
     assert result is False
-    assert runner.counters["mutator"] == 2
-    assert runner.counters["judge"] == 2
-    assert runner.counters["profiler"] == 0  # judged-fail attempts skip profiling
+    assert len(runner.calls_for("implementer")) == 2
+    assert len(runner.calls_for("judge")) == 2
+    assert len(runner.calls_for("profiler")) == 0  # judged-fail attempts skip profiling
 
     pop = _load_population(tmp_path)
     assert len(pop) == 2
@@ -440,7 +411,8 @@ def test_bootstrap_fails_all_attempts_returns_false(tmp_path, ref_file):  # noqa
 def test_bootstrap_failed_attempt_records_wip_seed_commit(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """A failed bootstrap attempt whose mutator actually edited the workspace is
     snapshotted to a WIP commit, so a later attempt can repair it in place."""
-    runner = _make_runner(judge_verdicts=["fail"], mutator_writes=True)
+    runner = FakeAgentClient().enqueue("judge", _judge_response("fail"))
+    runner.on_invoke(_mutator_writes_callback(runner))
     result = _invoke_bootstrap(
         tmp_path,
         ref_file,
@@ -462,7 +434,8 @@ def test_bootstrap_repairs_wip_seed_across_attempts(tmp_path, ref_file):  # noqa
     """A second bootstrap attempt fix-forwards from the most-recent WIP seed:
     it checks that commit out and mutates on top, yielding a fresh WIP commit
     distinct from the first."""
-    runner = _make_runner(judge_verdicts=["fail", "fail"], mutator_writes=True)
+    runner = FakeAgentClient().enqueue("judge", _judge_response("fail"), _judge_response("fail"))
+    runner.on_invoke(_mutator_writes_callback(runner))
     result = _invoke_bootstrap(
         tmp_path,
         ref_file,
@@ -486,7 +459,8 @@ def test_bootstrap_succeeds_after_repair(tmp_path, ref_file):  # noqa: ANN001, A
     """Bootstrap that fails once then passes: the failed attempt is snapshotted,
     the passing attempt repairs it in place and becomes the gen-0 seed. Only the
     passing attempt is profiled."""
-    runner = _make_runner(judge_verdicts=["fail", "pass"], mutator_writes=True)
+    runner = FakeAgentClient().enqueue("judge", _judge_response("fail"), _judge_response("pass"))
+    runner.on_invoke(_mutator_writes_callback(runner))
     result = _invoke_bootstrap(
         tmp_path,
         ref_file,
@@ -494,7 +468,7 @@ def test_bootstrap_succeeds_after_repair(tmp_path, ref_file):  # noqa: ANN001, A
         bootstrap_max_attempts=3,
     )
     assert result is True
-    assert runner.counters["profiler"] == 1  # only the passing attempt profiled
+    assert len(runner.calls_for("profiler")) == 1  # only the passing attempt profiled
 
     pop = _load_population(tmp_path)
     assert len(pop) == 2
@@ -514,21 +488,23 @@ def test_bootstrap_repairs_after_framework_accuracy_failure(tmp_path, ref_file):
     repair attempt, and the configured timeout reaches the framework gate.
     """
     failure = "Framework accuracy gate failed.\nstatus endpoint diverged"
-    runner = _make_runner(mutator_writes=True)
+    runner = FakeAgentClient()
+    runner.on_invoke(_mutator_writes_callback(runner))
+    accuracy_gate = MagicMock(side_effect=[failure, None])
     result = _invoke_bootstrap(
         tmp_path,
         ref_file,
         runner,
-        _accuracy_gate_feedbacks=[failure, None],
+        accuracy_gate=accuracy_gate,
         accuracy_timeout_seconds=37,
         bootstrap_max_attempts=2,
     )
 
     assert result is True
-    assert runner.counters["judge"] == 2
-    assert runner.counters["profiler"] == 1
-    assert runner.accuracy_gate.call_count == 2
-    assert [call.kwargs["timeout_seconds"] for call in runner.accuracy_gate.call_args_list] == [
+    assert len(runner.calls_for("judge")) == 2
+    assert len(runner.calls_for("profiler")) == 1
+    assert accuracy_gate.call_count == 2
+    assert [call.kwargs["timeout_seconds"] for call in accuracy_gate.call_args_list] == [
         37,
         37,
     ]
@@ -543,15 +519,15 @@ def test_bootstrap_repairs_after_framework_accuracy_failure(tmp_path, ref_file):
 def test_bootstrap_prompt_uses_cold_start_section(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """The bootstrap attempt sees the cold-start branch of the mutator prompt
     (no parent block)."""
-    captured: list[str] = []
-    runner = _make_runner(capture_mutator_prompts=captured)
+    runner = FakeAgentClient()
     _invoke_bootstrap(
         tmp_path,
         ref_file,
         runner,
     )
+    captured = runner.calls_for("implementer")
     assert len(captured) == 1
-    prompt = captured[0]
+    prompt = captured[0].system_prompt
     assert "Bootstrap the first passing seed" in prompt
     assert "## Parent" not in prompt
     assert "LLM-serving implementation invariants" in prompt
@@ -561,7 +537,7 @@ def test_evolve_with_preexisting_passing_seed_skips_bootstrap(tmp_path, ref_file
     """A resumed run whose population already has a passing seed skips the
     bootstrap phase entirely and evolves straight off the seed."""
     # First run: bootstrap-only, creates a passing gen-0 seed with a real commit.
-    _invoke_bootstrap(tmp_path, ref_file, _make_runner())
+    _invoke_bootstrap(tmp_path, ref_file, FakeAgentClient())
     exp_envs = list((tmp_path / "exp_env").iterdir())
     assert len(exp_envs) == 1
     exp_name = exp_envs[0].name
@@ -572,7 +548,7 @@ def test_evolve_with_preexisting_passing_seed_skips_bootstrap(tmp_path, ref_file
         result = _invoke_loop(
             tmp_path,
             ref_file,
-            _make_runner(),
+            FakeAgentClient(),
             exp_name=exp_name,
             input_path=str(exp_envs[0]),
             existing=True,
@@ -597,7 +573,7 @@ def test_evolve_with_preexisting_passing_seed_skips_bootstrap(tmp_path, ref_file
 def test_first_generation_uses_bootstrap_seed_as_parent(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """Gen 1's child must be tagged with parent_id pointing at the bootstrap
     seed."""
-    runner = _make_runner()
+    runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(2))
     result = _invoke_loop(
         tmp_path,
         ref_file,
@@ -642,10 +618,12 @@ def test_final_project_tree_is_the_deterministic_scalar_best(tmp_path, ref_file)
             perf_unit="tok/s",
         ),
     ]
+    runner = FakeAgentClient().enqueue("profiler", *responses)
+    runner.on_invoke(_mutator_writes_callback(runner))
     result = _invoke_loop(
         tmp_path,
         ref_file,
-        _make_runner(profiler_responses=responses, mutator_writes=True),
+        runner,
         max_generations=1,
         children_per_generation=2,
     )
@@ -663,7 +641,9 @@ def test_failed_child_excluded_from_future_parent_pool(tmp_path, ref_file):  # n
     parent). Gen 2: must still parent off the seed — never off the failed
     Gen 1 child."""
     # Judge order: bootstrap(pass), gen1(fail), gen2(pass).
-    runner = _make_runner(judge_verdicts=["pass", "fail", "pass"])
+    runner = FakeAgentClient().enqueue(
+        "judge", _judge_response("pass"), _judge_response("fail"), _judge_response("pass")
+    )
     result = _invoke_loop(
         tmp_path,
         ref_file,
@@ -672,9 +652,9 @@ def test_failed_child_excluded_from_future_parent_pool(tmp_path, ref_file):  # n
         children_per_generation=1,
     )
     assert result is True
-    assert runner.counters["mutator"] == 3
-    assert runner.counters["judge"] == 3
-    assert runner.counters["profiler"] == 2  # only the passes (seed + gen2)
+    assert len(runner.calls_for("implementer")) == 3
+    assert len(runner.calls_for("judge")) == 3
+    assert len(runner.calls_for("profiler")) == 2  # only the passes (seed + gen2)
 
     pop = _load_population(tmp_path)
     assert len(pop) == 3
@@ -690,20 +670,21 @@ def test_failed_child_excluded_from_future_parent_pool(tmp_path, ref_file):  # n
 def test_accuracy_rejected_child_is_not_profiled_or_selected(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """The framework oracle can overrule an LLM PASS for an offspring."""
     failure = "Framework accuracy gate failed.\nbooking response diverged"
-    runner = _make_runner()
+    runner = FakeAgentClient()
+    accuracy_gate = MagicMock(side_effect=[None, failure, None])
     result = _invoke_loop(
         tmp_path,
         ref_file,
         runner,
-        _accuracy_gate_feedbacks=[None, failure, None],
+        accuracy_gate=accuracy_gate,
         max_generations=2,
         children_per_generation=1,
     )
 
     assert result is True
-    assert runner.counters["judge"] == 3
-    assert runner.counters["profiler"] == 2
-    assert runner.accuracy_gate.call_count == 3
+    assert len(runner.calls_for("judge")) == 3
+    assert len(runner.calls_for("profiler")) == 2
+    assert accuracy_gate.call_count == 3
 
     seed, rejected, accepted = _load_population(tmp_path).all
     assert rejected.passed is False
@@ -752,7 +733,7 @@ def test_pareto_mode_records_metrics_dict_on_individuals(tmp_path, ref_file):  #
             metrics={"tput": 80.0, "lat_ms": 50.0},
         ),
     ]
-    runner = _make_runner(profiler_responses=profiler_responses)
+    runner = FakeAgentClient().enqueue("profiler", *profiler_responses)
     result = _invoke_loop(
         tmp_path,
         ref_file,
@@ -778,37 +759,17 @@ def test_pareto_mode_records_metrics_dict_on_individuals(tmp_path, ref_file):  #
 def test_pareto_addendum_appears_in_profiler_prompt(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """When Pareto mode is on, the profiler system prompt gets an addendum
     explicitly listing the metric keys to emit. The judge stays unaffected."""
-    captured_profiler_prompts: list[str] = []
-
-    def _make_runner_with_profiler_capture():  # noqa: ANN202  # tracked: #288
-        runner = _make_runner(
-            profiler_responses=[
-                ProfilerSummary(
-                    analysis="ok",
-                    bottlenecks="none",
-                    suggestions="none",
-                    perf_metric=10.0,
-                    perf_unit="tok/s",
-                    metrics={"tput": 10.0, "lat_ms": 50.0},
-                )
-            ],
-        )
-        original = runner.invoke.side_effect
-
-        def spy(*, kind, response_cls, system_prompt="", **kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
-            if kind == "profiler":
-                captured_profiler_prompts.append(system_prompt)
-            return original(
-                kind=kind,
-                response_cls=response_cls,
-                system_prompt=system_prompt,
-                **kwargs,
-            )
-
-        runner.invoke.side_effect = spy
-        return runner
-
-    runner = _make_runner_with_profiler_capture()
+    runner = FakeAgentClient().enqueue(
+        "profiler",
+        ProfilerSummary(
+            analysis="ok",
+            bottlenecks="none",
+            suggestions="none",
+            perf_metric=10.0,
+            perf_unit="tok/s",
+            metrics={"tput": 10.0, "lat_ms": 50.0},
+        ),
+    )
     space = MetricSpace(
         objectives=(
             Objective(name="tput", direction="max"),
@@ -822,8 +783,9 @@ def test_pareto_addendum_appears_in_profiler_prompt(tmp_path, ref_file):  # noqa
         space=space,
         frontier_bias=1.0,
     )
+    captured_profiler_prompts = runner.calls_for("profiler")
     assert len(captured_profiler_prompts) == 1
-    prompt = captured_profiler_prompts[0]
+    prompt = captured_profiler_prompts[0].system_prompt
     assert "Pareto-frontier mode" in prompt
     assert "`tput`" in prompt
     assert "`lat_ms`" in prompt
@@ -832,7 +794,7 @@ def test_pareto_addendum_appears_in_profiler_prompt(tmp_path, ref_file):  # noqa
 def test_no_objectives_keeps_metrics_empty_and_legacy_behavior(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """A space with no axes keeps `Individual.metrics` empty even if the
     profiler stub doesn't supply one — preserves the pre-Pareto behavior."""
-    runner = _make_runner()
+    runner = FakeAgentClient()
     result = _invoke_bootstrap(
         tmp_path,
         ref_file,
@@ -848,8 +810,7 @@ def test_no_objectives_keeps_metrics_empty_and_legacy_behavior(tmp_path, ref_fil
 def test_second_child_prompt_includes_parent_block(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """Gen 1's mutator prompt mentions the parent (bootstrap seed) perf_metric —
     one of the few signals the mutator has to ground its change in fitness."""
-    captured: list[str] = []
-    runner = _make_runner(capture_mutator_prompts=captured)
+    runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(2))
     _invoke_loop(
         tmp_path,
         ref_file,
@@ -857,8 +818,9 @@ def test_second_child_prompt_includes_parent_block(tmp_path, ref_file):  # noqa:
         max_generations=1,
         children_per_generation=1,
     )
+    captured = runner.calls_for("implementer")
     assert len(captured) == 2  # bootstrap (cold-start) + gen-1 (parent block)
-    gen1_prompt = captured[1]
+    gen1_prompt = captured[1].system_prompt
     assert "Bootstrap the first passing seed" not in gen1_prompt
     assert "## Parent" in gen1_prompt
     # The seed's perf_metric (10.0) was emitted by the profiler and should
@@ -869,12 +831,7 @@ def test_second_child_prompt_includes_parent_block(tmp_path, ref_file):  # noqa:
 def test_generic_domain_prompts_exclude_llm_serving_contracts(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """The evolve loop uses registered domain sections instead of baking the
     LLM-serving contract into its mutator and judge base prompts."""
-    mutator_prompts: list[str] = []
-    judge_prompts: list[str] = []
-    runner = _make_runner(
-        capture_mutator_prompts=mutator_prompts,
-        capture_judge_prompts=judge_prompts,
-    )
+    runner = FakeAgentClient()
 
     result = _invoke_bootstrap(
         tmp_path,
@@ -886,6 +843,8 @@ def test_generic_domain_prompts_exclude_llm_serving_contracts(tmp_path, ref_file
     )
 
     assert result is True
+    mutator_prompts = [call.system_prompt for call in runner.calls_for("implementer")]
+    judge_prompts = [call.system_prompt for call in runner.calls_for("judge")]
     assert len(mutator_prompts) == len(judge_prompts) == 1
     combined = "\n".join(mutator_prompts + judge_prompts)
     assert "uv run python accuracy_checker/checker.py" in combined
@@ -897,7 +856,8 @@ def test_generic_domain_prompts_exclude_llm_serving_contracts(tmp_path, ref_file
 
 
 def test_openevolve_policy_persists_multi_file_search_state(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_runner(mutator_writes=True)
+    runner = FakeAgentClient()
+    runner.on_invoke(_mutator_writes_callback(runner))
 
     result = _invoke_loop(
         tmp_path,
@@ -1402,7 +1362,8 @@ def test_evaluate_in_subcontext_builds_worktree_and_evaluates(tmp_path, ref_file
     """End-to-end: a real parent context spawns an isolated candidate sub-context
     (git worktree at the parent commit + its own logger/agent-runner), evaluates
     it, and the offspring commit lands in the parent's shared object store."""
-    runner = _make_runner(mutator_writes=True)
+    runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(1))
+    runner.on_invoke(_mutator_writes_callback(runner))
     with (
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
         patch("vibesys.context.build_agent_client", return_value=runner),
@@ -1493,7 +1454,9 @@ def test_max_parallelism_ignored_without_environment_capability(tmp_path, ref_fi
         "_run_generation_parallel",
         lambda *a, **k: called.__setitem__("parallel", True),  # noqa: ARG005, FBT003  # tracked: #288
     )
-    runner = _make_runner(judge_verdicts=["pass", "pass", "pass"])
+    runner = FakeAgentClient().enqueue(
+        "judge", _judge_response("pass"), _judge_response("pass"), _judge_response("pass")
+    )
     _invoke_loop(
         tmp_path,
         ref_file,
@@ -1511,7 +1474,9 @@ def test_loop_tears_down_candidate_on_pass_and_fail_paths(tmp_path, ref_file):  
     """Teardown fires exactly once per candidate on every exit path — the
     fails the judge."""
     # bootstrap passes (1 attempt), gen-1 candidate passes, gen-2 candidate fails.
-    runner = _make_runner(judge_verdicts=["pass", "pass", "fail"])
+    runner = FakeAgentClient().enqueue(
+        "judge", _judge_response("pass"), _judge_response("pass"), _judge_response("fail")
+    )
     with patch("vibesys.loops.evolve.loop._teardown_candidate_deployment") as teardown:
         _invoke_loop(
             tmp_path,
@@ -1615,7 +1580,7 @@ def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path, ref_file):  # 
     self-report, records every candidate's fitness."""
     from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
 
-    runner = _make_runner()
+    runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(2))
     gate = MagicMock(side_effect=[_passing_gate_result(42.5), _passing_gate_result(43.75)])
     with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
         result = _invoke_loop(
@@ -1637,7 +1602,7 @@ def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path, ref_file):  # 
     assert {item.perf_unit for item in pop.all} == {"tok/s"}
     assert pop.all[0].metrics == {"total_ops_per_sec": 42.5}
     # The profiler still ran for diagnostics; its self-report was not recorded.
-    assert runner.counters["profiler"] == 2
+    assert len(runner.calls_for("profiler")) == 2
 
 
 def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
@@ -1647,7 +1612,7 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_pat
         FrameworkBenchmarkOutcome,
     )
 
-    runner = _make_runner()
+    runner = FakeAgentClient()
     failing = BenchmarkGateResult(
         command="trusted-benchmark --json /tmp/result.json",
         output="benchmark exploded",
@@ -1666,7 +1631,7 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_pat
         )
 
     assert result is False
-    assert runner.counters["profiler"] == 0
+    assert len(runner.calls_for("profiler")) == 0
     pop = _load_population(tmp_path)
     assert len(pop) == 1
     failed = pop.all[0]
@@ -1675,7 +1640,7 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_pat
 
 
 def test_no_benchmark_contract_keeps_profiler_fitness(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    runner = _make_runner()
+    runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(1))
     gate = MagicMock()
     with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
         result = _invoke_bootstrap(tmp_path, ref_file, runner)
@@ -1723,7 +1688,7 @@ def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(tmp_path
             metrics={"total_ops_per_sec": 80.0, "p99_latency_ns": 800.0},
         ),
     ]
-    runner = _make_runner(profiler_responses=profiler_responses)
+    runner = FakeAgentClient().enqueue("profiler", *profiler_responses)
     gate = MagicMock(side_effect=[_passing_gate_result(42.5), _passing_gate_result(43.75)])
     with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
         result = _invoke_loop(
@@ -1751,7 +1716,7 @@ def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(tmp_path
 
 def test_protocol_contract_records_the_evaluator_declared_unit(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     """The recorded unit is the evaluator's declaration when it supplies one."""
-    runner = _make_runner()
+    runner = FakeAgentClient()
     gate = MagicMock(return_value=_passing_gate_result(42.5, unit="ops/s"))
     with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
         result = _invoke_bootstrap(
