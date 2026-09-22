@@ -141,6 +141,9 @@ const REPLAY = [
       'Pause',
       'Measure baseline vs ring, 3 reps each',
       'Pending',
+      // Graph only: a role the round has not reached, and what the live agent runs on.
+      'Profiler',
+      'Claude Code (claude-opus-5)',
     ],
   },
   {
@@ -180,7 +183,8 @@ const REPLAY = [
     name: 'r3',
     fixture: stub(),
     after: page => rail(page, 3).click(),
-    expect: ['R3', 'H-03', 'Judge', 'Speed up the VALUE computation in candidate.py.'],
+    // 'Stub' is the graph's runtime label for this recording's harness; nothing else shows it.
+    expect: ['R3', 'H-03', 'Judge', 'Speed up the VALUE computation in candidate.py.', 'Stub'],
   },
   {
     // No recording has a baseline value: 900 is invented here to render the R0 row.

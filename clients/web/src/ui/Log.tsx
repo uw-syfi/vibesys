@@ -10,6 +10,7 @@ import {
   User,
 } from 'lucide-react';
 import {useLayoutEffect, useRef, useState} from 'react';
+import {titleCase} from '../derive.js';
 import type {LogGroup, LogItem} from '../model.js';
 import {Prose} from './Prose.js';
 import './Log.css';
@@ -33,8 +34,6 @@ const ROLE_ICONS: Record<string, LucideIcon> = {
 const icon = {size: 16, strokeWidth: 1.75, 'aria-hidden': true} as const;
 const TIP_LIMIT = 600;
 
-const roleName = (role: string) =>
-  role.charAt(0).toUpperCase() + role.slice(1).replaceAll('_', ' ');
 const calls = (count: number) => (count === 1 ? '1 call' : `${count} calls`);
 // ponytail: module state, since App renders exactly one Log at a time.
 /** Set when a log unmounts with focus inside it, so the next round's log takes that focus. */
@@ -158,7 +157,7 @@ function Group({group, onOpen}: {group: LogGroup; onOpen: () => void}) {
       <li className={group.active ? 'grp is-active' : 'grp'}>
         <div className="who">
           <Icon {...icon} />
-          {roleName(group.role)}
+          {titleCase(group.role)}
         </div>
         <div className="what">
           {group.collapsed ? (
@@ -178,7 +177,7 @@ function Group({group, onOpen}: {group: LogGroup; onOpen: () => void}) {
                     }}
                   >
                     <span className="lab">
-                      <span className="verb">{group.summary || roleName(group.role)}</span>
+                      <span className="verb">{group.summary || titleCase(group.role)}</span>
                       {group.calls === 0 ? null : (
                         <span className="n mono">{calls(group.calls)}</span>
                       )}

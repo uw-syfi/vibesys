@@ -7,8 +7,14 @@ import type {
   PerformanceContext,
   RunEvent,
 } from '@vibesys/backend-client/browser';
-import {type CoreState, initialCoreState, reduceEventBatch} from '@vibesys/core-state';
 import {
+  type AgentPhase,
+  type CoreState,
+  initialCoreState,
+  reduceEventBatch,
+} from '@vibesys/core-state';
+import {
+  agentGraph,
   announce,
   endedWord,
   formatDelta,
@@ -681,4 +687,74 @@ test('prose keeps paragraphs, inline code, and bold; paths shorten at word start
   const short = pathShortener('run-7');
   assert.equal(short("cat '/w/run-7/src/a.rs' /x/run-7/b"), "cat 'src/a.rs' b");
   assert.equal(short('cat .vibesys/runs/run-7/x'), 'cat .vibesys/runs/run-7/x');
+});
+
+const phase = (patch: Partial<AgentPhase> & Pick<AgentPhase, 'kind'>): AgentPhase => ({
+  status: 'pending',
+  roundNumber: 1,
+  roundLabel: null,
+  ...patch,
+});
+const withPhases = (phases: AgentPhase[]): CoreState => ({...initialCoreState(), phases});
+const kinds = (core: CoreState, round: number | null) =>
+  agentGraph(core, round).map(column => column.kind);
+const statuses = (core: CoreState, round: number | null) =>
+  agentGraph(core, round).map(column => column.nodes.map(node => node.status));
+const edges = (core: CoreState, round: number | null) =>
+  agentGraph(core, round).map(column => column.edge);
+
+test('agent graph: columns in first-mention order, stacked agents, pending roles, runtime', () => {
+  // queue-rs at 623: the orchestrator has run twice, the implementer is working.
+  const core = fold(upTo(QUEUE, 623));
+  assert.deepEqual(kinds(core, 1), ['orchestrator', 'implementer', 'judge', 'profiler']);
+  // The loop runs the orchestrator twice a round, so its column already stacks two agents.
+  assert.deepEqual(statuses(core, 1), [
+    ['completed', 'completed'],
+    ['active'],
+    ['pending'],
+    ['pending'],
+  ]);
+  const graph = agentGraph(core, 1);
+  assert.deepEqual(
+    graph.map(column => column.nodes[0]?.role),
+    ['Orchestrator', 'Implementer', 'Judge', 'Profiler'],
+  );
+  assert.equal(graph[1]?.nodes[0]?.runtime, 'Claude Code (claude-opus-5)');
+  // Judge and profiler are pending because run_started advertised them: run-map seeds them from
+  // core.expectedRoles, and nothing here re-derives that list.
+  assert.deepEqual(core.expectedRoles, ['orchestrator', 'implementer', 'judge', 'profiler']);
+  assert.equal(graph[2]?.nodes[0]?.runtime, null);
+});
+
+test('agent graph: edge tones for live, idle, done, and failed', () => {
+  // Active on either side is live; a column that has not started is idle.
+  assert.deepEqual(edges(fold(upTo(QUEUE, 623)), 1), ['live', 'live', 'idle', null]);
+  // The run was interrupted inside the implementer, which fails its phase.
+  assert.deepEqual(edges(fold(QUEUE), 1), ['done', 'failed', 'idle', null]);
+  // A finished round hands over all the way down.
+  assert.deepEqual(edges(fold(STUB), 3), ['done', 'done', null]);
+});
+
+test('agent graph: runtime label from provider, model, both, or neither', () => {
+  const core = withPhases([
+    phase({kind: 'implementer', status: 'active', provider: 'codex', model: 'gpt-5.1-codex-max'}),
+    phase({kind: 'judge', provider: 'stub'}),
+    phase({kind: 'profiler', model: 'gemini-3-pro'}),
+    phase({kind: 'perf_eval'}),
+  ]);
+  const graph = agentGraph(core, 1);
+  assert.deepEqual(
+    graph.map(column => column.nodes[0]?.runtime),
+    ['Codex (gpt-5.1-codex-max)', 'Stub', 'gemini-3-pro', null],
+  );
+  assert.deepEqual(
+    graph.map(column => column.nodes[0]?.role),
+    ['Implementer', 'Judge', 'Profiler', 'Perf eval'],
+  );
+});
+
+test('agent graph: a round with no phases yields nothing', () => {
+  assert.deepEqual(agentGraph(fold(STUB), 0), []);
+  assert.deepEqual(agentGraph(fold(STUB), null), []);
+  assert.deepEqual(agentGraph(initialCoreState(), 1), []);
 });

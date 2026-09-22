@@ -1,6 +1,6 @@
 /** View models: `derive.ts` builds them from store state, the `ui/` components render them. */
 import type {DesignFileChange} from '@vibesys/backend-client/browser';
-import type {CoreRunStatus, RoundSummary} from '@vibesys/core-state';
+import type {AgentPhaseStatus, CoreRunStatus, RoundSummary} from '@vibesys/core-state';
 
 export type Connection = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -30,6 +30,28 @@ export interface RailModel {
   rows: RailRow[];
   /** `max_rounds` minus the latest started round; null when unknown or the run ended. */
   roundsLeft: number | null;
+}
+
+/** How the arrow between two columns of the agent graph is toned. */
+export type EdgeTone = 'idle' | 'done' | 'live' | 'failed';
+
+/** One agent of a round: a card in the agent graph. */
+export interface GraphNode {
+  /** The agent's execution id, or its kind and row while it is still pending. */
+  id: string;
+  /** Title-cased agent kind, e.g. `Implementer`. */
+  role: string;
+  status: AgentPhaseStatus;
+  /** `Claude Code (claude-opus-5)`; null when the phase recorded neither harness nor model. */
+  runtime: string | null;
+}
+
+/** One agent kind: the agents of that kind stacked, and the arrow to the next kind. */
+export interface GraphColumn {
+  kind: string;
+  nodes: GraphNode[];
+  /** Tone of the arrow to the next column; null on the last one. */
+  edge: EdgeTone | null;
 }
 
 export interface ProsePart {

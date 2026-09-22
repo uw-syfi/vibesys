@@ -10,10 +10,17 @@
   grid-template-columns: 188px minmax(0, 1fr) 352px;
   min-height: 0;
 }
+/* Graph, log, dock: only the log takes the slack, and the graph may be absent. */
 .center {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
+}
+.center > * {
+  flex: none;
+}
+.center > .logwrap {
+  flex: 1;
 }
 /* The log column and the dock share one centered measure. */
 .col {

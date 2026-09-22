@@ -1,0 +1,101 @@
+.graph {
+  border-bottom: 1px solid var(--border);
+}
+.graph .col {
+  padding-block: var(--space-3);
+}
+/* Columns centre on one line, so every arrow sits on that line whatever a column's height. */
+.gflow {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 2px;
+}
+.gflow:focus-visible {
+  outline-offset: -2px;
+}
+.gcol {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+}
+.gstack {
+  display: grid;
+  gap: var(--space-2);
+}
+/* The arrow to the next kind, drawn in the band the column reserves on its right. */
+.gcol[data-edge] {
+  position: relative;
+  padding-right: 34px;
+}
+.gcol[data-edge]::before,
+.gcol[data-edge]::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  translate: 0 -50%;
+}
+.gcol[data-edge]::before {
+  right: 14px;
+  width: 16px;
+  height: 1px;
+  background: var(--edge);
+}
+.gcol[data-edge]::after {
+  right: 8px;
+  border: 4px solid transparent;
+  border-left: 6px solid var(--edge);
+}
+.gcol[data-edge='idle'] {
+  --edge: var(--border-strong);
+}
+.gcol[data-edge='done'] {
+  --edge: var(--status-completed);
+}
+.gcol[data-edge='live'] {
+  --edge: var(--accent);
+}
+.gcol[data-edge='failed'] {
+  --edge: var(--status-failed);
+}
+
+/* One card per agent. A fixed width keeps the row a grid; the runtime wraps inside it. */
+.gnode {
+  display: grid;
+  width: 150px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.gnode[data-status='failed'],
+.gnode[data-status='cancelled'],
+.gnode[data-status='interrupted'] {
+  border-color: var(--status-failed);
+}
+.gnode[aria-current='step'] {
+  border-color: var(--accent);
+}
+.grole {
+  font-weight: 500;
+}
+.gstat,
+.grun {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.grun {
+  overflow-wrap: anywhere;
+}
+.gnode[data-status='active'] .gstat {
+  color: var(--status-running);
+}
+.gnode[data-status='completed'] .gstat {
+  color: var(--status-completed);
+}
+.gnode[data-status='failed'] .gstat,
+.gnode[data-status='cancelled'] .gstat,
+.gnode[data-status='interrupted'] .gstat {
+  color: var(--status-failed);
+}

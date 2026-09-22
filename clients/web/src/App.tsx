@@ -1,6 +1,7 @@
 import type {DesignRound, HypothesisEntry} from '@vibesys/backend-client/browser';
 import {useCallback, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {
+  agentGraph,
   endedWord,
   headerModel,
   inspectorModel,
@@ -16,6 +17,7 @@ import {
 import type {WorkspaceSession} from './session.js';
 import {Banner} from './ui/Banner.js';
 import {Composer} from './ui/Composer.js';
+import {Graph} from './ui/Graph.js';
 import {Header} from './ui/Header.js';
 import {Inspector} from './ui/Inspector.js';
 import {LiveRegion} from './ui/LiveRegion.js';
@@ -73,6 +75,7 @@ export function App({session}: {session: WorkspaceSession}) {
     () => (selected === null ? [] : logGroups(core, steer.consumed, selected, runId)),
     [core, steer, selected, runId],
   );
+  const graph = useMemo(() => agentGraph(core, selected), [core, selected]);
   const inspector = useMemo(
     () =>
       selected === null
@@ -162,6 +165,7 @@ export function App({session}: {session: WorkspaceSession}) {
           onRetry={() => void session.load('experiments')}
         />
         <main className="center">
+          <Graph round={selected} columns={graph} />
           <Log
             key={selected ?? 'none'}
             // Loading until the bootstrap batch folds an event or the snapshot gives a status:

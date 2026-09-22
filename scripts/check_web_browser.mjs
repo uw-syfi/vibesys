@@ -445,13 +445,15 @@ try {
   assert.equal(runIds.at(-1), runId, 'refresh preserves run');
   await page.getByLabel('Steer the run').fill('finish-browser-fixture');
   await page.getByRole('button', {name: 'Send', exact: true}).click();
-  await page.getByText('Completed', {exact: true}).waitFor();
+  // The run's own outcome, in the header: the agent graph says "Completed" of each agent too.
+  const completed = page.getByRole('banner').getByText('Completed', {exact: true});
+  await completed.waitFor();
   // A finished ServerRuntime waits for its last subscriber. Closing every tab
   // must leave the gateway's subscription holding it for later inspection.
   await page.goto('about:blank');
   await delay(300);
   await page.goto(origin);
-  await page.getByText('Completed', {exact: true}).waitFor();
+  await completed.waitFor();
   assert.equal(runIds.at(-1), runId, 'gateway retains a completed run without tabs');
   await page.setViewportSize({width: 390, height: 844});
   assert.equal(

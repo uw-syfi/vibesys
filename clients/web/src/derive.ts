@@ -8,9 +8,11 @@ import type {
   RunEvent,
 } from '@vibesys/backend-client/browser';
 import {
+  type AgentPhase,
   type CoreRunStatus,
   type CoreState,
   hasRunEnded,
+  phasesForRound,
   type RoundState,
   roundNumberFromLabel,
   type TranscriptEntry,
@@ -18,7 +20,9 @@ import {
 import type {
   Connection,
   ConsumedSteer,
+  EdgeTone,
   EndedWord,
+  GraphColumn,
   HeaderModel,
   InspectorModel,
   JudgeAttempt,
@@ -61,6 +65,82 @@ export function formatDelta(pct: number): string {
 /** The latest round the run has started, or null before round 1. */
 export function latestRound(core: CoreState): number | null {
   return core.rounds.filter(round => round.status !== 'planned').at(-1)?.number ?? null;
+}
+
+/** `perf_eval` as `Perf eval`: how a role or a harness is written as a word. */
+export function titleCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1).replaceAll('_', ' ');
+}
+
+const HARNESSES: Record<string, string> = {
+  codex: 'Codex',
+  claude: 'Claude Code',
+  gemini: 'Gemini',
+  opencode: 'Opencode',
+};
+
+/**
+ * `Claude Code (claude-opus-5)`: the harness an agent ran on and the model as the backend
+ * recorded it. Null when the phase recorded neither.
+ *
+ * ponytail: the TUI's `agent-runtime-label.ts` also prettifies the model id (`GPT 5.1 Codex Max`)
+ * from a table of acronyms. That table has to learn every new model, so this keeps the recorded
+ * id and the two labels differ by design.
+ */
+function runtimeLabel(
+  provider: string | null | undefined,
+  model: string | null | undefined,
+): string | null {
+  const recorded = provider?.trim();
+  const harness = recorded ? (HARNESSES[recorded.toLowerCase()] ?? titleCase(recorded)) : null;
+  const name = model?.trim() || null;
+  if (harness !== null && name !== null) return `${harness} (${name})`;
+  return harness ?? name;
+}
+
+const BROKEN = new Set<AgentPhase['status']>(['failed', 'cancelled', 'interrupted']);
+
+/**
+ * The arrow from a column to the next one. A failure on the left outranks everything: it is why
+ * the handover never happened. Otherwise an active agent on either side makes the arrow the live
+ * one, and a column that has finished has handed over.
+ */
+function edgeTone(left: readonly AgentPhase[], right: readonly AgentPhase[]): EdgeTone {
+  if (left.some(phase => BROKEN.has(phase.status))) return 'failed';
+  if (left.some(phase => phase.status === 'active')) return 'live';
+  if (right.some(phase => phase.status === 'active')) return 'live';
+  if (left.every(phase => phase.status === 'completed')) return 'done';
+  return 'idle';
+}
+
+/**
+ * The round's agent pipeline: one column per agent kind in the order the round first mentions
+ * them, the agents of that kind stacked inside it, and the tone of the arrow to the next kind.
+ *
+ * Roles the loop has not reached are already in `core.phases` as pending: run-map seeds them from
+ * the `expected_roles` that `run_started` advertised, so nothing is re-derived here. A round with
+ * no phases (R0, or one the run has not started) yields nothing and the panel does not render.
+ */
+export function agentGraph(core: CoreState, round: number | null): GraphColumn[] {
+  if (round === null) return [];
+  const phases = phasesForRound(core.phases, round);
+  const columns = [...new Set(phases.map(phase => phase.kind))].map(kind => ({
+    kind,
+    phases: phases.filter(phase => phase.kind === kind),
+  }));
+  return columns.map((column, index) => {
+    const next = columns[index + 1];
+    return {
+      kind: column.kind,
+      nodes: column.phases.map((phase, row) => ({
+        id: phase.executionId ?? `${phase.kind}-${row}`,
+        role: titleCase(phase.kind),
+        status: phase.status,
+        runtime: runtimeLabel(phase.provider, phase.model),
+      })),
+      edge: next === undefined ? null : edgeTone(column.phases, next.phases),
+    };
+  });
 }
 
 type Facts = Map<number, {entry: HypothesisEntry; round: HypothesisRound}>;
