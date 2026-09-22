@@ -462,9 +462,10 @@ async function capture(browser, origin, scenario) {
 const only = args.only?.split(',');
 const scenarios = (args.live ? LIVE : REPLAY).filter(item => !only || only.includes(item.name));
 const server = args.live ? null : await preview();
-const browser = await chromium.launch();
+let browser;
 let failed = false;
 try {
+  browser = await chromium.launch();
   for (const scenario of scenarios) {
     const failures = await capture(browser, args.live ?? server.origin, scenario);
     failed ||= failures.length > 0;
@@ -472,7 +473,7 @@ try {
     for (const failure of failures) console.log(`  ${failure}`);
   }
 } finally {
-  await browser.close();
+  await browser?.close();
   server?.child.kill();
 }
 console.log(`Frames in ${args.out}. PASS checks text and overflow only; review each PNG.`);
