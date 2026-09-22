@@ -340,7 +340,7 @@ export function logGroups(
     } else if ((entry.kind === 'assistant' || entry.kind === 'analysis') && entry.content.trim()) {
       rows.push({...base, item: {kind: 'prose', id: entry.id, paragraphs: prose(entry.content)}});
     } else if (entry.kind === 'status') {
-      // A phase start opens its role's group before the role has output anything.
+      // A phase start ends the previous role's group; its own group shows once it has entries.
       rows.push({...base, item: null});
     }
   }
@@ -376,9 +376,7 @@ export function logGroups(
     group.items.push(row.item);
     if (row.item.kind === 'tool') group.calls += 1;
   }
-  const groups = drafts.filter(
-    (group, index) => group.items.length > 0 || index === drafts.length - 1,
-  );
+  const groups = drafts.filter(group => group.items.length > 0);
   const live = !hasRunEnded(core) && latestRound(core) === round;
   groups.forEach((group, index) => {
     const previous = groups[index - 1];

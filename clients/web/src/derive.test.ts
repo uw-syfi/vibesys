@@ -276,12 +276,15 @@ test('steers: pending until a consumed control event, then placed at the consumi
   const groups = logGroups(fold(STUB), consumed, 3, null);
   assert.deepEqual(
     groups.map(group => [group.role, group.collapsed, group.items.map(item => item.kind)]),
-    [
-      ['implementer', true, ['steer']],
-      ['judge', false, []],
-    ],
-    'the steer opens the implementer group; the empty orchestrator group is dropped',
+    [['implementer', false, ['steer']]],
+    'the steer opens the implementer group; the empty orchestrator and judge groups are dropped',
   );
+  for (let round = 1; round <= 8; round++) {
+    assert.ok(
+      logGroups(fold(STUB), consumed, round, null).every(group => group.items.length > 0),
+      `R${round} renders no role group without entries`,
+    );
+  }
 });
 
 test('log groups: role groups, collapse, in-flight row, tool rows from typed payloads', () => {

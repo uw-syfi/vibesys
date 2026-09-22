@@ -36,6 +36,9 @@ const TIP_LIMIT = 600;
 const roleName = (role: string) =>
   role.charAt(0).toUpperCase() + role.slice(1).replaceAll('_', ' ');
 const calls = (count: number) => (count === 1 ? '1 call' : `${count} calls`);
+// ponytail: module state, since App renders exactly one Log at a time.
+/** Set when a log unmounts with focus inside it, so the next round's log takes that focus. */
+let carryFocus = false;
 
 /** Rendered with `key={round}`, so a new selection starts with fresh follow state. */
 export function Log({state, round, groups, follow, history}: LogProps) {
@@ -54,6 +57,17 @@ export function Log({state, round, groups, follow, history}: LogProps) {
     observer.observe(node.firstElementChild as Element);
     return () => observer.disconnect();
   }, [follow, away]);
+
+  // App re-keys the log per round. Focus that was inside the old log moves to the new one;
+  // focus anywhere else stays put.
+  useLayoutEffect(() => {
+    const node = scroller.current;
+    if (carryFocus) node?.focus({preventScroll: true});
+    carryFocus = false;
+    return () => {
+      carryFocus = node?.parentElement?.contains(document.activeElement) ?? false;
+    };
+  }, []);
 
   function onScroll() {
     const node = scroller.current;
@@ -121,7 +135,7 @@ export function Log({state, round, groups, follow, history}: LogProps) {
         </div>
       </div>
       {follow && away ? (
-        <button type="button" className="jump" aria-keyshortcuts="End" onClick={jump}>
+        <button type="button" className="jump" onClick={jump}>
           <ArrowDown size={14} strokeWidth={1.75} aria-hidden />
           Jump to latest
         </button>
