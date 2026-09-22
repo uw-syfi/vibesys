@@ -404,7 +404,7 @@ def test_task_dockerfile_selects_docker_without_building_during_validation(
     dockerfile = task / "Dockerfile"
     dockerfile.write_text("FROM python:3.12-bookworm\n")
 
-    with patch("entrypoints.cli.build_task_image") as build:
+    with patch("entrypoints.cli.environment.build_task_image") as build:
         invocation = parse_cli_invocation(
             ["--project", str(project), "--task", "latency", *environment_flag]
         )
@@ -424,7 +424,7 @@ def test_task_dockerfile_builds_once_for_a_launch(tmp_path: Path) -> None:
     invocation = parse_cli_invocation(["--project", str(project), "--task", "latency"])
     image_id = f"sha256:{'a' * 64}"
 
-    with patch("entrypoints.cli.build_task_image", return_value=image_id) as build:
+    with patch("entrypoints.cli.environment.build_task_image", return_value=image_id) as build:
         spec = run_environment_spec_from_args(
             invocation.args,
             build_task_docker_image=True,
@@ -468,7 +468,7 @@ def test_each_outer_loop_builds_the_task_image_once(
     invocation.args.exp_name = "test-run"
 
     with (
-        patch("entrypoints.cli.build_task_image", return_value=image_id) as build,
+        patch("entrypoints.cli.environment.build_task_image", return_value=image_id) as build,
         patch(
             "entrypoints.cli.load_config_and_skills",
             return_value=(config, (), ComputeBackend.CPU),
@@ -606,12 +606,11 @@ def test_direct_runs_default_to_local_and_copied_runs_default_to_a_remote(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from entrypoints import cli  # noqa: PLC0415
 
     project = _write_input_project(tmp_path)
     github = Mock()
     github.current_user.return_value = "octocat"
-    monkeypatch.setattr(cli, "GitHubCLI", Mock(return_value=github))
+    monkeypatch.setattr("entrypoints.cli.config.GitHubCLI", Mock(return_value=github))
     config = Config.model_validate({"model": {"name": "gpt-5.4"}})
 
     direct = parse_cli_invocation(["--input", str(project)])
@@ -684,8 +683,7 @@ def test_profiler_validation_uses_the_selected_environment(
         ["--input", str(project), "--profiler", "nsys"]
     )
     monkeypatch.setattr(
-        cli,
-        "supported_profilers",
+        "entrypoints.cli.environment.supported_profilers",
         Mock(return_value=frozenset({ProfilerKind.TORCH, ProfilerKind.NONE})),
     )
 
@@ -988,7 +986,7 @@ def test_repository_resume_keeps_a_recorded_local_environment_despite_task_docke
     monkeypatch.chdir(project)
 
     args = parse_cli_invocation(["--resume", run_id]).args
-    with patch("entrypoints.cli.build_task_image") as build:
+    with patch("entrypoints.cli.environment.build_task_image") as build:
         spec = run_environment_spec_from_args(args, build_task_docker_image=True)
 
     assert spec.name == "local"
@@ -1019,7 +1017,7 @@ def test_repository_resume_rebuilds_a_recorded_task_docker_environment(
     monkeypatch.chdir(project)
 
     args = parse_cli_invocation(["--resume", run_id]).args
-    with patch("entrypoints.cli.build_task_image", return_value=rebuilt_image) as build:
+    with patch("entrypoints.cli.environment.build_task_image", return_value=rebuilt_image) as build:
         spec = run_environment_spec_from_args(args, build_task_docker_image=True)
 
     assert spec.name == "docker"
