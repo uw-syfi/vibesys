@@ -4,6 +4,7 @@ import asyncio
 import re
 import shutil
 import time
+import uuid
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
@@ -15,18 +16,10 @@ from typing import Any, TextIO, TypeVar, overload
 from pydantic import BaseModel
 
 from vibesys import backends, boot_trace
-from vibesys.agents import AgentClientProtocol, build_agent_client
-from vibesys.agents.factory import (
-    agent_driver_supports_mcp_servers,
-    resolve_agent_driver,
-)
-from vibesys.agents.host_resource_declarations import task_agent_host_resources
-from vibesys.agents.progress import AgentProgress
-from vibesys.agents.session_store import AgentSessionState, DurableSessionStore
+from vibesys.agent_spec_config import agent_spec_from_config, resolve_agent_driver
 from vibesys.backends.base import ComputeBackendImpl, ContentionMonitor
 from vibesys.config import Config, as_config
 from vibesys.constants import (
-    DEFAULT_AGENT_BACKEND,
     DEFAULT_COMPUTE_BACKEND,
     PROJECT_ROOT,
     ComputeBackend,
@@ -60,26 +53,25 @@ from vibesys.profilers import (
     profiler_definition,
     resolve_profiler_kind,
 )
+from vibesys.render.log import log_and_print
 from vibesys.render.run_log import RunLogRenderer
 from vibesys.render.sink import output_sink
 from vibesys.resource_paths import profiler_support_dir
 from vibesys.run import (
-    AgentRuntimeResources,
-    AgentSelection,
     DeviceLease,
     ExperimentRepository,
     GitTracker,
     ProjectProvisioningSpec,
     RepositoryVisibility,
-    RunAttachment,
     RunCommands,
-    RunIntegration,
     RunLogger,
     RunPaths,
+    RunResourceHandoff,
     RunState,
     RunStateNamespace,
     Workspace,
     provision_project,
+    splice_steering,
 )
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration
@@ -99,6 +91,17 @@ from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     build_run_environment,
     make_run_environment_spec,
+)
+from vibesys.skills import platform_skill_selection
+from vs_agent.api import (
+    AgentBackend,
+    AgentClientProtocol,
+    AgentProgress,
+    AgentSessionState,
+    DurableSessionStore,
+    agent_driver_supports_mcp_servers,
+    build_agent_client,
+    task_agent_host_resources,
 )
 from vs_project import (
     Project,
@@ -253,7 +256,7 @@ def create_run_context(  # noqa: PLR0913  # tracked: #288
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
     agent_state_model_type: type[BaseModel] | None = None,
-    integration: RunIntegration | None = None,
+    integration: LocalRunIntegration | None = None,
 ) -> "_RunContext":
     """Build a fully wired :class:`_RunContext`.
 
@@ -346,7 +349,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
     remote_repo: str | None,
     repo_visibility: RepositoryVisibility,
     agent_state_model_type: type[BaseModel] | None,
-    integration: RunIntegration | None,
+    integration: LocalRunIntegration | None,
 ) -> "_RunContext":
     context_start = time.perf_counter()
     # Boot spans recorded before this function ran (the dispatch preamble)
@@ -423,9 +426,15 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 log=buffered_logs.append,
                 image=environment.backend_image,
             )
-            resolved_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
+            resolved_backend = str(agent_backend or config.agent.backend or AgentBackend.CLI)
             resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
             model_name = config.model.name
+            agent_spec = agent_spec_from_config(
+                config,
+                backend=agent_backend,
+                provider=cli_provider,
+                model=model_name,
+            )
         with boot_trace.span("profiler_preflight"):
             resolved_profiler_kind = resolve_profiler_kind(
                 profiler_kind,
@@ -434,10 +443,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 environment_default_profiler_kind=environment.default_profiler_kind,
                 environment_supported_profiler_kinds=environment.supported_profiler_kinds,
             )
-            driver_supports_mcp = agent_driver_supports_mcp_servers(
-                config,
-                agent_backend=agent_backend,
-            )
+            driver_supports_mcp = agent_driver_supports_mcp_servers(agent_spec)
             if resolved_profiler_kind in ACTIVE_PROFILER_KINDS and driver_supports_mcp is False:
                 driver_name = resolve_agent_driver(config)
                 definition = profiler_definition(resolved_profiler_kind)
@@ -447,7 +453,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                         stage="agent_capability_validation",
                         message=(
                             f"Profiler {resolved_profiler_kind.value!r} requires session MCP server "
-                            f"{definition.mcp_name!r}, but agent driver {driver_name!r} does not "
+                            f"{definition.mcp_name!r}, but agent driver {driver_name.value!r} does not "
                             "support session MCP servers. Select agent.driver='agentshim' or "
                             "disable profiling with --profiler none."
                         ),
@@ -555,7 +561,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                     )
         with boot_trace.span("log_bootstrap"):
             integration.attach(log_dir)
-            logger = RunLogger(log_dir)
+            logger = RunLogger(log_dir, emit=log_and_print)
             teardown_stack.callback(logger.close)
             # Registered after logger.close so LIFO teardown unsubscribes the
             # renderer before the log file closes.
@@ -903,9 +909,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             # backend is rejected if --docker is set; build_agent_client raises
             # SystemExit with a clear message in that case.
             agent_client = build_agent_client(
-                config,
-                agent_backend=agent_backend,
-                cli_provider=cli_provider,
+                spec=agent_spec,
                 session_store=agent_session_store,
                 backends={
                     "implementer": session.sandbox,
@@ -922,14 +926,14 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                     "orchestrator": session.sandbox,
                 },
                 skill_source_dirs=skill_source_paths,
-                compute_backend=backend,
-                model_name=model_name,
+                skill_selection=platform_skill_selection(backend),
                 run_log_file=logger.writer,
                 use_docker=session.view.cli_sandboxed,
                 log_dir=log_dir,
                 project_path_policy=project_path_policy,
                 require_host_sandbox=not session.view.cli_sandboxed,
                 host_resources=agent_host_resources,
+                events=output_sink(),
             )
         teardown_stack.callback(agent_client.close)
 
@@ -973,37 +977,31 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             round_transaction_coordinator=round_transaction_coordinator,
             agent_host_resources=agent_host_resources,
         )
-        detach_run = integration.attach_run(
-            RunAttachment(
+        integration.publish_resources(
+            RunResourceHandoff(
                 project=project,
                 run_id=run_id,
                 workspace=project_root,
                 log_dir=log_dir,
                 agent_backend=resolved_backend,
-                agent_defaults=AgentSelection(
-                    driver=resolve_agent_driver(config),
-                    provider=resolved_cli_provider,
-                    model=model_name,
-                    role_models=tuple(
-                        role.model
-                        for role in (config.agent.outer, config.agent.inner)
-                        if role.model is not None
-                    ),
+                driver=resolve_agent_driver(config).value,
+                provider=resolved_cli_provider,
+                model=model_name,
+                role_models=tuple(
+                    role.model
+                    for role in (config.agent.outer, config.agent.inner)
+                    if role.model is not None
                 ),
-                agent_runtime=AgentRuntimeResources(
-                    config=config,
-                    compute_backend=backend,
-                    skill_source_dirs=tuple(skill_source_paths),
-                    environment=environment,
-                    environment_request=run_environment_request,
-                    run_environment_sandboxed=session.view.cli_sandboxed,
-                    project_path_policy=project_path_policy,
-                    host_resources=agent_host_resources,
-                ),
+                config=config,
+                compute_backend=backend,
+                skill_source_dirs=tuple(skill_source_paths),
+                environment=environment,
+                environment_request=run_environment_request,
+                run_environment_sandboxed=session.view.cli_sandboxed,
+                project_path_policy=project_path_policy,
+                host_resources=agent_host_resources,
             )
         )
-        if detach_run is not None:
-            teardown_stack.callback(detach_run)
         construction_complete = True
     # Assembly's spans, including the enclosing one that just closed with the
     # total. The run log gets them in completion order: children, then parent.
@@ -1083,10 +1081,10 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
     teardown_stack.callback(lambda: parent.git.remove_worktree(workspace))
     parent.git.add_worktree(workspace, parent_commit)
 
-    logger = RunLogger(log_dir, tee_stderr=False)
+    logger = RunLogger(log_dir, tee_stderr=False, emit=log_and_print)
     teardown_stack.callback(logger.close)
 
-    resolved_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
+    resolved_backend = str(agent_backend or config.agent.backend or AgentBackend.CLI)
     resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
     effective_objective = getattr(parent, "effective_objective", None)
 
@@ -1157,10 +1155,14 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
     # role-scoped conversations are never checkpointed (they belong to one
     # process). Candidates also share the parent's run ID and local namespace
     # and run concurrently, so a single per-run map would alias them anyway.
-    agent_client = build_agent_client(
+    agent_spec = agent_spec_from_config(
         config,
-        agent_backend=agent_backend,
-        cli_provider=cli_provider,
+        backend=agent_backend,
+        provider=cli_provider,
+        model=parent.model_name,
+    )
+    agent_client = build_agent_client(
+        spec=agent_spec,
         backends={
             "implementer": session.sandbox,
             "judge": session.sandbox,
@@ -1169,8 +1171,7 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
             "orchestrator": session.sandbox,
         },
         skill_source_dirs=parent.skill_source_paths,
-        compute_backend=parent.backend,
-        model_name=parent.model_name,
+        skill_selection=platform_skill_selection(parent.backend),
         run_log_file=logger.writer,
         use_docker=session.view.cli_sandboxed,
         log_dir=log_dir,
@@ -1180,6 +1181,7 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
         # container access; recomputing is impossible here because a candidate
         # context carries neither the profiler domain nor the task name.
         host_resources=parent.agent_host_resources,
+        events=output_sink(),
     )
     teardown_stack.callback(agent_client.close)
 
@@ -1253,7 +1255,7 @@ class _RunContext:
         *,
         backend: ComputeBackend,
         run_environment: RunEnvironment,
-        integration: RunIntegration,
+        integration: LocalRunIntegration,
         logger: RunLogger,
         paths: RunPaths,
         debug: bool,
@@ -1475,62 +1477,52 @@ class _RunContext:
         driver = client.driver_name
         provider = client.provider
         model = client.model_for_kind(kind)
-        execution = self.integration.invocations.start(
-            kind,
-            round_label,
-            user_prompt,
-            system_prompt,
-            driver=driver,
-            provider=provider,
-            model=model,
-        )
-        user_prompt = execution.user_prompt
-        execution_id = execution.execution_id
+        control = self.integration.control
+        control.raise_if_stopped()
+        control.wait_while_paused()
+        steer_texts = control.take_pending_steer()
+        user_prompt = splice_steering(user_prompt, steer_texts)
+        execution_id = uuid.uuid4().hex
+        if steer_texts:
+            control.notify_steer_consumed(
+                agent_kind=kind, round_label=round_label, execution_id=execution_id
+            )
         event_fields: dict[str, Any] = {
             "agent_kind": kind,
             "round_label": round_label,
             "execution_id": execution_id,
         }
         attempt = _attempt_from_label(round_label)
-        try:
-            self.events.emit(
-                CoreEventType.AGENT_EXECUTION_STARTED,
-                status=EventStatus.ACTIVE,
-                data=AgentExecutionStartedData(
-                    stage=kind,
-                    attempt=attempt,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    activity=AgentExecutionActivityData(
-                        mode="thinking",
-                        summary=f"{kind.replace('_', ' ').title()} is working",
-                    ),
-                    driver=driver,
-                    provider=provider,
-                    model=model,
+        self.events.emit(
+            CoreEventType.AGENT_EXECUTION_STARTED,
+            status=EventStatus.ACTIVE,
+            data=AgentExecutionStartedData(
+                stage=kind,
+                attempt=attempt,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                activity=AgentExecutionActivityData(
+                    mode="thinking",
+                    summary=f"{kind.replace('_', ' ').title()} is working",
                 ),
-                **event_fields,
-            )
-            self.events.emit(
-                CoreEventType.PHASE_STARTED,
-                status=EventStatus.ACTIVE,
-                data=PhaseData(phase=kind, attempt=attempt),
-                **event_fields,
-            )
-            self.events.emit(
-                CoreEventType.INVOCATION_STARTED,
-                status=EventStatus.ACTIVE,
-                data=InvocationStartedData(system_prompt=system_prompt, user_prompt=user_prompt),
-                **event_fields,
-            )
-        except BaseException as lifecycle_error:
-            self.integration.invocations.finish(
-                kind,
-                round_label,
-                error=lifecycle_error,
-                execution_id=execution_id,
-            )
-            raise
+                driver=driver,
+                provider=provider,
+                model=model,
+            ),
+            **event_fields,
+        )
+        self.events.emit(
+            CoreEventType.PHASE_STARTED,
+            status=EventStatus.ACTIVE,
+            data=PhaseData(phase=kind, attempt=attempt),
+            **event_fields,
+        )
+        self.events.emit(
+            CoreEventType.INVOCATION_STARTED,
+            status=EventStatus.ACTIVE,
+            data=InvocationStartedData(system_prompt=system_prompt, user_prompt=user_prompt),
+            **event_fields,
+        )
         result: T | None = None
         error: BaseException | None = None
         try:
@@ -1554,43 +1546,24 @@ class _RunContext:
         finally:
             status = _execution_status(error)
             error_text = f"{type(error).__name__}: {error}" if error is not None else None
-            lifecycle_error: BaseException | None = None
-            try:
-                self.events.emit(
-                    CoreEventType.AGENT_EXECUTION_FINISHED,
-                    status=status,
-                    data=AgentExecutionFinishedData(result=json_value(result), error=error_text),
-                    **event_fields,
-                )
-                self.events.emit(
-                    CoreEventType.INVOCATION_FINISHED,
-                    status=status,
-                    data=InvocationFinishedData(result=json_value(result), error=error_text),
-                    **event_fields,
-                )
-                self.events.emit(
-                    CoreEventType.PHASE_FINISHED,
-                    status=status,
-                    data=PhaseData(phase=kind, attempt=attempt),
-                    **event_fields,
-                )
-            except BaseException as exc:  # noqa: BLE001
-                lifecycle_error = exc
-            finally:
-                self.integration.invocations.finish(
-                    kind,
-                    round_label,
-                    result=result,
-                    error=error or lifecycle_error,
-                    execution_id=execution_id,
-                )
-            if lifecycle_error is not None:
-                if error is None:
-                    raise lifecycle_error
-                error.add_note(
-                    "Additional error while recording invocation completion: "
-                    f"{type(lifecycle_error).__name__}: {lifecycle_error}"
-                )
+            self.events.emit(
+                CoreEventType.AGENT_EXECUTION_FINISHED,
+                status=status,
+                data=AgentExecutionFinishedData(result=json_value(result), error=error_text),
+                **event_fields,
+            )
+            self.events.emit(
+                CoreEventType.INVOCATION_FINISHED,
+                status=status,
+                data=InvocationFinishedData(result=json_value(result), error=error_text),
+                **event_fields,
+            )
+            self.events.emit(
+                CoreEventType.PHASE_FINISHED,
+                status=status,
+                data=PhaseData(phase=kind, attempt=attempt),
+                **event_fields,
+            )
 
     def wait_for_debug(self, step: str) -> None:
         if self.debug:

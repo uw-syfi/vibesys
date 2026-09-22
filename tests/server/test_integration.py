@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -14,9 +15,11 @@ from server.diagnostics import DiagnosticScope, DiagnosticSeverity
 from server.events import EventStatus, EventType
 from server.integration import _CORE_FAILURE_CONTEXTS
 from server.journal import DIAGNOSTIC_FAILURE_EVENTS
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
+from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.events import (
+    AgentExecutionActivityData,
     AgentExecutionFinishedData,
+    AgentExecutionStartedData,
     AgentOutputChunkData,
     CoreEventType,
     FrameworkSource,
@@ -30,35 +33,15 @@ from vibesys.events import (
 from vibesys.events import (
     EventStatus as CoreEventStatus,
 )
-from vibesys.run.integration import (
-    AgentSelection,
-    RunAttachment,
-)
+from vibesys.render import output_sink
+from vs_agent.api import AgentSessionKey, SessionScope
+from vs_agent.api.testing import FakeAgentClient
 from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-
-class _ChatClient:
-    """Record chat invocations and return a deterministic answer."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
-    def invoke_text(self, **kwargs: Any) -> str:  # noqa: ANN401
-        self.calls.append(kwargs)
-        return "It improved in round 2."
-
-    def provider_session_id(self, session_key: AgentSessionKey) -> str | None:
-        """Report no conversation, so every turn carries the full prompt."""
-        del session_key
-        return None
-
-    def last_turn_provider_session_id(self, session_key: AgentSessionKey) -> str | None:
-        """Report no conversation, matching ``provider_session_id``."""
-        del session_key
-        return None
+    from vibesys.api import RunSession
 
 
 def _project_run(root: Path) -> tuple[Project, str]:
@@ -91,25 +74,54 @@ def _project_run(root: Path) -> tuple[Project, str]:
     return project, manifest.run_id
 
 
+def _emit_execution_started(  # noqa: PLR0913
+    parts: Any,  # noqa: ANN401
+    kind: str,
+    round_label: str,
+    user_prompt: str,
+    *,
+    driver: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> str:
+    """Emit the core start event a real invocation boundary would produce."""
+    execution_id = uuid.uuid4().hex
+    parts.core_events.emit(
+        CoreEventType.AGENT_EXECUTION_STARTED,
+        status=CoreEventStatus.ACTIVE,
+        agent_kind=kind,
+        round_label=round_label,
+        execution_id=execution_id,
+        data=AgentExecutionStartedData(
+            stage=kind,
+            user_prompt=user_prompt,
+            activity=AgentExecutionActivityData(mode="thinking", summary="Working"),
+            driver=driver,
+            provider=provider,
+            model=model,
+        ),
+    )
+    return execution_id
+
+
 def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path)
-    handle = parts.integration.invocations.start(
-        "implementer", "round-1", "work", driver="agentshim", provider="codex"
+    execution_id = _emit_execution_started(
+        parts, "implementer", "round-1", "work", driver="agentshim", provider="codex"
     )
-    assert handle.execution_id is not None
 
-    parts.integration.events.emit(
+    output_sink().emit(
         CoreEventType.TOOL_CALL,
         agent_kind="implementer",
         round_label="round-1",
-        execution_id=handle.execution_id,
+        execution_id=execution_id,
         data=ToolCallData(tool="Bash", args={}),
     )
-    parts.integration.events.emit(
+    output_sink().emit(
         CoreEventType.AGENT_OUTPUT_CHUNK,
         agent_kind="implementer",
         round_label="round-1",
-        execution_id=handle.execution_id,
+        execution_id=execution_id,
         data=AgentOutputChunkData(channel="assistant", content="working"),
     )
 
@@ -126,21 +138,21 @@ def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path):  
 
 def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path)
-    parts.integration.invocations.start("implementer", "round-1", "work")
+    _emit_execution_started(parts, "implementer", "round-1", "work")
 
     # All three events arrive without an agent_kind while an implementer
     # execution is active. Only the presentation event may inherit it.
-    parts.integration.events.emit(
+    output_sink().emit(
         CoreEventType.AGENT_OUTPUT_CHUNK,
         data=AgentOutputChunkData(channel="assistant", content="working"),
     )
-    parts.integration.events.emit(
+    parts.core_events.emit(
         CoreEventType.GATE_FINISHED,
         status=CoreEventStatus.FAILED,
         round_label="round-1",
         data=GateFinishedData(gate=GateKind.ACCURACY, output_tail="mismatch"),
     )
-    parts.integration.events.emit(
+    parts.core_events.emit(
         CoreEventType.FRAMEWORK_WARNING,
         data=FrameworkWarningData(
             summary="profiler failed",
@@ -169,25 +181,25 @@ def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path):
 
 def test_failed_core_events_project_with_synthesized_diagnostics(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path)
-    handle = parts.integration.invocations.start("implementer", "round-1", "work")
+    execution_id = _emit_execution_started(parts, "implementer", "round-1", "work")
 
-    parts.integration.events.emit(
+    parts.core_events.emit(
         CoreEventType.AGENT_EXECUTION_FINISHED,
         status=CoreEventStatus.FAILED,
         agent_kind="implementer",
         round_label="round-1",
-        execution_id=handle.execution_id,
+        execution_id=execution_id,
         data=AgentExecutionFinishedData(error="RuntimeError: boom"),
     )
-    parts.integration.events.emit(
+    parts.core_events.emit(
         CoreEventType.PHASE_FINISHED,
         status=CoreEventStatus.FAILED,
         agent_kind="implementer",
         round_label="round-1",
-        execution_id=handle.execution_id,
+        execution_id=execution_id,
         data=PhaseData(phase="implementer"),
     )
-    parts.integration.events.emit(
+    parts.core_events.emit(
         CoreEventType.RUN_FAILED,
         "RuntimeError: boom",
         status=CoreEventStatus.FAILED,
@@ -222,7 +234,7 @@ def test_failed_core_events_project_with_synthesized_diagnostics(tmp_path):  # n
 
 def test_execution_failure_cascade_folds_to_one_diagnostic_per_execution(tmp_path):  # noqa: ANN001, ANN201
     parts = build_server_parts(tmp_path)
-    first = parts.integration.invocations.start("implementer", "round-1", "work")
+    first_id = _emit_execution_started(parts, "implementer", "round-1", "work")
     for event_type, data in (
         (
             CoreEventType.AGENT_EXECUTION_FINISHED,
@@ -231,31 +243,29 @@ def test_execution_failure_cascade_folds_to_one_diagnostic_per_execution(tmp_pat
         (CoreEventType.INVOCATION_FINISHED, InvocationFinishedData(error="RuntimeError: boom")),
         (CoreEventType.PHASE_FINISHED, PhaseData(phase="implementer")),
     ):
-        parts.integration.events.emit(
+        parts.core_events.emit(
             event_type,
             status=CoreEventStatus.FAILED,
             agent_kind="implementer",
             round_label="round-1",
-            execution_id=first.execution_id,
+            execution_id=first_id,
             data=data,
         )
 
     # A second execution failing must not inherit the first's cached diagnostic.
-    second = parts.integration.invocations.start("judge", "round-1", "review")
-    parts.integration.events.emit(
+    second_id = _emit_execution_started(parts, "judge", "round-1", "review")
+    parts.core_events.emit(
         CoreEventType.AGENT_EXECUTION_FINISHED,
         status=CoreEventStatus.FAILED,
         agent_kind="judge",
         round_label="round-1",
-        execution_id=second.execution_id,
+        execution_id=second_id,
         data=AgentExecutionFinishedData(error="ValueError: nope"),
     )
 
     events = parts.journal.read()
     first_diagnostics = [
-        e.diagnostic
-        for e in events
-        if e.execution_id == first.execution_id and e.diagnostic is not None
+        e.diagnostic for e in events if e.execution_id == first_id and e.diagnostic is not None
     ]
     # The journal folds the legacy invocation lifecycle onto the canonical one,
     # so the surviving cascade is the agent-execution and phase failures; both
@@ -265,7 +275,11 @@ def test_execution_failure_cascade_folds_to_one_diagnostic_per_execution(tmp_pat
     assert len(ids) == 1
     assert all(d.summary == "RuntimeError: boom" for d in first_diagnostics)
 
-    second_event = next(e for e in events if e.execution_id == second.execution_id)
+    second_event = next(
+        e
+        for e in events
+        if e.execution_id == second_id and e.type is EventType.AGENT_EXECUTION_FINISHED
+    )
     assert second_event.diagnostic is not None
     assert second_event.diagnostic.id not in ids
     assert second_event.diagnostic.summary == "ValueError: nope"
@@ -277,31 +291,59 @@ def test_core_failure_synthesis_covers_the_journal_failure_invariant() -> None:
     assert set(_CORE_FAILURE_CONTEXTS) == DIAGNOSTIC_FAILURE_EVENTS
 
 
-def test_invocation_adapter_applies_steering_without_emitting_duplicate_lifecycle(
+def test_track_started_does_not_double_track_a_repeated_start_event(
     tmp_path: Path,
 ) -> None:
+    """`ExecutionTracker.track_started` is idempotent for a repeated start event.
+
+    Core now mints the execution id and emits `AGENT_EXECUTION_STARTED`
+    itself, at the entry to `_RunContext.invoke`; `project_event` projects it
+    onto both the wire journal and `ExecutionTracker`. Redelivering the same
+    start event (e.g. from an at-least-once subscriber) must not double-track
+    the execution or double-emit the wire event.
+    """
     parts = build_server_parts(tmp_path)
-    parts.controller.steer("measure latency first")
 
-    handle = parts.integration.invocations.start("implementer", "round-1", "work")
+    execution_id = _emit_execution_started(parts, "implementer", "round-1", "work")
 
-    assert "measure latency first" in handle.user_prompt
-    assert not any(
-        event.type is EventType.AGENT_EXECUTION_STARTED for event in parts.journal.read()
+    assert len(parts.api.snapshot().active_executions) == 1
+    assert (
+        sum(event.type is EventType.AGENT_EXECUTION_STARTED for event in parts.journal.read()) == 1
+    )
+
+    # Redelivering the identical start event must not double-track.
+    parts.core_events.emit(
+        CoreEventType.AGENT_EXECUTION_STARTED,
+        status=CoreEventStatus.ACTIVE,
+        agent_kind="implementer",
+        round_label="round-1",
+        execution_id=execution_id,
+        data=AgentExecutionStartedData(
+            stage="implementer",
+            user_prompt="work",
+            activity=AgentExecutionActivityData(mode="thinking", summary="Working"),
+        ),
     )
     assert len(parts.api.snapshot().active_executions) == 1
-    parts.integration.invocations.finish(
-        "implementer", "round-1", result="done", execution_id=handle.execution_id
+
+    parts.core_events.emit(
+        CoreEventType.AGENT_EXECUTION_FINISHED,
+        status=CoreEventStatus.COMPLETED,
+        agent_kind="implementer",
+        round_label="round-1",
+        execution_id=execution_id,
+        data=AgentExecutionFinishedData(result="done"),
     )
     assert parts.api.snapshot().active_executions == []
 
 
 def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa: ANN001, ANN201
     project, run_id = _project_run(tmp_path / "project")
-    client = _ChatClient()
+    client = FakeAgentClient().set_text("chat", "It improved in round 2.")
     closed: list[str] = []
 
     def build_agent(
+        _session: RunSession,
         _attachment: RunAttachment,
         selection: AgentSelection,
         thread_id: str | None,
@@ -317,10 +359,11 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa
             environment=dict,
             progress=lambda: None,
             agent_shared_state_dir=str(shared_state_dir),
+            mcp_servers=(),
         )
 
     parts = build_server_parts(chat_agent_builder=build_agent)
-    detach = parts.integration.attach_run(
+    detach = parts.integration._attach_run(  # noqa: SLF001
         RunAttachment(
             project=project,
             run_id=run_id,
@@ -328,8 +371,8 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa
             log_dir=project.state.log_directory(run_id),
             agent_backend="cli",
             agent_defaults=AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
-            agent_runtime=cast("Any", None),
-        )
+        ),
+        cast("Any", object()),
     )
     assert detach is not None
 
@@ -337,25 +380,27 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa
 
     assert response.chat is not None
     assert response.chat.answer == "It improved in round 2."
-    assert client.calls[0]["reuse_session"] is True
-    assert client.calls[0]["session_key"] == AgentSessionKey(SessionScope.CHAT, "default")
-    assert client.calls[0]["user_prompt"] == "what improved?"
+    call = client.calls_for("chat")[0]
+    assert call.reuse_session is True
+    assert call.session_key == AgentSessionKey(SessionScope.CHAT, "default")
+    assert call.user_prompt == "what improved?"
     transcript = project.state.log_directory(run_id).parent / "server/chat/conversation.jsonl"
     assert json.loads(transcript.read_text()) == {
         "question": "what improved?",
         "answer": "It improved in round 2.",
     }
     assert not (project.root / ".vibesys/server").exists()
-    assert str(transcript.parent) in client.calls[0]["system_prompt"]
+    assert str(transcript.parent) in call.system_prompt
     detach()
     assert closed == ["closed"]
 
 
 def test_non_cli_run_rejects_new_chat_threads(tmp_path):  # noqa: ANN001, ANN201
     project, run_id = _project_run(tmp_path / "project")
-    client = _ChatClient()
+    client = FakeAgentClient()
 
     def build_agent(
+        _session: RunSession,
         _attachment: RunAttachment,
         _selection: AgentSelection,
         _thread_id: str | None,
@@ -369,10 +414,11 @@ def test_non_cli_run_rejects_new_chat_threads(tmp_path):  # noqa: ANN001, ANN201
             environment=dict,
             progress=lambda: None,
             agent_shared_state_dir=str(shared_state_dir),
+            mcp_servers=(),
         )
 
     parts = build_server_parts(chat_agent_builder=build_agent)
-    parts.integration.attach_run(
+    parts.integration._attach_run(  # noqa: SLF001
         RunAttachment(
             project=project,
             run_id=run_id,
@@ -380,8 +426,8 @@ def test_non_cli_run_rejects_new_chat_threads(tmp_path):  # noqa: ANN001, ANN201
             log_dir=project.state.log_directory(run_id),
             agent_backend="stub",
             agent_defaults=AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
-            agent_runtime=cast("Any", None),
-        )
+        ),
+        cast("Any", object()),
     )
 
     with pytest.raises(ValueError, match="require the CLI agent backend"):
@@ -393,7 +439,7 @@ def test_close_is_idempotent_and_stops_event_projection(tmp_path):  # noqa: ANN0
     parts.integration.close()
     parts.integration.close()
 
-    parts.integration.events.emit(
+    output_sink().emit(
         CoreEventType.AGENT_OUTPUT_CHUNK,
         data=AgentOutputChunkData(channel="assistant", content="after close"),
     )

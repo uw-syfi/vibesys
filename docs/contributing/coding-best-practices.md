@@ -7,9 +7,15 @@ path.
 
 ## Architecture Boundaries
 
-- Put headless optimization behavior under `src/vibesys/`.
-- Put frontend-serving behavior under `src/server/`.
-- Put process composition under `src/entrypoints/`, not in `libs/`.
+- Put core optimization behavior under `src/vibesys/`, reached through the
+  `vibesys.api` facade (run/observe) and `vibesys.api.request` (build a
+  `RunRequest`).
+- Put the headless run driver (execute a `RunRequest`, render to the terminal)
+  under `src/headless/`, and frontend-serving behavior under `src/server/`.
+  Both are peers over `vibesys.api`; neither imports the other.
+- Put process composition under `src/entrypoints/`, not in `libs/`: the shared
+  CLI (argument parsing, `RunRequest` building) plus the thin mode entries that
+  fork to the `headless` or `server` driver.
 - Put reusable standalone libraries under `libs/`.
 - Put prompt, loop, and domain behavior in the package that owns that surface.
 - Put long-form serving knowledge under `resources/skills/`, not in framework
@@ -38,8 +44,9 @@ path.
   are forbidden (`forbid_circular_dependencies`): move shared code down instead
   of adding an upward edge. There are
   no layers: every module, including `entrypoints` and each `server.*` module,
-  lists explicit edges. `entrypoints` is the composition root, with both a
-  server path and a direct headless path into core. Upward imports (core to
+  lists explicit edges. `entrypoints` is the composition root; both its server
+  and headless paths reach core only through the `vibesys.api` facade, so it
+  lists no core-internal `vibesys.*` module. Upward imports (core to
   server, server to entrypoints, a `server.*` module to a higher one) fail
   because the edge is undeclared. Tach is the single boundary tool. The libs
   DAG holds because every lib edge is explicit (only `vs_project` to

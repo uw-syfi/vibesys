@@ -18,17 +18,6 @@ if TYPE_CHECKING:
     from vs_project import Project, StateSnapshot
 
 
-class RunStopped(BaseException):
-    """The operator's ``/stop`` landed: unwind the run callable.
-
-    Raised on the run's own thread at the invocation boundary where the stop
-    lands, after the controller has already reached ``STOPPED`` and journaled
-    the terminal status change. Derives from ``BaseException``, like
-    ``KeyboardInterrupt``, so an ``except Exception`` inside loop code cannot
-    absorb the unwind on its way to :meth:`server.runtime.ServerRuntime.run`.
-    """
-
-
 @dataclass(frozen=True)
 class ProjectRunState:
     """Typed access to one attached canonical project run."""
@@ -57,7 +46,6 @@ class RunController:
         self._condition = condition
         self._journal = journal
         self._executions = executions
-        self._pending_steer: list[str] = []
         self._status: RunStatus = RunStatus.STARTING
         self._project_run: ProjectRunState | None = None
 
@@ -140,7 +128,6 @@ class RunController:
     def steer(self, text: str) -> None:
         """Queue operator guidance for the next controlled invocation."""
         with self._condition:
-            self._pending_steer.append(text)
             self._journal.record(EventType.CONTROL, f"/steer: {text}", status=EventStatus.PENDING)
 
     def start_agent_execution(  # noqa: PLR0913
@@ -150,29 +137,25 @@ class RunController:
         user_prompt: str,
         system_prompt: str = "",
         *,
-        consume_steering: bool = True,
         participates_in_run_control: bool = True,
         emit_lifecycle: bool = True,
         driver: str | None = None,
         provider: str | None = None,
         model: str | None = None,
     ) -> ExecutionHandle:
-        """Enter one invocation boundary, applying pause, stop, and steering state."""
+        """Allocate an invocation's identity and track it.
+
+        Pause, stop, and steering are no longer applied here: they are
+        core's job now, through `vibesys.run.run_control.RunControlChannel`
+        at the entry to `vibesys.context._RunContext.invoke`. This method
+        only allocates the execution; the caller is responsible for having
+        already applied any entry-side run control to `user_prompt`.
+        """
         with self._condition:
-            while participates_in_run_control and self._status is RunStatus.PAUSED:
-                self._condition.wait()
-            if participates_in_run_control:
-                self._land_stop_at_entry_locked()
-            steering = (
-                self._pending_steer if consume_steering and participates_in_run_control else []
-            )
-            if consume_steering and participates_in_run_control:
-                self._pending_steer = []
-            effective_prompt = _with_steering(user_prompt, steering)
-            execution = self._executions.start_locked(
+            return self._executions.start_locked(
                 kind,
                 round_label,
-                effective_prompt,
+                user_prompt,
                 system_prompt,
                 participates_in_run_control=participates_in_run_control,
                 emit_lifecycle=emit_lifecycle,
@@ -180,21 +163,17 @@ class RunController:
                 provider=provider,
                 model=model,
             )
-            if steering:
-                self._journal.record(
-                    EventType.CONTROL,
-                    "/steer",
-                    status=EventStatus.CONSUMED,
-                    agent_kind=kind,
-                    round_label=round_label,
-                    execution_id=execution.execution_id,
-                )
-            return execution
 
     def before_agent(
         self, kind: str, round_label: str, user_prompt: str, system_prompt: str = ""
     ) -> str:
-        """Compatibility boundary returning only the effective prompt."""
+        """Compatibility boundary allocating an execution and returning its prompt.
+
+        No longer applies run control to `user_prompt`: only core does, at
+        the entry to `_RunContext.invoke`, which this compatibility boundary
+        is not part of. Callers that need pause/stop/steering applied must
+        go through the core invocation path instead.
+        """
         execution = self.start_agent_execution(kind, round_label, user_prompt, system_prompt)
         self._executions.remember_legacy(execution.execution_id)
         return execution.user_prompt
@@ -232,6 +211,26 @@ class RunController:
                 )
         self._executions.clear_legacy(resolved_id)
 
+    def reach_invocation_boundary(
+        self,
+        agent_kind: str | None,
+        round_label: str | None,
+        execution_id: str | None,
+    ) -> None:
+        """Land a pending pause or stop for a core-projected execution finish.
+
+        Public, locked entry point for callers outside the controller: the
+        core-event projection in ``server.integration`` calls this after
+        ``ExecutionTracker.discard_finished`` has already dropped the
+        execution's tracking state. Idempotent like ``after_agent``'s own
+        boundary call: a trigger landing on a status other than PAUSING or
+        STOPPING is absorbed by ``_apply_locked``.
+        """
+        with self._condition:
+            self._reach_invocation_boundary_locked(
+                agent_kind=agent_kind, round_label=round_label, execution_id=execution_id
+            )
+
     def _reach_invocation_boundary_locked(
         self,
         *,
@@ -262,20 +261,46 @@ class RunController:
             execution_id=execution_id,
         )
 
-    def _land_stop_at_entry_locked(self) -> None:
-        """Land a pending stop at the entry side of the invocation boundary.
+    def land_pause_at_boundary(self) -> None:
+        """Apply a pause `RunControlChannel` is landing entry-side, idempotently.
 
-        A stop requested while the run was paused, or between invocations,
-        has no controlled call in flight to finish, so the entry to the next
-        one is the boundary where it lands: no further agent call starts.
-        Raising :class:`RunStopped` on the run's own thread is what unwinds
-        the run callable to ``ServerRuntime.run`` without touching loop code.
+        A call in flight when the pause was requested already lands it
+        exit-side, through `_reach_invocation_boundary_locked` from
+        `after_agent`; this covers the remaining case, a pause requested
+        with no call ever in flight, and is a no-op if the exit side (or an
+        earlier entry landing) already applied it.
         """
-        if self._status is RunStatus.STOPPING:
+        with self._condition:
+            if self._status is not RunStatus.PAUSING:
+                return
+            self._apply_locked(RunTrigger.INVOCATION_FINISHED)
+            self._journal.record(EventType.CONTROL, "/pause", status=EventStatus.CONSUMED)
+
+    def land_stop_at_boundary(self) -> None:
+        """Apply a stop `RunControlChannel` is landing entry-side, idempotently.
+
+        Mirrors `land_pause_at_boundary`: a no-op once the exit side, or an
+        earlier entry landing, already reached `STOPPED`.
+        """
+        with self._condition:
+            if self._status is not RunStatus.STOPPING:
+                return
             self._apply_locked(RunTrigger.INVOCATION_FINISHED)
             self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.CONSUMED)
-        if self._status is RunStatus.STOPPED:
-            raise RunStopped
+
+    def record_steer_consumed(
+        self, *, agent_kind: str | None, round_label: str | None, execution_id: str | None
+    ) -> None:
+        """Journal that queued steering was spliced into an invocation's prompt."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL,
+                "/steer",
+                status=EventStatus.CONSUMED,
+                agent_kind=agent_kind,
+                round_label=round_label,
+                execution_id=execution_id,
+            )
 
     def status(self) -> str:
         """Return a compact human-readable run status."""
@@ -349,16 +374,3 @@ class RunController:
             )
         finally:
             self._journal.clear_diagnostics()
-
-
-def _with_steering(user_prompt: str, messages: list[str]) -> str:
-    if not messages:
-        return user_prompt
-    block = "\n".join(f"- {message}" for message in messages)
-    return (
-        f"{user_prompt.rstrip()}\n\n"
-        "## Operator steering (live)\n\n"
-        "The operator sent the following instruction(s) for this invocation. "
-        "Treat them as high-priority guidance for the work you do now:\n\n"
-        f"{block}\n"
-    )

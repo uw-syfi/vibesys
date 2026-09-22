@@ -1,14 +1,13 @@
 """Typed emission interface for Git tracker observations.
 
-The tracker reports what happened; wiring decides where the report goes.
-``CoreGitTrackerEvents`` publishes typed core events on the process-global
-output sink, ``NullGitTrackerEvents`` discards them, and callers with other
-needs (a server-side design log, say) supply their own implementation.
+``GitTrackerEvents`` and ``NullGitTrackerEvents`` now live in ``vs_project``
+and are re-exported here so core-internal importers keep working.
+``CoreGitTrackerEvents`` stays in core: it publishes typed core events on the
+process-global output sink, which ``vs_project`` (a leaf library) cannot
+depend on.
 """
 
 from __future__ import annotations
-
-from typing import Protocol
 
 from vibesys.events import (
     CoreEventType,
@@ -16,42 +15,13 @@ from vibesys.events import (
     WorkspaceSnapshotData,
 )
 from vibesys.render.sink import output_sink
+from vs_project import GitTrackerEvents, NullGitTrackerEvents
 
-
-class GitTrackerEvents(Protocol):
-    """Observations one Git tracker reports about the tracked workspace."""
-
-    def snapshot_recorded(self, label: str, *, commit: str | None) -> None:
-        """A snapshot attempt finished; ``commit`` is None without changes."""
-        ...
-
-    def baseline_configured(self, commit: str) -> None:
-        """The trusted-input baseline resolved to ``commit``."""
-        ...
-
-    def paths_excluded(self, paths: tuple[str, ...]) -> None:
-        """Unreadable ``paths`` were excluded from future snapshots."""
-        ...
-
-    def warning(self, summary: str, *, detail: str | None = None) -> None:
-        """A non-fatal Git operation fault an operator should see."""
-        ...
-
-
-class NullGitTrackerEvents:
-    """Discard tracker observations (tests, internal resume helpers)."""
-
-    def snapshot_recorded(self, label: str, *, commit: str | None) -> None:  # noqa: D102
-        del label, commit
-
-    def baseline_configured(self, commit: str) -> None:  # noqa: D102
-        del commit
-
-    def paths_excluded(self, paths: tuple[str, ...]) -> None:  # noqa: D102
-        del paths
-
-    def warning(self, summary: str, *, detail: str | None = None) -> None:  # noqa: D102
-        del summary, detail
+__all__ = [
+    "CoreGitTrackerEvents",
+    "GitTrackerEvents",
+    "NullGitTrackerEvents",
+]
 
 
 class CoreGitTrackerEvents:

@@ -16,9 +16,10 @@ from server.chat.prompts import (
 )
 from server.chat.session import ExperimentChatDependencies, ExperimentChatSession
 from server.events import EventType
-from vibesys.agents.client import AgentClient
-from vibesys.agents.drivers import agentshim as agentshim_driver
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
+from vibesys.render import output_sink
+from vs_agent.api import AgentClient, AgentSessionKey, MCPServerSpec, SessionScope
+from vs_agent.api.testing import FakeAgentClient
+from vs_agent.drivers import agentshim as agentshim_driver
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -27,31 +28,13 @@ if TYPE_CHECKING:
     import agentshim
 
 _SHARED_STATE_DIR = "/state/server/chat"
-_FULL_PROMPT = experiment_chat_system_prompt(_SHARED_STATE_DIR, _SHARED_STATE_DIR)
+_FULL_PROMPT = experiment_chat_system_prompt(_SHARED_STATE_DIR)
 _CONTINUATION_PROMPT = experiment_chat_continuation_prompt(_SHARED_STATE_DIR)
-
-
-class _FakeClient:
-    """Record chat invocations and answer both conversation questions."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-        #: The conversation a next turn would continue.
-        self.continues: str | None = None
-        #: The conversation the last completed turn ran in.
-        self.ran_in: str | None = None
-
-    def invoke_text(self, **kwargs: Any) -> str:  # noqa: ANN401  # Mirrors agent clients.
-        self.calls.append(kwargs)
-        return "It improved in round 2."
-
-    def provider_session_id(self, session_key: AgentSessionKey) -> str | None:
-        del session_key
-        return self.continues
-
-    def last_turn_provider_session_id(self, session_key: AgentSessionKey) -> str | None:
-        del session_key
-        return self.ran_in
+_TOOL_SERVERS = (
+    MCPServerSpec(
+        name="vibesys-run", command="python", args=("-m", "vibesys.api.chat_tools_server")
+    ),
+)
 
 
 def _chat(
@@ -76,9 +59,8 @@ def _chat(
             chat_thread_id=thread_id,
             workspace=workspace,
             state_dir=tmp_path / "state",
-            agent_shared_state_dir=_SHARED_STATE_DIR,
             agent_state_dir=_SHARED_STATE_DIR,
-            evidence=MagicMock(),
+            mcp_servers=_TOOL_SERVERS,
             log=lambda _message: None,
             environment=dict,
             progress=lambda: None,
@@ -91,47 +73,57 @@ def _chat(
 
 
 def test_chat_reuses_a_conversation_keyed_by_thread(tmp_path: Path) -> None:
-    client = _FakeClient()
-    chat = _chat(tmp_path, client, thread_id="thread-a")
+    fake = FakeAgentClient()
+    chat = _chat(tmp_path, fake, thread_id="thread-a")
 
     chat.ask("what happened?")
 
-    kwargs = client.calls[0]
-    assert kwargs["reuse_session"] is True
-    assert kwargs["session_key"] == AgentSessionKey(SessionScope.CHAT, "thread-a")
+    call = fake.calls_for("chat")[0]
+    assert call.reuse_session is True
+    assert call.session_key == AgentSessionKey(SessionScope.CHAT, "thread-a")
 
 
 def test_chat_sends_the_full_prompt_when_no_conversation_is_named(tmp_path: Path) -> None:
-    client = _FakeClient()
-    chat = _chat(tmp_path, client)
+    fake = FakeAgentClient()
+    chat = _chat(tmp_path, fake)
 
     chat.ask("what happened?")
 
-    assert [call["system_prompt"] for call in client.calls] == [_FULL_PROMPT]
+    assert [call.system_prompt for call in fake.calls_for("chat")] == [_FULL_PROMPT]
+
+
+def test_chat_passes_the_investigation_tool_servers_to_the_agent(tmp_path: Path) -> None:
+    fake = FakeAgentClient()
+    chat = _chat(tmp_path, fake)
+
+    chat.ask("what happened?")
+
+    assert fake.calls_for("chat")[0].mcp_servers == list(_TOOL_SERVERS)
 
 
 def test_chat_shortens_the_prompt_inside_a_named_conversation(tmp_path: Path) -> None:
-    client = _FakeClient()
-    client.continues = "session-1"
-    client.ran_in = "session-1"
-    chat = _chat(tmp_path, client)
+    key = AgentSessionKey(SessionScope.CHAT, "default")
+    fake = FakeAgentClient().set_session(
+        key, provider_session_id="session-1", last_turn="session-1"
+    )
+    chat = _chat(tmp_path, fake)
 
     chat.ask("what happened?")
 
-    assert [call["system_prompt"] for call in client.calls] == [_CONTINUATION_PROMPT]
+    assert [call.system_prompt for call in fake.calls_for("chat")] == [_CONTINUATION_PROMPT]
 
 
 def test_chat_reasks_when_the_turn_ran_in_a_different_conversation(tmp_path: Path) -> None:
-    client = _FakeClient()
-    client.continues = "session-1"
+    key = AgentSessionKey(SessionScope.CHAT, "default")
+    fake = FakeAgentClient().set_text("chat", "It improved in round 2.")
     # The driver replaced the conversation while serving the turn, so the
     # shortened prompt reached an agent that never saw the read-only rules.
-    client.ran_in = "session-2"
-    chat = _chat(tmp_path, client)
+    fake.set_session(key, provider_session_id="session-1", last_turn="session-2")
+    chat = _chat(tmp_path, fake)
 
     answer = chat.ask("what happened?")
 
-    assert [call["system_prompt"] for call in client.calls] == [
+    assert [call.system_prompt for call in fake.calls_for("chat")] == [
         _CONTINUATION_PROMPT,
         _FULL_PROMPT,
     ]
@@ -141,26 +133,27 @@ def test_chat_reasks_when_the_turn_ran_in_a_different_conversation(tmp_path: Pat
 def test_chat_keeps_one_answer_when_the_conversation_retires_after_the_turn(
     tmp_path: Path,
 ) -> None:
-    client = _FakeClient()
-    client.continues = "session-1"
+    key = AgentSessionKey(SessionScope.CHAT, "default")
     # The turn ran where the shortened prompt assumed; the conversation was
     # retired only afterwards, so its answer stands.
-    client.ran_in = "session-1"
-    chat = _chat(tmp_path, client)
+    fake = FakeAgentClient().set_session(
+        key, provider_session_id="session-1", last_turn="session-1"
+    )
+    chat = _chat(tmp_path, fake)
     chat.ask("what happened?")
-    client.continues = None
+    fake.evict_session(key)
 
     chat.ask("and then?")
 
-    assert [call["system_prompt"] for call in client.calls] == [
+    assert [call.system_prompt for call in fake.calls_for("chat")] == [
         _CONTINUATION_PROMPT,
         _FULL_PROMPT,
     ]
 
 
 def test_chat_answer_carries_the_invocation_that_produced_it(tmp_path: Path) -> None:
-    client = _FakeClient()
-    chat = _chat(tmp_path, client)
+    fake = FakeAgentClient()
+    chat = _chat(tmp_path, fake)
 
     answer = chat.ask("what happened?")
 
@@ -168,35 +161,32 @@ def test_chat_answer_carries_the_invocation_that_produced_it(tmp_path: Path) -> 
     # (the presentation scope's invocation_id), so clients can fold the
     # terminal answer over exactly that turn.
     assert answer.invocation_id == "exec-1"
-    assert client.calls[0]["invocation_id"] == "exec-1"
+    assert fake.calls_for("chat")[0].invocation_id == "exec-1"
 
 
 def test_chat_reask_stamps_the_answer_with_the_second_invocation(tmp_path: Path) -> None:
-    client = _FakeClient()
-    client.continues = "session-1"
-    client.ran_in = "session-2"
+    key = AgentSessionKey(SessionScope.CHAT, "default")
+    fake = FakeAgentClient().set_session(
+        key, provider_session_id="session-1", last_turn="session-2"
+    )
     controller = MagicMock()
     controller.start_agent_execution.side_effect = [
         SimpleNamespace(execution_id="exec-1"),
         SimpleNamespace(execution_id="exec-2"),
     ]
-    chat = _chat(tmp_path, client, controller=controller)
+    chat = _chat(tmp_path, fake, controller=controller)
 
     answer = chat.ask("what happened?")
 
     # The re-ask is a second invocation; the returned answer came from it, so
     # its identity (not the abandoned first invocation's) is stamped.
-    assert len(client.calls) == 2
+    assert len(fake.calls_for("chat")) == 2
     assert answer.invocation_id == "exec-2"
 
 
 def test_chat_empty_answer_fallback_keeps_the_turn_identity(tmp_path: Path) -> None:
-    class _SilentClient(_FakeClient):
-        def invoke_text(self, **kwargs: Any) -> str:  # noqa: ANN401
-            super().invoke_text(**kwargs)
-            return "   "
-
-    chat = _chat(tmp_path, _SilentClient())
+    fake = FakeAgentClient().set_text("chat", "   ")
+    chat = _chat(tmp_path, fake)
 
     answer = chat.ask("what happened?")
 
@@ -207,14 +197,14 @@ def test_chat_empty_answer_fallback_keeps_the_turn_identity(tmp_path: Path) -> N
 
 
 def test_chat_never_reasks_a_cold_turn(tmp_path: Path) -> None:
-    client = _FakeClient()
-    client.ran_in = "session-1"
-    chat = _chat(tmp_path, client)
+    key = AgentSessionKey(SessionScope.CHAT, "default")
+    fake = FakeAgentClient().set_session(key, last_turn="session-1")
+    chat = _chat(tmp_path, fake)
 
     chat.ask("what happened?")
 
     # Nothing justified a shortened prompt, so a new conversation is expected.
-    assert len(client.calls) == 1
+    assert len(fake.calls_for("chat")) == 1
 
 
 def _chat_driver(
@@ -300,16 +290,16 @@ def test_streamed_output_is_filed_under_the_thread_that_asked(
 ) -> None:
     parts = build_server_parts(tmp_path)
 
-    class _StreamingClient(_FakeClient):
-        """Emit a token mid-turn the way a streaming driver does."""
-
-        def invoke_text(self, **kwargs: Any) -> str:  # noqa: ANN401
-            parts.executions.publish_agent_output("partial ")
-            return super().invoke_text(**kwargs)
+    # ``output_sink()`` is the same event sink `build_chat_agent` injects into
+    # a real client's construction; `parts.integration` (built by
+    # `build_server_parts`) is already subscribed to it, so a chunk emitted
+    # here reaches `parts.journal` exactly as a real streaming driver's would.
+    fake = FakeAgentClient(event_sink=output_sink())
+    fake.stream_output("chat", ["partial "])
 
     chat = _chat(
         tmp_path,
-        _StreamingClient(),
+        fake,
         thread_id=thread_id,
         executions=parts.executions,
         controller=parts.controller,
@@ -325,27 +315,18 @@ def test_streamed_output_is_filed_under_the_thread_that_asked(
 
 
 def test_chat_normalizes_an_agent_failure(tmp_path: Path) -> None:
-    class _FailingClient(_FakeClient):
-        def invoke_text(self, **kwargs: Any) -> str:  # noqa: ANN401
-            super().invoke_text(**kwargs)
-            raise ValueError("no such workspace")  # noqa: TRY003  # test fixture
-
-    client = _FailingClient()
-    chat = _chat(tmp_path, client)
+    fake = FakeAgentClient().fail("chat", ValueError("no such workspace"))
+    chat = _chat(tmp_path, fake)
 
     with pytest.raises(RuntimeError, match="Chat agent failed: ValueError: no such workspace"):
         chat.ask("what happened?")
 
-    assert len(client.calls) == 1
+    assert len(fake.calls_for("chat")) == 1
 
 
 def test_chat_propagates_a_cancellation_unwrapped(tmp_path: Path) -> None:
-    class _CancelledClient(_FakeClient):
-        def invoke_text(self, **kwargs: Any) -> str:  # noqa: ANN401
-            super().invoke_text(**kwargs)
-            raise KeyboardInterrupt
-
-    chat = _chat(tmp_path, _CancelledClient())
+    fake = FakeAgentClient().fail("chat", KeyboardInterrupt())
+    chat = _chat(tmp_path, fake)
 
     # A cancellation is not an agent error and must not be reported as one.
     with pytest.raises(KeyboardInterrupt):

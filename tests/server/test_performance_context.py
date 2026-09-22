@@ -8,6 +8,8 @@ from tests.server.support import build_server_parts
 
 from server.api.performance import build_performance_context, summarize_objective
 from server.api.protocol import PerformanceQuery
+from vibesys.api._readmodel import project_run_view
+from vibesys.api.contracts import RunStatus
 from vibesys.loops.agent.model import AgentRunState, Hypothesis, HypothesisMeasurement
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.schemas import OrchestratorPlan
@@ -18,6 +20,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from server.api.service import RunApi
+    from vibesys.api import RunView
 
 
 def _hypothesis(identifier: str, started_round: int, **overrides: object) -> Hypothesis:
@@ -79,6 +82,16 @@ def _project_run(project: Path, objectives: tuple[str, ...]) -> tuple[Project, s
     )
     vibesys_project.state.create_run(manifest)
     return vibesys_project, manifest.run_id
+
+
+def _view(state: AgentRunState) -> RunView:
+    """Project a hand-built `AgentRunState` into the `RunView` `build_performance_context` reads."""
+    return project_run_view(
+        state,
+        run_id="run-1",
+        status=RunStatus.ACTIVE,
+        experiment_revision=state.experiment_revision,
+    )
 
 
 def _service(project: Project, run_id: str) -> RunApi:
@@ -182,7 +195,7 @@ def test_build_context_copies_the_newest_measurement_as_one_tuple() -> None:
         ]
     )
 
-    context = build_performance_context(state, objectives=())
+    context = build_performance_context(_view(state), objectives=())
 
     assert context is not None
     assert context.objective_unit == "ops/s"
@@ -195,14 +208,14 @@ def test_build_context_copies_the_newest_measurement_as_one_tuple() -> None:
 def test_build_context_falls_back_to_the_manifest_direction() -> None:
     state = AgentRunState(hypotheses=[_hypothesis("H-01", 1, measurement=_measurement(1))])
 
-    context = build_performance_context(state, objectives=("total_ops_per_sec:min",))
+    context = build_performance_context(_view(state), objectives=("total_ops_per_sec:min",))
 
     assert context is not None
     assert context.objective_direction == "min"
 
 
 def test_build_context_is_none_with_nothing_to_say() -> None:
-    assert build_performance_context(AgentRunState(), objectives=()) is None
+    assert build_performance_context(_view(AgentRunState()), objectives=()) is None
     assert build_performance_context(None, objectives=()) is None
 
 

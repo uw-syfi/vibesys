@@ -21,13 +21,13 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
 
 from server.api.protocol import DesignFileChange, DesignPatch, DesignRound
-from vibesys.loops.agent.issue_board import framework_memory_paths
+from vibesys.api import framework_memory_paths
 from vs_project import is_project_state_path
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.loops.agent.model import AgentRunState
+    from vibesys.api import RunView
 
 #: Round checkpoints and the trusted baseline are recorded as commit hashes.
 #: Anything else (legacy placeholders, corrupt state) must not reach the git
@@ -93,7 +93,7 @@ class DesignLog:
         self._cache: OrderedDict[tuple[str, str], list[DesignFileChange]] = OrderedDict()
         self._patch_cache: OrderedDict[tuple[str, str, str], DesignPatch] = OrderedDict()
 
-    def rounds(self, state: AgentRunState, *, baseline: str) -> list[DesignRound]:
+    def rounds(self, state: RunView, *, baseline: str) -> list[DesignRound]:
         """Return one entry per recorded round, in round order.
 
         Each round's file list covers exactly the range that round produced: a
@@ -103,6 +103,11 @@ class DesignLog:
         previous round. ``baseline`` is the run manifest's trusted input
         baseline, the commit the run branched from, and anchors hypotheses that
         recorded no parent of their own.
+
+        ``state`` is the `vibesys.api.RunView` for the attached run: its
+        `HypothesisView.rounds`/`RunView.rounds` carry the same
+        `round_number`/`commit`/`parent_commit` facts this projection used to
+        read off the core `AgentRunState` directly.
         """
         chronological = _chronological_bases(state, baseline)
         entries: list[DesignRound] = []
@@ -219,7 +224,7 @@ def _framework_prefixes(workspace: Path) -> tuple[str, ...]:
     )
 
 
-def _chronological_bases(state: AgentRunState, baseline: str) -> dict[int, str]:
+def _chronological_bases(state: RunView, baseline: str) -> dict[int, str]:
     """Map each round to the newest checkpoint recorded before it.
 
     This is the fallback base for hypotheses without a recorded parent

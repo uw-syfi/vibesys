@@ -928,6 +928,39 @@ describe('core state projection', () => {
       severity: 'fatal',
     });
     expect('title' in (state.diagnostics[0] ?? {})).toBe(false);
+    // The distinction #804 calls out: an interrupted run ends in its own
+    // status rather than being folded into 'failed'.
+    expect(state.status).toBe('interrupted');
+  });
+
+  it('keeps the interruption failure kind when a shared-id run_failed diagnostic merges over it', () => {
+    // Real recorded journals attach the same structured diagnostic id to both
+    // the run_interrupted event and the run_failed that follows it for the
+    // same boundary, so the two fold into one merged CoreDiagnostic. The
+    // merge must not let the run_failed side's generic 'run' failureKind
+    // overwrite the more specific 'run_interruption' the first side computed.
+    const sharedDiagnostic = {
+      id: 'shared-diagnostic-1',
+      code: 'interrupted',
+      summary: 'Run interrupted',
+      detail: 'RuntimeError: launcher_terminated (SIGTERM)',
+      hint: null,
+      scope: 'run' as const,
+      severity: 'fatal' as const,
+      retryability: 'never' as const,
+    };
+    const state = reduceEventBatch(initialCoreState(), [
+      {
+        ...baseEvent(1, 'run_interrupted'),
+        diagnostic: sharedDiagnostic,
+        data: {kind: 'run_interrupted', reason: 'launcher_terminated', signal: 'SIGTERM'},
+      },
+      {...baseEvent(2, 'run_failed'), diagnostic: sharedDiagnostic, text: 'Run interrupted'},
+    ]);
+
+    expect(state.diagnostics).toHaveLength(1);
+    expect(state.diagnostics[0]).toMatchObject({failureKind: 'run_interruption'});
+    expect(state.status).toBe('interrupted');
   });
 
   it('distinguishes failed and interrupted terminal transcript entries', () => {
@@ -949,6 +982,8 @@ describe('core state projection', () => {
       content: 'Operator stopped the run (SIGINT)',
       label: 'Run interrupted',
     });
+    expect(failed.status).toBe('failed');
+    expect(interrupted.status).toBe('interrupted');
   });
 
   it('keeps typed payload precedence over conflicting event-type fallbacks', () => {
@@ -994,6 +1029,7 @@ describe('whether a run has ended', () => {
     expect(hasRunEnded(withStatus('completed'))).toBe(true);
     expect(hasRunEnded(withStatus('failed'))).toBe(true);
     expect(hasRunEnded(withStatus('stopped'))).toBe(true);
+    expect(hasRunEnded(withStatus('interrupted'))).toBe(true);
     expect(hasRunEnded(withStatus('connecting'))).toBe(false);
     expect(hasRunEnded(withStatus('starting'))).toBe(false);
     expect(hasRunEnded(withStatus('running'))).toBe(false);
@@ -1132,6 +1168,26 @@ describe('the run lifecycle', () => {
 
     expect(state.status).toBe('running');
     expect(hasRunEnded(state)).toBe(false);
+  });
+
+  it('ends a run as interrupted rather than failed on a run_interrupted event', () => {
+    const state = reduceEvent(initialCoreState(), baseEvent(1, 'run_interrupted'));
+
+    expect(state.status).toBe('interrupted');
+    expect(hasRunEnded(state)).toBe(true);
+  });
+
+  it('keeps interrupted when the recorded run_failed that follows it lands too', () => {
+    // Real recorded journals carry both: the backend's coarse RunStatus has no
+    // `interrupted` member, so a run_interrupted boundary is followed by a
+    // run_failed for the same boundary. The second, less specific event must
+    // not overwrite the first.
+    const state = reduceEventBatch(initialCoreState(), [
+      baseEvent(1, 'run_interrupted'),
+      baseEvent(2, 'run_failed'),
+    ]);
+
+    expect(state.status).toBe('interrupted');
   });
 });
 

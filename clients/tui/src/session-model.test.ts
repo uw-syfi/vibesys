@@ -1304,6 +1304,10 @@ describe('session event model', () => {
 
     expect(failed.errorBanner?.message).toBe('Run failed.');
     expect(interrupted.errorBanner?.message).toBe('Run interrupted.');
+    // #804: the run ends in its own status, not folded into 'failed', but it
+    // still banners its terminal diagnostic the same way a failure does.
+    expect(failed.core.status).toBe('failed');
+    expect(interrupted.core.status).toBe('interrupted');
   });
 
   it('shows structured interruption details when no event text is present', () => {
@@ -1773,6 +1777,8 @@ describe('session event model', () => {
   // The header carries exactly one status token, read from backend-owned core
   // state. `/pause` is visible as `pausing…` until the backend says the pause
   // landed, and the run's ended status replaces it rather than joining it.
+  // `interrupted` is the one client-derived exception: the backend signals it
+  // through the separate `run_interrupted` event rather than as a `RunStatus`.
   it('renders one header status token per backend run status', () => {
     expect(runStatusLabel('running')).toBe('running');
     expect(runStatusLabel('pausing')).toBe('pausing…');
@@ -1780,6 +1786,8 @@ describe('session event model', () => {
     expect(runStatusLabel('stopping')).toBe('stopping…');
     expect(runStatusLabel('stopped')).toBe('stopped');
     expect(runStatusLabel('completed')).toBe('completed');
+    expect(runStatusLabel('failed')).toBe('failed');
+    expect(runStatusLabel('interrupted')).toBe('interrupted');
   });
 
   it('reads a pause from the backend and drops it when the run ends', () => {

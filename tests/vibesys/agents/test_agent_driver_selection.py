@@ -7,15 +7,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibesys.agents import build_agent_client
-from vibesys.agents.client import AgentClient
-from vibesys.agents.drivers.agentshim import AgentShimDriver
-from vibesys.agents.drivers.mock import MockDriver
-from vibesys.agents.drivers.omnigent import OmnigentDriver, OmnigentDriverError
-from vibesys.agents.factory import agent_driver_supports_mcp_servers, supported_cli_providers
-from vibesys.agents.omnigent import supported_providers
-from vibesys.agents.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
+from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.config import Config
+from vs_agent.api import (
+    AgentClient,
+    Driver,
+    agent_driver_supports_mcp_servers,
+    build_agent_client,
+)
+from vs_agent.drivers.agentshim import AgentShimDriver
+from vs_agent.drivers.omnigent import OmnigentDriver, OmnigentDriverError
+from vs_agent.omnigent import supported_providers
+from vs_agent.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
 from vs_sandbox import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -36,13 +39,11 @@ def _build(  # noqa: PLR0913
     log_dir: Path | None = None,
     host_resources: Iterable[HostResource] = (),
 ) -> AgentClient:
+    spec = agent_spec_from_config(config, model=model_name)
     client = build_agent_client(
-        config,
-        agent_backend=None,
-        cli_provider=None,
+        spec=spec,
         backends=backends,
         skill_source_dirs=[],
-        model_name=model_name,
         run_log_file=None,
         use_docker=use_docker,
         log_dir=log_dir,
@@ -87,39 +88,22 @@ def test_omnigent_driver_can_be_selected() -> None:
     assert isinstance(client._driver, OmnigentDriver)  # noqa: SLF001
 
 
-def test_mock_driver_can_be_selected_as_test_infrastructure() -> None:
-    client = _build(_config(driver="mock", backend="cli"))
-
-    assert isinstance(client._driver, MockDriver)  # noqa: SLF001
-    # The mock drives no CLI, so the configured provider does not apply.
-    assert client.provider == "mock"
-    assert supported_cli_providers("mock") == ("mock",)
-
-
-def test_mock_driver_ignores_a_configured_cli_provider() -> None:
-    client = _build(_config(driver="mock", backend="cli", cli_provider="codex"))
-
-    assert isinstance(client._driver, MockDriver)  # noqa: SLF001
-    assert client.provider == "mock"
-
-
-def test_unknown_driver_names_the_selectable_drivers() -> None:
-    with pytest.raises(ValueError, match="mock") as exc:
-        supported_cli_providers("nonesuch")
-
-    assert "nonesuch" in str(exc.value)
+def test_unknown_driver_is_rejected() -> None:
+    with pytest.raises(ValueError, match="nonesuch"):
+        Driver("nonesuch")
 
 
 @pytest.mark.parametrize(
     ("driver", "supports_mcp"),
-    [(None, True), ("agentshim", True), ("omnigent", True), ("mock", True)],
+    [(None, True), ("agentshim", True), ("omnigent", True)],
 )
 def test_preflight_capabilities_match_constructed_driver(
     driver: str | None,
     supports_mcp: object,
 ) -> None:
     config = _config(driver=driver, backend="cli", cli_provider="codex")
-    declared = agent_driver_supports_mcp_servers(config, agent_backend=None)
+    spec = agent_spec_from_config(config)
+    declared = agent_driver_supports_mcp_servers(spec)
     client = _build(config)
 
     assert declared is supports_mcp
@@ -128,8 +112,9 @@ def test_preflight_capabilities_match_constructed_driver(
 
 def test_non_cli_backend_has_no_external_driver_capabilities() -> None:
     config = _config(backend="stub")
+    spec = agent_spec_from_config(config)
 
-    assert agent_driver_supports_mcp_servers(config, agent_backend=None) is None
+    assert agent_driver_supports_mcp_servers(spec) is None
 
 
 def test_omnigent_selection_passes_model_and_log_dir(tmp_path) -> None:  # noqa: ANN001
@@ -149,15 +134,21 @@ def test_driver_is_rejected_for_non_cli_backend() -> None:
 
 
 @pytest.mark.parametrize("provider", ["gemini", "opencode"])
-def test_omnigent_rejects_unsupported_provider_with_remedy(provider: str) -> None:
-    with pytest.raises(OmnigentDriverError) as exc:
+def test_omnigent_rejects_unsupported_provider(provider: str) -> None:
+    """An ``AgentSpec`` rejects an omnigent/provider pair before a client is built.
+
+    Previously this was ``OmnigentDriverError``, raised inside
+    ``build_agent_client``. It is now ``AgentSpec.__post_init__`` validating
+    against ``agent_catalog()``, generically, for every driver: the same
+    check no longer needs a driver-specific exception type.
+    """
+    with pytest.raises(ValueError, match=provider) as exc:
         _build(_config(driver="omnigent", backend="cli", cli_provider=provider))
 
     message = str(exc.value)
     assert provider in message
     assert "claude" in message
     assert "codex" in message
-    assert "agentshim" in message
 
 
 def test_omnigent_rejects_docker() -> None:

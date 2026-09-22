@@ -1702,6 +1702,20 @@ export function applyEventRebootstrap(
   );
 }
 
+/**
+ * Whether `status` ends a run the way `failed` does: with a terminal
+ * diagnostic the operator did not ask for and should see, unlike a clean
+ * `completed` or an operator-requested `stopped`.
+ *
+ * `interrupted` (a signal, or the launcher ending the run) belongs here too:
+ * before core state told it apart from `failed`, an interrupted run already
+ * bannered this way, and the reason/signal `run_interrupted` carries is exactly
+ * the kind of detail this banner exists to surface.
+ */
+function endedWithBannerableFailure(status: CoreState['status']): boolean {
+  return status === 'failed' || status === 'interrupted';
+}
+
 /** The UI transition shared by both ways of folding a backend checkpoint. */
 function applyReducedCore(state: SessionState, core: CoreState): SessionState {
   if (core === state.core) return state;
@@ -1710,7 +1724,7 @@ function applyReducedCore(state: SessionState, core: CoreState): SessionState {
     core,
     chatConversations: reconcileChatConversations(state.chatConversations, core.chatTranscripts),
   });
-  if (core.status === 'failed') {
+  if (endedWithBannerableFailure(core.status)) {
     // Warnings never banner, so a trailing warning must not mask the failure:
     // surface the last diagnostic that can.
     const finalDiagnostic = core.diagnostics.filter(d => d.severity !== 'warning').at(-1);
@@ -1724,7 +1738,8 @@ function applyReducedCore(state: SessionState, core: CoreState): SessionState {
     // `latestDiagnosticChange` relies on.
     const isNews =
       finalDiagnostic !== undefined &&
-      (state.core.status !== 'failed' || !state.core.diagnostics.includes(finalDiagnostic));
+      (!endedWithBannerableFailure(state.core.status) ||
+        !state.core.diagnostics.includes(finalDiagnostic));
     if (isNews) next = reportProjectedDiagnostic(next, finalDiagnostic);
   }
   return next;
@@ -2183,6 +2198,7 @@ export function runStatusLabel(status: CoreRunStatus): string {
     case 'stopped':
     case 'completed':
     case 'failed':
+    case 'interrupted':
       return status;
     default: {
       const unhandled: never = status;

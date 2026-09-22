@@ -9,7 +9,7 @@ conversation is retired.
 
 Sandbox-facing scenarios run against two ``WorkspaceSandbox`` doubles,
 ``_FakeHostSandbox`` and ``_FakeDockerSandbox``: the driver has one code path
-for both (:func:`vibesys.agents.drivers.agentshim.confine_to_sandbox`), so a
+for both (:func:`vs_agent.drivers.agentshim.confine_to_sandbox`), so a
 test that is really about that path is parametrized over both rather than
 duplicated per mode.
 """
@@ -36,26 +36,28 @@ from agentshim.testing import (
     scripted_turn,
 )
 
-from vibesys.agents import docker_executor
-from vibesys.agents.contracts import (
+from vibesys.events import CommandResultPayload
+from vibesys.schemas import ImplementerResponse, JudgeResponse
+from vs_agent import docker_executor
+from vs_agent.api import (
     AgentEvent,
     AgentEventKind,
+    MCPServerSpec,
+)
+from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnRequest,
-    MCPServerSpec,
     SessionDisposition,
 )
-from vibesys.agents.drivers import agentshim as subject
-from vibesys.events import CommandResultPayload
-from vibesys.schemas import ImplementerResponse, JudgeResponse
+from vs_agent.drivers import agentshim as subject
 from vs_sandbox import HostResource, ProjectPathPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
-    from vibesys.agents.contracts import AgentSession
+    from vs_agent.contracts import AgentSession
 
 SCRIPTED_PROVIDERS = ("claude", "codex", "gemini", "opencode")
 """Every provider VibeSys ships, each scripted in its own stream format.

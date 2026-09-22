@@ -8,13 +8,10 @@ the same event stream.
 """
 
 from vibesys.render.format import format_status_prefix, format_token_count
-from vibesys.render.headless import HeadlessRenderer, TodoDisplay
 from vibesys.render.sink import OutputSink, output_sink
 
 __all__ = [
-    "HeadlessRenderer",
     "OutputSink",
-    "TodoDisplay",
     "format_status_prefix",
     "format_token_count",
     "output_sink",

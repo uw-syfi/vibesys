@@ -194,6 +194,7 @@ describe('header', () => {
       'paused',
       'completed',
       'failed',
+      'interrupted',
       'connecting',
     ];
     for (const status of states) {
@@ -400,9 +401,10 @@ const SPAN_ROLES: readonly HeaderSpanRole[] = [
  * Every run state `runStateText` can produce, plus one it cannot.
  *
  * The statuses go through `runStatusLabel`, which is what puts them on the
- * line, so this covers the labels rather than the raw status words. There is no
- * `interrupted`: `RunStatus` has no such member, and `run_interrupted` ends the
- * run as `failed`.
+ * line, so this covers the labels rather than the raw status words.
+ * `interrupted` is included even though `RunStatus` has no such member: core
+ * state derives it itself from the separate `run_interrupted` event (#804),
+ * so it is one of the values `runStateText` can actually show.
  */
 const RUN_STATES = [
   ...(
@@ -415,6 +417,7 @@ const RUN_STATES = [
       'stopped',
       'completed',
       'failed',
+      'interrupted',
       'connecting',
     ] as const
   ).map(runStatusLabel),
@@ -490,6 +493,9 @@ describe('header hierarchy', () => {
     expect(tone('stopped')).toBe(theme.warning);
     expect(tone(runStatusLabel('stopping'))).toBe(theme.warning);
     expect(tone('stopping')).toBe(theme.textPrimary);
+    // A signal or the launcher ending the run (#804) is not the candidate's
+    // own failure either: same warning, not `error`.
+    expect(tone('interrupted')).toBe(theme.warning);
     expect(tone('disconnected')).toBe(theme.warning);
     // Not verdicts. Bold is what sets these apart, and the word is spelled out.
     expect(tone('running')).toBe(theme.textPrimary);

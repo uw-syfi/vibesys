@@ -1,9 +1,9 @@
 """Typed round records and in-memory history for the agent loop.
 
-``hypothesis_outcome`` and ``candidate_disposition`` are plain strings rather
-than enums: this library intentionally does not depend on ``vibesys``, which
-owns the actual ``HypothesisOutcome``/``CandidateDisposition`` vocabularies.
-Callers validate those values against their own enums and pass in the
+``hypothesis_outcome`` and ``candidate_disposition`` are plain strings on
+``RoundRecord`` rather than the ``HypothesisOutcome``/``CandidateDisposition``
+enums defined below, so that a legacy record carrying a retired value still
+loads. Callers validate those values against their own enums and pass in the
 classification (e.g. which outcome strings count as a failure) rather than
 this module hard-coding it.
 
@@ -35,6 +35,7 @@ the on-disk layout.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import ConfigDict, Field, TypeAdapter, model_validator
@@ -54,6 +55,78 @@ JudgeVerdict = Literal["pass", "fail", "deferred"]
 #: the agent reported it about its own work. Only the framework may write
 #: ``framework``, so this is the trust boundary every consumer branches on.
 PerfProvenance = Literal["framework", "implementer"]
+
+
+class HypothesisOutcome(StrEnum):
+    """Implementer-owned status for the active experimental hypothesis.
+
+    ``SUPPORTED`` and ``NOMINATED`` are deliberately distinct from
+    ``PROVEN``: an implementer may submit evidence for independent review,
+    but only the judge can establish that the scoped hypothesis held.
+    ``NOMINATED`` additionally asks the framework to run its global gates for
+    the current candidate checkpoint. It does not imply that the overall
+    objective or terminal target has been achieved.
+    """
+
+    CONTINUE = "continue"
+    SUPPORTED = "supported"
+    NOMINATED = "nominated"
+    DISPROVEN = "disproven"
+    IMPLEMENTATION_FAILED = "implementation_failed"
+    INCONCLUSIVE = "inconclusive"
+    BLOCKED = "blocked"
+
+
+class CandidateDisposition(StrEnum):
+    """How a measured candidate should be retained independently of its hypothesis.
+
+    Hypothesis truth and checkpoint utility are different questions. A causal
+    forecast can be disproven while its implementation still establishes a
+    useful throughput/latency tradeoff. These values keep that distinction
+    explicit without promoting provisional evidence to an official result.
+    """
+
+    UNASSESSED = "unassessed"
+    DISCARD = "discard"
+    PREREQUISITE = "prerequisite"
+    PARETO_FRONTIER = "pareto_frontier"
+
+
+class PerfDeltaReason(StrEnum):
+    """Why a headline measurement carries no causal delta.
+
+    Always re-derived from round evidence (``perf_provenance`` and the
+    baseline fields), never stored on the round record, so it cannot drift
+    from them. Absent entirely for records that predate provenance tracking:
+    a legacy absolute number keeps reading as a deliberate absolute rather
+    than being relabelled as unresolved.
+    """
+
+    # No trusted official measurement of the metric existed yet, so there was
+    # legitimately nothing to compare against.
+    NO_BASELINE_YET = "no_baseline_yet"
+    # Trusted measurements existed but none was admissible as this round's
+    # causal baseline: the lookup failed closed rather than inverting cause
+    # and effect.
+    BASELINE_UNRESOLVED = "baseline_unresolved"
+    # The only headline number is the implementer's own report, which the
+    # framework never orders against anything.
+    NOT_FRAMEWORK_MEASURED = "not_framework_measured"
+
+
+class HypothesisResolution(StrEnum):
+    """Framework-owned resolution after all available evidence is known."""
+
+    PROVEN = "proven"
+    DISPROVEN = "disproven"
+    INCONCLUSIVE = "inconclusive"
+    IMPLEMENTATION_FAILED = "implementation_failed"
+    BLOCKED = "blocked"
+    REJECTED = "rejected"
+    # The review passed but no trusted framework measurement exists, so the
+    # empirical claim is neither proven nor failed. Distinct from INCONCLUSIVE,
+    # which reports a trusted measurement that could not decide the claim.
+    UNMEASURED = "unmeasured"
 
 
 @dataclass(config=ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True))
@@ -112,9 +185,8 @@ class RoundRecord:
     # full canonical evaluation and therefore never updates ``perf_metric`` or
     # plateau detection by itself.
     #
-    # Mirrors ``vibesys.schemas.CandidateDisposition.UNASSESSED.value``; kept
-    # as a plain string default rather than importing the enum (see module
-    # docstring).
+    # Mirrors ``CandidateDisposition.UNASSESSED.value``; kept as a plain
+    # string default rather than the enum itself (see module docstring).
     candidate_disposition: str = "unassessed"
     candidate_metrics: dict[str, float] = Field(default_factory=dict)
     candidate_evaluation_artifact: str | None = None

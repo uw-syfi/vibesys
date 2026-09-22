@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.agents import provider_policy
+from vs_agent import api as agent_api
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
@@ -184,7 +184,7 @@ def agent_image(  # noqa: PLR0913  # tracked: #288
     of the resulting image ID. Otherwise the agent layer is built directly on
     ``base_image``.
 
-    CLI and toolchain versions come from :mod:`vibesys.agents.provider_policy`
+    CLI and toolchain versions come from :mod:`vs_agent.provider_policy`
     and are passed as build args, so a version bump changes this module's
     caller nowhere: rebuilding with an unchanged Dockerfile and unchanged
     build args resolves to the same image from Docker's layer cache.
@@ -208,12 +208,12 @@ def agent_image(  # noqa: PLR0913  # tracked: #288
     )
 
     build_args: list[str] = ["--build-arg", f"BASE_IMAGE={base}"]
-    build_args += ["--build-arg", f"NODE_VERSION={provider_policy.NODE_VERSION}"]
-    for provider, version in provider_policy.CLI_VERSIONS.items():
+    build_args += ["--build-arg", f"NODE_VERSION={agent_api.NODE_VERSION}"]
+    for provider, version in agent_api.CLI_VERSIONS.items():
         build_args += ["--build-arg", f"{provider.upper()}_VERSION={version}"]
     build_args += ["--build-arg", f"TOOLCHAINS={' '.join(sorted(set(toolchains)))}"]
-    build_args += ["--build-arg", f"RUST_VERSION={provider_policy.RUST_TOOLCHAIN_VERSION}"]
-    build_args += ["--build-arg", f"GO_VERSION={provider_policy.GO_TOOLCHAIN_VERSION}"]
+    build_args += ["--build-arg", f"RUST_VERSION={agent_api.RUST_TOOLCHAIN_VERSION}"]
+    build_args += ["--build-arg", f"GO_VERSION={agent_api.GO_TOOLCHAIN_VERSION}"]
     build_args += ["--build-arg", f"PIP_EXTRAS={' '.join(sorted(set(pip_extras)))}"]
 
     target = _BuildTarget(

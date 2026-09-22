@@ -6,11 +6,11 @@ sites pass to ``LoopContext.invoke``. ``run_started`` advertises this
 sequence to frontends, which seed one pending placeholder per role for each
 round. Conditional roles are included (``profiler`` runs only when profiling
 is enabled and requested) because a pending placeholder is the correct
-display for a role that may still run. ``entrypoints.headless`` drops
+display for a role that may still run. ``entrypoints.cli`` drops
 ``profiler`` from the advertised tuple when the resolved profiler kind is
 ``ProfilerKind.NONE``, since it is then guaranteed not to run.
 
-Kept free of loop imports: ``entrypoints.headless`` reads it while emitting
+Kept free of loop imports: ``entrypoints.cli`` reads it while emitting
 ``run_started``, before any loop module is loaded, and the loop packages
 intentionally avoid heavy package-level imports.
 """

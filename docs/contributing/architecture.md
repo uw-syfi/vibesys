@@ -22,14 +22,19 @@ Submodules such as `vibesys.agents` and `server.api` are collapsed into their to
 
 ```mermaid
 graph TD
+    entrypoints --> headless
     entrypoints --> server
     entrypoints --> vibesys
+    entrypoints --> vs_agent
     entrypoints --> vs_github
     entrypoints --> vs_project
+    headless --> vibesys
     server --> vibesys
+    server --> vs_agent
     server --> vs_loop_state
     server --> vs_project
     server --> vs_sandbox
+    vibesys --> vs_agent
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_feature_flags
     vibesys --> vs_github
@@ -38,6 +43,9 @@ graph TD
     vibesys --> vs_project
     vibesys --> vs_prompts
     vibesys --> vs_sandbox
+    vs_agent --> vs_loop_state
+    vs_agent --> vs_project
+    vs_agent --> vs_sandbox
     vs_project --> vs_loop_state
 ```
 
@@ -47,11 +55,15 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 
 ```mermaid
 graph TD
-    vibesys.agents --> vibesys
-    vibesys.agents --> vibesys.render
+    vibesys.api --> vibesys
+    vibesys.api --> vibesys.domains
+    vibesys.api --> vibesys.evaluators
+    vibesys.api --> vibesys.loops
+    vibesys.api --> vibesys.render
+    vibesys.api --> vibesys.run
+    vibesys.api --> vibesys.sandbox
     vibesys.backends --> vibesys
     vibesys.context --> vibesys
-    vibesys.context --> vibesys.agents
     vibesys.context --> vibesys.backends
     vibesys.context --> vibesys.domains
     vibesys.context --> vibesys.evaluators
@@ -62,7 +74,6 @@ graph TD
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
     vibesys.loops --> vibesys
-    vibesys.loops --> vibesys.agents
     vibesys.loops --> vibesys.context
     vibesys.loops --> vibesys.domains
     vibesys.loops --> vibesys.evaluators
@@ -73,13 +84,11 @@ graph TD
     vibesys.prompts --> vibesys
     vibesys.render --> vibesys
     vibesys.run --> vibesys
-    vibesys.run --> vibesys.agents
     vibesys.run --> vibesys.backends
     vibesys.run --> vibesys.evaluators
     vibesys.run --> vibesys.render
     vibesys.run --> vibesys.sandbox
     vibesys.sandbox --> vibesys
-    vibesys.sandbox --> vibesys.agents
     vibesys.sandbox --> vibesys.backends
     vibesys.sandbox --> vibesys.domains
     vibesys.sandbox --> vibesys.evaluators
@@ -92,17 +101,17 @@ graph TD
 
 ```mermaid
 graph TD
+    entrypoints --> headless
     entrypoints --> server.runtime
     entrypoints --> server.settings
-    entrypoints --> vibesys
-    entrypoints --> vibesys.agents
-    entrypoints --> vibesys.evaluators
-    entrypoints --> vibesys.loops
-    entrypoints --> vibesys.render
-    entrypoints --> vibesys.run
-    entrypoints --> vibesys.sandbox
+    entrypoints --> vibesys.api
+    entrypoints --> vs_agent
     entrypoints --> vs_github
     entrypoints --> vs_project
+    headless --> vibesys.api
+    server --> vs_agent
+    server --> vs_project
+    server --> vs_sandbox
     server.api --> server.chat
     server.api --> server.controller
     server.api --> server.diagnostics
@@ -112,19 +121,17 @@ graph TD
     server.api --> server.journal
     server.api --> server.run_lifecycle
     server.api --> server.settings
-    server.api --> vibesys
-    server.api --> vibesys.loops
-    server.api --> vibesys.run
+    server.api --> vibesys.api
     server.api --> vs_loop_state
     server.api --> vs_project
+    server.chat --> server
     server.chat --> server.controller
     server.chat --> server.events
     server.chat --> server.execution
     server.chat --> server.journal
     server.chat --> server.run_lifecycle
-    server.chat --> vibesys.agents
-    server.chat --> vibesys.domains
-    server.chat --> vibesys.run
+    server.chat --> vibesys.api
+    server.chat --> vs_agent
     server.chat --> vs_project
     server.chat --> vs_sandbox
     server.controller --> server.diagnostics
@@ -136,9 +143,12 @@ graph TD
     server.events --> server.diagnostics
     server.events --> server.event_index
     server.events --> server.run_lifecycle
+    server.events --> vs_agent
     server.execution --> server.diagnostics
     server.execution --> server.events
     server.execution --> server.journal
+    server.execution --> vibesys.api
+    server.integration --> server
     server.integration --> server.chat
     server.integration --> server.controller
     server.integration --> server.diagnostics
@@ -147,10 +157,8 @@ graph TD
     server.integration --> server.journal
     server.integration --> server.read_model
     server.integration --> server.run_lifecycle
-    server.integration --> vibesys
-    server.integration --> vibesys.agents
-    server.integration --> vibesys.render
-    server.integration --> vibesys.run
+    server.integration --> vibesys.api
+    server.integration --> vs_agent
     server.integration --> vs_project
     server.journal --> server.diagnostics
     server.journal --> server.events
@@ -167,26 +175,36 @@ graph TD
     server.runtime --> server.read_model
     server.runtime --> server.settings
     server.runtime --> server.transport
-    server.runtime --> vibesys
-    server.settings --> vibesys
+    server.runtime --> vibesys.api
+    server.settings --> vibesys.api
     server.tool_payloads --> server.events
+    server.tool_payloads --> vs_agent
     server.transport --> server.api
-    server.transport --> vibesys
+    server.transport --> vs_project
+    vibesys --> vs_agent
     vibesys --> vs_feature_flags
-    vibesys.agents --> vibesys
-    vibesys.agents --> vibesys.render
-    vibesys.agents --> vs_project
-    vibesys.agents --> vs_sandbox
+    vibesys --> vs_loop_state
+    vibesys.api --> vibesys
+    vibesys.api --> vibesys.domains
+    vibesys.api --> vibesys.evaluators
+    vibesys.api --> vibesys.loops
+    vibesys.api --> vibesys.render
+    vibesys.api --> vibesys.run
+    vibesys.api --> vibesys.sandbox
+    vibesys.api --> vs_agent
+    vibesys.api --> vs_loop_state
+    vibesys.api --> vs_project
+    vibesys.api --> vs_sandbox
     vibesys.backends --> vibesys
     vibesys.backends --> vs_sandbox
     vibesys.context --> vibesys
-    vibesys.context --> vibesys.agents
     vibesys.context --> vibesys.backends
     vibesys.context --> vibesys.domains
     vibesys.context --> vibesys.evaluators
     vibesys.context --> vibesys.render
     vibesys.context --> vibesys.run
     vibesys.context --> vibesys.sandbox
+    vibesys.context --> vs_agent
     vibesys.context --> vs_project
     vibesys.context --> vs_sandbox
     vibesys.domains --> vibesys
@@ -195,7 +213,6 @@ graph TD
     vibesys.evaluators --> vs_project
     vibesys.evaluators --> vs_sandbox
     vibesys.loops --> vibesys
-    vibesys.loops --> vibesys.agents
     vibesys.loops --> vibesys.context
     vibesys.loops --> vibesys.domains
     vibesys.loops --> vibesys.evaluators
@@ -203,6 +220,7 @@ graph TD
     vibesys.loops --> vibesys.render
     vibesys.loops --> vibesys.run
     vibesys.loops --> vibesys.sandbox
+    vibesys.loops --> vs_agent
     vibesys.loops --> vs_evaluator_protocol
     vibesys.loops --> vs_issue_board
     vibesys.loops --> vs_loop_state
@@ -212,26 +230,29 @@ graph TD
     vibesys.prompts --> vs_prompts
     vibesys.render --> vibesys
     vibesys.run --> vibesys
-    vibesys.run --> vibesys.agents
     vibesys.run --> vibesys.backends
     vibesys.run --> vibesys.evaluators
     vibesys.run --> vibesys.render
     vibesys.run --> vibesys.sandbox
+    vibesys.run --> vs_agent
     vibesys.run --> vs_github
     vibesys.run --> vs_loop_state
     vibesys.run --> vs_project
     vibesys.run --> vs_sandbox
     vibesys.sandbox --> vibesys
-    vibesys.sandbox --> vibesys.agents
     vibesys.sandbox --> vibesys.backends
     vibesys.sandbox --> vibesys.domains
     vibesys.sandbox --> vibesys.evaluators
     vibesys.sandbox --> vibesys.prompts
     vibesys.sandbox --> vibesys.skypilot
+    vibesys.sandbox --> vs_agent
     vibesys.sandbox --> vs_project
     vibesys.sandbox --> vs_sandbox
     vibesys.skypilot --> vibesys
     vibesys.skypilot --> vs_project
+    vs_agent --> vs_loop_state
+    vs_agent --> vs_project
+    vs_agent --> vs_sandbox
     vs_project --> vs_loop_state
 ```
 [//]: # (tach-graph:end)

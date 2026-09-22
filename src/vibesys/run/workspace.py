@@ -18,10 +18,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.agents.provider_policy import cli_skill_dirs
 from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.input_project import materialize_input_project
 from vibesys.skills import foreign_platform_names, is_platforms_parent
+from vs_agent.api import cli_skill_dirs
 
 if TYPE_CHECKING:
     from vibesys.backends.base import ComputeBackendImpl
@@ -53,7 +53,7 @@ EXCLUDED_WORKSPACE_DIRS: frozenset[str] = frozenset(
 )
 
 # Skill destinations mirrored by materialize_skills in agents.cli_common; both
-# derive from the same vibesys.agents.provider_policy.cli_skill_dirs union.
+# derive from the same vs_agent.provider_policy.cli_skill_dirs union.
 _CLI_SKILL_DIRS: tuple[str, ...] = cli_skill_dirs()
 
 

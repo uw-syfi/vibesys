@@ -25,11 +25,9 @@ from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import Any
 
-from vibesys.agents.factory import resolve_agent_driver
-from vibesys.agents.progress import RoundProgress
+from vibesys.agent_spec_config import resolve_agent_driver
 from vibesys.config import Config, as_config
 from vibesys.constants import (
-    DEFAULT_AGENT_BACKEND,
     DEFAULT_COMPUTE_BACKEND,
     ComputeBackend,
     DomainName,
@@ -43,7 +41,7 @@ from vibesys.loops.plain.state import PlainStateStore
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, Prompt
 from vibesys.render.sink import output_sink
-from vibesys.run import LoopContext, RepositoryVisibility, RunIntegration, RunStateNamespace
+from vibesys.run import LocalRunIntegration, LoopContext, RepositoryVisibility, RunStateNamespace
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -57,6 +55,7 @@ from vibesys.schemas import (
     PerfTrend,
     Verdict,
 )
+from vs_agent.api import AgentBackend, RoundProgress
 from vs_issue_board import (
     Issue,
     IssueBoard,
@@ -295,7 +294,7 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     domain: DomainName,
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
-    integration: RunIntegration | None = None,
+    integration: LocalRunIntegration | None = None,
 ) -> bool:
     """Run the issue-tracker driven loop.
 
@@ -307,13 +306,15 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     config = as_config(config)
     domain_definition = resolve_domain(domain)
     run_environment = run_environment or make_run_environment_spec()
-    resolved_agent_backend = agent_backend or config.agent.backend or DEFAULT_AGENT_BACKEND
+    resolved_agent_backend = str(agent_backend or config.agent.backend or AgentBackend.CLI)
     run_configuration = PlainRunConfiguration(
         outer_loop="plain",
         run_environment=run_environment_record(run_environment),
         model=config.model.name,
         agent_backend=resolved_agent_backend,
-        agent_driver=(resolve_agent_driver(config) if resolved_agent_backend == "cli" else None),
+        agent_driver=(
+            resolve_agent_driver(config).value if resolved_agent_backend == "cli" else None
+        ),
         cli_provider=cli_provider or config.agent.cli_provider or "codex",
         cli_timeout=config.agent.cli_timeout,
         compute_backend=backend.value,

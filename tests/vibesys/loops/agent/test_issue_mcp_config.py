@@ -8,8 +8,8 @@ correctly into the spec's command-line args.
 
 from __future__ import annotations
 
-from vibesys.agents.contracts import MCPServerSpec
 from vibesys.loops.plain.mcp_config import build_issue_mcp_spec
+from vs_agent.api import MCPServerSpec
 from vs_issue_board import IssueType
 
 

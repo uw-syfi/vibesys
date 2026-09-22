@@ -16,24 +16,11 @@ from vibesys.render import output_sink
 from vibesys.run.event_journal import EventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.run.paths import RunPaths
+from vs_agent.api.testing import FakeAgentClient
 
 
 class _Answer(BaseModel):
     value: str
-
-
-class _AgentClient:
-    driver_name = "mock"
-    provider = "test"
-
-    @staticmethod
-    def model_for_kind(kind: str) -> str:
-        return f"model-for-{kind}"
-
-    @staticmethod
-    def invoke(**kwargs: object) -> _Answer:
-        assert kwargs["invocation_id"]
-        return _Answer(value="done")
 
 
 def test_journal_flushes_pending_events_and_continues_sequence(tmp_path: Path) -> None:
@@ -117,7 +104,10 @@ def test_run_context_records_complete_invocation_lifecycle(tmp_path: Path) -> No
         uninitialized = cast("Any", context)
         uninitialized.integration = integration
         uninitialized.events = integration.events
-        uninitialized.agent_client = _AgentClient()
+        client = FakeAgentClient(driver_name="mock", provider="test")
+        client.set_model_for_kind({"implementer": "model-for-implementer"})
+        client.enqueue("implementer", _Answer(value="done"))
+        uninitialized.agent_client = client
         uninitialized._paths = RunPaths(  # noqa: SLF001
             project_root=tmp_path,
             log_dir=tmp_path,
@@ -136,6 +126,7 @@ def test_run_context_records_complete_invocation_lifecycle(tmp_path: Path) -> No
         )
 
         assert answer == _Answer(value="done")
+        assert client.calls_for("implementer")[0].invocation_id
         assert [event.type for event in integration.events.read()] == [
             CoreEventType.AGENT_EXECUTION_STARTED,
             CoreEventType.PHASE_STARTED,

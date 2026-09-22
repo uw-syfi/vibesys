@@ -9,6 +9,19 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
+# AgentOutputChannel, AgentStatusData, TodoItemData, and ToolResultPayload are
+# used directly below. CommandResultPayload and JsonResultPayload are only the
+# ToolResultPayload union members; re-exported here (like vs_loop_state's
+# enums in vibesys.schemas) so existing importers of vibesys.events keep working.
+from vs_agent.api import (
+    AgentOutputChannel,
+    AgentStatusData,
+    CommandResultPayload,  # noqa: F401
+    JsonResultPayload,  # noqa: F401
+    TodoItemData,
+    ToolResultPayload,
+)
+
 
 class CoreEventType(StrEnum):
     """Closed set of observations produced by a core run."""
@@ -39,6 +52,20 @@ class CoreEventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
 
+    # Run-control transitions (see `vibesys.run.run_control.RunControlChannel`):
+    # request-time events (`*_REQUESTED`, `STEER_QUEUED`, `RESUMED`) come from
+    # `RunControl` callers; boundary-consume-time events (`PAUSED`, `STOPPED`,
+    # `STEER_CONSUMED`) come from `_RunContext.invoke` landing them on the run
+    # loop's own thread. A server projects both onto its own status machine
+    # and CONTROL journal; there is no frontend-visible wire event for them.
+    STEER_QUEUED = "steer_queued"
+    PAUSE_REQUESTED = "pause_requested"
+    RESUMED = "resumed"
+    STOP_REQUESTED = "stop_requested"
+    STEER_CONSUMED = "steer_consumed"
+    PAUSED = "paused"
+    STOPPED = "stopped"
+
 
 class EventStatus(StrEnum):
     """Lifecycle status attached to a core event when applicable."""
@@ -51,7 +78,6 @@ class EventStatus(StrEnum):
 
 
 OutputStream = Literal["stdout", "stderr"]
-AgentOutputChannel = Literal["assistant", "analysis", "tool", "diagnostic", "prompt"]
 ExecutionActivityMode = Literal["thinking", "responding", "tool", "waiting"]
 
 
@@ -151,14 +177,6 @@ class PhaseData(EventPayload):  # noqa: D101
     attempt: int | None = None
 
 
-class AgentStatusData(EventPayload):  # noqa: D101
-    progress: str | None = None
-    agent_label: str | None = None
-    elapsed_seconds: float = 0.0
-    input_tokens: int = 0
-    context_window: int | None = None
-
-
 class AgentOutputChunkData(EventPayload):  # noqa: D101
     kind: Literal["agent_output_chunk"] = "agent_output_chunk"
     channel: AgentOutputChannel
@@ -174,25 +192,6 @@ class ToolCallData(EventPayload):  # noqa: D101
     status: AgentStatusData | None = None
 
 
-class CommandResultPayload(EventPayload):  # noqa: D101
-    kind: Literal["command"] = "command"
-    stdout: str
-    stderr: str
-    exit_code: int | None = None
-    duration: float | None = None
-
-
-class JsonResultPayload(EventPayload):  # noqa: D101
-    kind: Literal["json"] = "json"
-    value: dict[str, Any] | list[Any]
-
-
-ToolResultPayload = Annotated[
-    CommandResultPayload | JsonResultPayload,
-    Field(discriminator="kind"),
-]
-
-
 class ToolResultData(EventPayload):  # noqa: D101
     kind: Literal["tool_result"] = "tool_result"
     tool: str
@@ -200,11 +199,6 @@ class ToolResultData(EventPayload):  # noqa: D101
     content: str
     is_error: bool = False
     payload: ToolResultPayload | None = None
-
-
-class TodoItemData(EventPayload):  # noqa: D101
-    content: str
-    status: str
 
 
 class TodoUpdateData(EventPayload):  # noqa: D101

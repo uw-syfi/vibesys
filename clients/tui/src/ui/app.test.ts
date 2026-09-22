@@ -6234,6 +6234,27 @@ describe('header hierarchy', () => {
     expect(spanColors(testRenderer, 'failed')?.fg).toBe(theme.error);
   });
 
+  it('colours an interrupted run distinctly from a failed one (#804)', async () => {
+    const theme = resolveTheme('dark');
+    const testRenderer = await createTestRenderer({width: 100, height: 20});
+    const controller = new FakeController(runState('running'));
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('223k/400k context'));
+
+    controller.publish({
+      ...controller.state,
+      core: {...controller.state.core, status: 'interrupted'},
+    });
+    await testRenderer.waitForVisualIdle();
+
+    // The word itself distinguishes it from a failure, and the colour is the
+    // same warning tone a deliberate operator stop gets, not `error`.
+    expect(await frameAfter(testRenderer)).toContain('interrupted');
+    expect(spanColors(testRenderer, 'interrupted')?.fg).toBe(theme.warning);
+    expect(spanColors(testRenderer, 'interrupted')?.fg).not.toBe(theme.error);
+  });
+
   it('reads the header against the cell it is actually drawn on, in every theme', async () => {
     // The frame paints a surface of its own, so `theme.canvas` is not what the
     // header's text sits on and a floor measured against it checks a

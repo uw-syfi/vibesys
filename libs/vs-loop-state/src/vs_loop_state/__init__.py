@@ -6,7 +6,11 @@ all three loops. Project layout and filesystem persistence belong to
 """
 
 from vs_loop_state.agent import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    HypothesisResolution,
     JudgeVerdict,
+    PerfDeltaReason,
     PerfProvenance,
     RoundHistory,
     RoundRecord,
@@ -31,9 +35,13 @@ from vs_loop_state.plain import (
 )
 
 __all__ = [
+    "CandidateDisposition",
+    "HypothesisOutcome",
+    "HypothesisResolution",
     "IndividualRecord",
     "JudgeVerdict",
     "MetricComparison",
+    "PerfDeltaReason",
     "PerfProvenance",
     "PlainLoopCursor",
     "PlainPerformanceRecord",

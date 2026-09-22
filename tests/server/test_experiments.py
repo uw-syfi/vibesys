@@ -16,6 +16,8 @@ from server.api.experiments import (
 )
 from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEntry, PerformanceQuery
 from server.events import EventType, ExperimentsChangedData
+from vibesys.api._readmodel import project_committed_run_view, project_run_view
+from vibesys.api.contracts import RunStatus
 from vibesys.loops.agent.model import (
     AgentRunState,
     Hypothesis,
@@ -39,6 +41,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import pytest
+
+    from vibesys.api import RunView
 
 
 class _RoundFields(TypedDict, total=False):
@@ -144,6 +148,21 @@ def _hypothesis(
     return Hypothesis(**fields)
 
 
+def _view(state: AgentRunState, *, run_id: str = "run-1") -> RunView:
+    """Project a hand-built `AgentRunState` into the `RunView` the server reads.
+
+    `build_experiment_log`/`ExperimentProjection` now consume `vibesys.api`'s
+    `RunView`, not raw core state directly, so unit tests that build a state
+    fixture by hand still need this projection step before calling them.
+    """
+    return project_run_view(
+        state,
+        run_id=run_id,
+        status=RunStatus.ACTIVE,
+        experiment_revision=state.experiment_revision,
+    )
+
+
 def test_round_carries_its_own_verdict_and_causal_delta() -> None:
     """Per-round review and delta cross once, on the experiment log's row."""
     state = AgentRunState(
@@ -165,7 +184,7 @@ def test_round_carries_its_own_verdict_and_causal_delta() -> None:
         ]
     )
 
-    (entry,) = build_experiment_log(state)
+    (entry,) = build_experiment_log(_view(state))
     (round_entry,) = entry.rounds
 
     assert round_entry.judge_verdict == "deferred"
@@ -186,7 +205,7 @@ def test_round_reads_an_implementer_outcome_from_its_own_vocabulary() -> None:
         ]
     )
 
-    (entry,) = build_experiment_log(state)
+    (entry,) = build_experiment_log(_view(state))
 
     assert entry.rounds[0].hypothesis_outcome == HypothesisOutcome.NOMINATED
 
@@ -209,7 +228,7 @@ def test_round_drops_a_retired_outcome_rather_than_failing_the_log() -> None:
         ]
     )
 
-    (entry,) = build_experiment_log(state)
+    (entry,) = build_experiment_log(_view(state))
 
     assert entry.rounds[0].hypothesis_outcome is None
     assert entry.rounds[0].candidate_disposition is None
@@ -239,7 +258,7 @@ def test_projection_uses_nested_rounds_and_one_official_measurement_tuple() -> N
         strategy_reason="The official baseline regressed.",
     )
 
-    (entry,) = build_experiment_log(AgentRunState(hypotheses=[hypothesis]))
+    (entry,) = build_experiment_log(_view(AgentRunState(hypotheses=[hypothesis])))
 
     assert [round_.round for round_ in entry.rounds] == [1, 2]
     assert (entry.first_round, entry.last_round) == (1, 2)
@@ -318,7 +337,7 @@ def test_projection_carries_baseline_identity_and_the_no_delta_reason() -> None:
         ]
     )
 
-    measured, first, unresolved, reported = build_experiment_log(state)
+    measured, first, unresolved, reported = build_experiment_log(_view(state))
 
     assert (measured.perf_baseline_round, measured.perf_baseline_commit) == (1, "c1")
     assert measured.perf_delta_reason is None
@@ -359,7 +378,7 @@ def test_projection_surfaces_active_hypothesis_before_a_round_finishes() -> None
         hypotheses=[_hypothesis("H-02", 2)],
     )
 
-    (entry,) = build_experiment_log(state)
+    (entry,) = build_experiment_log(_view(state))
 
     assert entry.active is True
     assert entry.rounds == []
@@ -381,7 +400,7 @@ def test_projection_uses_the_orchestrator_title_when_present() -> None:
         ),
     )
 
-    (entry,) = build_experiment_log(AgentRunState(hypotheses=[hypothesis]))
+    (entry,) = build_experiment_log(_view(AgentRunState(hypotheses=[hypothesis])))
 
     assert entry.title == "Batch decode requests"
 
@@ -399,7 +418,7 @@ def test_projection_derives_a_title_from_the_claim_when_the_plan_title_is_empty(
         ),
     )
 
-    (entry,) = build_experiment_log(AgentRunState(hypotheses=[hypothesis]))
+    (entry,) = build_experiment_log(_view(AgentRunState(hypotheses=[hypothesis])))
 
     assert entry.title == "Batching decode requests reduces overhead"
 
@@ -417,7 +436,7 @@ def test_projection_title_is_none_without_any_text() -> None:
         ),
     )
 
-    (entry,) = build_experiment_log(AgentRunState(hypotheses=[hypothesis]))
+    (entry,) = build_experiment_log(_view(AgentRunState(hypotheses=[hypothesis])))
 
     assert entry.title is None
 
@@ -430,7 +449,7 @@ def test_projection_orders_hypotheses_by_started_round() -> None:
         ]
     )
 
-    entries = build_experiment_log(state)
+    entries = build_experiment_log(_view(state))
 
     assert [entry.hypothesis_id for entry in entries] == ["H-A", "H-B"]
 
@@ -444,7 +463,7 @@ def test_revisioned_projection_returns_only_changed_entries() -> None:
             _hypothesis("H-02", 2, last_experiment_revision=1),
         ],
     )
-    full = projection.replace("run", "projection", initial)
+    full = projection.replace("run", "projection", _view(initial))
 
     assert full.update.reset is True
     assert [entry.hypothesis_id for entry in full.entries] == ["H-01", "H-02"]
@@ -461,7 +480,7 @@ def test_revisioned_projection_returns_only_changed_entries() -> None:
     changed.experiment_revision = 2
     changed.hypotheses[1].last_experiment_revision = 2
     changed.hypotheses[1].plan.task = "changed task"
-    projection.update("run", "projection", changed)
+    projection.update("run", "projection", _view(changed))
     delta = projection.query(
         "run",
         "projection",
@@ -480,8 +499,8 @@ def test_revisioned_projection_combines_remove_then_recreate_in_order() -> None:
         experiment_revision=1,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=1)],
     )
-    full = projection.replace("run", "projection", original)
-    projection.update("run", "projection", AgentRunState(experiment_revision=2))
+    full = projection.replace("run", "projection", _view(original))
+    projection.update("run", "projection", _view(AgentRunState(experiment_revision=2)))
     recreated = AgentRunState(
         experiment_revision=3,
         hypotheses=[
@@ -493,7 +512,7 @@ def test_revisioned_projection_combines_remove_then_recreate_in_order() -> None:
             )
         ],
     )
-    projection.update("run", "projection", recreated)
+    projection.update("run", "projection", _view(recreated))
 
     delta = projection.query(
         "run",
@@ -512,15 +531,15 @@ def test_revisioned_projection_resets_for_a_history_gap_or_run_change() -> None:
         experiment_revision=1,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=1)],
     )
-    full = projection.replace("run", "projection", first)
+    full = projection.replace("run", "projection", _view(first))
     second = first.clone()
     second.experiment_revision = 2
     second.hypotheses[0].last_experiment_revision = 2
-    projection.update("run", "projection", second)
+    projection.update("run", "projection", _view(second))
     third = second.clone()
     third.experiment_revision = 3
     third.hypotheses[0].last_experiment_revision = 3
-    projection.update("run", "projection", third)
+    projection.update("run", "projection", _view(third))
 
     gap = projection.query(
         "run",
@@ -536,7 +555,7 @@ def test_revisioned_projection_resets_for_a_history_gap_or_run_change() -> None:
 def test_legacy_invalidation_forces_a_full_snapshot_at_the_same_revision() -> None:
     projection = ExperimentProjection()
     old = AgentRunState(hypotheses=[_hypothesis("H-01", 1)])
-    original = projection.replace("run", "projection", old)
+    original = projection.replace("run", "projection", _view(old))
     stale_cursor = ExperimentCursor(
         run_id="run",
         projection_id=original.update.projection_id,
@@ -548,7 +567,7 @@ def test_legacy_invalidation_forces_a_full_snapshot_at_the_same_revision() -> No
 
     new = old.clone()
     new.hypotheses[0].plan.task = "changed by a legacy writer"
-    reset = projection.replace("run", "projection", new)
+    reset = projection.replace("run", "projection", _view(new))
     assert reset.update.reset is True
     assert reset.entries[0].action == "changed by a legacy writer"
     assert reset.update.projection_id != stale_cursor.projection_id
@@ -567,7 +586,7 @@ def test_equal_revision_authoritative_snapshot_starts_a_new_cursor_chain() -> No
         experiment_revision=4,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=4)],
     )
-    original = projection.replace("run", "projection", old)
+    original = projection.replace("run", "projection", _view(old))
     stale_cursor = ExperimentCursor(
         run_id="run",
         projection_id=original.update.projection_id,
@@ -576,7 +595,7 @@ def test_equal_revision_authoritative_snapshot_starts_a_new_cursor_chain() -> No
 
     restored = old.clone()
     restored.hypotheses[0].plan.task = "restored contents"
-    projection.update("run", "projection", restored, changed_keys=None)
+    projection.update("run", "projection", _view(restored), changed_keys=None)
 
     result = projection.query("run", "projection", stale_cursor)
     assert isinstance(result, ExperimentQueryResult)
@@ -596,7 +615,7 @@ def test_invalidation_during_a_cold_load_rejects_the_stale_snapshot() -> None:
         hypotheses=[_hypothesis("H-stale", 1, last_experiment_revision=1)],
     )
 
-    assert projection.install_loaded("run", "projection", stale, token) is None
+    assert projection.install_loaded("run", "projection", _view(stale), token) is None
     assert isinstance(projection.query("run", "projection", None), ExperimentLoadToken)
 
 
@@ -680,7 +699,9 @@ def test_service_projects_committed_live_state_without_reloading_history(
     changed.hypotheses[1].last_experiment_revision = 2
     changed.hypotheses[1].plan.task = "project this row only"
     store.save(changed)
-    parts.integration.publish_committed_state("agent", changed, changed_keys=("H-02",))
+    parts.publish_committed_view(
+        project_committed_run_view(changed, run_id=run_id), changed_keys=("H-02",)
+    )
     parts.journal.record(
         EventType.EXPERIMENTS_CHANGED,
         data=ExperimentsChangedData(reason="round_persisted", revision=2),
@@ -741,7 +762,9 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
         changed.hypotheses[0].last_experiment_revision = 2
         changed.hypotheses[0].plan.task = "new committed contents"
         store.save(changed)
-        parts.integration.publish_committed_state("agent", changed, changed_keys=("H-01",))
+        parts.publish_committed_view(
+            project_committed_run_view(changed, run_id=run_id), changed_keys=("H-01",)
+        )
         parts.journal.record(
             EventType.EXPERIMENTS_CHANGED,
             data=ExperimentsChangedData(reason="round_persisted", revision=2),
@@ -809,7 +832,7 @@ def test_committed_state_is_projected_synchronously_before_later_mutation(tmp_pa
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
     state = AgentRunState(hypotheses=[_hypothesis("H-01", 1)])
 
-    parts.integration.publish_committed_state("agent", state)
+    parts.publish_committed_view(project_committed_run_view(state, run_id=run_id))
     state.hypotheses[0].plan.task = "uncommitted mutation"
     response = parts.api.execute(ExperimentQuery())
 

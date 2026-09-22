@@ -1,7 +1,7 @@
 """Durable provider-session checkpoints and AgentClient resume on restart.
 
 These tests exercise the machine-local session store in isolation and its
-integration with :class:`~vibesys.agents.client.AgentClient`: a fresh client
+integration with :class:`~vs_agent.client.AgentClient`: a fresh client
 (standing in for a resumed process) must offer a checkpointed provider session
 ID to the very first turn, but only when the spec that produced it still
 matches, and it must forget the ID when a driver reports a restart or refuses
@@ -15,9 +15,16 @@ from pathlib import Path
 
 import pytest
 
-from vibesys.agents.client import AgentClient
-from vibesys.agents.contracts import (
+from vs_agent.api import (
     AgentCapabilities,
+    AgentClient,
+    AgentSessionKey,
+    AgentSessionState,
+    DurableSessionStore,
+    NullSessionStore,
+    SessionScope,
+)
+from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentObserver,
     AgentSession,
@@ -26,12 +33,6 @@ from vibesys.agents.contracts import (
     AgentTurnResult,
     SessionDisposition,
     session_spec_fingerprint,
-)
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
-from vibesys.agents.session_store import (
-    AgentSessionState,
-    DurableSessionStore,
-    NullSessionStore,
 )
 from vs_project import (
     PlainRunConfiguration,

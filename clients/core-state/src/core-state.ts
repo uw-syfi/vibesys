@@ -159,12 +159,19 @@ function isRunLifetimeBoundary(event: RunEvent): boolean {
 
 /**
  * Run status as core state carries it: every status the backend reports, plus
- * the client-only `connecting` that precedes the first snapshot or event.
+ * the client-only `connecting` that precedes the first snapshot or event, and
+ * the client-only `interrupted`. The backend has no `interrupted` member of
+ * `RunStatus`: it reports an interruption through the separate `run_interrupted`
+ * event rather than through `run_status_changed`, so the client derives this
+ * status itself instead of receiving it on the wire.
  */
-export type CoreRunStatus = RunStatus | 'connecting';
+export type CoreRunStatus = RunStatus | 'connecting' | 'interrupted';
 
 /** The statuses a run never leaves. Named once; `terminate` writes only these. */
-export type EndedRunStatus = Extract<CoreRunStatus, 'completed' | 'failed' | 'stopped'>;
+export type EndedRunStatus = Extract<
+  CoreRunStatus,
+  'completed' | 'failed' | 'stopped' | 'interrupted'
+>;
 
 export interface CoreState {
   sequence: number;
@@ -271,6 +278,7 @@ function endedRunStatus(status: CoreRunStatus): EndedRunStatus | null {
     case 'completed':
     case 'failed':
     case 'stopped':
+    case 'interrupted':
       return status;
     case 'connecting':
     case 'starting':
@@ -858,9 +866,8 @@ function applyRunLifecycle(state: CoreState, event: RunEvent): CoreState {
   }
   if (event.type === 'configuration_failed') return terminate(state, 'failed');
   if (event.type === 'run_finished') return terminate(state, 'completed');
-  if (event.type === 'run_failed' || event.type === 'run_interrupted') {
-    return terminate(state, 'failed');
-  }
+  if (event.type === 'run_failed') return terminate(state, 'failed');
+  if (event.type === 'run_interrupted') return terminate(state, 'interrupted');
   return state;
 }
 
@@ -895,7 +902,20 @@ function applyRunStatus(state: CoreState, status: CoreRunStatus): CoreState {
   return ended === null ? cloneCoreStateWith(state, {status}) : terminate(state, ended);
 }
 
+/**
+ * Ends the run, unless it already has.
+ *
+ * A recorded run_interrupted is followed by a run_failed for the same
+ * boundary (the backend's coarse RunStatus has no `interrupted` member, so it
+ * also reports the generic failure for anything that only understands that
+ * one); folding both must not let the second, less specific event overwrite
+ * the first. `closePhase` in `run-map.ts` holds the same line for per-phase
+ * status, by leaving an already-closed phase alone. This is the run-level
+ * counterpart: once a status a run never leaves is written, `terminate` no
+ * longer has anything to write.
+ */
 function terminate(state: CoreState, status: EndedRunStatus): CoreState {
+  if (hasRunEnded(state)) return state;
   return cloneCoreStateWith(state, {status, activeExecutions: {}});
 }
 
@@ -1193,6 +1213,17 @@ function mergeDiagnostic(existing: CoreDiagnostic, incoming: CoreDiagnostic): Co
       diagnosticSeverityRank(incoming.severity) > diagnosticSeverityRank(existing.severity)
         ? incoming.severity
         : existing.severity,
+    // A recorded run_interrupted carries the same diagnostic id as the
+    // run_failed that follows it for the same boundary (the backend's coarse
+    // RunStatus has no `interrupted` member, so it also reports the generic
+    // failure). Both diagnostics merge by that shared id, and `run_interruption`
+    // must survive the merge regardless of which side computed it, the same way
+    // `terminate` keeps the run's own status from being downgraded by the event
+    // that follows it.
+    failureKind:
+      existing.failureKind === 'run_interruption' || incoming.failureKind === 'run_interruption'
+        ? 'run_interruption'
+        : incoming.failureKind,
     source: incoming.source ?? existing.source,
     agentKind: incoming.agentKind ?? existing.agentKind,
     roundLabel: incoming.roundLabel ?? existing.roundLabel,
