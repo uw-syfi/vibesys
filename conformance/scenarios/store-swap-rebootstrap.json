@@ -1,0 +1,37 @@
+{
+  "id": "store-swap-rebootstrap",
+  "title": "A store swapped under the client forces a rebootstrap",
+  "description": "The client resumes from a cursor in store-a, but a durable log attached while it was gone, so the live batch names store-b. The client re-folds from the new batch rather than extending the retired store's sequences.",
+  "role": "subscribe",
+  "transports": [
+    "unix",
+    "websocket"
+  ],
+  "decisions": [
+    "WP-REBOOTSTRAP",
+    "WP-SUBSCRIBE-ACK"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "subscribe",
+        "after_sequence": 120,
+        "store_id": "store-a"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "subscribed"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "event_batch",
+        "store_id": "store-b"
+      }
+    }
+  ]
+}

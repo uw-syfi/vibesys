@@ -1,0 +1,31 @@
+{
+  "id": "command-ack-roundtrip",
+  "title": "A command on the control connection is answered by one response",
+  "description": "A command.pause carrying the issuing client_id is answered by a single Response with an ack. The control connection carries many such request/response pairs in sequence over its life.",
+  "role": "control",
+  "transports": [
+    "unix",
+    "websocket"
+  ],
+  "decisions": [
+    "WP-ROLES",
+    "WP-GRANULARITY",
+    "WP-IDENTITY"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "command.pause",
+        "client_id": "client-1"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "response",
+        "ok": true
+      }
+    }
+  ]
+}

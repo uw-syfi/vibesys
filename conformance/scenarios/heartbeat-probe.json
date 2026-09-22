@@ -1,0 +1,30 @@
+{
+  "id": "heartbeat-probe",
+  "title": "The reserved application heartbeat is probed like any optional field",
+  "description": "A browser subscribe carrying the reserved heartbeat_ms field is rejected today because the field does not exist yet (#890). The scenario reserves the probe shape so the client heartbeat is additive; it is updated to assert a keepalive frame when #890 lands.",
+  "role": "subscribe",
+  "transports": [
+    "websocket"
+  ],
+  "decisions": [
+    "WP-HEARTBEAT",
+    "WP-CAPABILITY-PROBE"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "subscribe",
+        "after_sequence": 0,
+        "heartbeat_ms": 15000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "response",
+        "ok": false
+      }
+    }
+  ]
+}
