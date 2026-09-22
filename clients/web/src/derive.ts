@@ -679,9 +679,20 @@ const STATUS_WORDS: Partial<Record<CoreRunStatus, string>> = {
   paused: 'Paused',
 };
 
-/** What the polite live region says for one change: run status and new rounds, never tokens. */
+/**
+ * What the polite live region says for one change: run status, new rounds, and a dropped
+ * connection (once per drop; the banner's exhausted and protocol-error states are alerts).
+ * `''` clears the region silently; null leaves it as it is.
+ */
 export function announce(previous: RunPulse | null, next: RunPulse): string | null {
-  if (previous === null || previous.status === 'connecting') return null;
+  if (previous === null) return null;
+  if (previous.connection === 'connected' && next.connection === 'disconnected') {
+    return 'Reconnecting…';
+  }
+  // Back online, "Reconnecting…" must not linger, and the next drop must change the text again.
+  const cleared =
+    previous.connection !== 'connected' && next.connection === 'connected' ? '' : null;
+  if (previous.status === 'connecting') return cleared;
   const parts: string[] = [];
   if (next.ended === null && next.round !== null && next.round !== previous.round) {
     parts.push(`Round ${next.round} started`);
@@ -691,5 +702,5 @@ export function announce(previous: RunPulse | null, next: RunPulse): string | nu
     const word = STATUS_WORDS[next.status];
     if (word !== undefined) parts.push(word);
   }
-  return parts.length === 0 ? null : parts.join('. ');
+  return parts.length === 0 ? cleared : parts.join('. ');
 }

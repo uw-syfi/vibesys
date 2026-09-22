@@ -135,4 +135,5 @@ export interface RunPulse {
   status: CoreRunStatus;
   round: number | null;
   ended: EndedWord | null;
+  connection: Connection;
 }

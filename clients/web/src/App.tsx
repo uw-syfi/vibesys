@@ -200,7 +200,7 @@ export function App({session}: {session: WorkspaceSession}) {
           onRetryDesign={() => void session.load('design')}
         />
       </div>
-      <LiveRegion status={core.status} round={live} ended={ended} />
+      <LiveRegion status={core.status} round={live} ended={ended} connection={connection} />
       <Shortcuts onNext={() => step(1)} onPrevious={() => step(-1)} onToggleRun={toggleRun} />
       <Tooltip />
     </div>

@@ -27,7 +27,7 @@ import {
   steers,
   steersNeedOlder,
 } from './derive.js';
-import type {LogItem} from './model.js';
+import type {Connection, LogItem} from './model.js';
 import {CAPTURED_TYPES} from './session.js';
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -539,6 +539,7 @@ test('announcements: status changes and new rounds, nothing on first load', () =
     status,
     round,
     ended,
+    connection: 'connected' as const,
   });
   assert.equal(announce(null, pulse('running', 5)), null);
   assert.equal(announce(pulse('connecting', null), pulse('running', 5)), null);
@@ -551,8 +552,36 @@ test('announcements: status changes and new rounds, nothing on first load', () =
   assert.equal(announce(pulse('paused', 5), pulse('running', 5)), 'Running');
   assert.equal(announce(pulse('running', 5), pulse('running', 6)), 'Round 6 started');
   assert.equal(
-    announce(pulse('running', 8), {status: 'completed', round: 8, ended: 'Completed'}),
+    announce(pulse('running', 8), {...pulse('completed', 8), ended: 'Completed'}),
     'Run completed',
+  );
+});
+
+test('announcements: a dropped connection says Reconnecting once; connecting says nothing', () => {
+  // '' clears the region without speech; null leaves it as it is.
+  const at = (connection: Connection, status: CoreState['status'] = 'running') => ({
+    status,
+    round: status === 'connecting' ? null : 5,
+    ended: null,
+    connection,
+  });
+  assert.equal(announce(at('connected'), at('disconnected')), 'Reconnecting…');
+  assert.equal(announce(at('disconnected'), at('disconnected')), null, 'not again while down');
+  assert.equal(
+    announce(at('disconnected'), at('connected')),
+    '',
+    'back online clears the region silently, so the next drop is announced again',
+  );
+  assert.equal(announce(at('connecting', 'connecting'), at('connected', 'connecting')), '');
+  assert.equal(
+    announce(at('connected', 'connecting'), at('disconnected', 'connecting')),
+    'Reconnecting…',
+    'a drop before the first batch folds',
+  );
+  assert.equal(
+    announce(at('connecting'), at('disconnected')),
+    null,
+    'a failed dial after Retry is the alert banner, not a drop',
   );
 });
 

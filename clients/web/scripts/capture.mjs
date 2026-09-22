@@ -162,7 +162,7 @@ const REPLAY = [
     fixture: live(),
     after: async (page, gateway) => {
       gateway.drop();
-      await page.getByText('Reconnecting…').waitFor();
+      await page.getByText('Reconnecting…').first().waitFor();
     },
     expect: ['Reconnecting…'],
   },
