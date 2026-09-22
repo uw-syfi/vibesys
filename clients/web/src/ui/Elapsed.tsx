@@ -11,9 +11,12 @@ export interface ElapsedProps {
   className: string;
   /** Tooltip side: `right` (the rail) or `null` for below (the header, clear of the run control). */
   side?: 'right' | null;
+  /** Hides the tip and the ticking digits from screen readers. */
+  'aria-hidden'?: boolean;
 }
 
-export function Elapsed({ms, live, tip, className, side = 'right'}: ElapsedProps) {
+export function Elapsed(props: ElapsedProps) {
+  const {ms, live, tip, className, side = 'right', 'aria-hidden': hidden} = props;
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     if (!live) return;
@@ -21,7 +24,12 @@ export function Elapsed({ms, live, tip, className, side = 'right'}: ElapsedProps
     return () => clearInterval(timer);
   }, [live]);
   return (
-    <span className={`${className} mono`} data-tip={tip} data-side={side ?? undefined}>
+    <span
+      className={`${className} mono`}
+      data-tip={tip}
+      data-side={side ?? undefined}
+      aria-hidden={hidden}
+    >
       <span className="sr-only">{tip} </span>
       {formatDuration(ms(now))}
     </span>

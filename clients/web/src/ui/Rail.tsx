@@ -143,7 +143,8 @@ function Row({
         ? 'official'
         : 'provisional';
   // The name starts with the visible text (WCAG 2.5.3) and says everything the row's tips say, as
-  // one comma-separated run. The live row's elapsed follows from Elapsed, which ticks on its own.
+  // one comma-separated run. The live row's elapsed stays out of it: a name that ticks every second
+  // is re-announced every second while the row has focus.
   const name = [
     `R${row.round}`,
     live === null ? row.value : null,
@@ -164,7 +165,7 @@ function Row({
       data-side="right"
       onClick={() => onSelect(row.round)}
     >
-      <span className="sr-only">{live === null ? name : `${name}, `}</span>
+      <span className="sr-only">{name}</span>
       <span className={`ico st-${row.status}`} data-tip={word} data-side="right">
         <Icon
           size={16}
@@ -196,6 +197,7 @@ function Row({
           tip="Round elapsed"
           live={row.status === 'running'}
           ms={now => roundAgentElapsedMs(live, now)}
+          aria-hidden
         />
       )}
       {provenance === 'official' ? (
