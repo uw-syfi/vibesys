@@ -80,10 +80,12 @@
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
 }
+/* 11px is small text, so the ends owe 4.5:1 (WCAG 1.4.3). --text-subtle is 4.05:1 on the dark
+   canvas and its own token comment rules it out at this size; --text-muted is 7.52:1 there. */
 .tends {
   display: flex;
   justify-content: space-between;
-  color: var(--text-subtle);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 .left,
