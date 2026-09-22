@@ -32,6 +32,21 @@ export interface RailModel {
   roundsLeft: number | null;
 }
 
+/** A point of the rail's sparkline, in the `0 0 100 36` user space of its viewBox. */
+export interface TrendPoint {
+  x: number;
+  y: number;
+}
+
+/** The shape of the metric across rounds, under the rail rows. Null below two points. */
+export interface TrendModel {
+  /** Two or more points in round order; the last one carries the dot. */
+  points: TrendPoint[];
+  /** First and last plotted values, compact, as the rail rows write them. */
+  first: string;
+  last: string;
+}
+
 /** How the arrow between two columns of the agent graph is toned. */
 export type EdgeTone = 'idle' | 'done' | 'live' | 'failed';
 

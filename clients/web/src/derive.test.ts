@@ -5,6 +5,7 @@ import type {
   DesignRound,
   HypothesisEntry,
   PerformanceContext,
+  PerformanceRound,
   RunEvent,
 } from '@vibesys/backend-client/browser';
 import {
@@ -32,6 +33,7 @@ import {
   showsChanges,
   steers,
   steersNeedOlder,
+  trendModel,
 } from './derive.js';
 import type {Connection, LogItem} from './model.js';
 import {CAPTURED_TYPES} from './session.js';
@@ -59,6 +61,14 @@ const BASELINE: PerformanceContext = {
   objective_direction: 'max',
   objective_baseline_value: 900,
 };
+
+// The stub run's performance series: rounds 3 and 6 recorded no value, so they have no row.
+const SERIES: PerformanceRound[] = [1000, 1045, null, 1135, 1180, null, 1270, 1315].flatMap(
+  (value, index) =>
+    value === null
+      ? []
+      : [{round: index + 1, perf_metric: value, perf_unit: 'median_tok_per_sec', passed: true}],
+);
 
 const upTo = (events: RunEvent[], sequence: number) =>
   events.filter(event => (event.sequence ?? 0) <= sequence);
@@ -199,6 +209,47 @@ test('R0: a baseline row only with a baseline value, the incumbent until the fir
     [r0.hypothesis, r0.delta, r0.judge, r0.changes],
     [null, null, [], null],
     'R0 has no hypothesis, delta, verdicts, or changes',
+  );
+});
+
+test('the trend plots one point per measured round, spaced by round number', () => {
+  const model = trendModel(SERIES, STUB_CONTEXT);
+  assert.ok(model);
+  assert.equal(model.points.length, 6, 'rounds 3 and 6 recorded no value, so they have no point');
+  // x follows the round number, not the position: a skipped round stays a gap, never interpolated.
+  assert.deepEqual(
+    model.points.map(point => point.x),
+    [3, 16.43, 43.29, 56.71, 83.57, 97],
+  );
+  // y is inverted and scaled to the plotted values: the lowest sits at the bottom inset.
+  assert.equal(model.points[0]?.y, 32);
+  assert.equal(model.points.at(-1)?.y, 4);
+  assert.deepEqual([model.first, model.last], ['1K', '1.315K'], 'the rail rows write them so');
+  // One row without a number would otherwise poison every coordinate.
+  const bogus = [...SERIES, {round: 9, perf_metric: Number.NaN, perf_unit: '', passed: true}];
+  assert.equal(trendModel(bogus, STUB_CONTEXT)?.points.length, 6);
+});
+
+test('the trend starts at R0 only when the objective records a baseline', () => {
+  assert.equal(trendModel(SERIES, STUB_CONTEXT)?.points.length, 6);
+  const model = trendModel(SERIES, BASELINE);
+  assert.equal(model?.points.length, 7);
+  assert.equal(model?.first, '900');
+  assert.equal(model?.points[0]?.x, 3, 'R0 is the leftmost point');
+  assert.equal(model?.points[0]?.y, 32, 'and the lowest, so the curve rises out of it');
+});
+
+test('a trend needs two points; one measured round alone draws nothing', () => {
+  assert.equal(trendModel([], BASELINE), null);
+  assert.equal(trendModel(SERIES.slice(0, 1), STUB_CONTEXT), null);
+  assert.equal(trendModel(SERIES.slice(0, 1), BASELINE)?.points.length, 2);
+});
+
+test('a flat metric draws a flat line at mid height', () => {
+  const flat = SERIES.map(row => ({...row, perf_metric: 1000}));
+  assert.deepEqual(
+    trendModel(flat, STUB_CONTEXT)?.points.map(point => point.y),
+    [18, 18, 18, 18, 18, 18],
   );
 });
 

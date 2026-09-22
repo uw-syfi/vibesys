@@ -4,6 +4,7 @@ import type {
   HypothesisEntry,
   HypothesisRound,
   PerformanceContext,
+  PerformanceRound,
   ProtocolResponse,
   RunEvent,
 } from '@vibesys/backend-client/browser';
@@ -39,6 +40,7 @@ import type {
   RunPulse,
   Steers,
   ToolResultSummary,
+  TrendModel,
   Verdict,
 } from './model.js';
 
@@ -270,6 +272,52 @@ export function railModel(
       ? null
       : Math.max(0, core.maxRounds - latest);
   return {rows, roundsLeft};
+}
+
+// The sparkline's user space: a `0 0 100 36` viewBox, inset so the stroke and the dot at the last
+// point are never clipped. y is inverted: the largest value sits at `TOP`.
+const LEFT = 3;
+const RIGHT = 97;
+const TOP = 4;
+const BOTTOM = 32;
+
+/** `value` on `[min, max]` placed on `[low, high]`; a range of one value sits at the middle. */
+function scale(value: number, min: number, max: number, low: number, high: number): number {
+  const at = max === min ? (low + high) / 2 : low + ((value - min) / (max - min)) * (high - low);
+  return Math.round(at * 100) / 100;
+}
+
+/**
+ * The metric across rounds, for the rail's sparkline: one point per round the series measured, in
+ * round order, R0 first when the objective records a baseline. Rounds without a value are skipped,
+ * never interpolated, so x follows the round number and a gap reads as a longer segment.
+ */
+export function trendModel(
+  performance: readonly PerformanceRound[],
+  context: PerformanceContext | null,
+): TrendModel | null {
+  const series = performance
+    .filter(row => Number.isFinite(row.perf_metric))
+    .map(row => ({round: row.round, value: row.perf_metric}))
+    .sort((left, right) => left.round - right.round);
+  const baseline = context?.objective_baseline_value;
+  if (typeof baseline === 'number') series.unshift({round: 0, value: baseline});
+  // Fewer than two points is no curve at all.
+  const [head, ...rest] = series;
+  const tail = rest.at(-1);
+  if (head === undefined || tail === undefined) return null;
+  const values = series.map(point => point.value);
+  const rounds = series.map(point => point.round);
+  const [low, high] = [Math.min(...values), Math.max(...values)];
+  const [start, end] = [Math.min(...rounds), Math.max(...rounds)];
+  return {
+    points: series.map(point => ({
+      x: scale(point.round, start, end, LEFT, RIGHT),
+      y: scale(point.value, low, high, BOTTOM, TOP),
+    })),
+    first: formatValue(head.value),
+    last: formatValue(tail.value),
+  };
 }
 
 /** What the rail shows from the experiments query: `experiments_ready: false` is unattached. */

@@ -58,6 +58,34 @@
   margin-bottom: var(--space-1);
   background: var(--surface-raised);
 }
+/* The sparkline: the rows' content width, aligned with them, under the last row. */
+.trend {
+  padding: var(--space-2) var(--space-2) 0;
+}
+.tplot {
+  display: block;
+  width: 100%;
+  height: 36px;
+}
+.tplot polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.tplot .tdot {
+  stroke: var(--accent);
+  stroke-width: 3px;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.tends {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+}
 .left,
 .rail-hint {
   padding: var(--space-2) var(--space-2) 0 calc(var(--space-2) + 16px + var(--space-2));
@@ -126,6 +154,10 @@
   .rrow.skel {
     width: 56px;
     margin: 0 var(--space-1) 0 0;
+  }
+  /* The chip strip is one row of rounds: no room for a plot, and no rail footer to hold it. */
+  .trend {
+    display: none;
   }
   .left {
     padding: 0 var(--space-2) 0 0;

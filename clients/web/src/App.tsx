@@ -1,4 +1,4 @@
-import type {DesignRound, HypothesisEntry} from '@vibesys/backend-client/browser';
+import type {DesignRound, HypothesisEntry, PerformanceRound} from '@vibesys/backend-client/browser';
 import {useCallback, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {
   agentGraph,
@@ -13,6 +13,7 @@ import {
   showsChanges,
   steers,
   steersNeedOlder,
+  trendModel,
 } from './derive.js';
 import type {WorkspaceSession} from './session.js';
 import {Banner} from './ui/Banner.js';
@@ -32,6 +33,7 @@ const TABLET = '(min-width: 768px)';
 const HINT_KEY = 'vibesys.web.sheet-hint';
 const NO_EXPERIMENTS: HypothesisEntry[] = [];
 const NO_DESIGN: DesignRound[] = [];
+const NO_PERFORMANCE: PerformanceRound[] = [];
 const ACTIONS = {pause: 'Pause', resume: 'Resume', steer: 'Steer'} as const;
 
 function useMedia(query: string): boolean {
@@ -66,7 +68,9 @@ export function App({session}: {session: WorkspaceSession}) {
   const experiments = queries.experiments.response?.experiments ?? NO_EXPERIMENTS;
   const design = queries.design.response?.design ?? NO_DESIGN;
   const context = queries.performance.response?.performance_context ?? null;
+  const series = queries.performance.response?.performance ?? NO_PERFORMANCE;
   const rail = useMemo(() => railModel(core, experiments, context), [core, experiments, context]);
+  const trend = useMemo(() => trendModel(series, context), [series, context]);
   const steer = useMemo(() => steers(captured), [captured]);
   const live = latestRound(core);
   // The live round stays selected on new rounds until the user picks another.
@@ -161,6 +165,7 @@ export function App({session}: {session: WorkspaceSession}) {
           selected={selected}
           error={queries.experiments.error}
           hint={!tablet && !hinted}
+          trend={trend}
           onSelect={select}
           onRetry={() => void session.load('experiments')}
         />

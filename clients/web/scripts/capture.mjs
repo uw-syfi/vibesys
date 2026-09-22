@@ -62,6 +62,18 @@ const SPINE = new Set([
   'chat_thread_created',
 ]);
 const upTo = (events, sequence) => events.filter(event => event.sequence <= sequence);
+// query.performance answers with the same measurements the experiments rows carry: one row per
+// round that recorded a value, which is what the rail's sparkline plots.
+const perfRounds = experiments =>
+  experiments
+    .flatMap(entry => entry.rounds ?? [])
+    .filter(round => typeof round.perf_metric === 'number')
+    .map(round => ({
+      round: round.round,
+      perf_metric: round.perf_metric,
+      perf_unit: round.perf_unit ?? '',
+      passed: round.passed !== false,
+    }));
 const at = sequence => QUEUE.find(event => event.sequence === sequence);
 
 // queue-rs at sequence 623: the implementer's benchmark call is in flight.
@@ -227,7 +239,11 @@ const REPLAY = [
       context: {...STUB_CONTEXT, objective_unit: 'median_tok_per_sec', objective_baseline_value: 900},
     }),
     widths: [1440, 390],
-    after: page => rail(page, 1).click(),
+    after: async page => {
+      await rail(page, 1).click();
+      // The curve starts from the invented baseline, so this is the frame that shows R0 on it.
+      await page.getByRole('img', {name: 'Metric trend: 900 to 1.315K over 7 rounds'}).waitFor();
+    },
     expect: ['R0', '+11.1%', 'vs R0'],
   },
   {
@@ -351,7 +367,7 @@ async function mockGateway(page, fixture) {
           : request.type === 'query.design'
             ? {design_ready: true, design: fixture.design}
             : request.type === 'query.performance'
-              ? {performance: [], performance_context: fixture.context}
+              ? {performance: perfRounds(fixture.experiments), performance_context: fixture.context}
               : request.type === 'query.events'
                 ? {
                     events: fixture.events.filter(

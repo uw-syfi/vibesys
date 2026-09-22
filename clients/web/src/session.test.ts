@@ -498,9 +498,12 @@ test('query budget: four queries per bootstrap, three per experiments_changed, n
     'query.performance': 1,
   };
   assert.deepEqual(queryCounts(client), bootstrap, 'replayed invalidations are history');
-  const performance = session.getSnapshot().queries.performance.response;
-  assert.deepEqual(performance?.performance, [], 'the series is dropped');
-  assert.equal(performance?.performance_context?.objective_baseline_value, 900);
+  const series = () => session.getSnapshot().queries.performance.response;
+  // The rail's sparkline plots the raw rows, so they are kept beside the context, not dropped.
+  assert.deepEqual(series()?.performance, [
+    {round: 1, perf_metric: 1000, perf_unit: 'ops', passed: true},
+  ]);
+  assert.equal(series()?.performance_context?.objective_baseline_value, 900);
   client.emit({type: 'event', event: roundFinished(4)});
   client.emit({type: 'event', event: status(5, 'paused')});
   await settle();
@@ -514,6 +517,7 @@ test('query budget: four queries per bootstrap, three per experiments_changed, n
     'query.performance': 2,
   };
   assert.deepEqual(queryCounts(client), invalidated);
+  assert.equal(series()?.performance?.length, 1, 'the rows survive the refetch');
   client.disconnect?.(new Error('offline'));
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(client.subscriptions.at(-1)?.after, 6, 'the reconnect resumed the cursor');

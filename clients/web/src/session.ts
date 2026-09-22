@@ -218,9 +218,7 @@ export class WorkspaceSession {
       .then(
         response => {
           if (generation !== this.#runGeneration) return;
-          // Only `performance_context` (objective, baseline) is used; the series is dropped.
-          const kept = name === 'performance' ? {...response, performance: []} : response;
-          this.#query(name, {response: kept, loading: false, error: null});
+          this.#query(name, {response, loading: false, error: null});
         },
         error => {
           if (generation !== this.#runGeneration) return;
