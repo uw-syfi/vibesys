@@ -1,0 +1,124 @@
+/* Frozen visual system from research/quality-bar.md, verbatim values.
+   Dark is the default; light switches on prefers-color-scheme (and data-theme). */
+:root {
+  /* type */
+  --font-sans: 'IBM Plex Sans', -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --text-2xl: 2rem;      /* 32px / 1.15 / 600 — page hero */
+  --text-xl: 1.5rem;     /* 24px / 1.2  / 600 — section heading */
+  --text-lg: 1.0625rem;  /* 17px / 1.5  / 600 — card/panel title */
+  --text-base: 0.9375rem;/* 15px / 1.6  / 400 — body */
+  --text-sm: 0.8125rem;  /* 13px / 1.5  / 400 — meta, table cell, mono data */
+  --text-xs: 0.6875rem;  /* 11px / 1.4  / 500 — badge, tag, eyebrow */
+
+  /* spacing scale (4px base) */
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem;
+  --space-4: 1rem; --space-5: 1.25rem; --space-6: 1.5rem;
+  --space-8: 2rem; --space-10: 2.5rem; --space-12: 3rem; --space-16: 4rem;
+
+  /* row heights (from Vercel/Linear rows) */
+  --row-dense: 1.75rem;   /* 28px — log/event rows, tree rows */
+  --row-default: 2.5rem;  /* 40px — property rows, list rows */
+  --row-loose: 3.25rem;   /* 52px — file/function tree, deployment rows */
+
+  --radius-sm: 0.25rem;  /* 4px  — buttons, tags */
+  --radius-md: 0.5rem;   /* 8px  — cards, menus */
+  --radius-full: 999px;  /* pills only for live badges/avatars, never containers */
+  /* TUI-adjacent surfaces (terminal panes, code, transcript) use 0 radius */
+
+  --border-w: 1px;
+  --focus-ring: 0 0 0 2px var(--accent);
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 400ms;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---- dark (default) ---- */
+:root {
+  color-scheme: dark;
+  --canvas: #0e0e10;
+  --surface: #16161a;
+  --surface-raised: #1c1c21;   /* dropdowns, popovers, one step up from surface */
+  --border: #333338;
+  --border-strong: #45454c;
+  --text-primary: #ececeb;
+  --text-muted: #94a3b8;
+  --text-subtle: #64748b;      /* icons/large text only, 4.05:1 — not small body text */
+  --accent: #22d3ee;
+  --accent-text-on-dark: #22d3ee;
+
+  --status-running: #38bdf8;
+  --status-pausing: #facc15;
+  --status-paused: #94a3b8;
+  --status-stopping: #fb923c;
+  --status-stopped: #64748b;
+  --status-completed: #22c55e;
+  --status-failed: #f87171;
+  --status-provisional: #a78bfa;
+  --status-official: #818cf8;
+  --status-improvement: #22c55e;
+  --status-regression: #f87171;
+  --status-disconnected: #64748b;
+}
+
+/* ---- light ---- */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --canvas: #ffffff;
+    --surface: #fbfbfa;
+    --surface-raised: #f4f3f0;
+    --border: #d9d8d3;
+    --border-strong: #c3c1ba;
+    --text-primary: #17171a;
+    --text-muted: #57534e;
+    --text-subtle: #78716c;
+    --accent: #0e7490;           /* cyan-700: #22d3ee fails AA on white (2.1:1) */
+
+    --status-running: #0369a1;
+    --status-pausing: #a16207;
+    --status-paused: #57534e;
+    --status-stopping: #c2410c;
+    --status-stopped: #57534e;
+    --status-completed: #15803d;
+    --status-failed: #b91c1c;
+    --status-provisional: #7c3aed;
+    --status-official: #4338ca;
+    --status-improvement: #15803d;
+    --status-regression: #b91c1c;
+    --status-disconnected: #78716c;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --canvas: #ffffff;
+  --surface: #fbfbfa;
+  --surface-raised: #f4f3f0;
+  --border: #d9d8d3;
+  --border-strong: #c3c1ba;
+  --text-primary: #17171a;
+  --text-muted: #57534e;
+  --text-subtle: #78716c;
+  --accent: #0e7490;
+  --status-running: #0369a1;
+  --status-pausing: #a16207;
+  --status-paused: #57534e;
+  --status-stopping: #c2410c;
+  --status-stopped: #57534e;
+  --status-completed: #15803d;
+  --status-failed: #b91c1c;
+  --status-provisional: #7c3aed;
+  --status-official: #4338ca;
+  --status-improvement: #15803d;
+  --status-regression: #b91c1c;
+  --status-disconnected: #78716c;
+}
+
+/* Derived tints: computed from the frozen tokens, never new hexes. */
+:root {
+  --accent-tint: color-mix(in srgb, var(--accent) 7%, transparent);
+  --hover: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  --selected: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}

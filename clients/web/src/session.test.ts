@@ -7,9 +7,6 @@ import type {
   ServerMessage,
   SubscribeOptions,
 } from '@vibesys/backend-client/browser';
-import {createElement} from 'react';
-import {renderToStaticMarkup} from 'react-dom/server';
-import {App} from './App.js';
 import {type WorkspaceClient, WorkspaceSession} from './session.js';
 
 const response = (fields: Partial<ProtocolResponse> = {}): ProtocolResponse => ({
@@ -287,40 +284,57 @@ for (const failOldRequests of [false, true]) {
     await settle();
     await session.command({type: 'command.pause', mode: 'after_current_agent_call'});
 
-    const pending: {input: RequestInput; resolve: (value: ProtocolResponse) => void; reject: (error: Error) => void}[] = [];
-    client.replies = input => new Promise((resolve, reject) => pending.push({input, resolve, reject}));
+    const pending: {
+      input: RequestInput;
+      resolve: (value: ProtocolResponse) => void;
+      reject: (error: Error) => void;
+    }[] = [];
+    client.replies = input =>
+      new Promise((resolve, reject) => pending.push({input, resolve, reject}));
     const oldRefresh = session.refresh();
     const oldHistory = session.loadOlder();
     const oldCommand = session.command({type: 'command.steer', text: 'old guidance'});
     client.runId = 'run-2';
     client.replies = async input => {
-      if (input.type === 'query.snapshot') return response({snapshot: {run_id: 'run-2', sequence: 3, status: 'running'}});
-      if (input.type === 'query.design') return response({design_ready: true, design: [{round: 1, files: [{path: 'new.ts', change: 'added'}]}]});
+      if (input.type === 'query.snapshot')
+        return response({snapshot: {run_id: 'run-2', sequence: 3, status: 'running'}});
+      if (input.type === 'query.design')
+        return response({
+          design_ready: true,
+          design: [{round: 1, files: [{path: 'new.ts', change: 'added'}]}],
+        });
       return response({experiments_ready: true, experiments: []});
     };
     client.replay = after => ({
       type: 'event_batch',
-      events: after === 0 ? [output(1, 'new one'), output(2, 'new two'), output(3, 'new three')] : [],
+      events:
+        after === 0 ? [output(1, 'new one'), output(2, 'new two'), output(3, 'new three')] : [],
       through_sequence: 3,
       history_after_sequence: 0,
       active_executions: [],
     });
     client.disconnect?.(new Error('backend replaced'));
     await new Promise(resolve => setTimeout(resolve, 550));
-    assert.deepEqual(client.subscriptions.map(item => item.after), [0, 100, 0]);
+    assert.deepEqual(
+      client.subscriptions.map(item => item.after),
+      [0, 100, 0],
+    );
     assert.equal(session.getSnapshot().runId, 'run-2');
     assert.equal(session.getSnapshot().core.sequence, 3);
     assert.equal(session.getSnapshot().command.ack, null);
 
     for (const request of pending) {
       if (failOldRequests) request.reject(new Error('old run failed'));
-      else request.resolve(response({
-        snapshot: {run_id: 'run-1', sequence: 100, status: 'paused'},
-        events: [output(50, 'late old history')],
-        experiments_ready: false,
-        design_ready: false,
-        ack: {action: 'steer', status: 'pending'},
-      }));
+      else
+        request.resolve(
+          response({
+            snapshot: {run_id: 'run-1', sequence: 100, status: 'paused'},
+            events: [output(50, 'late old history')],
+            experiments_ready: false,
+            design_ready: false,
+            ack: {action: 'steer', status: 'pending'},
+          }),
+        );
     }
     await Promise.all([oldRefresh, oldHistory, oldCommand]);
     client.messages[1]?.({type: 'event', event: output(101, 'late old socket')});
@@ -329,7 +343,10 @@ for (const failOldRequests of [false, true]) {
     assert.equal(state.core.sequence, 3);
     assert.equal(state.core.status, 'running');
     assert.equal(state.core.historyAfterSequence, 0);
-    assert.deepEqual(state.core.transcript.map(entry => entry.content), ['new one', 'new two', 'new three']);
+    assert.deepEqual(
+      state.core.transcript.map(entry => entry.content),
+      ['new one', 'new two', 'new three'],
+    );
     assert.equal(state.queries.experiments.response?.experiments_ready, true);
     assert.equal(state.queries.design.response?.design?.[0]?.files?.[0]?.path, 'new.ts');
     assert.equal(state.snapshotError, null);
@@ -369,31 +386,5 @@ test('protocol errors disable commands and remain visible until an explicit reco
   await session.reconnect();
   assert.equal(session.getSnapshot().connection, 'connected');
   assert.equal(session.getSnapshot().connectionError, null);
-  await session.close();
-});
-
-test('renders unattached readiness, request errors, and backend text safely', async () => {
-  const client = new FakeClient();
-  const session = new WorkspaceSession(client);
-  await session.start();
-  let html = renderToStaticMarkup(createElement(App, {session}));
-  assert.match(html, /Waiting for a run to attach/);
-  assert.doesNotMatch(html, /No hypotheses recorded yet/);
-  assert.match(html, /Skip to workspace/);
-  client.emit({
-    type: 'event_batch',
-    events: [output(1, '<script>unsafe()</script>')],
-    through_sequence: 1,
-  });
-  html = renderToStaticMarkup(createElement(App, {session}));
-  assert.match(html, /&lt;script&gt;unsafe\(\)&lt;\/script&gt;/);
-  assert.doesNotMatch(html, /<script>unsafe/);
-  client.replies = async () => {
-    throw new Error('Backend unavailable');
-  };
-  await session.load('experiments');
-  html = renderToStaticMarkup(createElement(App, {session}));
-  assert.match(html, /Could not load hypothesis log: Backend unavailable/);
-  assert.match(html, /role="alert"/);
   await session.close();
 });

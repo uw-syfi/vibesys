@@ -1,0 +1,9 @@
+{
+  "objective_metric": null,
+  "objective_unit": null,
+  "objective_direction": null,
+  "objective_baseline_value": null,
+  "objective_baseline_round": null,
+  "objective_baseline_commit": null,
+  "objective_description": "Speed up the VALUE computation in candidate.py."
+}

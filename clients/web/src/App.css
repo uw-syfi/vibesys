@@ -1,0 +1,36 @@
+/* Shell: header, banner, then rail | log | inspector. */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+.shell {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 188px minmax(0, 1fr) 352px;
+  min-height: 0;
+}
+.center {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+}
+/* The log column and the dock share one centered measure. */
+.col {
+  max-width: 824px;
+  padding-inline: var(--space-10);
+}
+@media (max-width: 1023px) {
+  .shell {
+    grid-template-columns: 188px minmax(0, 1fr);
+  }
+}
+@media (max-width: 767px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .col {
+    padding-inline: var(--space-4);
+  }
+}
