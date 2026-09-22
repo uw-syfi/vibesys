@@ -473,9 +473,18 @@ test('inspector: hypothesis, delta vs the incumbent of that time, judge verdict 
       },
     },
   ] as RunEvent[];
+  // Round 9's experiments row discards the candidate, which is what makes its rail row rejected.
+  const discarded: HypothesisEntry[] = [
+    {
+      hypothesis_id: 'H-09',
+      first_round: 9,
+      last_round: 9,
+      rounds: [{round: 9, passed: true, reviewed: true, candidate_disposition: 'discard'}],
+    },
+  ];
   const rejected = [...rows, {...rows[0], round: 9, status: 'rejected' as const, incumbent: false}];
   assert.deepEqual(
-    inspectorModel(rejected as typeof rows, [], [], judged, 9, null).judge.map(attempt => [
+    inspectorModel(rejected as typeof rows, discarded, [], judged, 9, null).judge.map(attempt => [
       attempt.attempt,
       attempt.verdict,
       attempt.open,
@@ -486,6 +495,14 @@ test('inspector: hypothesis, delta vs the incumbent of that time, judge verdict 
     ],
     'the verdict is a word; a passed attempt under a rejected round reads Rejected',
   );
+});
+
+test('inspector: without an experiments row, a passing final attempt reads Passed, not Kept', () => {
+  // Unattached, or finished before the experiments refetch: no row says kept or rejected.
+  const rows = railModel(fold(STUB), [], STUB_CONTEXT).rows;
+  assert.deepEqual(inspectorModel(rows, [], [], captured(STUB), 4, STUB_CONTEXT).judge, [
+    {attempt: 1, verdict: 'Passed', feedback: '', open: true},
+  ]);
 });
 
 test('inspector: the metric heads a delta, never stands alone', () => {

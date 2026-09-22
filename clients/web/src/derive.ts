@@ -528,7 +528,9 @@ export function inspectorModel(
     // The metric names the delta; with no delta it would head nothing.
     metric: name === null || delta === null ? null : {name, direction},
     delta,
-    judge: judgeAttempts(captured, round, row?.status),
+    // The final attempt restates the round's outcome only from its experiments row; without one
+    // (unattached, or before the refetch) the judge's own verdict stands.
+    judge: judgeAttempts(captured, round, fact === undefined ? undefined : row?.status),
     changes:
       showsChanges(row) && changes?.files != null
         ? {commit: changes.commit ?? null, files: changes.files}
