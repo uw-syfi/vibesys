@@ -174,11 +174,10 @@ roots = ["src", "libs", "scripts", "packaging", "sdk"]
 # the AgentBackend/Driver enums (ruff re-wrapped the affected lines). +3 when the
 # vs_agent imports were consolidated into one parenthesized `vs_agent.api` block.
 "src/vibesys/loops/agent/loop.py" = 3710
-# CLI entry point; every subcommand's argument wiring lives here. Grew +7 when
-# config/errors value types were routed through vibesys.api: ruff expands the
-# larger vibesys.api import to one-per-line. That removed the vibesys.config and
-# vibesys.errors deep-import edges from entrypoints.
-"src/entrypoints/headless.py" = 2650
+# Shared CLI: every subcommand's argument wiring lives here. Renamed from
+# entrypoints/headless.py when the headless and server mode entries were split
+# into thin shims over this module (the shims stay well under the ceiling).
+"src/entrypoints/cli.py" = 2630
 # Sandbox run environment: setup, execution, and teardown across strategies.
 # Grew +1 from the agent-library refactor's AgentBackend enum swap.
 "src/vibesys/sandbox/run_environment.py" = 2240
