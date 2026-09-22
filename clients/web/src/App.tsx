@@ -171,9 +171,10 @@ export function App({session}: {session: WorkspaceSession}) {
             round={selected}
             groups={groups}
             follow={selected !== null && selected === live}
+            // Backfill state belongs to the rounds that asked for it, not to every round.
             history={{
-              loading: historyLoading,
-              error: historyError,
+              loading: wantsHistory && historyLoading,
+              error: wantsHistory ? historyError : null,
               onRetry: () => void session.loadOlder(),
             }}
           />
