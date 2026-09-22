@@ -37,6 +37,7 @@ FRAMEWORK_PACKAGES = (
     "vibesys",
     "entrypoints",
     "server",
+    "headless",
     "vs_agent",
     "vs_evaluator_protocol",
     "vs_feature_flags",
@@ -64,6 +65,7 @@ _PACKAGE_SOURCE_ROOTS = {
     Path("src/vibesys"): PurePosixPath("vibesys"),
     Path("src/entrypoints"): PurePosixPath("entrypoints"),
     Path("src/server"): PurePosixPath("server"),
+    Path("src/headless"): PurePosixPath("headless"),
     Path("libs/vs-agent/src/vs_agent"): PurePosixPath("vs_agent"),
     Path("libs/vs-evaluator-protocol/src/vs_evaluator_protocol"): PurePosixPath(
         "vs_evaluator_protocol"
