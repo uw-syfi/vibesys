@@ -70,17 +70,21 @@ export function Rail({state, model, selected, error, hint, onSelect, onRetry}: R
   }, [selected, state]);
   // Roving tabindex: the selected row is the rail's one Tab stop.
   const stop = model.rows.some(row => row.round === selected) ? selected : model.rows[0]?.round;
+  // A failed first load shows only the error, not the skeleton and "Loading rounds" too.
+  const loading = state === 'loading' && error === null;
 
   return (
     <nav className="rail" aria-label="Rounds">
       {state === 'loading' ? (
-        <ol className="rail-rows" aria-hidden="true">
-          {['a', 'b', 'c', 'd'].map(key => (
-            <li key={key}>
-              <span className="rrow skel" />
-            </li>
-          ))}
-        </ol>
+        loading ? (
+          <ol className="rail-rows" aria-hidden="true">
+            {['a', 'b', 'c', 'd'].map(key => (
+              <li key={key}>
+                <span className="rrow skel" />
+              </li>
+            ))}
+          </ol>
+        ) : null
       ) : state === 'unattached' ? (
         <p className="rail-note">Waiting for the project to attach</p>
       ) : model.rows.length === 0 ? (
@@ -116,7 +120,7 @@ export function Rail({state, model, selected, error, hint, onSelect, onRetry}: R
           </button>
         </p>
       )}
-      {state === 'loading' ? <p className="sr-only">Loading rounds</p> : null}
+      {loading ? <p className="sr-only">Loading rounds</p> : null}
     </nav>
   );
 }
@@ -134,17 +138,19 @@ function Row({
 }) {
   const {word, Icon} = STATUS[row.status];
   const live = row.live;
-  // R0 makes no provenance claim: the protocol does not say how the baseline was measured.
+  // One provenance per row, for both the badge and the name. None without a value, and none for
+  // R0: the protocol does not say how the baseline was measured.
   const provenance =
     row.value === null || row.status === 'baseline'
       ? null
       : row.official
         ? 'official'
         : 'provisional';
-  // The name says everything the row's tips say, as one comma-separated run. The live row's
-  // elapsed follows from Elapsed, which ticks on its own.
+  // The name starts with the visible text (WCAG 2.5.3) and says everything the row's tips say, as
+  // one comma-separated run. The live row's elapsed follows from Elapsed, which ticks on its own.
   const name = [
     `R${row.round}`,
+    live === null ? row.value : null,
     word.toLowerCase(),
     live === null ? row.valueTip : null,
     provenance,
@@ -196,7 +202,7 @@ function Row({
           ms={now => roundAgentElapsedMs(live, now)}
         />
       )}
-      {row.official ? (
+      {provenance === 'official' ? (
         <span className="off" data-tip={OFFICIAL} data-side="right">
           <BadgeCheck size={14} strokeWidth={1.75} aria-hidden />
         </span>
