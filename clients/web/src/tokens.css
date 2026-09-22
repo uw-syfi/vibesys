@@ -5,12 +5,12 @@
   --font-sans: 'IBM Plex Sans', -apple-system, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
-  --text-2xl: 2rem;      /* 32px / 1.15 / 600 — page hero */
-  --text-xl: 1.5rem;     /* 24px / 1.2  / 600 — section heading */
-  --text-lg: 1.0625rem;  /* 17px / 1.5  / 600 — card/panel title */
-  --text-base: 0.9375rem;/* 15px / 1.6  / 400 — body */
-  --text-sm: 0.8125rem;  /* 13px / 1.5  / 400 — meta, table cell, mono data */
-  --text-xs: 0.6875rem;  /* 11px / 1.4  / 500 — badge, tag, eyebrow */
+  --text-2xl: 2rem;      /* 32px / 1.15 / 600: page hero */
+  --text-xl: 1.5rem;     /* 24px / 1.2  / 600: section heading */
+  --text-lg: 1.0625rem;  /* 17px / 1.5  / 600: card/panel title */
+  --text-base: 0.9375rem;/* 15px / 1.6  / 400: body */
+  --text-sm: 0.8125rem;  /* 13px / 1.5  / 400: meta, table cell, mono data */
+  --text-xs: 0.6875rem;  /* 11px / 1.4  / 500: badge, tag, eyebrow */
 
   /* spacing scale (4px base) */
   --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem;
@@ -18,12 +18,12 @@
   --space-8: 2rem; --space-10: 2.5rem; --space-12: 3rem; --space-16: 4rem;
 
   /* row heights (from Vercel/Linear rows) */
-  --row-dense: 1.75rem;   /* 28px — log/event rows, tree rows */
-  --row-default: 2.5rem;  /* 40px — property rows, list rows */
-  --row-loose: 3.25rem;   /* 52px — file/function tree, deployment rows */
+  --row-dense: 1.75rem;   /* 28px: log/event rows, tree rows */
+  --row-default: 2.5rem;  /* 40px: property rows, list rows */
+  --row-loose: 3.25rem;   /* 52px: file/function tree, deployment rows */
 
-  --radius-sm: 0.25rem;  /* 4px  — buttons, tags */
-  --radius-md: 0.5rem;   /* 8px  — cards, menus */
+  --radius-sm: 0.25rem;  /* 4px: buttons, tags */
+  --radius-md: 0.5rem;   /* 8px: cards, menus */
   --radius-full: 999px;  /* pills only for live badges/avatars, never containers */
   /* TUI-adjacent surfaces (terminal panes, code, transcript) use 0 radius */
 
@@ -45,7 +45,7 @@
   --border-strong: #45454c;
   --text-primary: #ececeb;
   --text-muted: #94a3b8;
-  --text-subtle: #64748b;      /* icons/large text only, 4.05:1 — not small body text */
+  --text-subtle: #64748b;      /* icons/large text only, 4.05:1, not small body text */
   --accent: #22d3ee;
   --accent-text-on-dark: #22d3ee;
 
