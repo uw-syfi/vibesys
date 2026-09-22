@@ -30,8 +30,8 @@ for an optional field by sending it and treating rejection as "this server does 
 
 ## Framing and connection decisions
 
-Each decision below carries a stable token. The conformance corpus (`conformance/`, see
-`conformance/README.md`) tags every scenario with the tokens it exercises, and the corpus gate
+Each decision below carries a stable token. The conformance corpus (`tests/conformance/`, see
+`tests/conformance/README.md`) tags every scenario with the tokens it exercises, and the corpus gate
 (`clients/scripts/check_conformance_corpus.mjs`) fails if any token here is never exercised or a
 scenario tags a token that does not appear here. So this document cannot drift from the wire without
 a test failing.
@@ -181,18 +181,19 @@ the gateway, #811, because it needs one Unix and one WebSocket subscriber live i
 
 ## The conformance corpus
 
-The framing decisions above are enforced by one shared fixture corpus at `conformance/`, read by both
-conformance suites: the client-side fold suite (#812) and the server-side scenario suite (#811).
-Neither side keeps a private copy. The corpus has two parts:
+The framing decisions above are enforced by one shared fixture corpus at `tests/conformance/`, read
+by both conformance suites: the client-side fold suite (#812) and the server-side scenario suite
+(#811). Neither side keeps a private copy. The corpus has two parts:
 
-- `conformance/events/` holds one fixture per `EventType` (the event-kind enum in the generated
+- `tests/conformance/events/` holds one fixture per `EventType` (the event-kind enum in the generated
   schema). The corpus gate enumerates the enum from
   `clients/backend-client/src/generated/protocol.schema.json` and fails if a kind has no fixture, so
   a new event kind cannot land without a fixture.
-- `conformance/scenarios/` holds the connection scenarios (bootstrap, resume, rebootstrap, capability
-  probes, protocol error, and so on), each tagging the framing decisions it exercises.
+- `tests/conformance/scenarios/` holds the connection scenarios (bootstrap, resume, rebootstrap,
+  capability probes, protocol error, and so on), each tagging the framing decisions it exercises.
 
-See `conformance/README.md` for the layout and how to run the gate, and `conformance/FORMAT.md` for
+See `tests/conformance/README.md` for the layout and how to run the gate, and
+`tests/conformance/FORMAT.md` for
 the fixture and scenario formats. The replay runners that execute the scenarios against a live
 transport land with the transports themselves (888b for the client fold runner over the Unix
 transport, #811 for the two-transport scenario); this document and the corpus define what they must

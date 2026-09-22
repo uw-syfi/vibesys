@@ -26,7 +26,9 @@ Rules the gate enforces:
 
 - The filename stem equals `type` (`run_started.json` carries `"type": "run_started"`).
 - `type` is a member of the `EventType` enum in the generated schema.
-- Required fields are present: `type` and `timestamp`.
+- The `RunEvent` required fields are present. The gate reads that set from the schema
+  (`$defs.RunEvent.required`, currently `type` and `timestamp`) rather than hardcoding it, so the
+  rule tracks the generated source.
 - No top-level field outside the `RunEvent` property set (the schema declares
   `additionalProperties: false`, so an unknown field would be rejected on the wire).
 

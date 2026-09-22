@@ -46,8 +46,8 @@ async function writeTree(spec) {
   const root = await mkdtemp(join(tmpdir(), 'vibesys-corpus-'));
   await mkdir(join(root, 'clients', 'backend-client', 'src', 'generated'), {recursive: true});
   await mkdir(join(root, 'docs', 'contributing'), {recursive: true});
-  await mkdir(join(root, 'conformance', 'events'), {recursive: true});
-  await mkdir(join(root, 'conformance', 'scenarios'), {recursive: true});
+  await mkdir(join(root, 'tests', 'conformance', 'events'), {recursive: true});
+  await mkdir(join(root, 'tests', 'conformance', 'scenarios'), {recursive: true});
   await writeFile(
     join(root, 'clients', 'backend-client', 'src', 'generated', 'protocol.schema.json'),
     JSON.stringify(spec.schema ?? SCHEMA),
@@ -57,10 +57,10 @@ async function writeTree(spec) {
     spec.contract ?? CONTRACT,
   );
   for (const [name, data] of Object.entries(spec.events ?? {})) {
-    await writeFile(join(root, 'conformance', 'events', name), JSON.stringify(data));
+    await writeFile(join(root, 'tests', 'conformance', 'events', name), JSON.stringify(data));
   }
   for (const [name, data] of Object.entries(spec.scenarios ?? {})) {
-    await writeFile(join(root, 'conformance', 'scenarios', name), JSON.stringify(data));
+    await writeFile(join(root, 'tests', 'conformance', 'scenarios', name), JSON.stringify(data));
   }
   return root;
 }
@@ -102,6 +102,16 @@ test('a malformed event fixture is rejected', async () => {
   });
   const errors = await corpusErrors(root);
   assert.ok(errors.some(error => error.includes('unknown RunEvent field "bogus"')));
+});
+
+test('a fixture missing a schema-required field is rejected', async () => {
+  const {timestamp: _dropped, ...withoutTimestamp} = validEvent('run_finished');
+  const root = await writeTree({
+    events: {'run_started.json': validEvent('run_started'), 'run_finished.json': withoutTimestamp},
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.ok(errors.some(error => error.includes('missing required field "timestamp"')));
 });
 
 test('a scenario tagging an unknown decision is rejected', async () => {

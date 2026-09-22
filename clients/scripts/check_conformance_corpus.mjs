@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
-// Validates the shared transport conformance corpus at `<repo>/conformance` against the generated
-// protocol schema and the wire contract. Dependency-free on purpose: the workspace pins only biome,
-// dependency-cruiser, and knip, so this check hand-rolls the structural validation it needs rather
-// than pulling in a JSON-schema library. See conformance/README.md and conformance/FORMAT.md.
+// Validates the shared transport conformance corpus at `<repo>/tests/conformance` against the
+// generated protocol schema and the wire contract. Dependency-free on purpose: the workspace pins
+// only biome, dependency-cruiser, and knip, so this check hand-rolls the structural validation it
+// needs rather than pulling in a JSON-schema library. Message shape is not hand-encoded here: the
+// event envelope (its fields and which are required) is read from the generated schema, the single
+// source protocol codegen owns (see #850). See tests/conformance/README.md and FORMAT.md.
 
 import {readdir, readFile} from 'node:fs/promises';
 import {basename, dirname, join, resolve} from 'node:path';
@@ -11,9 +13,8 @@ import {fileURLToPath} from 'node:url';
 
 const SCHEMA_RELATIVE = 'backend-client/src/generated/protocol.schema.json';
 const CONTRACT_RELATIVE = 'docs/contributing/wire-protocol.md';
-const CORPUS_RELATIVE = 'conformance';
+const CORPUS_RELATIVE = 'tests/conformance';
 
-const REQUIRED_EVENT_FIELDS = ['type', 'timestamp'];
 const STEP_DIRECTIONS = new Set(['c2s', 's2c']);
 const SCENARIO_ROLES = new Set(['control', 'subscribe', 'chat']);
 const KNOWN_TRANSPORTS = new Set(['unix', 'websocket']);
@@ -38,6 +39,11 @@ function eventKinds(schema) {
 /** The `RunEvent` envelope: which top-level fields an event fixture may carry. */
 function runEventFields(schema) {
   return new Set(Object.keys(schema.$defs?.RunEvent?.properties ?? {}));
+}
+
+/** The `RunEvent` required fields, read from the schema rather than hand-encoded. */
+function runEventRequiredFields(schema) {
+  return schema.$defs?.RunEvent?.required ?? [];
 }
 
 /** Valid frame types a scenario may name: every discriminant const that is not an event kind. */
@@ -81,7 +87,7 @@ async function readJsonDir(dir) {
   return {files, error: null};
 }
 
-function checkEventFixture(fixture, kinds, allowedFields) {
+function checkEventFixture(fixture, kinds, allowedFields, requiredFields) {
   const errors = [];
   const label = `events/${fixture.name}`;
   if (fixture.parseError) return [`${label}: invalid JSON: ${fixture.parseError}`];
@@ -93,7 +99,7 @@ function checkEventFixture(fixture, kinds, allowedFields) {
   if (!kinds.has(event.type)) {
     errors.push(`${label}: type "${event.type}" is not a member of the EventType enum`);
   }
-  for (const field of REQUIRED_EVENT_FIELDS) {
+  for (const field of requiredFields) {
     if (!(field in event)) errors.push(`${label}: missing required field "${field}"`);
   }
   for (const field of Object.keys(event)) {
@@ -198,6 +204,7 @@ export async function corpusErrors(root) {
   }
   const kinds = eventKinds(schema);
   const allowedFields = runEventFields(schema);
+  const requiredFields = runEventRequiredFields(schema);
   const frames = frameTypes(schema);
 
   let decisions;
@@ -211,7 +218,7 @@ export async function corpusErrors(root) {
   const events = await readJsonDir(join(corpus, 'events'));
   if (events.error) errors.push(events.error);
   for (const fixture of events.files) {
-    errors.push(...checkEventFixture(fixture, kinds, allowedFields));
+    errors.push(...checkEventFixture(fixture, kinds, allowedFields, requiredFields));
   }
   errors.push(...checkEventCoverage(events.files, kinds));
 

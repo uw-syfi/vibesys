@@ -3,8 +3,8 @@
 One shared, language-neutral fixture corpus that both frontend transport conformance suites read.
 The browser port (#808) runs two transports carrying the same protocol: the existing Unix domain
 socket and a WebSocket gateway (#811). Both must reproduce the framing and connection semantics
-written down in [`docs/contributing/wire-protocol.md`](../docs/contributing/wire-protocol.md). This
-corpus is the fixtures that hold them to it.
+written down in [`docs/contributing/wire-protocol.md`](../../docs/contributing/wire-protocol.md).
+This corpus is the fixtures that hold them to it.
 
 There is exactly one copy. The client-side fold suite (`@vibesys/backend-client`, #812) and the
 server-side scenario suite (`src/server`, #811) both read the files here. Neither keeps a private
@@ -13,7 +13,7 @@ copy, so a fixture change moves both suites at once.
 ## Layout
 
 ```
-conformance/
+tests/conformance/
   README.md                 this file
   FORMAT.md                 the fixture and scenario file formats
   events/<kind>.json        one RunEvent fixture per EventType enum member
@@ -24,6 +24,13 @@ conformance/
   generated schema (`clients/backend-client/src/generated/protocol.schema.json`). The corpus gate
   enumerates the enum and fails if a kind has no fixture, so a new event kind cannot land without
   one. Each file is a single valid `RunEvent` instance; the filename stem is its `type`.
+
+  These fixtures are not serialization goldens. Message shape is owned by the generated schema (and,
+  as protocol codegen matures, by the codegen source explored in #850): the gate reads the envelope
+  and its required fields from that schema rather than re-encoding them here, so the fixtures do not
+  duplicate what codegen owns. Their job is the two things codegen does not provide: a coverage
+  checklist that forces every event kind to exist, and one representative instance per kind for the
+  fold and scenario runners to replay.
 - `scenarios/` holds the connection-level exchanges (bootstrap, resume, rebootstrap, capability
   probes, protocol error, and so on). Each scenario tags the wire-contract decisions it exercises,
   so every decision in the contract is covered by at least one scenario and no scenario references a
