@@ -40,14 +40,36 @@ const INCUMBENT = 'Incumbent: the best result so far. New rounds are compared ag
 
 export function Rail({state, model, selected, error, hint, onSelect, onRetry}: RailProps) {
   const list = useRef<HTMLOListElement>(null);
-  // Keyboard selection moves focus with it; on the phone strip the selected chip scrolls into view.
+  // Keyboard selection moves focus with it, and the selected row scrolls into view once the rows
+  // render, and again once the fonts load (they widen the phone chips).
   useEffect(() => {
-    if (selected === null) return;
-    const current = list.current?.querySelector<HTMLElement>('[aria-current="true"]');
-    if (current === null || current === undefined) return;
-    if (list.current?.contains(document.activeElement)) current.focus();
-    current.scrollIntoView({block: 'nearest', inline: 'nearest'});
-  }, [selected]);
+    const rows = list.current;
+    if (selected === null || state !== 'ready' || rows === null) return;
+    const current = rows.querySelector<HTMLElement>('[aria-current="true"]');
+    if (current === null) return;
+    if (rows.contains(document.activeElement)) current.focus({preventScroll: true});
+    // Scroll the strip (phone) and the rail (wider) to the nearest edge by hand, never the page:
+    // Chromium's scrollIntoView also moves the Tab starting point, so Tab would skip the header.
+    const reveal = () => {
+      for (const box of [rows, rows.parentElement]) {
+        if (box === null) continue;
+        const view = box.getBoundingClientRect();
+        const row = current.getBoundingClientRect();
+        box.scrollLeft += Math.min(0, row.left - view.left) + Math.max(0, row.right - view.right);
+        box.scrollTop += Math.min(0, row.top - view.top) + Math.max(0, row.bottom - view.bottom);
+      }
+    };
+    reveal();
+    let stale = false;
+    void document.fonts.ready.then(() => {
+      if (!stale) reveal();
+    });
+    return () => {
+      stale = true;
+    };
+  }, [selected, state]);
+  // Roving tabindex: the selected row is the rail's one Tab stop.
+  const stop = model.rows.some(row => row.round === selected) ? selected : model.rows[0]?.round;
 
   return (
     <nav className="rail" aria-label="Rounds">
@@ -67,7 +89,12 @@ export function Rail({state, model, selected, error, hint, onSelect, onRetry}: R
         <ol className="rail-rows" ref={list}>
           {model.rows.map(row => (
             <li key={row.round}>
-              <Row row={row} selected={row.round === selected} onSelect={onSelect} />
+              <Row
+                row={row}
+                selected={row.round === selected}
+                stop={row.round === stop}
+                onSelect={onSelect}
+              />
             </li>
           ))}
         </ol>
@@ -97,22 +124,45 @@ export function Rail({state, model, selected, error, hint, onSelect, onRetry}: R
 function Row({
   row,
   selected,
+  stop,
   onSelect,
 }: {
   row: RailRow;
   selected: boolean;
+  stop: boolean;
   onSelect: (round: number) => void;
 }) {
   const {word, Icon} = STATUS[row.status];
   const live = row.live;
-  const provenance = row.value === null ? '' : row.official ? ', official' : ', provisional';
+  // R0 makes no provenance claim: the protocol does not say how the baseline was measured.
+  const provenance =
+    row.value === null || row.status === 'baseline'
+      ? null
+      : row.official
+        ? 'official'
+        : 'provisional';
+  // The name says everything the row's tips say, as one comma-separated run. The live row's
+  // elapsed follows from Elapsed, which ticks on its own.
+  const name = [
+    `R${row.round}`,
+    word.toLowerCase(),
+    live === null ? row.valueTip : null,
+    provenance,
+    row.incumbent ? 'incumbent' : null,
+  ]
+    .filter(part => part !== null)
+    .join(', ');
   return (
     <button
       type="button"
       className="rrow"
+      tabIndex={stop ? 0 : -1}
       aria-current={selected ? 'true' : undefined}
+      data-tip={live === null ? (row.valueTip ?? undefined) : 'Round elapsed'}
+      data-side="right"
       onClick={() => onSelect(row.round)}
     >
+      <span className="sr-only">{live === null ? name : `${name}, `}</span>
       <span className={`ico st-${row.status}`} data-tip={word} data-side="right">
         <Icon
           size={16}
@@ -121,7 +171,7 @@ function Row({
           className={row.status === 'running' ? 'spin' : undefined}
         />
       </span>
-      <span className="rid">
+      <span className="rid" aria-hidden="true">
         R{row.round}
         {row.incumbent ? (
           <span className="inc" data-tip={INCUMBENT} data-side="right">
@@ -134,6 +184,7 @@ function Row({
           className={row.incumbent ? 'val mono is-inc' : 'val mono'}
           data-tip={row.valueTip ?? undefined}
           data-side="right"
+          aria-hidden="true"
         >
           {row.value}
         </span>
@@ -152,11 +203,6 @@ function Row({
       ) : (
         <span />
       )}
-      <span className="sr-only">
-        {word.toLowerCase()}
-        {row.incumbent ? ', incumbent' : ''}
-        {provenance}
-      </span>
     </button>
   );
 }

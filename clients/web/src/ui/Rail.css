@@ -43,8 +43,10 @@
 .rrow:focus-visible {
   outline-offset: -2px;
 }
+/* The fill alone is 1.18:1; the ring gives the selection 3:1 or more in both themes (WCAG 1.4.11). */
 .rrow[aria-current='true'] {
   background: var(--selected);
+  box-shadow: inset 0 0 0 1px var(--text-subtle);
 }
 @media (hover: hover) and (pointer: fine) {
   .rrow:not([aria-current='true']):hover {
