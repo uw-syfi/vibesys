@@ -14,7 +14,7 @@ export function Tooltip() {
     tip.setAttribute('role', 'tooltip');
     tip.hidden = true;
     document.body.append(tip);
-    // The anchor showing the tip, and the focused anchor, which pointer movement never hides.
+    // The anchor showing the tip, and the keyboard-focused anchor, which pointer movement never hides.
     let anchor: HTMLElement | null = null;
     let focused: HTMLElement | null = null;
     let leaving = 0;
@@ -77,9 +77,12 @@ export function Tooltip() {
         leaving = window.setTimeout(settle, 100);
       }
     };
+    // A click or tap focuses too; only keyboard focus (:focus-visible) owns the tip.
     const focus = (event: Event) => {
-      focused = find(event);
-      if (focused) show(focused);
+      const element = find(event);
+      const keyboard = event.target instanceof Element && event.target.matches(':focus-visible');
+      focused = keyboard ? element : null;
+      if (element) show(element);
       else hide();
     };
     const blur = () => {
