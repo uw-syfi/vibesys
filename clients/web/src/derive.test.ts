@@ -348,6 +348,12 @@ test('inspector: hypothesis, delta vs the incumbent of that time, judge verdict 
     'a title derived from the claim is not shown twice',
   );
   assert.deepEqual(r4.metric, {name: 'median_tok_per_sec', direction: null});
+  const named = {...STUB_CONTEXT, objective_metric: 'tok_per_sec'};
+  assert.deepEqual(
+    inspectorModel(rows, STUB_EXPERIMENTS, STUB_DESIGN, captured(STUB), 4, named).metric,
+    {name: 'tok_per_sec', direction: null},
+    'objective_metric names the metric before the round unit does',
+  );
   assert.deepEqual(r4.delta, {
     value: '+8.6%',
     vs: 2,
@@ -440,6 +446,7 @@ test('backfill is offered only where the tail floor may hide a round', () => {
   assert.equal(needsOlder(tailed, 1), true);
   assert.equal(needsOlder(tailed, 2), true, "round 1's replayed round_finished is below the floor");
   assert.equal(needsOlder(tailed, 3), false);
+  assert.equal(needsOlder(tailed, 0), false, 'R0 has no events to load');
 });
 
 test('queued steers: backfill for any started round reaches the latest call start', () => {
@@ -493,6 +500,7 @@ test('consumed steers: backfill reaches the start of the call before the consumi
     said(22, 'round-2-pre', 'orchestrator'),
   ];
   const hidden = tail(crossing, 11);
+  assert.equal(steersNeedOlder(hidden.core, hidden.held, 0), false, 'R0 consumed nothing');
   assert.equal(needsOlder(hidden.core, 2), false, "round 1's judge output is above the floor");
   assert.equal(steersNeedOlder(hidden.core, hidden.held, 2), true, 'its start is not');
   assert.deepEqual(steers(hidden.held).consumed, [], 'so the steer text is missing');

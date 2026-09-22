@@ -7,8 +7,10 @@ export interface InspectorProps {
   /** Drawer and sheet only. */
   open: boolean;
   /**
-   * The round's history is still below the tail floor (backfill loading or failed), so an empty
-   * `model.judge` means "not loaded", not "no verdict". Render skeleton rows instead.
+   * True only while the selected round's backfill is in flight: its verdicts are not loaded yet,
+   * so the Judge section renders skeleton rows with `aria-busy="true"`. False after a failed
+   * backfill; the Judge section then follows its normal empty rule, and the log carries the
+   * error and Retry.
    */
   judgePending: boolean;
   designError: string | null;

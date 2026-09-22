@@ -413,7 +413,8 @@ export function logGroups(
  */
 export function needsOlder(core: CoreState, round: number): boolean {
   const floor = core.historyAfterSequence;
-  if (floor === 0) return false;
+  // R0 is the objective's baseline, not a round: it has no events.
+  if (floor === 0 || round === 0) return false;
   const earliest = core.transcript.find(
     entry => entry.roundNumber !== undefined && Number(entry.id) > floor,
   )?.roundNumber;
@@ -504,7 +505,7 @@ export function inspectorModel(
     ) ??
     (live ? experiments.find(candidate => candidate.active === true) : undefined);
   const name =
-    entry?.perf_metric_name ?? fact?.round.perf_unit ?? context?.objective_metric ?? null;
+    entry?.perf_metric_name ?? context?.objective_metric ?? fact?.round.perf_unit ?? null;
   const direction = entry?.perf_direction ?? context?.objective_direction ?? null;
   // The incumbent of that time: the latest kept round (or R0) before this one with a value.
   const incumbent = incumbentBefore(rows, round);

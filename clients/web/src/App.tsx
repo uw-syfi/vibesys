@@ -189,7 +189,7 @@ export function App({session}: {session: WorkspaceSession}) {
           model={inspector}
           mode={wide ? 'aside' : tablet ? 'drawer' : 'sheet'}
           open={inspectorOpen}
-          judgePending={roundHidden}
+          judgePending={roundHidden && historyLoading}
           designError={queries.design.error}
           onClose={() => setInspectorOpen(false)}
           onRetryDesign={() => void session.load('design')}
