@@ -1,5 +1,15 @@
-import {useSyncExternalStore} from 'react';
-import type {HeaderModel, RailModel} from './model.js';
+import type {DesignRound, HypothesisEntry} from '@vibesys/backend-client/browser';
+import {useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
+import {
+  endedWord,
+  headerModel,
+  inspectorModel,
+  latestRound,
+  logGroups,
+  needsOlder,
+  railModel,
+  steers,
+} from './derive.js';
 import type {WorkspaceSession} from './session.js';
 import {Banner} from './ui/Banner.js';
 import {Composer} from './ui/Composer.js';
@@ -12,65 +22,182 @@ import {Shortcuts} from './ui/Shortcuts.js';
 import {Tooltip} from './ui/Tooltip.js';
 import './App.css';
 
-// Scaffold: task 4 replaces these constants with the store and derivations.
-const HEADER: HeaderModel = {
-  project: null,
-  objective: null,
-  startedAt: null,
-  endedAt: null,
-  control: {
-    kind: 'action',
-    action: 'pause',
-    label: 'Pause',
-    tip: 'Pause after the current agent call',
-    disabled: true,
-  },
-};
-const RAIL: RailModel = {rows: [], roundsLeft: null};
-const HISTORY = {loading: false, error: null, onRetry: () => {}};
-const noop = () => {};
+const WIDE = '(min-width: 1024px)';
+const TABLET = '(min-width: 768px)';
+const HINT_KEY = 'vibesys.web.sheet-hint';
+const NO_EXPERIMENTS: HypothesisEntry[] = [];
+const NO_DESIGN: DesignRound[] = [];
+const ACTIONS = {pause: 'Pause', resume: 'Resume', steer: 'Steer'} as const;
+
+function useMedia(query: string): boolean {
+  const subscribe = useCallback(
+    (notify: () => void) => {
+      const media = matchMedia(query);
+      media.addEventListener('change', notify);
+      return () => media.removeEventListener('change', notify);
+    },
+    [query],
+  );
+  return useSyncExternalStore(subscribe, () => matchMedia(query).matches);
+}
+
+function hintSeen(): boolean {
+  try {
+    return localStorage.getItem(HINT_KEY) === 'seen';
+  } catch {
+    return false;
+  }
+}
 
 export function App({session}: {session: WorkspaceSession}) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const wide = useMedia(WIDE);
+  const tablet = useMedia(TABLET);
+  const [picked, setPicked] = useState<{runId: string | null; round: number} | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [hinted, setHinted] = useState(hintSeen);
+  const backfilled = useRef<string | null>(null);
+
+  const {core, captured, runId, connection, queries, command} = state;
+  const experiments = queries.experiments.response?.experiments ?? NO_EXPERIMENTS;
+  const design = queries.design.response?.design ?? NO_DESIGN;
+  const context = queries.performance.response?.performance_context ?? null;
+  const rail = useMemo(() => railModel(core, experiments, context), [core, experiments, context]);
+  const steer = useMemo(() => steers(captured), [captured]);
+  const live = latestRound(core);
+  // The live round stays selected on new rounds until the user picks another.
+  const selected = picked !== null && picked.runId === runId ? picked.round : live;
+  const groups = useMemo(
+    () => (selected === null ? [] : logGroups(core, steer.consumed, selected, runId)),
+    [core, steer, selected, runId],
+  );
+  const inspector = useMemo(
+    () =>
+      selected === null
+        ? null
+        : inspectorModel(rail.rows, experiments, design, captured, selected, context),
+    [rail, experiments, design, captured, selected, context],
+  );
+  const header = headerModel(core, captured, connection, context);
+  const ended = endedWord(core, captured);
+  const error = command.error;
+
+  // Backfill while the tail floor may hide the selected round: one 500-event chunk at a time,
+  // re-evaluated after each, never retried after an error, and never twice at the same floor,
+  // so a chunk that does not lower the floor ends the loop instead of repeating it.
+  const floor = core.historyAfterSequence;
+  const wantsHistory = selected !== null && needsOlder(core, selected);
+  const {historyLoading, historyError} = state;
+  useEffect(() => {
+    const key = `${runId}:${floor}`;
+    if (!wantsHistory || historyLoading || historyError !== null || backfilled.current === key) {
+      return;
+    }
+    backfilled.current = key;
+    void session.loadOlder();
+  }, [session, runId, floor, wantsHistory, historyLoading, historyError]);
+  const commandError = error === null ? null : `${ACTIONS[error.action]} failed: ${error.message}`;
+
+  function select(round: number) {
+    const again = round === selected;
+    setPicked(round === live ? null : {runId, round});
+    if (wide || (!tablet && !again)) return;
+    setInspectorOpen(true);
+    if (!tablet && !hinted) {
+      setHinted(true);
+      try {
+        localStorage.setItem(HINT_KEY, 'seen');
+      } catch {
+        // Private mode: the hint shows again next visit.
+      }
+    }
+  }
+
+  function step(offset: number) {
+    const index = rail.rows.findIndex(row => row.round === selected);
+    const next = rail.rows[Math.min(rail.rows.length - 1, Math.max(0, index + offset))];
+    if (next !== undefined) setPicked(next.round === live ? null : {runId, round: next.round});
+  }
+
+  function toggleRun() {
+    const control = header.control;
+    if (control.kind !== 'action' || control.disabled) return;
+    void session.command(
+      control.action === 'pause'
+        ? {type: 'command.pause', mode: 'after_current_agent_call'}
+        : {type: 'command.resume'},
+    );
+  }
+
+  const experimentsResponse = queries.experiments.response;
+  const railState =
+    experimentsResponse === null
+      ? 'loading'
+      : experimentsResponse.experiments_ready === false
+        ? 'unattached'
+        : 'ready';
+
   return (
     <div className="app">
       <a className="skip" href="#log">
         Skip to log
       </a>
-      <Header model={HEADER} error={null} onControl={noop} />
+      <Header
+        model={header}
+        error={error !== null && error.action !== 'steer' ? commandError : null}
+        onControl={toggleRun}
+      />
       <Banner
-        connection={state.connection}
+        connection={connection}
         connectionError={state.connectionError}
-        canRetry={false}
+        canRetry={state.canRetry}
         snapshotError={state.snapshotError}
-        onReconnect={noop}
-        onRetrySnapshot={noop}
+        onReconnect={() => void session.reconnect()}
+        onRetrySnapshot={() => void session.refresh()}
       />
       <div className="shell">
         <Rail
-          state="loading"
-          model={RAIL}
-          selected={null}
-          error={null}
-          hint={false}
-          onSelect={noop}
-          onRetry={noop}
+          state={railState}
+          model={rail}
+          selected={selected}
+          error={queries.experiments.error}
+          hint={!tablet && !hinted}
+          onSelect={select}
+          onRetry={() => void session.load('experiments')}
         />
         <div className="center">
-          <Log state="loading" round={null} groups={[]} follow={false} history={HISTORY} />
-          <Composer pending={[]} disabled error={null} onSend={async () => false} />
+          <Log
+            key={selected ?? 'none'}
+            state={runId === null ? 'loading' : 'ready'}
+            round={selected}
+            groups={groups}
+            follow={selected !== null && selected === live}
+            history={{
+              loading: historyLoading,
+              error: historyError,
+              onRetry: () => void session.loadOlder(),
+            }}
+          />
+          {ended === null ? (
+            <Composer
+              pending={steer.pending}
+              disabled={connection !== 'connected'}
+              error={error?.action === 'steer' ? commandError : null}
+              onSend={text => session.command({type: 'command.steer', text})}
+            />
+          ) : null}
         </div>
         <Inspector
-          model={null}
-          mode="aside"
-          open={false}
-          designError={null}
-          onClose={noop}
-          onRetryDesign={noop}
+          model={inspector}
+          mode={wide ? 'aside' : tablet ? 'drawer' : 'sheet'}
+          open={inspectorOpen}
+          designError={queries.design.error}
+          onClose={() => setInspectorOpen(false)}
+          onRetryDesign={() => void session.load('design')}
         />
       </div>
-      <LiveRegion status={state.core.status} round={null} ended={null} />
-      <Shortcuts onNext={noop} onPrevious={noop} onToggleRun={noop} />
+      <LiveRegion status={core.status} round={live} ended={ended} />
+      <Shortcuts onNext={() => step(1)} onPrevious={() => step(-1)} onToggleRun={toggleRun} />
       <Tooltip />
     </div>
   );
