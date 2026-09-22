@@ -164,7 +164,9 @@ export function App({session}: {session: WorkspaceSession}) {
         <main className="center">
           <Log
             key={selected ?? 'none'}
-            state={runId === null ? 'loading' : 'ready'}
+            // Loading until the bootstrap batch folds an event or the snapshot gives a status:
+            // `subscribed` sets runId a frame before the batch arrives.
+            state={core.status === 'connecting' && core.sequence === 0 ? 'loading' : 'ready'}
             round={selected}
             groups={groups}
             follow={selected !== null && selected === live}
