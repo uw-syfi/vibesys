@@ -1,4 +1,20 @@
-import type {InspectorModel} from '../model.js';
+import type {DesignFileChange} from '@vibesys/backend-client/browser';
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronRight,
+  FileMinus,
+  FilePen,
+  FilePlus,
+  FileSymlink,
+  type LucideIcon,
+  X,
+} from 'lucide-react';
+import {useEffect, useRef} from 'react';
+import {prose} from '../derive.js';
+import type {InspectorModel, JudgeAttempt, Verdict} from '../model.js';
+import {Prose} from './Prose.js';
+import './Inspector.css';
 
 export interface InspectorProps {
   model: InspectorModel | null;
@@ -18,7 +34,222 @@ export interface InspectorProps {
   onRetryDesign: () => void;
 }
 
-// Scaffold; task 8 renders the inspector.
-export function Inspector({mode}: InspectorProps) {
-  return mode === 'aside' ? <aside className="insp" /> : null;
+const icon = {size: 16, strokeWidth: 1.75, 'aria-hidden': true} as const;
+const VERDICT_CLASS: Record<Verdict, string> = {
+  'Gate failed': 'st-failed',
+  Rejected: 'st-rejected',
+  Kept: 'st-kept',
+  Passed: 'st-rejected',
+};
+const CHANGE: Record<DesignFileChange['change'], LucideIcon> = {
+  added: FilePlus,
+  modified: FilePen,
+  deleted: FileMinus,
+  renamed: FileSymlink,
+};
+
+export function Inspector({
+  model,
+  mode,
+  open,
+  judgePending,
+  designError,
+  onClose,
+  onRetryDesign,
+}: InspectorProps) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  // Crossing 1024 px swaps the dialog for the aside and back; the new dialog node must reopen, or
+  // `open` stays true with nothing shown and no row click can open it again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `mode` re-runs this for the new node.
+  useEffect(() => {
+    const node = dialog.current;
+    if (node === null) return;
+    if (open && !node.open) node.showModal();
+    else if (!open && node.open) node.close();
+  }, [open, mode]);
+
+  const label = model === null ? 'Round details' : `Round ${model.round} details`;
+  const body =
+    model === null ? null : (
+      <Body
+        model={model}
+        judgePending={judgePending}
+        designError={designError}
+        onRetryDesign={onRetryDesign}
+      />
+    );
+  if (mode === 'aside') {
+    return (
+      <aside className="insp" aria-label={label}>
+        {body}
+      </aside>
+    );
+  }
+  return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: the click is on the backdrop; Esc closes natively.
+    <dialog
+      ref={dialog}
+      className={`insp insp-${mode}`}
+      aria-label={label}
+      onClose={onClose}
+      onClick={event => {
+        if (event.target === event.currentTarget) event.currentTarget.close();
+      }}
+    >
+      <div className="insp-inner">
+        <div className="sheet-bar">
+          <button
+            type="button"
+            className="btn btn-ghost btn-icon"
+            aria-label="Close"
+            onClick={() => dialog.current?.close()}
+          >
+            <X {...icon} />
+          </button>
+        </div>
+        {body}
+      </div>
+    </dialog>
+  );
+}
+
+function Body({
+  model,
+  judgePending,
+  designError,
+  onRetryDesign,
+}: {
+  model: InspectorModel;
+  judgePending: boolean;
+  designError: string | null;
+  onRetryDesign: () => void;
+}) {
+  const {hypothesis, metric, delta, judge, changes} = model;
+  return (
+    <div className="insp-body">
+      {hypothesis === null ? null : (
+        <header>
+          {hypothesis.id === null ? null : <p className="hid mono">{hypothesis.id}</p>}
+          {hypothesis.title === null ? null : <h2>{hypothesis.title}</h2>}
+          {hypothesis.claim === null ? null : (
+            <div className="claim">
+              <Prose paragraphs={prose(hypothesis.claim)} />
+            </div>
+          )}
+        </header>
+      )}
+      {metric === null && delta === null ? null : (
+        <section className="sec" aria-label="Measurement">
+          {metric === null ? null : (
+            <h3>
+              <span className="mono">{metric.name}</span>
+              {metric.direction === null ? null : (
+                <span
+                  className="dir"
+                  data-tip={metric.direction === 'max' ? 'Higher is better' : 'Lower is better'}
+                >
+                  {metric.direction === 'max' ? (
+                    <ArrowUp {...icon} size={14} />
+                  ) : (
+                    <ArrowDown {...icon} size={14} />
+                  )}
+                  <span className="sr-only">
+                    {metric.direction === 'max' ? ', higher is better' : ', lower is better'}
+                  </span>
+                </span>
+              )}
+            </h3>
+          )}
+          {delta === null ? null : (
+            <p className="meas">
+              {delta.value === null ? (
+                <span className="big pending">Pending</span>
+              ) : (
+                <span className="big mono" data-tip={delta.tip ?? undefined}>
+                  {delta.value}
+                </span>
+              )}
+              {delta.vs === null ? null : <span className="vs">vs R{delta.vs}</span>}
+            </p>
+          )}
+        </section>
+      )}
+      {judgePending ? (
+        // Verdicts still loading: skeleton rows, no text.
+        <section className="sec" aria-label="Judge" aria-busy="true">
+          <div className="insp-skel" aria-hidden="true">
+            <span />
+            <span />
+          </div>
+        </section>
+      ) : judge.length === 0 ? null : (
+        <section className="sec" aria-label="Judge">
+          <h3>Judge</h3>
+          {judge.map(attempt => (
+            <Attempt key={attempt.attempt} attempt={attempt} />
+          ))}
+        </section>
+      )}
+      {changes === null ? null : (
+        <section className="sec" aria-label="Changes">
+          <h3>
+            Changes
+            {changes.commit === null ? null : (
+              <span className="mono aside" data-tip="Commit">
+                {changes.commit.slice(0, 7)}
+              </span>
+            )}
+          </h3>
+          {changes.files.length === 0 ? (
+            <p className="insp-note">No files changed</p>
+          ) : (
+            <ul>
+              {changes.files.map(file => {
+                const Icon = CHANGE[file.change];
+                const tip =
+                  file.change === 'renamed' && file.renamed_from
+                    ? `Renamed from ${file.renamed_from}`
+                    : file.change.charAt(0).toUpperCase() + file.change.slice(1);
+                return (
+                  <li key={file.path} className="file">
+                    <span className="ic" data-tip={tip}>
+                      <Icon {...icon} />
+                    </span>
+                    <code className="trunc">{file.path}</code>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
+      {designError === null ? null : (
+        <p className="insp-note st-failed" role="alert">
+          Could not load changes: {designError}{' '}
+          <button type="button" className="btn btn-sm" onClick={onRetryDesign}>
+            Retry
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Attempt({attempt}: {attempt: JudgeAttempt}) {
+  const head = (
+    <>
+      <span>Attempt {attempt.attempt}</span>
+      <span className={`verdict ${VERDICT_CLASS[attempt.verdict]}`}>{attempt.verdict}</span>
+    </>
+  );
+  if (attempt.feedback === '') return <p className="att att-flat">{head}</p>;
+  return (
+    <details className="att" open={attempt.open}>
+      <summary>
+        {head}
+        <ChevronRight {...icon} className="chev" />
+      </summary>
+      <p className="att-body">{attempt.feedback}</p>
+    </details>
+  );
 }
