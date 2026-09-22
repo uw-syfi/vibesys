@@ -35,6 +35,7 @@ FRAMEWORK_PACKAGES = (
     "vibesys",
     "entrypoints",
     "server",
+    "headless",
     "vs_agent",
     "vs_evaluator_protocol",
     "vs_feature_flags",
