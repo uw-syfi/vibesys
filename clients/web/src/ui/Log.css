@@ -79,16 +79,18 @@
   white-space: nowrap;
 }
 .row .verb {
-  flex: none;
-  max-width: 100%;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 500;
 }
-.row .verb.trunc {
-  flex: 0 1 auto;
-}
+/* Basis 0: the command gets only the room the verb and result leave, so it gives way first.
+   At least 2ch, since the first glyph is clipped rather than ellipsed: a squeezed command reads
+   "s…", never a lone or cut glyph. */
 .row .arg {
+  flex: 1 1 0;
+  min-width: 2ch;
+  max-width: max-content;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-muted);

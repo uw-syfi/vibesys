@@ -128,7 +128,7 @@ export function Log({state, round, groups, follow, history}: LogProps) {
           ) : (
             <ol className="grps">
               {groups.map(group => (
-                <Group key={group.id} group={group} />
+                <Group key={group.id} group={group} onOpen={() => setAway(true)} />
               ))}
             </ol>
           )}
@@ -144,7 +144,7 @@ export function Log({state, round, groups, follow, history}: LogProps) {
   );
 }
 
-function Group({group}: {group: LogGroup}) {
+function Group({group, onOpen}: {group: LogGroup; onOpen: () => void}) {
   const Icon = ROLE_ICONS[group.role] ?? Bot;
   const steers = group.items.filter(item => item.kind === 'steer');
   const rest = group.items.filter(item => item.kind !== 'steer');
@@ -164,9 +164,17 @@ function Group({group}: {group: LogGroup}) {
               ))}
               {rest.length === 0 ? null : (
                 <details className="fold">
-                  <summary className="row">
+                  {/* biome-ignore lint/a11y/noStaticElementInteractions: <summary> is natively interactive. */}
+                  <summary
+                    className="row"
+                    // Opening history leaves the live edge, so following stops before the fold
+                    // grows. Enter and Space also fire click; `toggle` would come too late.
+                    onClick={event => {
+                      if (!(event.currentTarget.parentElement as HTMLDetailsElement).open) onOpen();
+                    }}
+                  >
                     <span className="lab">
-                      <span className="verb trunc">{group.summary || roleName(group.role)}</span>
+                      <span className="verb">{group.summary || roleName(group.role)}</span>
                       {group.calls === 0 ? null : (
                         <span className="n mono">{calls(group.calls)}</span>
                       )}
