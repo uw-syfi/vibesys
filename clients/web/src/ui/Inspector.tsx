@@ -6,6 +6,11 @@ export interface InspectorProps {
   mode: 'aside' | 'drawer' | 'sheet';
   /** Drawer and sheet only. */
   open: boolean;
+  /**
+   * The round's history is still below the tail floor (backfill loading or failed), so an empty
+   * `model.judge` means "not loaded", not "no verdict". Render skeleton rows instead.
+   */
+  judgePending: boolean;
   designError: string | null;
   onClose: () => void;
   onRetryDesign: () => void;

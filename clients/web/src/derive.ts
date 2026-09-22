@@ -420,6 +420,43 @@ export function needsOlder(core: CoreState, round: number): boolean {
   return earliest === undefined || round <= earliest;
 }
 
+/**
+ * Whether the text of a steer `round` consumed may still sit below the tail floor. The backend
+ * drains queued steers when an agent call starts and journals only `/steer` on the consuming
+ * call, so what call C consumed was queued after the call before C started: backfill until that
+ * start (its `phase_started` entry) is above the floor. `needsOlder` already covers a C-1 inside
+ * `round`, and a still-queued steer (sent after the latest call started), so this adds R-1's last
+ * call when `round`'s first call consumed a steer.
+ */
+export function steersNeedOlder(
+  core: CoreState,
+  captured: readonly RunEvent[],
+  round: number,
+): boolean {
+  const floor = core.historyAfterSequence;
+  if (floor === 0) return false;
+  const consumed = captured.find(
+    event =>
+      event.type === 'control' &&
+      event.status === 'consumed' &&
+      event.text?.startsWith('/steer') === true &&
+      roundNumberFromLabel(event.round_label) === round,
+  );
+  const at = consumed?.sequence;
+  if (consumed === undefined || at === undefined) return false;
+  // ponytail: a steer sent between C-1's drain and its phase_started event sits just below that
+  // start; core-state keeps no earlier call boundary, so such a steer can stay unloaded.
+  return !core.transcript.some(
+    entry =>
+      entry.kind === 'status' &&
+      entry.roundNumber !== undefined &&
+      Number(entry.id) > floor &&
+      Number(entry.id) < at &&
+      // The consuming call's own start can precede its control event.
+      !(entry.roundLabel === consumed.round_label && entry.agentKind === consumed.agent_kind),
+  );
+}
+
 function judgeAttempts(
   captured: readonly RunEvent[],
   round: number,

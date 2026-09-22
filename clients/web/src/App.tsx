@@ -9,6 +9,7 @@ import {
   needsOlder,
   railModel,
   steers,
+  steersNeedOlder,
 } from './derive.js';
 import type {WorkspaceSession} from './session.js';
 import {Banner} from './ui/Banner.js';
@@ -81,11 +82,14 @@ export function App({session}: {session: WorkspaceSession}) {
   const ended = endedWord(core, captured);
   const error = command.error;
 
-  // Backfill while the tail floor may hide the selected round: one 500-event chunk at a time
-  // (single-flight in the session), re-evaluated after each, never retried after an error.
-  // Every folded chunk lowers the floor, so no floor is requested twice within a bootstrap; a
-  // bootstrap that orphans a chunk clears the loading flag and requests at its own floor.
-  const wantsHistory = selected !== null && needsOlder(core, selected);
+  // Backfill while the tail floor may hide the selected round's events (verdicts included) or
+  // the text of a steer it consumed: one 500-event chunk at a time (single-flight in the
+  // session), re-evaluated after each, never retried after an error. Every folded chunk lowers
+  // the floor, so no floor is requested twice within a bootstrap; a bootstrap that orphans a
+  // chunk clears the loading flag and requests at its own floor.
+  const roundHidden = selected !== null && needsOlder(core, selected);
+  const wantsHistory =
+    roundHidden || (selected !== null && steersNeedOlder(core, captured, selected));
   const {historyLoading, historyError} = state;
   useEffect(() => {
     if (wantsHistory && !historyLoading && historyError === null) void session.loadOlder();
@@ -185,6 +189,7 @@ export function App({session}: {session: WorkspaceSession}) {
           model={inspector}
           mode={wide ? 'aside' : tablet ? 'drawer' : 'sheet'}
           open={inspectorOpen}
+          judgePending={roundHidden}
           designError={queries.design.error}
           onClose={() => setInspectorOpen(false)}
           onRetryDesign={() => void session.load('design')}
