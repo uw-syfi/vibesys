@@ -1,0 +1,88 @@
+.hdr {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: 56px;
+  padding: 0 var(--space-4) 0 var(--space-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--canvas);
+}
+.brand {
+  display: flex;
+  color: var(--text-primary);
+}
+.logo {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.proj {
+  margin-left: calc(-1 * var(--space-1));
+  font: 500 var(--text-sm) / 1 var(--font-mono);
+}
+.hdr-fill {
+  flex: 1;
+}
+.obj {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.elapsed {
+  color: var(--text-muted);
+}
+.ctl {
+  display: flex;
+  align-items: center;
+}
+.run-ctl {
+  min-width: 96px;
+  justify-content: center;
+}
+.ctl-error {
+  max-width: 320px;
+  color: var(--status-failed);
+  font-size: var(--text-xs);
+}
+.ended {
+  font-weight: 500;
+  padding-inline: var(--space-3);
+}
+@media (max-width: 767px) {
+  .hdr {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 56px;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  }
+  .run-ctl {
+    min-width: 0;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+  }
+  .run-ctl span {
+    display: none;
+  }
+  /* Row 1: mark, project, elapsed, control. Row 2: the objective. */
+  .proj {
+    flex: 1;
+  }
+  .obj {
+    order: 9;
+    flex-basis: 100%;
+  }
+  .ctl-error {
+    order: 10;
+    flex-basis: 100%;
+    max-width: none;
+  }
+}
