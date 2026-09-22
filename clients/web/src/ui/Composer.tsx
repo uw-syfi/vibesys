@@ -16,7 +16,8 @@ export function Composer({pending, disabled, error, onSend}: ComposerProps) {
   const [text, setText] = useState('');
   async function send() {
     if (disabled || text.trim() === '') return;
-    if (await onSend(text.trim())) setText('');
+    // Text typed while the send was in flight stays.
+    if (await onSend(text.trim())) setText(current => (current === text ? '' : current));
   }
 
   return (

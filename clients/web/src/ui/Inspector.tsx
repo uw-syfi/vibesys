@@ -1,8 +1,8 @@
-import type {DesignFileChange} from '@vibesys/backend-client/browser';
 import {
   ArrowDown,
   ArrowUp,
   ChevronRight,
+  FileIcon,
   FileMinus,
   FilePen,
   FilePlus,
@@ -41,12 +41,14 @@ const VERDICT_CLASS: Record<Verdict, string> = {
   Kept: 'st-kept',
   Passed: 'st-rejected',
 };
-const CHANGE: Record<DesignFileChange['change'], LucideIcon> = {
-  added: FilePlus,
-  modified: FilePen,
-  deleted: FileMinus,
-  renamed: FileSymlink,
-};
+// A kind this build does not know gets a neutral icon and word instead of crashing the render.
+const CHANGE = new Map<string, readonly [LucideIcon, string]>([
+  ['added', [FilePlus, 'Added']],
+  ['modified', [FilePen, 'Modified']],
+  ['deleted', [FileMinus, 'Deleted']],
+  ['renamed', [FileSymlink, 'Renamed']],
+]);
+const UNKNOWN_CHANGE = [FileIcon, 'Changed'] as const;
 
 export function Inspector({
   model,
@@ -74,7 +76,9 @@ export function Inspector({
   const label = model === null ? 'Round details' : `Round ${model.round} details`;
   const body =
     model === null ? null : (
+      // Keyed by round: a new round starts from its own attempts' open state, not the DOM's.
       <Body
+        key={model.round}
         model={model}
         judgePending={judgePending}
         designError={designError}
@@ -212,11 +216,11 @@ function Body({
           ) : (
             <ul>
               {changes.files.map(file => {
-                const Icon = CHANGE[file.change];
+                const [Icon, word] = CHANGE.get(file.change) ?? UNKNOWN_CHANGE;
                 const tip =
                   file.change === 'renamed' && file.renamed_from
                     ? `Renamed from ${file.renamed_from}`
-                    : file.change.charAt(0).toUpperCase() + file.change.slice(1);
+                    : word;
                 return (
                   <li key={file.path} className="file">
                     <span className="ic" data-tip={tip}>
@@ -257,7 +261,9 @@ function Attempt({attempt}: {attempt: JudgeAttempt}) {
         {head}
         <ChevronRight {...icon} className="chev" />
       </summary>
-      <p className="att-body">{attempt.feedback}</p>
+      <div className="att-body">
+        <Prose paragraphs={prose(attempt.feedback)} />
+      </div>
     </details>
   );
 }
