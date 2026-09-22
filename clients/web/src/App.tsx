@@ -144,7 +144,11 @@ export function App({session}: {session: WorkspaceSession}) {
         connectionError={state.connectionError}
         canRetry={state.canRetry}
         snapshotError={state.snapshotError}
-        onReconnect={() => void session.reconnect()}
+        onReconnect={() => {
+          // Retry unmounts the banner; focus goes to the log instead of falling to <body>.
+          document.getElementById('log')?.focus({preventScroll: true});
+          void session.reconnect();
+        }}
         onRetrySnapshot={() => void session.refresh()}
       />
       <div className="shell">
