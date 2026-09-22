@@ -49,8 +49,8 @@ The gateway serves API routes only. Candidate files are never served.
   until the next command. A steer shows as Queued until a `control` consumed
   event places it in the log.
 - Keys: `j`/`k` or the arrows change the round, `p` pauses or resumes, `/`
-  focuses the steer input, and `?` lists the keys and turns single-key
-  shortcuts off.
+  focuses the steer input, and `?` lists the keys with a toggle that turns
+  the single-key shortcuts off or back on.
 
 ## Verification
 
@@ -66,11 +66,11 @@ node clients/web/scripts/capture.mjs --out /tmp/vs-web-frames --strict
 The tests cover the session (replay, reconnect, backfill, query budget,
 control capture, commands) and the pure derivations in `src/derive.ts`
 against recorded runs. `pnpm test:web-browser` drives a deterministic real
-backend through the gateway: pause, steer, resume, reload, completion, the
-phone layout, round selection, and run replacement. On a mocked run it also
-checks live follow, focus, tooltips, the drawer, and the composer. The capture
-script serves `dist` with `vite preview`,
-replays `clients/tui/dev/fixtures/queue-rs-payloads.jsonl` and
+backend through the gateway: pause, steer, resume, reload, completion, and
+the phone layout. On mocked runs it checks round selection, run replacement,
+live follow, focus, tooltips, the drawer, and the composer. The capture
+script serves `dist` with `vite preview`, replays
+`clients/tui/dev/fixtures/queue-rs-payloads.jsonl` and
 `src/fixtures/stub-run.jsonl` through a mocked gateway, and writes each state
 at 1440, 1024, and 390 px in dark and light. `--live <url>` drives a running
 gateway instead. A PASS checks text and layout overflow only; review the

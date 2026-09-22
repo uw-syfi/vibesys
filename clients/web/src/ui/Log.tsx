@@ -122,7 +122,11 @@ export function Log({state, round, groups, follow, history}: LogProps) {
             // While earlier history is loading or failed, an empty round is not known to be empty.
             history.loading || history.error !== null ? null : (
               <p className="log-note">
-                {round === null ? 'No round has started yet' : 'No agent calls in this round yet'}
+                {round === null
+                  ? 'No round has started yet'
+                  : round === 0
+                    ? 'No agent calls in the baseline'
+                    : 'No agent calls in this round yet'}
               </p>
             )
           ) : (
