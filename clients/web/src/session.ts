@@ -363,6 +363,8 @@ export class WorkspaceSession {
           message.through_sequence,
           floor,
         ),
+        // The bump above orphans an in-flight chunk, whose `finally` then skips the unlock.
+        ...(reset ? {historyLoading: false, historyError: null} : {}),
       });
       // A bootstrap is the one time every query runs; its replayed invalidations are history.
       if (reset) void this.refresh();

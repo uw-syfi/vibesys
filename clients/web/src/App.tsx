@@ -1,5 +1,5 @@
 import type {DesignRound, HypothesisEntry} from '@vibesys/backend-client/browser';
-import {useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
+import {useCallback, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {
   endedWord,
   headerModel,
@@ -56,7 +56,6 @@ export function App({session}: {session: WorkspaceSession}) {
   const [picked, setPicked] = useState<{runId: string | null; round: number} | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [hinted, setHinted] = useState(hintSeen);
-  const backfilled = useRef<string | null>(null);
 
   const {core, captured, runId, connection, queries, command} = state;
   const experiments = queries.experiments.response?.experiments ?? NO_EXPERIMENTS;
@@ -82,20 +81,15 @@ export function App({session}: {session: WorkspaceSession}) {
   const ended = endedWord(core, captured);
   const error = command.error;
 
-  // Backfill while the tail floor may hide the selected round: one 500-event chunk at a time,
-  // re-evaluated after each, never retried after an error, and never twice at the same floor,
-  // so a chunk that does not lower the floor ends the loop instead of repeating it.
-  const floor = core.historyAfterSequence;
+  // Backfill while the tail floor may hide the selected round: one 500-event chunk at a time
+  // (single-flight in the session), re-evaluated after each, never retried after an error.
+  // Every folded chunk lowers the floor, so no floor is requested twice within a bootstrap; a
+  // bootstrap that orphans a chunk clears the loading flag and requests at its own floor.
   const wantsHistory = selected !== null && needsOlder(core, selected);
   const {historyLoading, historyError} = state;
   useEffect(() => {
-    const key = `${runId}:${floor}`;
-    if (!wantsHistory || historyLoading || historyError !== null || backfilled.current === key) {
-      return;
-    }
-    backfilled.current = key;
-    void session.loadOlder();
-  }, [session, runId, floor, wantsHistory, historyLoading, historyError]);
+    if (wantsHistory && !historyLoading && historyError === null) void session.loadOlder();
+  }, [session, wantsHistory, historyLoading, historyError]);
   const commandError = error === null ? null : `${ACTIONS[error.action]} failed: ${error.message}`;
 
   function select(round: number) {

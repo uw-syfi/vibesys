@@ -216,6 +216,44 @@ test('backfill excludes tail spine duplicates and a raised floor rebuilds the pr
   await session.close();
 });
 
+test('a bootstrap that supersedes a backfill clears its loading flag and error', async () => {
+  const client = new FakeClient();
+  client.replay = () => ({
+    type: 'event_batch',
+    events: [],
+    history_after_sequence: 700,
+    through_sequence: 1000,
+    active_executions: [],
+  });
+  const previous = client.replies;
+  let release: (() => void) | undefined;
+  client.replies = input => {
+    if (input.type !== 'query.events') return previous(input);
+    if (release !== undefined) return Promise.resolve(response({events: []}));
+    return new Promise(resolve => {
+      release = () => resolve(response({events: []}));
+    });
+  };
+  const session = new WorkspaceSession(client);
+  await session.start();
+  const older = session.loadOlder();
+  assert.equal(session.getSnapshot().historyLoading, true);
+  await session.reconnect();
+  release?.();
+  await older;
+  assert.equal(session.getSnapshot().historyLoading, false, 'the superseded chunk holds no lock');
+  await session.loadOlder();
+  assert.equal(session.getSnapshot().core.historyAfterSequence, 200);
+
+  client.replies = async input =>
+    input.type === 'query.events' ? Promise.reject(new Error('down')) : previous(input);
+  await session.loadOlder();
+  assert.equal(session.getSnapshot().historyError, 'down');
+  await session.reconnect();
+  assert.equal(session.getSnapshot().historyError, null, 'the rebuilt projection has no failure');
+  await session.close();
+});
+
 test('automatic reconnect resumes the cursor and retains incomplete history', async () => {
   const client = new FakeClient();
   const session = new WorkspaceSession(client);
