@@ -517,6 +517,105 @@ describe('ServerClient', () => {
     ).rejects.toThrow();
     expect(Date.now() - start).toBeLessThan(2_000);
   });
+
+  it('close() tears down a live subscription without reporting it as an outage', async () => {
+    let disconnects = 0;
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          if (request['type'] === 'subscribe') socket.write(subscribedMessage(request));
+        }),
+      async client => {
+        // A subscription the client owns but the caller never closed itself.
+        await client.subscribe(
+          0,
+          () => undefined,
+          () => {
+            disconnects += 1;
+          },
+        );
+        await client.close();
+        // Closing the client destroyed the subscription socket, but a client-wide
+        // close is not a stream outage, so its disconnect handler never fired. This
+        // holds whichever order a caller closes the stream and the client in.
+        expect(disconnects).toBe(0);
+      },
+      {closeGraceMs: 30},
+    );
+  });
+
+  it('close() resolves within the grace deadline when the server never closes', async () => {
+    socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
+    // Accept the connection and then ignore it forever: never respond, never end.
+    // The client's graceful end gets no FIN back, so only the destroy deadline can
+    // resolve close(). The pre-fix close() waited on 'close' unconditionally and
+    // would hang here.
+    const server = createServer(() => undefined);
+    await listen(server, socketPath);
+    const client = await ServerClient.connect(socketPath, {closeGraceMs: 40});
+    try {
+      const start = Date.now();
+      await client.close();
+      expect(Date.now() - start).toBeLessThan(1_000);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it('surfaces an unframable event stream as a parse disconnect', async () => {
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          if (request['type'] !== 'subscribe') return;
+          socket.write(subscribedMessage(request));
+          // A peer that has stopped delimiting frames: bytes without a newline,
+          // past the framer's remainder cap.
+          socket.write('x'.repeat(4 * 1024 * 1024 + 1));
+        }),
+      async client => {
+        const error = await new Promise<Error>(resolve => {
+          void client.subscribe(0, () => undefined, resolve);
+        });
+        expect(error).toBeInstanceOf(BackendClientError);
+        expect((error as BackendClientError).kind).toBe('parse');
+      },
+      {closeGraceMs: 30},
+    );
+  });
+
+  it('rejects a pending request when the control stream cannot be framed', async () => {
+    await withServer(
+      socket => {
+        // The client drops the connection on the framing error, so swallow the
+        // reset the server sees rather than let it become an uncaught error.
+        socket.on('error', () => undefined);
+        socket.once('data', () => socket.write('x'.repeat(4 * 1024 * 1024 + 1)));
+      },
+      async client => {
+        const rejected = client.request({type: 'query.snapshot'});
+        await expect(rejected).rejects.toMatchObject({kind: 'parse'});
+      },
+    );
+  });
+
+  it('close() abandons an in-flight chat as a disconnect', async () => {
+    await withServer(
+      socket => {
+        // close() destroys the chat socket, so swallow the reset the server sees.
+        socket.on('error', () => undefined);
+        // Accept the chat connection but never answer, so it is still in flight.
+        respondToLines(socket, () => undefined);
+      },
+      async client => {
+        // Capture the rejection as a value so close() abandoning the chat does
+        // not surface as an unhandled rejection before it is awaited.
+        const chat = client.request({type: 'query.chat', text: 'hang'}).catch(error => error);
+        await client.close();
+        expect((await chat).kind).toBe('disconnected');
+      },
+      {closeGraceMs: 30},
+    );
+  });
 });
 
 async function withServer(
@@ -550,6 +649,15 @@ function respondToLines(socket: Socket, respond: (request: Record<string, unknow
       if (line) respond(JSON.parse(line) as Record<string, unknown>);
     }
   });
+}
+
+function subscribedMessage(request: Record<string, unknown>): string {
+  return `${JSON.stringify({
+    type: 'subscribed',
+    request_id: request['request_id'],
+    run_id: 'test',
+    latest_sequence: 0,
+  })}\n`;
 }
 
 function successResponse(requestId: string): Record<string, unknown> {

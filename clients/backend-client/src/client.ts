@@ -19,6 +19,13 @@ export interface ServerClientOptions {
   requestTimeoutMs?: number;
   /** Delay between connection attempts while the socket does not exist yet. */
   connectRetryIntervalMs?: number;
+  /**
+   * How long `close()` waits for a socket to end gracefully before destroying
+   * it. Bounds shutdown against a server that never sends its FIN, so a quit
+   * cannot hang. Applies to every socket the client owns: control, chat, and
+   * subscriptions.
+   */
+  closeGraceMs?: number;
 }
 
 export interface SubscribeOptions {
@@ -40,6 +47,12 @@ export interface SubscribeOptions {
 const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_CONNECT_RETRY_INTERVAL_MS = 25;
+/**
+ * A graceful end on a local socket completes in well under this; the window is
+ * only reached when the peer never sends its FIN, so it stays short to keep
+ * `close()` inside the launcher's 2s backend exit grace.
+ */
+const DEFAULT_CLOSE_GRACE_MS = 250;
 /** Errors a not-yet-listening server produces; anything else is fatal. */
 const RETRYABLE_CONNECT_CODES = new Set(['ENOENT', 'ECONNREFUSED']);
 
@@ -56,7 +69,15 @@ export class ServerClient {
   >();
   readonly #connectTimeoutMs: number;
   readonly #requestTimeoutMs: number;
-  readonly #longRunningSockets = new Set<Socket>();
+  readonly #closeGraceMs: number;
+  /**
+   * Every secondary socket the client has opened (subscriptions and chats),
+   * mapped to a hook that suppresses its own disconnect handling. `close()`
+   * calls the hook before destroying, so tearing a socket down as part of a
+   * client-wide close does not surface as a spurious stream disconnect, whatever
+   * order the caller closes the stream and the client in.
+   */
+  readonly #secondarySockets = new Map<Socket, () => void>();
   readonly #responseFrames = new NewlineFramer();
 
   private constructor(socket: Socket, path: string, options: ServerClientOptions) {
@@ -64,6 +85,7 @@ export class ServerClient {
     this.#path = path;
     this.#connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.#closeGraceMs = options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS;
     socket.setEncoding('utf8');
     socket.on('data', chunk => this.#onData(chunk.toString()));
     socket.on('error', error => this.#rejectAll(transportFailure(error)));
@@ -214,7 +236,8 @@ export class ServerClient {
             close: () => {
               closing = true;
               clearTimeout(handshakeTimeout);
-              return closeSocket(socket);
+              this.#secondarySockets.delete(socket);
+              return closeSocketWithin(socket, this.#closeGraceMs);
             },
           });
         }
@@ -232,30 +255,26 @@ export class ServerClient {
           return false;
         }
       };
-      socket.setEncoding('utf8');
-      socket.once('connect', () => {
-        socket.write(
-          `${JSON.stringify({
-            protocol_version: 1,
-            request_id: randomUUID(),
-            timestamp: new Date().toISOString(),
-            type: 'subscribe',
-            after_sequence: afterSequence,
-            // Omitted rather than sent as null: an old server forbids unknown
-            // fields, so a default subscribe must stay byte-for-byte what it
-            // has always been.
-            ...(options.tail === undefined ? {} : {tail: options.tail}),
-            ...(options.storeId ? {store_id: options.storeId} : {}),
-          })}\n`,
-        );
+      // Track the socket so close() tears it down, flipping `closing` first.
+      this.#secondarySockets.set(socket, () => {
+        closing = true;
+        clearTimeout(handshakeTimeout);
       });
+      socket.setEncoding('utf8');
+      socket.once('connect', () => this.#writeSubscribe(socket, afterSequence, options));
       socket.on('data', chunk => {
-        for (const line of frames.push(chunk.toString())) {
+        const lines = frameChunk(frames, chunk.toString(), error => {
+          disconnect(error);
+          socket.destroy();
+        });
+        if (lines === null) return;
+        for (const line of lines) {
           if (!handleSubscriptionLine(line)) return;
         }
       });
       socket.once('error', error => disconnect(transportFailure(error)));
       socket.once('close', () => {
+        this.#secondarySockets.delete(socket);
         disconnect(
           new BackendClientError(
             'disconnected',
@@ -268,14 +287,38 @@ export class ServerClient {
     });
   }
 
-  close(): Promise<void> {
-    for (const socket of this.#longRunningSockets) socket.destroy();
-    this.#longRunningSockets.clear();
-    return new Promise(resolve => {
-      if (this.#socket.destroyed) return resolve();
-      this.#socket.once('close', resolve);
-      this.#socket.end();
-    });
+  /** Send the subscribe request once the subscription socket connects. */
+  #writeSubscribe(socket: Socket, afterSequence: number, options: SubscribeOptions): void {
+    socket.write(
+      `${JSON.stringify({
+        protocol_version: 1,
+        request_id: randomUUID(),
+        timestamp: new Date().toISOString(),
+        type: 'subscribe',
+        after_sequence: afterSequence,
+        // Omitted rather than sent as null: an old server forbids unknown fields,
+        // so a default subscribe must stay byte-for-byte what it has always been.
+        ...(options.tail === undefined ? {} : {tail: options.tail}),
+        ...(options.storeId ? {store_id: options.storeId} : {}),
+      })}\n`,
+    );
+  }
+
+  /**
+   * Close every socket the client owns: the control connection and every live
+   * secondary (subscription or chat). Each is ended gracefully and destroyed if
+   * it does not close within the grace window, so an unresponsive server cannot
+   * hang shutdown. Suppressing each secondary's disconnect handling first makes
+   * this safe whatever order the caller closes a stream and its client in.
+   */
+  close(graceMs: number = this.#closeGraceMs): Promise<void> {
+    const secondaries = [...this.#secondarySockets];
+    this.#secondarySockets.clear();
+    for (const [, suppress] of secondaries) suppress();
+    return Promise.all([
+      ...secondaries.map(([socket]) => closeSocketWithin(socket, graceMs)),
+      closeSocketWithin(this.#socket, graceMs),
+    ]).then(() => undefined);
   }
 
   /**
@@ -288,7 +331,11 @@ export class ServerClient {
   #requestLongRunning(request: ProtocolRequest): Promise<ProtocolResponse> {
     return new Promise((resolve, reject) => {
       const socket = createConnection(this.#path);
-      this.#longRunningSockets.add(socket);
+      // A client-wide close() abandons an in-flight chat: fail it as a
+      // disconnect and let close() destroy the socket.
+      this.#secondarySockets.set(socket, () => {
+        fail(new BackendClientError('disconnected', 'Client closed during chat'));
+      });
       const frames = new NewlineFramer();
       let settled = false;
       const connectTimeout = setTimeout(() => {
@@ -302,7 +349,7 @@ export class ServerClient {
 
       const cleanup = (): void => {
         clearTimeout(connectTimeout);
-        this.#longRunningSockets.delete(socket);
+        this.#secondarySockets.delete(socket);
         socket.off('error', fail);
         socket.off('close', disconnected);
       };
@@ -352,7 +399,9 @@ export class ServerClient {
         });
       });
       socket.on('data', chunk => {
-        for (const line of frames.push(chunk.toString())) {
+        const lines = frameChunk(frames, chunk.toString(), fail);
+        if (lines === null) return;
+        for (const line of lines) {
           if (handleChatResponseLine(line)) return;
         }
       });
@@ -362,7 +411,14 @@ export class ServerClient {
   }
 
   #onData(chunk: string): void {
-    for (const line of this.#responseFrames.push(chunk)) {
+    // An unframable stream (an oversized newline-less remainder) cannot be read
+    // further; fail every pending request and drop the connection.
+    const lines = frameChunk(this.#responseFrames, chunk, error => {
+      this.#rejectAll(error);
+      this.#socket.destroy();
+    });
+    if (lines === null) return;
+    for (const line of lines) {
       if (!line) continue;
       let response: ProtocolResponse;
       try {
@@ -430,6 +486,25 @@ function streamFailure(error: unknown): BackendClientError {
   return new BackendClientError('parse', cause.message, {cause});
 }
 
+/**
+ * Frame one socket chunk, or report an unreadable stream. Returns the completed
+ * lines, or null when the framer rejects the chunk (an oversized newline-less
+ * remainder), having first handed the typed failure to `onFramingError` so the
+ * caller can tear its connection down.
+ */
+function frameChunk(
+  framer: NewlineFramer,
+  chunk: string,
+  onFramingError: (error: BackendClientError) => void,
+): string[] | null {
+  try {
+    return framer.push(chunk);
+  } catch (error) {
+    onFramingError(streamFailure(error));
+    return null;
+  }
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -442,10 +517,22 @@ function responseError(response: ProtocolResponse): ServerError {
   return new ServerError(response.error ?? 'Unknown server error', response.diagnostic ?? null);
 }
 
-function closeSocket(socket: Socket): Promise<void> {
+/**
+ * End a socket gracefully, then force it closed if the peer does not complete
+ * the FIN handshake within `graceMs`. Resolves once the socket is actually
+ * closed (whether it ended or was destroyed), so a caller awaiting close cannot
+ * hang on an unresponsive server. The grace timer does not keep the event loop
+ * alive on its own.
+ */
+function closeSocketWithin(socket: Socket, graceMs: number): Promise<void> {
   return new Promise(resolve => {
     if (socket.destroyed) return resolve();
-    socket.once('close', resolve);
+    const timer = setTimeout(() => socket.destroy(), graceMs);
+    timer.unref?.();
+    socket.once('close', () => {
+      clearTimeout(timer);
+      resolve();
+    });
     socket.end();
   });
 }

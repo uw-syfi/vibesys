@@ -109,6 +109,15 @@ export class PersistentEventStream {
   /** True once a bootstrap batch has landed, so a resume has a cursor to use. */
   #bootstrapped = false;
   #closed = false;
+  /**
+   * Whether the caller currently sees the stream as disconnected. A single
+   * outage can fail many dials in a row; this reports `disconnected` once, on
+   * the transition, instead of once per failed attempt. Cleared when a
+   * reconnect recovers, so the next outage reports again.
+   */
+  #disconnectedReported = false;
+  /** Guards `#reconnectNow` so a manual `retry()` cannot stack a second dial. */
+  #reconnecting = false;
 
   constructor(transport: StreamTransport, options: PersistentEventStreamOptions = {}) {
     this.#transport = transport;
@@ -168,7 +177,7 @@ export class PersistentEventStream {
         return await this.#dial(0, false, {tail: this.#tail});
       } catch (error) {
         if (!isServerRejection(error)) {
-          this.#emit({status: 'disconnected', error: toError(error)});
+          this.#reportDisconnected(toError(error));
           return false;
         }
         // The server refused `tail`; fall through to a full replay.
@@ -249,7 +258,7 @@ export class PersistentEventStream {
     // that finished or hit a protocol error has nothing left to stream.
     if (this.#closed || token !== this.#connectionSeq) return;
     if (!this.#active().shouldReconnect()) return;
-    this.#emit({status: 'disconnected', error});
+    this.#reportDisconnected(error);
     this.#scheduleReconnect();
   }
 
@@ -265,22 +274,57 @@ export class PersistentEventStream {
   }
 
   async #reconnectNow(): Promise<void> {
+    if (this.#reconnecting) return;
     if (this.#closed || !this.#active().shouldReconnect()) return;
-    const stale = this.#subscription;
-    this.#subscription = null;
+    this.#reconnecting = true;
     try {
-      await stale?.close();
-    } catch {
-      // The subscription is already dead; closing it owes nothing.
+      const stale = this.#subscription;
+      this.#subscription = null;
+      try {
+        await stale?.close();
+      } catch {
+        // The subscription is already dead; closing it owes nothing.
+      }
+      const recovered = this.#bootstrapped ? await this.#resumeDial() : await this.#bootstrapDial();
+      if (this.#closed) return;
+      if (recovered) {
+        this.#reconnectAttempt = 0;
+        this.#disconnectedReported = false;
+        this.#emit({status: 'connected'});
+      } else {
+        this.#scheduleReconnect();
+      }
+    } finally {
+      this.#reconnecting = false;
     }
-    const recovered = this.#bootstrapped ? await this.#resumeDial() : await this.#bootstrapDial();
-    if (this.#closed) return;
-    if (recovered) {
-      this.#reconnectAttempt = 0;
-      this.#emit({status: 'connected'});
-    } else {
-      this.#scheduleReconnect();
-    }
+  }
+
+  /**
+   * Redial now, outside the backoff schedule. The schedule is finite: once it is
+   * exhausted the stream stays down with the disconnect as its answer, and this
+   * is the entry point a caller uses to try again (a reconnect affordance, or a
+   * resume-after-sleep watcher such as #832). It resets the attempt count so a
+   * fresh try gets the full schedule, and no-ops while closed, unsubscribed, or
+   * while a scheduled or in-flight reconnect is already running, so a caller
+   * cannot stack redials. A drop the caller deems not worth reconnecting stays
+   * down.
+   */
+  retry(): void {
+    if (this.#closed || this.#callbacks === null) return;
+    if (this.#reconnectTimer !== null || this.#reconnecting) return;
+    if (!this.#active().shouldReconnect()) return;
+    this.#reconnectAttempt = 0;
+    void this.#reconnectNow();
+  }
+
+  /**
+   * Report a disconnect once per outage: the first drop transitions the caller
+   * to `disconnected`; the retries that follow, until one recovers, are silent.
+   */
+  #reportDisconnected(error: Error): void {
+    if (this.#disconnectedReported) return;
+    this.#disconnectedReported = true;
+    this.#emit({status: 'disconnected', error});
   }
 
   #emit(state: StreamConnectionState): void {
