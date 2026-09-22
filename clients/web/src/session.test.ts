@@ -521,6 +521,30 @@ test('query budget: four queries per bootstrap, three per experiments_changed, n
   await session.close();
 });
 
+test('query budget: a resumed batch with experiments_changed refetches three queries, no snapshot', async () => {
+  const client = new FakeClient();
+  client.replay = after => ({
+    type: 'event_batch',
+    events: after === 0 ? [status(1, 'running')] : [experimentsChanged(after + 1)],
+    through_sequence: after === 0 ? 1 : after + 1,
+    active_executions: [],
+  });
+  const session = new WorkspaceSession(client, {reconnectDelaysMs: [1]});
+  await session.start();
+  await settle();
+  client.disconnect?.(new Error('offline'));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(client.subscriptions.at(-1)?.after, 1, 'the reconnect resumed the cursor');
+  await settle();
+  assert.deepEqual(queryCounts(client), {
+    'query.snapshot': 1,
+    'query.experiments': 2,
+    'query.design': 2,
+    'query.performance': 2,
+  });
+  await session.close();
+});
+
 test('records control events core-state drops, deduplicated, and resets them with the projection', async () => {
   const client = new FakeClient();
   const session = new WorkspaceSession(client);
