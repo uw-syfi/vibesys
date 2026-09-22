@@ -11,9 +11,15 @@
   line-height: 1.45;
   white-space: pre-line;
   overflow-wrap: anywhere;
-  pointer-events: auto;
+  pointer-events: none;
   box-shadow: 0 4px 12px rgb(0 0 0 / 0.18);
 }
 #tip kbd {
   margin-left: 6px;
+}
+/* Hoverable only where a pointer hovers; on touch a tap on the tip would be lost. */
+@media (hover: hover) {
+  #tip {
+    pointer-events: auto;
+  }
 }

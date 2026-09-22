@@ -14,7 +14,9 @@ export function Tooltip() {
     tip.setAttribute('role', 'tooltip');
     tip.hidden = true;
     document.body.append(tip);
+    // The anchor showing the tip, and the focused anchor, which pointer movement never hides.
     let anchor: HTMLElement | null = null;
+    let focused: HTMLElement | null = null;
     let leaving = 0;
     // A control whose tip changes under the pointer (Pause becomes Resume) re-shows it.
     const retip = new MutationObserver(() => {
@@ -23,6 +25,7 @@ export function Tooltip() {
 
     const show = (element: HTMLElement) => {
       clearTimeout(leaving);
+      if (anchor && anchor !== element) anchor.removeAttribute('aria-describedby');
       anchor = element;
       retip.disconnect();
       retip.observe(element, {attributeFilter: ['data-tip']});
@@ -34,6 +37,9 @@ export function Tooltip() {
         key.textContent = element.dataset.key;
         tip.append(key);
       }
+      // Measure at the origin: at the last position the box would shrink to fit the viewport edge.
+      tip.style.left = '0px';
+      tip.style.top = '0px';
       tip.hidden = false;
       const box = element.getBoundingClientRect();
       const size = tip.getBoundingClientRect();
@@ -58,37 +64,50 @@ export function Tooltip() {
     };
     const find = (event: Event) =>
       event.target instanceof Element ? event.target.closest<HTMLElement>('[data-tip]') : null;
-    // The tip is hoverable (WCAG 1.4.13): it hides only once the pointer has left both it and its
-    // anchor, after a short delay that covers the gap between them.
+    // The tip is hoverable (WCAG 1.4.13): once the pointer has left both it and its anchor, after a
+    // short delay that covers the gap between them, it returns to the focused anchor or hides.
+    const settle = () => (focused ? show(focused) : hide());
     const over = (event: Event) => {
       const onTip = event.target instanceof Node && tip.contains(event.target);
       const element = onTip ? anchor : find(event);
       if (element === anchor) clearTimeout(leaving);
       else if (element) show(element);
-      else {
+      else if (anchor !== focused) {
         clearTimeout(leaving);
-        leaving = window.setTimeout(hide, 100);
+        leaving = window.setTimeout(settle, 100);
       }
     };
     const focus = (event: Event) => {
-      const element = find(event);
-      if (element) show(element);
+      focused = find(event);
+      if (focused) show(focused);
       else hide();
     };
+    const blur = () => {
+      focused = null;
+      hide();
+    };
+    // Esc dismisses a visible tip, and only the tip: an open dialog closes on the next Esc.
     const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') hide();
+      if (event.key !== 'Escape' || tip.hidden) return;
+      event.preventDefault();
+      focused = null;
+      hide();
+    };
+    // Only a scroll that moves the anchor hides the tip, not the log following live output.
+    const scrolled = (event: Event) => {
+      if (anchor && event.target instanceof Node && event.target.contains(anchor)) hide();
     };
     document.addEventListener('pointerover', over);
     document.addEventListener('focusin', focus);
-    document.addEventListener('focusout', hide);
+    document.addEventListener('focusout', blur);
     document.addEventListener('keydown', key);
-    document.addEventListener('scroll', hide, true);
+    document.addEventListener('scroll', scrolled, true);
     return () => {
       document.removeEventListener('pointerover', over);
       document.removeEventListener('focusin', focus);
-      document.removeEventListener('focusout', hide);
+      document.removeEventListener('focusout', blur);
       document.removeEventListener('keydown', key);
-      document.removeEventListener('scroll', hide, true);
+      document.removeEventListener('scroll', scrolled, true);
       clearTimeout(leaving);
       retip.disconnect();
       tip.remove();

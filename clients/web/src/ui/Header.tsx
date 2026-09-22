@@ -52,6 +52,7 @@ export function Header({model, error, onControl}: HeaderProps) {
         {control.kind === 'ended' ? (
           <span
             className={control.word === 'Completed' ? 'ended st-kept' : 'ended st-failed'}
+            tabIndex={control.tip ? 0 : undefined}
             data-tip={control.tip ?? undefined}
           >
             {control.word}
