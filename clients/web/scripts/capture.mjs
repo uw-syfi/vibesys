@@ -221,6 +221,17 @@ const REPLAY = [
     ],
   },
   {
+    // A tool row's full output in the inspector, the one thing the web had no path to.
+    name: 'output',
+    fixture: live(),
+    widths: [1440],
+    after: async page => {
+      await page.locator('#log .row[data-tool]:visible').first().click();
+      await page.locator('.insp .out').waitFor();
+    },
+    expect: [],
+  },
+  {
     // The context meter near its ceiling, which no recording reaches.
     name: 'context',
     fixture: queue(NEAR_FULL(upTo(QUEUE, 623)), {active: QUEUE_ACTIVE}),

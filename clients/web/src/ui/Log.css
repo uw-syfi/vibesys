@@ -103,6 +103,10 @@
 .row.now {
   background: var(--accent-tint);
 }
+/* The row whose output the inspector is showing: the pair has to be readable as a pair. */
+.row.sel {
+  background: var(--selected);
+}
 /* The whole band lights, so the eye carries from the verb across to the duration on the far
    right. Hover is feedback, not a message, and the live row keeps its own tint. */
 @media (hover: hover) and (pointer: fine) {

@@ -35,6 +35,7 @@ import {
   showsChanges,
   steers,
   steersNeedOlder,
+  toolOutput,
   trendModel,
   usageText,
 } from './derive.js';
@@ -563,6 +564,85 @@ test('tool rows: how a command is read down to its target', () => {
     cases.map(([command]) => command),
     'the whole command stays on the row, including where the row shows none of it',
   );
+});
+
+test("tool output: a command's two streams, a plain result, the cap, and no row at all", () => {
+  const base = {
+    round_label: 'round-1-pre',
+    agent_kind: 'orchestrator',
+    invocation_id: 'x',
+    execution_id: 'x',
+    timestamp: '2026-09-21T12:00:00Z',
+  };
+  const call = (sequence: number, tool: string, args: Record<string, string>) =>
+    ({
+      ...base,
+      sequence,
+      type: 'tool_call',
+      data: {kind: 'tool_call', tool, call_id: `c${sequence}`, args},
+    }) as RunEvent;
+  const back = (sequence: number, tool: string, content: string, payload?: unknown) =>
+    ({
+      ...base,
+      sequence,
+      type: 'tool_result',
+      data: {
+        kind: 'tool_result',
+        tool,
+        call_id: `c${sequence - 1}`,
+        content,
+        is_error: false,
+        payload,
+      },
+    }) as RunEvent;
+  const ran = (sequence: number, command: string, stdout: string, stderr: string) => [
+    call(sequence, 'Bash', {command, description: 'Ran a command'}),
+    back(sequence + 1, 'Bash', `${stdout}${stderr}`, {
+      kind: 'command',
+      stdout,
+      stderr,
+      exit_code: 0,
+      duration: 1,
+    }),
+  ];
+  const long = 'x'.repeat(100_000 + 1234);
+  const core = fold([
+    ...ran(10, 'make test', 'ok so far\n', 'warning: unused\n'),
+    ...ran(12, 'make lint', '', 'only stderr\n'),
+    ...ran(14, 'make quiet', '', ''),
+    ...ran(16, 'make noisy', long, ''),
+    call(18, 'Read', {file_path: 'src/lib.rs'}),
+    back(19, 'Read', 'pub fn main() {}'),
+    call(20, 'Read', {file_path: 'gone.rs'}),
+  ]);
+
+  // A command's streams, in order, separated by one blank line.
+  assert.deepEqual(toolOutput(core, '10'), {
+    heading: 'make test',
+    body: 'ok so far\n\nwarning: unused',
+    cut: null,
+  });
+  // An empty stream is omitted rather than separated from nothing.
+  assert.deepEqual(toolOutput(core, '12'), {
+    heading: 'make lint',
+    body: 'only stderr',
+    cut: null,
+  });
+  assert.deepEqual(toolOutput(core, '14'), {heading: 'make quiet', body: '', cut: null});
+  // A result with no command payload answers with its content, headed by the row's verb.
+  assert.deepEqual(toolOutput(core, '18'), {
+    heading: 'Read',
+    body: 'pub fn main() {}',
+    cut: null,
+  });
+  // A call whose result has not arrived has nothing to show yet, and still names its row.
+  assert.deepEqual(toolOutput(core, '20'), {heading: 'Read', body: '', cut: null});
+  const capped = toolOutput(core, '16');
+  assert.equal(capped?.body.length, 100_000);
+  assert.equal(capped?.cut, '1,234', 'what was cut, grouped');
+  // A selection that outlives its round, or names a row that is not a tool call.
+  assert.equal(toolOutput(core, '999'), null);
+  assert.equal(toolOutput(core, null), null);
 });
 
 test('log rows: adjacent calls of one verb fold into one counted row', () => {

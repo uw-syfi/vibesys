@@ -11,6 +11,8 @@ const note = (round: number | null) =>
       groups={[]}
       follow={false}
       history={{loading: false, error: null, onRetry: () => {}}}
+      selected={null}
+      onSelect={() => {}}
     />,
   );
 

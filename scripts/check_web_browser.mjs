@@ -181,11 +181,28 @@ async function checkInteractions(browser, origin) {
     });
   const lines = (number, kind, prefix, count) =>
     Array.from({length: count}, (_, index) => say(number, kind, `${prefix} ${index + 1}`));
+  const ran = (number, kind, command, stdout) => [
+    event('tool_call', number, kind, {
+      kind: 'tool_call',
+      tool: 'Bash',
+      call_id: command,
+      args: {command, description: 'Ran a command'},
+    }),
+    event('tool_result', number, kind, {
+      kind: 'tool_result',
+      tool: 'Bash',
+      call_id: command,
+      content: stdout,
+      is_error: false,
+      payload: {kind: 'command', stdout, stderr: '', exit_code: 0, duration: 0.4},
+    }),
+  ];
   const events = [
     say(1, 'implementer', 'Round one evidence'),
     event('round_finished', 1, null, {kind: 'round_finished', attempts: 1, judge_verdict: 'pass'}),
     ...lines(2, 'orchestrator', 'Plan line', 40),
     say(2, 'implementer', 'Implementer started'),
+    ...ran(2, 'implementer', 'make bench', 'ops/sec 1420\nbench ok\n'),
   ];
   const implementer = {
     execution_id: 'implementer-2',
@@ -271,6 +288,21 @@ async function checkInteractions(browser, origin) {
       assert.equal(await pinned(), true, `following after append ${batchIndex}`);
     }
     assert.equal(await jump.count(), 0, 'no Jump to latest while following');
+
+    // A tool row's full output opens in the inspector, and no log row moves when it does.
+    const rowTop = () =>
+      log
+        .locator('.row')
+        .first()
+        .evaluate(node => node.getBoundingClientRect().top);
+    const call = log.locator('.row[data-tool]').first();
+    await call.scrollIntoViewIfNeeded();
+    const restingTop = await rowTop();
+    await call.click();
+    const out = page.locator('aside.insp .out');
+    await out.waitFor();
+    assert.match(await out.innerText(), /bench ok/, "the row's own output");
+    assert.equal(await rowTop(), restingTop, 'opening the output moved a log row');
 
     // Focus inside the log carries across the re-key a new round causes.
     await log.focus();

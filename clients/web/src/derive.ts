@@ -43,6 +43,7 @@ import type {
   RunControl,
   RunPulse,
   Steers,
+  ToolOutput,
   ToolResultSummary,
   TrendModel,
   Verdict,
@@ -627,6 +628,39 @@ function toolLabel(entry: TranscriptEntry): [string, string | null, string | nul
       return plainly(entry.toolName, typeof first === 'string' ? first : null);
     }
   }
+}
+
+/**
+ * What one tool row's output may put in the inspector. Past this the column stops being a page
+ * and the reader is better served by the terminal that produced it.
+ */
+const OUTPUT_CAP = 100_000;
+
+/**
+ * One tool row's full output, for the top of the inspector: the web's only path to it.
+ *
+ * Null when `id` names no tool row of the transcript, which covers a selection that outlived
+ * the round it was made in and a row that is not a tool call at all.
+ */
+export function toolOutput(core: CoreState, id: string | null): ToolOutput | null {
+  const entry = id === null ? undefined : core.transcript.find(item => item.id === id);
+  if (entry === undefined || entry.kind !== 'tool') return null;
+  const result = entry.toolResult;
+  const payload = result?.payload;
+  // One blank line between the streams, whether or not the first one ended with a newline.
+  const whole =
+    payload?.kind === 'command'
+      ? [payload.stdout, payload.stderr]
+          .map(stream => stream.replace(/\n$/, ''))
+          .filter(stream => stream !== '')
+          .join('\n\n')
+      : (result?.content ?? '');
+  const command = entry.toolArguments?.command;
+  return {
+    heading: typeof command === 'string' && command !== '' ? command : toolLabel(entry)[0],
+    body: whole.slice(0, OUTPUT_CAP),
+    cut: whole.length > OUTPUT_CAP ? exact.format(whole.length - OUTPUT_CAP) : null,
+  };
 }
 
 /** `round-N-retry-K[-role]` is attempt K; `round-N-retry-K-plan` is a plan reprompt, attempt 1. */

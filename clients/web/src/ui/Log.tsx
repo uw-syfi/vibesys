@@ -23,6 +23,9 @@ export interface LogProps {
   follow: boolean;
   /** Backfill below the tail floor, which App runs on its own; Retry only after an error. */
   history: {loading: boolean; error: string | null; onRetry: () => void};
+  /** The tool row whose output the inspector shows, by `LogItem.id`. */
+  selected: string | null;
+  onSelect: (id: string | null) => void;
 }
 
 const ROLE_ICONS: Record<string, LucideIcon> = {
@@ -40,7 +43,7 @@ const calls = (count: number) => (count === 1 ? '1 call' : `${count} calls`);
 let carryFocus = false;
 
 /** Rendered with `key={round}`, so a new selection starts with fresh follow state. */
-export function Log({state, round, groups, follow, history}: LogProps) {
+export function Log({state, round, groups, follow, history, selected, onSelect}: LogProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
 
@@ -83,6 +86,7 @@ export function Log({state, round, groups, follow, history}: LogProps) {
 
   return (
     <div className="logwrap">
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the scroller's own row cursor is the keyboard path. */}
       <div
         ref={scroller}
         id="log"
@@ -94,6 +98,12 @@ export function Log({state, round, groups, follow, history}: LogProps) {
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must take focus to scroll by keyboard.
         tabIndex={0}
         onScroll={onScroll}
+        // Delegated, so a row stays a row rather than becoming one tab stop each: the keyboard
+        // path is the cursor this scroller carries.
+        onClick={event => {
+          const row = (event.target as HTMLElement).closest<HTMLElement>('[data-tool]');
+          if (row?.dataset.tool !== undefined) onSelect(row.dataset.tool);
+        }}
       >
         <div className="col">
           {history.loading ? (
@@ -131,7 +141,12 @@ export function Log({state, round, groups, follow, history}: LogProps) {
           ) : (
             <ol className="grps">
               {groups.map(group => (
-                <Group key={group.id} group={group} onOpen={() => setAway(true)} />
+                <Group
+                  key={group.id}
+                  group={group}
+                  selected={selected}
+                  onOpen={() => setAway(true)}
+                />
               ))}
             </ol>
           )}
@@ -147,7 +162,15 @@ export function Log({state, round, groups, follow, history}: LogProps) {
   );
 }
 
-function Group({group, onOpen}: {group: LogGroup; onOpen: () => void}) {
+function Group({
+  group,
+  selected,
+  onOpen,
+}: {
+  group: LogGroup;
+  selected: string | null;
+  onOpen: () => void;
+}) {
   const Icon = ROLE_ICONS[group.role] ?? Bot;
   const steers = group.items.filter(item => item.kind === 'steer');
   const rest = group.items.filter(item => item.kind !== 'steer');
@@ -162,19 +185,22 @@ function Group({group, onOpen}: {group: LogGroup; onOpen: () => void}) {
         {group.collapsed ? (
           <>
             {steers.map(item => (
-              <Item key={item.id} item={item} onOpen={onOpen} />
+              <Item key={item.id} item={item} selected={selected} onOpen={onOpen} />
             ))}
             {rest.length === 0 ? null : (
               <Fold
                 verb={group.summary || titleCase(group.role)}
                 count={group.calls}
                 items={rest}
+                selected={selected}
                 onOpen={onOpen}
               />
             )}
           </>
         ) : (
-          group.items.map(item => <Item key={item.id} item={item} onOpen={onOpen} />)
+          group.items.map(item => (
+            <Item key={item.id} item={item} selected={selected} onOpen={onOpen} />
+          ))
         )}
       </div>
     </li>
@@ -186,11 +212,13 @@ function Fold({
   verb,
   count,
   items,
+  selected,
   onOpen,
 }: {
   verb: string;
   count: number;
   items: LogItem[];
+  selected: string | null;
   onOpen: () => void;
 }) {
   return (
@@ -212,16 +240,32 @@ function Fold({
       </summary>
       <div className="what">
         {items.map(item => (
-          <Item key={item.id} item={item} onOpen={onOpen} />
+          <Item key={item.id} item={item} selected={selected} onOpen={onOpen} />
         ))}
       </div>
     </details>
   );
 }
 
-function Item({item, onOpen}: {item: LogItem; onOpen: () => void}) {
+function Item({
+  item,
+  selected,
+  onOpen,
+}: {
+  item: LogItem;
+  selected: string | null;
+  onOpen: () => void;
+}) {
   if (item.kind === 'run') {
-    return <Fold verb={item.verb} count={item.items.length} items={item.items} onOpen={onOpen} />;
+    return (
+      <Fold
+        verb={item.verb}
+        count={item.items.length}
+        items={item.items}
+        selected={selected}
+        onOpen={onOpen}
+      />
+    );
   }
   if (item.kind === 'steer') {
     return (
@@ -248,10 +292,12 @@ function Item({item, onOpen}: {item: LogItem; onOpen: () => void}) {
   // whole command carries no tooltip: it would only repeat what the reader is looking at.
   const whole = item.argFull;
   const tip = whole !== null && whole.length > TIP_LIMIT ? `${whole.slice(0, TIP_LIMIT)}…` : whole;
+  const marks = ['row', item.inFlight ? 'now' : '', item.id === selected ? 'sel' : ''];
   return (
     <div
-      className={item.inFlight ? 'row now' : 'row'}
+      className={marks.filter(Boolean).join(' ')}
       aria-current={item.inFlight ? 'step' : undefined}
+      data-tool={item.id}
       data-tip={tip ?? undefined}
     >
       <span className="lab">

@@ -12,12 +12,14 @@ import {
 } from 'lucide-react';
 import {useEffect, useRef} from 'react';
 import {prose} from '../derive.js';
-import type {InspectorModel, JudgeAttempt, Verdict} from '../model.js';
+import type {InspectorModel, JudgeAttempt, ToolOutput, Verdict} from '../model.js';
 import {Prose} from './Prose.js';
 import './Inspector.css';
 
 export interface InspectorProps {
   model: InspectorModel | null;
+  /** The selected tool row's full output, above the round's own sections; null when none is. */
+  output: ToolOutput | null;
   /** >= 1024 px: an aside. 768-1023 px: a right drawer. < 768 px: a bottom sheet. */
   mode: 'aside' | 'drawer' | 'sheet';
   /** Drawer and sheet only. */
@@ -52,6 +54,7 @@ const UNKNOWN_CHANGE = [FileIcon, 'Changed'] as const;
 
 export function Inspector({
   model,
+  output,
   mode,
   open,
   judgePending,
@@ -80,6 +83,7 @@ export function Inspector({
       <Body
         key={model.round}
         model={model}
+        output={output}
         judgePending={judgePending}
         designError={designError}
         onRetryDesign={onRetryDesign}
@@ -125,11 +129,13 @@ export function Inspector({
 
 function Body({
   model,
+  output,
   judgePending,
   designError,
   onRetryDesign,
 }: {
   model: InspectorModel;
+  output: ToolOutput | null;
   judgePending: boolean;
   designError: string | null;
   onRetryDesign: () => void;
@@ -137,6 +143,23 @@ function Body({
   const {hypothesis, metric, delta, judge, changes} = model;
   return (
     <div className="insp-body">
+      {output === null ? null : (
+        // Above the round's own sections, in the same column: the reader scrolls one thing.
+        <section className="sec sec-out" aria-label="Output">
+          <h3 className="out-head mono">{output.heading}</h3>
+          {output.body === '' ? (
+            <p className="insp-note">No output</p>
+          ) : (
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must take focus to scroll by keyboard.
+            <pre className="out mono" tabIndex={0}>
+              {output.body}
+            </pre>
+          )}
+          {output.cut === null ? null : (
+            <p className="insp-note">{output.cut} more characters not shown</p>
+          )}
+        </section>
+      )}
       {hypothesis === null ? null : (
         // Not <header>: inside the dialog that would be a second banner landmark.
         <div>

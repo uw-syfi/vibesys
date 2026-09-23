@@ -114,6 +114,27 @@
 .insp-note {
   color: var(--text-muted);
 }
+/* A selected tool row's output. The grid item has to give way, or a long line pushes the
+   inspector wider and the page scrolls sideways. */
+.sec-out {
+  min-width: 0;
+}
+/* Which row the output belongs to. One line: a command can be a whole heredoc, and the row it
+   came from already carries the rest. */
+.sec h3.out-head {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Output as the tool wrote it: newlines kept, nothing reflowed, so the long lines scroll here
+   rather than widening the column. */
+.out {
+  margin: 0;
+  overflow-x: auto;
+  overscroll-behavior: contain;
+  line-height: 1.5;
+}
 /* Judge verdicts still loading: two attempt-height bars. */
 .insp-skel {
   display: grid;

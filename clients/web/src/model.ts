@@ -134,6 +134,16 @@ export interface LogTool {
   inFlight: boolean;
 }
 
+/** A selected tool row's full output, at the top of the inspector. */
+export interface ToolOutput {
+  /** The row's command when it has one, else its verb: which row the output below belongs to. */
+  heading: string;
+  /** A command's `stdout` then `stderr`, else the result's content; `''` when it produced none. */
+  body: string;
+  /** Characters the cap cut from the end of `body`, grouped; null when nothing was cut. */
+  cut: string | null;
+}
+
 export interface LogGroup {
   id: string;
   role: string;

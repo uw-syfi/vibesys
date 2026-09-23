@@ -13,6 +13,7 @@ import {
   showsChanges,
   steers,
   steersNeedOlder,
+  toolOutput,
   trendModel,
 } from './derive.js';
 import type {WorkspaceSession} from './session.js';
@@ -61,6 +62,9 @@ export function App({session}: {session: WorkspaceSession}) {
   const wide = useMedia(WIDE);
   const tablet = useMedia(TABLET);
   const [picked, setPicked] = useState<{runId: string | null; round: number} | null>(null);
+  // The row whose output the inspector shows, tied to the round it was picked in so that
+  // changing round clears it without an effect.
+  const [rowPick, setRowPick] = useState<{round: number; id: string} | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [hinted, setHinted] = useState(hintSeen);
 
@@ -87,6 +91,8 @@ export function App({session}: {session: WorkspaceSession}) {
         : inspectorModel(rail.rows, experiments, design, captured, selected, context),
     [rail, experiments, design, captured, selected, context],
   );
+  const selectedRow = rowPick !== null && rowPick.round === selected ? rowPick.id : null;
+  const output = useMemo(() => toolOutput(core, selectedRow), [core, selectedRow]);
   const header = headerModel(core, captured, connection, context);
   const ended = endedWord(core, captured);
   const error = command.error;
@@ -118,6 +124,12 @@ export function App({session}: {session: WorkspaceSession}) {
         // Private mode: the hint shows again next visit.
       }
     }
+  }
+
+  function selectRow(id: string | null) {
+    setRowPick(id === null || selected === null ? null : {round: selected, id});
+    // Narrow: the inspector is a dialog, so a row picked there has to open it or nothing happens.
+    if (id !== null && !wide) setInspectorOpen(true);
   }
 
   function step(offset: number) {
@@ -185,6 +197,8 @@ export function App({session}: {session: WorkspaceSession}) {
               error: wantsHistory ? historyError : null,
               onRetry: () => void session.loadOlder(),
             }}
+            selected={selectedRow}
+            onSelect={selectRow}
           />
           {ended === null ? (
             <Composer
@@ -197,6 +211,7 @@ export function App({session}: {session: WorkspaceSession}) {
         </main>
         <Inspector
           model={inspector}
+          output={output}
           mode={wide ? 'aside' : tablet ? 'drawer' : 'sheet'}
           open={inspectorOpen}
           judgePending={roundHidden && historyLoading}
