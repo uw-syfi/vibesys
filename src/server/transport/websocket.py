@@ -179,7 +179,8 @@ class WebSocketGateway:
         parsed = urlsplit(path)
         query = parse_qs(parsed.query, keep_blank_values=True)
         token = query.get("token", [""])[0]
-        if not secrets.compare_digest(token, self.token):
+        token_required = not parsed.path.startswith("/assets/")
+        if token_required and not secrets.compare_digest(token, self.token):
             return _respond(connection, HTTPStatus.FORBIDDEN, "Invalid VibeSys capability token\n")
 
         if parsed.path == _WEB_SOCKET_PATH:
