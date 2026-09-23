@@ -37,12 +37,17 @@ jobs:
       evaluators: ${{ steps.filter.outputs.evaluators }}
       native_targets: ${{ steps.filter.outputs.native_targets }}
       native_languages: ${{ steps.filter.outputs.native_languages }}
-      go_prototype: ${{ steps.filter.outputs.go_prototype }}
+      impact: ${{ steps.filter.outputs.impact }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/ci_impact/go.mod
 
       - name: Select affected CI jobs
         id: filter
@@ -74,7 +79,7 @@ jobs:
               exit 1
               ;;
           esac
-          python3 -m support.ci_impact plan --event "$EVENT_NAME" --base "$base" --head "$head" --github-output "$GITHUB_OUTPUT"
+          ./support/ci_impact/ci-impact plan --event "$EVENT_NAME" --base "$base" --head "$head" --github-output "$GITHUB_OUTPUT"
 
   # One environment setup for every cheap Python check. Issue #89 split these
   # apart so a failure names the check that failed; each check is still its own
@@ -283,24 +288,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Require selected native targets
-        env:
-          NATIVE_TARGETS: ${{ needs.changes.outputs.native_targets }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-
-          targets = json.loads(os.environ["NATIVE_TARGETS"])
-          if not isinstance(targets, list) or not targets:
-              raise SystemExit("queue-native was selected without native targets")
-          PY
-
       - name: Set up Go
-        if: contains(fromJSON(needs.changes.outputs.native_languages), 'go')
         uses: actions/setup-go@v5
         with:
-          go-version-file: resources/evaluators/queue/go.mod
+          go-version-file: support/ci_impact/go.mod
           cache-dependency-path: |
             resources/evaluators/queue/go.sum
             resources/evaluators/microservice/go.sum
@@ -330,11 +321,11 @@ jobs:
       - name: Check selected native targets
         env:
           NATIVE_TARGETS: ${{ needs.changes.outputs.native_targets }}
-        run: python3 -m support.ci_impact run-native --targets-json "$NATIVE_TARGETS"
+        run: ./support/ci_impact/ci-impact run-native --targets-json "$NATIVE_TARGETS"
 
-  go-impact-prototype:
+  impact-tool:
     needs: changes
-    if: needs.changes.outputs.go_prototype == 'true'
+    if: needs.changes.outputs.impact == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -343,11 +334,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: support/ci_impact_go/go.mod
+          go-version-file: support/ci_impact/go.mod
 
-      - name: Test Go impact prototype
-        working-directory: support/ci_impact_go
-        run: go test ./...
+      - name: Test CI impact tool
+        working-directory: support/ci_impact
+        run: |
+          go test ./...
+          go vet ./...
 
   # Owns everything that needs a repository-native example's external repository `.vibesys` directory,
   # so no other job pays for one. It fetches `.vibesys/` alone (blob-filtered,
@@ -598,7 +591,7 @@ jobs:
       - typecheck
       - tui
       - queue-native
-      - go-impact-prototype
+      - impact-tool
       - validate-examples
       - agent-image
       - test
@@ -658,7 +651,7 @@ jobs:
       - python-checks
       - tui
       - queue-native
-      - go-impact-prototype
+      - impact-tool
       - validate-examples
       - agent-image
       - test

@@ -1,13 +1,23 @@
 # CI impact selector
 
-The [Go prototype](../ci_impact_go/README.md) implements the same selection policy and inspection commands for comparison. CI uses this Python implementation to select jobs and run native checks.
+This utility is a repository-agnostic change selector. It reads a TOML policy, discovers components through configured manifest adapters, maps changed paths to components, and walks reverse dependency edges to select jobs. Component IDs are opaque to the graph walker. Adapters translate manifest formats into the common component model.
 
-Run `./support/ci_impact/ci-impact plan` from the repository root to compare `main` with `HEAD`. Use `explain PATH` to inspect one path or `validate` to check the graph and tracked-file ownership. Add `--json` to `plan` or `explain` for the full machine-readable plan. CI uses `python3 -m support.ci_impact plan --base BASE_SHA --head HEAD_SHA --event pull_request --github-output PATH`; `merge_group` and `push` are also supported events. An unclassified path or invalid graph exits with status 2.
+Run it from a repository root with a `ci-impact.toml` policy:
 
-The utility owns Git diff handling and reverse dependency traversal. It reads Python module ownership and edges from `tach.toml`, pnpm package ownership and workspace dependencies from `clients/*/package.json`, and native package roots from `Cargo.toml` and `go.mod`. It does not parse imports or replace those language tools. The top-level [`ci-components.toml`](../../ci-components.toml) declares shared CI inputs, checked native roots, and cross-component edges that language manifests cannot express.
+```sh
+./support/ci_impact/ci-impact plan --base <base-ref> --head HEAD
+./support/ci_impact/ci-impact explain path/to/file --json
+./support/ci_impact/ci-impact validate
+./support/ci_impact/ci-impact --config path/to/policy.toml validate
+(cd support/ci_impact && go test ./... && go vet ./...)
+```
 
-The output `jobs` object and GitHub outputs use the existing `python`, `tui`, `examples`, `agent_image`, and `evaluators` names. `native_targets` contains registered native manifest roots to check; `native_languages` contains the distinct `go` and `rust` toolchains those roots need; `pnpm_packages` contains affected workspace package names. The workflow selects jobs and toolchains from these outputs.
+`--config` accepts a path relative to the repository root or an absolute path. The directory containing an absolute config file is treated as the repository root. `CI_IMPACT_ROOT` can explicitly set the root when needed. Configured jobs and collection names become GitHub outputs, so a workflow can keep stable output names while the selector remains generic.
 
-Run selected native checks with `python3 -m support.ci_impact run-native --targets-json '["resources/evaluators/queue"]'`. The argument must be a nonempty JSON array of registered `native_ci_roots`. Each selected Go root runs `go test -race ./...`; each Cargo root runs formatting, Clippy, and tests. The SDK module path is checked before its Go tests, and the microservice evaluator enables managed-candidate tests. The command runs only the supplied roots and stops at the first failed check.
+The built-in discovery adapters are `tach`, `package_json`, and `manifest_directories`. Each adapter parses one manifest format and returns common component records. Paths, ID prefixes, source classes, ownership groups, job assignments, manifest globs, language mappings, and selected native roots come from the policy. The graph walker knows no language-specific ID prefixes.
 
-To add an evaluator package, add its native manifest and its root to `native_ci_roots`. The runner selects Cargo or Go commands from that manifest. Manifests under `native_ci_scope_roots` without a registered target fail selection. To add a cross-component effect, add an `[[edges]]` entry with `from` as the changed dependency and `to` as the affected component. Add shared files or suites outside native package roots as a small named component in `ci-components.toml`. Keep each new path classified, and add an impact test for each non-obvious edge.
+To add a manifest format, implement `discoveryAdapter` in a new `discover_*.go` file, register it in `discoveryAdapters`, and add its adapter-specific fields to the policy schema. Add any language command arrays under `native_checks.commands`. The graph walker and selector remain unchanged.
+
+Native checks are configured as argument arrays by language, with a timeout and optional per-root environment overrides or line assertions. The utility does not infer commands from the repository or shell-evaluate config values.
+
+The policy format is intentionally small. Components may declare roots, exact files, jobs, classes, and dependency IDs. `[[edges]]` declares cross-component effects. `[[collections]]` selects output values by component class and field. Unknown config keys, missing dependencies, cycles, unknown paths, unsafe paths, unregistered in-scope manifests, and conflicting manifests fail validation.

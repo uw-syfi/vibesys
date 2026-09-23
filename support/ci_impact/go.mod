@@ -1,4 +1,4 @@
-module vibesys.local/ci-impact-go
+module ci-impact
 
 go 1.25
 

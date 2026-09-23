@@ -6,10 +6,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
-func rootPath() (string, error) {
+func rootPath(configPath string) (string, error) {
+	if filepath.IsAbs(configPath) {
+		if _, err := os.Stat(configPath); err != nil {
+			return "", fmt.Errorf("configuration %q: %w", configPath, err)
+		}
+		return filepath.Dir(configPath), nil
+	}
 	if root := os.Getenv("CI_IMPACT_ROOT"); root != "" {
 		return root, nil
 	}
@@ -18,11 +25,15 @@ func rootPath() (string, error) {
 		return "", err
 	}
 	for dir := wd; ; dir = filepath.Dir(dir) {
-		if _, err := os.Stat(filepath.Join(dir, "ci-components.toml")); err == nil {
+		candidate := configPath
+		if !filepath.IsAbs(candidate) {
+			candidate = filepath.Join(dir, candidate)
+		}
+		if _, err := os.Stat(candidate); err == nil {
 			return dir, nil
 		}
 		if filepath.Dir(dir) == dir {
-			return "", fmt.Errorf("cannot locate ci-components.toml")
+			return "", fmt.Errorf("cannot locate configuration %q", configPath)
 		}
 	}
 }
@@ -36,11 +47,12 @@ func emit(p plan, asJSON bool) error {
 		return nil
 	}
 	selected := []string{}
-	for _, job := range jobs {
+	for job := range p.Jobs {
 		if p.Jobs[job] {
 			selected = append(selected, job)
 		}
 	}
+	sort.Strings(selected)
 	fmt.Printf("Changed paths: %d\n", len(p.ChangedPaths))
 	line := "none"
 	if len(selected) > 0 {
@@ -52,14 +64,16 @@ func emit(p plan, asJSON bool) error {
 			fmt.Printf("  %s: %s\n", job, reason)
 		}
 	}
-	if len(p.NativeTargets) > 0 {
-		fmt.Println("Native targets: " + strings.Join(p.NativeTargets, ", "))
+	collectionNames := make([]string, 0, len(p.Collections))
+	for name := range p.Collections {
+		collectionNames = append(collectionNames, name)
 	}
-	if len(p.NativeLanguages) > 0 {
-		fmt.Println("Native languages: " + strings.Join(p.NativeLanguages, ", "))
-	}
-	if len(p.PnpmPackages) > 0 {
-		fmt.Println("pnpm packages: " + strings.Join(p.PnpmPackages, ", "))
+	sort.Strings(collectionNames)
+	for _, name := range collectionNames {
+		values := p.Collections[name]
+		if len(values) > 0 {
+			fmt.Printf("%s: %s\n", name, strings.Join(values, ", "))
+		}
 	}
 	return nil
 }
@@ -69,31 +83,75 @@ func writeOutputs(path string, p plan) error {
 		return err
 	}
 	defer f.Close()
-	for _, job := range jobs {
-		fmt.Fprintf(f, "%s=%t\n", job, p.Jobs[job])
+	jobNames := make([]string, 0, len(p.Jobs))
+	for job := range p.Jobs {
+		jobNames = append(jobNames, job)
 	}
-	for _, key := range []struct {
-		name  string
-		value []string
-	}{{"native_targets", p.NativeTargets}, {"native_languages", p.NativeLanguages}, {"pnpm_packages", p.PnpmPackages}} {
-		data, _ := json.Marshal(key.value)
-		fmt.Fprintf(f, "%s=%s\n", key.name, data)
+	sort.Strings(jobNames)
+	for _, job := range jobNames {
+		selected := p.Jobs[job]
+		if _, err := fmt.Fprintf(f, "%s=%t\n", job, selected); err != nil {
+			return err
+		}
+	}
+	collectionNames := make([]string, 0, len(p.Collections))
+	for name := range p.Collections {
+		collectionNames = append(collectionNames, name)
+	}
+	sort.Strings(collectionNames)
+	for _, name := range collectionNames {
+		values := p.Collections[name]
+		data, err := json.Marshal(values)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(f, "%s=%s\n", name, data); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 func cli(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: ci-impact-go {plan|explain|validate}")
+	configPath := "ci-impact.toml"
+	filtered := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--config" {
+			if i+1 >= len(args) {
+				return fmt.Errorf("--config requires a path")
+			}
+			i++
+			configPath = args[i]
+			continue
+		}
+		if strings.HasPrefix(args[i], "--config=") {
+			configPath = strings.TrimPrefix(args[i], "--config=")
+			continue
+		}
+		filtered = append(filtered, args[i])
 	}
-	root, err := rootPath()
+	args = filtered
+	if len(args) == 0 {
+		return fmt.Errorf("usage: ci-impact {plan|explain|validate|run-native}")
+	}
+	root, err := rootPath(configPath)
 	if err != nil {
 		return err
 	}
-	g, err := readPolicy(root)
+	g, err := readPolicy(root, configPath)
 	if err != nil {
 		return err
 	}
 	switch args[0] {
+	case "run-native":
+		fs := flag.NewFlagSet("run-native", flag.ContinueOnError)
+		targets := fs.String("targets-json", "", "Selected native roots as a JSON array")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 {
+			return fmt.Errorf("unexpected run-native arguments")
+		}
+		return runNativeTargets(root, g, *targets, runNativeCommand)
 	case "validate":
 		if len(args) != 1 {
 			return fmt.Errorf("validate takes no arguments")
@@ -133,7 +191,7 @@ func cli(args []string) error {
 		return emit(p, *asJSON)
 	case "plan":
 		fs := flag.NewFlagSet("plan", flag.ContinueOnError)
-		base := fs.String("base", "main", "Base revision")
+		base := fs.String("base", g.DefaultBase, "Base revision")
 		head := fs.String("head", "HEAD", "Head revision")
 		event := fs.String("event", "pull_request", "Event type")
 		asJSON := fs.Bool("json", false, "Print JSON plan")

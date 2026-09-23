@@ -90,7 +90,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/tests", "libs/vs-github/tests", "libs/vs-issue-board/tests", "libs/vs-loop-state/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "sdk/vs-bench/tests", "support/ci_impact/tests"]
+testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/tests", "libs/vs-github/tests", "libs/vs-issue-board/tests", "libs/vs-loop-state/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "sdk/vs-bench/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
 # below, so `uv run pytest` reports coverage locally without needing the full
 # flag string CI uses. CI layers on `--cov-report=xml`, `--cov-report=json`,
@@ -242,7 +242,6 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 # on stdout, so `print` is the intended output mechanism rather than a stray
 # debug statement. Same categorical treatment as S101 in tests/.
 "scripts/**" = ["T201"]
-"support/ci_impact/selector.py" = ["T201"]
 # packaging/ holds top-level build modules with no __init__.py on purpose (a
 # `packaging` package would shadow the PyPA `packaging` library), and release
 # tools that report on stdout/stderr like scripts/.

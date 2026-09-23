@@ -1,10 +1,37 @@
-# Cross-component CI policy. Source ownership for Python modules, TypeScript
-# packages, and native packages is discovered from their language manifests.
+# Repository policy consumed by the generic CI impact utility.
+default_base = "main"
+jobs = ["python", "tui", "examples", "agent_image", "evaluators", "impact"]
 
-# Website and third-party content is checked by separate workflows.
 ignored_roots = ["website", "3rd_party", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
-native_ci_roots = [
+
+[[discoveries]]
+adapter = "tach"
+config = "tach.toml"
+class = "python_module"
+id_prefix = "python:"
+job = "python"
+ownership_group = "python_modules"
+
+[[discoveries]]
+adapter = "package_json"
+manifest_glob = "clients/*/package.json"
+class = "workspace_package"
+id_prefix = "pnpm:"
+job = "tui"
+ownership_group = "workspace_packages"
+workspace_prefix = "workspace:"
+dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
+
+[[discoveries]]
+adapter = "manifest_directories"
+class = "native"
+id_prefix = "native:"
+target = true
+ownership_group = "native_manifests"
+manifests = { "Cargo.toml" = "rust", "go.mod" = "go" }
+scope_roots = ["resources/evaluators", "examples/evaluators", "sdk/vs-evaluator"]
+selected_roots = [
   "resources/evaluators/queue",
   "resources/evaluators/queue/native_runner",
   "resources/evaluators/microservice",
@@ -14,11 +41,46 @@ native_ci_roots = [
   "examples/starters/priority-queue-rs",
   "sdk/vs-evaluator/vseval",
 ]
-# Every Cargo/go manifest under these evaluator areas needs a CI target.
-native_ci_scope_roots = ["resources/evaluators", "examples/evaluators", "sdk/vs-evaluator"]
+selected_jobs = ["evaluators"]
+
+[[collections]]
+name = "native_targets"
+class = "native"
+field = "root"
+selected_only = true
+
+[[collections]]
+name = "native_languages"
+class = "native"
+field = "language"
+selected_only = true
+
+[[collections]]
+name = "pnpm_packages"
+class = "workspace_package"
+field = "name"
+
+[native_checks]
+timeout_seconds = 600
+[native_checks.commands]
+go = [["go", "test", "-race", "./..."]]
+rust = [
+  ["cargo", "fmt", "--", "--check"],
+  ["cargo", "clippy", "--locked", "--all-targets", "--", "-D", "warnings"],
+  ["cargo", "test", "--locked"],
+]
+
+[[native_check_overrides]]
+root = "sdk/vs-evaluator/vseval"
+assertions = [{ file = "go.mod", line_prefix = "module ", equals = "github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval" }]
+
+[[native_check_overrides]]
+root = "resources/evaluators/microservice"
+env = { VIBESYS_REQUIRE_MANAGED_CANDIDATE_TESTS = "1" }
 
 [[components]]
 id = "python_support"
+class = "python_support"
 job = "python"
 # Central tests and project tooling are outside Tach's source roots.
 roots = ["tests", "libs", "sdk", "scripts", "packaging", "benchmarks", "resources", "examples"]
@@ -30,6 +92,7 @@ files = ["src/server/api/schema.py", "src/server/events.py", "src/server/api/pro
 
 [[components]]
 id = "clients"
+class = "manual"
 job = "tui"
 root = "clients"
 depends_on = ["server_protocol", "bun_fetcher"]
@@ -40,6 +103,7 @@ files = ["packaging/fetch_bun.py"]
 
 [[components]]
 id = "examples"
+class = "manual"
 job = "examples"
 roots = ["examples", "docs"]
 files = [".gitmodules", "README.md"]
@@ -52,6 +116,7 @@ roots = ["src/vibesys/evaluators"]
 
 [[components]]
 id = "agent_image"
+class = "manual"
 job = "agent_image"
 roots = ["src/vibesys/sandbox/images", "libs/vs-sandbox"]
 files = ["src/vibesys/sandbox/images.py", "src/vibesys/agents/provider_policy.py"]
@@ -83,17 +148,12 @@ to = "native:examples/data-structures/repositories/queue-rs"
 [[components]]
 id = "ci_policy"
 roots = ["support/ci_impact"]
-files = [".github/workflows/test.yml", "ci-components.toml"]
-depends_on = []
-jobs = ["python", "tui", "examples", "agent_image", "evaluators"]
-
-[[components]]
-id = "go_prototype"
-root = "support/ci_impact_go"
-job = "go_prototype"
-depends_on = ["ci_policy"]
+files = [".github/workflows/test.yml", "ci-impact.toml", "ci-components.toml"]
+select_all_jobs = true
+select_all_collections = true
 
 [[components]]
 id = "workflow_references"
+class = "manual"
 job = "examples"
-roots = [".github/workflows"]
+root = ".github/workflows"

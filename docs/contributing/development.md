@@ -180,20 +180,19 @@ work, see [`docs/contributing/openevolve.md`](openevolve.md).
 Every pull request must pass the following gates before it can be merged.
 You can run each one locally before pushing.
 
-The `changes` job selects checks from the component graph in
-`ci-components.toml`. `support/ci_impact/` discovers Python modules from
-`tach.toml`, TypeScript packages from their manifests, and Go and Rust roots
-from `go.mod` and `Cargo.toml`. The top-level graph records cross-component
-effects that those manifests cannot express. The job prints each selection and
-its reason; an unowned changed path fails selection instead of silently
-skipping checks. To inspect a branch's plan locally, run:
+The `changes` job selects checks from the repository policy in
+`ci-impact.toml`. `support/ci_impact/` provides configurable adapters for
+language and package manifests. The top-level graph records cross-component
+effects those manifests cannot express. The job prints each selection and its
+reason; an unowned changed path fails selection instead of silently skipping
+checks. To inspect a branch's plan locally, run:
 
 ```bash
 ./support/ci_impact/ci-impact plan
+(cd support/ci_impact && go test ./... && go vet ./...)
 ```
 
-The Go prototype uses the same policy and CLI commands. Run
-`./support/ci_impact_go/ci-impact-go plan` to compare its selections locally.
+The Go CLI also runs selected native checks with `run-native --targets-json`.
 
 ### Format
 

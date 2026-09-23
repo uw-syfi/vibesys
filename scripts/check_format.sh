@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-targets=(src tests examples resources libs support)
+targets=(src tests examples resources libs)
 
 uv run ruff check --select I "${targets[@]}"
 uv run ruff format --check "${targets[@]}"

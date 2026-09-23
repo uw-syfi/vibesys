@@ -23,6 +23,63 @@ func run(root, program string, args ...string) ([]byte, error) {
 	}
 	return out, nil
 }
+
+// parseNameStatusZ parses `git diff --name-status -z` output. In NUL mode Git
+// separates each status and pathname with NUL, including both paths for a
+// rename or copy. Pathnames are otherwise opaque bytes represented as strings.
+func parseNameStatusZ(raw []byte) ([]string, error) {
+	if len(raw) == 0 {
+		return []string{}, nil
+	}
+	if raw[len(raw)-1] != 0 {
+		return nil, fmt.Errorf("malformed git diff output: missing final NUL")
+	}
+
+	fields := bytes.Split(raw[:len(raw)-1], []byte{0})
+	paths := make([]string, 0, len(fields))
+	seen := make(map[string]bool, len(fields))
+	for i := 0; i < len(fields); {
+		status := string(fields[i])
+		count, ok := nameStatusPathCount(status)
+		if !ok {
+			return nil, fmt.Errorf("malformed git diff status %q", status)
+		}
+		if len(fields)-i-1 < count {
+			return nil, fmt.Errorf("truncated git diff record for status %q", status)
+		}
+		for _, field := range fields[i+1 : i+1+count] {
+			if len(field) == 0 {
+				return nil, fmt.Errorf("empty pathname for status %q", status)
+			}
+			path := string(field)
+			if !seen[path] {
+				paths = append(paths, path)
+				seen[path] = true
+			}
+		}
+		i += count + 1
+	}
+	return paths, nil
+}
+
+func nameStatusPathCount(status string) (int, bool) {
+	switch status {
+	case "A", "M", "D", "T", "U", "X", "B":
+		return 1, true
+	}
+	if len(status) < 2 || (status[0] != 'R' && status[0] != 'C') || len(status) > 4 {
+		return 0, false
+	}
+	score := 0
+	for _, digit := range status[1:] {
+		if digit < '0' || digit > '9' {
+			return 0, false
+		}
+		score = score*10 + int(digit-'0')
+	}
+	return 2, score <= 100
+}
+
 func changedPaths(root, base, head, event string) ([]string, error) {
 	if base == "" || head == "" {
 		return nil, fmt.Errorf("both --base and --head are required")
@@ -48,28 +105,7 @@ func changedPaths(root, base, head, event string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	parts := bytes.Split(out, []byte{0})
-	paths := []string{}
-	seen := map[string]bool{}
-	for i := 0; i < len(parts)-1; {
-		status := string(parts[i])
-		count := 1
-		if strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C") {
-			count = 2
-		}
-		if status == "" || !strings.ContainsRune("ACDMRTUXB", rune(status[0])) || i+count >= len(parts) {
-			return nil, fmt.Errorf("malformed git diff status %q", status)
-		}
-		for j := 1; j <= count; j++ {
-			p := string(parts[i+j])
-			if !seen[p] {
-				paths = append(paths, p)
-				seen[p] = true
-			}
-		}
-		i += count + 1
-	}
-	return paths, nil
+	return parseNameStatusZ(out)
 }
 func trackedPaths(root string) ([]string, error) {
 	out, err := run(root, "git", "ls-files", "-z")
