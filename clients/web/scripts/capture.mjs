@@ -149,6 +149,15 @@ const FIVE_ROLES = ['orchestrator', 'implementer', 'judge', 'profiler', 'perf_ev
 // both calls, so the failure is invented, the way `baseline` invents a baseline value.
 const RETRY = events =>
   events.map(event => (event.sequence === 128 ? {...event, status: 'failed'} : event));
+// The implementer's later calls relabelled as a second attempt, so the log's retry badge has a
+// frame. No recording carries a `-retry-K-` round label, which is the only thing that says an
+// attempt repeated, so this is invented the way `baseline` invents a baseline value.
+const RETRY_LABEL = events =>
+  events.map(event =>
+    event.agent_kind === 'implementer' && event.sequence > 430
+      ? {...event, round_label: 'round-1-retry-2-implementer'}
+      : event,
+  );
 // Rounds 9 to 32, cloned from the stub's last hypothesis with a rising metric. No recording has
 // enough rounds to scroll the rail at 900px tall, which is the state that pins the trend.
 const MANY_ROUNDS = [
@@ -220,6 +229,15 @@ const REPLAY = [
     fixture: queue(RETRY(upTo(QUEUE, 623)), {active: QUEUE_ACTIVE}),
     widths: [1440],
     expect: ['Failed', 'Completed', 'Running'],
+  },
+  {
+    // The log's side of a retry: the badge on each group header of the second attempt, and no
+    // divider row anywhere.
+    name: 'retry-log',
+    fixture: queue(RETRY_LABEL(upTo(QUEUE, 623)), {active: QUEUE_ACTIVE}),
+    widths: [1440],
+    after: page => page.locator('#log .who', {hasText: 'Attempt 2'}).waitFor(),
+    expect: ['Attempt 2'],
   },
   {
     // The vertical fade and the tab stop that comes with it. No round reaches a second row: the
