@@ -115,7 +115,14 @@ def _headless_requested(args: list[str]) -> bool:
     ``--help``/``-h`` and ``validate`` never need the TUI, so they always go to
     the engine (and never trigger a source-checkout build).
     """
-    if "--headless" in args or "--web" in args or "--help" in args or "-h" in args:
+    if (
+        "--headless" in args
+        or "--web" in args
+        or "--web-reopen" in args
+        or "--detach" in args
+        or "--help" in args
+        or "-h" in args
+    ):
         return True
     if args and args[0] in {"tui-defaults", "validate"}:
         return True
@@ -125,7 +132,7 @@ def _headless_requested(args: list[str]) -> bool:
 def _run_headless(args: list[str]) -> int:
     module = (
         "entrypoints.server"
-        if (args and args[0] == "tui-defaults") or "--web" in args
+        if (args and args[0] == "tui-defaults") or "--web" in args or "--web-reopen" in args
         else "entrypoints.headless"
     )
     command_args = args if module == "entrypoints.server" else _without_option(args, "--theme")

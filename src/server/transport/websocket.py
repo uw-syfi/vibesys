@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import secrets
 import threading
 from contextlib import suppress
 from http import HTTPStatus
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -21,11 +23,10 @@ from server.api.protocol import (
     SubscribedMessage,
     SubscribeRequest,
 )
+from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 from server.transport.subscriptions import SubscriptionTracker
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from websockets.asyncio.server import ServerConnection
     from websockets.http11 import Request
     from websockets.http11 import Response as HttpResponse
@@ -49,7 +50,7 @@ class WebSocketGateway:
     Unix adapter.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-101057 [PLR0913]; the gateway exposes independent protocol, asset, port, capability, and discovery options
         self,
         api: RunApi,
         *,
@@ -57,13 +58,19 @@ class WebSocketGateway:
         port: int = 0,
         subscriptions: SubscriptionTracker | None = None,
         token: str | None = None,
+        instance_path: Path | None = None,
+        project_root: Path | None = None,
     ) -> None:
         """Create a loopback gateway around a shared run API."""
         self.api = api
         self.assets_dir = assets_dir.resolve() if assets_dir is not None else None
         self.port = port
         self.token = token or secrets.token_urlsafe(32)
+        self.instance_path = instance_path
+        self.project_root = project_root or Path.cwd()
         self.subscriptions = subscriptions or SubscriptionTracker()
+        self._claim: WebInstanceClaim | None = None
+        self._instance_record: WebInstanceRecord | None = None
         self._server: object | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -100,6 +107,11 @@ class WebSocketGateway:
         self._stop.clear()
         self._ready.clear()
         self._startup_error = None
+        if self.instance_path is not None:
+            claim = WebInstanceClaim(self.instance_path)
+            if not claim.try_acquire():
+                raise RuntimeError("Another VibeSys web gateway owns this project")  # noqa: TRY003  # lint-waiver: LW-101033 [TRY003]; reject a duplicate project-local web gateway
+            self._claim = claim
         self._thread = threading.Thread(
             target=self._run,
             name="vibesys-server-websocket",
@@ -110,6 +122,7 @@ class WebSocketGateway:
         if not self._ready.is_set():
             raise RuntimeError("Timed out starting WebSocket gateway")  # noqa: TRY003  # lint-waiver: LW-101011 [TRY003]; convert a startup synchronization timeout into a clear lifecycle error
         if self._startup_error is not None:
+            self._release_instance()
             raise RuntimeError("Unable to start WebSocket gateway") from self._startup_error  # noqa: TRY003  # lint-waiver: LW-101012 [TRY003]; preserve the gateway startup failure as a lifecycle error
 
     def close(self) -> None:
@@ -124,6 +137,7 @@ class WebSocketGateway:
         self._loop = None
         self._server = None
         self._bound_port = None
+        self._release_instance()
 
     def __enter__(self) -> WebSocketGateway:
         """Start and return the gateway."""
@@ -174,10 +188,28 @@ class WebSocketGateway:
                     "WebSocket gateway did not expose a listening socket"
                 )
             self._bound_port = int(next(iter(sockets)).getsockname()[1])
+            if self.instance_path is not None:
+                self._instance_record = WebInstanceRecord.from_gateway(
+                    pid=os.getpid(),
+                    port=self._bound_port,
+                    token=self.token,
+                    project_root=self.project_root,
+                )
+                self._instance_record.write(self.instance_path)
             self._ready.set()
             await asyncio.to_thread(self._stop.wait)
 
-    async def _process_request(
+    def _release_instance(self) -> None:
+        record = self._instance_record
+        if record is not None and self.instance_path is not None:
+            record.remove_if_owner(self.instance_path)
+        self._instance_record = None
+        claim = self._claim
+        self._claim = None
+        if claim is not None:
+            claim.close()
+
+    async def _process_request(  # noqa: PLR0911  # lint-waiver: LW-101058 [PLR0911]; each HTTP route returns its precise status and body at this protocol boundary
         self, connection: ServerConnection, request: Request
     ) -> HttpResponse | None:
         path = getattr(request, "path", "")
@@ -194,6 +226,9 @@ class WebSocketGateway:
             if origin != allowed_origin:
                 return _respond(connection, HTTPStatus.FORBIDDEN, "Invalid WebSocket origin\n")
             return None
+
+        if parsed.path == "/health":
+            return _response(HTTPStatus.OK, "vibesys-ok\n", "text/plain")
 
         if parsed.path in {"/", "/index.html"}:
             return self._asset_response("index.html", cache_control="no-store")

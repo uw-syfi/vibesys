@@ -604,10 +604,11 @@ class EventStore:
     state.
     """
 
-    def __init__(self, path: Path, run_id: str) -> None:
-        """Open the JSONL event log and index its existing records."""
+    def __init__(self, path: Path, run_id: str, *, read_only: bool = False) -> None:
+        """Open an indexed event file, optionally without cache writes."""
         self.path = path
         self.run_id = run_id
+        self.read_only = read_only
         # Names this store's sequence space. Sequences are only comparable
         # within one store, and a run replaces its store mid-flight when the
         # durable log is attached, so a consumer holding folded state needs an
@@ -627,8 +628,9 @@ class EventStore:
         self._sequences = [record.header.sequence for record in self._records]
         self._next_sequence = self._sequences[-1] + 1 if self._sequences else 1
 
-    def append(self, event: RunEvent) -> RunEvent:
-        """Append an event with this store's next sequence and run identity."""
+    def append(self, event: RunEvent) -> RunEvent:  # noqa: D102  # lint-waiver: LW-101045 [D102]; the append contract is documented by the surrounding event-store protocol
+        if self.read_only:
+            raise PermissionError("Event store is read-only")  # noqa: TRY003  # lint-waiver: LW-101032 [TRY003]; reject writes while serving a reopened read-only run
         with self._changed:
             if self._malformed_tail_offset is not None:
                 with self.path.open("r+b") as stream:
@@ -825,7 +827,11 @@ class EventStore:
                     self._scan_stream_unlocked(records, start=cached.boundary)
                 )
                 self._parse_eager_tail(records, malformed_tail_offset)
-                if initial_source is not None and safe_boundary != cached.boundary:
+                if (
+                    not self.read_only
+                    and initial_source is not None
+                    and safe_boundary != cached.boundary
+                ):
                     self._publish_index(records, safe_count, safe_boundary, initial_source)
                 return records, malformed_tail_offset
 
@@ -834,7 +840,7 @@ class EventStore:
             [], start=0
         )
         self._parse_eager_tail(records, malformed_tail_offset)
-        if initial_source is not None:
+        if not self.read_only and initial_source is not None:
             self._publish_index(records, safe_count, safe_boundary, initial_source)
         return records, malformed_tail_offset
 

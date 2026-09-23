@@ -512,7 +512,12 @@ class Response(ProtocolModel):
         code: str | None = None,
     ) -> Response:
         """Build a failed response with consistent legacy and typed errors."""
-        diagnostic = exception_to_diagnostic(error, scope=scope, operation=operation, code=code)
+        diagnostic = exception_to_diagnostic(
+            error,
+            scope=scope,
+            operation=operation,
+            code=code or getattr(error, "diagnostic_code", None),
+        )
         return cls(request_id=request_id, ok=False, error=diagnostic.summary, diagnostic=diagnostic)
 
 
@@ -572,7 +577,12 @@ class ProtocolErrorMessage(ProtocolModel):
         code: str | None = None,
     ) -> ProtocolErrorMessage:
         """Build a protocol error with consistent legacy and typed errors."""
-        diagnostic = exception_to_diagnostic(error, scope=scope, operation=operation, code=code)
+        diagnostic = exception_to_diagnostic(
+            error,
+            scope=scope,
+            operation=operation,
+            code=code or getattr(error, "diagnostic_code", None),
+        )
         return cls(
             request_id=request_id,
             code=diagnostic.code,

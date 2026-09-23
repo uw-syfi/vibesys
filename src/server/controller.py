@@ -76,6 +76,30 @@ class RunController:
             self._journal.attach(log_dir, run_id=run_id)
             self._apply_locked(RunTrigger.ATTACHED)
 
+    def attach_read_only(self, log_dir: Path, *, run_id: str | None = None) -> None:
+        """Open an ended journal without appending lifecycle or query events."""
+        with self._condition:
+            self._project_run = None
+            self._journal.attach(log_dir, run_id=run_id, read_only=True)
+            status = RunStatus.STARTING
+            for event in self._journal.read_history():
+                if event.type is EventType.RUN_STATUS_CHANGED and isinstance(
+                    event.data, RunStatusChangedData
+                ):
+                    status = event.data.status
+                elif event.type is EventType.RUN_FINISHED:
+                    status = RunStatus.COMPLETED
+                elif event.type in {EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}:
+                    status = RunStatus.FAILED
+            if not status.has_ended:
+                raise ValueError("Read-only serving requires a finished run")  # noqa: TRY003  # lint-waiver: LW-101044 [TRY003]; reject reopening an unfinished run with a clear API error
+            self._status = status
+
+    def is_read_only(self) -> bool:
+        """Return whether this controller is serving a finished run."""
+        with self._condition:
+            return self._journal.read_only
+
     def _apply_locked(
         self,
         trigger: RunTrigger,

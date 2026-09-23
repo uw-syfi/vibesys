@@ -15,6 +15,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
 from server.api.protocol import SnapshotQuery, SubscribeRequest
+from server.transport.discovery import WebInstanceRecord
 from server.transport.websocket import (
     WebSocketGateway,
     _connection_closed,
@@ -234,3 +235,20 @@ def test_gateway_reports_subscription_bootstrap_failure(
         response = asyncio.run(request())
     assert response["type"] == "protocol_error"
     assert response["code"] == "stream_failed"
+
+
+def test_gateway_publishes_and_cleans_project_instance_record(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+    assets = tmp_path / "web"
+    assets.mkdir()
+    (assets / "index.html").write_text("ok")
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+
+    with WebSocketGateway(parts.api, assets_dir=assets, instance_path=instance_path) as gateway:
+        record = WebInstanceRecord.discover(instance_path)
+        assert record is not None
+        assert record.url == gateway.url
+    with urlopen(f"http://127.0.0.1:{gateway.bound_port}/health?token={gateway.token}") as response:
+        assert response.read() == b"vibesys-ok\n"
+
+    assert not instance_path.exists()

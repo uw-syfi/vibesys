@@ -85,6 +85,29 @@ and the exact page Origin. This is local browser hygiene, not remote authenticat
 and TUI remain the default path, and the WebSocket adapter uses one connection each for control,
 subscription, and chat as specified by the shared wire contract.
 
+### Detached and read-only web lifetimes
+
+`vibesys --web --detach` is the explicit long-lived mode. The launcher creates a new session for a
+server child, returns after that child publishes its capability URL, and leaves the child serving
+with zero subscribers. A later TUI or browser client can use the same Unix or WebSocket bootstrap,
+including the existing store-id and tail semantics. `SIGTERM` or `ServerRuntime.shutdown()` is the
+deliberate stop operation. Without `--detach`, the 30-second first-subscriber timeout and
+last-subscriber teardown remain unchanged.
+
+The detached gateway publishes `.vibesys/web-gateway.json` by default. The record is written by
+temporary-file replacement, has owner-only permissions, and contains the PID, loopback port,
+capability token, and project root. Discovery requires both a live PID and a token-authenticated
+`/health` response. A failed probe removes only the matching stale record. The path can be
+overridden with `--web-instance`; it is project-local, so two working directories do not share
+gateway state. The default port remains ephemeral across restarts. Use `--web-port` when a stable
+bookmarkable port is required.
+
+`vibesys --web --web-reopen PATH` serves a completed `run-events.jsonl` through the same API and
+WebSocket transport without attaching a project writer. Event history and indexed state are read
+from the existing event store, query bookkeeping is suppressed, and control or thread-creation
+requests return the typed `run_read_only` diagnostic. A reopened server remains alive until
+explicitly stopped.
+
 `core-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
 time-dependent selectors require an explicit clock value so tests remain deterministic. Transcript
 labels and tones are semantic annotations derived from event fields; the TUI decides whether and how

@@ -95,26 +95,46 @@ class WireJournal:
         self._error_diagnostics: dict[int, tuple[BaseException, Diagnostic]] = {}
         self._listeners: list[tuple[EventListener, HeaderFilter]] = []
         self.log_dir: Path | None = None
+        self._read_only = False
 
     def add_listener(self, listener: EventListener, *, replay_filter: HeaderFilter) -> None:
         """Register a live append reducer and its selective replay filter."""
         with self._condition:
             self._listeners.append((listener, replay_filter))
 
-    def attach(self, log_dir: Path, *, run_id: str | None = None) -> None:
+    def attach(  # noqa: C901  # lint-waiver: LW-101046 [C901]; attachment handles store replacement, replay continuity, and read-only validation as one atomic operation
+        self, log_dir: Path, *, run_id: str | None = None, read_only: bool = False
+    ) -> None:
         """Attach the journal to a durable run event file."""
-        log_dir.mkdir(parents=True, exist_ok=True)
+        if read_only:
+            if not log_dir.is_dir():
+                raise FileNotFoundError(log_dir)
+        else:
+            log_dir.mkdir(parents=True, exist_ok=True)
         events_path = log_dir / "run-events.jsonl"
+        if read_only and not events_path.is_file():
+            raise FileNotFoundError(events_path)
         with self._condition:
             previous = self._store
             if previous is not None and previous.path == events_path:
                 if run_id is not None:
                     previous.run_id = run_id
                 self.log_dir = log_dir
+                self._read_only = read_only
                 return
-            durable = EventStore(events_path, run_id=run_id or log_dir.parent.name)
+            durable = (
+                EventStore(events_path, run_id=run_id or log_dir.parent.name)
+                if not read_only
+                else EventStore(
+                    events_path,
+                    run_id=run_id or log_dir.parent.name,
+                    read_only=True,
+                )
+            )
             self._index_stored_history(durable)
             pending = previous.read() if previous is not None else self._pending_events
+            if read_only and pending:
+                raise RuntimeError("Cannot replace a read-only journal with pending events")  # noqa: TRY003  # lint-waiver: LW-101047 [TRY003]; reject an unsafe store transition instead of silently dropping pending events
             self._pending_events = []
             # Migrating into an empty log re-appends the retired store's events
             # in order, so every sequence keeps its meaning: the new store
@@ -128,7 +148,8 @@ class WireJournal:
                 self._apply_recorded(durable.append(event))
             self._store = durable
             self.log_dir = log_dir
-            started_fresh = previous is None
+            started_fresh = previous is None and not read_only
+            self._read_only = read_only
             if previous is not None:
                 previous.notify_change()
         if started_fresh:
@@ -154,6 +175,8 @@ class WireJournal:
         _require_failure_diagnostic(event_type, fields.get("status"), fields.get("diagnostic"))
         event = make_event(event_type, text, data=data, **fields)
         with self._condition:
+            if self._read_only:
+                return event
             store = self._store
             if store is None:
                 self._pending_events.append(event)
@@ -168,6 +191,8 @@ class WireJournal:
         """
         _require_failure_diagnostic(event.type, event.status, event.diagnostic)
         with self._condition:
+            if self._read_only:
+                return event
             store = self._store
             if store is None:
                 self._pending_events.append(event)
@@ -309,6 +334,12 @@ class WireJournal:
         """Return the latest durable wire-event sequence."""
         with self._condition:
             return self.latest_sequence_locked()
+
+    @property
+    def read_only(self) -> bool:
+        """Whether this journal accepts no appends."""
+        with self._condition:
+            return self._read_only
 
     def latest_sequence_locked(self) -> int:
         """Return the latest sequence while the shared lock is held."""

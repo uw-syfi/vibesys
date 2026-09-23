@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 import tempfile
+import time
+import webbrowser
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from entrypoints import cli
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
+from server.transport.discovery import WebInstanceRecord
 from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
 from vs_github.api import GitHubCLI, GitHubCLIError
@@ -30,7 +35,11 @@ def _control_socket_from_argv(argv: list[str]) -> Path | None:
 
 
 def _web_requested(argv: list[str]) -> bool:
-    return "--web" in argv
+    return "--web" in argv or "--web-reopen" in argv
+
+
+def _detach_requested(argv: list[str]) -> bool:
+    return "--detach" in argv
 
 
 def _web_port_from_argv(argv: list[str]) -> int:
@@ -55,6 +64,20 @@ def _web_assets_from_argv(argv: list[str]) -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
+def _web_instance_from_argv(argv: list[str]) -> Path:
+    value = cli._option_from_argv(argv, "--web-instance")  # noqa: SLF001  # lint-waiver: LW-101042 [SLF001]; reuse the CLI's private option scanner for the launcher-only flag
+    return (
+        Path(value).expanduser().resolve()
+        if value is not None
+        else (Path.cwd() / ".vibesys" / "web-gateway.json").resolve()
+    )
+
+
+def _read_only_log_from_argv(argv: list[str]) -> Path | None:
+    value = cli._option_from_argv(argv, "--web-reopen")  # noqa: SLF001  # lint-waiver: LW-101043 [SLF001]; reuse the CLI's private option scanner for the launcher-only flag
+    return Path(value).expanduser().resolve() if value is not None else None
+
+
 def _headless_argv(argv: list[str]) -> list[str]:
     """Remove server-only options before dispatching to the core CLI."""
     arguments: list[str] = []
@@ -63,12 +86,28 @@ def _headless_argv(argv: list[str]) -> list[str]:
         if skip_next:
             skip_next = False
             continue
-        if argument in {"--control-socket", "--theme", "--web-port", "--web-assets"}:
+        if argument in {
+            "--control-socket",
+            "--theme",
+            "--web-port",
+            "--web-assets",
+            "--web-instance",
+            "--web-reopen",
+        }:
             skip_next = True
             continue
-        if argument == "--web":
+        if argument in {"--web", "--detach"}:
             continue
-        if argument.startswith(("--control-socket=", "--theme=", "--web-port=", "--web-assets=")):
+        if argument.startswith(
+            (
+                "--control-socket=",
+                "--theme=",
+                "--web-port=",
+                "--web-assets=",
+                "--web-instance=",
+                "--web-reopen=",
+            )
+        ):
             continue
         arguments.append(argument)
     return arguments
@@ -179,7 +218,30 @@ def _missing_control_socket() -> NoReturn:
     )
 
 
-def main(argv: list[str] | None = None) -> None:  # noqa: C901  # lint-waiver: LW-101005 [C901]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
+def _spawn_detached(arguments: list[str], instance_path: Path) -> None:
+    """Start the long-lived child and wait for its capability record."""
+    environment = {**os.environ, "VIBESYS_DETACHED_CHILD": "1"}
+    subprocess.Popen(  # noqa: S603  # lint-waiver: LW-101035 [S603]; launch the detached child with a fixed interpreter/module command
+        [sys.executable, "-m", "entrypoints.server", *arguments],
+        cwd=Path.cwd(),
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        record = WebInstanceRecord.discover(instance_path, cleanup_stale=False)
+        if record is not None:
+            print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101036 [T201]; expose the detached capability URL to the launcher user
+            webbrowser.open(record.url, new=2)
+            return
+        time.sleep(0.05)
+    raise RuntimeError("Detached VibeSys web gateway did not become ready")  # noqa: TRY003  # lint-waiver: LW-101037 [TRY003]; report a bounded child-startup failure to the launcher
+
+
+def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR0912, PLR0915]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
     """Run the frontend server and headless engine in one process."""
     arguments = sys.argv[1:] if argv is None else argv
     if arguments and arguments[0] == "tui-defaults":
@@ -190,6 +252,25 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901  # lint-waiver: L
         return
 
     web = _web_requested(arguments)
+    detach = _detach_requested(arguments)
+    if detach and not web:
+        cli.configuration_error(
+            "--detach requires --web",
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
+    instance_path = _web_instance_from_argv(arguments) if web else None
+    if web and os.environ.get("VIBESYS_DETACHED_CHILD") != "1":
+        if instance_path is None:  # pragma: no cover - web always supplies a path.
+            raise RuntimeError("Web instance path was not resolved")  # noqa: TRY003  # lint-waiver: LW-101038 [TRY003]; guard an impossible parser/launcher invariant
+        existing = WebInstanceRecord.discover(instance_path)
+        if existing is not None:
+            print(f"VibeSys web UI: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101039 [T201]; expose the reused capability URL to the launcher user
+            webbrowser.open(existing.url, new=2)
+            return
+        if detach:
+            _spawn_detached(arguments, instance_path)
+            return
     control_socket = _control_socket_from_argv(arguments)
     temp_socket_dir: tempfile.TemporaryDirectory[str] | None = None
     if control_socket is None and web:
@@ -203,6 +284,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901  # lint-waiver: L
     try:
         web_port = _web_port_from_argv(arguments)
         web_assets = _web_assets_from_argv(arguments)
+        read_only_log = _read_only_log_from_argv(arguments)
     except ValueError as exc:
         cli.configuration_error(
             str(exc),
@@ -218,6 +300,9 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901  # lint-waiver: L
                 web=True,
                 web_port=web_port,
                 web_assets=web_assets,
+                instance_path=instance_path,
+                detach=detach,
+                read_only_log=read_only_log,
             )
         else:
             runtime = server_runtime(
@@ -225,9 +310,12 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901  # lint-waiver: L
                 tui_defaults=_tui_defaults_from_argv(arguments),
             )
         try:
-            invocation = cli.parse_cli_invocation(_headless_argv(arguments))
-            request = cli.build_run_request(invocation)
-            result = runtime.run(lambda: runtime.drive(request))
+            if read_only_log is not None:
+                result = runtime.run(lambda: None)
+            else:
+                invocation = cli.parse_cli_invocation(_headless_argv(arguments))
+                request = cli.build_run_request(invocation)
+                result = runtime.run(lambda: runtime.drive(request))
         except ConfigurationError as exc:
             raise SystemExit(exc.diagnostic.exit_code) from None
     finally:
