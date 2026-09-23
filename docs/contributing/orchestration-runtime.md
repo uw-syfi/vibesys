@@ -104,12 +104,21 @@ choice. It uses the same run control and event path as text turns.
 Use `AgentDefinition.resources` for grants; nondefault `AgentSpec.execution`
 is rejected by this runtime slice rather than silently ignored.
 
-The built-in multi-agent policy declares orchestrator, implementer, judge, and
-profiler roles as named handles over its existing shared run context. Its policy
-code still chooses whether to profile or review, routes typed plans and feedback,
-and controls retries and round completion. These internal bindings do not call
-`VibeSysRuntime.spawn_agent`; preserving the built-in client, sandbox, hypothesis
-sessions, and round transaction behavior is part of this incremental migration.
+The built-in agent loop uses an internal `BuiltInAgentControlFlow` protocol in
+`src/vibesys/loops/agent/policy_flow.py`. The shared executor in `loop.py`
+selects one flow before the first round and calls its preparation, attempt,
+evidence, continuation, and profile-outcome methods. `MultiAgentFlow` binds the
+orchestrator prepass, optional profiler, implementer, and judge in
+`policy_multi.py`. `SingleAgentFlow` binds one combined implementation, profile,
+and review turn in `policy_single.py`. `ProfileGuidedFlow` wraps either inner flow
+with component profiling and measurement from `policy_profile.py`. Evolve has its
+own control flow in `src/vibesys/loops/evolve/loop.py`. The agent executor owns
+durable retry numbering, framework gates, and round transactions. These built-in
+role bindings use the existing shared context rather than
+`VibeSysRuntime.spawn_agent`. This internal protocol preserves the current
+built-in round and retry semantics. Custom orchestrations implement the
+run-level `execute(request, runtime)` hook above; they can inspect each agent's
+output to choose the next agent, message, or action dynamically.
 
 This is the first runtime slice. Agents share the run workspace unless the
 selected run environment isolates it. The runtime does not yet offer a generic

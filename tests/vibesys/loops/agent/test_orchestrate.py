@@ -17,26 +17,34 @@ from vibesys.evaluators.input_manifest import BenchmarkResult, WorkspaceSource
 from vibesys.loops.agent import issue_board
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.loop import (
-    FrameworkBenchmarkOutcome,
     _backfill_revert_commit,
-    _candidate_evidence_is_fresh,
     _finalize_agent_run,
-    _invoke_read_only_role,
-    _missing_implementer_response,
     _official_evaluation_reason,
     _pareto_archive_dominators,
     _pareto_archive_summary,
-    _pareto_frontier_records,
     _provisional_candidates_since_official,
-    _review_due,
-    _run_framework_validation_gate,
-    _select_final_candidate,
     _terminal_workspace_notice,
-    _trusted_candidate_records,
     run_agent_loop,
 )
 from vibesys.loops.agent.model import Hypothesis, HypothesisResolution, HypothesisReview
+from vibesys.loops.agent.policy_gates import (
+    _run_framework_accuracy_gate,
+    _run_framework_benchmark,
+    _run_framework_gates,
+    _run_framework_validation_gate,
+)
+from vibesys.loops.agent.policy_support import (
+    _candidate_evidence_is_fresh,
+    _invoke_read_only_role,
+    _missing_implementer_response,
+    _pareto_archive_conflict,
+    _pareto_frontier_records,
+    _review_due,
+    _select_final_candidate,
+    _trusted_candidate_records,
+)
 from vibesys.loops.agent.state import AgentRunStateStore
+from vibesys.loops.gates import FrameworkBenchmarkOutcome
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.prompts import PROMPTS_DIR
@@ -389,7 +397,7 @@ def _invoke_orchestrate(
         patch("vibesys.context.build_agent_client", return_value=runner),
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
         patch(
-            "vibesys.loops.agent.loop._run_framework_accuracy_gate",
+            "vibesys.loops.agent.policy_gates._run_framework_accuracy_gate",
             side_effect=_accuracy_gate_results,
             return_value=None,
         ),
@@ -897,8 +905,6 @@ def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_p
 
 
 def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _pareto_archive_conflict  # noqa: PLC0415  # tracked: #288
-
     trusted = RoundRecord(
         61,
         "a" * 40,
@@ -923,8 +929,6 @@ def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate():  #
 
 
 def test_live_archive_preserves_real_throughput_latency_tradeoff():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _pareto_archive_conflict  # noqa: PLC0415  # tracked: #288
-
     trusted = RoundRecord(
         6,
         "a" * 40,
@@ -1905,10 +1909,6 @@ def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path):  # no
 
 
 def test_framework_accuracy_gate_runs_manifest_command_and_records_pass(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
-
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
     ctx.judge_accuracy_command = "trusted-check --profile hard"
@@ -2095,7 +2095,7 @@ def test_loop_runs_local_validation_only_after_judge_pass(tmp_path, ref_file):  
     fake.enqueue("judge", _judge_response("pass"))
 
     with patch(
-        "vibesys.loops.agent.loop._run_framework_validation_gate",
+        "vibesys.loops.agent.policy_multi._run_framework_validation_gate",
         return_value=None,
     ) as validation_gate:
         _invoke_orchestrate(
@@ -2113,10 +2113,6 @@ def test_loop_runs_local_validation_only_after_judge_pass(tmp_path, ref_file):  
 
 
 def test_framework_accuracy_gate_rejects_checker_failure(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
-
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
     ctx.judge_accuracy_command = "trusted-check"
@@ -2135,10 +2131,6 @@ def test_framework_accuracy_gate_rejects_checker_failure(tmp_path):  # noqa: ANN
 
 
 def test_framework_accuracy_gate_uses_manifest_timeout(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
-
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
     ctx.judge_accuracy_command = "trusted-check"
@@ -2156,10 +2148,6 @@ def test_framework_accuracy_gate_uses_manifest_timeout(tmp_path):  # noqa: ANN00
 
 
 def test_framework_accuracy_gate_passes_candidate_revision_to_environment(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
-
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
     ctx.judge_accuracy_command = "trusted-check"
@@ -2180,10 +2168,6 @@ def test_framework_accuracy_gate_passes_candidate_revision_to_environment(tmp_pa
 
 
 def test_framework_accuracy_gate_can_release_final_deployment(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
-
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
     ctx.judge_accuracy_command = "trusted-check"
@@ -2206,10 +2190,6 @@ def test_framework_accuracy_gate_can_release_final_deployment(tmp_path):  # noqa
 
 
 def test_framework_accuracy_gate_rejects_evaluator_changes_without_execution(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
-
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = ["_input_libs/checker.go"]
     ctx.judge_accuracy_command = "trusted-check"
@@ -2227,10 +2207,6 @@ def test_framework_accuracy_gate_rejects_evaluator_changes_without_execution(tmp
 
 
 def test_framework_accuracy_gate_rejects_changes_during_execution(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
-
     ctx = MagicMock()
     ctx.trusted_input_changes.side_effect = [[], ["_input_libs/checker.go"]]
     ctx.judge_accuracy_command = "trusted-check"
@@ -2248,8 +2224,6 @@ def test_framework_accuracy_gate_rejects_changes_during_execution(tmp_path):  # 
 
 
 def test_framework_gates_reuse_accuracy_pass_after_later_gate_failure(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_gates  # noqa: PLC0415  # tracked: #288
-
     ctx = MagicMock()
     ctx.agent_client.backend_name = "cli"
     ctx.judge_accuracy_command = "trusted-check"
@@ -2257,11 +2231,11 @@ def test_framework_gates_reuse_accuracy_pass_after_later_gate_failure(tmp_path):
 
     with (
         patch(
-            "vibesys.loops.agent.loop._run_framework_accuracy_gate",
+            "vibesys.loops.agent.policy_gates._run_framework_accuracy_gate",
             return_value=None,
         ) as accuracy_gate,
         patch(
-            "vibesys.loops.agent.loop._run_framework_benchmark",
+            "vibesys.loops.agent.policy_gates._run_framework_benchmark",
             side_effect=[
                 FrameworkBenchmarkOutcome(feedback="benchmark failed"),
                 FrameworkBenchmarkOutcome(metric_name="tok/s", metric_value=42.0),
@@ -2300,7 +2274,6 @@ def test_framework_gates_reuse_accuracy_pass_after_later_gate_failure(tmp_path):
 
 def test_framework_benchmark_extracts_declared_metric(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
         FRAMEWORK_BENCHMARK_END_MARKER,
         FRAMEWORK_BENCHMARK_MARKER,
@@ -2345,7 +2318,6 @@ def test_framework_benchmark_extracts_declared_metric(tmp_path):  # noqa: ANN001
 
 def test_framework_benchmark_prefers_top_level_metric_over_trial_diagnostics(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
         FRAMEWORK_BENCHMARK_END_MARKER,
         FRAMEWORK_BENCHMARK_MARKER,
@@ -2378,7 +2350,6 @@ def test_framework_benchmark_prefers_top_level_metric_over_trial_diagnostics(tmp
 
 def test_framework_benchmark_rejects_ambiguous_metric(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
         FRAMEWORK_BENCHMARK_END_MARKER,
         FRAMEWORK_BENCHMARK_MARKER,
@@ -2442,7 +2413,6 @@ def _protocol_benchmark_ctx(stream: str) -> MagicMock:
 
 
 def test_protocol_benchmark_reads_complete_row(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
     from vibesys.loops.gates import PROTOCOL_OUTPUT_FLAG  # noqa: PLC0415  # tracked: #288
 
     ctx = _protocol_benchmark_ctx(f"{_HELLO}\n{_RESULT}")
@@ -2470,8 +2440,6 @@ def test_protocol_benchmark_reads_complete_row(tmp_path):  # noqa: ANN001, ANN20
 
 
 def test_protocol_benchmark_rejects_objective_the_evaluator_does_not_declare(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
-
     ctx = _protocol_benchmark_ctx(f"{_HELLO}\n{_RESULT}")
 
     outcome = _run_framework_benchmark(
@@ -2493,8 +2461,6 @@ def test_protocol_benchmark_rejects_objective_the_evaluator_does_not_declare(tmp
 
 
 def test_protocol_benchmark_reports_evaluator_error_record(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
-
     stream = f'{_HELLO}\n{{"kind":"error","message":"queue never reached steady state"}}'
     ctx = _protocol_benchmark_ctx(stream)
 
@@ -2513,8 +2479,6 @@ def test_protocol_benchmark_reports_evaluator_error_record(tmp_path):  # noqa: A
 
 
 def test_protocol_benchmark_surfaces_reason_code_for_malformed_stream(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
-
     ctx = _protocol_benchmark_ctx("not a record")
 
     outcome = _run_framework_benchmark(
@@ -2581,7 +2545,7 @@ def test_official_protocol_benchmark_row_becomes_the_round_metrics(tmp_path, ref
     fake = _new_orchestrate_fake()
 
     with patch(
-        "vibesys.loops.agent.loop._run_framework_benchmark",
+        "vibesys.loops.agent.policy_gates._run_framework_benchmark",
         return_value=FrameworkBenchmarkOutcome(
             metric_name="total_ops_per_sec",
             metric_value=41250.3,
@@ -4167,7 +4131,7 @@ def test_official_framework_benchmark_scalar_populates_round_metrics(tmp_path, r
     fake = _new_orchestrate_fake()
 
     with patch(
-        "vibesys.loops.agent.loop._run_framework_benchmark",
+        "vibesys.loops.agent.policy_gates._run_framework_benchmark",
         return_value=FrameworkBenchmarkOutcome(metric_name="tok/s", metric_value=512.0),
     ):
         _invoke_orchestrate(
@@ -4229,7 +4193,7 @@ def test_official_regression_disproves_and_drops_queue_candidate(tmp_path, ref_f
     ]
 
     with patch(
-        "vibesys.loops.agent.loop._run_framework_benchmark",
+        "vibesys.loops.agent.policy_gates._run_framework_benchmark",
         side_effect=benchmark_results,
     ):
         _invoke_orchestrate(
@@ -5009,7 +4973,7 @@ def test_loop_threads_plateau_warning_into_prompt(tmp_path, ref_file):  # noqa: 
     # readings have to come from the benchmark gate. Round one measures
     # nothing; rounds 2-5 are flat at 41.9-42.1.
     with patch(
-        "vibesys.loops.agent.loop._run_framework_benchmark",
+        "vibesys.loops.agent.policy_gates._run_framework_benchmark",
         side_effect=[
             FrameworkBenchmarkOutcome(),
             *(
@@ -5163,7 +5127,7 @@ def test_framework_measured_round_is_stamped_framework(tmp_path, ref_file):  # n
     )
 
     with patch(
-        "vibesys.loops.agent.loop._run_framework_benchmark",
+        "vibesys.loops.agent.policy_gates._run_framework_benchmark",
         return_value=FrameworkBenchmarkOutcome(
             metric_name="total_ops_per_sec",
             metric_value=41250.3,
@@ -5225,7 +5189,7 @@ def test_single_agent_framework_benchmark_overrides_and_stamps_framework(tmp_pat
     fake.enqueue("implementer", _single_agent_round(123.5))
 
     with patch(
-        "vibesys.loops.agent.loop._run_framework_benchmark",
+        "vibesys.loops.agent.policy_gates._run_framework_benchmark",
         return_value=FrameworkBenchmarkOutcome(
             metric_name="total_ops_per_sec",
             metric_value=41250.3,
@@ -5297,7 +5261,7 @@ def test_framework_measured_improvement_resolves_proven(tmp_path, ref_file):  # 
     )
 
     with patch(
-        "vibesys.loops.agent.loop._run_framework_benchmark",
+        "vibesys.loops.agent.policy_gates._run_framework_benchmark",
         side_effect=[
             FrameworkBenchmarkOutcome(
                 metric_name="total_ops_per_sec",

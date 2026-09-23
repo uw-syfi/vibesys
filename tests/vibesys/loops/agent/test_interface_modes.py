@@ -19,7 +19,10 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError
-from vibesys.loops.agent.loop import _effective_profiler_definition
+from vibesys.loops.agent.policy_support import (
+    _effective_profiler_definition,
+    _profiler_prompt_template,
+)
 from vibesys.loops.metrics import MetricSpace
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, render_template
@@ -91,8 +94,6 @@ def test_loop_constants_and_rejects_unknown_interface():  # noqa: ANN201  # trac
 
 
 def test_torch_profiler_honors_resolved_environment_capability():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _profiler_prompt_template  # noqa: PLC0415  # tracked: #288
-
     assert (
         _profiler_prompt_template(
             ProfilerKind.TORCH,
@@ -108,22 +109,16 @@ def test_torch_profiler_honors_resolved_environment_capability():  # noqa: ANN20
 
 
 def test_non_torch_profilers_use_the_resolved_kind():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _profiler_prompt_template  # noqa: PLC0415  # tracked: #288
-
     assert _profiler_prompt_template(ProfilerKind.NEURON) == "profilers/neuron.j2"
     assert _profiler_prompt_template(ProfilerKind.NSYS) == "profilers/nsys.j2"
 
 
 def test_standalone_profiler_none_has_no_prompt_template():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _profiler_prompt_template  # noqa: PLC0415  # tracked: #288
-
     with pytest.raises(ValueError, match="disabled"):
         _profiler_prompt_template(ProfilerKind.NONE)
 
 
 def test_standalone_profiler_rejects_unknown_kind():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _profiler_prompt_template  # noqa: PLC0415  # tracked: #288
-
     # The runtime guard is the subject here, so the declared type is violated
     # deliberately: a caller that skips static checking must still be rejected.
     with pytest.raises(TypeError, match="ProfilerKind"):

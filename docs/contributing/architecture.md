@@ -98,6 +98,7 @@ graph TD
     vibesys.api._orchestrations.agent --> vibesys.api._orchestrations.contracts
     vibesys.api._orchestrations.agent --> vibesys.api.contracts
     vibesys.api._orchestrations.agent --> vibesys.loops.agent
+    vibesys.api._orchestrations.agent --> vibesys.loops.agent.loop
     vibesys.api._orchestrations.agent --> vibesys.orchestration
     vibesys.api._orchestrations.agent --> vibesys.run
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.agent
@@ -181,6 +182,32 @@ graph TD
     vibesys.loops.agent --> vibesys.render
     vibesys.loops.agent --> vibesys.run
     vibesys.loops.agent --> vibesys.sandbox
+    vibesys.loops.agent.loop --> vibesys
+    vibesys.loops.agent.loop --> vibesys.context
+    vibesys.loops.agent.loop --> vibesys.domains
+    vibesys.loops.agent.loop --> vibesys.evaluators
+    vibesys.loops.agent.loop --> vibesys.loops
+    vibesys.loops.agent.loop --> vibesys.loops.agent
+    vibesys.loops.agent.loop --> vibesys.loops.agent.policy_flow
+    vibesys.loops.agent.loop --> vibesys.loops.agent.policy_profile
+    vibesys.loops.agent.loop --> vibesys.profilers
+    vibesys.loops.agent.loop --> vibesys.render
+    vibesys.loops.agent.loop --> vibesys.run
+    vibesys.loops.agent.loop --> vibesys.sandbox
+    vibesys.loops.agent.policy_flow --> vibesys
+    vibesys.loops.agent.policy_flow --> vibesys.evaluators
+    vibesys.loops.agent.policy_flow --> vibesys.loops.agent
+    vibesys.loops.agent.policy_flow --> vibesys.loops.agent.policy_multi
+    vibesys.loops.agent.policy_flow --> vibesys.loops.agent.policy_profile
+    vibesys.loops.agent.policy_flow --> vibesys.loops.agent.policy_single
+    vibesys.loops.agent.policy_multi --> vibesys
+    vibesys.loops.agent.policy_multi --> vibesys.loops.agent
+    vibesys.loops.agent.policy_multi --> vibesys.profilers
+    vibesys.loops.agent.policy_profile --> vibesys.evaluators
+    vibesys.loops.agent.policy_profile --> vibesys.loops.agent
+    vibesys.loops.agent.policy_profile --> vibesys.run
+    vibesys.loops.agent.policy_single --> vibesys
+    vibesys.loops.agent.policy_single --> vibesys.loops.agent
     vibesys.loops.evolve --> vibesys
     vibesys.loops.evolve --> vibesys.context
     vibesys.loops.evolve --> vibesys.domains
@@ -341,6 +368,7 @@ graph TD
     vibesys.api._orchestrations.agent --> vibesys.api._orchestrations.contracts
     vibesys.api._orchestrations.agent --> vibesys.api.contracts
     vibesys.api._orchestrations.agent --> vibesys.loops.agent
+    vibesys.api._orchestrations.agent --> vibesys.loops.agent.loop
     vibesys.api._orchestrations.agent --> vibesys.orchestration
     vibesys.api._orchestrations.agent --> vibesys.run
     vibesys.api._orchestrations.agent --> vs_project
@@ -448,6 +476,35 @@ graph TD
     vibesys.loops.agent --> vs_agent
     vibesys.loops.agent --> vs_loop_state
     vibesys.loops.agent --> vs_project
+    vibesys.loops.agent.loop --> vibesys
+    vibesys.loops.agent.loop --> vibesys.context
+    vibesys.loops.agent.loop --> vibesys.domains
+    vibesys.loops.agent.loop --> vibesys.evaluators
+    vibesys.loops.agent.loop --> vibesys.loops
+    vibesys.loops.agent.loop --> vibesys.loops.agent
+    vibesys.loops.agent.loop --> vibesys.loops.agent.policy_flow
+    vibesys.loops.agent.loop --> vibesys.loops.agent.policy_profile
+    vibesys.loops.agent.loop --> vibesys.profilers
+    vibesys.loops.agent.loop --> vibesys.render
+    vibesys.loops.agent.loop --> vibesys.run
+    vibesys.loops.agent.loop --> vibesys.sandbox
+    vibesys.loops.agent.loop --> vs_agent
+    vibesys.loops.agent.loop --> vs_loop_state
+    vibesys.loops.agent.policy_flow --> vibesys
+    vibesys.loops.agent.policy_flow --> vibesys.evaluators
+    vibesys.loops.agent.policy_flow --> vibesys.loops.agent
+    vibesys.loops.agent.policy_flow --> vibesys.loops.agent.policy_multi
+    vibesys.loops.agent.policy_flow --> vibesys.loops.agent.policy_profile
+    vibesys.loops.agent.policy_flow --> vibesys.loops.agent.policy_single
+    vibesys.loops.agent.policy_multi --> vibesys
+    vibesys.loops.agent.policy_multi --> vibesys.loops.agent
+    vibesys.loops.agent.policy_multi --> vibesys.profilers
+    vibesys.loops.agent.policy_profile --> vibesys.evaluators
+    vibesys.loops.agent.policy_profile --> vibesys.loops.agent
+    vibesys.loops.agent.policy_profile --> vibesys.run
+    vibesys.loops.agent.policy_single --> vibesys
+    vibesys.loops.agent.policy_single --> vibesys.loops.agent
+    vibesys.loops.agent.policy_single --> vs_loop_state
     vibesys.loops.evolve --> vibesys
     vibesys.loops.evolve --> vibesys.context
     vibesys.loops.evolve --> vibesys.domains
