@@ -12,7 +12,7 @@
   outline-offset: -2px;
 }
 .log .col {
-  padding-block: var(--space-6) var(--space-12);
+  padding-block: var(--space-6) var(--space-4);
 }
 .grps {
   display: grid;
@@ -20,19 +20,17 @@
 }
 .grp {
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
-  column-gap: var(--space-4);
 }
-/* Sticky so the acting role stays named while its rows scroll. */
+/* A full-width header, so rows get the whole measure. Sticky, so the acting role stays named
+   while its rows scroll under it; opaque, so they disappear cleanly at its edge. */
 .who {
   position: sticky;
   top: 0;
   z-index: 1;
-  align-self: start;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: 28px;
+  height: 22px;
   background: var(--canvas);
   color: var(--text-muted);
   font-weight: 500;
@@ -65,7 +63,8 @@
   align-items: center;
   column-gap: var(--space-3);
   width: calc(100% + 2 * var(--space-2));
-  height: 28px;
+  height: 20px;
+  line-height: 18px;
   margin: 0 calc(-1 * var(--space-2));
   padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
@@ -196,21 +195,6 @@
 }
 @media (max-width: 767px) {
   .log .col {
-    padding-block: var(--space-4) var(--space-5);
-  }
-  /* The row gap keeps the label's fade off the first item until that item scrolls under it. */
-  .grp {
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: var(--space-3);
-  }
-  .who::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 100%;
-    height: var(--space-4);
-    background: linear-gradient(var(--canvas) 45%, transparent);
-    pointer-events: none;
+    padding-block: var(--space-4) var(--space-4);
   }
 }

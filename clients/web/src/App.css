@@ -22,10 +22,10 @@
 .center > .logwrap {
   flex: 1;
 }
-/* The log column and the dock share one centered measure. */
+/* The log column and the dock share one measure, left aligned on the graph's own edge. */
 .col {
   max-width: 824px;
-  padding-inline: var(--space-10);
+  padding-inline: var(--space-5);
 }
 @media (max-width: 1023px) {
   .shell {
