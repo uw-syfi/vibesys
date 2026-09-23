@@ -5,6 +5,12 @@ Typed feature flag utilities.
 This is an internal import package shipped by the `vibesys` distribution. It
 is not published as a separate Python distribution.
 
+## Responsibility
+
+This package defines and evaluates typed feature flags and parses user overrides.
+Applications own their flag enum, manifest, and decisions at call sites. Keep flag
+references typed so removed flags fail visibly.
+
 ## Concepts
 
 - `FeatureDefinition` describes one flag with a required `description` and a
@@ -24,13 +30,11 @@ Define a `StrEnum` and a registry:
 ```python
 from enum import StrEnum
 
-from vs_feature_flags import FeatureDefinition, FeatureRegistry
-
+from vs_feature_flags.api import FeatureDefinition, FeatureRegistry
 
 class FeatureFlag(StrEnum):
     NEW_DASHBOARD = "new_dashboard"
     STRICT_VALIDATION = "strict_validation"
-
 
 FEATURES = FeatureRegistry(
     FeatureFlag,
@@ -75,7 +79,7 @@ if FEATURES.is_enabled(FeatureFlag.NEW_DASHBOARD, overrides):
 When loading config, parse the raw user-provided table into typed overrides:
 
 ```python
-from vs_feature_flags import parse_feature_flag_overrides
+from vs_feature_flags.api import parse_feature_flag_overrides
 
 raw_feature_flags = raw_config.get("feature_flags")
 feature_flags = parse_feature_flag_overrides(raw_feature_flags, FeatureFlag)
