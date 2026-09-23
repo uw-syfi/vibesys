@@ -243,9 +243,10 @@ function Item({item, onOpen}: {item: LogItem; onOpen: () => void}) {
       </div>
     );
   }
-  // The row shows the command's shape, sometimes none of it. The whole text is the row's tooltip
-  // and, for a reader who cannot hover, its own DOM text.
-  const whole = item.argFull ?? item.arg;
+  // The row shows the command's shape, sometimes none of it. What the row dropped is its
+  // tooltip and, for a reader who cannot hover, its own DOM text. A row already showing its
+  // whole command carries no tooltip: it would only repeat what the reader is looking at.
+  const whole = item.argFull;
   const tip = whole !== null && whole.length > TIP_LIMIT ? `${whole.slice(0, TIP_LIMIT)}…` : whole;
   return (
     <div
