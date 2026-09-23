@@ -17,7 +17,7 @@ from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.run.state import RunStateNamespace
-from vs_project.api import AgentRunConfiguration
+from vs_project.api import AgentRunConfiguration, RunManifest
 
 if TYPE_CHECKING:
     from vibesys.loops.agent.model import AgentRunState
@@ -35,6 +35,8 @@ _AGENT_OUTER_LOOP = "agent"
 def load_agent_run_state(project: Project, run_id: str) -> AgentRunState | None:
     """Return *run_id*'s reprojected agent state, or `None` for a non-agent run."""
     manifest = project.state.load_run(run_id)
+    if not isinstance(manifest, RunManifest):
+        return None
     configuration = manifest.configuration
     if not isinstance(configuration, AgentRunConfiguration):
         return None

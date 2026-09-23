@@ -54,6 +54,7 @@ from vs_project.api import (
     GitTracker,
     NullGitTrackerEvents,
     ProjectStateError,
+    RunManifest,
 )
 
 if TYPE_CHECKING:
@@ -420,7 +421,9 @@ class RunApi:
         if project_run is None:
             return None
         manifest = project_run.project.state.load_run(project_run.run_id)
-        if not isinstance(manifest.configuration, AgentRunConfiguration):
+        if not isinstance(manifest, RunManifest) or not isinstance(
+            manifest.configuration, AgentRunConfiguration
+        ):
             return None
         run_view = open_run_store(project_run.project).get_run(project_run.run_id)
         return build_performance_context(
@@ -584,7 +587,10 @@ class RunApi:
             cached = self._experiment_run_kind
             if cached is not None and cached[0] == key:
                 return cached[1]
-        is_agent = project.state.load_run(run_id).configuration.outer_loop == "agent"
+        manifest = project.state.load_run(run_id)
+        is_agent = (
+            isinstance(manifest, RunManifest) and manifest.configuration.outer_loop == "agent"
+        )
         with self._experiment_run_kind_lock:
             self._experiment_run_kind = (key, is_agent)
         return is_agent

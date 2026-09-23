@@ -25,12 +25,26 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol, Self
+from typing import TYPE_CHECKING, Literal, Protocol, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ValidationError,
+)
 
 import vs_project._paths as project_paths
 from vs_loop_state.api import RoundRecord, parse_round_record
+from vs_project._manifests import (
+    _IDENTIFIER_PATTERN,
+    GitObjectId,
+    OrchestrationDescriptor,
+    OrchestrationRunManifest,
+    ProjectManifest,
+    RunConfiguration,
+    RunEnvironmentRecord,
+    RunManifest,
+    RunManifestRecord,
+)
 from vs_project._state_io import (
     _atomic_write_bytes,
     _atomic_write_model,
@@ -58,13 +72,11 @@ PROJECT_SCHEMA_VERSION: Literal[1] = 1
 # portable compute-resource request used to reproduce remote execution. Older
 # recordings are rejected at load time and must be migrated explicitly.
 RUN_SCHEMA_VERSION: Literal[3] = 3
+ORCHESTRATION_RUN_SCHEMA_VERSION: Literal[4] = 4
 _CONFIG_DIRECTORY_NAME = project_paths.CONFIGURATION_DIRECTORY_NAME
 _STATE_DIRECTORY_PARTS = project_paths.STATE_DIRECTORY_PARTS
 _STATE_DIRECTORY_PATH = project_paths.STATE_DIRECTORY_PATH
 _STATE_DIRECTORY_POSIX = project_paths.STATE_DIRECTORY_POSIX
-_IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,127}$"
-_DIGEST_PATTERN = r"^[0-9a-f]{64}$"
-_GIT_OBJECT_ID_PATTERN = r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
 _ROUND_FILE_PATTERN = re.compile(r"^(?P<round>0*[1-9][0-9]*)\.json$")
 _STATE_HOME_ENV = "VIBESYS_STATE_HOME"
 _LEGACY_WORKTREE_MIN_PARTS = 3
@@ -82,11 +94,6 @@ _EXCLUDED_NAMES = frozenset(
         "node_modules",
     }
 )
-
-Identifier = Annotated[str, Field(pattern=_IDENTIFIER_PATTERN)]
-Sha256Digest = Annotated[str, Field(pattern=_DIGEST_PATTERN)]
-GitObjectId = Annotated[str, Field(pattern=_GIT_OBJECT_ID_PATTERN)]
-PortableText = Annotated[str, Field(min_length=1, max_length=256)]
 
 
 def is_project_state_path(relative_path: Path | str) -> bool:
@@ -715,165 +722,6 @@ class StateSlot[ModelT: BaseModel]:
         self._namespace.apply(self.validate_transition(transition))
 
 
-class _CommittedManifest(BaseModel):
-    """Strict base for versioned, portable metadata committed with source.
-
-    Each concrete manifest declares its own ``schema_version`` literal so the
-    project and run schemas can evolve independently.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-
-class ProjectManifest(_CommittedManifest):
-    """Immutable identity and initial provenance of one project directory."""
-
-    schema_version: Literal[1]
-    project_id: Identifier
-    created_at: AwareDatetime
-    initial_input_fingerprint: Sha256Digest
-
-
-class RunResourceRequest(BaseModel):
-    """Portable compute resources required by one run environment.
-
-    Operator-owned cluster profiles resolve this logical request to concrete
-    infrastructure. Provider names, partitions, accounts, images, paths, and
-    transient allocation identifiers deliberately do not belong here.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    nodes: Annotated[int, Field(gt=0)] = 1
-    accelerators_per_node: Annotated[int, Field(gt=0)]
-    accelerator_backend: Literal["cuda", "rocm", "trainium"]
-    cpus_per_node: Annotated[int, Field(gt=0)] | None = None
-
-
-class RunEnvironmentRecord(BaseModel):
-    """Runtime environment a run executes in, recorded for faithful resume.
-
-    ``name`` selects the environment; the remaining fields carry that
-    environment's operator-selected options and stay ``None`` when they do not
-    apply. Values a run derives from its own input (rather than from the
-    operator) are deliberately absent: they are re-derived on every launch.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    name: Literal["local", "docker", "modal", "skypilot"]
-    image: PortableText | None = None
-    gpu: PortableText | None = None
-    model_volume: PortableText | None = None
-    app: PortableText | None = None
-    resources: RunResourceRequest | None = None
-
-
-class _BaseRunConfiguration(BaseModel):
-    """Strict settings shared by every supported outer loop."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    run_environment: RunEnvironmentRecord
-    model: PortableText | None = None
-    agent_backend: PortableText
-    agent_driver: PortableText | None = None
-    cli_provider: PortableText | None = None
-    cli_timeout: Annotated[int, Field(gt=0)] | None = None
-    compute_backend: PortableText
-    profiler: PortableText | None = None
-    modality: PortableText | None = None
-    default_reasoning_effort: PortableText | None = None
-    outer_model: PortableText | None = None
-    outer_reasoning_effort: PortableText | None = None
-    inner_model: PortableText | None = None
-    inner_reasoning_effort: PortableText | None = None
-
-
-class AgentRunConfiguration(_BaseRunConfiguration):
-    """Sanitized settings that define an agent-loop run."""
-
-    outer_loop: Literal["agent", "profile-guided"]
-    inner_loop: PortableText
-    interface: PortableText
-    max_rounds: Annotated[int, Field(gt=0)]
-    max_retries_per_round: Annotated[int, Field(gt=0)]
-    judge_every: Annotated[int, Field(gt=0)]
-    official_eval_every: Annotated[int, Field(gt=0)]
-    memory_layout: PortableText
-    operator_constraints: tuple[str, ...] = ()
-    objectives: tuple[PortableText, ...] = ()
-
-
-class PlainRunConfiguration(_BaseRunConfiguration):
-    """Sanitized settings that define an issue-driven plain-loop run."""
-
-    outer_loop: Literal["plain"]
-    max_rounds: Annotated[int, Field(gt=0)]
-    max_attempts_per_issue: Annotated[int, Field(gt=0)]
-    max_issues_per_perf_eval: Annotated[int, Field(gt=0)]
-
-
-class EvolveRunConfiguration(_BaseRunConfiguration):
-    """Sanitized settings that define an evolutionary-search run."""
-
-    outer_loop: Literal["evolve"]
-    max_generations: Annotated[int, Field(gt=0)]
-    children_per_generation: Annotated[int, Field(gt=0)]
-    k_top_inspirations: Annotated[int, Field(ge=0)]
-    k_random_inspirations: Annotated[int, Field(ge=0)]
-    selection_temperature: Annotated[float, Field(gt=0, allow_inf_nan=False)]
-    seed: int | None = None
-    search_policy: Literal["vibesys", "openevolve"] | None = None
-    openevolve_population_size: Annotated[int, Field(gt=0)] | None = None
-    openevolve_archive_size: Annotated[int, Field(gt=0)] | None = None
-    openevolve_num_islands: Annotated[int, Field(gt=0)] | None = None
-    openevolve_migration_interval: Annotated[int, Field(gt=0)] | None = None
-    openevolve_migration_rate: Annotated[float, Field(ge=0, le=1)] | None = None
-    frontier_bias: Annotated[float, Field(ge=0, le=1)]
-    bootstrap_max_attempts: Annotated[int, Field(gt=0)]
-    keep_deployments: bool
-    max_parallelism: Annotated[int, Field(gt=0)]
-    objectives: tuple[PortableText, ...] = ()
-
-    @model_validator(mode="after")
-    def _validate_search_policy_settings(self) -> Self:
-        openevolve_values = (
-            self.openevolve_population_size,
-            self.openevolve_archive_size,
-            self.openevolve_num_islands,
-            self.openevolve_migration_interval,
-            self.openevolve_migration_rate,
-        )
-        if self.search_policy == "vibesys" and any(
-            value is not None for value in openevolve_values
-        ):
-            raise ValueError("OpenEvolve settings require search_policy='openevolve'")
-        return self
-
-
-RunConfiguration = Annotated[
-    AgentRunConfiguration | PlainRunConfiguration | EvolveRunConfiguration,
-    Field(discriminator="outer_loop"),
-]
-
-
-class RunManifest(_CommittedManifest):
-    """Immutable identity and starting provenance of one optimization run."""
-
-    schema_version: Literal[3]
-    run_id: Identifier
-    project_id: Identifier
-    task_name: Identifier | None = None
-    display_name: PortableText
-    created_at: AwareDatetime
-    input_fingerprint: Sha256Digest
-    trusted_input_baseline: GitObjectId
-    branch: PortableText
-    vibesys_version: PortableText
-    configuration: RunConfiguration
-
-
 class _Digest(Protocol):
     def update(self, data: bytes, /) -> object:
         """Add bytes to the digest state."""
@@ -1084,7 +932,7 @@ class ProjectState:
         now: datetime | None = None,
         unique: UUID | None = None,
     ) -> RunManifest:
-        """Build, but do not persist, a run manifest for the current project tree."""
+        """Deprecated for new code: build a version 3 loop-specific manifest."""
         project = self.load_project()
         created_at = _aware_now(now)
         return RunManifest(
@@ -1105,7 +953,43 @@ class ProjectState:
             configuration=configuration,
         )
 
-    def create_run(self, manifest: RunManifest, *, make_current: bool = True) -> None:
+    def new_orchestration_run_manifest(  # noqa: PLR0913
+        self,
+        display_name: str,
+        *,
+        branch: str,
+        vibesys_version: str,
+        run_environment: RunEnvironmentRecord,
+        orchestration: OrchestrationDescriptor,
+        trusted_input_baseline: GitObjectId,
+        task_name: str | None = None,
+        run_id: str | None = None,
+        now: datetime | None = None,
+        unique: UUID | None = None,
+    ) -> OrchestrationRunManifest:
+        """Build a version 4 manifest; the orchestration validates its options."""
+        project = self.load_project()
+        created_at = _aware_now(now)
+        return OrchestrationRunManifest(
+            schema_version=ORCHESTRATION_RUN_SCHEMA_VERSION,
+            run_id=(
+                _validate_run_id(run_id)
+                if run_id is not None
+                else generate_run_id(display_name, now=created_at, unique=unique)
+            ),
+            project_id=project.project_id,
+            task_name=task_name,
+            display_name=display_name,
+            created_at=created_at,
+            input_fingerprint=self.input_fingerprint(),
+            trusted_input_baseline=trusted_input_baseline,
+            branch=branch,
+            vibesys_version=vibesys_version,
+            run_environment=run_environment,
+            orchestration=orchestration,
+        )
+
+    def create_run(self, manifest: RunManifestRecord, *, make_current: bool = True) -> None:
         """Persist a new run manifest and initialize its local operational paths."""
         self._validate_storage_roots()
         project = self.load_project()
@@ -1139,18 +1023,27 @@ class ProjectState:
             ),
         )
 
-    def load_run(self, run_id: str) -> RunManifest:
-        """Load one run manifest, rejecting recordings from an older schema."""
+    def load_run(self, run_id: str) -> RunManifestRecord:
+        """Load a version 3 or 4 run manifest; older versions require migration."""
         path = self._run_manifest_path(run_id)
         _require_current_run_schema(path, run_id)
-        return _load_model(path, RunManifest)
+        version = _read_json_object(path).get("schema_version")
+        if version == ORCHESTRATION_RUN_SCHEMA_VERSION:
+            model_type = OrchestrationRunManifest
+        elif version == RUN_SCHEMA_VERSION:
+            model_type = RunManifest
+        else:
+            raise ProjectStateError(
+                f"Run metadata at {path} records unsupported run schema version {version!r}"
+            )
+        return _load_model(path, model_type)
 
     def migrate_run_environment(
         self,
         run_id: str,
         run_environment: RunEnvironmentRecord,
     ) -> RunManifest:
-        """Migrate a version 1 or 2 run to the current environment schema.
+        """Migrate a version 1 or 2 run to the version 3 environment schema.
 
         Run schema version 1 never recorded the runtime environment, so the
         operator supplies the environment the run actually used. Version 2
@@ -1161,9 +1054,9 @@ class ProjectState:
         path = self._run_manifest_path(run_id)
         raw = _read_json_object(path)
         recorded_version = raw.get("schema_version")
-        if recorded_version == RUN_SCHEMA_VERSION:
+        if recorded_version in {RUN_SCHEMA_VERSION, ORCHESTRATION_RUN_SCHEMA_VERSION}:
             raise ProjectStateError(
-                f"Run metadata at {path} is already at run schema version {RUN_SCHEMA_VERSION}"
+                f"Run metadata at {path} is already at run schema version {recorded_version}"
             )
         if recorded_version not in {1, 2}:
             raise ProjectStateError(
@@ -1225,9 +1118,11 @@ class ProjectState:
         run_id: str,
         configuration: RunConfiguration,
     ) -> None:
-        """Replace a run's sanitized configuration while preserving its identity."""
+        """Deprecated for new code: update a version 3 loop configuration."""
         self._validate_storage_roots()
         manifest = self.load_run(run_id)
+        if not isinstance(manifest, RunManifest):
+            raise ProjectStateError(f"Run {run_id!r} uses a version 4 orchestration descriptor")
         if configuration.outer_loop != manifest.configuration.outer_loop:
             raise ProjectStateError(
                 f"Run {manifest.run_id!r} uses outer loop "
@@ -1238,20 +1133,47 @@ class ProjectState:
         if updated != manifest:
             _atomic_write_model(path, updated)
 
-    def list_runs(self) -> list[RunManifest]:
+    def update_run_orchestration(
+        self,
+        run_id: str,
+        orchestration: OrchestrationDescriptor,
+    ) -> None:
+        """Update version 4 options without changing orchestration identity or version.
+
+        The orchestration owns option validation and resume compatibility.
+        """
+        self._validate_storage_roots()
+        manifest = self.load_run(run_id)
+        if not isinstance(manifest, OrchestrationRunManifest):
+            raise ProjectStateError(f"Run {run_id!r} uses a version 3 loop configuration")
+        recorded = manifest.orchestration
+        if (orchestration.id, orchestration.config_version) != (
+            recorded.id,
+            recorded.config_version,
+        ):
+            raise ProjectStateError(
+                f"Run {run_id!r} cannot change orchestration id or config version"
+            )
+        if orchestration != recorded:
+            _atomic_write_model(
+                self._run_manifest_path(run_id),
+                manifest.model_copy(update={"orchestration": orchestration}),
+            )
+
+    def list_runs(self) -> list[RunManifestRecord]:
         """Return all runs ordered by creation time, then run ID."""
         self._validate_storage_roots()
         runs_dir = self._metadata_dir / "runs"
         if not runs_dir.exists():
             return []
-        manifests: list[RunManifest] = []
+        manifests: list[RunManifestRecord] = []
         for child in sorted(runs_dir.iterdir()):
             if not child.is_dir():
                 raise ProjectStateError(f"Unexpected file in VibeSys runs directory: {child}")
             manifests.append(self.load_run(child.name))
         return sorted(manifests, key=lambda manifest: (manifest.created_at, manifest.run_id))
 
-    def latest_run(self) -> RunManifest | None:
+    def latest_run(self) -> RunManifestRecord | None:
         """Return the most recently created run, if one exists."""
         runs = self.list_runs()
         return runs[-1] if runs else None
@@ -1279,7 +1201,7 @@ class ProjectState:
         self.load_run(normalized)
         _atomic_write_text(self._current_run_path, f"{normalized}\n")
 
-    def resolve_run(self, run_id: str | None = None) -> RunManifest:
+    def resolve_run(self, run_id: str | None = None) -> RunManifestRecord:
         """Resolve an explicit run, otherwise current, otherwise latest."""
         if run_id is not None:
             return self.load_run(run_id)
@@ -1292,7 +1214,7 @@ class ProjectState:
         return latest
 
     def save_round(self, run_id: str, record: RoundRecord) -> StateSnapshot:
-        """Persist one completed round and return its exact portable snapshot."""
+        """Deprecated for new code: persist an agent completed round."""
         self._validate_storage_roots()
         self.load_run(run_id)
         contents = serialize_round(record)
@@ -1319,7 +1241,7 @@ class ProjectState:
         run_id: str,
         record: RoundRecord,
     ) -> StateSnapshot:
-        """Build the canonical snapshot for a typed completed round without writing it."""
+        """Deprecated for new code: prepare an agent completed-round snapshot."""
         self.load_run(run_id)
         _validate_portable_round(record, source=self.project_root)
         root = self._portable_state_dir(run_id, "agent")
@@ -1335,7 +1257,7 @@ class ProjectState:
         )
 
     def restore_completed_round(self, run_id: str, record: RoundRecord) -> StateSnapshot:
-        """Restore one already-committed round from its typed canonical record."""
+        """Deprecated for new code: restore an agent completed round."""
         self.load_run(run_id)
         _validate_portable_round(record, source=self.project_root)
         directory = self._rounds_dir(run_id)
@@ -1345,7 +1267,7 @@ class ProjectState:
         return self.completed_round_snapshot(run_id, record.round_number)
 
     def load_rounds(self, run_id: str) -> list[RoundRecord]:
-        """Load completed rounds in numeric order."""
+        """Deprecated for new code: load agent completed rounds."""
         self.load_run(run_id)
         directory = self._rounds_dir(run_id)
         if not directory.exists():
@@ -1373,7 +1295,7 @@ class ProjectState:
         return records
 
     def completed_round_snapshot(self, run_id: str, round_number: int) -> StateSnapshot:
-        """Snapshot one validated completed-round record."""
+        """Deprecated for new code: snapshot an agent completed round."""
         if round_number < 1:
             raise ProjectStateError(f"Round number must be positive, got {round_number}")
         records = self.load_rounds(run_id)

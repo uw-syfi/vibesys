@@ -49,7 +49,7 @@ from vs_agent.api import (
 from vs_agent.api.testing import FakeAgentClient
 from vs_agent.contracts import AgentTurnRequest, AgentTurnResult
 from vs_loop_state.api import PlainLoopCursor
-from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord, RunManifest
 from vs_sandbox.api import HostResourceAccess, SandboxLifecycle
 
 
@@ -548,6 +548,7 @@ def test_resume_reuses_project_and_run_id_and_only_increases_limit(tmp_path):  #
         assert resumed.run_id == run_id
 
     stored = Project.open(project).state.load_run(run_id)
+    assert isinstance(stored, RunManifest)
     assert isinstance(stored.configuration, AgentRunConfiguration)
     assert stored.configuration.max_rounds == 2
     assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
@@ -580,6 +581,7 @@ def test_resume_migrates_legacy_objectives_with_dirty_candidate(tmp_path):  # no
         pass
 
     stored = state.load_run(run_id)
+    assert isinstance(stored, RunManifest)
     assert isinstance(stored.configuration, AgentRunConfiguration)
     assert stored.configuration.objectives == ("total_ops_per_sec:max",)
     assert "# interrupted edit" in candidate.read_text()

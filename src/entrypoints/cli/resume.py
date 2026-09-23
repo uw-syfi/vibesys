@@ -26,6 +26,7 @@ from vs_project.api import (
     Project,
     ProjectStateError,
     RunConfiguration,
+    RunManifest,
     RunSchemaMigrationRequiredError,
 )
 
@@ -313,6 +314,12 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
             stage="resume_resolution",
         )
     args.resume = run_id
+    if not isinstance(run_manifest, RunManifest):
+        _configuration_error(
+            "This CLI cannot resume a version 4 orchestration run yet",
+            code="project_resume_configuration_mismatch",
+            stage="resume_resolution",
+        )
     args.exp_name = run_id
     args.input = project_root
     if run_manifest.task_name is not None:
