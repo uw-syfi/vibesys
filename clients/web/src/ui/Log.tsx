@@ -69,6 +69,8 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
   const scroller = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
   const rows = groups.reduce((total, group) => total + leaves(group.items), 0);
+  /** The row the cursor was last on, by DOM id: focus can be taken away, this cannot. */
+  const held = useRef<string | null>(null);
   /** Rows at the moment the reader left the live edge: the count the button reports is since. */
   const mark = useRef(0);
   const fresh = Math.max(0, rows - mark.current);
@@ -89,6 +91,20 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
     observer.observe(node.firstElementChild as Element);
     return () => observer.disconnect();
   }, [follow, away, groups]);
+
+  // A render can put the cursor's row inside a fold that closed over it, or drop the row for a
+  // new one: an adjacent call of the same verb settling folds a run, and a new role speaking
+  // collapses the group the cursor was in. Chromium then blurs to <body>, where the log's
+  // keydown never fires and the global handler reads the arrows as the rail's, so a reader
+  // pressing up to move one row loses the round instead. Focus comes back to the scroller.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `groups` is what can hide a row.
+  useLayoutEffect(() => {
+    const id = held.current;
+    if (id === null || document.activeElement !== document.body) return;
+    if (document.getElementById(id)?.checkVisibility()) return;
+    held.current = null;
+    scroller.current?.focus({preventScroll: true});
+  }, [groups]);
 
   // App re-keys the log per round. Focus that was inside the old log moves to the new one;
   // focus anywhere else stays put.
@@ -118,6 +134,9 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
     const node = scroller.current;
     if (node === null) return;
     node.scrollTop = node.scrollHeight;
+    // `l` goes to the live edge, so the scroller keeps the focus rather than handing it back
+    // to whichever row the cursor was on further up.
+    held.current = null;
     node.focus();
     setAway(false);
   }
@@ -185,6 +204,17 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
         tabIndex={0}
         onScroll={onScroll}
         onKeyDown={onKeyDown}
+        onFocus={event => {
+          const row = (event.target as HTMLElement).closest<HTMLElement>('[data-row]');
+          if (row !== null) {
+            held.current = row.id;
+            return;
+          }
+          // The scroller is the log's one tab stop and the cursor is focus, so a trip out and
+          // back would otherwise lose it: Tab back in returns to the row it was on.
+          const back = held.current === null ? null : document.getElementById(held.current);
+          if (back?.checkVisibility()) back.focus({preventScroll: true});
+        }}
         // Delegated, so a row stays a row rather than becoming one tab stop each: the keyboard
         // path is the cursor this scroller carries.
         onClick={event => {
@@ -323,6 +353,8 @@ function Fold({
       <summary
         id={rowId(id)}
         data-row=""
+        // Natively tabbable, and the log has one tab stop: the arrows reach this row.
+        tabIndex={-1}
         className="row"
         // Opening history leaves the live edge, so following stops before the fold grows. Enter
         // and Space also fire click; `toggle` would come too late.

@@ -104,11 +104,11 @@
 .row.now {
   background: var(--accent-tint);
 }
-/* The row whose output the inspector is showing. The live row keeps its own tint: which call
-   is running now outranks which one the inspector is quoting, and the inspector's own heading
-   says which row that is. */
-.row.sel:not(.now) {
-  background: var(--selected);
+/* The row whose output the inspector is showing. An edge rather than a fill, so it sits on the
+   live row without covering the tint that says which call is running: the two carry different
+   messages and neither can be read off the other. Inset, so nothing reflows. */
+.row.sel {
+  box-shadow: inset 2px 0 0 var(--text-primary);
 }
 /* The role header is sticky and 22px tall, so a row the cursor scrolls to the very top of the
    log would come to rest under it. `block: 'nearest'` honours this margin. */

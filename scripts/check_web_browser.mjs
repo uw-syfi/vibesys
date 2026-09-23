@@ -212,6 +212,16 @@ async function checkInteractions(browser, origin) {
     // than the column being widened by it.
     ...ran(2, 'implementer', 'make bench', `ops/sec 1420\nbench ok\n${'x'.repeat(400)}\n`),
     say(2, 'implementer', 'After the benchmark'),
+    // A call with no result: the row is the live one, and its output section says so.
+    {
+      ...event('tool_call', 2, 'implementer', {
+        kind: 'tool_call',
+        tool: 'Bash',
+        call_id: 'make slow',
+        args: {command: 'make slow', description: 'Ran a command'},
+      }),
+      invocation_id: 'implementer-2',
+    },
     event('usage_update', 2, 'implementer', {
       kind: 'usage_update',
       input_tokens: 12_400,
@@ -327,6 +337,21 @@ async function checkInteractions(browser, origin) {
     // The header's context meter, from the run's own usage_update.
     await page.getByRole('banner').getByText('12k/200k context').waitFor();
 
+    // The live row carries both marks when it is also the selected one: the tint says which
+    // call is running, the edge says which one the inspector is quoting.
+    const running = log.locator('.row.now');
+    await running.click();
+    await page.getByText('Still running').waitFor();
+    const marks = await running.evaluate(node => {
+      const style = getComputedStyle(node);
+      return [style.backgroundColor, style.boxShadow, node.className];
+    });
+    assert.equal(marks[2], 'row now sel', 'the live row is also the selected one');
+    assert.notEqual(marks[0], 'rgba(0, 0, 0, 0)', 'the live tint survived the selection');
+    assert.notEqual(marks[1], 'none', 'the selection marks the live row');
+    await page.keyboard.press('Escape');
+    await page.getByText('Still running').waitFor({state: 'detached'});
+
     // Arrows in the log move a row cursor that is real focus, so it is announced; the round
     // stays where it is, and so does every row.
     const cursor = () => page.evaluate(() => document.activeElement?.id ?? null);
@@ -362,6 +387,22 @@ async function checkInteractions(browser, origin) {
       'the cursor stepped onto a row inside a closed fold',
     );
 
+    // A trip out of the log and back returns to the row the cursor was on: the scroller is
+    // the log's one tab stop, and every row and fold summary is out of the tab order.
+    await call.focus();
+    const stops = await log.evaluate(
+      node => [...node.querySelectorAll('[tabindex="0"], summary:not([tabindex])')].length,
+    );
+    assert.equal(stops, 0, 'the log has a tab stop inside it');
+    await page.keyboard.press('Tab');
+    assert.equal(
+      await page.evaluate(() => document.getElementById('log')?.contains(document.activeElement)),
+      false,
+      'Tab stayed inside the log',
+    );
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await cursor(), await call.getAttribute('id'), 'Shift+Tab lost the cursor');
+
     // Enter on a tool row fills the inspector, and moves no row doing it.
     await call.focus();
     const beforeEnter = await belowTop();
@@ -372,7 +413,44 @@ async function checkInteractions(browser, origin) {
     // Left clears it again.
     await out.waitFor({state: 'detached'});
 
+    // A render that hides the cursor's row must not leave focus on <body>, where the log's
+    // keys are dead and the global handler reads the arrows as the rail's. Two renders do it.
+    const recovered = async (what, id) => {
+      const shown = await page.evaluate(
+        row => document.getElementById(row)?.checkVisibility() ?? false,
+        id,
+      );
+      assert.equal(shown, false, `${what} did not hide the cursor's row`);
+      assert.equal(await cursor(), 'log', `${what} left focus on ${await cursor()}`);
+      await page.keyboard.press('ArrowUp');
+      assert.equal(await log.getAttribute('aria-label'), 'Round 2 log', `${what} lost the round`);
+    };
+    // One: an adjacent call of the same verb settles, and the two fold into a run.
+    push(ran(2, 'implementer', 'make alpha', 'alpha\n'));
+    const alpha = log.locator('.row[data-tool]:visible', {hasText: 'make alpha'});
+    await alpha.waitFor();
+    await alpha.focus();
+    const alphaId = await alpha.getAttribute('id');
+    push(ran(2, 'implementer', 'make beta', 'beta\n'));
+    await log.locator('details.fold > summary', {hasText: '2 calls'}).waitFor();
+    await recovered('a run folding', alphaId);
+    // Two: a new role speaks, and the group the cursor was in collapses behind its own fold.
+    const last = log.locator('.row[data-tool]:visible').last();
+    await last.focus();
+    const lastId = await last.getAttribute('id');
+    push(
+      [event('phase_started', 2, 'judge', {kind: 'phase', phase: 'judge', attempt: null})],
+      [implementer, {...implementer, execution_id: 'judge-2', agent_kind: 'judge', stage: 'judge'}],
+    );
+    await log.locator('.who', {hasText: 'Judge'}).waitFor();
+    await recovered('a group collapsing', lastId);
+
     // Away from the live edge the pill counts what arrived since, and `l` goes back to it.
+    // Back at the edge first, so the count is taken from a mark this test set. `l` does it
+    // whether or not the pill is up, which a click on the pill cannot.
+    await page.keyboard.press('l');
+    await delay(200);
+    assert.equal(await pinned(), true, 'at the live edge before counting');
     await log.evaluate(node => node.scrollTo(0, 0));
     await jump.waitFor();
     push([
