@@ -12,22 +12,21 @@ from vibesys.api._orchestrations._common import (
 
 if TYPE_CHECKING:
     from vibesys.api.contracts import RunRequest
+    from vibesys.orchestration import ResumeProjection
     from vibesys.run.integration import LocalRunIntegration
-    from vs_project.api import AgentRunConfiguration, OrchestrationRunManifest
+    from vs_project.api import OrchestrationRunManifest
 
 
 class AgentOrchestration:
     """Preserve the existing agent loop call contract."""
 
-    def legacy_resume_configuration(
-        self, manifest: OrchestrationRunManifest
-    ) -> AgentRunConfiguration:
-        """Project v4 policy into the transitional CLI resume contract."""
+    def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
+        """Project agent-owned settings without constructing v3 configuration."""
         from vibesys.loops.agent.orchestration import (  # noqa: PLC0415  # tracked: #288
-            configuration_from_manifest,
+            resume_projection,
         )
 
-        return configuration_from_manifest(manifest)
+        return resume_projection(manifest)
 
     def execute(self, request: RunRequest, integration: LocalRunIntegration) -> bool:
         from vibesys.loops.agent.loop import run_agent_loop  # noqa: PLC0415  # tracked: #288

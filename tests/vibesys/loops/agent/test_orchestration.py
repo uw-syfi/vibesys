@@ -12,9 +12,9 @@ from vibesys.errors import ConfigurationError
 from vibesys.loops.agent.orchestration import (
     UnsupportedAgentOrchestrationError,
     compare_resume_descriptors,
-    configuration_from_manifest,
     descriptor_from_configuration,
     options_from_descriptor,
+    resume_projection,
 )
 from vs_project.api import (
     AgentRunConfiguration,
@@ -89,10 +89,11 @@ def test_v4_agent_manifest_projects_into_cli_resume_contract() -> None:
         ),
     )
 
-    projected = configuration_from_manifest(manifest)
-    assert projected.outer_loop == "profile-guided"
-    assert projected.objectives == ("score:max",)
+    projected = resume_projection(manifest)
+    assert projected.orchestration_id == "profile-guided"
+    assert options_from_descriptor(manifest.orchestration).objectives == ("score:max",)
     assert projected.run_environment.name == "local"
+    assert projected.budget_destination == "max_rounds"
     assert not is_agent_run_manifest(manifest)
 
 
