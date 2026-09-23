@@ -7,7 +7,7 @@ It is an internal import package shipped by the `vibesys` distribution, not a
 separately published Python distribution.
 
 ```python
-from vs_github import GitHubCLI
+from vs_github.api import GitHubCLI
 
 github = GitHubCLI()
 github.clone_repository("owner/experiment", destination)

@@ -9,7 +9,7 @@ from vibesys.loops.plain.render import (
     render_issue_markdown,
     slugify,
 )
-from vs_issue_board import (
+from vs_issue_board.api import (
     Issue,
     IssueBoard,
     IssueEvent,

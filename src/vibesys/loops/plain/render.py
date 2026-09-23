@@ -29,7 +29,7 @@ import unicodedata
 from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import Any
 
-from vs_issue_board import (
+from vs_issue_board.api import (
     Issue,
     IssueBoard,
     IssueEvent,

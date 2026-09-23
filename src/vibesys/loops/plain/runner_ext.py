@@ -30,7 +30,7 @@ from vs_agent.api import (
     AgentSessionKey,
     MCPServerSpec,
 )
-from vs_issue_board import IssueType
+from vs_issue_board.api import IssueType
 
 T = TypeVar("T", bound=BaseModel)
 

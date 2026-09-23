@@ -64,8 +64,8 @@ from vibesys.skypilot.bridge import SkyPilotBridge
 from vibesys.skypilot.config import load_cluster_profiles, resolve_profile
 from vibesys.skypilot.runner import SkyPilotJobRunner, stable_cluster_name
 from vs_agent.api import AgentBackend
-from vs_project import RunEnvironmentRecord, RunResourceRequest
-from vs_sandbox import (
+from vs_project.api import RunEnvironmentRecord, RunResourceRequest
+from vs_sandbox.api import (
     BeforeReadyContext,
     HostResource,
     HostResourceAccess,
@@ -113,8 +113,8 @@ for attempt in range(5):
 """
 
 if TYPE_CHECKING:
-    from vs_project import StateNamespace
-    from vs_sandbox.execution import Sandbox
+    from vs_project.api import StateNamespace
+    from vs_sandbox.api import Sandbox
 
 
 @dataclass(frozen=True)
@@ -865,7 +865,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
         # HOME of the user the container runs as, the agent image's
         # non-root ``agent`` user, not root. Deferred: the Docker sandbox
         # module imports the agent stack, which this module must not load.
-        from vs_sandbox import AGENT_HOME  # noqa: PLC0415  # tracked: #288
+        from vs_sandbox.api import AGENT_HOME  # noqa: PLC0415  # tracked: #288
 
         modal_auth = Path.home() / ".modal.toml"
         if modal_auth.exists():
@@ -975,7 +975,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
         meta_path = request.ref_dir / "meta.json"
         if not meta_path.exists():
             return
-        from vs_sandbox import ensure_model_volume  # noqa: PLC0415  # tracked: #288
+        from vs_sandbox.api import ensure_model_volume  # noqa: PLC0415  # tracked: #288
 
         meta = json.loads(meta_path.read_text())
         model_id = meta.get("model_id")
@@ -1012,7 +1012,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):  # noqa: D101  # tracked: #288
         draft_meta_path = request.ref_dir / "draft_meta.json"
         if not draft_meta_path.exists():
             return None
-        from vs_sandbox import ensure_model_volume  # noqa: PLC0415  # tracked: #288
+        from vs_sandbox.api import ensure_model_volume  # noqa: PLC0415  # tracked: #288
 
         draft_meta = json.loads(draft_meta_path.read_text())
         draft_model_id = draft_meta.get("model_id")

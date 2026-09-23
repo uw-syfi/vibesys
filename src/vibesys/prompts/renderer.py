@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from vibesys.constants import ComputeBackend
-from vs_prompts import FragmentFamily, TemplateRenderer
+from vs_prompts.api import FragmentFamily, TemplateRenderer
 
 PROMPTS_DIR = Path(__file__).resolve().parent
 _BACKEND_FRAGMENTS_ROOT = PROMPTS_DIR / "backend"

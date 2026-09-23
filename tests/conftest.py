@@ -13,7 +13,7 @@ from vibesys.evaluators.input_manifest import (
     load_project_task,
 )
 from vibesys.render import output_sink
-from vs_project import Project, ProjectNotInitializedError
+from vs_project.api import Project, ProjectNotInitializedError
 
 
 @pytest.fixture(autouse=True)

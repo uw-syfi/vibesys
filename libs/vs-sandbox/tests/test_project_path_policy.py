@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-import vs_sandbox
+import vs_sandbox.api as sandbox_api
 from vs_sandbox import host_sandbox
 from vs_sandbox.host_resources import HostResource
 from vs_sandbox.project_paths import ProjectPathPolicy, ProjectPathPolicyError
@@ -67,9 +67,9 @@ def _working_bwrap() -> str | None:
 
 class TestProjectPathPolicy:
     def test_public_export(self) -> None:
-        assert vs_sandbox.ProjectPathPolicy is ProjectPathPolicy
-        assert vs_sandbox.ProjectPathPolicyError is ProjectPathPolicyError
-        assert vs_sandbox.SandboxUnavailableError is host_sandbox.SandboxUnavailableError
+        assert sandbox_api.ProjectPathPolicy is ProjectPathPolicy
+        assert sandbox_api.ProjectPathPolicyError is ProjectPathPolicyError
+        assert sandbox_api.SandboxUnavailableError is host_sandbox.SandboxUnavailableError
 
     def test_empty_policy_preserves_legacy_nonexistent_workspace_behavior(
         self, tmp_path: Path

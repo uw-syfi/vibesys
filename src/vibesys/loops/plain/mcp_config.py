@@ -13,7 +13,7 @@ MCP path; everything else is provider-agnostic and lives in the driver.
 from __future__ import annotations
 
 from vs_agent.api import MCPServerSpec
-from vs_issue_board import IssueType  # noqa: TC001  # tracked: #288
+from vs_issue_board.api import IssueType  # noqa: TC001  # tracked: #288
 
 
 def build_issue_mcp_spec(

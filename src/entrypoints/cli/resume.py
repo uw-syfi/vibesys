@@ -18,7 +18,7 @@ from entrypoints.cli.errors import _configuration_error, _project_resume_mismatc
 from entrypoints.cli.loops import _migrate_run_environment_command, _resolve_project_root
 from vibesys.api import ComputeBackend, ProfilerKind
 from vibesys.api.request import coerce_profiler_kind
-from vs_project import (
+from vs_project.api import (
     AgentRunConfiguration,
     GitTracker,
     NullGitTrackerEvents,

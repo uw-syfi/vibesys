@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vs_agent import provider_profiles
-from vs_sandbox import (
+from vs_sandbox.api import (
     HostResource,
     HostResourceAccess,
     HostResourceContext,

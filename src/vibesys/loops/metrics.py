@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 from pydantic.dataclasses import dataclass
 
-from vs_loop_state import MetricComparison
+from vs_loop_state.api import MetricComparison
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence

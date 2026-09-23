@@ -23,7 +23,7 @@ from server.api.protocol import (
     SubscribeRequest,
 )
 from server.transport.subscriptions import SubscriptionTracker
-from vs_project import validate_socket_path
+from vs_project.api import validate_socket_path
 
 if TYPE_CHECKING:
     from server.api.service import RunApi, SubscriptionBootstrap

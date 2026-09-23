@@ -15,7 +15,7 @@ from vibesys.evaluators.input_manifest import (
     load_project_task,
 )
 from vibesys.run import Workspace
-from vs_project import Project
+from vs_project.api import Project
 
 if TYPE_CHECKING:
     from pathlib import Path

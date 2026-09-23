@@ -44,8 +44,8 @@ from vibesys.sandbox.run_environment import (
     make_run_environment_spec,
     run_environment_record,
 )
-from vs_project import Project, RunEnvironmentRecord, RunResourceRequest
-from vs_sandbox import (
+from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
+from vs_sandbox.api import (
     BeforeReadyContext,
     HostResource,
     HostResourceAccess,

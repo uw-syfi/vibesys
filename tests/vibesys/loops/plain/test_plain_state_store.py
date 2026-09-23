@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 import pytest
 
 from vibesys.loops.plain.state import PlainStateStore
-from vs_loop_state import PlainLoopCursor, PlainPerformanceRecord
-from vs_project import (
+from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
+from vs_project.api import (
     PlainRunConfiguration,
     Project,
     ProjectStateError,

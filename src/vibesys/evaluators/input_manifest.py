@@ -13,10 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from vibesys.constants import DomainName
 from vibesys.evaluators.packages import EvaluatorPackageRequirement, resolve_evaluator_package
-from vs_project import RunResourceRequest
+from vs_project.api import RunResourceRequest
 
 if TYPE_CHECKING:
-    from vs_project import Project, TaskDirectory
+    from vs_project.api import Project, TaskDirectory
 
 MANIFEST_NAME = "vibesys.input.toml"
 

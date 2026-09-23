@@ -49,7 +49,12 @@ from server.api.workspace_git import WorkspacePatchReader
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
 from vibesys.api import open_run_store
-from vs_project import AgentRunConfiguration, GitTracker, NullGitTrackerEvents, ProjectStateError
+from vs_project.api import (
+    AgentRunConfiguration,
+    GitTracker,
+    NullGitTrackerEvents,
+    ProjectStateError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -62,7 +67,7 @@ if TYPE_CHECKING:
     from server.journal import EventJournal
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunControl, RunView
-    from vs_project import Project
+    from vs_project.api import Project
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,8 @@
 
 from vibesys.loops.plain import issue_board as compat
 from vibesys.loops.plain import mcp_server, tool_impl
-from vs_issue_board import (
+from vs_issue_board import mcp as issue_board_mcp
+from vs_issue_board.api import (
     CreateIssuePolicy,
     Issue,
     IssueBoard,
@@ -15,7 +16,6 @@ from vs_issue_board import (
     format_issue_short,
     parse_type,
 )
-from vs_issue_board import mcp as issue_board_mcp
 
 
 def test_issue_board_compat_exports_reusable_package_api():  # noqa: ANN201  # tracked: #288

@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_project import StateNamespace, StateSlot
+    from vs_project.api import StateNamespace, StateSlot
 
 InvocationId = Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
 Sha256Digest = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]

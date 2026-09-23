@@ -13,8 +13,8 @@ from vibesys.api.contracts import RunStatus
 from vibesys.loops.agent.model import AgentRunState, Hypothesis, HypothesisMeasurement
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.schemas import OrchestratorPlan
-from vs_loop_state import RoundRecord
-from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_loop_state.api import RoundRecord
+from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path

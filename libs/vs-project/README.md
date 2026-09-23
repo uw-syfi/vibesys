@@ -7,7 +7,7 @@ validated repository root. Application code constructs one project and uses
 task operations directly and persistence through `project.state`:
 
 ```python
-from vs_project import Project
+from vs_project.api import Project
 
 project = Project.open(".")
 task = project.select_task("latency")

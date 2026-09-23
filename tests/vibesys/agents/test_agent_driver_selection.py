@@ -19,7 +19,7 @@ from vs_agent.drivers.agentshim import AgentShimDriver
 from vs_agent.drivers.omnigent import OmnigentDriver, OmnigentDriverError
 from vs_agent.omnigent import supported_providers
 from vs_agent.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
-from vs_sandbox import HostResource, HostResourceAccess
+from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

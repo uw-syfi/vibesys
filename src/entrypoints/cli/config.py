@@ -16,12 +16,12 @@ from vibesys.api.request import (
     repository_name_from_experiment,
     resolve_skill_source_dirs,
 )
-from vs_github import GitHubCLI, GitHubCLIError
+from vs_github.api import GitHubCLI, GitHubCLIError
 
 if TYPE_CHECKING:
     import argparse
 
-    from vs_project import RunConfiguration
+    from vs_project.api import RunConfiguration
 
 
 def _explicit_config_value(raw: object, path: tuple[str, ...]) -> tuple[bool, object]:

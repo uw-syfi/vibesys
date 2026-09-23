@@ -51,7 +51,7 @@ from vs_agent.contracts import (
     SessionDisposition,
 )
 from vs_agent.drivers import agentshim as subject
-from vs_sandbox import HostResource, ProjectPathPolicy
+from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence

@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from vibesys.constants import DomainName
 from vibesys.evaluators.input_manifest import InputManifest, render_input_manifest
-from vs_project import RunResourceRequest
+from vs_project.api import RunResourceRequest
 
 
 def _manifest(resources: object) -> InputManifest:

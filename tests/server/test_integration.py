@@ -36,7 +36,7 @@ from vibesys.events import (
 from vibesys.render import output_sink
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient
-from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path

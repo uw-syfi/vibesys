@@ -60,7 +60,7 @@ from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentSpec
 from vibesys.schemas import JudgeResponse, ProfilerSummary, Verdict
 from vs_agent.api.testing import FakeAgentClient
-from vs_project import EvolveRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import EvolveRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from collections.abc import Callable

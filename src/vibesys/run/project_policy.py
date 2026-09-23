@@ -7,8 +7,8 @@ considers trusted, read-only, or secret.
 
 from pathlib import Path
 
-from vs_project import Project
-from vs_sandbox import ProjectPathPolicy
+from vs_project.api import Project
+from vs_sandbox.api import ProjectPathPolicy
 
 LEGACY_TRUSTED_PROJECT_INPUT_PATHS: tuple[str, ...] = (
     "OBJECTIVE.md",

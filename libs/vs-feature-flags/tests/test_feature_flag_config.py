@@ -2,7 +2,7 @@ from enum import StrEnum
 
 import pytest
 
-from vs_feature_flags import parse_feature_flag_overrides
+from vs_feature_flags.api import parse_feature_flag_overrides
 
 
 class ExampleFlag(StrEnum):

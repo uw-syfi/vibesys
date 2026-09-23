@@ -39,7 +39,7 @@ from vibesys.api.request import (
     run_environment_record,
     with_operator_constraints,
 )
-from vs_project import Project, ProjectLayoutError, ProjectStateError
+from vs_project.api import Project, ProjectLayoutError, ProjectStateError
 
 if TYPE_CHECKING:
     import argparse

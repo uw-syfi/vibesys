@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from vibesys.run.git_tracker import GitTracker
     from vibesys.run.state import RunState
     from vs_agent.api import AgentClientProtocol, AgentProgress
-    from vs_project import Project, StateTransition
+    from vs_project.api import Project, StateTransition
 
 T = TypeVar("T", bound=BaseModel)
 

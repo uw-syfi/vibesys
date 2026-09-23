@@ -23,12 +23,10 @@ from vibesys.backends.cuda.gpu_monitor import (
 )
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
-from vs_sandbox.local_shell import LocalShellSandbox
+from vs_sandbox.api import LocalShellSandbox
 
 if TYPE_CHECKING:
-    from vs_sandbox.execution import Sandbox
-    from vs_sandbox.host_resources import HostResource
-    from vs_sandbox.lifecycle import SandboxLifecycleHooks
+    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
 _DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
@@ -85,7 +83,7 @@ class CudaBackend:
         """Construct a sandbox configured for CUDA execution."""
         # Deferred: importing DockerSandbox registers process-wide signal and
         # atexit handlers. Registration must stay side-effect free.
-        from vs_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
+        from vs_sandbox.api import DockerSandbox  # noqa: PLC0415  # tracked: #288
 
         bind_mounts = bind_mounts or []
         extra_env = extra_env or {}
@@ -164,7 +162,7 @@ class CudaBackend:
 
         # Deferred for the same reason as in make_sandbox; by the time a
         # rebalance happens the module is already imported.
-        from vs_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
+        from vs_sandbox.api import DockerSandbox  # noqa: PLC0415  # tracked: #288
 
         # Kind-dispatched pokes at sandbox internals: DOCKER entries are
         # always DockerSandbox (stop/start/_gpus), LOCAL entries are always

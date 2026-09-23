@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.loops.agent.model import AgentRunState, Hypothesis
-    from vs_loop_state import RoundRecord
+    from vs_loop_state.api import RoundRecord
 
 
 def project_run_view(

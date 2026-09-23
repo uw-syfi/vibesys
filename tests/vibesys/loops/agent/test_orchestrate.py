@@ -61,9 +61,9 @@ from vibesys.schemas import (
 from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_agent.stub_runner import StubAgentClient
-from vs_loop_state.agent import RoundRecord
-from vs_project import Project, serialize_round
-from vs_sandbox import SandboxExecutionResult
+from vs_loop_state.api import RoundRecord
+from vs_project.api import Project, serialize_round
+from vs_sandbox.api import SandboxExecutionResult
 
 if TYPE_CHECKING:
     from vibesys.run.protocol import LoopContext

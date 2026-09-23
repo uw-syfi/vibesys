@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.prompts.renderer import _build_env
-from vs_prompts import filter_skip_marked
+from vs_prompts.api import filter_skip_marked
 
 _PROFILERS_DIR = PROMPTS_DIR / "loops" / "agent" / "profilers"
 _AGENT_LOOP_ROOT = PROMPTS_DIR / "loops" / "agent"

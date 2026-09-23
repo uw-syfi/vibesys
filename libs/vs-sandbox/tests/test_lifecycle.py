@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from vs_sandbox import (
+from vs_sandbox.api import (
     BeforeReadyContext,
     SandboxLifecycle,
     SandboxLifecycleError,

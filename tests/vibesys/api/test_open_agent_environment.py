@@ -18,7 +18,7 @@ from vibesys.constants import ComputeBackend
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.run.integration import RunResourceHandoff
 from vibesys.skills import platform_skill_selection
-from vs_sandbox import HostResource, HostResourceAccess, ProjectPathPolicy
+from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 
 if TYPE_CHECKING:
     from pathlib import Path

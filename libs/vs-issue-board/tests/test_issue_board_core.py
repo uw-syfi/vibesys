@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from vs_issue_board import (
+from vs_issue_board.api import (
     Issue,
     IssueBoard,
     IssueBoardLoadError,

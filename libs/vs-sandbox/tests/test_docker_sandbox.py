@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vs_sandbox import BeforeReadyContext, SandboxLifecycleError, SandboxLifecycleHooks
+from vs_sandbox.api import BeforeReadyContext, SandboxLifecycleError, SandboxLifecycleHooks
 from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox, _first_component_below
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
 

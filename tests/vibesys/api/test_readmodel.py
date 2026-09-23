@@ -22,7 +22,7 @@ from vibesys.loops.agent.model import (
     HypothesisStrategy,
 )
 from vibesys.schemas import CandidateDisposition, OrchestratorPlan, derive_hypothesis_title
-from vs_loop_state import RoundRecord
+from vs_loop_state.api import RoundRecord
 
 
 class _RoundFields(TypedDict, total=False):

@@ -44,7 +44,7 @@ from vibesys.skypilot.runner import (
     SkyPilotControlPlaneError,
     SkyPilotJobStateError,
 )
-from vs_project import validate_socket_path
+from vs_project.api import validate_socket_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -52,7 +52,7 @@ if TYPE_CHECKING:
 
     from vibesys.skypilot.config import ResolvedSkyPilotResources
     from vibesys.skypilot.runner import SkyPilotJobRunner
-    from vs_project import StateNamespace
+    from vs_project.api import StateNamespace
 
 _MAX_REQUEST_BYTES = 4096
 _OUTPUT_CHUNK_CHARACTERS = 64 * 1024

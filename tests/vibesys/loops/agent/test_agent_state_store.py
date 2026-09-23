@@ -14,8 +14,8 @@ from vibesys.loops.agent.model import (
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.schemas import HypothesisStrategyUpdate, OrchestratorPlan
-from vs_loop_state import RoundRecord
-from vs_project import (
+from vs_loop_state.api import RoundRecord
+from vs_project.api import (
     PlainRunConfiguration,
     Project,
     RunEnvironmentRecord,

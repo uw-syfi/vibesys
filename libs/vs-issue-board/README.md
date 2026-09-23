@@ -42,7 +42,7 @@ orchestration around it.
 ```python
 from pathlib import Path
 
-from vs_issue_board import IssueBoard, IssueStatus, IssueType
+from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
 
 board = IssueBoard(Path("issues.json"))
 issue = board.create(
@@ -62,7 +62,7 @@ Use `CreateIssuePolicy` when a caller should only be allowed to create certain
 issue types, or when creation should be capped per creator and iteration.
 
 ```python
-from vs_issue_board import (
+from vs_issue_board.api import (
     CreateIssuePolicy,
     IssueBoard,
     IssueType,

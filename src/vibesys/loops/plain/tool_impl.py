@@ -3,7 +3,7 @@
 New code should import these generic helpers directly from :mod:`vs_issue_board`.
 """
 
-from vs_issue_board import (
+from vs_issue_board.api import (
     CreateIssuePolicy,
     check_create_allowed,
     create_issue_under_policy,

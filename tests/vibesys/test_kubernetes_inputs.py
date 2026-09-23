@@ -14,7 +14,7 @@ from vibesys.evaluators.input_manifest import load_project_task
 from vibesys.run.project import ProjectProvisioningSpec, provision_project
 from vibesys.run.workspace import GitSourceSpec, Workspace
 from vibesys.sandbox.run_environment import LocalEnvironment
-from vs_project import Project
+from vs_project.api import Project
 
 PROJECT_ROOT = Path(__file__).parents[2]
 MICROSERVICE_ROOT = PROJECT_ROOT / "examples" / "microservices"

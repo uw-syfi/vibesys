@@ -23,7 +23,7 @@ from vs_agent.api import MCPServerSpec
 
 if TYPE_CHECKING:
     from vibesys.skills import SkillSelection
-    from vs_sandbox import HostResource, ProjectPathPolicy, Sandbox
+    from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
 
 # Objective/MetricSpace live in vibesys.loops.metrics because the
 # metric-comparison logic they carry is loop code.

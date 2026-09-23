@@ -15,7 +15,7 @@ from vibesys.events import (
     WorkspaceSnapshotData,
 )
 from vibesys.render.sink import output_sink
-from vs_project import GitTrackerEvents, NullGitTrackerEvents
+from vs_project.api import GitTrackerEvents, NullGitTrackerEvents
 
 __all__ = [
     "CoreGitTrackerEvents",

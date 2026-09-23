@@ -7,8 +7,8 @@ from tests.server.support import build_server_parts
 from server.diagnostics import DiagnosticScope
 from server.events import ConfigurationFailedData, EventStatus, EventType
 from server.read_model import RunInspector
-from vs_loop_state import RoundRecord
-from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_loop_state.api import RoundRecord
+from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 
 def _project_run(root: Path) -> tuple[Project, str]:

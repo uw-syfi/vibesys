@@ -18,7 +18,7 @@ from vibesys.evaluators.input_manifest import (
     render_input_manifest,
 )
 from vibesys.run.workspace import CopySpec, GitSourceSpec, InputProjectSpec, Workspace
-from vs_project import Project, is_project_state_path
+from vs_project.api import Project, is_project_state_path
 
 _PRIVATE_PROJECT_ENTRY_NAMES = frozenset({".git", "agent.toml"})
 

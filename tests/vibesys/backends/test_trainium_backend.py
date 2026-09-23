@@ -10,7 +10,7 @@ from vibesys.backends import SandboxKind
 from vibesys.backends.trainium import TrainiumBackend
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
-from vs_sandbox import DockerSandbox, HostResource, HostResourceAccess, LocalShellSandbox
+from vs_sandbox.api import DockerSandbox, HostResource, HostResourceAccess, LocalShellSandbox
 
 
 def _make_backend(tmp_path, devices=("/dev/neuron0",)) -> TrainiumBackend:  # noqa: ANN001  # tracked: #288

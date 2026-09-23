@@ -130,8 +130,8 @@ from vs_agent.api import (
     RoundProgress,
     SessionScope,
 )
-from vs_loop_state.agent import PerfProvenance, RoundHistory, RoundRecord
-from vs_project import AgentRunConfiguration
+from vs_loop_state.api import PerfProvenance, RoundHistory, RoundRecord
+from vs_project.api import AgentRunConfiguration
 
 # Candidate process boundaries selected by ``--interface``. Language, tooling,
 # and artifact requirements belong to the selected domain and input bundle.

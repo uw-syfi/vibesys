@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from vibesys.loops.plain.mcp_config import build_issue_mcp_spec
 from vs_agent.api import MCPServerSpec
-from vs_issue_board import IssueType
+from vs_issue_board.api import IssueType
 
 
 def test_build_judge_spec_has_correct_shape():  # noqa: ANN201  # tracked: #288

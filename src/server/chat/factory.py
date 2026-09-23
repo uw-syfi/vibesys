@@ -21,8 +21,8 @@ from server.events import ChatThreadCreatedData
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.api import agent_spec_from_config, output_sink
 from vs_agent.api import AgentSessionKey, SessionScope, build_agent_client
-from vs_project import RunLogger
-from vs_sandbox import HostResource, HostResourceAccess
+from vs_project.api import RunLogger
+from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from server.execution import ExecutionTracker
     from vibesys.api import RunSession
     from vs_agent.api import MCPServerSpec
-    from vs_project import Project
+    from vs_project.api import Project
 
 
 #: Session-key identifier for the run's default chat, which has no thread ID of

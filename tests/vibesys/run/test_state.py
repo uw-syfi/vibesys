@@ -7,7 +7,7 @@ import pytest
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vibesys.run.state import RunState
-from vs_project import Project
+from vs_project.api import Project
 
 
 def _tracker(root: Path, run_id: str) -> GitTracker:

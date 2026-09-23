@@ -26,12 +26,12 @@ from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from vs_agent.session_key import AgentSessionKey
-from vs_project import ProjectError
+from vs_project.api import ProjectError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_project import StateSlot
+    from vs_project.api import StateSlot
 
 
 class ProviderSessionRecord(BaseModel):

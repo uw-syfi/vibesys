@@ -45,7 +45,7 @@ from vs_agent.omnigent.providers import (
     OmnigentExecutorSpec,
     supported_providers,
 )
-from vs_sandbox import HostResourceContext
+from vs_sandbox.api import HostResourceContext
 
 if TYPE_CHECKING:
     import concurrent.futures

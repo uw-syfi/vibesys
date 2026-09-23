@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-import vs_sandbox
+import vs_sandbox.api as sandbox_api
 from vs_sandbox import host_sandbox, landlock
 from vs_sandbox.host_sandbox import LandlockSandbox, LinuxBackend
 from vs_sandbox.project_paths import ProjectPathPolicy
@@ -88,8 +88,8 @@ def _run(sandbox: LandlockSandbox, script: str) -> subprocess.CompletedProcess[s
 
 class TestLandlockPolicyCompilation:
     def test_public_export(self) -> None:
-        assert vs_sandbox.LandlockSandbox is LandlockSandbox
-        assert vs_sandbox.LinuxBackend is LinuxBackend
+        assert sandbox_api.LandlockSandbox is LandlockSandbox
+        assert sandbox_api.LinuxBackend is LinuxBackend
 
     def test_workspace_is_writable_and_system_roots_are_read_only(self, tmp_path: Path) -> None:
         workspace = _workspace(tmp_path)

@@ -34,7 +34,7 @@ from vs_agent.contracts import (
     SessionDisposition,
     session_spec_fingerprint,
 )
-from vs_project import (
+from vs_project.api import (
     PlainRunConfiguration,
     Project,
     RunEnvironmentRecord,

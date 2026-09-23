@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vs_sandbox import (
+from vs_sandbox.api import (
     HostResource,
     HostResourceAccess,
     HostResourceContext,

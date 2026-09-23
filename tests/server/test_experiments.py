@@ -34,8 +34,8 @@ from vibesys.schemas import (
     OrchestratorPlan,
     PerfDeltaReason,
 )
-from vs_loop_state import MetricComparison, PerfProvenance, RoundRecord
-from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_loop_state.api import MetricComparison, PerfProvenance, RoundRecord
+from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path

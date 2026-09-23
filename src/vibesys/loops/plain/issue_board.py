@@ -3,7 +3,7 @@
 New code should import directly from :mod:`vs_issue_board`.
 """
 
-from vs_issue_board import Issue, IssueBoard, IssueEvent, IssueStatus, IssueType
+from vs_issue_board.api import Issue, IssueBoard, IssueEvent, IssueStatus, IssueType
 
 __all__ = [
     "Issue",

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_project import (
+from vs_project.api import (
     MAX_SOCKET_PATH_BYTES,
     SocketPathTooLongError,
     validate_socket_path,

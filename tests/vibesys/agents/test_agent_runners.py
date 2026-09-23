@@ -17,7 +17,7 @@ from vibesys.schemas import (
 from vs_agent.api import AgentClient, build_agent_client
 from vs_agent.callbacks import AgentLogger
 from vs_agent.drivers.agentshim import AgentShimDriver
-from vs_sandbox import ProjectPathPolicy
+from vs_sandbox.api import ProjectPathPolicy
 
 
 def _agent_config(**agent) -> Config:  # noqa: ANN003  # tracked: #288

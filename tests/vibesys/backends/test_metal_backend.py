@@ -12,7 +12,7 @@ from vibesys.backends import SandboxKind
 from vibesys.backends.local import LocalBackend
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
-from vs_sandbox import LocalShellSandbox
+from vs_sandbox.api import LocalShellSandbox
 
 
 def _make_backend(tmp_path) -> LocalBackend:  # noqa: ANN001  # tracked: #288

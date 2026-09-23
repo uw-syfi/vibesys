@@ -25,8 +25,8 @@ from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.skills import platform_skill_selection
 from vs_agent.api import MCPServerSpec, expose_as_tools
-from vs_project import Project
-from vs_sandbox import HostResource, HostResourceAccess
+from vs_project.api import Project
+from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from vibesys.run.integration import RunResourceHandoff
     from vibesys.sandbox.run_environment import RunEnvironmentSession
     from vibesys.skills import SkillSelection
-    from vs_sandbox import ProjectPathPolicy, Sandbox
+    from vs_sandbox.api import ProjectPathPolicy, Sandbox
 
 
 class RunQuery(Protocol):

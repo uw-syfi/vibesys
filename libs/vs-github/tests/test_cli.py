@@ -7,7 +7,7 @@ from pathlib import Path  # noqa: TC003  # tracked: #288
 
 import pytest
 
-from vs_github import (
+from vs_github.api import (
     GitHubAuthenticationError,
     GitHubCLI,
     GitHubCLIError,

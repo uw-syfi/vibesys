@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from vs_sandbox import LocalShellSandbox, Sandbox, SandboxExecutionResult
+from vs_sandbox.api import LocalShellSandbox, Sandbox, SandboxExecutionResult
 
 if TYPE_CHECKING:
     from pathlib import Path

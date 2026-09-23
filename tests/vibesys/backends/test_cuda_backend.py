@@ -5,7 +5,7 @@ import pytest
 
 from vibesys.backends import SandboxKind
 from vibesys.backends.cuda import CudaBackend
-from vs_sandbox import DockerSandbox, HostResource, HostResourceAccess
+from vs_sandbox.api import DockerSandbox, HostResource, HostResourceAccess
 
 
 def test_cpu_only_control_plane_docker_skips_gpu_runtime(

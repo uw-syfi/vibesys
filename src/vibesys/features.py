@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from enum import StrEnum
 
-from vs_feature_flags import FeatureDefinition, FeatureRegistry
+from vs_feature_flags.api import FeatureDefinition, FeatureRegistry
 
 
 class FeatureFlag(StrEnum):  # noqa: D101  # tracked: #288

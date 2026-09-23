@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.api.contracts import Config, ConfigurationDiagnostic, LoopKind, RunRequest
-    from vs_project import Project
+    from vs_project.api import Project
 
 
 def load_config(path: Path, *, ignored_sections: frozenset[str] = frozenset()) -> Config:

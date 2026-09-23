@@ -17,7 +17,7 @@ from vibesys.run.project import (
 )
 from vibesys.run.workspace import Workspace
 from vibesys.sandbox.run_environment import LocalEnvironment
-from vs_project import Project
+from vs_project.api import Project
 
 if TYPE_CHECKING:
     from pathlib import Path

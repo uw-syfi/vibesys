@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 from entrypoints.cli.errors import _configuration_error
 from vibesys.api.request import REPOSITORY_SLUG, experiment_origin_matches
-from vs_github import GitHubCLI, GitHubCLIError
-from vs_project import Project, ProjectStateError
+from vs_github.api import GitHubCLI, GitHubCLIError
+from vs_project.api import Project, ProjectStateError
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -24,7 +24,7 @@ from vibesys.schemas import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_loop_state import PerfProvenance, RoundRecord
+    from vs_loop_state.api import PerfProvenance, RoundRecord
 
 
 def trusted_perf_provenance(provenance: PerfProvenance | None) -> bool:

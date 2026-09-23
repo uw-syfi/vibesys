@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from server.execution import ExecutionHandle, ExecutionTracker
     from server.journal import EventJournal
-    from vs_project import Project, StateSnapshot
+    from vs_project.api import Project, StateSnapshot
 
 
 @dataclass(frozen=True)

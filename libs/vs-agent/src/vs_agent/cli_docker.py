@@ -26,7 +26,7 @@ from pathlib import Path
 
 from vs_agent import provider_profiles
 from vs_agent.provider_policy import DOCKER_PROVIDER_ENV
-from vs_sandbox import AGENT_HOME
+from vs_sandbox.api import AGENT_HOME
 
 # Re-exported for existing importers (``vs_agent.factory``,
 # ``vibesys.sandbox.run_environment``, and this module's own tests reach it as

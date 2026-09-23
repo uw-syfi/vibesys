@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from vs_agent.progress import AgentProgress
     from vs_agent.sink import AgentEventSink
     from vs_agent.skills import SkillSelection
-    from vs_sandbox import HostResource, ProjectPathPolicy
+    from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 T = TypeVar("T", bound=BaseModel)
 

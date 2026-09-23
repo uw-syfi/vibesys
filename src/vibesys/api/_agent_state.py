@@ -17,11 +17,11 @@ from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.run.state import RunStateNamespace
-from vs_project import AgentRunConfiguration
+from vs_project.api import AgentRunConfiguration
 
 if TYPE_CHECKING:
     from vibesys.loops.agent.model import AgentRunState
-    from vs_project import Project
+    from vs_project.api import Project
 
 # The server's own experiment/design/performance projections treat only
 # "agent" as an agent run, deliberately excluding "profile-guided" even

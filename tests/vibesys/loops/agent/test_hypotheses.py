@@ -34,7 +34,7 @@ from vibesys.schemas import (
     OrchestratorPlan,
     PerfDeltaReason,
 )
-from vs_loop_state import PerfProvenance, RoundRecord
+from vs_loop_state.api import PerfProvenance, RoundRecord
 
 
 def _plan(identifier: str, *, updates: list[HypothesisStrategyUpdate] | None = None):  # noqa: ANN202

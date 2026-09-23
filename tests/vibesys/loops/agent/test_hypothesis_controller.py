@@ -11,7 +11,7 @@ from vibesys.loops.agent.model import (
     ProfileGuidanceStatus,
 )
 from vibesys.schemas import OrchestratorPlan
-from vs_loop_state import RoundRecord
+from vs_loop_state.api import RoundRecord
 
 
 def _ranking(*names: str) -> tuple[ProfileBottleneck, ...]:

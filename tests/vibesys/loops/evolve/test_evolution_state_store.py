@@ -6,7 +6,7 @@ from vibesys.loops.evolve.population import Individual, Population
 from vibesys.loops.evolve.state import EvolutionStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.run import RunState, RunStateNamespace
-from vs_project import EvolveRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import EvolveRunConfiguration, Project, RunEnvironmentRecord
 
 
 def _store(tmp_path) -> EvolutionStateStore:  # noqa: ANN001

@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vibesys.run.git_tracker import GitTracker
-    from vs_loop_state import RoundRecord
-    from vs_project import Project, StateNamespace
+    from vs_loop_state.api import RoundRecord
+    from vs_project.api import Project, StateNamespace
 
 
 class RunStateNamespace(StrEnum):

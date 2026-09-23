@@ -40,7 +40,7 @@ from vs_agent.contracts import (
 )
 from vs_agent.drivers import agentshim as agentshim_driver
 from vs_agent.drivers.agentshim import AgentShimDriver
-from vs_sandbox import HostResource, HostResourceAccess
+from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

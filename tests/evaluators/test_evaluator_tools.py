@@ -23,7 +23,7 @@ from vibesys.evaluators import (
     tool_spec_digest,
     tool_token,
 )
-from vs_sandbox import BeforeReadyContext, SandboxLifecycle
+from vs_sandbox.api import BeforeReadyContext, SandboxLifecycle
 
 
 def _spec() -> CargoGitToolSpec:

@@ -13,7 +13,7 @@ from vibesys.repository import RepositoryVisibility
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
-from vs_github import GitHubCLI
+from vs_github.api import GitHubCLI
 
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "test",

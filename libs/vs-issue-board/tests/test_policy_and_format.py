@@ -6,7 +6,7 @@ the formatting helpers that higher-level tool adapters delegate into.
 
 import pytest
 
-from vs_issue_board import IssueBoard, IssueType
+from vs_issue_board.api import IssueBoard, IssueType
 from vs_issue_board.format import format_issue_full, format_issue_short
 from vs_issue_board.policy import (
     CreateIssuePolicy,

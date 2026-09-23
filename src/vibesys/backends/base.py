@@ -21,15 +21,12 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from vibesys.constants import ComputeBackend  # noqa: TC001  # tracked: #288
 from vibesys.profilers import ProfilerKind  # noqa: TC001  # tracked: #288
-from vs_sandbox.lifecycle import SandboxLifecycle
-from vs_sandbox.local_shell import LocalShellSandbox
+from vs_sandbox.api import LocalShellSandbox, SandboxLifecycle
 
 if TYPE_CHECKING:
     from collections.abc import Sequence  # tracked: #288
 
-    from vs_sandbox.execution import Sandbox
-    from vs_sandbox.host_resources import HostResource
-    from vs_sandbox.lifecycle import SandboxLifecycleHooks
+    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
 
 
 class SandboxKind(StrEnum):

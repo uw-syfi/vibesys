@@ -20,7 +20,7 @@ from vibesys.api.request import (
     synthesize_input_bundle,
     validate_experiment_name,
 )
-from vs_project import Project, ProjectLayoutError
+from vs_project.api import Project, ProjectLayoutError
 
 if TYPE_CHECKING:
     import argparse

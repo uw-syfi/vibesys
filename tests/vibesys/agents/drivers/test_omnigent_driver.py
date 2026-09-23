@@ -38,7 +38,7 @@ from vs_agent.drivers.omnigent import (
     _LifecycleState,
 )
 from vs_agent.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
-from vs_sandbox import HostResource, ProjectPathPolicy
+from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 omnigent = pytest.importorskip("omnigent")
 TextChunk = omnigent.TextChunk

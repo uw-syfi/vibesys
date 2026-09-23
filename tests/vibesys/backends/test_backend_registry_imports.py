@@ -17,7 +17,7 @@ from vibesys import backends
 from vibesys.backends import SandboxKind
 from vibesys.backends.local import cpu_backend
 from vibesys.constants import ComputeBackend
-from vs_sandbox import LocalShellSandbox
+from vs_sandbox.api import LocalShellSandbox
 
 _PROBE = """
 import sys

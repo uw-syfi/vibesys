@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from vs_evaluator_protocol import (
+from vs_evaluator_protocol.api import (
     Hello,
     Measurement,
     ProtocolError,

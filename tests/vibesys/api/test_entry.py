@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.api import LoopKind
 from vibesys.api.entry import default_request, validate
-from vs_project import Project
+from vs_project.api import Project
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -12,7 +12,7 @@ from vibesys.skypilot.config import (
     load_cluster_profiles,
     resolve_profile,
 )
-from vs_project import RunResourceRequest
+from vs_project.api import RunResourceRequest
 
 if TYPE_CHECKING:
     from pathlib import Path

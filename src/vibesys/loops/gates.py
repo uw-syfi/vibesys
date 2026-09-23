@@ -22,7 +22,7 @@ from vibesys.events import (
 from vibesys.loops.metrics import Objective  # noqa: TC001  # tracked: #288
 from vibesys.render.sink import output_sink
 from vibesys.run import LoopContext  # noqa: TC001  # tracked: #288
-from vs_evaluator_protocol import (
+from vs_evaluator_protocol.api import (
     Hello,
     ProtocolError,
     check_objectives,
@@ -33,7 +33,7 @@ from vs_evaluator_protocol import (
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from vs_sandbox import SandboxExecutionResult
+    from vs_sandbox.api import SandboxExecutionResult
 
 # Truncation lengths for gate failure output. All three values are defined
 # here so that the logged window, the agent-feedback window, and the record

@@ -24,8 +24,8 @@ from vibesys.loops.agent.hypotheses import append_round, reproject_run_evidence
 from vibesys.loops.agent.model import AgentRunState, Hypothesis
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.schemas import OrchestratorPlan
-from vs_loop_state import RoundRecord
-from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_loop_state.api import RoundRecord
+from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 SIZES = (20, 100, 500)
 SAMPLES = 30

@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from vibesys.loops.agent.state import AgentRunStateStore
     from vibesys.run import LoopContext
     from vibesys.schemas import OrchestratorPlan
-    from vs_loop_state import RoundRecord
+    from vs_loop_state.api import RoundRecord
 
 
 @dataclass(frozen=True)

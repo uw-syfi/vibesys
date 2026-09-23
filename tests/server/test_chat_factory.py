@@ -12,7 +12,7 @@ from vibesys.config import Config
 from vibesys.skills import NULL_SKILL_SELECTION
 from vs_agent.api import MCPServerSpec
 from vs_agent.api.testing import FakeAgentClient
-from vs_sandbox import HostResource, HostResourceAccess, ProjectPathPolicy
+from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 
 _FAKE_TOOL_SERVERS = (
     MCPServerSpec(

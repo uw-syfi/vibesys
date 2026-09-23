@@ -40,7 +40,7 @@ from tests.support.example_registry import (
 from entrypoints.cli import _run_validate
 from vibesys.errors import ConfigurationError
 from vibesys.run.project_policy import build_project_path_policy, trusted_project_input_paths
-from vs_project import Project
+from vs_project.api import Project
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

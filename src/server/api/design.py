@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Literal
 
 from server.api.protocol import DesignFileChange, DesignPatch, DesignRound
 from vibesys.api import framework_memory_paths
-from vs_project import is_project_state_path
+from vs_project.api import is_project_state_path
 
 if TYPE_CHECKING:
     from pathlib import Path

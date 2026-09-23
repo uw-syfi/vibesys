@@ -43,14 +43,14 @@ from vs_agent.contracts import (
 from vs_agent.events import CommandResultPayload
 from vs_agent.host_resource_declarations import declare_agent_host_resources
 from vs_agent.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS, is_codex
-from vs_sandbox import build_host_sandbox
+from vs_sandbox.api import build_host_sandbox
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from pydantic import BaseModel
 
-    from vs_sandbox import WorkspaceSandbox
+    from vs_sandbox.api import WorkspaceSandbox
 
 AGENTSHIM_CAPABILITIES = AgentCapabilities(
     mcp_servers=True,

@@ -133,7 +133,7 @@ def reconcile_model_requests(
     if not requests:
         return []
 
-    from vs_sandbox import ensure_model_volume  # noqa: PLC0415  # tracked: #288
+    from vs_sandbox.api import ensure_model_volume  # noqa: PLC0415  # tracked: #288
 
     allow = _allow_prefixes()
     volumes: list[str] = []

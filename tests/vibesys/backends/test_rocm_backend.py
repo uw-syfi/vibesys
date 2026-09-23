@@ -12,7 +12,7 @@ from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, RocmComputeBackendFragment
 from vibesys.prompts.renderer import _FRAGMENT_IMPLS, ComputeBackendFragment
-from vs_sandbox import DockerSandbox, HostResource, HostResourceAccess, LocalShellSandbox
+from vs_sandbox.api import DockerSandbox, HostResource, HostResourceAccess, LocalShellSandbox
 
 
 def _make_backend(tmp_path, devices=("/dev/kfd", "/dev/dri/renderD128")) -> RocmBackend:  # noqa: ANN001  # tracked: #288

@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from server.execution import ExecutionTracker
     from server.journal import EventJournal as WireEventJournal
     from vibesys.api import CoreEvent, RunResourceHandoff, RunSession
-    from vs_project import Project
+    from vs_project.api import Project
 
 _EVENT_DATA_ADAPTER = TypeAdapter(EventData)
 _TERMINAL_TRIGGERS: dict[EventType, RunTrigger] = {

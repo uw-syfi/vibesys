@@ -17,8 +17,8 @@ if TYPE_CHECKING:
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
     from vibesys.sandbox.run_environment import RunEnvironment, RunEnvironmentRequest
-    from vs_project import Project
-    from vs_sandbox import HostResource, ProjectPathPolicy
+    from vs_project.api import Project
+    from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 
 @dataclass(frozen=True, slots=True)

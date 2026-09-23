@@ -11,8 +11,8 @@ from uuid import UUID
 import pytest
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
-from vs_loop_state import RoundRecord, parse_round_record, serialize_round_record
-from vs_project import (
+from vs_loop_state.api import RoundRecord, parse_round_record, serialize_round_record
+from vs_project.api import (
     PROJECT_SCHEMA_VERSION,
     RUN_SCHEMA_VERSION,
     AgentRunConfiguration,

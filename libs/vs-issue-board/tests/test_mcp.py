@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from vs_issue_board import IssueType
+from vs_issue_board.api import IssueType
 from vs_issue_board.mcp import build_parser, build_server
 
 

@@ -34,12 +34,12 @@ from pydantic import (
 )
 
 from vibesys.run.git_tracker import FrameworkSnapshotStatus
-from vs_loop_state import RoundRecord, parse_round_record
-from vs_project import ProjectStateError, StateSlot, StateTransition
+from vs_loop_state.api import RoundRecord, parse_round_record
+from vs_project.api import ProjectStateError, StateSlot, StateTransition
 
 if TYPE_CHECKING:
     from vibesys.run.git_tracker import GitTracker
-    from vs_project import Project
+    from vs_project.api import Project
 
 _JOURNAL_SCHEMA_VERSION: Literal[4] = 4
 _GIT_OBJECT_ID_PATTERN = r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"

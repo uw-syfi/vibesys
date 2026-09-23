@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from server.chat.factory import ChatAgentBuilder
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunView
-    from vs_project import Project
+    from vs_project.api import Project
 
 
 class _ControlBridge:

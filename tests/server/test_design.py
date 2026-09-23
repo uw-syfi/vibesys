@@ -18,8 +18,8 @@ from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vibesys.schemas import OrchestratorPlan
-from vs_loop_state import RoundRecord
-from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_loop_state.api import RoundRecord
+from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path

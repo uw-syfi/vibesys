@@ -9,7 +9,7 @@ from tests.support import provider_profiles as fake_profiles
 
 import vibesys
 from vs_agent import host_resource_declarations
-from vs_sandbox import HostResource, HostResourceAccess, HostResourceContext
+from vs_sandbox.api import HostResource, HostResourceAccess, HostResourceContext
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")
 

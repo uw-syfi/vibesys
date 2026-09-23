@@ -48,9 +48,9 @@ from vs_agent.api import (
 )
 from vs_agent.api.testing import FakeAgentClient
 from vs_agent.contracts import AgentTurnRequest, AgentTurnResult
-from vs_loop_state import PlainLoopCursor
-from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
-from vs_sandbox import HostResourceAccess, SandboxLifecycle
+from vs_loop_state.api import PlainLoopCursor
+from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_sandbox.api import HostResourceAccess, SandboxLifecycle
 
 
 class _FakeBackend:

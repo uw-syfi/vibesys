@@ -29,7 +29,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
 
-from vs_loop_state import (
+from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
     PerfDeltaReason,  # noqa: F401

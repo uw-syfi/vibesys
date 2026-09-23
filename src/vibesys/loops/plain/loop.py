@@ -56,14 +56,14 @@ from vibesys.schemas import (
     Verdict,
 )
 from vs_agent.api import AgentBackend, RoundProgress
-from vs_issue_board import (
+from vs_issue_board.api import (
     Issue,
     IssueBoard,
     IssueStatus,
     IssueType,
 )
-from vs_loop_state import PlainLoopCursor, PlainPerformanceRecord
-from vs_project import PlainRunConfiguration
+from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
+from vs_project.api import PlainRunConfiguration
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "plain"
 PlainLoopState = PlainLoopCursor

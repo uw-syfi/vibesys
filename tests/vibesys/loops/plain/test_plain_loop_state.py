@@ -1,7 +1,7 @@
 """Tests for plain-loop resume decisions over typed state."""
 
 from vibesys.loops.plain.loop import PlainLoopState, _determine_resume_point
-from vs_issue_board import IssueBoard, IssueStatus, IssueType
+from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
 
 
 def _make_store(tmp_path) -> IssueBoard:  # noqa: ANN001  # tracked: #288

@@ -103,14 +103,14 @@ from vs_agent.api import (
     build_agent_client,
     task_agent_host_resources,
 )
-from vs_project import (
+from vs_project.api import (
     Project,
     RunConfiguration,
     StateTransition,
     compare_resume_configurations,
     generate_run_id,
 )
-from vs_sandbox import HostResource
+from vs_sandbox.api import HostResource
 
 T = TypeVar("T", bound=BaseModel)
 

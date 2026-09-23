@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, assert_never
 from vibesys.schemas import Verdict
 
 if TYPE_CHECKING:
-    from vs_loop_state import JudgeVerdict
+    from vs_loop_state.api import JudgeVerdict
 
 
 class JudgeSkipReason(StrEnum):

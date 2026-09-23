@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from vs_agent.api import AgentSelection  # noqa: TC001  # tracked: #288
 
 if TYPE_CHECKING:
-    from vs_project import Project
+    from vs_project.api import Project
 
 
 @dataclass(frozen=True, slots=True)

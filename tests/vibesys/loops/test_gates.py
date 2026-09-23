@@ -34,7 +34,7 @@ from vibesys.loops.gates import (
 )
 from vibesys.loops.metrics import Objective
 from vibesys.render.sink import output_sink
-from vs_sandbox import SandboxExecutionResult
+from vs_sandbox.api import SandboxExecutionResult
 
 _SCALAR_SPEC = BenchmarkResult(json_argument="--out", metric="tok_per_sec")
 

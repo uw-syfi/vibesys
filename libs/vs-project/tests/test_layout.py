@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_project import (
+from vs_project.api import (
     AmbiguousTaskError,
     InvalidTaskDefinitionError,
     InvalidTaskNameError,

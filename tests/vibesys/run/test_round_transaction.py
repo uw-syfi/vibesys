@@ -18,8 +18,8 @@ from vibesys.run import (
     RoundTransactionError,
 )
 from vibesys.run.git_events import NullGitTrackerEvents
-from vs_loop_state import RoundRecord
-from vs_project import (
+from vs_loop_state.api import RoundRecord
+from vs_project.api import (
     AgentRunConfiguration,
     Project,
     RunEnvironmentRecord,

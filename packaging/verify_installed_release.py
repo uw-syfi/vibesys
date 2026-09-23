@@ -29,7 +29,7 @@ from vibesys.resource_paths import (
     profiler_support_dir,
     resources_root,
 )
-from vs_project import Project, ProjectError
+from vs_project.api import Project, ProjectError
 
 FRAMEWORK_PACKAGES = (
     "vibesys",

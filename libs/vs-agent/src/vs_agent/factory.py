@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from vs_agent.sink import AgentEventSink
     from vs_agent.skills import SkillSelection
     from vs_agent.spec import AgentSpec
-    from vs_sandbox import HostResource, ProjectPathPolicy
+    from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 
 def agent_driver_supports_mcp_servers(spec: AgentSpec) -> bool | None:

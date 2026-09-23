@@ -70,7 +70,7 @@ if TYPE_CHECKING:
     from typing import TextIO
 
     from vs_agent.client import AgentClient
-    from vs_sandbox import HostResource, ProjectPathPolicy
+    from vs_sandbox.api import HostResource, ProjectPathPolicy
 
 __all__ = [
     "CLI_VERSIONS",

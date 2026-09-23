@@ -8,13 +8,13 @@ from vibesys.api._agent_state import load_agent_run_state
 from vibesys.api._readmodel import project_run_view
 from vibesys.api.contracts import LoopKind, RunStatus
 from vibesys.loops.agent.model import AgentRunState
-from vs_sandbox import HostResource, HostResourceAccess
+from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vibesys.api.contracts import RunView
-    from vs_project import Project, RunManifest
+    from vs_project.api import Project, RunManifest
 
 
 class RunStore(Protocol):

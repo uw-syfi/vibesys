@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ValidationError
 
-from vs_loop_state import RoundRecord, serialize_round_record
+from vs_loop_state.api import RoundRecord, serialize_round_record
 from vs_project.errors import ProjectStateError, StateModelNotFoundError
 
 

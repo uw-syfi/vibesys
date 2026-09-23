@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 
-from vs_loop_state import HypothesisOutcome
+from vs_loop_state.api import HypothesisOutcome
 
 # Each scripted hypothesis spans two rounds so a run exercises the
 # continuation path, and every third one is disproven so the experiment log

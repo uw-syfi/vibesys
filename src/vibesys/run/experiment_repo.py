@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from vibesys.repository import REPOSITORY_SLUG, RepositoryVisibility
-from vs_github import GitHubCLI
+from vs_github.api import GitHubCLI
 
 _RUN_BRANCH_PREFIXES = ("vibesys-runs/", "vibesys/")
 _GITHUB_ORIGIN = re.compile(

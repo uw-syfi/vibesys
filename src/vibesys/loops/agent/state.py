@@ -31,8 +31,8 @@ from vibesys.schemas import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_loop_state import RoundRecord
-    from vs_project import StateNamespace, StateSlot, StateTransition
+    from vs_loop_state.api import RoundRecord
+    from vs_project.api import StateNamespace, StateSlot, StateTransition
 
 
 class AgentRunStateStore:

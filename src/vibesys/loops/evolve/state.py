@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 
 from vibesys.loops.evolve.population import Individual, Population
 from vibesys.loops.metrics import MetricSpace
-from vs_loop_state import IndividualRecord, PopulationSnapshot
+from vs_loop_state.api import IndividualRecord, PopulationSnapshot
 
 if TYPE_CHECKING:
-    from vs_project import StateNamespace, StateSlot
+    from vs_project.api import StateNamespace, StateSlot
 
 _POPULATION_FILE = "population.json"
 _METRICS_FILE = "metrics.json"

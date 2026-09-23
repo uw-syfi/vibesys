@@ -7,7 +7,7 @@ from pathlib import Path
 from entrypoints.cli import _MODALITIES
 from vibesys.evaluators.input_manifest import load_project_task
 from vibesys.prompts import PROMPTS_DIR, render_template
-from vs_project import Project
+from vs_project.api import Project
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]

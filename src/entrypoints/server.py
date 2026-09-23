@@ -10,7 +10,7 @@ from entrypoints import cli
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
 from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
-from vs_github import GitHubCLI, GitHubCLIError
+from vs_github.api import GitHubCLI, GitHubCLIError
 
 if TYPE_CHECKING:
     import argparse

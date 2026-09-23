@@ -32,8 +32,8 @@ from vibesys.schemas import (
 )
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
-from vs_issue_board import IssueBoard, IssueStatus
-from vs_project import RUN_SCHEMA_VERSION, Project, RunEnvironmentRecord
+from vs_issue_board.api import IssueBoard, IssueStatus
+from vs_project.api import RUN_SCHEMA_VERSION, Project, RunEnvironmentRecord
 
 # ---------------------------------------------------------------------------
 # Helpers — factories and fixtures shared across tests

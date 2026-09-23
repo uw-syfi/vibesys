@@ -14,7 +14,7 @@ from vibesys.schemas import (
     OrchestratorPlan,
     PerfDeltaReason,
 )
-from vs_loop_state import HypothesisResolution, RoundRecord
+from vs_loop_state.api import HypothesisResolution, RoundRecord
 
 
 class HypothesisReview(StrEnum):

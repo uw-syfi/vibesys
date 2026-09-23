@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, Protocol, Self
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 import vs_project._paths as project_paths
-from vs_loop_state import RoundRecord, parse_round_record
+from vs_loop_state.api import RoundRecord, parse_round_record
 from vs_project._state_io import (
     _atomic_write_bytes,
     _atomic_write_model,

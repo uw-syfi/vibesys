@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 from vibesys.features import FeatureFlag
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
-from vs_feature_flags import parse_feature_flag_overrides
+from vs_feature_flags.api import parse_feature_flag_overrides
 
 Provider = Literal["vertex-ai", "anthropic", "google-genai", "openai", "openai-compatible"]
 

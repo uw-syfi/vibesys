@@ -39,7 +39,7 @@ from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.loops.roles import EXPECTED_AGENT_ROLES
 from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import run_environment_record
-from vs_project import (
+from vs_project.api import (
     RUN_SCHEMA_VERSION,
     AgentRunConfiguration,
     EvolveRunConfiguration,

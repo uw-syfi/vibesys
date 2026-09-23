@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from vs_feature_flags import FeatureDefinition, FeatureRegistry
+from vs_feature_flags.api import FeatureDefinition, FeatureRegistry
 
 if TYPE_CHECKING:
     from collections.abc import MutableMapping

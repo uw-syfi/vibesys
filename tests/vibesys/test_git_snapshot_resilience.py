@@ -10,7 +10,7 @@ import pytest
 
 from vibesys.run import GitTracker
 from vibesys.run.git_events import NullGitTrackerEvents
-from vs_project import Project
+from vs_project.api import Project
 
 if TYPE_CHECKING:
     from pathlib import Path
