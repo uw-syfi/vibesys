@@ -62,7 +62,7 @@ from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_agent.stub_runner import StubAgentClient
 from vs_loop_state.api import RoundRecord
-from vs_project.api import Project, serialize_round
+from vs_project.api import AgentRunConfiguration, Project, serialize_round
 from vs_sandbox.api import SandboxExecutionResult
 
 if TYPE_CHECKING:
@@ -435,13 +435,14 @@ def _active_hypothesis(tmp_path: Path) -> Hypothesis | None:
 # ---------------------------------------------------------------------------
 
 
-def test_project_configuration_captures_effective_agent_behavior(tmp_path: Path) -> None:
+def test_orchestration_descriptor_captures_effective_agent_behavior(tmp_path: Path) -> None:
     with (
         patch(
             "vibesys.loops.agent.loop.create_run_context",
-            side_effect=RuntimeError("captured project configuration"),
+            side_effect=RuntimeError("captured orchestration descriptor"),
         ) as create_context,
-        pytest.raises(RuntimeError, match="captured project configuration"),
+        patch.object(AgentRunConfiguration, "model_validate") as legacy_validate,
+        pytest.raises(RuntimeError, match="captured orchestration descriptor"),
     ):
         run_agent_loop(
             config=as_config(
@@ -481,10 +482,13 @@ def test_project_configuration_captures_effective_agent_behavior(tmp_path: Path)
             ),
         )
 
-    configuration = create_context.call_args.kwargs["project_configuration"]
-    assert configuration.model_dump() == {
+    legacy_validate.assert_not_called()
+    context_kwargs = create_context.call_args.kwargs
+    descriptor = context_kwargs["orchestration_descriptor"](ProfilerKind.AUTO)
+    assert descriptor.id == "agent"
+    assert descriptor.config_version == 1
+    assert descriptor.options == {
         "model": "gpt-default",
-        "outer_loop": "agent",
         "inner_loop": "single-agent",
         "interface": "service",
         "agent_backend": "cli",
@@ -504,17 +508,14 @@ def test_project_configuration_captures_effective_agent_behavior(tmp_path: Path)
         "outer_reasoning_effort": "xhigh",
         "inner_model": "gpt-inner",
         "inner_reasoning_effort": "medium",
-        "operator_constraints": ("Preserve ordering",),
-        "objectives": (),
-        "run_environment": {
-            "name": "modal",
-            "image": None,
-            "gpu": "A100-80GB",
-            "model_volume": "weights",
-            "app": "vibesys",
-            "resources": None,
-        },
+        "operator_constraints": ["Preserve ordering"],
+        "objectives": [],
     }
+    legacy = context_kwargs["legacy_configuration_factory"](ProfilerKind.AUTO)
+    assert legacy.outer_loop == "agent"
+    assert legacy.run_environment.name == "modal"
+    assert legacy.run_environment.gpu == "A100-80GB"
+    assert legacy.run_environment.model_volume == "weights"
 
 
 def test_validation_recipe_rejects_non_workspace_inputs():  # noqa: ANN201  # tracked: #288
