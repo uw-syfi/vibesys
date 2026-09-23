@@ -1,11 +1,14 @@
 # vs-evaluator-protocol
 
-Framework-side reader for the VibeSys evaluator result protocol, version 2. The
-protocol itself, its fixtures, and the evaluator-side SDKs live in
-`sdk/vs-evaluator/`; this library is the only implementation the framework uses
-to consume an evaluator's record stream.
+## Responsibility
 
-The public API exported from `vs_evaluator_protocol` has three groups:
+This package validates evaluator record streams and returns typed measurements to
+the framework. Evaluator execution, file I/O, scoring, and the evaluator-side SDK
+belong outside it. The protocol definition and SDKs live in `sdk/vs-evaluator/`.
+
+## Concepts
+
+The public API has three groups:
 
 - `Hello`, `Result`, `ErrorRecord`, `MetricSpec`, and the `Record` union define
   the records, with `PROTOCOL_VERSION` naming the version this reader
@@ -25,17 +28,22 @@ The public API exported from `vs_evaluator_protocol` has three groups:
   metrics are optimized. A task cannot rank on an optional metric, since a
   successful run may omit it and the frontier would silently lose the round.
 
-Every rejection raises `ProtocolError` carrying a `ReasonCode` from the shared
-contract and a message naming the offending record and key. Record models
-reject unknown keys and type coercion; Pydantic failures are translated, never
-surfaced. `read_measurement` loops over records rather than indexing a
-fully-parsed stream, so a transport that delivers records incrementally can
-reuse it unchanged.
+Every rejection raises `ProtocolError` with a `ReasonCode` and a message
+naming the offending record and key. Record models reject unknown keys and
+type coercion.
 
-The reader also accepts version 1 streams, reading them as declaring every
-metric required. That support is transitional: it exists only until the Go
-evaluators in this repository are rebuilt against an SDK that emits version 2,
-and the code carrying it is marked for deletion in `records.py`.
+Version 1 streams remain accepted during the transition to version 2. The
+reader treats every declared metric in a version 1 stream as required.
 
-The library does not read or write files, run evaluators, or score
-measurements.
+## Usage
+
+Read an evaluator's output after the application has run it:
+
+```python
+from vs_evaluator_protocol.api import parse_records, read_measurement
+
+measurement = read_measurement(parse_records(output_text))
+```
+
+The caller checks task objectives against the evaluator declaration with
+`check_objectives` before using measurements for ranking.

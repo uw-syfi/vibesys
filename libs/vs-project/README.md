@@ -1,10 +1,16 @@
 # vs-project
 
-One filesystem boundary for a repository-native VibeSys project.
+## Responsibility
 
-`Project` binds human-authored task definitions and generated state to one
-validated repository root. Application code constructs one project and uses
-task operations directly and persistence through `project.state`:
+This package owns the `.vibesys` filesystem contract for a repository-native
+project. It discovers and validates tasks, binds project state to one repository
+root, and provides access to generated run state. Applications should use one
+`Project` per root rather than assemble paths or state stores themselves.
+
+## Usage
+
+Application code uses task operations directly and persists state through
+`project.state`:
 
 ```python
 from vs_project.api import Project

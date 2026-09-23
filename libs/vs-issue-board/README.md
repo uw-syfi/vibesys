@@ -5,11 +5,11 @@ Reusable JSON-backed issue board utilities for small agent workflows.
 This is an internal import package shipped by the `vibesys` distribution. It
 is not published as a separate Python distribution.
 
-`vs-issue-board` owns the generic issue tracker pieces that do not depend on
-VibeSys: the persistent issue store, typed issue models, create-policy
-helpers, text formatting helpers, and a stdio MCP server. Applications can use
-it directly, then add their own rendering, prompts, tool adapters, or loop
-orchestration around it.
+## Responsibility
+
+This package owns reusable issue state and history, JSON persistence, create
+policies, text formatting, and a stdio MCP server. Applications supply prompts,
+rendering, agent tools, and loop orchestration around that board.
 
 ## Concepts
 
@@ -19,23 +19,12 @@ orchestration around it.
   models/enums for issue state and history.
 - `IssueBoard.reload()` lets multiple processes coordinate through the same
   file.
-- Opening or reloading malformed, structurally invalid, or unsupported-version
-  state raises `IssueBoardLoadError` without replacing the file or the last
-  valid in-memory snapshot.
-- Reloading a store that has disappeared or cannot be read raises the same
-  error and preserves the last valid in-memory snapshot.
+- A failed load or reload raises `IssueBoardLoadError` and preserves the last
+  valid in-memory state.
 - `on_change` lets applications attach derived views such as markdown mirrors
   without making rendering part of the core library.
 - `CreateIssuePolicy` keeps role-specific create limits out of application
   wrappers, so MCP and in-process tool paths can share the same semantics.
-
-## Package Layout
-
-- `vs_issue_board.core`: issue models, enums, and `IssueBoard`.
-- `vs_issue_board.policy`: type parsing and create-policy enforcement.
-- `vs_issue_board.format`: plain text issue summaries and full issue bodies.
-- `vs_issue_board.mcp`: stdio MCP server exposing issue-board tools.
-- `vs_issue_board`: public re-export surface for the commonly used APIs.
 
 ## Example
 
@@ -134,17 +123,4 @@ Package-owned tests live beside the package:
 
 ```bash
 uv run pytest libs/vs-issue-board/tests
-```
-
-When moving code into this package, move or add the tests that define that
-generic behavior here too. App-level compatibility tests can stay in the app
-test tree when they verify old import paths or VibeSys integration wiring.
-
-For the full repository gate, run the whole suite. `[tool.coverage.run]` in
-the root `pyproject.toml` already measures `vs_issue_board` alongside
-`vibesys` and the other internal import packages, so a bare `uv run pytest`
-reports combined coverage locally; CI additionally enforces the floor:
-
-```bash
-uv run pytest --cov-fail-under=75
 ```

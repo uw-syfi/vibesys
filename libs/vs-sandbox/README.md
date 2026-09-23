@@ -1,15 +1,10 @@
 # vs-sandbox
 
-Reusable host and Docker sandbox backends for agent workspaces, plus Modal
-model-weight volume provisioning.
+## Responsibility
 
-This is an internal import package shipped by the `vibesys` distribution. It
-is not published as a separate Python distribution.
-
-`vs-sandbox` owns the sandbox execution backends that do not depend on
-VibeSys: container-backed workspaces, an unconfined local shell sandbox, host process
-confinement, plus Modal model-weight volume provisioning.
-Applications wire these into their own run-environment policy.
+This package provides workspace execution backends, host resource and path
+policies, lifecycle hooks, and Modal model-weight volume provisioning.
+Applications select a backend and declare the resources their agents need.
 
 ## Concepts
 
@@ -21,18 +16,12 @@ Applications wire these into their own run-environment policy.
   host bind mounts, and cleans up tracked containers on exit or SIGINT.
 - `HostResource` and related declaration types form a backend-neutral SDK for
   describing which host paths an application needs to import. `agent_path`
-  names the path the confined process should see when it differs from the
-  host path; leave it unset unless a resource is presented at a fixed
-  container path. Host backends cannot remap, so `build_host_sandbox` rejects
-  a resource whose `agent_path` disagrees with its host path.
+  identifies the path the agent sees when a container remaps a host resource.
 - `HostSandbox`, `LandlockSandbox`, and `SeatbeltSandbox` consume those
   declarations to confine a local process with bubblewrap, Landlock, or
   Seatbelt. Applications own their resource lists; this package owns
-  validation and import mechanics. Every `WorkspaceSandbox` exposes
-  `agent_path(host_path)` (identity on host backends) and an `env` property
-  (the environment the confined process runs with, guaranteed to carry HOME
-  and PATH) so callers do not need backend-specific branches to answer either
-  question.
+  validation and import mechanics. `WorkspaceSandbox` exposes a common path
+  mapping and environment interface to callers.
 - `ProjectPathPolicy` protects workspace-relative files and directories inside
   an otherwise writable project. It supports read-only paths and hidden paths,
   validates containment and overlap, and can require the host backend to fail
