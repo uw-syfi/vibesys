@@ -28,8 +28,8 @@ native_targets = ["resources/evaluators/microservice", "resources/evaluators/que
 pnpm_packages = []
 
 [[cases]]
-name = "repository tool changes select all checks"
-paths = ["support/repoctl/main.go"]
+name = "repoctl code and policy changes select all checks"
+paths = ["support/repoctl/main.go", ".repoctl/components.toml", ".repoctl/checks.toml"]
 jobs = ["agent_image", "evaluators", "examples", "impact", "python", "tui"]
 [cases.collections]
 native_languages = ["go", "rust"]

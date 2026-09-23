@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -13,23 +14,13 @@ func splitPath(s string) []string  { return strings.Split(s, "/") }
 func under(path, root string) bool { return path == root || strings.HasPrefix(path, root+"/") }
 
 func readPolicy(root, configPath string) (graph, error) {
-	var p policy
 	path := configPath
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(root, path)
 	}
-	md, err := toml.DecodeFile(path, &p)
+	p, err := loadPolicy(path)
 	if err != nil {
 		return graph{}, err
-	}
-	expected := []string{"default_base", "jobs", "ignored_roots", "ignored_files", "discoveries", "collections", "components", "edges"}
-	for _, key := range expected {
-		if !md.IsDefined(key) {
-			return graph{}, fmt.Errorf("%s: missing key %s", path, key)
-		}
-	}
-	if len(md.Undecoded()) > 0 {
-		return graph{}, fmt.Errorf("%s: unknown keys %v", path, md.Undecoded())
 	}
 	if err := unique(p.Jobs, "jobs"); err != nil || len(p.Jobs) == 0 {
 		if err != nil {
@@ -137,6 +128,55 @@ func readPolicy(root, configPath string) (graph, error) {
 		return g, err
 	}
 	return g, nil
+}
+
+var componentKeys = []string{"default_base", "jobs", "ignored_roots", "ignored_files", "discoveries", "collections", "components", "edges"}
+var checkKeys = []string{"native_checks", "native_check_overrides", "check_groups"}
+
+func loadPolicy(path string) (policy, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return policy{}, fmt.Errorf("configuration %q: %w", path, err)
+	}
+	if !info.IsDir() {
+		return decodePolicyFile(path, append(append([]string{}, componentKeys...), checkKeys...), componentKeys)
+	}
+	componentsPath := filepath.Join(path, "components.toml")
+	checksPath := filepath.Join(path, "checks.toml")
+	components, err := decodePolicyFile(componentsPath, componentKeys, componentKeys)
+	if err != nil {
+		return policy{}, err
+	}
+	checks, err := decodePolicyFile(checksPath, checkKeys, nil)
+	if err != nil {
+		return policy{}, err
+	}
+	components.NativeChecks = checks.NativeChecks
+	components.NativeCheckOverrides = checks.NativeCheckOverrides
+	components.CheckGroups = checks.CheckGroups
+	return components, nil
+}
+
+func decodePolicyFile(path string, allowed, required []string) (policy, error) {
+	var p policy
+	md, err := toml.DecodeFile(path, &p)
+	if err != nil {
+		return policy{}, err
+	}
+	for _, key := range required {
+		if !md.IsDefined(key) {
+			return policy{}, fmt.Errorf("%s: missing key %s", path, key)
+		}
+	}
+	if len(md.Undecoded()) > 0 {
+		return policy{}, fmt.Errorf("%s: unknown keys %v", path, md.Undecoded())
+	}
+	for _, key := range md.Keys() {
+		if !contains(allowed, key[0]) {
+			return policy{}, fmt.Errorf("%s: key %s belongs in another config file", path, key)
+		}
+	}
+	return p, nil
 }
 
 func (g *graph) add(c component) error {

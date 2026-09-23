@@ -180,9 +180,10 @@ work, see [`docs/contributing/openevolve.md`](openevolve.md).
 Every pull request must pass the following gates before it can be merged.
 You can run each one locally before pushing.
 
-The `changes` job selects checks from the repository policy in
-`repoctl.toml`. `support/repoctl/` provides configurable adapters for
-language and package manifests. The top-level graph records cross-component
+The `changes` job reads `.repoctl/components.toml` for ownership, discovery,
+and dependency policy, and `.repoctl/checks.toml` for executable check groups
+and native commands. `support/repoctl/` provides configurable adapters for
+language and package manifests. The component graph records cross-component
 effects those manifests cannot express. The job prints each selection and its
 reason; an unowned changed path fails selection instead of silently skipping
 checks. To run the selected checks locally, use one command:
@@ -192,7 +193,7 @@ checks. To run the selected checks locally, use one command:
 ```
 
 Use `./support/repoctl/repoctl plan` to inspect the selection without running checks.
-The workflow runs named check groups from `repoctl.toml`. Run
+The workflow runs named check groups from `.repoctl/checks.toml`. Run
 `./support/repoctl/repoctl verify-policy --cases tests/repoctl/cases.toml` after
 changing component ownership or dependencies; CI runs this contract check before
 selecting jobs.

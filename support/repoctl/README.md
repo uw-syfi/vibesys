@@ -1,9 +1,11 @@
 # repoctl
 
-`repoctl` plans work from repository changes and runs selected checks. It reads a
-repository-owned TOML policy, discovers components, maps changed paths to their
-owners, and walks reverse dependency edges. The Go program contains no
-repository-specific paths, jobs, or commands; those belong in the policy.
+`repoctl` plans work from repository changes and runs selected checks. It reads
+`.repoctl/components.toml` for ownership, discovery, and dependency policy and
+`.repoctl/checks.toml` for check groups and native commands. It discovers
+components, maps changed paths to their owners, and walks reverse dependency
+edges. The Go program contains no repository-specific paths, jobs, or
+commands; those belong in the policy.
 
 From a repository root:
 
@@ -20,14 +22,15 @@ From a repository root:
 `test` and `plan` accept `--base`, `--head`, and `--event`. `test` also includes
 staged, unstaged, and untracked local paths; `plan` uses only committed changes
 for CI. Pull requests compare against the merge base; pushes use the exact
-endpoints. `--config` accepts a
-repository-relative or absolute policy path. The directory containing an
-absolute policy is the repository root; `REPOCTL_ROOT` can set it explicitly.
-CI uses `plan --github-output PATH` to emit configured job and collection
-names, then runs named `[[check_groups]]` independently with `run-checks
---group NAME`. Groups can have ordered commands, environment overrides, and
-selected package collections. `run-native --targets-json JSON` executes only
-registered native targets from a plan. `test` runs groups marked
+endpoints. By default, repoctl loads `.repoctl/components.toml` and
+`.repoctl/checks.toml`. `--config` accepts a repository-relative or absolute
+policy directory, or a legacy single-file policy. `REPOCTL_ROOT` can set the
+repository root explicitly. CI uses `plan --github-output PATH` to emit
+configured job and collection names, then runs named `[[check_groups]]` from
+`.repoctl/checks.toml` independently with `run-checks --group NAME`. Groups can
+have ordered commands, environment overrides, and selected package
+collections. `run-native --targets-json JSON` executes only registered native
+targets from a plan. `test` runs groups marked
 `include_in_test` for affected jobs, plus affected native targets.
 Pass `--collection-json '["package-name"]'` to `run-checks` for a group with
 a configured collection; unknown or duplicate values fail before execution.

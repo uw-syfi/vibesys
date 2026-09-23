@@ -14,8 +14,12 @@ import (
 
 func rootPath(configPath string) (string, error) {
 	if filepath.IsAbs(configPath) {
-		if _, err := os.Stat(configPath); err != nil {
+		info, err := os.Stat(configPath)
+		if err != nil {
 			return "", fmt.Errorf("configuration %q: %w", configPath, err)
+		}
+		if info.IsDir() {
+			return filepath.Dir(filepath.Clean(configPath)), nil
 		}
 		return filepath.Dir(configPath), nil
 	}
@@ -114,7 +118,7 @@ func writeOutputs(path string, p plan) error {
 	return nil
 }
 func cli(args []string) error {
-	configPath := "repoctl.toml"
+	configPath := ".repoctl"
 	filtered := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--config" {

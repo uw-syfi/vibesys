@@ -132,7 +132,7 @@ def test_ci_fetches_external_repos_and_runs_this_module() -> None:
     job = workflow.split("\n  validate-examples:", 1)[1].split("\n  # ", 1)[0]
     assert "repoctl run-checks --group examples_tests" in job
 
-    policy = tomllib.loads((REPO_ROOT / "repoctl.toml").read_text())
+    policy = tomllib.loads((REPO_ROOT / ".repoctl" / "checks.toml").read_text())
     group = next(group for group in policy["check_groups"] if group["name"] == "examples_tests")
     commands = group["commands"]
     assert any("scripts/example_repositories.py" in command for command in commands)
