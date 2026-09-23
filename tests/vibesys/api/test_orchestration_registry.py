@@ -8,10 +8,19 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vibesys.api import OrchestrationRegistry, built_in_orchestrations, create_session
+from vibesys.api import (
+    ComputeBackend,
+    Config,
+    OrchestrationRegistry,
+    ProfilerKind,
+    VibeSysRuntime,
+    built_in_orchestrations,
+    create_session,
+)
 from vibesys.api._dispatch import dispatch_loop
 from vibesys.api.contracts import LoopKind, RunRequest, RunResult, RunStatus
 from vibesys.api.entry import default_request
+from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, Project
@@ -25,10 +34,10 @@ _EXAMPLE = "examples/model-serving/whisper-large-v3"
 class _StubOrchestration:
     def __init__(self, *, result: bool) -> None:
         self.result = result
-        self.calls: list[tuple[RunRequest, LocalRunIntegration]] = []
+        self.calls: list[tuple[RunRequest, VibeSysRuntime]] = []
 
-    def execute(self, request: RunRequest, integration: LocalRunIntegration) -> bool:
-        self.calls.append((request, integration))
+    def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool:
+        self.calls.append((request, runtime))
         return self.result
 
 
@@ -62,7 +71,8 @@ def test_dispatch_uses_injected_registry_without_built_in_loop_calls() -> None:
     integration = LocalRunIntegration()
 
     assert dispatch_loop(request, integration, registry) is False
-    assert implementation.calls == [(request, integration)]
+    assert implementation.calls[0][0] is request
+    assert implementation.calls[0][1] is not integration
 
 
 def test_builtin_ids_resolve_to_their_own_implementations() -> None:
@@ -73,21 +83,32 @@ def test_builtin_ids_resolve_to_their_own_implementations() -> None:
     assert registry.resolve(LoopKind.AGENT) is not registry.resolve(LoopKind.PLAIN)
 
 
-def _custom_request(repo_root: Path) -> RunRequest:
-    built_in = default_request(Project.open(repo_root / _EXAMPLE), LoopKind.AGENT)
-    values = built_in.model_dump()
-    values.update(
-        loop=None,
+def _custom_request(tmp_path: Path) -> RunRequest:
+    project_root = tmp_path / "custom-project"
+    project_root.mkdir()
+    (project_root / "OBJECTIVE.md").write_text("Improve the queue.\n")
+    (project_root / "queue.py").write_text("VALUE = 1\n")
+    (project_root / "vibesys.input.toml").write_text(
+        'version = 1\n[agent]\ndomain = "generic"\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+    )
+    return RunRequest(
+        project_root=project_root,
         orchestration=OrchestrationDescriptor(
             id="team-search", config_version=2, options={"workers": 3}
         ),
+        config=Config.model_validate({"model": {"name": "gpt-test"}}),
+        input_bundle=load_input_bundle(project_root),
         exp_name="custom-run",
+        run_environment=RunEnvironmentSpec("local"),
+        agent_backend="stub",
+        profiler_kind=ProfilerKind.NONE,
+        backend=ComputeBackend.CPU,
     )
-    return RunRequest.model_validate(values)
 
 
-def test_session_executes_unknown_registered_id_and_reports_it(repo_root: Path) -> None:
-    request = _custom_request(repo_root)
+def test_session_executes_unknown_registered_id_and_reports_it(tmp_path: Path) -> None:
+    request = _custom_request(tmp_path)
     implementation = _StubOrchestration(result=True)
     registry = OrchestrationRegistry()
     registry.register("team-search", implementation)
@@ -104,7 +125,8 @@ def test_session_executes_unknown_registered_id_and_reports_it(repo_root: Path) 
 
     assert implementation.calls[0][0] is request
     assert implementation.calls[0][0].orchestration == request.orchestration
-    assert result.run_id == "custom-run"
+    assert result.run_id.endswith("-custom-run")
+    assert view.run_id == result.run_id
     assert result.loop == "team-search"
     assert result.succeeded is True
     assert view.loop == "team-search"
@@ -113,10 +135,13 @@ def test_session_executes_unknown_registered_id_and_reports_it(repo_root: Path) 
     assert isinstance(started.data, RunStartedData)
     assert started.data.outer_loop == "team-search"
     assert started.data.expected_roles == ()
+    assert Project.open(request.project_root).state.load_run(result.run_id).schema_version == 4
 
 
-def test_custom_selection_validates_descriptor_and_preserves_builtin_enum(repo_root: Path) -> None:
-    custom = _custom_request(repo_root)
+def test_custom_selection_validates_descriptor_and_preserves_builtin_enum(
+    tmp_path: Path, repo_root: Path
+) -> None:
+    custom = _custom_request(tmp_path)
     assert custom.orchestration_id == "team-search"
     assert custom.orchestration is not None
     assert custom.orchestration.options == {"workers": 3}

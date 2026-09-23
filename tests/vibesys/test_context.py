@@ -966,12 +966,13 @@ def test_log_switch_retargets_stderr_tee(tmp_path):  # noqa: ANN001, ANN201
         run_log_path=ctx.logger.path,
     )
     original_file = ctx.logger.file
-    ctx.agent_client = FakeAgentClient()
+    client = FakeAgentClient()
+    ctx.agent_client = client
 
     ctx.switch_log_file("round001")
 
     assert original_file.closed
-    assert ctx.agent_client.log_files == [ctx.logger.writer]
+    assert client.log_files == [ctx.logger.writer]
     print("\033[31mcolored diagnostic\033[0m", file=sys.stderr)  # noqa: T201
     ctx.logger.close()
     assert sys.stderr is original_stderr

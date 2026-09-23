@@ -27,6 +27,7 @@ from vs_agent.contracts import (
     AgentClientProtocol,
     AgentEvent,
     AgentEventKind,
+    AgentExecutionPolicy,
     AgentUsage,
     MCPServerSpec,
 )
@@ -89,6 +90,7 @@ __all__ = [
     "AgentEvent",
     "AgentEventKind",
     "AgentEventSink",
+    "AgentExecutionPolicy",
     "AgentOutputChannel",
     "AgentProgress",
     "AgentSelection",

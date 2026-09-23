@@ -10,13 +10,13 @@ from vibesys.api.contracts import OrchestrationDescriptor
 
 if TYPE_CHECKING:
     from vibesys.api.contracts import RunRequest
-    from vibesys.run.integration import LocalRunIntegration
+    from vibesys.runtime import VibeSysRuntime
 
 
 class Orchestration(Protocol):
-    """Execute a run without exposing its internal agent topology to the caller."""
+    """Own agent topology, communication, and stopping policy for one run."""
 
-    def execute(self, request: RunRequest, integration: LocalRunIntegration) -> bool: ...
+    def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool: ...
 
 
 class OrchestrationRegistry:
