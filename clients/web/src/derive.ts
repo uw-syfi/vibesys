@@ -604,7 +604,7 @@ interface Row {
 
 /**
  * The selected round's log: role groups in sequence order, consumed steers at the call that
- * consumed them, one "Attempt N" divider per retry, and every group but the last collapsed.
+ * consumed them, the attempt each group belongs to, and every group but the last collapsed.
  */
 export function logGroups(
   core: CoreState,
@@ -675,7 +675,6 @@ export function logGroups(
         id: `${row.role}-${row.sequence}`,
         role: row.role,
         attempt: row.attempt,
-        divider: null,
         collapsed: false,
         active: false,
         summary: '',
@@ -698,12 +697,7 @@ export function logGroups(
     (group, index) => group.items.length > 0 || (index === drafts.length - 1 && acting(group.role)),
   );
   groups.forEach((group, index) => {
-    const previous = groups[index - 1];
     const last = index === groups.length - 1;
-    group.divider =
-      group.attempt > 1 && (previous === undefined || previous.attempt !== group.attempt)
-        ? group.attempt
-        : null;
     group.collapsed = !last;
     group.active = last && acting(group.role);
     const prose = group.items.filter(item => item.kind === 'prose').at(-1);

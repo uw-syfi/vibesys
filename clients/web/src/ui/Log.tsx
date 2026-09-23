@@ -152,34 +152,32 @@ function Group({group, onOpen}: {group: LogGroup; onOpen: () => void}) {
   const steers = group.items.filter(item => item.kind === 'steer');
   const rest = group.items.filter(item => item.kind !== 'steer');
   return (
-    <>
-      {group.divider === null ? null : <li className="attempt">Attempt {group.divider}</li>}
-      <li className={group.active ? 'grp is-active' : 'grp'}>
-        <div className="who">
-          <Icon {...icon} />
-          {titleCase(group.role)}
-        </div>
-        <div className="what">
-          {group.collapsed ? (
-            <>
-              {steers.map(item => (
-                <Item key={item.id} item={item} onOpen={onOpen} />
-              ))}
-              {rest.length === 0 ? null : (
-                <Fold
-                  verb={group.summary || titleCase(group.role)}
-                  count={group.calls}
-                  items={rest}
-                  onOpen={onOpen}
-                />
-              )}
-            </>
-          ) : (
-            group.items.map(item => <Item key={item.id} item={item} onOpen={onOpen} />)
-          )}
-        </div>
-      </li>
-    </>
+    <li className={group.active ? 'grp is-active' : 'grp'}>
+      <div className="who">
+        <Icon {...icon} />
+        {titleCase(group.role)}
+        {group.attempt > 1 ? <span className="att">Attempt {group.attempt}</span> : null}
+      </div>
+      <div className="what">
+        {group.collapsed ? (
+          <>
+            {steers.map(item => (
+              <Item key={item.id} item={item} onOpen={onOpen} />
+            ))}
+            {rest.length === 0 ? null : (
+              <Fold
+                verb={group.summary || titleCase(group.role)}
+                count={group.calls}
+                items={rest}
+                onOpen={onOpen}
+              />
+            )}
+          </>
+        ) : (
+          group.items.map(item => <Item key={item.id} item={item} onOpen={onOpen} />)
+        )}
+      </div>
+    </li>
   );
 }
 

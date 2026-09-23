@@ -364,10 +364,10 @@ test('log groups: role groups, collapse, in-flight row, tool rows from typed pay
   const core = fold(upTo(QUEUE, 623));
   const groups = logGroups(core, [], 1, QUEUE_RUN);
   assert.deepEqual(
-    groups.map(group => [group.role, group.collapsed, group.active, group.calls, group.divider]),
+    groups.map(group => [group.role, group.collapsed, group.active, group.calls]),
     [
-      ['orchestrator', true, false, 37, null],
-      ['implementer', false, true, 69, null],
+      ['orchestrator', true, false, 37],
+      ['implementer', false, true, 69],
     ],
   );
   assert.equal(groups[0]?.summary, 'Roadmap written. Plan below.');
@@ -544,7 +544,7 @@ test('log groups: the acting role shows before its first entry', () => {
   );
 });
 
-test('log groups: an "Attempt N" divider marks only the start of a retry', () => {
+test('log groups: every group of a retry carries its attempt number', () => {
   const event = (sequence: number, type: RunEvent['type'], label: string, kind: string) =>
     ({
       sequence,
@@ -569,14 +569,15 @@ test('log groups: an "Attempt N" divider marks only the start of a retry', () =>
     event(10, 'agent_output_chunk', 'round-1-retry-2-judge', 'judge'),
   ]);
   assert.deepEqual(
-    logGroups(core, [], 1, null).map(group => [group.role, group.attempt, group.divider]),
+    logGroups(core, [], 1, null).map(group => [group.role, group.attempt]),
     [
-      ['orchestrator', 1, null],
-      ['implementer', 1, null],
-      ['judge', 1, null],
-      ['implementer', 2, 2],
-      ['judge', 2, null],
+      ['orchestrator', 1],
+      ['implementer', 1],
+      ['judge', 1],
+      ['implementer', 2],
+      ['judge', 2],
     ],
+    'the badge sits on each header, so both groups of attempt 2 say which attempt made them',
   );
   // A plan reprompt (`round-N-retry-K-plan`) retries the plan call, not the round.
   const reprompted = fold([
@@ -590,10 +591,10 @@ test('log groups: an "Attempt N" divider marks only the start of a retry', () =>
     event(8, 'agent_output_chunk', 'round-1-retry-1-implementer', 'implementer'),
   ]);
   assert.deepEqual(
-    logGroups(reprompted, [], 1, null).map(group => [group.role, group.attempt, group.divider]),
+    logGroups(reprompted, [], 1, null).map(group => [group.role, group.attempt]),
     [
-      ['orchestrator', 1, null],
-      ['implementer', 1, null],
+      ['orchestrator', 1],
+      ['implementer', 1],
     ],
   );
 });

@@ -43,19 +43,11 @@
   gap: 2px;
   min-width: 0;
 }
-.attempt {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
+/* Which attempt made the rows under this header. A retry does not get rows of its own. */
+.att {
   color: var(--text-muted);
   font-size: var(--text-xs);
-  font-weight: 500;
-}
-.attempt::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--border);
+  font-weight: 400;
 }
 .row {
   display: grid;

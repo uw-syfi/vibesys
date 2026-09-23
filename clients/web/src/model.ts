@@ -137,9 +137,8 @@ export interface LogTool {
 export interface LogGroup {
   id: string;
   role: string;
+  /** Which attempt made these rows; past 1 the header badges it. */
   attempt: number;
-  /** Set on the first group of a retry: render an "Attempt N" divider before it. */
-  divider: number | null;
   collapsed: boolean;
   /** The role that is acting right now; its label renders bright. */
   active: boolean;
