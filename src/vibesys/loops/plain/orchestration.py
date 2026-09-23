@@ -16,6 +16,7 @@ from vs_project.api import (
     OrchestrationDescriptor,
     OrchestrationRunManifest,
     PlainRunConfiguration,
+    RunEnvironmentRecord,
 )
 
 
@@ -52,9 +53,34 @@ class PlainOrchestrationOptions(BaseModel):
 def descriptor_from_configuration(
     configuration: PlainRunConfiguration, *, profiler: str
 ) -> OrchestrationDescriptor:
-    """Resolve the plain settings into a portable v4 descriptor."""
+    """Adapt a version 3 fixture to the owner-native descriptor builder."""
     options = PlainOrchestrationOptions.from_legacy(configuration, profiler=profiler)
-    return OrchestrationDescriptor(id="plain", config_version=1, options=options.model_dump())
+    return descriptor_from_options(options, profiler=profiler)
+
+
+def descriptor_from_options(
+    options: PlainOrchestrationOptions, *, profiler: str
+) -> OrchestrationDescriptor:
+    """Persist resolved plain options without constructing version 3 settings."""
+    resolved = options.model_copy(update={"profiler": profiler})
+    return OrchestrationDescriptor(id="plain", config_version=1, options=resolved.model_dump())
+
+
+def legacy_configuration_from_options(
+    options: PlainOrchestrationOptions,
+    *,
+    run_environment: RunEnvironmentRecord,
+    profiler: str,
+) -> PlainRunConfiguration:
+    """Construct version 3 settings only when resuming an old run."""
+    return PlainRunConfiguration.model_validate(
+        {
+            **options.model_dump(),
+            "outer_loop": "plain",
+            "run_environment": run_environment,
+            "profiler": profiler,
+        }
+    )
 
 
 def options_from_descriptor(descriptor: OrchestrationDescriptor) -> PlainOrchestrationOptions:

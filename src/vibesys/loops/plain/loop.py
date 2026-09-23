@@ -35,7 +35,12 @@ from vibesys.constants import (
 from vibesys.context import create_run_context
 from vibesys.domains.registry import resolve_domain
 from vibesys.evaluators.input_manifest import WorkspaceSource  # noqa: TC001  # tracked: #288
-from vibesys.loops.plain.orchestration import compare_resume, descriptor_from_configuration
+from vibesys.loops.plain.orchestration import (
+    PlainOrchestrationOptions,
+    compare_resume,
+    descriptor_from_options,
+    legacy_configuration_from_options,
+)
 from vibesys.loops.plain.render import render_all
 from vibesys.loops.plain.runner_ext import PlainLoopAgentClient
 from vibesys.loops.plain.state import PlainStateStore
@@ -64,7 +69,6 @@ from vs_issue_board.api import (
     IssueType,
 )
 from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
-from vs_project.api import PlainRunConfiguration
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "plain"
 PlainLoopState = PlainLoopCursor
@@ -308,9 +312,7 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     domain_definition = resolve_domain(domain)
     run_environment = run_environment or make_run_environment_spec()
     resolved_agent_backend = str(agent_backend or config.agent.backend or AgentBackend.CLI)
-    run_configuration = PlainRunConfiguration(
-        outer_loop="plain",
-        run_environment=run_environment_record(run_environment),
+    options = PlainOrchestrationOptions(
         model=config.model.name,
         agent_backend=resolved_agent_backend,
         agent_driver=(
@@ -348,9 +350,13 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         profiler_kind=profiler_kind,
         skills_dirs=skills_dirs,
         run_environment=run_environment,
-        project_configuration=run_configuration,
-        orchestration_descriptor=lambda resolved_profiler: descriptor_from_configuration(
-            run_configuration, profiler=resolved_profiler.value
+        legacy_configuration_factory=lambda resolved_profiler: legacy_configuration_from_options(
+            options,
+            run_environment=run_environment_record(run_environment),
+            profiler=resolved_profiler.value,
+        ),
+        orchestration_descriptor=lambda resolved_profiler: descriptor_from_options(
+            options, profiler=resolved_profiler.value
         ),
         orchestration_resume=compare_resume,
         agent_backend=agent_backend,

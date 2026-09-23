@@ -21,6 +21,7 @@ from vs_project.api import (
     AgentRunConfiguration,
     OrchestrationDescriptor,
     OrchestrationRunManifest,
+    RunEnvironmentRecord,
 )
 
 if TYPE_CHECKING:
@@ -84,14 +85,45 @@ class AgentOrchestrationOptions(BaseModel):
 
 
 def descriptor_from_configuration(configuration: AgentRunConfiguration) -> OrchestrationDescriptor:
-    """Build a versioned descriptor from the selected agent run policy."""
+    """Adapt a version 3 fixture to the owner-native descriptor builder."""
     options = AgentOrchestrationOptions.model_validate(
         configuration.model_dump(exclude={"outer_loop", "run_environment"})
     )
+    return descriptor_from_options(options, outer_loop=configuration.outer_loop)
+
+
+def descriptor_from_options(
+    options: AgentOrchestrationOptions,
+    *,
+    outer_loop: Literal["agent", "profile-guided"],
+    profiler: str | None = None,
+) -> OrchestrationDescriptor:
+    """Persist resolved agent options without constructing version 3 settings."""
+    resolved = (
+        options.model_copy(update={"profiler": profiler}) if profiler is not None else options
+    )
     return OrchestrationDescriptor(
-        id=configuration.outer_loop,
+        id=outer_loop,
         config_version=AGENT_CONFIG_VERSION,
-        options=options.model_dump(mode="json"),
+        options=resolved.model_dump(mode="json"),
+    )
+
+
+def legacy_configuration_from_options(
+    options: AgentOrchestrationOptions,
+    *,
+    outer_loop: Literal["agent", "profile-guided"],
+    run_environment: RunEnvironmentRecord,
+    profiler: str,
+) -> AgentRunConfiguration:
+    """Construct version 3 settings only when resuming an old run."""
+    return AgentRunConfiguration.model_validate(
+        {
+            **options.model_dump(),
+            "outer_loop": outer_loop,
+            "run_environment": run_environment,
+            "profiler": profiler,
+        }
     )
 
 

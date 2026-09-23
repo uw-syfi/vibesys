@@ -288,6 +288,7 @@ def create_run_context(  # noqa: PLR0913  # tracked: #288
     objective: str | None = None,
     existing: bool = False,
     project_configuration: RunConfiguration | None = None,
+    legacy_configuration_factory: Callable[[ProfilerKind], RunConfiguration] | None = None,
     orchestration_descriptor: Callable[[ProfilerKind], OrchestrationDescriptor] | None = None,
     orchestration_resume: Callable[
         [OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision
@@ -335,6 +336,7 @@ def create_run_context(  # noqa: PLR0913  # tracked: #288
             objective=objective,
             existing=existing,
             project_configuration=project_configuration,
+            legacy_configuration_factory=legacy_configuration_factory,
             orchestration_descriptor=orchestration_descriptor,
             orchestration_resume=orchestration_resume,
             trusted_input_baseline=trusted_input_baseline,
@@ -388,6 +390,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
     objective: str | None,
     existing: bool,
     project_configuration: RunConfiguration | None,
+    legacy_configuration_factory: Callable[[ProfilerKind], RunConfiguration] | None,
     orchestration_descriptor: Callable[[ProfilerKind], OrchestrationDescriptor] | None,
     orchestration_resume: Callable[
         [OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision
@@ -652,11 +655,16 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             )
             git.init(existing, trusted_input_baseline=trusted_input_baseline)
         with boot_trace.span("project_state_resume"):
-            effective_configuration = (
-                project_configuration.model_copy(update={"profiler": resolved_profiler_kind.value})
-                if project_configuration is not None
-                else None
-            )
+
+            def legacy_configuration() -> RunConfiguration | None:
+                if legacy_configuration_factory is not None:
+                    return legacy_configuration_factory(resolved_profiler_kind)
+                if project_configuration is not None:
+                    return project_configuration.model_copy(
+                        update={"profiler": resolved_profiler_kind.value}
+                    )
+                return None
+
             effective_orchestration = (
                 orchestration_descriptor(resolved_profiler_kind)
                 if orchestration_descriptor is not None
@@ -703,6 +711,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                         )
                     )
                 if isinstance(run_manifest, RunManifest):
+                    effective_configuration = legacy_configuration()
                     if effective_configuration is None:
                         raise _MissingOrchestrationContractError
                     configuration_update = _resume_configuration_update(
@@ -799,6 +808,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                         trusted_input_baseline=git.trusted_input_baseline,
                     )
                 else:
+                    effective_configuration = legacy_configuration()
                     if effective_configuration is None:
                         raise _MissingOrchestrationContractError
                     run_manifest = project_state.new_run_manifest(

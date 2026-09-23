@@ -56,7 +56,12 @@ from vibesys.evaluators.input_manifest import (  # noqa: TC001  # tracked: #288
     WorkspaceSource,
 )
 from vibesys.events import FrameworkSource
-from vibesys.loops.evolve.orchestration import compare_resume, descriptor_from_configuration
+from vibesys.loops.evolve.orchestration import (
+    EvolveOptions,
+    compare_resume,
+    descriptor_from_options,
+    legacy_configuration_from_options,
+)
 from vibesys.loops.evolve.population import (
     Individual,
     Population,
@@ -91,7 +96,6 @@ from vibesys.sandbox.run_environment import (
 )
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
 from vs_agent.api import AgentBackend, CandidateProgress
-from vs_project.api import EvolveRunConfiguration
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "evolve"
 _AGENT_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
@@ -1519,9 +1523,7 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     resolved_agent_backend = str(
         agent_backend or normalized_config.agent.backend or AgentBackend.CLI
     )
-    run_configuration = EvolveRunConfiguration(
-        outer_loop="evolve",
-        run_environment=run_environment_record(run_environment),
+    options = EvolveOptions(
         model=normalized_config.model.name,
         agent_backend=resolved_agent_backend,
         agent_driver=(
@@ -1591,9 +1593,13 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         profiler_domain=domain_definition.name,
         skills_dirs=skills_dirs,
         run_environment=run_environment,
-        project_configuration=run_configuration,
-        orchestration_descriptor=lambda resolved_profiler: descriptor_from_configuration(
-            run_configuration, profiler=resolved_profiler.value
+        legacy_configuration_factory=lambda resolved_profiler: legacy_configuration_from_options(
+            options,
+            run_environment=run_environment_record(run_environment),
+            profiler=resolved_profiler.value,
+        ),
+        orchestration_descriptor=lambda resolved_profiler: descriptor_from_options(
+            options, profiler=resolved_profiler.value
         ),
         orchestration_resume=compare_resume,
         agent_backend=agent_backend,

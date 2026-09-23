@@ -206,6 +206,7 @@ def _create_context(  # noqa: PLR0913
     existing: bool = False,
     configuration: AgentRunConfiguration | None = None,
     orchestration_v4: bool = False,
+    legacy_configuration_factory=None,  # noqa: ANN001
     objective: str = "Make the queue faster.\n",
     task_name: str | None = None,
     task_root: Path | None = None,
@@ -228,6 +229,7 @@ def _create_context(  # noqa: PLR0913
         objective=objective,
         existing=existing,
         project_configuration=selected_configuration,
+        legacy_configuration_factory=legacy_configuration_factory,
         orchestration_descriptor=(
             lambda profiler: descriptor_from_configuration(
                 selected_configuration.model_copy(update={"profiler": profiler.value})
@@ -602,6 +604,51 @@ def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path):  # noqa: ANN00
     assert isinstance(resumed, OrchestrationRunManifest)
     assert resumed.orchestration.options["max_rounds"] == 2
     assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
+
+
+def test_legacy_configuration_factory_runs_only_for_v3_resume(tmp_path):  # noqa: ANN001, ANN201
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+
+    def unexpected_legacy_configuration(profiler):  # noqa: ANN001, ANN202
+        pytest.fail(f"v4 requested legacy configuration for {profiler}")
+
+    with _create_context(
+        project,
+        evaluator=evaluator,
+        orchestration_v4=True,
+        legacy_configuration_factory=unexpected_legacy_configuration,
+    ) as first:
+        run_id = first.run_id
+    with _create_context(
+        project,
+        evaluator=evaluator,
+        exp_name=run_id,
+        existing=True,
+        orchestration_v4=True,
+        legacy_configuration_factory=unexpected_legacy_configuration,
+    ):
+        pass
+
+    legacy_project = tmp_path / "legacy"
+    legacy_evaluator = _write_project(legacy_project)
+    with _create_context(legacy_project, evaluator=legacy_evaluator) as first:
+        legacy_run_id = first.run_id
+    requested_profilers = []
+
+    def legacy_configuration(profiler):  # noqa: ANN001, ANN202
+        requested_profilers.append(profiler)
+        return _configuration(max_rounds=2)
+
+    with _create_context(
+        legacy_project,
+        evaluator=legacy_evaluator,
+        exp_name=legacy_run_id,
+        existing=True,
+        legacy_configuration_factory=legacy_configuration,
+    ):
+        pass
+    assert requested_profilers == [ProfilerKind.NONE]
 
 
 def test_resume_migrates_legacy_objectives_with_dirty_candidate(tmp_path):  # noqa: ANN001, ANN201
