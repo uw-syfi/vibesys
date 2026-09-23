@@ -33,7 +33,7 @@ from vibesys.schemas import (
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_issue_board.api import IssueBoard, IssueStatus
-from vs_project.api import RUN_SCHEMA_VERSION, Project, RunEnvironmentRecord
+from vs_project.api import OrchestrationRunManifest, Project, RunEnvironmentRecord
 
 # ---------------------------------------------------------------------------
 # Helpers — factories and fixtures shared across tests
@@ -166,8 +166,11 @@ def test_bootstrap_creates_initial_feature_issue_on_first_run(  # noqa: ANN201  
     assert result is True
     exp_dir = _run_exp_dir(tmp_path)
     manifest = Project.open(exp_dir).state.load_run(_run_id(exp_dir))
-    assert manifest.schema_version == RUN_SCHEMA_VERSION
-    assert manifest.configuration.run_environment == RunEnvironmentRecord(name="local")
+    assert isinstance(manifest, OrchestrationRunManifest)
+    assert manifest.run_environment == RunEnvironmentRecord(name="local")
+    assert manifest.orchestration.id == "plain"
+    assert manifest.orchestration.config_version == 1
+    assert manifest.orchestration.options["max_rounds"] == 1
     issues_path = _store_path(exp_dir)
     assert issues_path.is_file()
     data = json.loads(issues_path.read_text())

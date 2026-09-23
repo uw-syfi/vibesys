@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vibesys.api._orchestrations.builtins import legacy_resume_configuration
 from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.evaluators.input_synthesis import (
     InputSynthesisError,
@@ -66,6 +67,7 @@ __all__ = [
     "default_skill_roots",
     "experiment_origin_matches",
     "generate_experiment_name",
+    "legacy_resume_configuration",
     "load_input_bundle",
     "load_objective",
     "load_project_task",

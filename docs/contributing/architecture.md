@@ -111,6 +111,7 @@ graph TD
     vibesys.context --> vibesys.backends
     vibesys.context --> vibesys.domains
     vibesys.context --> vibesys.evaluators
+    vibesys.context --> vibesys.orchestration
     vibesys.context --> vibesys.render
     vibesys.context --> vibesys.run
     vibesys.context --> vibesys.sandbox
@@ -143,6 +144,7 @@ graph TD
     vibesys.loops.plain --> vibesys.context
     vibesys.loops.plain --> vibesys.domains
     vibesys.loops.plain --> vibesys.evaluators
+    vibesys.loops.plain --> vibesys.orchestration
     vibesys.loops.plain --> vibesys.prompts
     vibesys.loops.plain --> vibesys.render
     vibesys.loops.plain --> vibesys.run
@@ -279,6 +281,7 @@ graph TD
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.evolve
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.plain
     vibesys.api._orchestrations.builtins --> vibesys.api.contracts
+    vibesys.api._orchestrations.builtins --> vs_project
     vibesys.api._orchestrations.contracts --> vibesys.api.contracts
     vibesys.api._orchestrations.contracts --> vibesys.run
     vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations._common
@@ -289,6 +292,7 @@ graph TD
     vibesys.api._orchestrations.plain --> vibesys.api.contracts
     vibesys.api._orchestrations.plain --> vibesys.loops.plain
     vibesys.api._orchestrations.plain --> vibesys.run
+    vibesys.api._orchestrations.plain --> vs_project
     vibesys.api._orchestrations.runner --> vibesys.api._orchestrations.contracts
     vibesys.api._orchestrations.runner --> vibesys.api.contracts
     vibesys.api._orchestrations.runner --> vibesys.run
@@ -305,6 +309,7 @@ graph TD
     vibesys.context --> vibesys.backends
     vibesys.context --> vibesys.domains
     vibesys.context --> vibesys.evaluators
+    vibesys.context --> vibesys.orchestration
     vibesys.context --> vibesys.render
     vibesys.context --> vibesys.run
     vibesys.context --> vibesys.sandbox
@@ -352,6 +357,7 @@ graph TD
     vibesys.loops.plain --> vibesys.context
     vibesys.loops.plain --> vibesys.domains
     vibesys.loops.plain --> vibesys.evaluators
+    vibesys.loops.plain --> vibesys.orchestration
     vibesys.loops.plain --> vibesys.prompts
     vibesys.loops.plain --> vibesys.render
     vibesys.loops.plain --> vibesys.run
@@ -360,6 +366,7 @@ graph TD
     vibesys.loops.plain --> vs_issue_board
     vibesys.loops.plain --> vs_loop_state
     vibesys.loops.plain --> vs_project
+    vibesys.orchestration --> vs_project
     vibesys.prompts --> vibesys
     vibesys.prompts --> vs_prompts
     vibesys.render --> vibesys

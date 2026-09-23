@@ -9,10 +9,19 @@ from vibesys.api._orchestrations._common import resolved_run_id
 if TYPE_CHECKING:
     from vibesys.api.contracts import RunRequest
     from vibesys.run.integration import LocalRunIntegration
+    from vs_project.api import OrchestrationRunManifest, PlainRunConfiguration
 
 
 class PlainOrchestration:
     """Preserve the existing plain loop call contract."""
+
+    def legacy_resume_configuration(
+        self, manifest: OrchestrationRunManifest
+    ) -> PlainRunConfiguration:
+        """Project v4 options for the transitional CLI resume parser."""
+        from vibesys.loops.plain.orchestration import legacy_resume_configuration  # noqa: PLC0415
+
+        return legacy_resume_configuration(manifest)
 
     def execute(self, request: RunRequest, integration: LocalRunIntegration) -> bool:
         from vibesys.loops.plain.loop import run_plain_loop  # noqa: PLC0415  # tracked: #288

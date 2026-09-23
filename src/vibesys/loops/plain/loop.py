@@ -35,6 +35,7 @@ from vibesys.constants import (
 from vibesys.context import create_run_context
 from vibesys.domains.registry import resolve_domain
 from vibesys.evaluators.input_manifest import WorkspaceSource  # noqa: TC001  # tracked: #288
+from vibesys.loops.plain.orchestration import compare_resume, descriptor_from_configuration
 from vibesys.loops.plain.render import render_all
 from vibesys.loops.plain.runner_ext import PlainLoopAgentClient
 from vibesys.loops.plain.state import PlainStateStore
@@ -348,6 +349,10 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         skills_dirs=skills_dirs,
         run_environment=run_environment,
         project_configuration=run_configuration,
+        orchestration_descriptor=lambda resolved_profiler: descriptor_from_configuration(
+            run_configuration, profiler=resolved_profiler.value
+        ),
+        orchestration_resume=compare_resume,
         agent_backend=agent_backend,
         cli_provider=cli_provider,
         backend=backend,
