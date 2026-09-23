@@ -40,10 +40,20 @@ type Suite struct {
 	TimeoutSeconds  int               `toml:"timeout_seconds"`
 }
 
-// Planner translates a configured suite and selected collection values to
-// executable checks. It must preserve configured command order.
+// Planner validates and translates a configured suite and selected collection
+// values to executable checks. It must preserve configured command order.
 type Planner interface {
+	Validate(Suite, map[string]bool) error
 	Plan(Suite, []string) ([]Check, error)
+}
+
+// ValidateCommands rejects collection settings for languages that run only
+// the configured commands.
+func ValidateCommands(suite Suite) error {
+	if suite.Collection != "" || len(suite.PackageCommands) != 0 {
+		return fmt.Errorf("check_groups.%s: collection commands are unsupported for language %q", suite.Name, suite.Language)
+	}
+	return nil
 }
 
 // Commands builds checks for a group with no collection expansion.

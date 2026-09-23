@@ -193,7 +193,7 @@ checks. To run the selected checks locally, use one command:
 
 Use `./support/repoctl/repoctl plan` to inspect the selection without running checks.
 The workflow runs named check groups from `repoctl.toml`. Run
-`./support/repoctl/repoctl verify-policy --cases repoctl-cases.toml` after
+`./support/repoctl/repoctl verify-policy --cases tests/repoctl/cases.toml` after
 changing component ownership or dependencies; CI runs this contract check before
 selecting jobs.
 

@@ -8,16 +8,7 @@ import (
 	"strings"
 
 	"repoctl/execution"
-	"repoctl/execution/golang"
-	"repoctl/execution/python"
-	"repoctl/execution/rust"
-	"repoctl/execution/typescript"
 )
-
-var testPlanners = map[string]execution.Planner{
-	"go": golang.Planner{}, "rust": rust.Planner{},
-	"python": python.Planner{}, "typescript": typescript.Planner{},
-}
 
 func selectedTestChecks(g graph, p plan) ([]execution.Check, []string, error) {
 	allTargets := false
@@ -50,7 +41,10 @@ func selectedTestChecks(g graph, p plan) ([]execution.Check, []string, error) {
 		if !suite.IncludeInTest || !p.Jobs[suite.TriggerJob] {
 			continue
 		}
-		planner := testPlanners[suite.Language]
+		planner, ok := testPlanners[suite.Language]
+		if !ok {
+			return nil, nil, fmt.Errorf("check group %q: unknown language %q", suite.Name, suite.Language)
+		}
 		planned, err := planner.Plan(suite, p.Collections[suite.Collection])
 		if err != nil {
 			return nil, nil, err

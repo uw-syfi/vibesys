@@ -6,21 +6,11 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"repoctl/discovery"
-	"repoctl/discovery/native"
-	"repoctl/discovery/python"
-	"repoctl/discovery/typescript"
 	"repoctl/execution"
 )
 
 func splitPath(s string) []string  { return strings.Split(s, "/") }
 func under(path, root string) bool { return path == root || strings.HasPrefix(path, root+"/") }
-
-var discoveryAdapters = map[string]discovery.Adapter{
-	"tach":                 python.Adapter{},
-	"package_json":         typescript.Adapter{},
-	"manifest_directories": native.Adapter{Run: run},
-}
 
 func readPolicy(root, configPath string) (graph, error) {
 	var p policy

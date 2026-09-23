@@ -98,6 +98,16 @@ func TestMissingSelectedSuiteFails(t *testing.T) {
 	}
 }
 
+func TestSelectedTestChecksRejectsUnknownLanguage(t *testing.T) {
+	g, p := testFixture()
+	suite := g.CheckGroups["python"]
+	suite.Language = "unknown"
+	g.CheckGroups["python"] = suite
+	if _, _, err := selectedTestChecks(g, p); err == nil || !strings.Contains(err.Error(), `unknown language "unknown"`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestInvalidTestSuiteConfiguration(t *testing.T) {
 	g, _ := testFixture()
 	g.Jobs = []string{"python", "tui"}
@@ -114,6 +124,35 @@ func TestInvalidTestSuiteConfiguration(t *testing.T) {
 		if err := g.validateCheckGroups([]execution.Suite{suite}); err == nil {
 			t.Fatalf("accepted invalid suite %+v", suite)
 		}
+	}
+}
+
+func TestLanguagePlannerValidatesCollectionConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name, language, collection, message string
+		packageCommands                     [][]string
+	}{
+		{"unknown collection", "typescript", "missing", "unknown collection", [][]string{{"pnpm", "{package}"}}},
+		{"missing package commands", "typescript", "pnpm_packages", "missing package_commands", nil},
+		{"package commands without collection", "typescript", "", "require a collection", [][]string{{"pnpm", "{package}"}}},
+		{"package command without placeholder", "typescript", "pnpm_packages", "requires {package}", [][]string{{"pnpm", "test"}}},
+		{"go collection", "go", "pnpm_packages", "unsupported", [][]string{{"go", "test"}}},
+		{"rust package commands", "rust", "", "unsupported", [][]string{{"cargo", "test"}}},
+		{"python collection", "python", "pnpm_packages", "unsupported", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, _ := testFixture()
+			g.CheckGroups = map[string]execution.Suite{}
+			suite := execution.Suite{
+				Name: "example", Language: tc.language, Directory: ".", TimeoutSeconds: 1,
+				Collection: tc.collection, PackageCommands: tc.packageCommands,
+				Commands: [][]string{{"test"}},
+			}
+			err := g.validateCheckGroups([]execution.Suite{suite})
+			if err == nil || !strings.Contains(err.Error(), tc.message) {
+				t.Fatalf("validation error = %v, want %q", err, tc.message)
+			}
+		})
 	}
 }
 

@@ -13,7 +13,7 @@ From a repository root:
 ./support/repoctl/repoctl plan --base main --head HEAD
 ./support/repoctl/repoctl explain path/to/file --json
 ./support/repoctl/repoctl validate
-./support/repoctl/repoctl verify-policy --cases repoctl-cases.toml
+./support/repoctl/repoctl verify-policy --cases tests/repoctl/cases.toml
 ./support/repoctl/repoctl run-checks --group python_quality
 ```
 
@@ -35,6 +35,15 @@ In GitHub Actions, `plan --github-event` reads `GITHUB_EVENT_NAME` and
 `GITHUB_EVENT_PATH` and rejects malformed or unsupported events before
 publishing outputs.
 
+## Architecture boundary
+
+The repoctl core must remain language agnostic. It must not branch on language
+names or import language implementations. Language-specific discovery belongs
+behind `discovery.Adapter`; check validation and planning belong behind
+`execution.Planner`. Register implementations only in the composition files:
+`discovery_adapters.go` and `test_planners.go`. The architecture test checks
+this boundary.
+
 ## Extension contracts
 
 The shared discovery contract is [discovery/discovery.go](discovery/discovery.go).
@@ -47,9 +56,9 @@ not walk the graph or run tests. Implementations live in
 `discovery/python/`, `discovery/typescript/`, and `discovery/native/`.
 
 The shared execution contract is [execution/execution.go](execution/execution.go).
-An `execution.Planner` turns a configured check group and selected collection values
-into ordered `execution.Check` records. A check contains an argument-vector
-command, working directory, timeout, and environment. `execution.Runner`
+An `execution.Planner` validates a check group for its language and turns
+selected collection values into ordered `execution.Check` records. A check
+contains an argument-vector command, working directory, timeout, and environment. `execution.Runner`
 executes checks and reports failures. Language planners live in
 `execution/python/`, `execution/typescript/`, `execution/golang/`, and
 `execution/rust/`. TypeScript expands selected workspace packages; Go and Rust
@@ -57,9 +66,11 @@ native targets run their configured commands within each selected manifest
 root. Python currently runs its configured full suite for a selected job.
 
 To support a new manifest format, add a discovery adapter, register it in
-`policy.go`, and configure it in the repository policy. To support a new test
-selection scheme, add an execution planner and configure its command arrays in
-the policy. The graph walker remains language-independent. The native manifest
+`discovery_adapters.go`, and configure it in the repository policy. To support a new test
+selection scheme, add an execution planner, register it in `test_planners.go`,
+and configure its command arrays in the policy. Shared policy validation and
+check execution dispatch through these contracts. The graph walker remains
+language-independent. The native manifest
 adapter discovers Go and Cargo roots; cross-root edges are declared in the
 policy, rather than inferred from Go or Cargo metadata.
 

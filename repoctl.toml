@@ -303,9 +303,9 @@ to = "native:examples/data-structures/repositories/queue-rs"
 
 [[components]]
 id = "repo_policy"
-# Keep the previous paths owned while this rename appears in a diff.
+# Policy inputs affect every CI selection.
 roots = ["support/repoctl", "support/ci_impact"]
-files = [".github/workflows/test.yml", "repoctl.toml", "repoctl-cases.toml", "ci-impact.toml"]
+files = [".github/workflows/test.yml", "repoctl.toml", "tests/repoctl/cases.toml", "ci-impact.toml"]
 select_all_jobs = true
 select_all_collections = true
 

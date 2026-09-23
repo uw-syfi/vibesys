@@ -36,29 +36,12 @@ func (g *graph) validateCheckGroups(groups []execution.Suite) error {
 				return fmt.Errorf("check_groups.%s: invalid environment key %q", suite.Name, key)
 			}
 		}
-		switch suite.Language {
-		case "go", "rust", "python":
-			if suite.Collection != "" || len(suite.PackageCommands) != 0 {
-				return fmt.Errorf("check_groups.%s: collection commands require typescript", suite.Name)
-			}
-		case "typescript":
-			if suite.Collection != "" && (!collections[suite.Collection] || len(suite.PackageCommands) == 0) {
-				return fmt.Errorf("check_groups.%s: unknown collection or missing package_commands", suite.Name)
-			}
-			if suite.Collection == "" && len(suite.PackageCommands) != 0 {
-				return fmt.Errorf("check_groups.%s: package_commands require a collection", suite.Name)
-			}
-			for _, args := range suite.PackageCommands {
-				found := false
-				for _, arg := range args {
-					found = found || strings.Contains(arg, "{package}")
-				}
-				if !found {
-					return fmt.Errorf("check_groups.%s: package command requires {package}", suite.Name)
-				}
-			}
-		default:
+		planner, ok := testPlanners[suite.Language]
+		if !ok {
 			return fmt.Errorf("check_groups.%s: unknown language %q", suite.Name, suite.Language)
+		}
+		if err := planner.Validate(suite, collections); err != nil {
+			return err
 		}
 		if len(suite.Commands) == 0 && len(suite.AlwaysCommands) == 0 {
 			return fmt.Errorf("check_groups.%s: commands or always_commands must not be empty", suite.Name)

@@ -54,7 +54,7 @@ jobs:
         id: filter
         run: |
           ./support/repoctl/repoctl validate
-          ./support/repoctl/repoctl verify-policy --cases repoctl-cases.toml
+          ./support/repoctl/repoctl verify-policy --cases tests/repoctl/cases.toml
           ./support/repoctl/repoctl plan --github-event --github-output "$GITHUB_OUTPUT"
 
   # One environment setup for the Python quality group. repoctl prints each

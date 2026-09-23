@@ -12,6 +12,25 @@ import (
 
 type Planner struct{}
 
+func (Planner) Validate(suite execution.Suite, collections map[string]bool) error {
+	if suite.Collection != "" && (!collections[suite.Collection] || len(suite.PackageCommands) == 0) {
+		return fmt.Errorf("check_groups.%s: unknown collection or missing package_commands", suite.Name)
+	}
+	if suite.Collection == "" && len(suite.PackageCommands) != 0 {
+		return fmt.Errorf("check_groups.%s: package_commands require a collection", suite.Name)
+	}
+	for _, args := range suite.PackageCommands {
+		found := false
+		for _, arg := range args {
+			found = found || strings.Contains(arg, "{package}")
+		}
+		if !found {
+			return fmt.Errorf("check_groups.%s: package command requires {package}", suite.Name)
+		}
+	}
+	return nil
+}
+
 func (Planner) Plan(suite execution.Suite, packages []string) ([]execution.Check, error) {
 	if len(packages) == 0 {
 		return execution.Commands(suite)
