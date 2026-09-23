@@ -1,10 +1,19 @@
-import type {RunEvent} from '@vibesys/backend-client';
-import {type CoreState, initialCoreState, reduceEventBatch} from '@vibesys/core-state';
+import type {RunEvent, RunSnapshot, ServerMessage} from '@vibesys/backend-client';
+import {
+  type ActiveExecutionCheckpoint,
+  type CoreState,
+  initialCoreState,
+  reduceEventBatch,
+  reduceEventRebootstrap,
+  reduceSnapshot,
+} from '@vibesys/core-state';
 
 export interface CoreStateStore {
   getState(): CoreState;
   subscribe(listener: () => void): () => void;
   append(events: readonly RunEvent[]): void;
+  applySnapshot(snapshot: RunSnapshot): void;
+  applyBatch(message: Extract<ServerMessage, {type?: 'event_batch'}>, rebootstrap?: boolean): void;
 }
 
 export function createCoreStateStore(seed: CoreState = initialCoreState()): CoreStateStore {
@@ -19,6 +28,30 @@ export function createCoreStateStore(seed: CoreState = initialCoreState()): Core
     append(events) {
       if (events.length === 0) return;
       state = reduceEventBatch(state, events);
+      for (const listener of listeners) listener();
+    },
+    applySnapshot(snapshot) {
+      state = reduceSnapshot(state, snapshot);
+      for (const listener of listeners) listener();
+    },
+    applyBatch(message, rebootstrap = false) {
+      const events = message.events ?? [];
+      const activeExecutions = (message.active_executions ?? []) as ActiveExecutionCheckpoint;
+      state = rebootstrap
+        ? reduceEventRebootstrap(
+            state,
+            events,
+            activeExecutions,
+            message.through_sequence,
+            message.history_after_sequence ?? 0,
+          )
+        : reduceEventBatch(
+            state,
+            events,
+            activeExecutions,
+            message.through_sequence,
+            message.history_after_sequence ?? 0,
+          );
       for (const listener of listeners) listener();
     },
   };
