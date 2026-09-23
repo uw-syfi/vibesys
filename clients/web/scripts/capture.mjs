@@ -229,7 +229,11 @@ const REPLAY = [
       await page.locator('#log .row[data-tool]:visible').first().click();
       await page.locator('.insp .out').waitFor();
     },
-    expect: [],
+    // Both lines are past the objective's first sentence, so only this section renders them:
+    // the header shows the first sentence and keeps the rest in a tooltip. The heading is not
+    // checked here, because the same command also sits in a collapsed fold, where `getByText`
+    // finds it first and reports it hidden; the browser check asserts the heading by scope.
+    expect: ['Headline metric:', 'Preserve the required interface:'],
   },
   {
     // The context meter near its ceiling, which no recording reaches.

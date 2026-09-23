@@ -532,20 +532,26 @@ function commandSegments(command: string): string[][] {
   return segments.filter(segment => segment.length > 0);
 }
 
-/** What a row's target may take before the column ellipses it and the file name is lost. */
+/** What a row's whole target may take before the column ellipses it and the file name is lost. */
 const TARGET_CHARS = 40;
 
 /** A path as a row shows it: its last two segments, and the mark only when it dropped some. */
-function shortenPath(path: string): string {
+function shortenPath(path: string, room: number): string {
   if (path.includes('://')) return path;
   const clean = path.replace(/(?!^)\/+$/, '');
   const root = clean.startsWith('/') ? '/' : '';
   const names = clean.slice(root.length).split('/');
   if (names.length <= 2) return `${root}${names.join('/')}`;
   // A 52-character run-id directory would push the file name itself past the ellipsis, so a
-  // pair that overruns the column drops back to the one segment the reader came for.
+  // pair that overruns what the executable left of the column drops back to the one segment
+  // the reader came for.
   const pair = names.slice(-2).join('/');
-  return `…/${pair.length > TARGET_CHARS ? names.at(-1) : pair}`;
+  return `…/${pair.length + 2 <= room ? pair : names.at(-1)}`;
+}
+
+/** What the row shows for one command: `executable path`, inside the column's budget. */
+function shown(executable: string, path: string): string {
+  return `${executable} ${shortenPath(path, TARGET_CHARS - executable.length - 1)}`;
 }
 
 /**
@@ -577,11 +583,11 @@ function bashTarget(command: string): string | null {
     const executable = word.split('/').at(-1) || word;
     const path = words.find(word => !NOT_A_PATH.test(word) && A_PATH.test(word));
     if (PROLOGUE.has(executable)) {
-      if (setup === null && path !== undefined) setup = `${executable} ${shortenPath(path)}`;
+      if (setup === null && path !== undefined) setup = shown(executable, path);
       continue;
     }
     if (path === undefined) return SAYS_NOTHING.has(executable) ? null : executable;
-    return `${executable} ${shortenPath(path)}`;
+    return shown(executable, path);
   }
   return setup;
 }
@@ -647,6 +653,8 @@ export function toolOutput(core: CoreState, id: string | null): ToolOutput | nul
   if (entry === undefined || entry.kind !== 'tool') return null;
   const result = entry.toolResult;
   const payload = result?.payload;
+  // Nothing has come back yet, which is not the same as a call that produced nothing.
+  const open = result === undefined && entry.toolResponse === undefined;
   // One blank line between the streams, whether or not the first one ended with a newline.
   const whole =
     payload?.kind === 'command'
@@ -658,8 +666,8 @@ export function toolOutput(core: CoreState, id: string | null): ToolOutput | nul
   const command = entry.toolArguments?.command;
   return {
     heading: typeof command === 'string' && command !== '' ? command : toolLabel(entry)[0],
-    body: whole.slice(0, OUTPUT_CAP),
-    cut: whole.length > OUTPUT_CAP ? exact.format(whole.length - OUTPUT_CAP) : null,
+    body: open ? null : whole.slice(0, OUTPUT_CAP),
+    cut: !open && whole.length > OUTPUT_CAP ? exact.format(whole.length - OUTPUT_CAP) : null,
   };
 }
 

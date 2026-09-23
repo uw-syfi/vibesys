@@ -328,6 +328,11 @@ test('context meter: the count alone unless a window honestly bounds it', () => 
   // The recording's own value, which is what the header renders from it.
   assert.equal(meter(2, 200_000), '2/200k context');
   assert.equal(meter(12_400, 200_000), '12k/200k context');
+  // Where the format changes: under a thousand is the integer, then `k`, then `M` to a tenth.
+  assert.equal(meter(999, 200_000), '999/200k context');
+  assert.equal(meter(1000, 200_000), '1k/200k context');
+  assert.equal(meter(999_999, 2_000_000), '999k/2.0M context');
+  assert.equal(meter(1_000_000, 2_000_000), '1.0M/2.0M context');
   assert.equal(meter(1_240_000, 2_000_000), '1.2M/2.0M context');
   assert.equal(meter(12_400, null), '12k tokens', 'no window, no ratio');
   assert.equal(meter(220_000, 200_000), '220k tokens', 'a ratio over 100% is not a true statement');
@@ -541,8 +546,13 @@ test('tool rows: how a command is read down to its target', () => {
     // named by path is still identified by its basename.
     ['for i in 1 2; do /tmp/harness measure ./cand.so; done', 'harness ./cand.so'],
     ['for f in a b; do\n  otool -tV queue.so\ndone', 'otool queue.so'],
-    // Two segments of a path do not fit the column when one of them is a run id.
+    // Two segments of a path do not fit the column when one of them is a run id, and what
+    // fits is what the executable left of the column, not the pair on its own.
     ['cat .vibesys/state/runs/20260831-210421-dad182f4-queue-rs/run.json', 'cat …/run.json'],
+    [
+      'my-long-tool-name a/bbbbbbbbbbbbbbbbbbbb/cccccccccc.txt',
+      'my-long-tool-name …/cccccccccc.txt',
+    ],
     // Nothing the verb has not already said.
     ["python3 - <<'PY'\nprint(1)\nPY", null],
     ['echo "=== NOTES ==="', null],
@@ -635,10 +645,11 @@ test("tool output: a command's two streams, a plain result, the cap, and no row 
     body: 'pub fn main() {}',
     cut: null,
   });
-  // A call whose result has not arrived has nothing to show yet, and still names its row.
-  assert.deepEqual(toolOutput(core, '20'), {heading: 'Read', body: '', cut: null});
+  // A call whose result has not arrived has nothing to show *yet*, which the section has to
+  // separate from a finished call that produced nothing. It still names its row.
+  assert.deepEqual(toolOutput(core, '20'), {heading: 'Read', body: null, cut: null});
   const capped = toolOutput(core, '16');
-  assert.equal(capped?.body.length, 100_000);
+  assert.equal(capped?.body?.length, 100_000);
   assert.equal(capped?.cut, '1,234', 'what was cut, grouped');
   // A selection that outlives its round, or names a row that is not a tool call.
   assert.equal(toolOutput(core, '999'), null);

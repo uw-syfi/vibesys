@@ -101,15 +101,17 @@ export function Shortcuts({onNext, onPrevious, onToggleRun, onJumpToLive}: Short
           </button>
         </div>
         <dl className="keys-list">
+          {/* The arrows belong to the log's row cursor, and are listed there. Claiming them
+              here too would leave the reader no way to tell which claim applies when. */}
           <div>
             <dt>
-              <kbd>j</kbd> <kbd>↓</kbd>
+              <kbd>j</kbd>
             </dt>
             <dd>Next round</dd>
           </div>
           <div>
             <dt>
-              <kbd>k</kbd> <kbd>↑</kbd>
+              <kbd>k</kbd>
             </dt>
             <dd>Previous round</dd>
           </div>

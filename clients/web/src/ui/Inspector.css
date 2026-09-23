@@ -120,18 +120,28 @@
   min-width: 0;
 }
 /* Which row the output belongs to. One line: a command can be a whole heredoc, and the row it
-   came from already carries the rest. */
-.sec h3.out-head {
+   came from already carries the rest. A heading, so it sits in the outline; an eyebrow, so it
+   does not compete with the hypothesis title below it. */
+.insp h2.out-head {
   display: block;
   overflow: hidden;
+  margin-top: 0;
+  margin-bottom: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.4;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* Output as the tool wrote it: newlines kept, nothing reflowed, so the long lines scroll here
-   rather than widening the column. */
+/* Output as the tool wrote it: newlines kept, nothing reflowed, so long lines scroll here
+   rather than widening the column. Half the viewport at most, or a hundred thousand characters
+   would put the round's own sections two thousand lines below the fold. A nested scroll area is
+   not a second panel and not a tab: the column above and below it is still one scroll. */
 .out {
+  max-height: 50vh;
   margin: 0;
-  overflow-x: auto;
+  overflow: auto;
   overscroll-behavior: contain;
   line-height: 1.5;
 }

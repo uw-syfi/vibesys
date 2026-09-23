@@ -92,6 +92,8 @@ export function App({session}: {session: WorkspaceSession}) {
         : inspectorModel(rail.rows, experiments, design, captured, selected, context),
     [rail, experiments, design, captured, selected, context],
   );
+  // The guard covers the live round advancing on its own; `select` and `step` clear the pick
+  // outright, so a round the reader comes back to does not restore the output it once showed.
   const selectedRow = rowPick !== null && rowPick.round === selected ? rowPick.id : null;
   const output = useMemo(() => toolOutput(core, selectedRow), [core, selectedRow]);
   const header = headerModel(core, captured, connection, context);
@@ -115,6 +117,7 @@ export function App({session}: {session: WorkspaceSession}) {
   function select(round: number) {
     const again = round === selected;
     setPicked(round === live ? null : {runId, round});
+    if (!again) setRowPick(null);
     if (wide || (!tablet && !again)) return;
     setInspectorOpen(true);
     if (!tablet && !hinted) {
@@ -136,7 +139,9 @@ export function App({session}: {session: WorkspaceSession}) {
   function step(offset: number) {
     const index = rail.rows.findIndex(row => row.round === selected);
     const next = rail.rows[Math.min(rail.rows.length - 1, Math.max(0, index + offset))];
-    if (next !== undefined) setPicked(next.round === live ? null : {runId, round: next.round});
+    if (next === undefined || next.round === selected) return;
+    setPicked(next.round === live ? null : {runId, round: next.round});
+    setRowPick(null);
   }
 
   function toggleRun() {

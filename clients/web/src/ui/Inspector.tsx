@@ -146,8 +146,11 @@ function Body({
       {output === null ? null : (
         // Above the round's own sections, in the same column: the reader scrolls one thing.
         <section className="sec sec-out" aria-label="Output">
-          <h3 className="out-head mono">{output.heading}</h3>
-          {output.body === '' ? (
+          {/* An h2, so the outline does not open at level 3; styled as the eyebrows are. */}
+          <h2 className="out-head mono">{output.heading}</h2>
+          {output.body === null ? (
+            <p className="insp-note">Still running</p>
+          ) : output.body === '' ? (
             <p className="insp-note">No output</p>
           ) : (
             // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must take focus to scroll by keyboard.
