@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.api._orchestrations.builtins import legacy_resume_configuration
+from vibesys.api._orchestrations.builtins import resume_projection
 from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
 from vibesys.evaluators.input_synthesis import (
     InputSynthesisError,
@@ -31,6 +31,7 @@ from vibesys.evaluators.input_synthesis import (
 )
 from vibesys.evaluators.objective import load_objective, with_operator_constraints
 from vibesys.loops.evolve.search_policy import OpenEvolveSearchConfig
+from vibesys.orchestration import ResumeConfigSnapshot, ResumeProjection
 from vibesys.profilers import CLI_PROFILER_CHOICES, coerce_profiler_kind
 from vibesys.repository import (
     REPOSITORY_SLUG,
@@ -60,6 +61,8 @@ __all__ = [
     "InputBundle",
     "InputSynthesisError",
     "OpenEvolveSearchConfig",
+    "ResumeConfigSnapshot",
+    "ResumeProjection",
     "RunEnvironmentSpec",
     "SynthesizedInputSpec",
     "build_task_image",
@@ -67,13 +70,13 @@ __all__ = [
     "default_skill_roots",
     "experiment_origin_matches",
     "generate_experiment_name",
-    "legacy_resume_configuration",
     "load_input_bundle",
     "load_objective",
     "load_project_task",
     "make_run_environment_spec",
     "repository_name_from_experiment",
     "resolve_skill_source_dirs",
+    "resume_projection",
     "run_environment_record",
     "supported_profilers",
     "synthesize_input_bundle",
