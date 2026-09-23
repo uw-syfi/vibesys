@@ -16,7 +16,7 @@ from vibesys.skypilot.recovery import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_project import StateNamespace
+    from vs_project.api import StateNamespace
 
 
 class _Slot:

@@ -272,7 +272,7 @@ class TestReselectGpu:
         from vibesys.backends.cuda import CudaBackend  # noqa: PLC0415  # tracked: #288
         from vibesys.context import _RunContext  # noqa: PLC0415  # tracked: #288
         from vibesys.run import RunPaths  # noqa: PLC0415  # tracked: #288
-        from vs_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
+        from vs_sandbox.api import DockerSandbox  # noqa: PLC0415  # tracked: #288
 
         ctx = object.__new__(_RunContext)
         ctx.selected_gpu = selected_gpu
@@ -305,7 +305,7 @@ class TestReselectGpu:
             ctx.judge_backend = MagicMock(spec=DockerSandbox)
             kind = SandboxKind.DOCKER
         else:
-            from vs_sandbox import LocalShellSandbox  # noqa: PLC0415  # tracked: #288
+            from vs_sandbox.api import LocalShellSandbox  # noqa: PLC0415  # tracked: #288
 
             ctx.implementer_backend = MagicMock(spec=LocalShellSandbox)
             ctx.judge_backend = MagicMock(spec=LocalShellSandbox)
