@@ -203,6 +203,12 @@ async function checkInteractions(browser, origin) {
     ...lines(2, 'orchestrator', 'Plan line', 40),
     say(2, 'implementer', 'Implementer started'),
     ...ran(2, 'implementer', 'make bench', 'ops/sec 1420\nbench ok\n'),
+    event('usage_update', 2, 'implementer', {
+      kind: 'usage_update',
+      input_tokens: 12_400,
+      context_window: 200_000,
+      model: 'claude-opus-5',
+    }),
   ];
   const implementer = {
     execution_id: 'implementer-2',
@@ -303,6 +309,48 @@ async function checkInteractions(browser, origin) {
     await out.waitFor();
     assert.match(await out.innerText(), /bench ok/, "the row's own output");
     assert.equal(await rowTop(), restingTop, 'opening the output moved a log row');
+    // The header's context meter, from the run's own usage_update.
+    await page.getByRole('banner').getByText('12k/200k context').waitFor();
+
+    // Arrows in the log move its row cursor; the round stays where it is, and so does every row.
+    const cursor = () => log.evaluate(node => node.getAttribute('aria-activedescendant'));
+    const onCall = await cursor();
+    await log.focus();
+    await page.keyboard.press('Escape');
+    await out.waitFor({state: 'detached'});
+    await page.keyboard.press('ArrowDown');
+    const moved = await cursor();
+    assert.notEqual(moved, onCall, 'Down moves the cursor');
+    assert.notEqual(moved, null, 'Down sets a cursor');
+    await page.keyboard.press('j');
+    assert.equal(await log.getAttribute('aria-label'), 'Round 2 log', 'the log kept its round');
+
+    // Enter on a tool row fills the inspector, and moves no row doing it.
+    await page.keyboard.press('ArrowUp');
+    while ((await cursor()) !== onCall) await page.keyboard.press('ArrowUp');
+    const beforeEnter = await rowTop();
+    await page.keyboard.press('Enter');
+    await out.waitFor();
+    assert.equal(await rowTop(), beforeEnter, 'Enter on a tool row moved a log row');
+    await page.keyboard.press('ArrowLeft');
+    // Left clears it again.
+    await out.waitFor({state: 'detached'});
+
+    // Away from the live edge the pill counts what arrived since, and `l` goes back to it.
+    await log.evaluate(node => node.scrollTo(0, 0));
+    await jump.waitFor();
+    push([
+      ...ran(2, 'implementer', 'make one', 'one\n'),
+      ...ran(2, 'implementer', 'make two', 'two\n'),
+      ...ran(2, 'implementer', 'make three', 'three\n'),
+    ]);
+    await page.getByRole('button', {name: '3 new \u00b7 Jump to latest'}).waitFor();
+    // `l` works from outside the log too.
+    await page.getByRole('button', {name: 'Pause', exact: true}).focus();
+    await page.keyboard.press('l');
+    await jump.waitFor({state: 'detached'});
+    await delay(150);
+    assert.equal(await pinned(), true, 'l returned to the live edge');
 
     // Focus inside the log carries across the re-key a new round causes.
     await log.focus();
@@ -502,7 +550,7 @@ try {
   await checkRoundSelection(browser, origin);
   await checkInteractions(browser, origin);
   console.log(
-    'Browser smoke passed: live events, pause/resume/steer, replay after refresh, completion, mobile layout, keyboard focus, round selection, run replacement, live follow, focus carry, tooltips, drawer, composer.',
+    'Browser smoke passed: live events, pause/resume/steer, replay after refresh, completion, mobile layout, keyboard focus, round selection, run replacement, live follow, focus carry, tooltips, drawer, composer, context meter, tool output, row cursor, jump to live.',
   );
 } catch (error) {
   for (const entry of children) console.error(entry.output());

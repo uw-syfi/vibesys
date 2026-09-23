@@ -9,7 +9,7 @@ import {
   Scale,
   User,
 } from 'lucide-react';
-import {useLayoutEffect, useRef, useState} from 'react';
+import {type Ref, useImperativeHandle, useLayoutEffect, useRef, useState} from 'react';
 import {titleCase} from '../derive.js';
 import type {LogGroup, LogItem} from '../model.js';
 import {Prose} from './Prose.js';
@@ -26,6 +26,12 @@ export interface LogProps {
   /** The tool row whose output the inspector shows, by `LogItem.id`. */
   selected: string | null;
   onSelect: (id: string | null) => void;
+  ref?: Ref<LogHandle>;
+}
+
+/** What `L` needs from the log, which owns the scroller the key acts on. */
+export interface LogHandle {
+  jump: () => void;
 }
 
 const ROLE_ICONS: Record<string, LucideIcon> = {
@@ -38,14 +44,37 @@ const icon = {size: 16, strokeWidth: 1.75, 'aria-hidden': true} as const;
 const TIP_LIMIT = 600;
 
 const calls = (count: number) => (count === 1 ? '1 call' : `${count} calls`);
+/** The DOM id of a row, which is what `aria-activedescendant` names. */
+const rowId = (id: string) => `row-${id}`;
+/** Leaves of the round, folded or not: what the reader missed while away from the live edge. */
+const leaves = (items: readonly LogItem[]): number =>
+  items.reduce((total, item) => total + (item.kind === 'run' ? item.items.length : 1), 0);
+
+/**
+ * The rows a reader can see. A closed fold's own summary is still a row; everything under it
+ * is not rendered to them, so the cursor steps over it.
+ */
+function visibleRows(scroller: HTMLElement): HTMLElement[] {
+  return [...scroller.querySelectorAll<HTMLElement>('[data-row]')].filter(row => {
+    const shut = row.closest('details:not([open])');
+    return shut === null || row.parentElement === shut;
+  });
+}
 // ponytail: module state, since App renders exactly one Log at a time.
 /** Set when a log unmounts with focus inside it, so the next round's log takes that focus. */
 let carryFocus = false;
 
 /** Rendered with `key={round}`, so a new selection starts with fresh follow state. */
-export function Log({state, round, groups, follow, history, selected, onSelect}: LogProps) {
+export function Log({state, round, groups, follow, history, selected, onSelect, ref}: LogProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
+  // The roving cursor, by DOM id. It is not focus: the scroller keeps that and names the row
+  // through `aria-activedescendant`, so moving the cursor is not announced as new content.
+  const [cursor, setCursor] = useState<string | null>(null);
+  const rows = groups.reduce((total, group) => total + leaves(group.items), 0);
+  /** Rows at the moment the reader left the live edge: the count the button reports is since. */
+  const mark = useRef(0);
+  const fresh = Math.max(0, rows - mark.current);
 
   // While following, every size change keeps the bottom in view: new rows, and also reflow on a
   // resize or a taller dock, which no render of this component sees.
@@ -71,9 +100,17 @@ export function Log({state, round, groups, follow, history, selected, onSelect}:
     };
   }, []);
 
+  function leave() {
+    if (!away) mark.current = rows;
+    setAway(true);
+  }
+
   function onScroll() {
     const node = scroller.current;
-    if (node !== null) setAway(node.scrollHeight - node.scrollTop - node.clientHeight > 32);
+    if (node === null) return;
+    const gone = node.scrollHeight - node.scrollTop - node.clientHeight > 32;
+    if (gone && !away) mark.current = rows;
+    setAway(gone);
   }
 
   function jump() {
@@ -83,10 +120,55 @@ export function Log({state, round, groups, follow, history, selected, onSelect}:
     node.focus();
     setAway(false);
   }
+  // `L` reaches the scroller from anywhere, so the key binding lives with the other shortcuts.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `jump` only reads stable refs.
+  useImperativeHandle(ref, () => ({jump}), []);
+
+  /** Open or close the fold a summary row heads; anything else has none. */
+  function fold(row: HTMLElement, open: boolean) {
+    const details = row.parentElement;
+    if (!(details instanceof HTMLDetailsElement) || details.open === open) return;
+    details.open = open;
+    // Opening history leaves the live edge, as a click on the same summary does.
+    if (open) leave();
+  }
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const node = scroller.current;
+    if (node === null || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+    const visible = visibleRows(node);
+    const at = visible.findIndex(row => row.id === cursor);
+    const here = visible[at];
+    const move = (next: HTMLElement | undefined) => {
+      if (next === undefined) return;
+      setCursor(next.id);
+      // Within the log only: the page itself never scrolls under the reader.
+      next.scrollIntoView({block: 'nearest'});
+    };
+    // Enter and Space on a focused <summary> are the native toggle; only the scroller's own
+    // Enter acts on the cursor.
+    const enter = event.key === 'Enter' && event.target === event.currentTarget;
+    if (event.key === 'ArrowDown') move(at < 0 ? visible[0] : visible[at + 1]);
+    else if (event.key === 'ArrowUp') move(at < 0 ? visible.at(-1) : visible[at - 1]);
+    else if (here === undefined) return;
+    else if (event.key === 'ArrowRight' || enter) {
+      if (here.dataset.tool !== undefined) onSelect(here.dataset.tool);
+      else fold(here, true);
+    } else if (event.key === 'ArrowLeft') {
+      if (here.dataset.tool !== undefined) onSelect(null);
+      else fold(here, false);
+    } else if (event.key === 'Escape') {
+      if (selected === null) return;
+      onSelect(null);
+    } else return;
+    event.preventDefault();
+  }
 
   return (
     <div className="logwrap">
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the scroller's own row cursor is the keyboard path. */}
+      {/* The region stays a `log`, which does not take `aria-activedescendant`: the cursor
+          rides along for anything reading the DOM and is deliberately not announced. */}
+      {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the region is a live log first. */}
       <div
         ref={scroller}
         id="log"
@@ -95,14 +177,19 @@ export function Log({state, round, groups, follow, history, selected, onSelect}:
         aria-live="off"
         aria-label={round === null ? 'Run log' : `Round ${round} log`}
         aria-busy={state === 'loading' || history.loading || undefined}
+        aria-activedescendant={cursor ?? undefined}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must take focus to scroll by keyboard.
         tabIndex={0}
         onScroll={onScroll}
+        onKeyDown={onKeyDown}
         // Delegated, so a row stays a row rather than becoming one tab stop each: the keyboard
         // path is the cursor this scroller carries.
         onClick={event => {
           const row = (event.target as HTMLElement).closest<HTMLElement>('[data-tool]');
-          if (row?.dataset.tool !== undefined) onSelect(row.dataset.tool);
+          if (row?.dataset.tool === undefined) return;
+          // The cursor follows the pointer, so the two never disagree about which row is live.
+          setCursor(row.id);
+          onSelect(row.dataset.tool);
         }}
       >
         <div className="col">
@@ -144,8 +231,9 @@ export function Log({state, round, groups, follow, history, selected, onSelect}:
                 <Group
                   key={group.id}
                   group={group}
+                  cursor={cursor}
                   selected={selected}
-                  onOpen={() => setAway(true)}
+                  onOpen={leave}
                 />
               ))}
             </ol>
@@ -153,9 +241,17 @@ export function Log({state, round, groups, follow, history, selected, onSelect}:
         </div>
       </div>
       {follow && away ? (
-        <button type="button" className="jump" onClick={jump}>
+        // The count is the one thing the button does not otherwise say: how much was missed.
+        <button
+          type="button"
+          className="jump"
+          aria-keyshortcuts="L"
+          data-tip=""
+          data-key="L"
+          onClick={jump}
+        >
           <ArrowDown size={14} strokeWidth={1.75} aria-hidden />
-          Jump to latest
+          {fresh === 0 ? 'Jump to latest' : `${fresh} new · Jump to latest`}
         </button>
       ) : null}
     </div>
@@ -164,10 +260,12 @@ export function Log({state, round, groups, follow, history, selected, onSelect}:
 
 function Group({
   group,
+  cursor,
   selected,
   onOpen,
 }: {
   group: LogGroup;
+  cursor: string | null;
   selected: string | null;
   onOpen: () => void;
 }) {
@@ -185,13 +283,15 @@ function Group({
         {group.collapsed ? (
           <>
             {steers.map(item => (
-              <Item key={item.id} item={item} selected={selected} onOpen={onOpen} />
+              <Item key={item.id} item={item} cursor={cursor} selected={selected} onOpen={onOpen} />
             ))}
             {rest.length === 0 ? null : (
               <Fold
+                id={group.id}
                 verb={group.summary || titleCase(group.role)}
                 count={group.calls}
                 items={rest}
+                cursor={cursor}
                 selected={selected}
                 onOpen={onOpen}
               />
@@ -199,7 +299,7 @@ function Group({
           </>
         ) : (
           group.items.map(item => (
-            <Item key={item.id} item={item} selected={selected} onOpen={onOpen} />
+            <Item key={item.id} item={item} cursor={cursor} selected={selected} onOpen={onOpen} />
           ))
         )}
       </div>
@@ -209,15 +309,19 @@ function Group({
 
 /** A counted row that opens in place: a whole role's turn, or a run of calls of one verb. */
 function Fold({
+  id,
   verb,
   count,
   items,
+  cursor,
   selected,
   onOpen,
 }: {
+  id: string;
   verb: string;
   count: number;
   items: LogItem[];
+  cursor: string | null;
   selected: string | null;
   onOpen: () => void;
 }) {
@@ -225,7 +329,9 @@ function Fold({
     <details className="fold">
       {/* biome-ignore lint/a11y/noStaticElementInteractions: <summary> is natively interactive. */}
       <summary
-        className="row"
+        id={rowId(id)}
+        data-row=""
+        className={rowId(id) === cursor ? 'row cur' : 'row'}
         // Opening history leaves the live edge, so following stops before the fold grows. Enter
         // and Space also fire click; `toggle` would come too late.
         onClick={event => {
@@ -240,7 +346,7 @@ function Fold({
       </summary>
       <div className="what">
         {items.map(item => (
-          <Item key={item.id} item={item} selected={selected} onOpen={onOpen} />
+          <Item key={item.id} item={item} cursor={cursor} selected={selected} onOpen={onOpen} />
         ))}
       </div>
     </details>
@@ -249,19 +355,24 @@ function Fold({
 
 function Item({
   item,
+  cursor,
   selected,
   onOpen,
 }: {
   item: LogItem;
+  cursor: string | null;
   selected: string | null;
   onOpen: () => void;
 }) {
+  const at = rowId(item.id) === cursor;
   if (item.kind === 'run') {
     return (
       <Fold
+        id={item.id}
         verb={item.verb}
         count={item.items.length}
         items={item.items}
+        cursor={cursor}
         selected={selected}
         onOpen={onOpen}
       />
@@ -269,7 +380,7 @@ function Item({
   }
   if (item.kind === 'steer') {
     return (
-      <p className="said">
+      <p id={rowId(item.id)} data-row="" className={at ? 'said cur' : 'said'}>
         <span className="ic" data-tip="Steer, delivered at the start of this call">
           <User {...icon} />
         </span>
@@ -282,7 +393,7 @@ function Item({
   }
   if (item.kind === 'prose') {
     return (
-      <div className="say">
+      <div id={rowId(item.id)} data-row="" className={at ? 'say cur' : 'say'}>
         <Prose paragraphs={item.paragraphs} />
       </div>
     );
@@ -292,9 +403,16 @@ function Item({
   // whole command carries no tooltip: it would only repeat what the reader is looking at.
   const whole = item.argFull;
   const tip = whole !== null && whole.length > TIP_LIMIT ? `${whole.slice(0, TIP_LIMIT)}…` : whole;
-  const marks = ['row', item.inFlight ? 'now' : '', item.id === selected ? 'sel' : ''];
+  const marks = [
+    'row',
+    item.inFlight ? 'now' : '',
+    item.id === selected ? 'sel' : '',
+    at ? 'cur' : '',
+  ];
   return (
     <div
+      id={rowId(item.id)}
+      data-row=""
       className={marks.filter(Boolean).join(' ')}
       aria-current={item.inFlight ? 'step' : undefined}
       data-tool={item.id}

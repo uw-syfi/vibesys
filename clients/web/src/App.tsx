@@ -1,5 +1,5 @@
 import type {DesignRound, HypothesisEntry, PerformanceRound} from '@vibesys/backend-client/browser';
-import {useCallback, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {
   agentGraph,
   endedWord,
@@ -23,7 +23,7 @@ import {Graph} from './ui/Graph.js';
 import {Header} from './ui/Header.js';
 import {Inspector} from './ui/Inspector.js';
 import {LiveRegion} from './ui/LiveRegion.js';
-import {Log} from './ui/Log.js';
+import {Log, type LogHandle} from './ui/Log.js';
 import {Rail} from './ui/Rail.js';
 import {Shortcuts} from './ui/Shortcuts.js';
 import {Tooltip} from './ui/Tooltip.js';
@@ -67,6 +67,7 @@ export function App({session}: {session: WorkspaceSession}) {
   const [rowPick, setRowPick] = useState<{round: number; id: string} | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [hinted, setHinted] = useState(hintSeen);
+  const log = useRef<LogHandle>(null);
 
   const {core, captured, runId, connection, queries, command} = state;
   const experiments = queries.experiments.response?.experiments ?? NO_EXPERIMENTS;
@@ -185,6 +186,7 @@ export function App({session}: {session: WorkspaceSession}) {
           <Graph round={selected} graph={graph} />
           <Log
             key={selected ?? 'none'}
+            ref={log}
             // Loading until the bootstrap batch folds an event or the snapshot gives a status:
             // `subscribed` sets runId a frame before the batch arrives.
             state={core.status === 'connecting' && core.sequence === 0 ? 'loading' : 'ready'}
@@ -225,7 +227,12 @@ export function App({session}: {session: WorkspaceSession}) {
         />
       </div>
       <LiveRegion status={core.status} round={live} ended={ended} connection={connection} />
-      <Shortcuts onNext={() => step(1)} onPrevious={() => step(-1)} onToggleRun={toggleRun} />
+      <Shortcuts
+        onNext={() => step(1)}
+        onPrevious={() => step(-1)}
+        onToggleRun={toggleRun}
+        onJumpToLive={() => log.current?.jump()}
+      />
       <Tooltip />
     </div>
   );

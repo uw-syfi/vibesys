@@ -8,6 +8,7 @@ export interface ShortcutsProps {
   onNext: () => void;
   onPrevious: () => void;
   onToggleRun: () => void;
+  onJumpToLive: () => void;
 }
 
 function stored(): boolean {
@@ -19,16 +20,17 @@ function stored(): boolean {
 }
 
 /**
- * Keyboard shortcuts and the `?` dialog listing them. `j`/`k`/`p`/`/` are single-key shortcuts
- * the dialog can turn off (WCAG 2.1.4); `?` always opens the dialog so they can be turned back on.
- * Arrow keys change the round only while focus is on the rail or on nothing.
+ * Keyboard shortcuts and the `?` dialog listing them. `j`/`k`/`l`/`p`/`/` are single-key
+ * shortcuts the dialog can turn off (WCAG 2.1.4); `?` always opens the dialog so they can be
+ * turned back on. Arrow keys change the round only while focus is on the rail or on nothing,
+ * and `j`/`k` never do while focus is in the log, where they belong to its row cursor.
  */
-export function Shortcuts({onNext, onPrevious, onToggleRun}: ShortcutsProps) {
+export function Shortcuts({onNext, onPrevious, onToggleRun, onJumpToLive}: ShortcutsProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [enabled, setEnabled] = useState(stored);
-  const actions = useRef({onNext, onPrevious, onToggleRun});
+  const actions = useRef({onNext, onPrevious, onToggleRun, onJumpToLive});
   useEffect(() => {
-    actions.current = {onNext, onPrevious, onToggleRun};
+    actions.current = {onNext, onPrevious, onToggleRun, onJumpToLive};
   });
 
   useEffect(() => {
@@ -42,6 +44,7 @@ export function Shortcuts({onNext, onPrevious, onToggleRun}: ShortcutsProps) {
         return;
       }
       if (document.querySelector('dialog[open]')) return;
+      const inLog = target?.closest('#log') != null;
       const onRail = target === null || target === document.body || target.closest('.rail');
       if (onRail && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
         event.preventDefault();
@@ -52,8 +55,11 @@ export function Shortcuts({onNext, onPrevious, onToggleRun}: ShortcutsProps) {
       if (!enabled) return;
       // Caps Lock and Shift still count; Ctrl, Meta, and Alt returned above.
       const letter = event.key.toLowerCase();
+      // Round movement yields to the log's row cursor rather than being unbound there.
+      if (inLog && (letter === 'j' || letter === 'k')) return;
       if (letter === 'j') actions.current.onNext();
       else if (letter === 'k') actions.current.onPrevious();
+      else if (letter === 'l') actions.current.onJumpToLive();
       else if (letter === 'p') actions.current.onToggleRun();
       else if (event.key === '/') document.getElementById('steer')?.focus();
       else return;
@@ -109,6 +115,30 @@ export function Shortcuts({onNext, onPrevious, onToggleRun}: ShortcutsProps) {
           </div>
           <div>
             <dt>
+              <kbd>↑</kbd> <kbd>↓</kbd>
+            </dt>
+            <dd>Move the cursor in the log</dd>
+          </div>
+          <div>
+            <dt>
+              <kbd>→</kbd> <kbd>Enter</kbd>
+            </dt>
+            <dd>Show a tool call's output, or open a fold</dd>
+          </div>
+          <div>
+            <dt>
+              <kbd>←</kbd>
+            </dt>
+            <dd>Clear that output, or close a fold</dd>
+          </div>
+          <div>
+            <dt>
+              <kbd>l</kbd>
+            </dt>
+            <dd>Jump to the latest rows</dd>
+          </div>
+          <div>
+            <dt>
               <kbd>p</kbd>
             </dt>
             <dd>Pause or resume</dd>
@@ -129,7 +159,7 @@ export function Shortcuts({onNext, onPrevious, onToggleRun}: ShortcutsProps) {
             <dt>
               <kbd>Esc</kbd>
             </dt>
-            <dd>Close a dialog or sheet</dd>
+            <dd>Close a dialog, or clear the output</dd>
           </div>
         </dl>
         <label className="keys-toggle">
@@ -138,7 +168,7 @@ export function Shortcuts({onNext, onPrevious, onToggleRun}: ShortcutsProps) {
             checked={enabled}
             onChange={event => toggle(event.target.checked)}
           />
-          Single-key shortcuts (j, k, p, /)
+          Single-key shortcuts (j, k, l, p, /)
         </label>
       </div>
     </dialog>

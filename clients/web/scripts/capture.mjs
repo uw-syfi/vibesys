@@ -309,6 +309,8 @@ const REPLAY = [
   },
   {name: 'paused', fixture: queue(upTo(QUEUE, 623), {status: 'paused'}), expect: ['Resume']},
   {
+    // The pill, and the row under it: the column reserves the pill's band, so nothing is
+    // covered by it.
     name: 'scrolled',
     fixture: live(),
     after: page => page.locator('#log').evaluate(node => node.scrollTo(0, 0)),
@@ -418,7 +420,7 @@ const REPLAY = [
     fixture: live(),
     widths: [1440],
     after: page => page.keyboard.press('?'),
-    expect: ['Keyboard shortcuts', 'Single-key shortcuts (j, k, p, /)'],
+    expect: ['Keyboard shortcuts', 'Move the cursor in the log', 'Single-key shortcuts (j, k, l, p, /)'],
   },
   {
     name: 'sheet',
