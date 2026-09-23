@@ -248,6 +248,7 @@ function Item({item}: {item: LogItem}) {
           <span className={item.result.failed ? 'res err' : 'res'}>{item.result.text}</span>
         )}
       </span>
+      {item.duration === null ? null : <span className="dur mono">{item.duration}</span>}
     </div>
   );
 }

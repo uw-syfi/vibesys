@@ -379,6 +379,7 @@ test('log groups: role groups, collapse, in-flight row, tool rows from typed pay
     arg: 'cat …/runtime/effective-objective.md',
     argFull: `cat .vibesys/state/runs/${QUEUE_RUN}/runtime/effective-objective.md`,
     result: null,
+    duration: '0.3s',
     inFlight: false,
   });
   assert.equal(tool(items, '487')?.verb, 'Wrote');
@@ -400,6 +401,26 @@ test('log groups: role groups, collapse, in-flight row, tool rows from typed pay
     ),
     false,
     'nothing is in flight once the run ended',
+  );
+});
+
+test('tool rows: a command carries its wall clock, and nothing else does', () => {
+  const rows = logGroups(fold(QUEUE), [], 1, QUEUE_RUN)
+    .flatMap(group => group.items)
+    .filter(item => item.kind === 'tool');
+  const timed = rows.filter(row => row.duration !== null);
+  assert.equal(timed.length, 105, 'every command payload of the recording reports one');
+  assert.ok(rows.length > timed.length, 'a result without a command payload reports none');
+  // The payload decides, not the tool name: the recording times four non-Bash calls whose
+  // results came back as command payloads.
+  assert.ok(timed.some(row => row.verb === 'Wrote'));
+  // Tenths under ten seconds, whole seconds under a minute: `0:00` would say nothing about a
+  // call that took 40 ms, and the recording's slowest is 52.8 s.
+  const shapes = [...new Set(timed.map(row => (row.duration ?? '').replace(/\d/g, '0')))].sort();
+  assert.deepEqual(shapes, ['0.0s', '00s']);
+  assert.ok(
+    timed.some(row => row.duration === '53s'),
+    'the 52.8 s build rounds to whole seconds',
   );
 });
 

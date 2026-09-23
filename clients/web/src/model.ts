@@ -121,6 +121,8 @@ export type LogItem =
       /** The whole command, when `arg` is a reduction of it; null when the row shows all of it. */
       argFull: string | null;
       result: ToolResultSummary | null;
+      /** The call's wall clock, which only a command payload reports; null when it did not. */
+      duration: string | null;
       inFlight: boolean;
     }
   | {kind: 'steer'; id: string; text: string};

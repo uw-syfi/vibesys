@@ -448,6 +448,20 @@ export function toolResult(entry: TranscriptEntry): ToolResultSummary | null {
   return summary;
 }
 
+/**
+ * How long the call took. The command payload is the only one that reports it, whatever tool
+ * produced that payload, so most timed rows are Bash and a few are not. Tenths under ten
+ * seconds, whole seconds under a minute, `m:ss` above: `0:00` would say nothing about the 40 ms
+ * reads that are most of a round.
+ */
+function toolDuration(entry: TranscriptEntry): string | null {
+  const payload = entry.toolResult?.payload;
+  const seconds = payload?.kind === 'command' ? payload.duration : null;
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null;
+  if (seconds < 10) return `${seconds.toFixed(1)}s`;
+  return seconds < 60 ? `${Math.round(seconds)}s` : formatDuration(seconds * 1000);
+}
+
 function summarize(entry: TranscriptEntry): ToolResultSummary | null {
   const result = entry.toolResult;
   if (result === undefined) return null;
@@ -594,6 +608,7 @@ export function logGroups(
           arg: arg === null ? null : short(arg),
           argFull: argFull === null ? null : short(argFull),
           result: toolResult(entry),
+          duration: toolDuration(entry),
           inFlight: entry.id === inFlight,
         },
       });

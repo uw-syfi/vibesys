@@ -100,6 +100,11 @@
   flex: none;
   color: var(--text-muted);
 }
+/* The row's second grid column, which nothing filled: tabular, so the edge stays straight. */
+.row .dur {
+  text-align: right;
+  color: var(--text-muted);
+}
 .row .res.err {
   color: var(--status-failed);
 }
