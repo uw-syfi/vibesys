@@ -282,6 +282,15 @@ manifest described below.
   # > The wrapper does not accept shell syntax from the caller.
   ```
 
+  For import suppressions, put the reason in a nearby standalone comment so
+  Ruff's import sorter can still process the import block:
+
+  ```python
+  # lint-waiver: LW-000043 [PLC0415]; this dependency is optional at startup
+  def load_optional_backend():
+      from optional_backend import Backend  # noqa: PLC0415
+  ```
+
   The JSONL entry records the ID, repository-relative path, and exact rule set.
   It deliberately has no line number, so ordinary edits above the site do not
   invalidate the entry. Keep the ID if the suppression moves within a file;
