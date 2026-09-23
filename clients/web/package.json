@@ -1,0 +1,30 @@
+{
+  "name": "@vibesys/web",
+  "version": "0.1.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "prebuild": "pnpm --filter @vibesys/web^... build",
+    "check": "tsc -p tsconfig.check.json",
+    "precheck": "pnpm --filter @vibesys/web^... build",
+    "test": "bun test --max-concurrency 1 src",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@vibesys/backend-client": "workspace:*",
+    "@vibesys/core-state": "workspace:*",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.9",
+    "@types/react": "19.1.13",
+    "@types/react-dom": "19.1.9",
+    "@types/node": "^24.0.0",
+    "@vitejs/plugin-react": "5.0.4",
+    "typescript": "^5.8.3"
+  }
+}

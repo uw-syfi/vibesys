@@ -295,6 +295,14 @@ jobs:
         working-directory: clients
         run: pnpm build:clients
 
+      - name: Install Chromium for the web smoke test
+        working-directory: clients
+        run: pnpm --filter @vibesys/web exec playwright install --with-deps chromium
+
+      - name: Test the replay-driven web viewer
+        working-directory: clients
+        run: pnpm --filter @vibesys/web test:e2e
+
       - name: Smoke-test packed public TUI package
         working-directory: clients
         run: |

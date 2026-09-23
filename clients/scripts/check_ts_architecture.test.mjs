@@ -23,6 +23,7 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async () 
           '@vibesys/backend-client': ['backend-client/src/index.ts'],
           '@vibesys/core-state': ['core-state/src/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
+          '@vibesys/web': ['web/src/index.ts'],
         },
       },
     }),
@@ -47,11 +48,12 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async () 
   );
   await writeSource(root, 'tui', 'cycle-a.ts', "import './cycle-b.js';\n");
   await writeSource(root, 'tui', 'cycle-b.ts', "import './cycle-a.js';\n");
+  await writeSource(root, 'web', 'index.ts', "import '@vibesys/core-state';\n");
   await writeExternalPackage(root, '@opentui/core');
   await writeExternalPackage(root, 'undeclared-package');
 
   const options = await extractDepcruiseOptions(CONFIG);
-  const result = await cruise(['backend-client/src', 'core-state/src', 'tui/src'], {
+  const result = await cruise(['backend-client/src', 'core-state/src', 'tui/src', 'web/src'], {
     ...options,
     baseDir: root,
     tsConfig: {fileName: join(root, 'tsconfig.architecture.json')},
@@ -82,6 +84,7 @@ const VALID_FILES = {
   'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
+  'web/src/index.ts': "import '@vibesys/backend-client';\nimport '@vibesys/core-state';\n",
   'tui/src/runtime.ts': "import '@opentui/core';\nimport type {} from './session-controller.js';\n",
   'tui/src/session-controller.ts': "import './session-model.js';\nimport './ui/theme.js';\n",
   'tui/src/session-model.ts': "import './ui/theme.js';\n",
@@ -213,6 +216,7 @@ async function violatedRules(files) {
           '@vibesys/backend-client': ['backend-client/src/index.ts'],
           '@vibesys/core-state': ['core-state/src/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
+          '@vibesys/web': ['web/src/index.ts'],
         },
       },
     }),
@@ -231,7 +235,15 @@ async function violatedRules(files) {
   const options = await extractDepcruiseOptions(CONFIG);
   const tsConfigFile = join(root, 'tsconfig.architecture.json');
   const result = await cruise(
-    ['backend-client/src', 'core-state/src', 'tui/src', 'tui/dev', 'tui/benchmarks', 'scripts'],
+    [
+      'backend-client/src',
+      'core-state/src',
+      'tui/src',
+      'tui/dev',
+      'tui/benchmarks',
+      'web/src',
+      'scripts',
+    ],
     {
       ...options,
       baseDir: root,
@@ -265,6 +277,10 @@ test('manifest policy rejects declared reverse dependencies', async () => {
   });
   await writeManifest(root, 'tui', '@vibesys/tui', {
     '@vibesys/backend-client': 'workspace:*',
+  });
+  await writeManifest(root, 'web', '@vibesys/web', {
+    '@vibesys/backend-client': 'workspace:*',
+    '@vibesys/core-state': 'workspace:*',
   });
 
   assert.deepEqual(await manifestErrors(root), [

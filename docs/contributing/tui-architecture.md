@@ -13,15 +13,16 @@ journal, and owns frontend-specific facilities such as experiment chat.
 `entrypoints` composes either a local headless integration or the server
 runtime. Tach enforces this direction in CI.
 
-The TypeScript frontend has three packages with one allowed dependency direction:
+The TypeScript frontend has four packages with one allowed dependency direction:
 
 ```text
 @vibesys/backend-client <- @vibesys/core-state <- @vibesys/tui
-                         \_______________________^
+                         \____________________<- @vibesys/web
 ```
 
-`@vibesys/tui` may depend on both packages. Reverse imports and cross-package relative imports are
-forbidden and checked by `pnpm check:ts-architecture`.
+`@vibesys/tui` and `@vibesys/web` may depend on the lower layers. They never depend on each other,
+and reverse imports and cross-package relative imports are forbidden and checked by
+`pnpm check:ts-architecture`.
 
 Dependency-cruiser parses and resolves the TypeScript graph for dependency direction, cycles,
 unresolvable or undeclared imports, public package entry points, and the runtime-independence rules
@@ -31,7 +32,7 @@ workspace dependencies that are declared but unused, because they do not appear 
 dependency graph. Rule regressions run as part of `pnpm test:clients`.
 
 The check scans each package's `src/` plus the non-shipping code next to it (`tui/dev`, benchmarks,
-`clients/scripts`). Beyond the package direction, it enforces:
+the web end-to-end tests, and `clients/scripts`). Beyond the package direction, it enforces:
 
 - No deep imports into another workspace package (`@vibesys/x/dist/...`, `@vibesys/x/src/...`,
   relative paths into a sibling package). Only the public `exports` are importable.
@@ -51,6 +52,7 @@ The check scans each package's `src/` plus the non-shipping code next to it (`tu
 | Status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics | `core-state` |
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress | `tui` |
 | Terminal widgets, rendering, keyboard and mouse events | `tui` |
+| Browser bindings, presentation, and browser-only interaction state | `web` |
 
 The backend client performs I/O and exposes validated protocol messages. Core state is a pure fold
 over snapshots, ordered events, and active-execution checkpoints. The TUI owns all interaction and
@@ -58,6 +60,11 @@ presentation state, renders the combined state, and sends user intents through t
 
 Only backend messages change core state. A frontend action may send a command, but the command does
 not optimistically change backend-authoritative state. The resulting backend event does.
+
+The web client is a presentation adapter over `core-state`. Its React external-store binding owns
+subscriptions and browser presentation state; it does not fold events or copy TUI state logic.
+Recorded replay fixtures are served by the development harness and folded through the same
+`core-state` reducer used by live clients.
 
 `core-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
 time-dependent selectors require an explicit clock value so tests remain deterministic. Transcript

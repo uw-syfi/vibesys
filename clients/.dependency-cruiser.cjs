@@ -1,7 +1,7 @@
 // Scanned sources: each package's `src/`, plus the non-shipping code that lives next to it: the
 // replay harness (`tui/dev`), benchmarks, and the workspace's own tooling (`scripts`).
-const PACKAGES = '^(?:backend-client|core-state|tui)/';
-const TOOLING = '^(?:tui/dev|tui/benchmarks|core-state/bench|scripts)/';
+const PACKAGES = '^(?:backend-client|core-state|tui|web)/';
+const TOOLING = '^(?:tui/dev|tui/benchmarks|core-state/bench|web/e2e|scripts)/';
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
 
@@ -33,6 +33,18 @@ module.exports = {
       to: {
         path: ['^(?:core-state|tui)/', '/node_modules/@vibesys/(?:core-state|tui)/'],
       },
+    },
+    {
+      name: 'web-does-not-depend-on-tui',
+      severity: 'error',
+      from: {path: '^web/src/'},
+      to: {path: ['^tui/', '/node_modules/@vibesys/tui/']},
+    },
+    {
+      name: 'tui-does-not-depend-on-web',
+      severity: 'error',
+      from: {path: '^tui/'},
+      to: {path: ['^web/', '/node_modules/@vibesys/web/']},
     },
     {
       // `tui/dev/` is the development replay harness. It is kept out of

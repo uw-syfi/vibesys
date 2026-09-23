@@ -32,6 +32,8 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+clients/web/artifacts/
+clients/web/test-results/
 downloads/
 eggs/
 .eggs/

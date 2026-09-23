@@ -20,6 +20,11 @@ const PACKAGES = {
     runtimeWorkspaceDependencies: ['@vibesys/backend-client', '@vibesys/core-state'],
     forbiddenDependencyPrefixes: [],
   },
+  '@vibesys/web': {
+    directory: 'web',
+    runtimeWorkspaceDependencies: ['@vibesys/backend-client', '@vibesys/core-state'],
+    forbiddenDependencyPrefixes: ['@vibesys/tui'],
+  },
 };
 
 const DEPENDENCY_SECTIONS = [
