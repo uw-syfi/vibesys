@@ -207,7 +207,7 @@ depends_on = ["vs_agent", "vibesys.loops", "vibesys.evaluators", "vibesys.run", 
 
 [[modules]]
 path = "vibesys.loops.agent.loop"
-depends_on = ["vibesys.loops.agent", "vibesys.loops.agent.policy_flow", "vibesys.loops.agent.policy_profile", "vibesys", "vibesys.context", "vibesys.domains", "vibesys.evaluators", "vibesys.loops", "vibesys.profilers", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_agent", "vs_loop_state"]
+depends_on = ["vibesys.loops.agent", "vibesys.loops.agent.policy_flow", "vibesys.loops.agent.policy_profile", "vibesys", "vibesys.context", "vibesys.domains", "vibesys.evaluators", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_agent", "vs_loop_state"]
 
 [[modules]]
 path = "vibesys.loops.agent.policy_flow"
@@ -215,7 +215,7 @@ depends_on = ["vibesys.loops.agent", "vibesys.loops.agent.policy_multi", "vibesy
 
 [[modules]]
 path = "vibesys.loops.agent.policy_multi"
-depends_on = ["vibesys.loops.agent", "vibesys", "vibesys.profilers"]
+depends_on = ["vibesys.loops.agent", "vibesys"]
 
 [[modules]]
 path = "vibesys.loops.agent.policy_single"

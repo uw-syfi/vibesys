@@ -190,7 +190,6 @@ graph TD
     vibesys.loops.agent.loop --> vibesys.loops.agent
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_flow
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_profile
-    vibesys.loops.agent.loop --> vibesys.profilers
     vibesys.loops.agent.loop --> vibesys.render
     vibesys.loops.agent.loop --> vibesys.run
     vibesys.loops.agent.loop --> vibesys.sandbox
@@ -202,7 +201,6 @@ graph TD
     vibesys.loops.agent.policy_flow --> vibesys.loops.agent.policy_single
     vibesys.loops.agent.policy_multi --> vibesys
     vibesys.loops.agent.policy_multi --> vibesys.loops.agent
-    vibesys.loops.agent.policy_multi --> vibesys.profilers
     vibesys.loops.agent.policy_profile --> vibesys.evaluators
     vibesys.loops.agent.policy_profile --> vibesys.loops.agent
     vibesys.loops.agent.policy_profile --> vibesys.run
@@ -484,7 +482,6 @@ graph TD
     vibesys.loops.agent.loop --> vibesys.loops.agent
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_flow
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_profile
-    vibesys.loops.agent.loop --> vibesys.profilers
     vibesys.loops.agent.loop --> vibesys.render
     vibesys.loops.agent.loop --> vibesys.run
     vibesys.loops.agent.loop --> vibesys.sandbox
@@ -498,7 +495,6 @@ graph TD
     vibesys.loops.agent.policy_flow --> vibesys.loops.agent.policy_single
     vibesys.loops.agent.policy_multi --> vibesys
     vibesys.loops.agent.policy_multi --> vibesys.loops.agent
-    vibesys.loops.agent.policy_multi --> vibesys.profilers
     vibesys.loops.agent.policy_profile --> vibesys.evaluators
     vibesys.loops.agent.policy_profile --> vibesys.loops.agent
     vibesys.loops.agent.policy_profile --> vibesys.run

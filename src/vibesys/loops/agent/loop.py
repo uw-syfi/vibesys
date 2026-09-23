@@ -111,6 +111,8 @@ from vibesys.profilers import (
 )
 from vibesys.render.sink import output_sink
 from vibesys.run import LocalRunIntegration, RepositoryVisibility, RunStateNamespace
+from vibesys.run.agent_round_transaction import agent_round_transaction_factory
+from vibesys.run.legacy_state import LegacyRunState
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -307,7 +309,8 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         environment_hooks=domain_definition.environment_hooks,
         remote_repo=remote_repo,
         repo_visibility=repo_visibility,
-        agent_state_model_type=AgentRunState,
+        round_transaction_factory=agent_round_transaction_factory(AgentRunState),
+        run_state_factory=LegacyRunState,
         integration=integration,
     )
     # This policy declares its participants once. The handles share the
