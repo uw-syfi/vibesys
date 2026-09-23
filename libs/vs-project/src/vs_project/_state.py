@@ -410,6 +410,63 @@ class StateNamespace:
         """Atomically serialize one state model at a safe relative path."""
         self.apply(self.transition(relative_path, model))
 
+    def read_bytes(self, relative_path: str | PurePosixPath) -> bytes | None:
+        """Read one safe state file, returning ``None`` only when absent.
+
+        This byte boundary supports compatibility formats whose schemas are
+        owned by a subsystem rather than by ``vs_project``.
+        """
+        path = self._resolve_file(relative_path)
+        if not path.exists():
+            return None
+        if not path.is_file():
+            raise ProjectStateError(f"VibeSys state path is not a file: {path}")
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            raise ProjectStateError(f"Could not read VibeSys state file {path}: {exc}") from exc
+
+    def entries(self, relative_directory: str | PurePosixPath) -> tuple[str, ...]:
+        """List direct state-directory entry names without following symlinks."""
+        directory = self._resolve_file(relative_directory)
+        if not directory.exists():
+            return ()
+        if not directory.is_dir():
+            raise ProjectStateError(f"VibeSys state path is not a directory: {directory}")
+        try:
+            entries = tuple(sorted(directory.iterdir(), key=lambda entry: entry.name))
+        except OSError as exc:
+            raise ProjectStateError(
+                f"Could not list VibeSys state directory {directory}: {exc}"
+            ) from exc
+        for entry in entries:
+            if entry.is_symlink():
+                raise ProjectStateError(f"VibeSys state must not contain symlinks: {entry}")
+        return tuple(entry.name for entry in entries)
+
+    def write_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> None:
+        """Atomically write one safe state file in a subsystem-owned format."""
+        path = self._resolve_file(relative_path)
+        if not isinstance(contents, bytes):
+            raise TypeError("state file contents must be bytes")
+        try:
+            _atomic_write_bytes(path, contents)
+        except OSError as exc:
+            raise ProjectStateError(f"Could not write VibeSys state file {path}: {exc}") from exc
+
+    def snapshot_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> StateSnapshot:
+        """Prepare an exact portable snapshot of one subsystem-owned file."""
+        if not self._portable:
+            raise ProjectStateError("Machine-local VibeSys state namespaces cannot be snapshotted")
+        if not isinstance(contents, bytes):
+            raise TypeError("state snapshot contents must be bytes")
+        relative = _validate_state_relative_path(relative_path)
+        self._resolve_file(relative)
+        return StateSnapshot._create(
+            self._namespace_root,
+            (StateFile(relative_path=relative, contents=contents),),
+        )
+
     def slot[ModelT: BaseModel](
         self,
         relative_path: str | PurePosixPath,

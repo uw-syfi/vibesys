@@ -20,6 +20,7 @@ from vibesys.loops.agent.orchestration import (
 )
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
+from vibesys.run.agent_round_compat import LegacyAgentRoundStore
 from vibesys.run.state import RunStateNamespace
 from vs_project.api import AgentRunConfiguration, OrchestrationRunManifest
 
@@ -82,7 +83,7 @@ def load_agent_run_state(project: Project, run_id: str) -> AgentRunState | None:
     # (matches the server's own migration call before it moved onto this
     # module).
     return store.migrate_legacy(
-        rounds=project.state.load_rounds(run_id),
+        rounds=LegacyAgentRoundStore(project, run_id).load(),
         local_namespace=local,
         legacy_space=MetricSpace(
             objectives=tuple(

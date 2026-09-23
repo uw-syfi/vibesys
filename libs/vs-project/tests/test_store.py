@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
+from typing import cast
 from uuid import UUID
 
 import pytest
@@ -1474,6 +1475,29 @@ def test_empty_portable_namespace_has_an_empty_snapshot(tmp_path: Path) -> None:
 
     assert snapshot._namespace_root == PurePosixPath(f".vibesys/state/runs/{run.run_id}/runtime")
     assert snapshot.files == ()
+
+
+def test_namespace_byte_file_preserves_exact_legacy_contents(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    run = _run(store)
+    namespace = store.state.portable_namespace(run.run_id, "agent")
+    contents = b'{"round":1}\n'
+
+    assert namespace.read_bytes("rounds/0001.json") is None
+    prepared = namespace.snapshot_bytes("rounds/0001.json", contents)
+    namespace.write_bytes("rounds/0001.json", contents)
+
+    assert namespace.read_bytes("rounds/0001.json") == contents
+    assert namespace.entries("rounds") == ("0001.json",)
+    assert prepared.files == (
+        StateFile(relative_path=PurePosixPath("rounds/0001.json"), contents=contents),
+    )
+    with pytest.raises(ProjectStateError):
+        namespace.snapshot_bytes("../outside.json", contents)
+    with pytest.raises(ProjectStateError, match="cannot be snapshotted"):
+        store.state.local_namespace(run.run_id, "agent").snapshot_bytes("active.json", contents)
+    with pytest.raises(TypeError, match="must be bytes"):
+        namespace.snapshot_bytes("rounds/0002.json", cast("bytes", "text"))
 
 
 def test_initialization_snapshot_contains_only_selected_run_metadata(tmp_path: Path) -> None:
