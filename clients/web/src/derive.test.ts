@@ -417,10 +417,16 @@ test('tool rows: a command carries its wall clock, and nothing else does', () =>
   // Tenths under ten seconds, whole seconds under a minute: `0:00` would say nothing about a
   // call that took 40 ms, and the recording's slowest is 52.8 s.
   const shapes = [...new Set(timed.map(row => (row.duration ?? '').replace(/\d/g, '0')))].sort();
-  assert.deepEqual(shapes, ['0.0s', '00s']);
+  assert.deepEqual(shapes, ['0.0s', '00s', '<0.0s']);
   assert.ok(
     timed.some(row => row.duration === '53s'),
     'the 52.8 s build rounds to whole seconds',
+  );
+  // A column exists to be believed: under 100 ms it says so, it does not claim `0.0s`.
+  assert.ok(timed.some(row => row.duration === '<0.1s'));
+  assert.deepEqual(
+    timed.filter(row => row.duration === '0.0s'),
+    [],
   );
 });
 
@@ -429,28 +435,88 @@ test('tool rows: a command row names its executable and the first path it touche
     .flatMap(group => group.items)
     .filter(item => item.kind === 'tool');
   const args = rows.flatMap(row => (row.arg === null ? [] : [row.arg]));
-  assert.ok(args.length > 80, `the fixture has command rows (${args.length})`);
-  // No row repeats its verb in shell. Two segments is the floor, so the rows still past 40
-  // characters are the ones with a 51-character run id or a long library name inside a segment;
-  // cutting inside a segment is the ellipsis's job, which knows the real width.
+  assert.ok(args.length > 70, `the fixture has command rows (${args.length})`);
+  // No row repeats its verb in shell, and none of the 102 command rows passes 40 characters.
   assert.deepEqual(
     args.filter(arg => arg.length > 40),
-    [
-      `ls …/runs/${QUEUE_RUN}`,
-      `echo …/${QUEUE_RUN}/run.json`,
-      'export …/release/libqueue_candidate.dylib',
-    ],
+    [],
   );
-  // A path with more than three segments keeps its last two; a shallow one stays whole.
-  assert.ok(args.includes('make queue-candidate.so'), 'an executable plus what it built');
+  // A path with more than two segments keeps its last two; a shallow one stays whole, and a
+  // wrapper, a prologue or a later pipe stage never answers for the command that did the work.
   assert.ok(args.includes('nm …/deps/libqueue_candidate.dylib'), 'a deep path keeps two segments');
   assert.ok(args.includes('cat src/lib.rs'), 'a shallow path stays whole');
-  // An inline script is the executable and nothing else: its body is not a target.
-  assert.ok(args.includes('python3'), 'a heredoc names no path');
+  assert.ok(args.includes('rm /tmp/qc_probe.c'), 'an absolute path keeps its root, unmarked');
+  assert.ok(args.includes('make'), '`timeout 300 make …` is the make, not the timeout');
+  assert.ok(args.includes('grep runner.go'), '`cd <dir> && grep … runner.go` is the grep');
+  assert.deepEqual(
+    args.filter(arg => /^(export|cd|timeout|env|sudo|nohup) /.test(arg)),
+    [],
+    'no row names a wrapper as the command',
+  );
+  // An inline script or a section marker says only what the verb said, so the row shows neither.
+  assert.deepEqual(
+    args.filter(arg => arg === 'python3' || arg === 'echo'),
+    [],
+  );
   // The whole command stays reachable wherever the row shows less than all of it.
   for (const row of rows) {
     if (row.argFull !== null) assert.ok(row.argFull.length > (row.arg?.length ?? 0));
   }
+  assert.ok(
+    rows.some(row => row.arg === null && row.argFull !== null),
+    'a row with no target at all still carries its command',
+  );
+});
+
+test('tool rows: how a command is read down to its target', () => {
+  const ran = (sequence: number, command: string) =>
+    ({
+      sequence,
+      type: 'tool_call',
+      round_label: 'round-1-pre',
+      agent_kind: 'orchestrator',
+      timestamp: '2026-09-21T12:00:00Z',
+      data: {
+        kind: 'tool_call',
+        tool: 'Bash',
+        call_id: `c${sequence}`,
+        args: {command, description: `Did thing ${sequence}`},
+      },
+    }) as RunEvent;
+  const cases: [string, string | null][] = [
+    // A quoted run is one word, so a path with a space in it survives whole.
+    ['cat "my file.txt"', 'cat my file.txt'],
+    ['TMPDIR="/tmp with space" make all', 'make'],
+    // The mark appears only where segments were dropped.
+    ['cat /etc/hosts', 'cat /etc/hosts'],
+    ['curl https://example.com', 'curl https://example.com'],
+    ['find /', 'find /'],
+    ['cat a/b/c/d.txt', 'cat …/c/d.txt'],
+    // Only the first segment that does work answers.
+    ['cat Makefile.in && cat README.md', 'cat Makefile.in'],
+    ['git status && sysctl hw.ncpu', 'git'],
+    ['cd /tmp/work && cargo test', 'cargo'],
+    ['export TMPDIR=/tmp; otool -tV queue.so', 'otool queue.so'],
+    ['timeout 300 make 2>&1 | tail -20', 'make'],
+    ['ls -la 2>/dev/null | grep src/lib.rs', 'ls'],
+    // Nothing the verb has not already said.
+    ["python3 - <<'PY'\nprint(1)\nPY", null],
+    ['echo "=== NOTES ==="; cat notes.md', null],
+    ['echo done > out/log.txt', 'echo out/log.txt'],
+  ];
+  const events = cases.map(([command], index) => ran(index + 1, command));
+  const rows = logGroups(fold(events), [], 1, null)
+    .flatMap(group => group.items)
+    .filter(item => item.kind === 'tool');
+  assert.deepEqual(
+    rows.map(row => row.arg),
+    cases.map(([, target]) => target),
+  );
+  assert.deepEqual(
+    rows.map(row => row.argFull ?? row.arg),
+    cases.map(([command]) => command),
+    'the whole command stays on the row, including where the row shows none of it',
+  );
 });
 
 test('log rows: adjacent calls of one verb fold into one counted row', () => {
@@ -500,8 +566,13 @@ test('log rows: adjacent calls of one verb fold into one counted row', () => {
     ...read(40, 'broken.rs', true),
     ...read(44, 'b0.rs'),
     ...read(46, 'b1.rs'),
+    // A call whose result never arrived, mid-run. It is not in flight (a later call is), and it
+    // is not a completed success either, so it stays a row and breaks the run around it.
+    call(48, 'Read', {file_path: 'lost.rs'}),
+    ...read(49, 'b2.rs'),
+    ...read(51, 'b3.rs'),
     // The open call at the live edge: it is not folded, so the row in flight stays a row.
-    call(50, 'Read', {file_path: 'b2.rs'}),
+    call(53, 'Read', {file_path: 'b4.rs'}),
   ];
   const items = logGroups(fold(events), [], 1, null).flatMap(group => group.items);
   assert.deepEqual(
@@ -512,15 +583,17 @@ test('log rows: adjacent calls of one verb fold into one counted row', () => {
       ['run', 'Read', 15],
       ['tool', '40'],
       ['run', 'Read', 2],
-      ['tool', '50'],
+      ['tool', '48'],
+      ['run', 'Read', 2],
+      ['tool', '53'],
     ],
-    'a failure and the call in flight each stand alone; everything adjacent to them folds',
+    'a failure, a result that never came and the call in flight each stand alone',
   );
   const first = items[0];
   assert.equal(first?.kind === 'run' && first.items[3]?.arg, 'a3.rs', 'members keep their target');
   assert.equal(
     logGroups(fold(events), [], 1, null)[0]?.calls,
-    19,
+    22,
     'the group still counts every call, folded or not',
   );
   assert.deepEqual(

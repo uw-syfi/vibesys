@@ -33,6 +33,7 @@ import type {
   JudgeAttempt,
   LogGroup,
   LogItem,
+  LogTool,
   PendingSteer,
   ProsePart,
   RailModel,
@@ -452,12 +453,13 @@ export function toolResult(entry: TranscriptEntry): ToolResultSummary | null {
  * How long the call took. The command payload is the only one that reports it, whatever tool
  * produced that payload, so most timed rows are Bash and a few are not. Tenths under ten
  * seconds, whole seconds under a minute, `m:ss` above: `0:00` would say nothing about the 40 ms
- * reads that are most of a round.
+ * reads that are most of a round, and `0.0s` would claim a call took no time at all.
  */
 function toolDuration(entry: TranscriptEntry): string | null {
   const payload = entry.toolResult?.payload;
   const seconds = payload?.kind === 'command' ? payload.duration : null;
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null;
+  if (seconds < 0.1) return '<0.1s';
   if (seconds < 10) return `${seconds.toFixed(1)}s`;
   return seconds < 60 ? `${Math.round(seconds)}s` : formatDuration(seconds * 1000);
 }
@@ -480,28 +482,84 @@ function summarize(entry: TranscriptEntry): ToolResultSummary | null {
   return null;
 }
 
-/** A flag, an operator, a redirect, an assignment, a quoted word: not a path the command named. */
-const NOT_A_PATH = /^[-<>|&;]|^\d*[<>]|[='"$()]/;
-/** `src/lib.rs`, `~/.cache/uv`, `Cargo.toml`: a path, or a bare name with a short extension. */
-const A_PATH = /\/|\.[A-Za-z0-9]{1,5}$/;
+/** A flag, an operator, a redirect, an assignment, a pattern: not a path the command named. */
+const NOT_A_PATH = /^[-<>|&;]|^\d*[<>]|[='"$()^]/;
+/** `src/lib.rs`, `~/.cache/uv`, `Cargo.toml`, `.vibesys`: a path, a short extension, a dotfile. */
+const A_PATH = /\/|\.[A-Za-z0-9]{1,5}$|^\.[A-Za-z0-9][\w.-]*$/;
+/** A word, with quoted runs kept whole so a path with a space in it survives as one. */
+const WORDS = /(?:[^\s'"]+|'[^']*'|"[^"]*")+/g;
+/** Sets the shell up for the command after it, or opens a block, rather than doing work. */
+// biome-ignore format: one word per idea reads worse than the list.
+const PROLOGUE = new Set([
+  'cd', 'export', 'set', 'unset', 'source', '.', 'pushd', 'popd',
+  'for', 'while', 'until', 'if', 'then', 'else', 'elif', 'fi', 'do', 'done', 'case', 'esac',
+]);
+/** Runs the command after it, so the command after it is the one that did the work. */
+const WRAPPER = new Set(['env', 'sudo', 'time', 'timeout', 'nohup', 'command', 'exec']);
+/** Runs what follows inline, so its bare name repeats the verb instead of adding to it. */
+const SAYS_NOTHING = new Set([
+  'python',
+  'python3',
+  'node',
+  'bash',
+  'sh',
+  'zsh',
+  'perl',
+  'ruby',
+  'echo',
+]);
+
+/** The command's words, cut into its commands: one per line, pipe stage and `;` list entry. */
+function commandSegments(command: string): string[][] {
+  const segments: string[][] = [[]];
+  for (const line of command.split('\n')) {
+    segments.push([]);
+    for (const word of line.match(WORDS) ?? []) {
+      if (/^(\|\|?|&&?|;)$/.test(word)) {
+        segments.push([]);
+        continue;
+      }
+      const token = word.replace(/;+$/, '').replace(/^['"]|['"]$/g, '');
+      if (token !== '') segments.at(-1)?.push(token);
+      if (word.endsWith(';')) segments.push([]);
+    }
+  }
+  return segments.filter(segment => segment.length > 0);
+}
+
+/** A path as a row shows it: its last two segments, and the mark only when it dropped some. */
+function shortenPath(path: string): string {
+  if (path.includes('://')) return path;
+  const clean = path.replace(/(?!^)\/+$/, '');
+  const root = clean.startsWith('/') ? '/' : '';
+  const names = clean.slice(root.length).split('/');
+  return names.length > 2 ? `…/${names.slice(-2).join('/')}` : `${root}${names.join('/')}`;
+}
 
 /**
- * A command's shape rather than its text: the executable and the first path it names, cut to
- * that path's last two segments. Everything a row drops here is in its tooltip.
+ * A command's shape rather than its text: the executable that did the work and the first path it
+ * names, cut to that path's last two segments. Only the first segment that does work answers, so
+ * a row never takes a path from after a `|` or a `&&` that belongs to a different command; a
+ * `cd` or `export` in front of it is setup, a `timeout` or `env` around it runs it, and an
+ * interpreter or an `echo` with no path is saying only what the verb already said. Everything a
+ * row drops here is in its tooltip.
  */
 function bashTarget(command: string): string | null {
-  const tokens = command
-    .trim()
-    .split(/\s+/)
-    .map(token => token.replace(/^['"]+|['";,]+$/g, ''));
-  // `TMPDIR=/tmp make …`: the assignments in front of a command are not the command.
-  while (/^\w+=/.test(tokens[0] ?? '')) tokens.shift();
-  const executable = tokens.shift();
-  if (!executable) return null;
-  const path = tokens.find(token => token !== '' && !NOT_A_PATH.test(token) && A_PATH.test(token));
-  if (path === undefined) return executable;
-  const parts = path.replace(/\/+$/, '').split('/');
-  return `${executable} ${parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : parts.join('/')}`;
+  for (const segment of commandSegments(command)) {
+    const words = [...segment];
+    while (words.length > 1 && (/^\w+=/.test(words[0] ?? '') || WRAPPER.has(words[0] ?? ''))) {
+      // `timeout 300 make`: a wrapper's own flags and counts are not the command either.
+      const wrapped = WRAPPER.has(words[0] ?? '');
+      words.shift();
+      while (wrapped && words.length > 1 && /^-|^\d+(\.\d+)?$/.test(words[0] ?? '')) words.shift();
+    }
+    const executable = words.shift();
+    if (executable === undefined || /^\w+=/.test(executable) || PROLOGUE.has(executable)) continue;
+    const path = words.find(word => !NOT_A_PATH.test(word) && A_PATH.test(word));
+    if (path === undefined) return SAYS_NOTHING.has(executable) ? null : executable;
+    return `${executable} ${shortenPath(path)}`;
+  }
+  return null;
 }
 
 /** The row's verb, what it shows for a target, and the whole target when it shows less. */
@@ -562,26 +620,24 @@ function plain(parts: readonly ProsePart[]): string {
  * Adjacent calls of one verb read as one counted row: fifteen reads cost fifteen rows otherwise.
  *
  * ponytail: a client heuristic, not a fold the producer declared. The protocol carries no fold
- * level, so the bound is what a client can see: adjacent, same verb, no failure, nothing in
- * flight. A failed call and the call at the live edge each stay a row of their own, so nothing
- * a reader is waiting on or has to act on is ever behind a fold.
+ * level, so the bound is what a client can see: adjacent, same verb, and finished without a
+ * failure. A failed call, the call at the live edge, and any call whose result has not arrived
+ * each stay a row of their own, so nothing a reader is waiting on or has to act on is ever
+ * behind a fold.
  */
-function foldRuns(items: readonly LogItem[]): LogItem[] {
+function foldRuns(items: readonly LogItem[], pending: ReadonlySet<string>): LogItem[] {
+  const foldable = (item: LogItem): item is LogTool =>
+    item.kind === 'tool' && !pending.has(item.id) && item.result?.failed !== true;
   const folded: LogItem[] = [];
   for (const item of items) {
-    if (item.kind !== 'tool' || item.inFlight || item.result?.failed === true) {
+    if (!foldable(item)) {
       folded.push(item);
       continue;
     }
     const open = folded.at(-1);
     if (open?.kind === 'run' && open.verb === item.verb) {
       open.items.push(item);
-    } else if (
-      open?.kind === 'tool' &&
-      open.verb === item.verb &&
-      !open.inFlight &&
-      open.result?.failed !== true
-    ) {
+    } else if (open?.kind === 'tool' && open.verb === item.verb && foldable(open)) {
       folded[folded.length - 1] = {
         kind: 'run',
         id: `run-${open.id}`,
@@ -618,13 +674,15 @@ export function logGroups(
   const entries = core.transcript.filter(
     entry => entry.roundNumber === round && entry.agentKind !== undefined,
   );
-  // The in-flight call: the last open tool call whose execution is still running.
+  // Calls whose result has not arrived, and of those the in-flight one: the last whose
+  // execution is still running.
+  const pending = new Set<string>();
   let inFlight: string | null = null;
   for (const entry of entries) {
     const open = entry.kind === 'tool' && !entry.toolResult && entry.toolResponse === undefined;
-    if (open && entry.invocationId !== undefined && running.has(entry.invocationId)) {
-      inFlight = entry.id;
-    }
+    if (!open) continue;
+    pending.add(entry.id);
+    if (entry.invocationId !== undefined && running.has(entry.invocationId)) inFlight = entry.id;
   }
   const rows: Row[] = [];
   for (const entry of entries) {
@@ -709,7 +767,7 @@ export function logGroups(
           ? tool.verb
           : '';
     // After the summary, which reads the group's own last call rather than a fold of them.
-    group.items = foldRuns(group.items);
+    group.items = foldRuns(group.items, pending);
   });
   return groups;
 }
