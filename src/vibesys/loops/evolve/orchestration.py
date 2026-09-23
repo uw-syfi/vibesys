@@ -17,6 +17,7 @@ from vs_project.api import (
     EvolveRunConfiguration,
     OrchestrationDescriptor,
     OrchestrationRunManifest,
+    RunEnvironmentRecord,
 )
 
 PortableText = Annotated[str, Field(min_length=1, max_length=256)]
@@ -82,15 +83,38 @@ class EvolveOptions(BaseModel):
 def descriptor_from_configuration(
     configuration: EvolveRunConfiguration, *, profiler: str
 ) -> OrchestrationDescriptor:
-    """Project resolved settings into the version 4 manifest envelope."""
+    """Adapt a version 3 fixture to the owner-native descriptor builder."""
     values = configuration.model_dump(exclude={"outer_loop", "run_environment"})
     values["profiler"] = profiler
     options = EvolveOptions.model_validate_json(
         json.dumps(values),
         strict=True,
     )
+    return descriptor_from_options(options, profiler=profiler)
+
+
+def descriptor_from_options(options: EvolveOptions, *, profiler: str) -> OrchestrationDescriptor:
+    """Persist resolved evolve options without constructing version 3 settings."""
+    resolved = options.model_copy(update={"profiler": profiler})
     return OrchestrationDescriptor(
-        id="evolve", config_version=1, options=options.model_dump(mode="json")
+        id="evolve", config_version=1, options=resolved.model_dump(mode="json")
+    )
+
+
+def legacy_configuration_from_options(
+    options: EvolveOptions,
+    *,
+    run_environment: RunEnvironmentRecord,
+    profiler: str,
+) -> EvolveRunConfiguration:
+    """Construct version 3 settings only when resuming an old run."""
+    return EvolveRunConfiguration.model_validate(
+        {
+            **options.model_dump(),
+            "outer_loop": "evolve",
+            "run_environment": run_environment,
+            "profiler": profiler,
+        }
     )
 
 

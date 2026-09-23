@@ -72,8 +72,10 @@ from vibesys.loops.agent.model import (
     HypothesisResolution,
 )
 from vibesys.loops.agent.orchestration import (
+    AgentOrchestrationOptions,
     compare_resume_descriptors,
-    descriptor_from_configuration,
+    descriptor_from_options,
+    legacy_configuration_from_options,
     recorded_objectives,
 )
 from vibesys.loops.agent.state import AgentRunStateStore
@@ -136,7 +138,6 @@ from vs_agent.api import (
     SessionScope,
 )
 from vs_loop_state.api import PerfProvenance, RoundHistory, RoundRecord
-from vs_project.api import AgentRunConfiguration
 
 # Candidate process boundaries selected by ``--interface``. Language, tooling,
 # and artifact requirements belong to the selected domain and input bundle.
@@ -2385,23 +2386,17 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         if agent_backend == "stub"
         else str(agent_backend or normalized_config.agent.backend or AgentBackend.CLI)
     )
-    project_configuration = AgentRunConfiguration(
-        outer_loop=outer_loop,
-        run_environment=run_environment_record(run_environment),
+    options = AgentOrchestrationOptions(
         inner_loop=inner_loop,
         interface=interface,
         model=normalized_config.model.name,
         agent_backend=resolved_agent_backend,
-        agent_driver=(
-            resolve_agent_driver(normalized_config).value
-            if resolved_agent_backend == "cli"
-            else None
-        ),
-        cli_provider=(
-            cli_provider or normalized_config.agent.cli_provider or "codex"
-            if agent_backend != "stub"
-            else None
-        ),
+        agent_driver=resolve_agent_driver(normalized_config).value
+        if resolved_agent_backend == "cli"
+        else None,
+        cli_provider=(cli_provider or normalized_config.agent.cli_provider or "codex")
+        if agent_backend != "stub"
+        else None,
         compute_backend=backend.value,
         profiler=profiler_kind.value,
         max_rounds=max_rounds,
@@ -2437,9 +2432,14 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         ).output_argument,
         objective=objective,
         existing=existing,
-        project_configuration=project_configuration,
-        orchestration_descriptor=lambda resolved_profiler: descriptor_from_configuration(
-            project_configuration.model_copy(update={"profiler": resolved_profiler.value})
+        legacy_configuration_factory=lambda resolved_profiler: legacy_configuration_from_options(
+            options,
+            outer_loop=outer_loop,
+            run_environment=run_environment_record(run_environment),
+            profiler=resolved_profiler.value,
+        ),
+        orchestration_descriptor=lambda resolved_profiler: descriptor_from_options(
+            options, outer_loop=outer_loop, profiler=resolved_profiler.value
         ),
         orchestration_resume=compare_resume_descriptors,
         trusted_input_baseline=trusted_input_baseline,
