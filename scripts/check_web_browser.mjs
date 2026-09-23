@@ -201,8 +201,17 @@ async function checkInteractions(browser, origin) {
     say(1, 'implementer', 'Round one evidence'),
     event('round_finished', 1, null, {kind: 'round_finished', attempts: 1, judge_verdict: 'pass'}),
     ...lines(2, 'orchestrator', 'Plan line', 40),
+    // Three adjacent calls of one verb fold into a run row, inside a group that is itself
+    // folded because it is not the last: a closed fold inside a closed fold, which is the
+    // shape the cursor has to step over.
+    ...ran(2, 'orchestrator', 'grep one', 'one\n'),
+    ...ran(2, 'orchestrator', 'grep two', 'two\n'),
+    ...ran(2, 'orchestrator', 'grep three', 'three\n'),
     say(2, 'implementer', 'Implementer started'),
-    ...ran(2, 'implementer', 'make bench', 'ops/sec 1420\nbench ok\n'),
+    // A line with no break in it, so the output's own horizontal scroll is exercised rather
+    // than the column being widened by it.
+    ...ran(2, 'implementer', 'make bench', `ops/sec 1420\nbench ok\n${'x'.repeat(400)}\n`),
+    say(2, 'implementer', 'After the benchmark'),
     event('usage_update', 2, 'implementer', {
       kind: 'usage_update',
       input_tokens: 12_400,
@@ -295,43 +304,70 @@ async function checkInteractions(browser, origin) {
     }
     assert.equal(await jump.count(), 0, 'no Jump to latest while following');
 
-    // A tool row's full output opens in the inspector, and no log row moves when it does.
-    const rowTop = () =>
-      log
-        .locator('.row')
-        .first()
-        .evaluate(node => node.getBoundingClientRect().top);
-    const call = log.locator('.row[data-tool]').first();
+    // A tool row's full output opens in the inspector, and no log row moves when it does. The
+    // row measured sits *below* the one selected, where a reflow would actually show, and the
+    // page must not gain a sideways scroll from the 400-character line in that output.
+    const below = log.getByText('After the benchmark', {exact: true});
+    const belowTop = () => below.evaluate(node => node.getBoundingClientRect().top);
+    const wide = () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+    const call = log.locator('.row[data-tool]:visible').first();
     await call.scrollIntoViewIfNeeded();
-    const restingTop = await rowTop();
+    const restingTop = await belowTop();
     await call.click();
     const out = page.locator('aside.insp .out');
     await out.waitFor();
     assert.match(await out.innerText(), /bench ok/, "the row's own output");
-    assert.equal(await rowTop(), restingTop, 'opening the output moved a log row');
+    assert.equal(
+      await page.locator('aside.insp .out-head').innerText(),
+      'make bench',
+      'the section names the row it came from',
+    );
+    assert.equal(await belowTop(), restingTop, 'opening the output moved the row below it');
+    assert.equal(await wide(), true, 'a long output line widened the page');
     // The header's context meter, from the run's own usage_update.
     await page.getByRole('banner').getByText('12k/200k context').waitFor();
 
-    // Arrows in the log move its row cursor; the round stays where it is, and so does every row.
-    const cursor = () => log.evaluate(node => node.getAttribute('aria-activedescendant'));
+    // Arrows in the log move a row cursor that is real focus, so it is announced; the round
+    // stays where it is, and so does every row.
+    const cursor = () => page.evaluate(() => document.activeElement?.id ?? null);
     const onCall = await cursor();
-    await log.focus();
+    assert.match(onCall, /^row-/, 'clicking a row put the cursor on it');
     await page.keyboard.press('Escape');
     await out.waitFor({state: 'detached'});
     await page.keyboard.press('ArrowDown');
     const moved = await cursor();
     assert.notEqual(moved, onCall, 'Down moves the cursor');
-    assert.notEqual(moved, null, 'Down sets a cursor');
+    assert.match(moved, /^row-/, 'Down leaves the cursor on a row');
     await page.keyboard.press('j');
     assert.equal(await log.getAttribute('aria-label'), 'Round 2 log', 'the log kept its round');
 
+    // The cursor never steps into a fold the reader cannot see, including the run fold nested
+    // inside the collapsed orchestrator group.
+    const hidden = await log.evaluate(node =>
+      [...node.querySelectorAll('[data-row]')]
+        .filter(row => !row.checkVisibility())
+        .map(row => row.id),
+    );
+    assert.ok(hidden.length > 0, 'the fixture folds rows out of sight');
+    await log.focus();
+    await page.keyboard.press('ArrowDown');
+    const walked = [];
+    for (let step = 0; step < 12; step++) {
+      walked.push(await cursor());
+      await page.keyboard.press('ArrowDown');
+    }
+    assert.deepEqual(
+      walked.filter(id => hidden.includes(id)),
+      [],
+      'the cursor stepped onto a row inside a closed fold',
+    );
+
     // Enter on a tool row fills the inspector, and moves no row doing it.
-    await page.keyboard.press('ArrowUp');
-    while ((await cursor()) !== onCall) await page.keyboard.press('ArrowUp');
-    const beforeEnter = await rowTop();
+    await call.focus();
+    const beforeEnter = await belowTop();
     await page.keyboard.press('Enter');
     await out.waitFor();
-    assert.equal(await rowTop(), beforeEnter, 'Enter on a tool row moved a log row');
+    assert.equal(await belowTop(), beforeEnter, 'Enter on a tool row moved the row below it');
     await page.keyboard.press('ArrowLeft');
     // Left clears it again.
     await out.waitFor({state: 'detached'});

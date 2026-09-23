@@ -44,21 +44,21 @@ const icon = {size: 16, strokeWidth: 1.75, 'aria-hidden': true} as const;
 const TIP_LIMIT = 600;
 
 const calls = (count: number) => (count === 1 ? '1 call' : `${count} calls`);
-/** The DOM id of a row, which is what `aria-activedescendant` names. */
+/** The DOM id of a row. The cursor is the focused one, so this is for finding it again. */
 const rowId = (id: string) => `row-${id}`;
 /** Leaves of the round, folded or not: what the reader missed while away from the live edge. */
 const leaves = (items: readonly LogItem[]): number =>
   items.reduce((total, item) => total + (item.kind === 'run' ? item.items.length : 1), 0);
 
 /**
- * The rows a reader can see. A closed fold's own summary is still a row; everything under it
- * is not rendered to them, so the cursor steps over it.
+ * The rows a reader can see, which is the browser's own answer: a row inside a closed fold is
+ * not rendered, and folds nest, so walking the ancestors by hand gets a fold inside a closed
+ * fold wrong. The cursor takes real focus, and focusing an unrendered row silently drops it.
  */
 function visibleRows(scroller: HTMLElement): HTMLElement[] {
-  return [...scroller.querySelectorAll<HTMLElement>('[data-row]')].filter(row => {
-    const shut = row.closest('details:not([open])');
-    return shut === null || row.parentElement === shut;
-  });
+  return [...scroller.querySelectorAll<HTMLElement>('[data-row]')].filter(row =>
+    row.checkVisibility(),
+  );
 }
 // ponytail: module state, since App renders exactly one Log at a time.
 /** Set when a log unmounts with focus inside it, so the next round's log takes that focus. */
@@ -68,26 +68,27 @@ let carryFocus = false;
 export function Log({state, round, groups, follow, history, selected, onSelect, ref}: LogProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
-  // The roving cursor, by DOM id. It is not focus: the scroller keeps that and names the row
-  // through `aria-activedescendant`, so moving the cursor is not announced as new content.
-  const [cursor, setCursor] = useState<string | null>(null);
   const rows = groups.reduce((total, group) => total + leaves(group.items), 0);
   /** Rows at the moment the reader left the live edge: the count the button reports is since. */
   const mark = useRef(0);
   const fresh = Math.max(0, rows - mark.current);
 
   // While following, every size change keeps the bottom in view: new rows, and also reflow on a
-  // resize or a taller dock, which no render of this component sees.
+  // resize or a taller dock, which no render of this component sees. The pin runs in the commit
+  // itself as well as from the observer, because a scroll event dispatched in the gap between
+  // the rows landing and the observer catching up reads as the reader walking away.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `groups` is what changed the rows.
   useLayoutEffect(() => {
     const node = scroller.current;
     if (node === null || !follow || away) return;
+    node.scrollTop = node.scrollHeight;
     const observer = new ResizeObserver(() => {
       node.scrollTop = node.scrollHeight;
     });
     observer.observe(node);
     observer.observe(node.firstElementChild as Element);
     return () => observer.disconnect();
-  }, [follow, away]);
+  }, [follow, away, groups]);
 
   // App re-keys the log per round. Focus that was inside the old log moves to the new one;
   // focus anywhere else stays put.
@@ -120,6 +121,7 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
     node.focus();
     setAway(false);
   }
+
   // `L` reaches the scroller from anywhere, so the key binding lives with the other shortcuts.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `jump` only reads stable refs.
   useImperativeHandle(ref, () => ({jump}), []);
@@ -137,17 +139,20 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
     const node = scroller.current;
     if (node === null || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
     const visible = visibleRows(node);
-    const at = visible.findIndex(row => row.id === cursor);
-    const here = visible[at];
+    // The cursor is the focused row, so it is announced like any other focus move, and there is
+    // no second idea of "where the reader is" to keep in step with focus.
+    const here = document.activeElement?.closest<HTMLElement>('[data-row]') ?? undefined;
+    const at = here === undefined ? -1 : visible.indexOf(here);
     const move = (next: HTMLElement | undefined) => {
       if (next === undefined) return;
-      setCursor(next.id);
-      // Within the log only: the page itself never scrolls under the reader.
+      // Focus first, without its scroll, then bring it into view within the log only: the page
+      // itself never scrolls under the reader.
+      next.focus({preventScroll: true});
       next.scrollIntoView({block: 'nearest'});
     };
-    // Enter and Space on a focused <summary> are the native toggle; only the scroller's own
-    // Enter acts on the cursor.
-    const enter = event.key === 'Enter' && event.target === event.currentTarget;
+    // Enter on a focused <summary> is the native toggle, which raises the click the fold
+    // already listens for, so it is left alone.
+    const enter = event.key === 'Enter' && here?.tagName !== 'SUMMARY';
     if (event.key === 'ArrowDown') move(at < 0 ? visible[0] : visible[at + 1]);
     else if (event.key === 'ArrowUp') move(at < 0 ? visible.at(-1) : visible[at - 1]);
     else if (here === undefined) return;
@@ -166,18 +171,16 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
 
   return (
     <div className="logwrap">
-      {/* The region stays a `log`, which does not take `aria-activedescendant`: the cursor
-          rides along for anything reading the DOM and is deliberately not announced. */}
-      {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the region is a live log first. */}
       <div
         ref={scroller}
         id="log"
-        className={follow ? 'log follows' : 'log'}
+        className="log"
         role="log"
         aria-live="off"
         aria-label={round === null ? 'Run log' : `Round ${round} log`}
         aria-busy={state === 'loading' || history.loading || undefined}
-        aria-activedescendant={cursor ?? undefined}
+        // The log's one tab stop, from which the arrows walk the rows. The rows themselves are
+        // -1, so a round of four hundred calls is four hundred cursor steps and still one Tab.
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must take focus to scroll by keyboard.
         tabIndex={0}
         onScroll={onScroll}
@@ -187,8 +190,8 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
         onClick={event => {
           const row = (event.target as HTMLElement).closest<HTMLElement>('[data-tool]');
           if (row?.dataset.tool === undefined) return;
-          // The cursor follows the pointer, so the two never disagree about which row is live.
-          setCursor(row.id);
+          // The cursor follows the pointer, so arrows carry on from the row just clicked.
+          row.focus({preventScroll: true});
           onSelect(row.dataset.tool);
         }}
       >
@@ -228,13 +231,7 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
           ) : (
             <ol className="grps">
               {groups.map(group => (
-                <Group
-                  key={group.id}
-                  group={group}
-                  cursor={cursor}
-                  selected={selected}
-                  onOpen={leave}
-                />
+                <Group key={group.id} group={group} selected={selected} onOpen={leave} />
               ))}
             </ol>
           )}
@@ -260,12 +257,10 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
 
 function Group({
   group,
-  cursor,
   selected,
   onOpen,
 }: {
   group: LogGroup;
-  cursor: string | null;
   selected: string | null;
   onOpen: () => void;
 }) {
@@ -283,7 +278,7 @@ function Group({
         {group.collapsed ? (
           <>
             {steers.map(item => (
-              <Item key={item.id} item={item} cursor={cursor} selected={selected} onOpen={onOpen} />
+              <Item key={item.id} item={item} selected={selected} onOpen={onOpen} />
             ))}
             {rest.length === 0 ? null : (
               <Fold
@@ -291,7 +286,6 @@ function Group({
                 verb={group.summary || titleCase(group.role)}
                 count={group.calls}
                 items={rest}
-                cursor={cursor}
                 selected={selected}
                 onOpen={onOpen}
               />
@@ -299,7 +293,7 @@ function Group({
           </>
         ) : (
           group.items.map(item => (
-            <Item key={item.id} item={item} cursor={cursor} selected={selected} onOpen={onOpen} />
+            <Item key={item.id} item={item} selected={selected} onOpen={onOpen} />
           ))
         )}
       </div>
@@ -313,7 +307,6 @@ function Fold({
   verb,
   count,
   items,
-  cursor,
   selected,
   onOpen,
 }: {
@@ -321,7 +314,6 @@ function Fold({
   verb: string;
   count: number;
   items: LogItem[];
-  cursor: string | null;
   selected: string | null;
   onOpen: () => void;
 }) {
@@ -331,7 +323,7 @@ function Fold({
       <summary
         id={rowId(id)}
         data-row=""
-        className={rowId(id) === cursor ? 'row cur' : 'row'}
+        className="row"
         // Opening history leaves the live edge, so following stops before the fold grows. Enter
         // and Space also fire click; `toggle` would come too late.
         onClick={event => {
@@ -346,7 +338,7 @@ function Fold({
       </summary>
       <div className="what">
         {items.map(item => (
-          <Item key={item.id} item={item} cursor={cursor} selected={selected} onOpen={onOpen} />
+          <Item key={item.id} item={item} selected={selected} onOpen={onOpen} />
         ))}
       </div>
     </details>
@@ -355,16 +347,13 @@ function Fold({
 
 function Item({
   item,
-  cursor,
   selected,
   onOpen,
 }: {
   item: LogItem;
-  cursor: string | null;
   selected: string | null;
   onOpen: () => void;
 }) {
-  const at = rowId(item.id) === cursor;
   if (item.kind === 'run') {
     return (
       <Fold
@@ -372,7 +361,6 @@ function Item({
         verb={item.verb}
         count={item.items.length}
         items={item.items}
-        cursor={cursor}
         selected={selected}
         onOpen={onOpen}
       />
@@ -380,7 +368,7 @@ function Item({
   }
   if (item.kind === 'steer') {
     return (
-      <p id={rowId(item.id)} data-row="" className={at ? 'said cur' : 'said'}>
+      <p id={rowId(item.id)} data-row="" tabIndex={-1} className="said">
         <span className="ic" data-tip="Steer, delivered at the start of this call">
           <User {...icon} />
         </span>
@@ -393,7 +381,7 @@ function Item({
   }
   if (item.kind === 'prose') {
     return (
-      <div id={rowId(item.id)} data-row="" className={at ? 'say cur' : 'say'}>
+      <div id={rowId(item.id)} data-row="" tabIndex={-1} className="say">
         <Prose paragraphs={item.paragraphs} />
       </div>
     );
@@ -403,16 +391,12 @@ function Item({
   // whole command carries no tooltip: it would only repeat what the reader is looking at.
   const whole = item.argFull;
   const tip = whole !== null && whole.length > TIP_LIMIT ? `${whole.slice(0, TIP_LIMIT)}…` : whole;
-  const marks = [
-    'row',
-    item.inFlight ? 'now' : '',
-    item.id === selected ? 'sel' : '',
-    at ? 'cur' : '',
-  ];
+  const marks = ['row', item.inFlight ? 'now' : '', item.id === selected ? 'sel' : ''];
   return (
     <div
       id={rowId(item.id)}
       data-row=""
+      tabIndex={-1}
       className={marks.filter(Boolean).join(' ')}
       aria-current={item.inFlight ? 'step' : undefined}
       data-tool={item.id}

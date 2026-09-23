@@ -1,22 +1,13 @@
 .logwrap {
-  position: relative;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  /* The floating jump pill's height, which the scrollport keeps clear of. */
-  --jump: 32px;
 }
 .log {
-  position: absolute;
-  inset: 0;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-}
-/* The jump pill floats over the bottom-right corner, where it would sit on whichever row is
-   there and hide that row's duration. The scrollport stops above the pill's band instead, so
-   no row is ever under it, at any scroll position. The band is reserved wherever the pill can
-   appear at all rather than only while it is up: a scrollport that resized under the reader
-   would be read as the reader walking away from the live edge. */
-.log.follows {
-  bottom: calc(var(--jump) + var(--space-4));
 }
 .log:focus-visible {
   outline-offset: -2px;
@@ -113,13 +104,20 @@
 .row.now {
   background: var(--accent-tint);
 }
-/* The row whose output the inspector is showing: the pair has to be readable as a pair. */
-.row.sel {
+/* The row whose output the inspector is showing. The live row keeps its own tint: which call
+   is running now outranks which one the inspector is quoting, and the inspector's own heading
+   says which row that is. */
+.row.sel:not(.now) {
   background: var(--selected);
 }
-/* The row cursor. Not focus, which stays on the scroller, so it draws its own ring. */
-.cur {
-  outline: 2px solid var(--accent);
+/* The role header is sticky and 22px tall, so a row the cursor scrolls to the very top of the
+   log would come to rest under it. `block: 'nearest'` honours this margin. */
+[data-row] {
+  scroll-margin-top: 22px;
+}
+/* The cursor is the focused row, so the ring is the focus ring, drawn inside the row's box
+   rather than 2px outside it, where it would cross the rows above and below. */
+[data-row]:focus-visible {
   outline-offset: -2px;
   border-radius: var(--radius-sm);
 }
@@ -193,21 +191,22 @@
 .log-skel span:nth-child(2n) {
   width: 70%;
 }
+/* Docked under the scrollport rather than floating over it. An overlay hides whichever row is
+   beneath it, and reserving a band for one costs every live render that space whether or not
+   the reader has left the live edge; docked, it takes its room only while it is there. */
 .jump {
-  position: absolute;
-  right: var(--space-4);
-  bottom: var(--space-4);
+  align-self: flex-end;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: var(--jump);
+  height: 32px;
+  margin: var(--space-2) var(--space-4) var(--space-2) 0;
   padding: 0 var(--space-3);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
   background: var(--surface-raised);
   font-size: var(--text-xs);
   font-weight: 500;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.16);
 }
 .jump svg {
   color: var(--accent);
