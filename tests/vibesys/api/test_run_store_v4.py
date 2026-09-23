@@ -66,3 +66,29 @@ def test_evolve_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     assert direct.run_id == manifest.run_id
     assert direct.rounds == []
     assert store.list_runs() == [direct]
+
+
+def test_unknown_v4_run_has_generic_history_view(tmp_path: Path) -> None:
+    (tmp_path / "OBJECTIVE.md").write_text("Explore candidates.\n")
+    project = Project.open(tmp_path)
+    project.state.create_project("custom project")
+    manifest = project.state.new_orchestration_run_manifest(
+        "custom run",
+        run_id="team-run",
+        branch="vibesys-runs/team-run",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="local"),
+        orchestration=OrchestrationDescriptor(
+            id="team-search", config_version=2, options={"workers": 3}
+        ),
+        trusted_input_baseline="0" * 40,
+    )
+    project.state.create_run(manifest)
+
+    store = open_run_store(project)
+    direct = store.get_run(manifest.run_id)
+
+    assert direct.loop == "team-search"
+    assert direct.status is RunStatus.UNKNOWN
+    assert direct.rounds == []
+    assert store.list_runs() == [direct]

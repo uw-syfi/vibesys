@@ -16,4 +16,4 @@ def run_orchestration(
     registry: OrchestrationRegistry,
 ) -> bool:
     """Execute the selected implementation through the shared contract."""
-    return registry.resolve(request.loop).execute(request, integration)
+    return registry.resolve(request.orchestration_id).execute(request, integration)

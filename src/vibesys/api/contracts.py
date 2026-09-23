@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
@@ -20,6 +20,7 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.input_manifest import InputBundle
 from vibesys.events import CoreEvent, EventStatus
 from vs_agent.api import MCPServerSpec
+from vs_project.api import OrchestrationDescriptor
 
 if TYPE_CHECKING:
     from vibesys.skills import SkillSelection
@@ -49,6 +50,7 @@ __all__ = [
     "MCPServerSpec",
     "MetricSpace",
     "Objective",
+    "OrchestrationDescriptor",
     "PerfDeltaReason",
     "ResumeRef",
     "RoundView",
@@ -104,7 +106,8 @@ class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     project_root: Path
-    loop: LoopKind
+    loop: LoopKind | None = None
+    orchestration: OrchestrationDescriptor | None = None
     config: Config
     input_bundle: InputBundle
     objective: str | None = None
@@ -159,6 +162,33 @@ class RunRequest(BaseModel):
     search_policy: str | None = None
     openevolve_config: OpenEvolveSearchConfig | None = None
 
+    @model_validator(mode="after")
+    def _validate_selection(self) -> Self:
+        if (self.loop is None) == (self.orchestration is None):
+            message = "select exactly one of loop or orchestration"
+            raise ValueError(message)
+        if self.orchestration is not None and self.orchestration.id in {
+            kind.value for kind in LoopKind
+        }:
+            message = "built-in orchestration IDs must use loop selection"
+            raise ValueError(message)
+        return self
+
+    @property
+    def orchestration_id(self) -> str:
+        """Return the selected stable ID without assuming a built-in loop."""
+        if self.orchestration is not None:
+            return self.orchestration.id
+        if self.loop is None:
+            message = "RunRequest has no orchestration selection"
+            raise ValueError(message)
+        return self.loop.value
+
+    @property
+    def selected_loop(self) -> LoopKind | str:
+        """Keep the enum for built-ins and expose custom IDs as strings."""
+        return self.loop if self.loop is not None else self.orchestration_id
+
 
 class RunResult(BaseModel):
     """Terminal outcome of one run."""
@@ -166,7 +196,7 @@ class RunResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     run_id: str
-    loop: LoopKind
+    loop: LoopKind | str = Field(union_mode="left_to_right")
     succeeded: bool
 
 
@@ -298,7 +328,7 @@ class RunView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     run_id: str
-    loop: LoopKind
+    loop: LoopKind | str = Field(union_mode="left_to_right")
     status: RunStatus
     current_round: int
     active_hypothesis_id: str | None = None

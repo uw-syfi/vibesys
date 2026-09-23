@@ -38,7 +38,7 @@ def project_run_view(
     run_id: str,
     status: RunStatus,
     experiment_revision: int,
-    loop: LoopKind = LoopKind.AGENT,
+    loop: LoopKind | str = LoopKind.AGENT,
 ) -> RunView:
     """Return *state* as the `RunView` a caller sees across the boundary.
 

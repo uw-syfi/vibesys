@@ -316,6 +316,7 @@ graph TD
     vibesys.api.contracts --> vibesys.loops.evolve
     vibesys.api.contracts --> vibesys.sandbox
     vibesys.api.contracts --> vs_agent
+    vibesys.api.contracts --> vs_project
     vibesys.api.contracts --> vs_sandbox
     vibesys.backends --> vibesys
     vibesys.backends --> vs_sandbox
