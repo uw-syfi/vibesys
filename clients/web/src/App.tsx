@@ -1,12 +1,28 @@
 import {type JSX, useEffect, useSyncExternalStore} from 'react';
 import {loadReplayFixture} from './replay.js';
+import type {WebSession} from './session.js';
 import {type CoreStateStore, createCoreStateStore} from './store.js';
 
-export function App({store}: {readonly store: CoreStateStore}): JSX.Element {
+const EMPTY_SESSION_STATE = {status: 'connected' as const, error: null};
+const EMPTY_SESSION_SUBSCRIBE = (): (() => void) => () => undefined;
+
+export function App({
+  store,
+  session,
+}: {
+  readonly store: CoreStateStore;
+  readonly session?: WebSession;
+}): JSX.Element {
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
+  const sessionState = useSyncExternalStore(
+    session?.subscribe ?? EMPTY_SESSION_SUBSCRIBE,
+    session?.getState ?? (() => EMPTY_SESSION_STATE),
+    session?.getState ?? (() => EMPTY_SESSION_STATE),
+  );
   useEffect(() => {
-    void loadReplayFixture(store).catch(() => undefined);
-  }, [store]);
+    if (session === undefined) void loadReplayFixture(store).catch(() => undefined);
+    else void session.start();
+  }, [session, store]);
   return (
     <main className="shell">
       <header className="header">
@@ -16,6 +32,17 @@ export function App({store}: {readonly store: CoreStateStore}): JSX.Element {
         </div>
         <span className={`status status-${state.status}`}>{state.status}</span>
       </header>
+      {sessionState.status === 'stale' && (
+        <div className="stale-banner" role="alert">
+          <span>
+            Live connection is stale
+            {sessionState.error === null ? '' : `: ${sessionState.error.message}`}
+          </span>
+          <button type="button" onClick={() => session?.reattach()}>
+            Reattach
+          </button>
+        </div>
+      )}
       <section className="summary" aria-label="Run summary">
         <div>
           <span>Sequence</span>
@@ -57,4 +84,8 @@ export function App({store}: {readonly store: CoreStateStore}): JSX.Element {
 
 export function createDemoApp(): JSX.Element {
   return <App store={createCoreStateStore()} />;
+}
+
+export function createLiveApp(session: WebSession): JSX.Element {
+  return <App store={session.store} session={session} />;
 }

@@ -24,11 +24,19 @@ function replayFixturePlugin(): Plugin {
 export default defineConfig({
   plugins: [react(), replayFixturePlugin()],
   resolve: {
-    alias: {
-      '@vibesys/backend-client': fileURLToPath(
-        new URL('../backend-client/src/index.ts', import.meta.url),
-      ),
-      '@vibesys/core-state': fileURLToPath(new URL('../core-state/src/index.ts', import.meta.url)),
-    },
+    alias: [
+      {
+        find: '@vibesys/backend-client/websocket',
+        replacement: fileURLToPath(new URL('../backend-client/src/websocket.ts', import.meta.url)),
+      },
+      {
+        find: '@vibesys/backend-client',
+        replacement: fileURLToPath(new URL('../backend-client/src/index.ts', import.meta.url)),
+      },
+      {
+        find: '@vibesys/core-state',
+        replacement: fileURLToPath(new URL('../core-state/src/index.ts', import.meta.url)),
+      },
+    ],
   },
 });

@@ -15,6 +15,8 @@ h2 { font-size: 16px; margin: 0; }
 .summary span, .panel-heading span { color: #8190a8; font-size: 12px; }
 .summary strong { font-size: 21px; font-weight: 600; }
 .panel { padding: 22px; }
+.stale-banner { align-items: center; background: #34231f; border: 1px solid #9b654c; border-radius: 10px; color: #ffc2a8; display: flex; justify-content: space-between; gap: 16px; margin: 18px 0; padding: 12px 14px; }
+.stale-banner button { background: #ffc2a8; border: 0; border-radius: 6px; color: #34231f; cursor: pointer; font: inherit; font-weight: 700; padding: 7px 10px; }
 .panel-heading { align-items: baseline; display: flex; justify-content: space-between; border-bottom: 1px solid #283142; padding-bottom: 16px; }
 .empty { color: #8190a8; }
 .transcript { display: grid; gap: 13px; list-style: none; margin: 20px 0 0; padding: 0; }
