@@ -125,6 +125,16 @@ class _MissingOrchestrationContractError(ValueError):
         super().__init__("run requires configuration for its recorded manifest version")
 
 
+class _MissingDefaultAgentClientError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("this run has no built-in agent client")
+
+
+class _MissingDefaultAgentSpecError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("built-in agent client requires an agent specification")
+
+
 def _attempt_from_label(round_label: str) -> int | None:
     match = re.search(r"retry-(\d+)", round_label)
     return int(match.group(1)) if match else None
@@ -308,6 +318,7 @@ def create_run_context(  # noqa: PLR0913  # tracked: #288
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
     agent_state_model_type: type[BaseModel] | None = None,
     integration: LocalRunIntegration | None = None,
+    build_default_agent_client: bool = True,
 ) -> "_RunContext":
     """Build a fully wired :class:`_RunContext`.
 
@@ -353,6 +364,7 @@ def create_run_context(  # noqa: PLR0913  # tracked: #288
             repo_visibility=repo_visibility,
             agent_state_model_type=agent_state_model_type,
             integration=integration,
+            build_default_agent_client=build_default_agent_client,
         )
     except BaseException as construction_error:
         _close_after_construction_failure(teardown_stack, construction_error)
@@ -410,6 +422,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
     repo_visibility: RepositoryVisibility,
     agent_state_model_type: type[BaseModel] | None,
     integration: LocalRunIntegration | None,
+    build_default_agent_client: bool,
 ) -> "_RunContext":
     context_start = time.perf_counter()
     # Boot spans recorded before this function ran (the dispatch preamble)
@@ -489,11 +502,15 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             resolved_backend = str(agent_backend or config.agent.backend or AgentBackend.CLI)
             resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
             model_name = config.model.name
-            agent_spec = agent_spec_from_config(
-                config,
-                backend=agent_backend,
-                provider=cli_provider,
-                model=model_name,
+            agent_spec = (
+                agent_spec_from_config(
+                    config,
+                    backend=agent_backend,
+                    provider=cli_provider,
+                    model=model_name,
+                )
+                if build_default_agent_client
+                else None
             )
         with boot_trace.span("profiler_preflight"):
             resolved_profiler_kind = resolve_profiler_kind(
@@ -503,7 +520,9 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 environment_default_profiler_kind=environment.default_profiler_kind,
                 environment_supported_profiler_kinds=environment.supported_profiler_kinds,
             )
-            driver_supports_mcp = agent_driver_supports_mcp_servers(agent_spec)
+            driver_supports_mcp = (
+                agent_driver_supports_mcp_servers(agent_spec) if agent_spec is not None else None
+            )
             if resolved_profiler_kind in ACTIVE_PROFILER_KINDS and driver_supports_mcp is False:
                 driver_name = resolve_agent_driver(config)
                 definition = profiler_definition(resolved_profiler_kind)
@@ -1018,48 +1037,40 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
 
         run_state = RunState(project, git, run_id)
 
-        with boot_trace.span("agent_client_build"):
-            # Checkpoint coding-agent provider session IDs in the run's
-            # machine-local namespace so a resumed run can continue the
-            # implementer's conversation instead of replaying the round. The
-            # map lives under the local (never snapshotted) namespace because
-            # the provider transcripts it names are host-local.
-            agent_session_store = DurableSessionStore(
-                run_state.local(RunStateNamespace.AGENT).slot("sessions.json", AgentSessionState),
-                log=logger.lprint,
-            )
-            # Build the backend-agnostic agent client. Loops invoke this
-            # instead of calling an agent driver directly. The cli
-            # backend is rejected if --docker is set; build_agent_client raises
-            # SystemExit with a clear message in that case.
-            agent_client = build_agent_client(
-                spec=agent_spec,
-                session_store=agent_session_store,
-                backends={
-                    "implementer": session.sandbox,
-                    "judge": session.sandbox,
-                    # Perf eval reuses the implementer's backend today (loop.py:564),
-                    # so the runner picks the same one when kind="perf_eval".
-                    "perf_eval": session.sandbox,
-                    # Profiler also reuses the implementer's backend — it needs
-                    # shell access to start/stop the server and run nsys.
-                    "profiler": session.sandbox,
-                    # Orchestrator (orchestrate loop) inspects the workspace
-                    # and writes plans — reuse the implementer's backend for
-                    # file access.
-                    "orchestrator": session.sandbox,
-                },
-                skill_source_dirs=skill_source_paths,
-                skill_selection=platform_skill_selection(backend),
-                run_log_file=logger.writer,
-                use_docker=session.view.cli_sandboxed,
-                log_dir=log_dir,
-                project_path_policy=project_path_policy,
-                require_host_sandbox=not session.view.cli_sandboxed,
-                host_resources=agent_host_resources,
-                events=output_sink(),
-            )
-        teardown_stack.callback(agent_client.close)
+        agent_client: AgentClientProtocol | None = None
+        if build_default_agent_client:
+            if agent_spec is None:
+                raise _MissingDefaultAgentSpecError
+            with boot_trace.span("agent_client_build"):
+                # Provider session IDs for built-in roles remain machine-local.
+                agent_session_store = DurableSessionStore(
+                    run_state.local(RunStateNamespace.AGENT).slot(
+                        "sessions.json", AgentSessionState
+                    ),
+                    log=logger.lprint,
+                )
+                # Existing loops share this client and its role sandbox map.
+                agent_client = build_agent_client(
+                    spec=agent_spec,
+                    session_store=agent_session_store,
+                    backends={
+                        "implementer": session.sandbox,
+                        "judge": session.sandbox,
+                        "perf_eval": session.sandbox,
+                        "profiler": session.sandbox,
+                        "orchestrator": session.sandbox,
+                    },
+                    skill_source_dirs=skill_source_paths,
+                    skill_selection=platform_skill_selection(backend),
+                    run_log_file=logger.writer,
+                    use_docker=session.view.cli_sandboxed,
+                    log_dir=log_dir,
+                    project_path_policy=project_path_policy,
+                    require_host_sandbox=not session.view.cli_sandboxed,
+                    host_resources=agent_host_resources,
+                    events=output_sink(),
+                )
+            teardown_stack.callback(agent_client.close)
 
         result = _RunContext(
             backend=backend,
@@ -1409,7 +1420,7 @@ class _RunContext:
         run_environment_session: RunEnvironmentSession,
         commands: RunCommands,
         device: DeviceLease,
-        agent_client: AgentClientProtocol,
+        agent_client: AgentClientProtocol | None,
         project: Project,
         state: RunState,
         run_id: str,
@@ -1465,7 +1476,7 @@ class _RunContext:
         self.device = device
         # Expose the picked device for legacy callers (gpu monitor tests etc).
         self.selected_gpu = device.selected_device
-        self.agent_client = agent_client
+        self._agent_client = agent_client
         self._closed = False
         self._progress_stack: list[AgentProgress] = []
 
@@ -1475,6 +1486,17 @@ class _RunContext:
     @property
     def project_root(self) -> Path:
         return self._paths.project_root
+
+    @property
+    def agent_client(self) -> AgentClientProtocol:
+        """Return the built-in loop client when this context has one."""
+        if self._agent_client is None:
+            raise _MissingDefaultAgentClientError
+        return self._agent_client
+
+    @agent_client.setter
+    def agent_client(self, client: AgentClientProtocol) -> None:
+        self._agent_client = client
 
     @property
     def log_dir(self) -> Path:
@@ -1739,8 +1761,8 @@ class _RunContext:
         self._paths = replace(self._paths, run_log_path=self.logger.path)
         # Update the agent client's log file handle so subsequent
         # invoke() calls write to the new step log.
-        if hasattr(self, "agent_client"):
-            self.agent_client.set_log_file(self.logger.writer)
+        if self._agent_client is not None:
+            self._agent_client.set_log_file(self.logger.writer)
 
     def reselect_gpu(self) -> None:
         """Delegate mid-run device rebalance — see :meth:`DeviceLease.reselect`."""

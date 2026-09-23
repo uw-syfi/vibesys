@@ -200,6 +200,12 @@ class _LocalRunSession:
         if self._resource_listener is not None:
             self._resource_listener(handoff)
 
+    def _run_id(self) -> str:
+        """Use the provisioned ID once a custom runtime has created its run."""
+        if self._request.orchestration is not None and self._resource_handoff is not None:
+            return self._resource_handoff.run_id
+        return resolved_run_id(self._request)
+
     def open_agent_environment(self, *, mounts: tuple[HostResource, ...] = ()) -> AgentEnvironment:
         """Open this run's environment for agent construction, plus extra *mounts*.
 
@@ -270,7 +276,12 @@ class _LocalRunSession:
             ),
         )
         try:
-            succeeded = dispatch_loop(request, self._integration, registry=self._registry)
+            succeeded = dispatch_loop(
+                request,
+                self._integration,
+                registry=self._registry,
+                open_agent_environment=self.open_agent_environment,
+            )
         except BaseException as exc:
             self._status = RunStatus.FAILED
             self._integration.events.emit(
@@ -286,7 +297,7 @@ class _LocalRunSession:
                 status=EventStatus.COMPLETED if succeeded else EventStatus.FAILED,
             )
             return RunResult(
-                run_id=resolved_run_id(request),
+                run_id=self._run_id(),
                 loop=request.selected_loop,
                 succeeded=succeeded,
             )
@@ -303,7 +314,7 @@ class _LocalRunSession:
         only go stale. `status` reflects `_run_sync`'s own progress
         (`ACTIVE` until it returns or raises), not a re-derivation from state.
         """
-        run_id = resolved_run_id(self._request)
+        run_id = self._run_id()
         if self._request.orchestration is not None:
             state = AgentRunState()
         else:

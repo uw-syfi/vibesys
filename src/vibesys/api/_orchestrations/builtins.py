@@ -11,27 +11,47 @@ from vibesys.api._orchestrations.plain import PlainOrchestration
 from vibesys.api.contracts import LoopKind
 
 if TYPE_CHECKING:
+    from vibesys.api._orchestrations.runtime import _LocalVibeSysRuntime
+    from vibesys.api.contracts import RunRequest
     from vibesys.orchestration import ResumeProjection
+    from vibesys.run.integration import LocalRunIntegration
+    from vibesys.runtime import VibeSysRuntime
     from vs_project.api import OrchestrationRunManifest
 
 
-class _ResumeProjector(Protocol):
+class _LegacyImplementation(Protocol):
+    def execute(self, request: RunRequest, integration: LocalRunIntegration) -> bool: ...
+
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection: ...
+
+
+class _LegacyOrchestration:
+    """Keep the existing loop adapters on their integration-only contract."""
+
+    def __init__(self, implementation: _LegacyImplementation) -> None:
+        self._implementation = implementation
+
+    def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool:
+        local = cast("_LocalVibeSysRuntime", runtime)
+        return self._implementation.execute(request, local.legacy_integration)
+
+    def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
+        return self._implementation.resume_projection(manifest)
 
 
 def built_in_orchestrations() -> OrchestrationRegistry:
     """Register current public loop IDs, including the agent variant."""
     registry = OrchestrationRegistry()
-    agent = AgentOrchestration()
+    agent = _LegacyOrchestration(AgentOrchestration())
     registry.register(LoopKind.AGENT, agent)
     registry.register(LoopKind.PROFILE_GUIDED, agent)
-    registry.register(LoopKind.PLAIN, PlainOrchestration())
-    registry.register(LoopKind.EVOLVE, EvolveOrchestration())
+    registry.register(LoopKind.PLAIN, _LegacyOrchestration(PlainOrchestration()))
+    registry.register(LoopKind.EVOLVE, _LegacyOrchestration(EvolveOrchestration()))
     return registry
 
 
 def resume_projection(manifest: OrchestrationRunManifest) -> ResumeProjection:
     """Delegate descriptor validation and CLI projection to its owner."""
     implementation = built_in_orchestrations().resolve(LoopKind(manifest.orchestration.id))
-    projector = cast("_ResumeProjector", implementation)
+    projector = cast("_LegacyOrchestration", implementation)
     return projector.resume_projection(manifest)

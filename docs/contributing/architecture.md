@@ -23,6 +23,9 @@ them. New orchestration-specific logic, including agent configuration and
 resume policy, belongs in `vibesys`, not `vs_project`. `vs_project` owns generic
 project layout and persistence operations.
 
+The public custom-policy execution contract and example are in
+[orchestration-runtime.md](orchestration-runtime.md).
+
 [//]: # (tach-graph:start)
 ## Architecture overview
 
@@ -77,6 +80,7 @@ graph TD
     vibesys.api --> vibesys.orchestration
     vibesys.api --> vibesys.render
     vibesys.api --> vibesys.run
+    vibesys.api --> vibesys.runtime
     vibesys.api --> vibesys.sandbox
     vibesys.api._orchestrations._common --> vibesys
     vibesys.api._orchestrations._common --> vibesys.api.contracts
@@ -89,10 +93,14 @@ graph TD
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.contracts
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.evolve
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.plain
+    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.runtime
     vibesys.api._orchestrations.builtins --> vibesys.api.contracts
     vibesys.api._orchestrations.builtins --> vibesys.orchestration
+    vibesys.api._orchestrations.builtins --> vibesys.run
+    vibesys.api._orchestrations.builtins --> vibesys.runtime
     vibesys.api._orchestrations.contracts --> vibesys.api.contracts
     vibesys.api._orchestrations.contracts --> vibesys.run
+    vibesys.api._orchestrations.contracts --> vibesys.runtime
     vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations._common
     vibesys.api._orchestrations.evolve --> vibesys.api.contracts
     vibesys.api._orchestrations.evolve --> vibesys.loops.evolve
@@ -104,8 +112,16 @@ graph TD
     vibesys.api._orchestrations.plain --> vibesys.orchestration
     vibesys.api._orchestrations.plain --> vibesys.run
     vibesys.api._orchestrations.runner --> vibesys.api._orchestrations.contracts
+    vibesys.api._orchestrations.runner --> vibesys.api._orchestrations.runtime
     vibesys.api._orchestrations.runner --> vibesys.api.contracts
     vibesys.api._orchestrations.runner --> vibesys.run
+    vibesys.api._orchestrations.runtime --> vibesys
+    vibesys.api._orchestrations.runtime --> vibesys.api._orchestrations._common
+    vibesys.api._orchestrations.runtime --> vibesys.api.contracts
+    vibesys.api._orchestrations.runtime --> vibesys.context
+    vibesys.api._orchestrations.runtime --> vibesys.render
+    vibesys.api._orchestrations.runtime --> vibesys.run
+    vibesys.api._orchestrations.runtime --> vibesys.runtime
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.evaluators
     vibesys.api.contracts --> vibesys.loops
@@ -273,6 +289,7 @@ graph TD
     vibesys.api --> vibesys.orchestration
     vibesys.api --> vibesys.render
     vibesys.api --> vibesys.run
+    vibesys.api --> vibesys.runtime
     vibesys.api --> vibesys.sandbox
     vibesys.api --> vs_agent
     vibesys.api --> vs_loop_state
@@ -290,11 +307,15 @@ graph TD
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.contracts
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.evolve
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.plain
+    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.runtime
     vibesys.api._orchestrations.builtins --> vibesys.api.contracts
     vibesys.api._orchestrations.builtins --> vibesys.orchestration
+    vibesys.api._orchestrations.builtins --> vibesys.run
+    vibesys.api._orchestrations.builtins --> vibesys.runtime
     vibesys.api._orchestrations.builtins --> vs_project
     vibesys.api._orchestrations.contracts --> vibesys.api.contracts
     vibesys.api._orchestrations.contracts --> vibesys.run
+    vibesys.api._orchestrations.contracts --> vibesys.runtime
     vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations._common
     vibesys.api._orchestrations.evolve --> vibesys.api.contracts
     vibesys.api._orchestrations.evolve --> vibesys.loops.evolve
@@ -308,8 +329,17 @@ graph TD
     vibesys.api._orchestrations.plain --> vibesys.run
     vibesys.api._orchestrations.plain --> vs_project
     vibesys.api._orchestrations.runner --> vibesys.api._orchestrations.contracts
+    vibesys.api._orchestrations.runner --> vibesys.api._orchestrations.runtime
     vibesys.api._orchestrations.runner --> vibesys.api.contracts
     vibesys.api._orchestrations.runner --> vibesys.run
+    vibesys.api._orchestrations.runtime --> vibesys
+    vibesys.api._orchestrations.runtime --> vibesys.api._orchestrations._common
+    vibesys.api._orchestrations.runtime --> vibesys.api.contracts
+    vibesys.api._orchestrations.runtime --> vibesys.context
+    vibesys.api._orchestrations.runtime --> vibesys.render
+    vibesys.api._orchestrations.runtime --> vibesys.run
+    vibesys.api._orchestrations.runtime --> vibesys.runtime
+    vibesys.api._orchestrations.runtime --> vs_agent
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.evaluators
     vibesys.api.contracts --> vibesys.loops
@@ -397,6 +427,8 @@ graph TD
     vibesys.run --> vs_loop_state
     vibesys.run --> vs_project
     vibesys.run --> vs_sandbox
+    vibesys.runtime --> vs_agent
+    vibesys.runtime --> vs_sandbox
     vibesys.sandbox --> vibesys
     vibesys.sandbox --> vibesys.backends
     vibesys.sandbox --> vibesys.domains
