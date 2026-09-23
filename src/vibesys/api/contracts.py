@@ -62,12 +62,10 @@ __all__ = [
 
 
 class LoopKind(StrEnum):
-    """Closed set of outer loops a run can select.
+    """Built-in outer-loop choices exposed by the CLI.
 
-    Mirrors the `--outer-loop` CLI choices documented in
-    `entrypoints/cli.py`. No single enum unifies them in core today
-    (each loop module spells its own `outer_loop` string/Literal); this is
-    the canonical version new callers should use.
+    Custom orchestrations use `RunRequest.orchestration` with a versioned
+    `OrchestrationDescriptor` instead of extending this enum.
     """
 
     AGENT = "agent"
@@ -87,6 +85,9 @@ class ResumeRef(BaseModel):
 class RunRequest(BaseModel):
     """Everything needed to start or resume one run, independent of transport.
 
+    Select a built-in CLI loop with `loop`, or a registered custom policy
+    with `orchestration`; exactly one selector is required.
+
     Fields mirror the union of `run_agent_loop`/`run_evolve_loop`/
     `run_plain_loop`'s keyword arguments (`vibesys.loops.{agent,evolve,plain}
     .loop`). Per-input facts that `input_bundle` already carries (task name/
@@ -94,7 +95,7 @@ class RunRequest(BaseModel):
     domain, its own objective text, `profile_guided`, ...) are read from
     `input_bundle` at dispatch time instead of being duplicated here.
 
-    Not every field applies to every `loop`: `metrics` is agent-only, `space`/
+    Not every field applies to every built-in `loop`: `metrics` is agent-only, `space`/
     `search_policy`/`openevolve_config`/generation budgets are evolve-only,
     `max_attempts_per_issue`/`max_issues_per_perf_eval` are plain-only, and so
     on -- each `_dispatch_*` helper in `vibesys.api._dispatch` reads only the
