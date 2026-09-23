@@ -7,7 +7,7 @@ validates its JSON shape; these settings and their meaning belong here.
 from __future__ import annotations
 
 import json
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,6 +18,10 @@ from vs_project.api import (
     OrchestrationDescriptor,
     OrchestrationRunManifest,
 )
+
+if TYPE_CHECKING:
+    from vibesys.evaluators.input_manifest import BenchmarkResult
+    from vibesys.loops.metrics import MetricSpace
 
 AGENT_CONFIG_VERSION = 1
 AGENT_ORCHESTRATION_IDS = frozenset({"agent", "profile-guided"})
@@ -32,6 +36,18 @@ class UnsupportedAgentOrchestrationError(ValueError):
         super().__init__(
             f"Unsupported agent orchestration {orchestration_id!r} configuration version {version}"
         )
+
+
+def recorded_objectives(
+    metrics: MetricSpace, benchmark_result: BenchmarkResult | None
+) -> tuple[str, ...]:
+    """Record frontier axes plus the framework benchmark's scalar axis."""
+    axes: dict[str, Literal["max", "min"]] = {
+        objective.name: objective.direction for objective in metrics.objectives
+    }
+    if benchmark_result is not None:
+        axes.setdefault(benchmark_result.metric, "max")
+    return tuple(f"{name}:{direction}" for name, direction in axes.items())
 
 
 class AgentOrchestrationOptions(BaseModel):

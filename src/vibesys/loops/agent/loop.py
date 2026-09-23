@@ -74,6 +74,7 @@ from vibesys.loops.agent.model import (
 from vibesys.loops.agent.orchestration import (
     compare_resume_descriptors,
     descriptor_from_configuration,
+    recorded_objectives,
 )
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.gates import (
@@ -2375,15 +2376,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     framework_benchmark_configured = benchmark_result is not None or (
         benchmark_result_protocol is not None
     )
-    # Axes recorded in the run manifest. The server reads them back to build a
-    # metric space for runs whose unified state predates one; they include the
-    # framework benchmark's own axis, which is not a frontier axis.
-    manifest_axes: dict[str, Literal["max", "min"]] = {
-        objective.name: objective.direction for objective in objectives
-    }
-    if benchmark_result is not None:
-        # The legacy scalar result contract has always defined its metric as maximized.
-        manifest_axes.setdefault(benchmark_result.metric, "max")
     if modality is None and domain_definition.name is constants.DomainName.LLM_SERVING:
         modality = "text_generation"
     run_environment = run_environment or make_run_environment_spec()
@@ -2425,7 +2417,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         inner_model=normalized_config.agent.inner.model,
         inner_reasoning_effort=normalized_config.agent.inner.reasoning_effort,
         operator_constraints=operator_constraints,
-        objectives=tuple(f"{name}:{direction}" for name, direction in manifest_axes.items()),
+        objectives=recorded_objectives(metrics, benchmark_result),
     )
     ctx = create_run_context(
         config=normalized_config,
