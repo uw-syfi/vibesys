@@ -66,6 +66,7 @@ def test_pnpm_workspace_dependents_are_selected() -> None:
         "@vibesys/backend-client",
         "@vibesys/core-state",
         "@vibesys/tui",
+        "@vibesys/web",
     ]
 
 
