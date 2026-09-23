@@ -243,28 +243,24 @@ function Item({item, onOpen}: {item: LogItem; onOpen: () => void}) {
       </div>
     );
   }
+  // The row shows the command's shape, sometimes none of it. The whole text is the row's tooltip
+  // and, for a reader who cannot hover, its own DOM text.
   const whole = item.argFull ?? item.arg;
   const tip = whole !== null && whole.length > TIP_LIMIT ? `${whole.slice(0, TIP_LIMIT)}…` : whole;
   return (
     <div
       className={item.inFlight ? 'row now' : 'row'}
       aria-current={item.inFlight ? 'step' : undefined}
+      data-tip={tip ?? undefined}
     >
       <span className="lab">
         <span className="verb">{item.verb}</span>
         {item.arg === null ? null : (
-          <code className="arg" data-tip={tip ?? undefined}>
-            {item.argFull === null ? (
-              item.arg
-            ) : (
-              <>
-                {/* The row shows the command's shape; a reader who cannot hover gets its text. */}
-                <span aria-hidden="true">{item.arg}</span>
-                <span className="sr-only">{item.argFull}</span>
-              </>
-            )}
+          <code className="arg" aria-hidden={item.argFull === null ? undefined : true}>
+            {item.arg}
           </code>
         )}
+        {item.argFull === null ? null : <span className="sr-only">{item.argFull}</span>}
         {item.result === null ? null : (
           <span className={item.result.failed ? 'res err' : 'res'}>{item.result.text}</span>
         )}

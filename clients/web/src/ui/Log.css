@@ -103,8 +103,10 @@
 .row.now {
   background: var(--accent-tint);
 }
+/* The whole band lights, so the eye carries from the verb across to the duration on the far
+   right. Hover is feedback, not a message, and the live row keeps its own tint. */
 @media (hover: hover) and (pointer: fine) {
-  summary.row:hover {
+  .row:not(.now):hover {
     background: var(--hover);
   }
 }
