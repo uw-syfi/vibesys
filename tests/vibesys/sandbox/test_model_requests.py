@@ -130,7 +130,7 @@ def test_reconcile_empty_does_not_touch_provisioner(
         called.append(args)
         return "vol"
 
-    monkeypatch.setattr("vs_sandbox.ensure_model_volume", _fail_if_called)
+    monkeypatch.setattr("vs_sandbox.api.ensure_model_volume", _fail_if_called)
     assert reconcile_model_requests(tmp_path) == []
     assert called == []
 
@@ -146,7 +146,7 @@ def test_reconcile_provisions_each_request(tmp_path: Path, monkeypatch: pytest.M
         seen.append((model_id, revision))
         return f"vibesys-model-{model_id.replace('/', '-')}"
 
-    monkeypatch.setattr("vs_sandbox.ensure_model_volume", _fake_ensure)
+    monkeypatch.setattr("vs_sandbox.api.ensure_model_volume", _fake_ensure)
     volumes = reconcile_model_requests(tmp_path)
     assert seen == [("org/a", "r1"), ("org/b", None)]
     assert volumes == ["vibesys-model-org-a", "vibesys-model-org-b"]
@@ -159,6 +159,6 @@ def test_reconcile_rejects_disallowed(tmp_path: Path, monkeypatch: pytest.Monkey
     def _must_not_run(*_args: object, **_kwargs: object) -> str:
         pytest.fail("provisioner must not run for disallowed request")
 
-    monkeypatch.setattr("vs_sandbox.ensure_model_volume", _must_not_run)
+    monkeypatch.setattr("vs_sandbox.api.ensure_model_volume", _must_not_run)
     with pytest.raises(ModelRequestError, match="not permitted"):
         reconcile_model_requests(tmp_path)
