@@ -11,7 +11,13 @@ import pytest
 
 import entrypoints.server as server_entrypoint
 import server.runtime as runtime_module
-from entrypoints.server import _control_socket_from_argv, _headless_argv, main
+from entrypoints.server import (
+    _control_socket_from_argv,
+    _headless_argv,
+    _web_port_from_argv,
+    _web_requested,
+    main,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -23,6 +29,19 @@ def test_control_socket_argument_forms() -> None:
     assert _headless_argv(["--local", "--control-socket", "control.sock"]) == ["--local"]
     assert _headless_argv(["--control-socket=control.sock", "--local"]) == ["--local"]
     assert _headless_argv(["--theme", "dark", "--local"]) == ["--local"]
+
+
+def test_web_server_arguments_are_consumed_before_run_parsing() -> None:
+    assert _web_requested(["--web", "--web-port", "4312"]) is True
+    assert _web_port_from_argv(["--web-port=4312"]) == 4312
+    assert _headless_argv(["--web", "--web-port", "4312", "--web-assets", "dist", "--local"]) == [
+        "--local"
+    ]
+
+
+def test_web_port_rejects_out_of_range_values() -> None:
+    with pytest.raises(ValueError, match="between 0 and 65535"):
+        _web_port_from_argv(["--web-port", "65536"])
 
 
 def test_tui_defaults_use_launch_config_and_normalize_runs_dir(

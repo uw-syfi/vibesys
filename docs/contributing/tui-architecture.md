@@ -76,6 +76,15 @@ subscriptions and browser presentation state; it does not fold events or copy TU
 Recorded replay fixtures are served by the development harness and folded through the same
 `core-state` reducer used by live clients.
 
+The browser launch path keeps the server composition shared. `vibesys --web` starts the existing
+Unix adapter and a loopback WebSocket gateway around the same `RunApi` and
+`SubscriptionTracker`; the gateway changes only framing, not request dispatch, replay, batching, or
+store-identity handling. It binds `127.0.0.1`, serves the built `clients/web/dist` bundle from the
+same port, and prints a capability-bearing page URL. WebSocket handshakes require that URL's token
+and the exact page Origin. This is local browser hygiene, not remote authentication. The Unix socket
+and TUI remain the default path, and the WebSocket adapter uses one connection each for control,
+subscription, and chat as specified by the shared wire contract.
+
 `core-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
 time-dependent selectors require an explicit clock value so tests remain deterministic. Transcript
 labels and tones are semantic annotations derived from event fields; the TUI decides whether and how

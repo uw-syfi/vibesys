@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from importlib import import_module
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
@@ -12,6 +13,8 @@ from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
 from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
 from vs_github.api import GitHubCLI, GitHubCLIError
+
+_WEB_PORT_MAX = 65_535
 
 if TYPE_CHECKING:
     import argparse
@@ -26,20 +29,48 @@ def _control_socket_from_argv(argv: list[str]) -> Path | None:
     return Path(value) if value else None
 
 
+def _web_requested(argv: list[str]) -> bool:
+    return "--web" in argv
+
+
+def _web_port_from_argv(argv: list[str]) -> int:
+    value = cli._option_from_argv(argv, "--web-port")  # noqa: SLF001
+    if value is None:
+        return 0
+    try:
+        port = int(value)
+    except ValueError:
+        raise ValueError("--web-port must be an integer") from None  # noqa: TRY003
+    if not 0 <= port <= _WEB_PORT_MAX:
+        raise ValueError("--web-port must be between 0 and 65535")  # noqa: TRY003
+    return port
+
+
+def _web_assets_from_argv(argv: list[str]) -> Path | None:
+    value = cli._option_from_argv(argv, "--web-assets")  # noqa: SLF001
+    if value is not None:
+        return Path(value).expanduser().resolve()
+    source_root = Path(__file__).resolve().parents[2]
+    candidate = source_root / "clients" / "web" / "dist"
+    return candidate if candidate.is_dir() else None
+
+
 def _headless_argv(argv: list[str]) -> list[str]:
     """Remove server-only options before dispatching to the core CLI."""
     arguments: list[str] = []
     skip_next = False
-    for token in argv:
+    for argument in argv:
         if skip_next:
             skip_next = False
             continue
-        if token in {"--control-socket", "--theme"}:
+        if argument in {"--control-socket", "--theme", "--web-port", "--web-assets"}:
             skip_next = True
             continue
-        if token.startswith(("--control-socket=", "--theme=")):
+        if argument == "--web":
             continue
-        arguments.append(token)
+        if argument.startswith(("--control-socket=", "--theme=", "--web-port=", "--web-assets=")):
+            continue
+        arguments.append(argument)
     return arguments
 
 
@@ -148,7 +179,7 @@ def _missing_control_socket() -> NoReturn:
     )
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> None:  # noqa: C901
     """Run the frontend server and headless engine in one process."""
     arguments = sys.argv[1:] if argv is None else argv
     if arguments and arguments[0] == "tui-defaults":
@@ -158,24 +189,50 @@ def main(argv: list[str] | None = None) -> None:
             cli.render_configuration_error(exc)
         return
 
+    web = _web_requested(arguments)
     control_socket = _control_socket_from_argv(arguments)
+    temp_socket_dir: tempfile.TemporaryDirectory[str] | None = None
+    if control_socket is None and web:
+        temp_socket_dir = tempfile.TemporaryDirectory(prefix="vibesys-web-")
+        control_socket = Path(temp_socket_dir.name) / "control.sock"
     if control_socket is None:
         try:
             _missing_control_socket()
         except ConfigurationError as exc:
             cli.render_configuration_error(exc)
-    server_runtime = import_module("server.runtime").ServerRuntime
-
-    runtime = server_runtime(
-        socket_path=control_socket,
-        tui_defaults=_tui_defaults_from_argv(arguments),
-    )
     try:
-        invocation = cli.parse_cli_invocation(_headless_argv(arguments))
-        request = cli.build_run_request(invocation)
-        result = runtime.run(lambda: runtime.drive(request))
-    except ConfigurationError as exc:
-        raise SystemExit(exc.diagnostic.exit_code) from None
+        web_port = _web_port_from_argv(arguments)
+        web_assets = _web_assets_from_argv(arguments)
+    except ValueError as exc:
+        cli.configuration_error(
+            str(exc),
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
+    server_runtime = import_module("server.runtime").ServerRuntime
+    try:
+        if web:
+            runtime = server_runtime(
+                socket_path=control_socket,
+                tui_defaults=_tui_defaults_from_argv(arguments),
+                web=True,
+                web_port=web_port,
+                web_assets=web_assets,
+            )
+        else:
+            runtime = server_runtime(
+                socket_path=control_socket,
+                tui_defaults=_tui_defaults_from_argv(arguments),
+            )
+        try:
+            invocation = cli.parse_cli_invocation(_headless_argv(arguments))
+            request = cli.build_run_request(invocation)
+            result = runtime.run(lambda: runtime.drive(request))
+        except ConfigurationError as exc:
+            raise SystemExit(exc.diagnostic.exit_code) from None
+    finally:
+        if temp_socket_dir is not None:
+            temp_socket_dir.cleanup()
     # `result` is `None` when `ServerRuntime.run` absorbed an operator stop
     # (`RunStopped`) as a clean backend exit; only a completed run's
     # `RunResult.succeeded` decides the process exit code.
