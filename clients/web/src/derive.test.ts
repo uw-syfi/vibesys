@@ -534,10 +534,21 @@ test('tool rows: how a command is read down to its target', () => {
     ['export TMPDIR=/tmp; otool -tV queue.so', 'otool queue.so'],
     ['timeout 300 make 2>&1 | tail -20', 'make'],
     ['ls -la 2>/dev/null | grep src/lib.rs', 'ls'],
+    // A header line is setup, not work, so the command after it answers.
+    ['echo "=== FFI ==="; cat src/ffi.rs', 'cat src/ffi.rs'],
+    // A loop body is work: `do` runs what follows it, on its own line or not, and a program
+    // named by path is still identified by its basename.
+    ['for i in 1 2; do /tmp/harness measure ./cand.so; done', 'harness ./cand.so'],
+    ['for f in a b; do\n  otool -tV queue.so\ndone', 'otool queue.so'],
+    // Two segments of a path do not fit the column when one of them is a run id.
+    ['cat .vibesys/state/runs/20260831-210421-dad182f4-queue-rs/run.json', 'cat …/run.json'],
     // Nothing the verb has not already said.
     ["python3 - <<'PY'\nprint(1)\nPY", null],
-    ['echo "=== NOTES ==="; cat notes.md', null],
+    ['echo "=== NOTES ==="', null],
+    // Every segment is setup: the first one that named a path still says what it touched.
     ['echo done > out/log.txt', 'echo out/log.txt'],
+    ['echo target/debug/deps/_probe.tmp', 'echo …/deps/_probe.tmp'],
+    ['cd /tmp/work', 'cd /tmp/work'],
   ];
   const events = cases.map(([command], index) => ran(index + 1, command));
   const rows = logGroups(fold(events), [], 1, null)

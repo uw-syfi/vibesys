@@ -488,26 +488,30 @@ const NOT_A_PATH = /^[-<>|&;]|^\d*[<>]|[='"$()^]/;
 const A_PATH = /\/|\.[A-Za-z0-9]{1,5}$|^\.[A-Za-z0-9][\w.-]*$/;
 /** A word, with quoted runs kept whole so a path with a space in it survives as one. */
 const WORDS = /(?:[^\s'"]+|'[^']*'|"[^"]*")+/g;
-/** Sets the shell up for the command after it, or opens a block, rather than doing work. */
+/**
+ * Sets the shell up for the command after it, opens a block, or prints a header line, rather
+ * than doing work. `echo` belongs here and not in `SAYS_NOTHING`: a stop there left every row
+ * whose real command sat behind `echo "=== HEADER ==="` showing nothing at all.
+ */
 // biome-ignore format: one word per idea reads worse than the list.
 const PROLOGUE = new Set([
-  'cd', 'export', 'set', 'unset', 'source', '.', 'pushd', 'popd',
-  'for', 'while', 'until', 'if', 'then', 'else', 'elif', 'fi', 'do', 'done', 'case', 'esac',
+  'cd', 'export', 'set', 'unset', 'source', '.', 'pushd', 'popd', 'echo',
+  'for', 'while', 'until', 'if', 'fi', 'done', 'case', 'esac',
 ]);
-/** Runs the command after it, so the command after it is the one that did the work. */
-const WRAPPER = new Set(['env', 'sudo', 'time', 'timeout', 'nohup', 'command', 'exec']);
-/** Runs what follows inline, so its bare name repeats the verb instead of adding to it. */
-const SAYS_NOTHING = new Set([
-  'python',
-  'python3',
-  'node',
-  'bash',
-  'sh',
-  'zsh',
-  'perl',
-  'ruby',
-  'echo',
+/**
+ * Runs the command after it, so the command after it is the one that did the work. `do`, `then`
+ * and `else` open a branch of a block and the command follows on the same line, so they are
+ * stripped rather than skipped: skipping them would drop the body of every loop.
+ */
+// biome-ignore format: one word per idea reads worse than the list.
+const WRAPPER = new Set([
+  'env', 'sudo', 'time', 'timeout', 'nohup', 'command', 'exec', 'do', 'then', 'else', 'elif',
 ]);
+/**
+ * Runs what follows inline, so its bare name repeats the verb instead of adding to it, and the
+ * scan stops rather than reading on into a heredoc body and naming one of its statements.
+ */
+const SAYS_NOTHING = new Set(['python', 'python3', 'node', 'bash', 'sh', 'zsh', 'perl', 'ruby']);
 
 /** The command's words, cut into its commands: one per line, pipe stage and `;` list entry. */
 function commandSegments(command: string): string[][] {
@@ -527,24 +531,35 @@ function commandSegments(command: string): string[][] {
   return segments.filter(segment => segment.length > 0);
 }
 
+/** What a row's target may take before the column ellipses it and the file name is lost. */
+const TARGET_CHARS = 40;
+
 /** A path as a row shows it: its last two segments, and the mark only when it dropped some. */
 function shortenPath(path: string): string {
   if (path.includes('://')) return path;
   const clean = path.replace(/(?!^)\/+$/, '');
   const root = clean.startsWith('/') ? '/' : '';
   const names = clean.slice(root.length).split('/');
-  return names.length > 2 ? `…/${names.slice(-2).join('/')}` : `${root}${names.join('/')}`;
+  if (names.length <= 2) return `${root}${names.join('/')}`;
+  // A 52-character run-id directory would push the file name itself past the ellipsis, so a
+  // pair that overruns the column drops back to the one segment the reader came for.
+  const pair = names.slice(-2).join('/');
+  return `…/${pair.length > TARGET_CHARS ? names.at(-1) : pair}`;
 }
 
 /**
  * A command's shape rather than its text: the executable that did the work and the first path it
  * names, cut to that path's last two segments. Only the first segment that does work answers, so
  * a row never takes a path from after a `|` or a `&&` that belongs to a different command; a
- * `cd` or `export` in front of it is setup, a `timeout` or `env` around it runs it, and an
- * interpreter or an `echo` with no path is saying only what the verb already said. Everything a
- * row drops here is in its tooltip.
+ * `cd`, `export` or an `echo` header line in front of it is setup, a `timeout` or `env` around it
+ * runs it, and an interpreter with no path is saying only what the verb already said. Everything
+ * a row drops here is in its tooltip.
+ *
+ * When every segment is setup there is no working command to answer for, so the first setup
+ * segment that named a path answers instead: a lone `cd /tmp/work` still says what it touched.
  */
 function bashTarget(command: string): string | null {
+  let setup: string | null = null;
   for (const segment of commandSegments(command)) {
     const words = [...segment];
     while (words.length > 1 && (/^\w+=/.test(words[0] ?? '') || WRAPPER.has(words[0] ?? ''))) {
@@ -553,13 +568,21 @@ function bashTarget(command: string): string | null {
       words.shift();
       while (wrapped && words.length > 1 && /^-|^\d+(\.\d+)?$/.test(words[0] ?? '')) words.shift();
     }
-    const executable = words.shift();
-    if (executable === undefined || /^\w+=/.test(executable) || PROLOGUE.has(executable)) continue;
+    const word = words.shift();
+    // A lone `do` or `sudo` at the end of a line wraps the next segment and does no work itself.
+    if (word === undefined || /^\w+=/.test(word) || WRAPPER.has(word)) continue;
+    // A program named by path is identified by its basename, and the row has no room for the
+    // directory that found it.
+    const executable = word.split('/').at(-1) || word;
     const path = words.find(word => !NOT_A_PATH.test(word) && A_PATH.test(word));
+    if (PROLOGUE.has(executable)) {
+      if (setup === null && path !== undefined) setup = `${executable} ${shortenPath(path)}`;
+      continue;
+    }
     if (path === undefined) return SAYS_NOTHING.has(executable) ? null : executable;
     return `${executable} ${shortenPath(path)}`;
   }
-  return null;
+  return setup;
 }
 
 /** The row's verb, what it shows for a target, and the whole target when it shows less. */
