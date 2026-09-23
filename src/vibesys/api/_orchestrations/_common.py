@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from vibesys.api._orchestrations.contracts import RunDescription
 from vibesys.api.contracts import LoopKind
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.loops.roles import expected_agent_roles
+from vibesys.profilers import ProfilerKind
 
 if TYPE_CHECKING:
     from vibesys.api.contracts import RunRequest
@@ -61,3 +64,16 @@ def resolved_run_id(request: RunRequest) -> str:
         message = "RunRequest.exp_name must be set for a fresh (non-resume) run"
         raise ValueError(message)
     return request.exp_name
+
+
+def built_in_description(request: RunRequest, *, round_budget: bool) -> RunDescription:
+    """Preserve a built-in policy's existing run-start presentation."""
+    roles = expected_agent_roles(request.orchestration_id)
+    if request.profiler_kind is ProfilerKind.NONE:
+        roles = tuple(role for role in roles if role != "profiler")
+    return RunDescription(
+        max_rounds=(request.max_rounds if request.max_rounds is not None else 1)
+        if round_budget
+        else 1,
+        expected_roles=roles,
+    )

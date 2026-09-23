@@ -5,18 +5,24 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, cast
 
 from vibesys.api._orchestrations.agent import AgentOrchestration
-from vibesys.api._orchestrations.contracts import OrchestrationRegistry
+from vibesys.api._orchestrations.contracts import (
+    OrchestrationRegistry,
+    RunDescription,
+    project_run,
+)
 from vibesys.api._orchestrations.evolve import EvolveOrchestration
 from vibesys.api._orchestrations.plain import PlainOrchestration
 from vibesys.api.contracts import LoopKind
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from vibesys.api._orchestrations.runtime import _LocalVibeSysRuntime
-    from vibesys.api.contracts import RunRequest
+    from vibesys.api.contracts import RunRequest, RunStatus, RunView
     from vibesys.orchestration import ResumeProjection
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.runtime import VibeSysRuntime
-    from vs_project.api import OrchestrationRunManifest
+    from vs_project.api import OrchestrationRunManifest, Project
 
 
 class _LegacyImplementation(Protocol):
@@ -35,6 +41,24 @@ class _LegacyOrchestration:
         local = cast("_LocalVibeSysRuntime", runtime)
         return self._implementation.execute(request, local.legacy_integration)
 
+    def prepare(self, request: RunRequest, runtime: VibeSysRuntime) -> None:
+        """The existing loop constructs its own run context during execute."""
+        del request, runtime
+
+    def describe(self, request: RunRequest) -> RunDescription:
+        describe = getattr(self._implementation, "describe", None)
+        return describe(request) if callable(describe) else RunDescription()
+
+    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+        view = getattr(self._implementation, "view", None)
+        if callable(view):
+            return view(project, run_id, status=status, loop=loop)
+        return project_run(None, project, run_id=run_id, status=status, loop=loop)
+
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        projector = getattr(self._implementation, "project_committed", None)
+        return projector(namespace, state, run_id=run_id) if callable(projector) else None
+
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
         return self._implementation.resume_projection(manifest)
 
@@ -52,6 +76,6 @@ def built_in_orchestrations() -> OrchestrationRegistry:
 
 def resume_projection(manifest: OrchestrationRunManifest) -> ResumeProjection:
     """Delegate descriptor validation and CLI projection to its owner."""
-    implementation = built_in_orchestrations().resolve(LoopKind(manifest.orchestration.id))
+    implementation = built_in_orchestrations().resolve(manifest.orchestration.id)
     projector = cast("_LegacyOrchestration", implementation)
     return projector.resume_projection(manifest)

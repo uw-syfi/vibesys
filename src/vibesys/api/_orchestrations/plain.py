@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.api._orchestrations._common import resolved_run_id
+from vibesys.api._orchestrations._common import built_in_description, resolved_run_id
 
 if TYPE_CHECKING:
+    from vibesys.api._orchestrations.contracts import RunDescription
     from vibesys.api.contracts import RunRequest
     from vibesys.orchestration import ResumeProjection
     from vibesys.run.integration import LocalRunIntegration
@@ -15,6 +16,9 @@ if TYPE_CHECKING:
 
 class PlainOrchestration:
     """Preserve the existing plain loop call contract."""
+
+    def describe(self, request: RunRequest) -> RunDescription:
+        return built_in_description(request, round_budget=True)
 
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
         """Project the plain-owned descriptor without constructing v3 settings."""

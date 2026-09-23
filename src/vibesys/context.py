@@ -738,11 +738,9 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                         effective_configuration,
                     )
                     if configuration_update is not None:
-                        limit_field = (
-                            "max_generations"
-                            if run_manifest.configuration.outer_loop == "evolve"
-                            else "max_rounds"
-                        )
+                        limit_field = compare_resume_configurations(
+                            run_manifest.configuration, effective_configuration
+                        ).limit_field
                         limit_increased = getattr(configuration_update, limit_field) > getattr(
                             run_manifest.configuration, limit_field
                         )

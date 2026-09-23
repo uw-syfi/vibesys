@@ -11,7 +11,7 @@ from vibesys.api._orchestrations.runner import run_orchestration
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.api._orchestrations.contracts import OrchestrationRegistry
+    from vibesys.api._orchestrations.contracts import Orchestration, OrchestrationRegistry
     from vibesys.api.contracts import AgentEnvironment, RunRequest
     from vibesys.run.integration import LocalRunIntegration
 
@@ -24,6 +24,7 @@ def dispatch_loop(
     registry: OrchestrationRegistry | None = None,
     *,
     open_agent_environment: Callable[..., AgentEnvironment] | None = None,
+    implementation: Orchestration | None = None,
 ) -> bool:
     """Execute the registered orchestration for this request's stable loop ID."""
     return run_orchestration(
@@ -31,4 +32,5 @@ def dispatch_loop(
         integration,
         registry or built_in_orchestrations(),
         open_agent_environment=open_agent_environment,
+        implementation=implementation,
     )

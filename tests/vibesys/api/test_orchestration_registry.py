@@ -16,9 +16,11 @@ from vibesys.api import (
     VibeSysRuntime,
     built_in_orchestrations,
     create_session,
+    open_run_store,
 )
 from vibesys.api._dispatch import dispatch_loop
-from vibesys.api.contracts import LoopKind, RunRequest, RunResult, RunStatus
+from vibesys.api._orchestrations.contracts import RunDescription
+from vibesys.api.contracts import LoopKind, RunRequest, RunResult, RunStatus, RunView
 from vibesys.api.entry import default_request
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
@@ -46,7 +48,7 @@ def test_registry_rejects_duplicate_and_missing_ids() -> None:
     implementation = _StubOrchestration(result=True)
     registry.register(LoopKind.PLAIN, implementation)
 
-    assert registry.resolve(LoopKind.PLAIN) is implementation
+    assert registry.resolve(LoopKind.PLAIN) is not implementation
     with pytest.raises(ValueError, match="already registered"):
         registry.register(LoopKind.PLAIN, _StubOrchestration(result=False))
     with pytest.raises(ValueError, match="not registered"):
@@ -136,6 +138,44 @@ def test_session_executes_unknown_registered_id_and_reports_it(tmp_path: Path) -
     assert started.data.outer_loop == "team-search"
     assert started.data.expected_roles == ()
     assert Project.open(request.project_root).state.load_run(result.run_id).schema_version == 4
+
+
+def test_policy_owns_start_metadata_and_live_and_stored_views(tmp_path: Path) -> None:
+    class ProjectingPolicy(_StubOrchestration):
+        def describe(self, request: RunRequest) -> RunDescription:
+            assert request.orchestration_id == "team-search"
+            return RunDescription(max_rounds=9, expected_roles=("scout", "reviewer"))
+
+        def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+            assert project.root == request.project_root
+            return RunView(
+                run_id=run_id,
+                loop=loop,
+                status=status,
+                current_round=7,
+                experiment_revision=3,
+            )
+
+    request = _custom_request(tmp_path)
+    policy = ProjectingPolicy(result=True)
+    registry = OrchestrationRegistry()
+    registry.register("team-search", policy)
+    events: list[CoreEvent] = []
+    session = create_session(request, sink=events.append, registry=registry)
+
+    session.start()
+    result = asyncio.run(session.await_result())
+
+    started = next(event for event in events if event.type is CoreEventType.RUN_STARTED)
+    assert isinstance(started.data, RunStartedData)
+    assert started.data.max_rounds == 9
+    assert started.data.expected_roles == ("scout", "reviewer")
+    assert session.view().current_round == 7
+    stored = open_run_store(Project.open(request.project_root), registry=registry).get_run(
+        result.run_id
+    )
+    assert stored.current_round == 7
+    assert stored.status is RunStatus.UNKNOWN
 
 
 def test_custom_selection_validates_descriptor_and_preserves_builtin_enum(

@@ -13,15 +13,11 @@ import asyncio
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
-from vibesys.api._agent_state import load_agent_run_state
 from vibesys.api._dispatch import dispatch_loop, resolved_run_id
-from vibesys.api._readmodel import project_committed_run_view, project_run_view
-from vibesys.api.contracts import LoopKind, RunResult, RunStatus
+from vibesys.api._orchestrations.builtins import built_in_orchestrations
+from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
-from vibesys.loops.agent.model import AgentRunState
-from vibesys.loops.roles import expected_agent_roles
-from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.skills import platform_skill_selection
 from vs_agent.api import MCPServerSpec, expose_as_tools
@@ -167,7 +163,8 @@ class _LocalRunSession:
     ) -> None:
         self._request = request
         self._sink = sink
-        self._registry = registry
+        self._registry = registry or built_in_orchestrations()
+        self._policy = self._registry.resolve(request.orchestration_id)
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -194,10 +191,11 @@ class _LocalRunSession:
         state: BaseModel,
         changed_keys: tuple[str, ...] | None,
     ) -> None:
-        if namespace != "agent" or self._committed_view_listener is None:
+        if self._committed_view_listener is None:
             return
-        view = project_committed_run_view(state, run_id=resolved_run_id(self._request))
-        self._committed_view_listener(view, changed_keys)
+        view = self._policy.project_committed(namespace, state, run_id=self._run_id())
+        if view is not None:
+            self._committed_view_listener(view, changed_keys)
 
     def on_run_resources(self, listener: Callable[[RunResourceHandoff], None]) -> None:
         """Register the sole application consumer of this run's resource handoff."""
@@ -210,7 +208,7 @@ class _LocalRunSession:
 
     def _run_id(self) -> str:
         """Use the provisioned ID once a custom runtime has created its run."""
-        if self._request.orchestration is not None and self._resource_handoff is not None:
+        if self._resource_handoff is not None:
             return self._resource_handoff.run_id
         return resolved_run_id(self._request)
 
@@ -289,14 +287,15 @@ class _LocalRunSession:
 
     def _run_sync(self) -> RunResult:
         request = self._request
+        description = self._policy.describe(request)
         self._integration.events.emit(
             CoreEventType.RUN_STARTED,
             status=EventStatus.ACTIVE,
             data=RunStartedData(
                 outer_loop=request.orchestration_id,
                 input=str(request.input_bundle.root),
-                max_rounds=_max_rounds_for_started_event(request),
-                expected_roles=_expected_roles(request),
+                max_rounds=description.max_rounds,
+                expected_roles=description.expected_roles,
             ),
         )
         try:
@@ -305,6 +304,7 @@ class _LocalRunSession:
                 self._integration,
                 registry=self._registry,
                 open_agent_environment=self.open_agent_environment,
+                implementation=self._policy,
             )
         except BaseException as exc:
             self._status = RunStatus.FAILED
@@ -338,18 +338,11 @@ class _LocalRunSession:
         only go stale. `status` reflects `_run_sync`'s own progress
         (`ACTIVE` until it returns or raises), not a re-derivation from state.
         """
-        run_id = self._run_id()
-        if self._request.orchestration is not None:
-            state = AgentRunState()
-        else:
-            project = Project.open(self._request.project_root)
-            state = load_agent_run_state(project, run_id) or AgentRunState()
-        return project_run_view(
-            state,
-            run_id=run_id,
+        return self._policy.view(
+            Project.open(self._request.project_root),
+            run_id=self._run_id(),
             status=self._status,
-            experiment_revision=state.experiment_revision,
-            loop=self._request.selected_loop,
+            loop=self._request.orchestration_id,
         )
 
     def workspace(self) -> HostResource:
@@ -459,28 +452,3 @@ def _environment_bind_mount(mount: HostResource) -> EnvironmentBindMount:
         mount.agent_path if mount.agent_path is not None else str(mount.path),
         read_only=mount.access is HostResourceAccess.READ_ONLY,
     )
-
-
-def _max_rounds_for_started_event(request: RunRequest) -> int:
-    """Match today's `RUN_STARTED.max_rounds`: the loop's round budget, or 1.
-
-    `dispatch()` in `entrypoints/cli.py` derived this via
-    `getattr(args, "max_rounds", getattr(args, "max_iterations", 1))`. Evolve
-    has no `--max-rounds` flag, so that chain always fell through to `1` for
-    evolve; agent/plain reported their real `--max-rounds` value. Preserved
-    here rather than "fixed" to keep this an extract-and-reroute.
-    """
-    if request.loop in (LoopKind.AGENT, LoopKind.PROFILE_GUIDED, LoopKind.PLAIN):
-        return request.max_rounds if request.max_rounds is not None else 1
-    return 1
-
-
-def _expected_roles(request: RunRequest) -> tuple[str, ...]:
-    if request.loop is None:
-        return ()
-    roles = expected_agent_roles(request.loop.value)
-    if request.profiler_kind is ProfilerKind.NONE:
-        # A disabled profiler never runs (see loop.py's profiler-kind gate),
-        # so don't seed a placeholder for it.
-        return tuple(role for role in roles if role != "profiler")
-    return roles

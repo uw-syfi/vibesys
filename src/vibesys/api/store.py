@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.api._agent_state import load_agent_run_state
-from vibesys.api._readmodel import project_run_view
-from vibesys.api.contracts import LoopKind, RunStatus
-from vibesys.loops.agent.model import AgentRunState
+from vibesys.api._orchestrations.builtins import built_in_orchestrations
+from vibesys.api._orchestrations.contracts import project_run
+from vibesys.api.contracts import RunStatus
 from vs_project.api import OrchestrationRunManifest
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vibesys.api._orchestrations.contracts import OrchestrationRegistry
     from vibesys.api.contracts import RunView
     from vs_project.api import Project, RunManifestRecord
 
@@ -38,9 +38,9 @@ class RunStore(Protocol):
         ...
 
 
-def open_run_store(project: Project) -> RunStore:
+def open_run_store(project: Project, *, registry: OrchestrationRegistry | None = None) -> RunStore:
     """Open a read-only run history store for *project*."""
-    return _LocalRunStore(project)
+    return _LocalRunStore(project, registry=registry or built_in_orchestrations())
 
 
 class _LocalRunStore:
@@ -54,8 +54,9 @@ class _LocalRunStore:
     its own session instead.
     """
 
-    def __init__(self, project: Project) -> None:
+    def __init__(self, project: Project, *, registry: OrchestrationRegistry) -> None:
         self._project = project
+        self._registry = registry
 
     def list_runs(self) -> Sequence[RunView]:
         manifests = self._project.state.list_runs()
@@ -79,18 +80,19 @@ class _LocalRunStore:
         )
 
     def _view(self, manifest: RunManifestRecord) -> RunView:
-        if isinstance(manifest, OrchestrationRunManifest):
-            try:
-                loop: LoopKind | str = LoopKind(manifest.orchestration.id)
-            except ValueError:
-                loop = manifest.orchestration.id
-        else:
-            loop = LoopKind(manifest.configuration.outer_loop)
-        state = load_agent_run_state(self._project, manifest.run_id) or AgentRunState()
-        return project_run_view(
-            state,
+        loop = (
+            manifest.orchestration.id
+            if isinstance(manifest, OrchestrationRunManifest)
+            else manifest.configuration.outer_loop
+        )
+        try:
+            policy = self._registry.resolve(loop)
+        except ValueError:
+            policy = None
+        return project_run(
+            policy,
+            self._project,
             run_id=manifest.run_id,
             status=RunStatus.UNKNOWN,
-            experiment_revision=state.experiment_revision,
             loop=loop,
         )

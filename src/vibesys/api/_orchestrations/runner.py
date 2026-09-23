@@ -9,7 +9,7 @@ from vibesys.api._orchestrations.runtime import _LocalVibeSysRuntime
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.api._orchestrations.contracts import OrchestrationRegistry
+    from vibesys.api._orchestrations.contracts import Orchestration, OrchestrationRegistry
     from vibesys.api.contracts import AgentEnvironment, RunRequest
     from vibesys.run.integration import LocalRunIntegration
 
@@ -20,11 +20,12 @@ def run_orchestration(
     registry: OrchestrationRegistry,
     *,
     open_agent_environment: Callable[..., AgentEnvironment] | None = None,
+    implementation: Orchestration | None = None,
 ) -> bool:
     """Execute the selected implementation through the shared contract."""
+    policy = implementation or registry.resolve(request.orchestration_id)
     with _LocalVibeSysRuntime(
         request, integration, open_agent_environment=open_agent_environment
     ) as runtime:
-        if request.orchestration is not None:
-            runtime.prepare()
-        return registry.resolve(request.orchestration_id).execute(request, runtime)
+        policy.prepare(request, runtime)
+        return policy.execute(request, runtime)

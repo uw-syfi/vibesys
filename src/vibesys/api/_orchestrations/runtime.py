@@ -225,7 +225,16 @@ class _LocalVibeSysRuntime:
         *,
         open_agent_environment: Callable[..., AgentEnvironment] | None,
     ) -> None:
-        if request.orchestration is not None and request.resume is not None:
+        self._request = request
+        self._integration = integration
+        self._open_agent_environment = open_agent_environment
+        self._context: _RunContext | None = None
+        self._agents: dict[str, _LocalAgentHandle] = {}
+        self._closed = False
+
+    def _validate_capabilities(self) -> None:
+        request = self._request
+        if request.resume is not None:
             raise ConfigurationError(
                 ConfigurationDiagnostic(
                     code="custom_orchestration_resume_unsupported",
@@ -233,7 +242,7 @@ class _LocalVibeSysRuntime:
                     message="custom orchestration resume needs a policy-owned checkpoint contract",
                 )
             )
-        if request.orchestration is not None and request.profiler_kind not in {
+        if request.profiler_kind not in {
             ProfilerKind.AUTO,
             ProfilerKind.NONE,
         }:
@@ -244,11 +253,7 @@ class _LocalVibeSysRuntime:
                     message="custom orchestration runtime does not yet provide a profiler capability",
                 )
             )
-        if (
-            request.orchestration is not None
-            and request.run_environment is not None
-            and request.run_environment.name == "skypilot"
-        ):
+        if request.run_environment is not None and request.run_environment.name == "skypilot":
             raise ConfigurationError(
                 ConfigurationDiagnostic(
                     code="custom_orchestration_skypilot_unsupported",
@@ -259,12 +264,6 @@ class _LocalVibeSysRuntime:
                     ),
                 )
             )
-        self._request = request
-        self._integration = integration
-        self._open_agent_environment = open_agent_environment
-        self._context: _RunContext | None = None
-        self._agents: dict[str, _LocalAgentHandle] = {}
-        self._closed = False
 
     @property
     def workspace(self) -> Path:
@@ -277,7 +276,10 @@ class _LocalVibeSysRuntime:
         return self._integration
 
     def prepare(self) -> None:
-        """Persist the custom run before policy code executes."""
+        """Persist runs with an explicit orchestration descriptor."""
+        if self._request.orchestration is None:
+            return
+        self._validate_capabilities()
         self._ensure_context()
 
     def spawn_agent(self, definition: AgentDefinition) -> _LocalAgentHandle:

@@ -7,18 +7,52 @@ from typing import TYPE_CHECKING
 from vibesys.api._orchestrations._common import (
     _agent_outer_loop,
     _required_objective,
+    built_in_description,
     resolved_run_id,
 )
+from vibesys.api._orchestrations.agent_readmodel import (
+    project_committed_run_view,
+    project_run_view,
+)
+from vibesys.api._orchestrations.agent_state import load_agent_run_state
+from vibesys.api.contracts import LoopKind, RunStatus
+from vibesys.loops.agent.model import AgentRunState
 
 if TYPE_CHECKING:
-    from vibesys.api.contracts import RunRequest
+    from pydantic import BaseModel
+
+    from vibesys.api._orchestrations.contracts import RunDescription
+    from vibesys.api.contracts import RunRequest, RunView
     from vibesys.orchestration import ResumeProjection
     from vibesys.run.integration import LocalRunIntegration
-    from vs_project.api import OrchestrationRunManifest
+    from vs_project.api import OrchestrationRunManifest, Project
 
 
 class AgentOrchestration:
     """Preserve the existing agent loop call contract."""
+
+    def describe(self, request: RunRequest) -> RunDescription:
+        return built_in_description(request, round_budget=True)
+
+    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+        # The existing public read model exposes hypotheses only for `agent`.
+        state = (
+            load_agent_run_state(project, run_id) or AgentRunState()
+            if loop == LoopKind.AGENT
+            else AgentRunState()
+        )
+        return project_run_view(
+            state,
+            run_id=run_id,
+            status=status,
+            experiment_revision=state.experiment_revision,
+            loop=loop,
+        )
+
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        if namespace != "agent":
+            return None
+        return project_committed_run_view(state, run_id=run_id)
 
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
         """Project agent-owned settings without constructing v3 configuration."""
