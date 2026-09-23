@@ -22,9 +22,10 @@
 .center > .logwrap {
   flex: 1;
 }
-/* The log column and the dock share one measure, left aligned on the graph's own edge. */
+/* The log column and the dock share one measure, left aligned on the graph's own edge: past
+   1100px a 20px row would run to 250 characters, so the column stops and the rest stays empty. */
 .col {
-  max-width: 824px;
+  max-width: 1100px;
   padding-inline: var(--space-5);
 }
 @media (max-width: 1023px) {
