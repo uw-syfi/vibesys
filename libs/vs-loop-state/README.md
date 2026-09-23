@@ -32,7 +32,7 @@ vocabulary stored in these values.
 Codecs keep persisted values separate from file I/O:
 
 ```python
-from vs_loop_state import PlainLoopCursor, parse_plain_loop_cursor, serialize_plain_loop_cursor
+from vs_loop_state.api import PlainLoopCursor, parse_plain_loop_cursor, serialize_plain_loop_cursor
 
 cursor = PlainLoopCursor()
 restored = parse_plain_loop_cursor(serialize_plain_loop_cursor(cursor))

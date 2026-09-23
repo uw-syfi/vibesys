@@ -40,7 +40,7 @@ reader treats every declared metric in a version 1 stream as required.
 Read an evaluator's output after the application has run it:
 
 ```python
-from vs_evaluator_protocol import parse_records, read_measurement
+from vs_evaluator_protocol.api import parse_records, read_measurement
 
 measurement = read_measurement(parse_records(output_text))
 ```

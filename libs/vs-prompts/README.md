@@ -37,7 +37,7 @@ Bind a renderer to an application-owned template directory:
 ```python
 from pathlib import Path
 
-from vs_prompts import TemplateRenderer
+from vs_prompts.api import TemplateRenderer
 
 renderer = TemplateRenderer(Path("prompts"))
 prompt = renderer.render_template("agent.j2", objective="Reduce latency")

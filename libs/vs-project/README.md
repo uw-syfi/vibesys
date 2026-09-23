@@ -13,7 +13,7 @@ Application code uses task operations directly and persists state through
 `project.state`:
 
 ```python
-from vs_project import Project
+from vs_project.api import Project
 
 project = Project.open(".")
 task = project.select_task("latency")

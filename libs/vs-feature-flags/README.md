@@ -30,7 +30,7 @@ Define a `StrEnum` and a registry:
 ```python
 from enum import StrEnum
 
-from vs_feature_flags import FeatureDefinition, FeatureRegistry
+from vs_feature_flags.api import FeatureDefinition, FeatureRegistry
 
 class FeatureFlag(StrEnum):
     NEW_DASHBOARD = "new_dashboard"
@@ -79,7 +79,7 @@ if FEATURES.is_enabled(FeatureFlag.NEW_DASHBOARD, overrides):
 When loading config, parse the raw user-provided table into typed overrides:
 
 ```python
-from vs_feature_flags import parse_feature_flag_overrides
+from vs_feature_flags.api import parse_feature_flag_overrides
 
 raw_feature_flags = raw_config.get("feature_flags")
 feature_flags = parse_feature_flag_overrides(raw_feature_flags, FeatureFlag)
