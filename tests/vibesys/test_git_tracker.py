@@ -16,7 +16,7 @@ from vs_project.api import PlainRunConfiguration, Project, RunEnvironmentRecord
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_project import StateSnapshot
+    from vs_project.api import StateSnapshot
 
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "test",
