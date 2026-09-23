@@ -17,16 +17,21 @@ from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.run.integration import RunResourceHandoff
+from vibesys.sandbox.run_environment import _cli_container_env, _cli_provider_env_and_auth_files
 from vibesys.skills import platform_skill_selection
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
+
 
 @dataclass(frozen=True)
 class _EnvironmentRequest:
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
+    agent_backend: str | None = "cli"
+    cli_provider: str | None = "claude"
 
 
 class _Environment:
@@ -130,6 +135,34 @@ def test_open_agent_environment_folds_requested_mounts_into_the_request(
     )
     assert result.agent_path(mount_dir) == f"/opt/mapped{mount_dir}"
     result.close()
+
+
+def test_agent_override_reaches_docker_and_modal_auth_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = _Environment()
+    handoff = _handoff(tmp_path, environment, _EnvironmentRequest())
+    session = _session_with_handoff(handoff)
+    monkeypatch.setattr(
+        "vs_agent.api.auth_env_passthrough", lambda provider: {"SELECTED": provider}
+    )
+    monkeypatch.setattr("vs_agent.api.auth_paths", lambda _provider: ())
+    monkeypatch.setattr("vs_agent.api.auth_copy_paths", lambda provider: [(provider, "/auth")])
+
+    opened = session.open_agent_environment(agent_backend="cli", cli_provider="codex")
+    selected = environment.requests[-1]
+    docker_auth = _cli_container_env(cast("Any", selected))
+    modal_env, modal_files = _cli_provider_env_and_auth_files(cast("Any", selected))
+
+    assert selected.agent_backend == "cli"
+    assert selected.cli_provider == "codex"
+    assert handoff.environment_request.cli_provider == "claude"
+    assert docker_auth is not None
+    assert docker_auth[0] == "codex"
+    assert docker_auth[1]["SELECTED"] == "codex"
+    assert modal_env["SELECTED"] == "codex"
+    assert modal_files == [("codex", "/auth")]
+    opened.close()
 
 
 def test_investigation_tools_launches_the_chat_tools_server_for_this_run(

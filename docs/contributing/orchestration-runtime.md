@@ -77,8 +77,11 @@ This is the first runtime slice. Agents share the run workspace unless the
 selected run environment isolates it. The runtime does not yet offer a generic
 message bus, checkpoint API, profiler capability, or custom resume policy.
 `ProfilerKind.AUTO` uses no profiler for custom policies; selecting an active
-profiler is rejected. Custom resume is rejected
-until an orchestration-owned checkpoint contract exists. History currently has
+profiler is rejected. SkyPilot custom runs are rejected until each spawned
+agent can own a bridge without replacing the run's bridge socket. Docker and
+Modal agent environments use each agent's backend and provider for container
+authentication. Custom resume is rejected until an orchestration-owned
+checkpoint contract exists. History currently has
 a generic view for custom IDs, without policy-specific rounds. The broader
 agent spawning, sandbox, workspace, and remote-runtime design is tracked in
 [RFC #937](https://github.com/uw-syfi/vibesys/issues/937).

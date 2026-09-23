@@ -39,7 +39,6 @@ from vs_project.api import OrchestrationRunManifest, Project
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.domains.environment import EnvironmentBindMount
     from vibesys.sandbox.run_environment import RunEnvironmentRequest, RunEnvironmentSession
 
 
@@ -138,6 +137,7 @@ def _request(project_root: Path) -> RunRequest:
         exp_name="team-demo",
         run_environment=RunEnvironmentSpec("local"),
         agent_backend="stub",
+        cli_provider="claude",
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
     )
@@ -158,8 +158,8 @@ def _assert_message_handoffs(clients: dict[str, FakeAgentClient]) -> None:
 
 def _capture_environments(
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[list[tuple[EnvironmentBindMount, ...]], list[str]]:
-    mounts: list[tuple[EnvironmentBindMount, ...]] = []
+) -> tuple[list[RunEnvironmentRequest], list[str]]:
+    requests: list[RunEnvironmentRequest] = []
     closed: list[str] = []
     original_open = LocalEnvironment.open
     original_close = _OpenedAgentEnvironment.close
@@ -167,7 +167,7 @@ def _capture_environments(
     def open_environment(
         self: LocalEnvironment, request: RunEnvironmentRequest
     ) -> RunEnvironmentSession:
-        mounts.append(request.environment_bind_mounts)
+        requests.append(request)
         return original_open(self, request)
 
     def close_environment(self: _OpenedAgentEnvironment) -> None:
@@ -176,7 +176,7 @@ def _capture_environments(
 
     monkeypatch.setattr(LocalEnvironment, "open", open_environment)
     monkeypatch.setattr(_OpenedAgentEnvironment, "close", close_environment)
-    return mounts, closed
+    return requests, closed
 
 
 def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
@@ -207,7 +207,7 @@ def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
     def reject_default_client(**_kwargs: object) -> None:
         raise AssertionError
 
-    opened_mounts, closed_environments = _capture_environments(monkeypatch)
+    environment_requests, closed_environments = _capture_environments(monkeypatch)
     monkeypatch.setattr("vibesys.api._orchestrations.runtime.build_agent_client", build_client)
     monkeypatch.setattr("vibesys.context.build_agent_client", reject_default_client)
     monkeypatch.setattr("vibesys.context.agent_spec_from_config", reject_default_client)
@@ -231,7 +231,17 @@ def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
     _assert_message_handoffs(clients)
     assert grant in granted["worker-model"]
     assert grant not in granted["planner-model"]
-    assert sum(mount.host_path == grant_path for group in opened_mounts for mount in group) == 1
+    assert (
+        sum(
+            mount.host_path == grant_path
+            for request in environment_requests
+            for mount in request.environment_bind_mounts
+        )
+        == 1
+    )
+    assert environment_requests[0].cli_provider == "claude"
+    assert all(request.cli_provider == "codex" for request in environment_requests[1:])
+    assert all(request.agent_backend == "stub" for request in environment_requests[1:])
     assert all(client.closed for client in clients.values())
     assert len(closed_environments) == 3
     assert (
@@ -262,6 +272,23 @@ def test_custom_resume_requires_policy_checkpoint_contract(tmp_path: Path) -> No
     active_profiler = _request(project_root).model_copy(update={"profiler_kind": ProfilerKind.NSYS})
     with pytest.raises(ConfigurationError, match="does not yet provide a profiler capability"):
         asyncio.run(create_session(active_profiler, sink=discard, registry=registry).await_result())
+
+
+def test_skypilot_custom_runtime_is_rejected_before_environment_open(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    request = _request(project_root).model_copy(
+        update={"run_environment": RunEnvironmentSpec("skypilot")}
+    )
+    registry = OrchestrationRegistry()
+    registry.register("three-agent-rounds", _ThreeAgentPolicy(HostResource(tmp_path)))
+
+    def discard(event: CoreEvent) -> None:
+        del event
+
+    with pytest.raises(ConfigurationError, match="per-agent bridge ownership"):
+        asyncio.run(create_session(request, sink=discard, registry=registry).await_result())
+    assert not (project_root / ".vibesys").exists()
 
 
 def test_agent_spec_execution_policy_is_rejected_explicitly(tmp_path: Path) -> None:

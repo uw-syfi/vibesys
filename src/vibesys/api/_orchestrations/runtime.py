@@ -187,6 +187,21 @@ class _LocalVibeSysRuntime:
                     message="custom orchestration runtime does not yet provide a profiler capability",
                 )
             )
+        if (
+            request.orchestration is not None
+            and request.run_environment is not None
+            and request.run_environment.name == "skypilot"
+        ):
+            raise ConfigurationError(
+                ConfigurationDiagnostic(
+                    code="custom_orchestration_skypilot_unsupported",
+                    stage="agent_capability_validation",
+                    message=(
+                        "custom orchestration agents are not supported on SkyPilot "
+                        "until per-agent bridge ownership is implemented"
+                    ),
+                )
+            )
         self._request = request
         self._integration = integration
         self._open_agent_environment = open_agent_environment
@@ -220,7 +235,11 @@ class _LocalVibeSysRuntime:
             raise _MissingAgentHostError
         context = self._ensure_context()
         with ExitStack() as resources:
-            opened = self._open_agent_environment(mounts=definition.resources)
+            opened = self._open_agent_environment(
+                mounts=definition.resources,
+                agent_backend=definition.spec.backend.value,
+                cli_provider=definition.spec.provider,
+            )
             resources.callback(opened.close)
             backends = (
                 {definition.id: opened.backends["chat"]} if opened.backends is not None else None
