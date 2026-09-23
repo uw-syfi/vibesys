@@ -226,13 +226,18 @@ const REPLAY = [
     // inferred chain is one card per rank, and the shapes that stack (a fan-out, a join) need
     // edges the backend does not report yet. So this forces the state the general path handles,
     // by capping the panel under its own one row, and checks the panel notices it on the vertical
-    // axis as it does sideways. The frame shows the cut row fading out.
+    // axis as it does sideways.
+    //
+    // 40px, against a 44px card: the fade covers the last 24px, so it runs across the card's
+    // second line and that line dissolves while the role above it stays crisp. A tighter cap
+    // leaves the fade nothing but the card's own fill to work on, and surface against canvas is
+    // 8 levels of luminance in the dark theme and 4 in the light one: measurable, invisible.
     name: 'panel-cap',
     fixture: live(),
     widths: [1440],
     after: async page => {
       await page.locator('.gflow').evaluate(panel => {
-        panel.style.maxHeight = '30px';
+        panel.style.maxHeight = '40px';
       });
       await page
         .waitForFunction(
