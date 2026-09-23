@@ -44,6 +44,16 @@ def test_registry_rejects_duplicate_and_missing_ids() -> None:
         registry.resolve(LoopKind.EVOLVE)
 
 
+@pytest.mark.parametrize("invalid_id", ["", " Team", "team/search", "TEAM", "a" * 129])
+def test_registry_rejects_ids_outside_descriptor_envelope(invalid_id: str) -> None:
+    registry = OrchestrationRegistry()
+    with pytest.raises(ValueError, match="invalid orchestration ID"):
+        registry.register(invalid_id, _StubOrchestration(result=True))
+
+    registry.register("team.v2", _StubOrchestration(result=True))
+    assert registry.resolve("team.v2") is not None
+
+
 def test_dispatch_uses_injected_registry_without_built_in_loop_calls() -> None:
     registry = OrchestrationRegistry()
     implementation = _StubOrchestration(result=False)
