@@ -1,12 +1,22 @@
 .logwrap {
   position: relative;
   min-height: 0;
+  /* The floating jump pill's height, which the scrollport keeps clear of. */
+  --jump: 32px;
 }
 .log {
   position: absolute;
   inset: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+/* The jump pill floats over the bottom-right corner, where it would sit on whichever row is
+   there and hide that row's duration. The scrollport stops above the pill's band instead, so
+   no row is ever under it, at any scroll position. The band is reserved wherever the pill can
+   appear at all rather than only while it is up: a scrollport that resized under the reader
+   would be read as the reader walking away from the live edge. */
+.log.follows {
+  bottom: calc(var(--jump) + var(--space-4));
 }
 .log:focus-visible {
   outline-offset: -2px;
@@ -190,7 +200,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
+  height: var(--jump);
   padding: 0 var(--space-3);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);

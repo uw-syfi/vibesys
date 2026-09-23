@@ -172,7 +172,7 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
       <div
         ref={scroller}
         id="log"
-        className="log"
+        className={follow ? 'log follows' : 'log'}
         role="log"
         aria-live="off"
         aria-label={round === null ? 'Run log' : `Round ${round} log`}
