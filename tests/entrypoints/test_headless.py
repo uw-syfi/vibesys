@@ -35,6 +35,7 @@ from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.events import CoreEventType, RunStartedData
+from vibesys.loops.evolve.orchestration import descriptor_from_configuration as evolve_descriptor
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.loops.plain.orchestration import descriptor_from_configuration
 from vibesys.loops.roles import EXPECTED_AGENT_ROLES
@@ -1500,6 +1501,45 @@ def test_evolve_resume_restores_its_configuration(
         ("latency", "min"),
         ("throughput", "max"),
     ]
+
+
+def test_v4_evolve_resume_restores_openevolve_settings_and_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _write_input_project(tmp_path)
+    run_id = "20260811-120000-11111111-evolve-v4"
+    configuration = _evolve_configuration()
+    store = Project.open(project).state
+    store.create_project(project.name)
+    manifest = store.new_orchestration_run_manifest(
+        project.name,
+        run_id=run_id,
+        branch=f"vibesys-runs/{run_id}",
+        vibesys_version="0.2.0-test",
+        run_environment=configuration.run_environment,
+        orchestration=evolve_descriptor(configuration, profiler="none"),
+        trusted_input_baseline="0" * 40,
+        now=datetime(2026, 8, 11, 12, tzinfo=UTC),
+    )
+    store.create_run(manifest)
+    monkeypatch.chdir(project)
+
+    args = parse_cli_invocation(["--outer-loop", "evolve", "--resume", run_id]).args
+    raised = parse_cli_invocation(
+        ["--outer-loop", "evolve", "--resume", run_id, "--max-generations", "6"]
+    ).args
+
+    assert args.max_generations == 5
+    assert args.search_policy == "openevolve"
+    assert args.openevolve_population_size == 40
+    assert args.openevolve_num_islands == 3
+    assert args.openevolve_migration_rate == 0.25
+    assert raised.max_generations == 6
+    with pytest.raises(ConfigurationError, match="cannot decrease"):
+        parse_cli_invocation(
+            ["--outer-loop", "evolve", "--resume", run_id, "--max-generations", "4"]
+        )
 
 
 @pytest.mark.parametrize(

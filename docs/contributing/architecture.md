@@ -136,6 +136,7 @@ graph TD
     vibesys.loops.evolve --> vibesys.domains
     vibesys.loops.evolve --> vibesys.evaluators
     vibesys.loops.evolve --> vibesys.loops
+    vibesys.loops.evolve --> vibesys.orchestration
     vibesys.loops.evolve --> vibesys.prompts
     vibesys.loops.evolve --> vibesys.render
     vibesys.loops.evolve --> vibesys.run
@@ -288,6 +289,7 @@ graph TD
     vibesys.api._orchestrations.evolve --> vibesys.api.contracts
     vibesys.api._orchestrations.evolve --> vibesys.loops.evolve
     vibesys.api._orchestrations.evolve --> vibesys.run
+    vibesys.api._orchestrations.evolve --> vs_project
     vibesys.api._orchestrations.plain --> vibesys.api._orchestrations._common
     vibesys.api._orchestrations.plain --> vibesys.api.contracts
     vibesys.api._orchestrations.plain --> vibesys.loops.plain
@@ -346,6 +348,7 @@ graph TD
     vibesys.loops.evolve --> vibesys.domains
     vibesys.loops.evolve --> vibesys.evaluators
     vibesys.loops.evolve --> vibesys.loops
+    vibesys.loops.evolve --> vibesys.orchestration
     vibesys.loops.evolve --> vibesys.prompts
     vibesys.loops.evolve --> vibesys.render
     vibesys.loops.evolve --> vibesys.run

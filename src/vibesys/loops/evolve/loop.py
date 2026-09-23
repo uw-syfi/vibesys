@@ -56,6 +56,7 @@ from vibesys.evaluators.input_manifest import (  # noqa: TC001  # tracked: #288
     WorkspaceSource,
 )
 from vibesys.events import FrameworkSource
+from vibesys.loops.evolve.orchestration import compare_resume, descriptor_from_configuration
 from vibesys.loops.evolve.population import (
     Individual,
     Population,
@@ -1591,6 +1592,10 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         skills_dirs=skills_dirs,
         run_environment=run_environment,
         project_configuration=run_configuration,
+        orchestration_descriptor=lambda resolved_profiler: descriptor_from_configuration(
+            run_configuration, profiler=resolved_profiler.value
+        ),
+        orchestration_resume=compare_resume,
         agent_backend=agent_backend,
         cli_provider=cli_provider,
         backend=backend,

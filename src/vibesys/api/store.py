@@ -85,10 +85,11 @@ class _LocalRunStore:
     def _view(self, manifest: RunManifestRecord) -> RunView:
         if isinstance(manifest, RunManifest):
             loop = LoopKind(manifest.configuration.outer_loop)
-        elif (
-            isinstance(manifest, OrchestrationRunManifest) and manifest.orchestration.id == "plain"
-        ):
-            loop = LoopKind.PLAIN
+        elif isinstance(manifest, OrchestrationRunManifest) and manifest.orchestration.id in {
+            LoopKind.PLAIN.value,
+            LoopKind.EVOLVE.value,
+        }:
+            loop = LoopKind(manifest.orchestration.id)
         else:
             raise UnsupportedOrchestrationRunError
         state = load_agent_run_state(self._project, manifest.run_id) or AgentRunState()

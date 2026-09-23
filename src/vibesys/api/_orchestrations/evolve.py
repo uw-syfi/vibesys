@@ -5,14 +5,22 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.api._orchestrations._common import _required_objective, resolved_run_id
+from vibesys.loops.evolve.orchestration import legacy_resume_configuration
 
 if TYPE_CHECKING:
     from vibesys.api.contracts import RunRequest
     from vibesys.run.integration import LocalRunIntegration
+    from vs_project.api import EvolveRunConfiguration, OrchestrationRunManifest
 
 
 class EvolveOrchestration:
     """Preserve the existing evolve loop call contract."""
+
+    def legacy_resume_configuration(
+        self, manifest: OrchestrationRunManifest
+    ) -> EvolveRunConfiguration:
+        """Project v4 settings for the transitional CLI resume path."""
+        return legacy_resume_configuration(manifest)
 
     def execute(self, request: RunRequest, integration: LocalRunIntegration) -> bool:
         from vibesys.loops.evolve.loop import run_evolve_loop  # noqa: PLC0415  # tracked: #288
