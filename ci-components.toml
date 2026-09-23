@@ -1,0 +1,99 @@
+# Cross-component CI policy. Source ownership for Python modules, TypeScript
+# packages, and native packages is discovered from their language manifests.
+
+# Website and third-party content is checked by separate workflows.
+ignored_roots = ["website", "3rd_party", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
+ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
+native_ci_roots = [
+  "resources/evaluators/queue",
+  "resources/evaluators/queue/native_runner",
+  "resources/evaluators/microservice",
+  "examples/data-structures/repositories/queue-rs",
+  "examples/evaluators/priority-queue",
+  "examples/evaluators/priority-queue/native_runner",
+  "examples/starters/priority-queue-rs",
+  "sdk/vs-evaluator/vseval",
+]
+# Every Cargo/go manifest under these evaluator areas needs a CI target.
+native_ci_scope_roots = ["resources/evaluators", "examples/evaluators", "sdk/vs-evaluator"]
+
+[[components]]
+id = "python_support"
+job = "python"
+# Central tests and project tooling are outside Tach's source roots.
+roots = ["tests", "libs", "sdk", "scripts", "packaging", "benchmarks", "resources", "examples"]
+files = ["tach.toml", "pyproject.toml", "uv.lock", "setup.py", "conftest.py", "MANIFEST.in", ".github/delegated-merge.toml", ".github/workflows/delegated-merge.yml"]
+
+[[components]]
+id = "server_protocol"
+files = ["src/server/api/schema.py", "src/server/events.py", "src/server/api/protocol.py", "src/server/controller.py", "src/server/diagnostics.py", "src/server/settings.py"]
+
+[[components]]
+id = "clients"
+job = "tui"
+root = "clients"
+depends_on = ["server_protocol", "bun_fetcher"]
+
+[[components]]
+id = "bun_fetcher"
+files = ["packaging/fetch_bun.py"]
+
+[[components]]
+id = "examples"
+job = "examples"
+roots = ["examples", "docs"]
+files = [".gitmodules", "README.md"]
+depends_on = ["example_validation", "microservice_evaluator"]
+
+[[components]]
+id = "example_validation"
+files = ["src/entrypoints/headless.py", "src/vibesys/run/project_policy.py", "scripts/example_repositories.py", "tests/vibesys/test_microservice_inputs.py", "tests/vibesys/test_input_sources.py", "tests/examples/test_example_registry.py", "tests/support/example_registry.py"]
+roots = ["src/vibesys/evaluators"]
+
+[[components]]
+id = "agent_image"
+job = "agent_image"
+roots = ["src/vibesys/sandbox/images", "libs/vs-sandbox"]
+files = ["src/vibesys/sandbox/images.py", "src/vibesys/agents/provider_policy.py"]
+
+[[components]]
+id = "microservice_evaluator"
+roots = ["resources/evaluators/microservice"]
+
+[[edges]]
+from = "native:sdk/vs-evaluator/vseval"
+to = "native:resources/evaluators/microservice"
+
+[[edges]]
+from = "native:sdk/vs-evaluator/vseval"
+to = "native:resources/evaluators/queue"
+
+[[edges]]
+from = "native:resources/evaluators/queue/native_runner"
+to = "native:resources/evaluators/queue"
+
+[[edges]]
+from = "native:examples/evaluators/priority-queue/native_runner"
+to = "native:examples/evaluators/priority-queue"
+
+[[edges]]
+from = "native:examples/data-structures/repositories/queue-rs/verus-mpmc"
+to = "native:examples/data-structures/repositories/queue-rs"
+
+[[components]]
+id = "ci_policy"
+roots = ["support/ci_impact"]
+files = [".github/workflows/test.yml", "ci-components.toml"]
+depends_on = []
+jobs = ["python", "tui", "examples", "agent_image", "evaluators"]
+
+[[components]]
+id = "go_prototype"
+root = "support/ci_impact_go"
+job = "go_prototype"
+depends_on = ["ci_policy"]
+
+[[components]]
+id = "workflow_references"
+job = "examples"
+roots = [".github/workflows"]

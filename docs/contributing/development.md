@@ -180,6 +180,21 @@ work, see [`docs/contributing/openevolve.md`](openevolve.md).
 Every pull request must pass the following gates before it can be merged.
 You can run each one locally before pushing.
 
+The `changes` job selects checks from the component graph in
+`ci-components.toml`. `support/ci_impact/` discovers Python modules from
+`tach.toml`, TypeScript packages from their manifests, and Go and Rust roots
+from `go.mod` and `Cargo.toml`. The top-level graph records cross-component
+effects that those manifests cannot express. The job prints each selection and
+its reason; an unowned changed path fails selection instead of silently
+skipping checks. To inspect a branch's plan locally, run:
+
+```bash
+./support/ci_impact/ci-impact plan
+```
+
+The Go prototype uses the same policy and CLI commands. Run
+`./support/ci_impact_go/ci-impact-go plan` to compare its selections locally.
+
 ### Format
 
 ```bash
@@ -188,11 +203,11 @@ You can run each one locally before pushing.
 
 Runs `ruff format --check` (whitespace, line length, blank lines) and
 `ruff check --select I` (import order) across `src`, `tests`, `examples`,
-`resources`, and `libs`. To auto-fix locally:
+`resources`, `libs`, and `support`. To auto-fix locally:
 
 ```bash
-uv run ruff format src tests examples resources libs
-uv run ruff check --select I --fix src tests examples resources libs
+uv run ruff format src tests examples resources libs support
+uv run ruff check --select I --fix src tests examples resources libs support
 ```
 
 ### Lint

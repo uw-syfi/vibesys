@@ -1,0 +1,13 @@
+# CI impact selector
+
+The [Go prototype](../ci_impact_go/README.md) implements the same policy and CLI for comparison. CI uses this Python implementation to select jobs.
+
+Run `./support/ci_impact/ci-impact plan` from the repository root to compare `main` with `HEAD`. Use `explain PATH` to inspect one path or `validate` to check the graph and tracked-file ownership. Add `--json` to `plan` or `explain` for the full machine-readable plan. CI uses `python3 -m support.ci_impact plan --base BASE_SHA --head HEAD_SHA --event pull_request --github-output PATH`; `merge_group` and `push` are also supported events. An unclassified path or invalid graph exits with status 2.
+
+The utility owns Git diff handling and reverse dependency traversal. It reads Python module ownership and edges from `tach.toml`, pnpm package ownership and workspace dependencies from `clients/*/package.json`, and native package roots from `Cargo.toml` and `go.mod`. It does not parse imports or replace those language tools. The top-level [`ci-components.toml`](../../ci-components.toml) declares shared CI inputs, checked native roots, and cross-component edges that language manifests cannot express.
+
+The output `jobs` object and GitHub outputs use the existing `python`, `tui`, `examples`, `agent_image`, and `evaluators` names. `native_targets` contains registered native manifest roots to check; `native_languages` contains the distinct `go` and `rust` toolchains those roots need; `pnpm_packages` contains affected workspace package names. The workflow selects jobs and toolchains from these outputs.
+
+Run selected native checks with `python3 -m support.ci_impact run-native --targets-json '["resources/evaluators/queue"]'`. The argument must be a nonempty JSON array of registered `native_ci_roots`. Each selected Go root runs `go test -race ./...`; each Cargo root runs formatting, Clippy, and tests. The SDK module path is checked before its Go tests, and the microservice evaluator enables managed-candidate tests. The command runs only the supplied roots and stops at the first failed check.
+
+To add an evaluator package, add its native manifest, register its CI command, and add its root to `native_ci_roots`. Manifests under `native_ci_scope_roots` without a registered target fail selection. To add a cross-component effect, add an `[[edges]]` entry with `from` as the changed dependency and `to` as the affected component. Add shared files or suites outside native package roots as a small named component in `ci-components.toml`. Keep each new path classified, and add an impact test for each non-obvious edge.

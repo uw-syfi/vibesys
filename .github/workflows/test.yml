@@ -35,95 +35,46 @@ jobs:
       examples: ${{ steps.filter.outputs.examples }}
       agent_image: ${{ steps.filter.outputs.agent_image }}
       evaluators: ${{ steps.filter.outputs.evaluators }}
+      native_targets: ${{ steps.filter.outputs.native_targets }}
+      native_languages: ${{ steps.filter.outputs.native_languages }}
+      go_prototype: ${{ steps.filter.outputs.go_prototype }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        id: filter
         with:
-          # merge_group is handled natively by paths-filter (diffs the queue
-          # branch head_sha against the group's base_sha).
-          filters: |
-            # What `python-checks` actually reads: `ruff`'s
-            # source roots (`[tool.ruff] src` in pyproject.toml), the dirs
-            # `check_format.sh` also formats, and dependency/lint config.
-            # Deliberately coarse rather than chasing every edge case (e.g.
-            # `check_doc_links.py` also covers Markdown under `clients/`): the
-            # job is cheap, so an occasional unnecessary run costs less than
-            # the upkeep of a fully precise filter.
-            python:
-              - 'src/**'
-              - 'tests/**'
-              - 'libs/**'
-              - 'sdk/**'
-              - 'scripts/**'
-              - 'packaging/**'
-              - 'tach.toml'
-              - '.github/delegated-merge.toml'
-              - '.github/workflows/delegated-merge.yml'
-              - 'examples/**'
-              - 'resources/**'
-              - '*.py'
-              - 'pyproject.toml'
-              - 'uv.lock'
-              - '.github/workflows/test.yml'
-            # Mirrors the rebuild watch set the repository launcher uses in
-            # src/entrypoints/launcher.py: the TUI is affected by the TypeScript
-            # workspace itself and by the Python modules that feed the
-            # generated protocol bindings, and by nothing else.
-            tui:
-              - 'clients/**'
-              - 'src/server/api/schema.py'
-              - 'src/server/events.py'
-              - 'src/server/api/protocol.py'
-              - 'src/server/controller.py'
-              - 'src/server/diagnostics.py'
-              - 'src/server/settings.py'
-              - 'packaging/fetch_bun.py'
-              - '.github/workflows/test.yml'
-            # What `validate-examples` checks: the example repositories
-            # themselves (a submodule bump shows up as a change to the gitlink
-            # path under examples/), the two validators, and the fetcher that
-            # materializes the external repositories.
-            examples:
-              - 'examples/**'
-              - '.gitmodules'
-              - 'src/entrypoints/headless.py'
-              - 'src/vibesys/evaluators/input_manifest.py'
-              - 'src/vibesys/evaluators/**'
-              - 'resources/evaluators/microservice/**'
-              - 'scripts/example_repositories.py'
-              - 'tests/vibesys/test_microservice_inputs.py'
-              - 'tests/vibesys/test_input_sources.py'
-              - 'tests/examples/test_example_registry.py'
-              - 'tests/support/example_registry.py'
-              - 'src/vibesys/run/project_policy.py'
-              # Scanned for stale `examples/...` path references.
-              - 'docs/**'
-              - 'README.md'
-              - '.github/workflows/*.yml'
-            # The agent image build: its Dockerfile, the module that builds
-            # it, the version pins it takes as build args, and the Docker
-            # sandbox backend the conformance test in the agent-image job
-            # exercises against the built image.
-            agent_image:
-              - 'src/vibesys/sandbox/images/**'
-              - 'src/vibesys/sandbox/images.py'
-              - 'src/vibesys/agents/provider_policy.py'
-              - 'libs/vs-sandbox/**'
-              - '.github/workflows/test.yml'
-            # What `queue-native` builds and tests: the queue evaluator and its
-            # native runner, the queue and priority-queue reference
-            # candidates, the evaluator SDK, and the microservice evaluator.
-            evaluators:
-              - 'resources/evaluators/queue/**'
-              - 'resources/evaluators/microservice/**'
-              - 'examples/data-structures/repositories/queue-rs/**'
-              - 'examples/evaluators/priority-queue/**'
-              - 'examples/starters/priority-queue-rs/**'
-              - 'sdk/vs-evaluator/vseval/**'
-              - '.github/workflows/test.yml'
+          fetch-depth: 0
+
+      - name: Select affected CI jobs
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request)
+              base="$PR_BASE_SHA"
+              head="$PR_HEAD_SHA"
+              ;;
+            merge_group)
+              base="$GROUP_BASE_SHA"
+              head="$GROUP_HEAD_SHA"
+              ;;
+            push)
+              base="$PUSH_BEFORE_SHA"
+              head="$PUSH_AFTER_SHA"
+              ;;
+            *)
+              echo "Unsupported CI event: $EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+          python3 -m support.ci_impact plan --event "$EVENT_NAME" --base "$base" --head "$head" --github-output "$GITHUB_OUTPUT"
 
   # One environment setup for every cheap Python check. Issue #89 split these
   # apart so a failure names the check that failed; each check is still its own
@@ -332,7 +283,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Require selected native targets
+        env:
+          NATIVE_TARGETS: ${{ needs.changes.outputs.native_targets }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          targets = json.loads(os.environ["NATIVE_TARGETS"])
+          if not isinstance(targets, list) or not targets:
+              raise SystemExit("queue-native was selected without native targets")
+          PY
+
       - name: Set up Go
+        if: contains(fromJSON(needs.changes.outputs.native_languages), 'go')
         uses: actions/setup-go@v5
         with:
           go-version-file: resources/evaluators/queue/go.mod
@@ -346,6 +311,7 @@ jobs:
       # minutes each and never reached a test. A timeout turns that into a
       # legible failure in minutes instead of a job that burns hours.
       - name: Install managed-candidate containment dependency
+        if: contains(fromJSON(needs.changes.outputs.native_targets), 'resources/evaluators/microservice')
         timeout-minutes: 10
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -356,86 +322,32 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Set up Rust
+        if: contains(fromJSON(needs.changes.outputs.native_languages), 'rust')
         uses: dtolnay/rust-toolchain@1.78.0
         with:
           components: clippy, rustfmt
 
-      - name: Check native runner formatting
-        working-directory: resources/evaluators/queue/native_runner
-        run: cargo fmt -- --check
-
-      - name: Lint native runner
-        working-directory: resources/evaluators/queue/native_runner
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      - name: Test native runner
-        working-directory: resources/evaluators/queue/native_runner
-        run: cargo test --locked
-
-      - name: Check queue candidate formatting
-        working-directory: examples/data-structures/repositories/queue-rs
-        run: cargo fmt -- --check
-
-      - name: Lint queue candidate
-        working-directory: examples/data-structures/repositories/queue-rs
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      - name: Test queue candidate
-        working-directory: examples/data-structures/repositories/queue-rs
-        run: cargo test --locked
-
-      # The SDK is consumed by `go get`, so a module path that disagrees with
-      # its directory fails only for outside consumers and never for us.
-      - name: Check evaluator SDK module path
-        run: |
-          declared=$(sed -n 's/^module //p' sdk/vs-evaluator/vseval/go.mod)
-          expected=github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval
-          if [ "$declared" != "$expected" ]; then
-            echo "go.mod declares $declared but its directory requires $expected"
-            exit 1
-          fi
-
-      - name: Test evaluator SDK
-        working-directory: sdk/vs-evaluator/vseval
-        run: go test -race ./...
-
-      - name: Test queue evaluator
-        working-directory: resources/evaluators/queue
-        run: go test -race ./...
-
-      - name: Check priority-queue native runner formatting
-        working-directory: examples/evaluators/priority-queue/native_runner
-        run: cargo fmt -- --check
-
-      - name: Lint priority-queue native runner
-        working-directory: examples/evaluators/priority-queue/native_runner
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      - name: Test priority-queue native runner
-        working-directory: examples/evaluators/priority-queue/native_runner
-        run: cargo test --locked
-
-      - name: Check priority-queue starter formatting
-        working-directory: examples/starters/priority-queue-rs
-        run: cargo fmt -- --check
-
-      - name: Lint priority-queue starter
-        working-directory: examples/starters/priority-queue-rs
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      - name: Test priority-queue starter
-        working-directory: examples/starters/priority-queue-rs
-        run: cargo test --locked
-
-      - name: Test priority-queue evaluator
-        working-directory: examples/evaluators/priority-queue
-        run: go test -race ./...
-
-      - name: Test microservice evaluator
-        working-directory: resources/evaluators/microservice
+      - name: Check selected native targets
         env:
-          VIBESYS_REQUIRE_MANAGED_CANDIDATE_TESTS: "1"
-        run: go test -race ./...
+          NATIVE_TARGETS: ${{ needs.changes.outputs.native_targets }}
+        run: python3 -m support.ci_impact run-native --targets-json "$NATIVE_TARGETS"
+
+  go-impact-prototype:
+    needs: changes
+    if: needs.changes.outputs.go_prototype == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/ci_impact_go/go.mod
+
+      - name: Test Go impact prototype
+        working-directory: support/ci_impact_go
+        run: go test ./...
 
   # Owns everything that needs a repository-native example's external repository `.vibesys` directory,
   # so no other job pays for one. It fetches `.vibesys/` alone (blob-filtered,
@@ -548,10 +460,6 @@ jobs:
       needs.changes.outputs.python == 'true' ||
       needs.changes.outputs.tui == 'true'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12"]
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -563,8 +471,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+      - name: Set up Python
+        run: uv python install 3.12
 
       - name: Install dependencies
         run: uv sync --dev
@@ -592,7 +500,6 @@ jobs:
         run: uv run python scripts/check_coverage_floor.py coverage.json
 
       - name: Upload coverage report
-        if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-xml
@@ -691,6 +598,7 @@ jobs:
       - typecheck
       - tui
       - queue-native
+      - go-impact-prototype
       - validate-examples
       - agent-image
       - test
@@ -750,6 +658,7 @@ jobs:
       - python-checks
       - tui
       - queue-native
+      - go-impact-prototype
       - validate-examples
       - agent-image
       - test

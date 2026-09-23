@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$(dirname "$0")"
+CI_IMPACT_ROOT="$repo_root" exec go run . "$@"
