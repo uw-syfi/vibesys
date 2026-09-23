@@ -83,6 +83,7 @@ graph TD
     vibesys.api._orchestrations.agent --> vibesys.api._orchestrations._common
     vibesys.api._orchestrations.agent --> vibesys.api.contracts
     vibesys.api._orchestrations.agent --> vibesys.loops.agent
+    vibesys.api._orchestrations.agent --> vibesys.orchestration
     vibesys.api._orchestrations.agent --> vibesys.run
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.agent
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.contracts
@@ -95,6 +96,7 @@ graph TD
     vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations._common
     vibesys.api._orchestrations.evolve --> vibesys.api.contracts
     vibesys.api._orchestrations.evolve --> vibesys.loops.evolve
+    vibesys.api._orchestrations.evolve --> vibesys.orchestration
     vibesys.api._orchestrations.evolve --> vibesys.run
     vibesys.api._orchestrations.plain --> vibesys.api._orchestrations._common
     vibesys.api._orchestrations.plain --> vibesys.api.contracts
@@ -281,6 +283,7 @@ graph TD
     vibesys.api._orchestrations.agent --> vibesys.api._orchestrations._common
     vibesys.api._orchestrations.agent --> vibesys.api.contracts
     vibesys.api._orchestrations.agent --> vibesys.loops.agent
+    vibesys.api._orchestrations.agent --> vibesys.orchestration
     vibesys.api._orchestrations.agent --> vibesys.run
     vibesys.api._orchestrations.agent --> vs_project
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.agent
@@ -295,6 +298,7 @@ graph TD
     vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations._common
     vibesys.api._orchestrations.evolve --> vibesys.api.contracts
     vibesys.api._orchestrations.evolve --> vibesys.loops.evolve
+    vibesys.api._orchestrations.evolve --> vibesys.orchestration
     vibesys.api._orchestrations.evolve --> vibesys.run
     vibesys.api._orchestrations.evolve --> vs_project
     vibesys.api._orchestrations.plain --> vibesys.api._orchestrations._common

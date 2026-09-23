@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.orchestration import OrchestrationResumeDecision
+from vibesys.orchestration import (
+    OrchestrationResumeDecision,
+    ResumeConfigSnapshot,
+    ResumeProjection,
+)
 from vs_project.api import (
     AgentRunConfiguration,
     OrchestrationDescriptor,
@@ -147,14 +151,27 @@ def compare_resume_descriptors(
     return OrchestrationResumeDecision(descriptor=None)
 
 
-def configuration_from_manifest(manifest: OrchestrationRunManifest) -> AgentRunConfiguration:
-    """Project v4 agent options into the existing CLI configuration contract.
-
-    This adapter is temporary while CLI restoration accepts the v3 shape.
-    Agent policy validation happens in this module before that projection.
-    """
+def resume_projection(manifest: OrchestrationRunManifest) -> ResumeProjection:
+    """Project validated agent options directly into CLI resume settings."""
     options = options_from_descriptor(manifest.orchestration)
-    payload = options.model_dump(mode="json")
-    payload["outer_loop"] = manifest.orchestration.id
-    payload["run_environment"] = manifest.run_environment.model_dump(mode="json")
-    return AgentRunConfiguration.model_validate_json(json.dumps(payload))
+    return ResumeProjection(
+        orchestration_id=manifest.orchestration.id,
+        run_environment=manifest.run_environment,
+        config=ResumeConfigSnapshot.model_validate(options.model_dump()),
+        cli_values={
+            "agent_backend": options.agent_backend,
+            "cli_provider": options.cli_provider,
+            "backend": options.compute_backend,
+            "profiler": options.profiler,
+            "modality": options.modality,
+            "inner_loop": options.inner_loop,
+            "interface": options.interface,
+            "max_retries_per_round": options.max_retries_per_round,
+            "judge_every": options.judge_every,
+            "official_eval_every": options.official_eval_every,
+            "memory_layout": options.memory_layout,
+            "constraint": options.operator_constraints,
+        },
+        budget_destination="max_rounds",
+        budget_value=options.max_rounds,
+    )

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Literal
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.orchestration import (
     AGENT_ORCHESTRATION_IDS,
-    configuration_from_manifest,
+    options_from_descriptor,
 )
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
@@ -41,7 +41,7 @@ def agent_run_objectives(manifest: RunManifestRecord) -> tuple[str, ...] | None:
     if isinstance(manifest, OrchestrationRunManifest):
         if manifest.orchestration.id not in AGENT_ORCHESTRATION_IDS:
             return None
-        return configuration_from_manifest(manifest).objectives
+        return options_from_descriptor(manifest.orchestration).objectives
     if isinstance(manifest.configuration, AgentRunConfiguration):
         return manifest.configuration.objectives
     return None
@@ -63,13 +63,14 @@ def load_agent_run_state(project: Project, run_id: str) -> AgentRunState | None:
     if isinstance(manifest, OrchestrationRunManifest):
         if manifest.orchestration.id != _AGENT_OUTER_LOOP:
             return None
-        configuration = configuration_from_manifest(manifest)
+        objectives = options_from_descriptor(manifest.orchestration).objectives
     else:
         configuration = manifest.configuration
-    if not isinstance(configuration, AgentRunConfiguration):
-        return None
-    if configuration.outer_loop != _AGENT_OUTER_LOOP:
-        return None
+        if not isinstance(configuration, AgentRunConfiguration):
+            return None
+        if configuration.outer_loop != _AGENT_OUTER_LOOP:
+            return None
+        objectives = configuration.objectives
     portable = project.state.portable_namespace(run_id, "agent")
     store = AgentRunStateStore(portable)
     state = store.load_optional()
@@ -86,7 +87,7 @@ def load_agent_run_state(project: Project, run_id: str) -> AgentRunState | None:
         legacy_space=MetricSpace(
             objectives=tuple(
                 Objective(name=name, direction=direction)
-                for name, direction in _metric_directions(configuration.objectives).items()
+                for name, direction in _metric_directions(objectives).items()
             )
         ),
     )

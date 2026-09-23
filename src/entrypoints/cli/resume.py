@@ -155,7 +155,11 @@ def _set_resume_cli_value(
     destination: str,
     value: object,
 ) -> None:
-    if destination == "objective":
+    if destination == "agent_backend":
+        is_stub = value == "stub"
+        args.stub_agent = is_stub
+        value = None if is_stub else value
+    elif destination == "objective":
         value = [_parse_cli_objective(item) for item in cast("tuple[str, ...]", value)]
     elif destination == "constraint":
         value = list(cast("tuple[str, ...]", value))
@@ -288,10 +292,19 @@ def _restore_v4_resume_cli_args(
     for destination, expected in projection.cli_values.items():
         if not hasattr(args, destination):
             continue
-        if destination in explicit:
-            requested = _normalized_resume_cli_value(destination, getattr(args, destination))
+        is_explicit = destination in explicit or (
+            destination == "agent_backend" and "stub_agent" in explicit
+        )
+        if is_explicit:
+            requested = (
+                "stub"
+                if destination == "agent_backend" and args.stub_agent
+                else _normalized_resume_cli_value(destination, getattr(args, destination))
+            )
             if requested != expected:
-                changed.append(destination)
+                changed.append(
+                    "operator_constraints" if destination == "constraint" else destination
+                )
         else:
             _set_resume_cli_value(args, destination, expected)
     if changed:

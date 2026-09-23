@@ -8,7 +8,11 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.orchestration import OrchestrationResumeDecision
+from vibesys.orchestration import (
+    OrchestrationResumeDecision,
+    ResumeConfigSnapshot,
+    ResumeProjection,
+)
 from vs_project.api import (
     EvolveRunConfiguration,
     OrchestrationDescriptor,
@@ -145,16 +149,36 @@ def compare_resume(
     return OrchestrationResumeDecision(descriptor=requested, requires_clean_workspace=True)
 
 
-def legacy_resume_configuration(manifest: OrchestrationRunManifest) -> EvolveRunConfiguration:
-    """Adapt a version 4 evolve run to existing CLI configuration restoration."""
+def resume_projection(manifest: OrchestrationRunManifest) -> ResumeProjection:
+    """Project validated evolve options directly into CLI resume settings."""
     options = options_from_descriptor(manifest.orchestration)
-    return EvolveRunConfiguration.model_validate_json(
-        json.dumps(
-            {
-                "outer_loop": "evolve",
-                "run_environment": manifest.run_environment.model_dump(mode="json"),
-                **options.model_dump(mode="json"),
-            }
-        ),
-        strict=True,
+    return ResumeProjection(
+        orchestration_id="evolve",
+        run_environment=manifest.run_environment,
+        config=ResumeConfigSnapshot.model_validate(options.model_dump()),
+        cli_values={
+            "agent_backend": options.agent_backend,
+            "cli_provider": options.cli_provider,
+            "backend": options.compute_backend,
+            "profiler": options.profiler,
+            "modality": options.modality,
+            "children_per_generation": options.children_per_generation,
+            "k_top_inspirations": options.k_top_inspirations,
+            "k_random_inspirations": options.k_random_inspirations,
+            "selection_temperature": options.selection_temperature,
+            "seed": options.seed,
+            "search_policy": options.search_policy,
+            "openevolve_population_size": options.openevolve_population_size,
+            "openevolve_archive_size": options.openevolve_archive_size,
+            "openevolve_num_islands": options.openevolve_num_islands,
+            "openevolve_migration_interval": options.openevolve_migration_interval,
+            "openevolve_migration_rate": options.openevolve_migration_rate,
+            "frontier_bias": options.frontier_bias,
+            "bootstrap_max_attempts": options.bootstrap_max_attempts,
+            "keep_deployments": options.keep_deployments,
+            "max_parallelism": options.max_parallelism,
+            "objective": options.objectives,
+        },
+        budget_destination="max_generations",
+        budget_value=options.max_generations,
     )
