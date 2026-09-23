@@ -46,6 +46,7 @@ from vibesys.events import (
     PhaseData,
     json_value,
 )
+from vibesys.orchestration import OrchestrationResumeDecision
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     ProfilerKind,
@@ -91,6 +92,7 @@ from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     build_run_environment,
     make_run_environment_spec,
+    run_environment_record,
 )
 from vibesys.skills import platform_skill_selection
 from vs_agent.api import (
@@ -104,6 +106,8 @@ from vs_agent.api import (
     task_agent_host_resources,
 )
 from vs_project.api import (
+    OrchestrationDescriptor,
+    OrchestrationRunManifest,
     Project,
     RunConfiguration,
     RunManifest,
@@ -114,6 +118,11 @@ from vs_project.api import (
 from vs_sandbox.api import HostResource
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class _MissingOrchestrationContractError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("run requires configuration for its recorded manifest version")
 
 
 def _attempt_from_label(round_label: str) -> int | None:
@@ -197,6 +206,41 @@ def _resume_configuration_update(
     )
 
 
+def _resume_orchestration_decision(
+    recorded: OrchestrationRunManifest,
+    requested: OrchestrationDescriptor,
+    environment: RunEnvironmentSpec,
+    resume_policy: Callable[
+        [OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision
+    ],
+) -> OrchestrationResumeDecision:
+    """Check the generic v4 identity and delegate option policy to its owner."""
+    if recorded.run_environment != run_environment_record(environment):
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message="resuming a run cannot change its recorded run_environment",
+            )
+        )
+    if (recorded.orchestration.id, recorded.orchestration.config_version) != (
+        requested.id,
+        requested.config_version,
+    ):
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message=(
+                    f"run uses orchestration {recorded.orchestration.id!r} version "
+                    f"{recorded.orchestration.config_version}, not {requested.id!r} "
+                    f"version {requested.config_version}"
+                ),
+            )
+        )
+    return resume_policy(recorded.orchestration, requested)
+
+
 @overload
 def _coerce_dir_path(raw: str, label: str) -> str: ...
 
@@ -243,7 +287,12 @@ def create_run_context(  # noqa: PLR0913  # tracked: #288
     benchmark_output_argument: str | None = None,
     objective: str | None = None,
     existing: bool = False,
-    project_configuration: RunConfiguration,
+    project_configuration: RunConfiguration | None = None,
+    orchestration_descriptor: Callable[[ProfilerKind], OrchestrationDescriptor] | None = None,
+    orchestration_resume: Callable[
+        [OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision
+    ]
+    | None = None,
     trusted_input_baseline: str | None = None,
     debug: bool = False,
     profiler_kind: ProfilerKind = ProfilerKind.AUTO,
@@ -286,6 +335,8 @@ def create_run_context(  # noqa: PLR0913  # tracked: #288
             objective=objective,
             existing=existing,
             project_configuration=project_configuration,
+            orchestration_descriptor=orchestration_descriptor,
+            orchestration_resume=orchestration_resume,
             trusted_input_baseline=trusted_input_baseline,
             debug=debug,
             profiler_kind=profiler_kind,
@@ -336,7 +387,12 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
     benchmark_output_argument: str | None,
     objective: str | None,
     existing: bool,
-    project_configuration: RunConfiguration,
+    project_configuration: RunConfiguration | None,
+    orchestration_descriptor: Callable[[ProfilerKind], OrchestrationDescriptor] | None,
+    orchestration_resume: Callable[
+        [OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision
+    ]
+    | None,
     trusted_input_baseline: str | None,
     debug: bool,
     profiler_kind: ProfilerKind,
@@ -596,21 +652,20 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             )
             git.init(existing, trusted_input_baseline=trusted_input_baseline)
         with boot_trace.span("project_state_resume"):
-            effective_configuration = project_configuration.model_copy(
-                update={"profiler": resolved_profiler_kind.value}
+            effective_configuration = (
+                project_configuration.model_copy(update={"profiler": resolved_profiler_kind.value})
+                if project_configuration is not None
+                else None
+            )
+            effective_orchestration = (
+                orchestration_descriptor(resolved_profiler_kind)
+                if orchestration_descriptor is not None
+                else None
             )
             round_transaction_coordinator: RoundTransactionCoordinator | None = None
             if existing:
                 project_state.load_project()
                 run_manifest = project_state.load_run(run_id)
-                if not isinstance(run_manifest, RunManifest):
-                    raise ConfigurationError(
-                        ConfigurationDiagnostic(
-                            code="project_resume_configuration_mismatch",
-                            stage="resume_resolution",
-                            message=f"run {run_id!r} uses a version 4 orchestration descriptor",
-                        )
-                    )
                 if git.trusted_input_baseline is None:
                     git.configure_trusted_input_baseline(run_manifest.trusted_input_baseline)
                 elif git.trusted_input_baseline != run_manifest.trusted_input_baseline:
@@ -647,44 +702,80 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                             ),
                         )
                     )
-                configuration_update = _resume_configuration_update(
-                    run_manifest.configuration,
-                    effective_configuration,
-                )
-                if configuration_update is not None:
-                    limit_field = (
-                        "max_generations"
-                        if run_manifest.configuration.outer_loop == "evolve"
-                        else "max_rounds"
+                if isinstance(run_manifest, RunManifest):
+                    if effective_configuration is None:
+                        raise _MissingOrchestrationContractError
+                    configuration_update = _resume_configuration_update(
+                        run_manifest.configuration,
+                        effective_configuration,
                     )
-                    limit_increased = getattr(configuration_update, limit_field) > getattr(
-                        run_manifest.configuration, limit_field
-                    )
-                    if limit_increased:
-                        pending = git.pending_changes()
-                        if pending:
-                            raise ConfigurationError(
-                                ConfigurationDiagnostic(
-                                    code="project_resume_configuration_dirty",
-                                    stage="resume_resolution",
-                                    message=(
-                                        "commit or discard pending project changes before increasing "
-                                        f"the run limit: {', '.join(pending)}"
-                                    ),
+                    if configuration_update is not None:
+                        limit_field = (
+                            "max_generations"
+                            if run_manifest.configuration.outer_loop == "evolve"
+                            else "max_rounds"
+                        )
+                        limit_increased = getattr(configuration_update, limit_field) > getattr(
+                            run_manifest.configuration, limit_field
+                        )
+                        if limit_increased:
+                            pending = git.pending_changes()
+                            if pending:
+                                raise ConfigurationError(
+                                    ConfigurationDiagnostic(
+                                        code="project_resume_configuration_dirty",
+                                        stage="resume_resolution",
+                                        message=(
+                                            "commit or discard pending project changes before increasing "
+                                            f"the run limit: {', '.join(pending)}"
+                                        ),
+                                    )
                                 )
+                        project_state.update_run_configuration(run_id, configuration_update)
+                        snapshot = project_state.run_manifest_snapshot(run_id)
+                        if limit_increased:
+                            git.snapshot_with_framework_metadata(
+                                "vibesys: update run configuration",
+                                snapshot,
                             )
-                    project_state.update_run_configuration(run_id, configuration_update)
-                    snapshot = project_state.run_manifest_snapshot(run_id)
-                    if limit_increased:
-                        git.snapshot_with_framework_metadata(
-                            "vibesys: update run configuration",
-                            snapshot,
-                        )
-                    else:
-                        git.snapshot_framework_metadata_only(
-                            "vibesys: migrate run configuration",
-                            snapshot,
-                        )
+                        else:
+                            git.snapshot_framework_metadata_only(
+                                "vibesys: migrate run configuration",
+                                snapshot,
+                            )
+                else:
+                    if effective_orchestration is None or orchestration_resume is None:
+                        raise _MissingOrchestrationContractError
+                    decision = _resume_orchestration_decision(
+                        run_manifest,
+                        effective_orchestration,
+                        run_environment_spec,
+                        orchestration_resume,
+                    )
+                    if decision.descriptor is not None:
+                        if decision.requires_clean_workspace:
+                            pending = git.pending_changes()
+                            if pending:
+                                raise ConfigurationError(
+                                    ConfigurationDiagnostic(
+                                        code="project_resume_configuration_dirty",
+                                        stage="resume_resolution",
+                                        message=(
+                                            "commit or discard pending project changes before increasing "
+                                            f"the run limit: {', '.join(pending)}"
+                                        ),
+                                    )
+                                )
+                        project_state.update_run_orchestration(run_id, decision.descriptor)
+                        snapshot = project_state.run_manifest_snapshot(run_id)
+                        if decision.requires_clean_workspace:
+                            git.snapshot_with_framework_metadata(
+                                "vibesys: update run orchestration", snapshot
+                            )
+                        else:
+                            git.snapshot_framework_metadata_only(
+                                "vibesys: migrate run orchestration", snapshot
+                            )
                 project_state.set_current_run(run_id)
             else:
                 project_state.create_project(project_root.name)
@@ -696,15 +787,29 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                             message="Git did not provide the project run branch-point commit",
                         )
                     )
-                run_manifest = project_state.new_run_manifest(
-                    exp_name,
-                    task_name=task_name,
-                    run_id=run_id,
-                    branch=git.project_branch,
-                    vibesys_version=_installed_vibesys_version(),
-                    configuration=effective_configuration,
-                    trusted_input_baseline=git.trusted_input_baseline,
-                )
+                if effective_orchestration is not None:
+                    run_manifest = project_state.new_orchestration_run_manifest(
+                        exp_name,
+                        task_name=task_name,
+                        run_id=run_id,
+                        branch=git.project_branch,
+                        vibesys_version=_installed_vibesys_version(),
+                        run_environment=run_environment_record(run_environment_spec),
+                        orchestration=effective_orchestration,
+                        trusted_input_baseline=git.trusted_input_baseline,
+                    )
+                else:
+                    if effective_configuration is None:
+                        raise _MissingOrchestrationContractError
+                    run_manifest = project_state.new_run_manifest(
+                        exp_name,
+                        task_name=task_name,
+                        run_id=run_id,
+                        branch=git.project_branch,
+                        vibesys_version=_installed_vibesys_version(),
+                        configuration=effective_configuration,
+                        trusted_input_baseline=git.trusted_input_baseline,
+                    )
                 project_state.create_run(run_manifest)
                 git.snapshot_with_framework_metadata(
                     f"vibesys: initialize run {run_id}",

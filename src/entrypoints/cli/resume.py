@@ -17,16 +17,16 @@ from entrypoints.cli.constants import (
 from entrypoints.cli.errors import _configuration_error, _project_resume_mismatch
 from entrypoints.cli.loops import _migrate_run_environment_command, _resolve_project_root
 from vibesys.api import ComputeBackend, ProfilerKind
-from vibesys.api.request import coerce_profiler_kind
+from vibesys.api.request import coerce_profiler_kind, legacy_resume_configuration
 from vs_project.api import (
     AgentRunConfiguration,
     GitTracker,
     NullGitTrackerEvents,
+    OrchestrationRunManifest,
     PlainRunConfiguration,
     Project,
     ProjectStateError,
     RunConfiguration,
-    RunManifest,
     RunSchemaMigrationRequiredError,
 )
 
@@ -314,12 +314,10 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
             stage="resume_resolution",
         )
     args.resume = run_id
-    if not isinstance(run_manifest, RunManifest):
-        _configuration_error(
-            "This CLI cannot resume a version 4 orchestration run yet",
-            code="project_resume_configuration_mismatch",
-            stage="resume_resolution",
-        )
+    if isinstance(run_manifest, OrchestrationRunManifest):
+        recorded_configuration = legacy_resume_configuration(run_manifest)
+    else:
+        recorded_configuration = run_manifest.configuration
     args.exp_name = run_id
     args.input = project_root
     if run_manifest.task_name is not None:
@@ -330,5 +328,5 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
                 stage="resume_resolution",
             )
         args.task = run_manifest.task_name
-    args.project_run_configuration = run_manifest.configuration
-    _restore_project_resume_cli_args(args, run_manifest.configuration, loop_kind=loop_kind)
+    args.project_run_configuration = recorded_configuration
+    _restore_project_resume_cli_args(args, recorded_configuration, loop_kind=loop_kind)

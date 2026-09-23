@@ -36,6 +36,7 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.events import CoreEventType, RunStartedData
 from vibesys.loops.metrics import MetricSpace, Objective
+from vibesys.loops.plain.orchestration import descriptor_from_configuration
 from vibesys.loops.roles import EXPECTED_AGENT_ROLES
 from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import run_environment_record
@@ -43,6 +44,7 @@ from vs_project.api import (
     RUN_SCHEMA_VERSION,
     AgentRunConfiguration,
     EvolveRunConfiguration,
+    OrchestrationRunManifest,
     PlainRunConfiguration,
     Project,
     RunConfiguration,
@@ -1423,6 +1425,43 @@ def test_plain_resume_restores_its_configuration(
     assert args.cli_provider == "claude"
     assert args.backend is ComputeBackend.CPU
     assert args.profiler is ProfilerKind.NONE
+
+
+def test_v4_plain_resume_restores_options_and_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _write_input_project(tmp_path)
+    run_id = "20260811-120000-11111111-plain-v4"
+    configuration = _plain_configuration()
+    store = Project.open(project).state
+    store.create_project(project.name)
+    manifest = store.new_orchestration_run_manifest(
+        project.name,
+        run_id=run_id,
+        branch=f"vibesys-runs/{run_id}",
+        vibesys_version="0.2.0-test",
+        run_environment=configuration.run_environment,
+        orchestration=descriptor_from_configuration(configuration, profiler="none"),
+        trusted_input_baseline="0" * 40,
+        now=datetime(2026, 8, 11, 12, tzinfo=UTC),
+    )
+    store.create_run(manifest)
+    assert isinstance(store.load_run(run_id), OrchestrationRunManifest)
+    monkeypatch.chdir(project)
+
+    args = parse_cli_invocation(["--outer-loop", "plain", "--resume", run_id]).args
+    raised = parse_cli_invocation(
+        ["--outer-loop", "plain", "--resume", run_id, "--max-rounds", "7"]
+    ).args
+
+    assert args.max_rounds == 6
+    assert args.max_attempts_per_issue == 4
+    assert args.max_issues_per_perf_eval == 2
+    assert args.cli_provider == "claude"
+    assert raised.max_rounds == 7
+    with pytest.raises(ConfigurationError, match="cannot decrease"):
+        parse_cli_invocation(["--outer-loop", "plain", "--resume", run_id, "--max-rounds", "5"])
 
 
 def test_evolve_resume_restores_its_configuration(
