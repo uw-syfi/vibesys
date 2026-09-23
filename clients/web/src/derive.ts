@@ -466,37 +466,70 @@ function summarize(entry: TranscriptEntry): ToolResultSummary | null {
   return null;
 }
 
-function toolLabel(entry: TranscriptEntry): [string, string | null] {
+/** A flag, an operator, a redirect, an assignment, a quoted word: not a path the command named. */
+const NOT_A_PATH = /^[-<>|&;]|^\d*[<>]|[='"$()]/;
+/** `src/lib.rs`, `~/.cache/uv`, `Cargo.toml`: a path, or a bare name with a short extension. */
+const A_PATH = /\/|\.[A-Za-z0-9]{1,5}$/;
+
+/**
+ * A command's shape rather than its text: the executable and the first path it names, cut to
+ * that path's last two segments. Everything a row drops here is in its tooltip.
+ */
+function bashTarget(command: string): string | null {
+  const tokens = command
+    .trim()
+    .split(/\s+/)
+    .map(token => token.replace(/^['"]+|['";,]+$/g, ''));
+  // `TMPDIR=/tmp make …`: the assignments in front of a command are not the command.
+  while (/^\w+=/.test(tokens[0] ?? '')) tokens.shift();
+  const executable = tokens.shift();
+  if (!executable) return null;
+  const path = tokens.find(token => token !== '' && !NOT_A_PATH.test(token) && A_PATH.test(token));
+  if (path === undefined) return executable;
+  const parts = path.replace(/\/+$/, '').split('/');
+  return `${executable} ${parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : parts.join('/')}`;
+}
+
+/** The row's verb, what it shows for a target, and the whole target when it shows less. */
+function toolLabel(entry: TranscriptEntry): [string, string | null, string | null] {
   const args = entry.toolArguments ?? {};
   const text = (key: string): string | null => {
     const value = args[key];
     return typeof value === 'string' ? value : null;
   };
+  const plainly = (verb: string, arg: string | null): [string, string | null, null] => [
+    verb,
+    arg,
+    null,
+  ];
   switch (entry.toolName) {
-    case 'Bash':
-      return [text('description') ?? 'Ran a command', text('command')];
+    case 'Bash': {
+      const command = text('command');
+      const target = command === null ? null : bashTarget(command);
+      return [text('description') ?? 'Ran a command', target, target === command ? null : command];
+    }
     case 'Write':
-      return ['Wrote', text('file_path')];
+      return plainly('Wrote', text('file_path'));
     case 'Edit':
     case 'MultiEdit':
-      return ['Edited', text('file_path')];
+      return plainly('Edited', text('file_path'));
     case 'Read':
-      return ['Read', text('file_path')];
+      return plainly('Read', text('file_path'));
     case 'Grep':
     case 'Glob':
-      return ['Searched', text('pattern')];
+      return plainly('Searched', text('pattern'));
     case 'StructuredOutput':
-      return [
+      return plainly(
         entry.agentKind === 'implementer'
           ? 'Returned the attempt report'
           : 'Returned structured output',
         null,
-      ];
+      );
     case undefined:
-      return ['Tool call', entry.toolCall?.replace(/^\s*→\s*/, '').trim() || null];
+      return plainly('Tool call', entry.toolCall?.replace(/^\s*→\s*/, '').trim() || null);
     default: {
       const first = Object.values(args).find(value => typeof value === 'string');
-      return [entry.toolName, typeof first === 'string' ? first : null];
+      return plainly(entry.toolName, typeof first === 'string' ? first : null);
     }
   }
 }
@@ -551,7 +584,7 @@ export function logGroups(
       attempt: attemptOf(entry.roundLabel),
     };
     if (entry.kind === 'tool') {
-      const [verb, arg] = toolLabel(entry);
+      const [verb, arg, argFull] = toolLabel(entry);
       rows.push({
         ...base,
         item: {
@@ -559,6 +592,7 @@ export function logGroups(
           id: entry.id,
           verb,
           arg: arg === null ? null : short(arg),
+          argFull: argFull === null ? null : short(argFull),
           result: toolResult(entry),
           inFlight: entry.id === inFlight,
         },

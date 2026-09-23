@@ -116,7 +116,10 @@ export type LogItem =
       kind: 'tool';
       id: string;
       verb: string;
+      /** What the row shows: for a command, the executable and the first path it names. */
       arg: string | null;
+      /** The whole command, when `arg` is a reduction of it; null when the row shows all of it. */
+      argFull: string | null;
       result: ToolResultSummary | null;
       inFlight: boolean;
     }

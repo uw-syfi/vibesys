@@ -376,19 +376,21 @@ test('log groups: role groups, collapse, in-flight row, tool rows from typed pay
     kind: 'tool',
     id: '273',
     verb: 'Read effective objective',
-    arg: `cat .vibesys/state/runs/${QUEUE_RUN}/runtime/effective-objective.md`,
+    arg: 'cat …/runtime/effective-objective.md',
+    argFull: `cat .vibesys/state/runs/${QUEUE_RUN}/runtime/effective-objective.md`,
     result: null,
     inFlight: false,
   });
   assert.equal(tool(items, '487')?.verb, 'Wrote');
   assert.equal(tool(items, '487')?.arg, 'src/lib.rs');
+  assert.equal(tool(items, '487')?.argFull, null, 'a row that shows its whole target has no tip');
   assert.deepEqual(tool(items, '516')?.result, {text: '12 passed', failed: false});
   assert.equal(tool(items, '623')?.verb, 'Measure baseline vs ring, 3 reps each');
   assert.equal(tool(items, '623')?.inFlight, true);
   assert.equal(items.filter(item => item.kind === 'tool' && item.inFlight).length, 1);
   const orchestrator = groups[0]?.items ?? [];
   assert.equal(
-    tool(orchestrator, '49')?.arg,
+    tool(orchestrator, '49')?.argFull,
     `cat .vibesys/state/runs/${QUEUE_RUN}/runtime/effective-objective.md`,
     'the absolute workspace prefix is stripped',
   );
@@ -399,6 +401,35 @@ test('log groups: role groups, collapse, in-flight row, tool rows from typed pay
     false,
     'nothing is in flight once the run ended',
   );
+});
+
+test('tool rows: a command row names its executable and the first path it touched', () => {
+  const rows = logGroups(fold(QUEUE), [], 1, QUEUE_RUN)
+    .flatMap(group => group.items)
+    .filter(item => item.kind === 'tool');
+  const args = rows.flatMap(row => (row.arg === null ? [] : [row.arg]));
+  assert.ok(args.length > 80, `the fixture has command rows (${args.length})`);
+  // No row repeats its verb in shell. Two segments is the floor, so the rows still past 40
+  // characters are the ones with a 51-character run id or a long library name inside a segment;
+  // cutting inside a segment is the ellipsis's job, which knows the real width.
+  assert.deepEqual(
+    args.filter(arg => arg.length > 40),
+    [
+      `ls …/runs/${QUEUE_RUN}`,
+      `echo …/${QUEUE_RUN}/run.json`,
+      'export …/release/libqueue_candidate.dylib',
+    ],
+  );
+  // A path with more than three segments keeps its last two; a shallow one stays whole.
+  assert.ok(args.includes('make queue-candidate.so'), 'an executable plus what it built');
+  assert.ok(args.includes('nm …/deps/libqueue_candidate.dylib'), 'a deep path keeps two segments');
+  assert.ok(args.includes('cat src/lib.rs'), 'a shallow path stays whole');
+  // An inline script is the executable and nothing else: its body is not a target.
+  assert.ok(args.includes('python3'), 'a heredoc names no path');
+  // The whole command stays reachable wherever the row shows less than all of it.
+  for (const row of rows) {
+    if (row.argFull !== null) assert.ok(row.argFull.length > (row.arg?.length ?? 0));
+  }
 });
 
 test('log groups: the acting role shows before its first entry', () => {

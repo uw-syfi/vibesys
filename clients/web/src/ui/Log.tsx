@@ -222,10 +222,8 @@ function Item({item}: {item: LogItem}) {
       </div>
     );
   }
-  const tip =
-    item.arg !== null && item.arg.length > TIP_LIMIT
-      ? `${item.arg.slice(0, TIP_LIMIT)}…`
-      : item.arg;
+  const whole = item.argFull ?? item.arg;
+  const tip = whole !== null && whole.length > TIP_LIMIT ? `${whole.slice(0, TIP_LIMIT)}…` : whole;
   return (
     <div
       className={item.inFlight ? 'row now' : 'row'}
@@ -235,7 +233,15 @@ function Item({item}: {item: LogItem}) {
         <span className="verb">{item.verb}</span>
         {item.arg === null ? null : (
           <code className="arg" data-tip={tip ?? undefined}>
-            {item.arg}
+            {item.argFull === null ? (
+              item.arg
+            ) : (
+              <>
+                {/* The row shows the command's shape; a reader who cannot hover gets its text. */}
+                <span aria-hidden="true">{item.arg}</span>
+                <span className="sr-only">{item.argFull}</span>
+              </>
+            )}
           </code>
         )}
         {item.result === null ? null : (
