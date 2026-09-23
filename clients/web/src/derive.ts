@@ -156,19 +156,18 @@ function graphNodes(phases: readonly AgentPhase[], kind: string): GraphNode[] {
 }
 
 /**
- * The handovers of a round whose events carry none: every agent of a kind hands over to every
- * agent of the next kind, in the order the kinds first appear. That is the chain the loop runs
- * today, and it is a fallback: the moment the backend reports real edges, this call is replaced by
- * reading them, and nothing else in the graph changes.
+ * The handovers of a round whose events carry none: each card hands over to the next in the order
+ * they ran. Within a kind that is its retries in sequence, and between kinds it is the last card of
+ * one and the first of the next, so no handover is drawn that did not happen. Wiring every card of
+ * a kind to every card of the next would invent one: a retried orchestrator would claim two
+ * handovers into the implementer where the loop made one. This is the fallback until the backend
+ * reports edges; that day it is replaced by reading them and nothing else in the graph changes.
  */
-function inferChainEdges(kinds: Array<{nodes: GraphNode[]}>): GraphEdge[] {
+function inferChainEdges(nodes: readonly GraphNode[]): GraphEdge[] {
   const edges: GraphEdge[] = [];
-  for (const [index, kind] of kinds.entries()) {
-    for (const from of kind.nodes) {
-      for (const to of kinds[index + 1]?.nodes ?? []) {
-        edges.push({from: from.id, to: to.id, tone: edgeTone(from, to)});
-      }
-    }
+  for (const [index, to] of nodes.entries()) {
+    const from = nodes[index - 1];
+    if (from !== undefined) edges.push({from: from.id, to: to.id, tone: edgeTone(from, to)});
   }
   return edges;
 }
@@ -185,13 +184,13 @@ function inferChainEdges(kinds: Array<{nodes: GraphNode[]}>): GraphEdge[] {
 export function agentGraph(core: CoreState, round: number | null): AgentGraph {
   if (round === null) return {nodes: [], edges: []};
   const phases = phasesForRound(core.phases, round);
-  const kinds = [...new Set(phases.map(phase => phase.kind))].map(kind => ({
-    nodes: graphNodes(
+  const nodes = [...new Set(phases.map(phase => phase.kind))].flatMap(kind =>
+    graphNodes(
       phases.filter(phase => phase.kind === kind),
       kind,
     ),
-  }));
-  return {nodes: kinds.flatMap(kind => kind.nodes), edges: inferChainEdges(kinds)};
+  );
+  return {nodes, edges: inferChainEdges(nodes)};
 }
 
 /**
@@ -201,7 +200,8 @@ export function agentGraph(core: CoreState, round: number | null): AgentGraph {
  */
 export const NODE = {width: 160, height: 44};
 const RANK_GAP = 32;
-const NODE_GAP = 12;
+/** The gap between stacked cards, which is also what the panel's three-row cap is counted in. */
+export const NODE_GAP = 12;
 
 /**
  * Where the cards and the arrows go: left to right, a rank per hop, ranks tight enough that the

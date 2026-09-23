@@ -809,18 +809,21 @@ test('agent graph: edge tones for live, idle, done, and failed, per edge', () =>
   ]);
 });
 
-test('agent graph: two cards of one kind fan in to the next kind', () => {
-  // Two orchestrator calls that differ stay two cards, so the implementer has two parents: the
-  // in-degree > 1 case the chain layout could not draw.
+test('agent graph: a retried kind chains its own cards, and only the last hands over', () => {
+  // An orchestrator that failed and ran again is two cards. The loop handed over once, so there is
+  // one edge into the implementer; wiring both cards to it would claim a handover that never was.
   const core = withPhases([
-    phase({kind: 'orchestrator', status: 'completed', model: 'claude-opus-5'}),
     phase({kind: 'orchestrator', status: 'failed', model: 'claude-opus-5'}),
+    phase({kind: 'orchestrator', status: 'completed', model: 'claude-opus-5'}),
     phase({kind: 'implementer', status: 'active', model: 'gpt-5.1-codex-max'}),
   ]);
   assert.deepEqual(wires(core, 1), [
+    ['Orchestrator', 'Orchestrator', 'failed'],
     ['Orchestrator', 'Implementer', 'live'],
-    ['Orchestrator', 'Implementer', 'failed'],
   ]);
+  // One edge per hop, never one card count times the next.
+  const graph = agentGraph(core, 1);
+  assert.equal(graph.edges.length, graph.nodes.length - 1);
 });
 
 test('agent graph: the card shows the model, the tooltip pairs it with the harness', () => {

@@ -1,6 +1,7 @@
 import {strict as assert} from 'node:assert';
 import {test} from 'node:test';
 import {renderToStaticMarkup} from 'react-dom/server';
+import {NODE, NODE_GAP} from '../derive.js';
 import type {AgentGraph} from '../model.js';
 import {Graph} from './Graph.js';
 
@@ -74,10 +75,13 @@ test('every edge is one path, toned by its two ends, with an arrow head', () => 
 });
 
 test('the row is a tab stop only once it has somewhere to scroll', () => {
-  // Server-rendered, so nothing is measured yet: the row is not in the tab order.
+  // Server-rendered, so nothing is measured yet: the row is not in the tab order, on either axis.
   const html = renderToStaticMarkup(<Graph round={3} graph={GRAPH} />);
   assert.match(html, /<div class="gflow"[^>]*tabindex="-1"/);
   assert.equal(html.includes('data-more'), false);
+  assert.equal(html.includes('data-down'), false);
+  // Three node rows, taken from the layout's own card and gap so the cap cannot drift from them.
+  assert.match(html, new RegExp(`style="max-height:${NODE.height * 3 + NODE_GAP * 2}px"`));
 });
 
 test('the runtime line shows the model; the harness rides in the tooltip and the name', () => {

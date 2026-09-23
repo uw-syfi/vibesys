@@ -143,14 +143,12 @@ const queued = () =>
 // loop's four roles plus `perf_eval`, which belongs to the `plain` loop. No recording runs five
 // roles in a round, and five is what it takes to overflow the graph row at 1440.
 const FIVE_ROLES = ['orchestrator', 'implementer', 'judge', 'profiler', 'perf_eval'];
-// The second orchestrator call of queue-rs round 1, on another model. Two orchestrator cards that
-// differ do not collapse, so both hand over to the implementer and it has two parents. Invented
-// the same way: the backend reports no edges, so the round's shape is inferred from its kinds, and
-// no recording runs one kind on two models.
-const FAN_IN = events =>
-  events.map(event =>
-    event.sequence === 129 ? {...event, data: {...event.data, model: 'claude-sonnet-5'}} : event,
-  );
+// queue-rs round 1 with its first orchestrator call failed rather than completed. Cards collapse
+// only when they say the same thing, so the retry stays a second card and the round reads
+// orchestrator, orchestrator, implementer: what a retry really looks like. The recording completed
+// both calls, so the failure is invented, the way `baseline` invents a baseline value.
+const RETRY = events =>
+  events.map(event => (event.sequence === 128 ? {...event, status: 'failed'} : event));
 // Rounds 9 to 32, cloned from the stub's last hypothesis with a rising metric. No recording has
 // enough rounds to scroll the rail at 900px tall, which is the state that pins the trend.
 const MANY_ROUNDS = [
@@ -217,11 +215,39 @@ const REPLAY = [
     expect: ['Profiler', 'Perf eval'],
   },
   {
-    // A node with two parents: the shape a chain of columns could not draw.
-    name: 'fan-in',
-    fixture: queue(FAN_IN(upTo(QUEUE, 623)), {active: QUEUE_ACTIVE}),
+    // A retry: two orchestrator cards, and one handover out of the second one.
+    name: 'retry-chain',
+    fixture: queue(RETRY(upTo(QUEUE, 623)), {active: QUEUE_ACTIVE}),
     widths: [1440],
-    expect: ['claude-opus-5', 'claude-sonnet-5'],
+    expect: ['Failed', 'Completed', 'Running'],
+  },
+  {
+    // The vertical fade and the tab stop that comes with it. No round reaches a second row: the
+    // inferred chain is one card per rank, and the shapes that stack (a fan-out, a join) need
+    // edges the backend does not report yet. So this forces the state the general path handles,
+    // by capping the panel under its own one row, and checks the panel notices it on the vertical
+    // axis as it does sideways. The frame shows the cut row fading out.
+    name: 'panel-cap',
+    fixture: live(),
+    widths: [1440],
+    after: async page => {
+      await page.locator('.gflow').evaluate(panel => {
+        panel.style.maxHeight = '30px';
+      });
+      await page
+        .waitForFunction(
+          () => {
+            const panel = document.querySelector('.gflow');
+            return panel?.getAttribute('data-down') === 'end' && panel.getAttribute('tabindex') === '0';
+          },
+          null,
+          {timeout: 3000},
+        )
+        .catch(() => {
+          throw new Error('the panel never noticed it scrolls down');
+        });
+    },
+    expect: ['Orchestrator'],
   },
   {
     name: 'pausing',

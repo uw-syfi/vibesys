@@ -1,6 +1,6 @@
 import type {AgentPhaseStatus} from '@vibesys/core-state';
 import {useCallback, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import {layoutGraph, NODE, titleCase} from '../derive.js';
+import {layoutGraph, NODE, NODE_GAP, titleCase} from '../derive.js';
 import type {AgentGraph, EdgeTone, GraphNode, PlacedEdge} from '../model.js';
 import './Graph.css';
 
@@ -9,8 +9,17 @@ export interface GraphProps {
   graph: AgentGraph;
 }
 
-/** The edge the row has more graph past, which the fade marks; undefined when it all fits. */
+/** Which end of an axis the panel has more graph past, which that edge's fade marks. */
 type More = 'start' | 'end' | 'both' | undefined;
+
+/** Three node rows, from the layout's own card and gap, so the cap cannot drift from them. */
+const CAP = NODE.height * 3 + NODE_GAP * 2;
+
+/** Where a scroll sits on one axis: nowhere to go, or more behind, ahead, or both. */
+function moreOn(room: number, at: number): More {
+  if (room <= 1) return undefined;
+  return at <= 1 ? 'end' : at >= room - 1 ? 'start' : 'both';
+}
 
 const TONES: EdgeTone[] = ['idle', 'done', 'live', 'failed'];
 
@@ -32,14 +41,17 @@ const path = (edge: PlacedEdge) =>
 export function Graph({round, graph}: GraphProps) {
   const row = useRef<HTMLDivElement | null>(null);
   const [more, setMore] = useState<More>(undefined);
+  const [down, setDown] = useState<More>(undefined);
   const layout = useMemo(() => layoutGraph(graph), [graph]);
 
+  // Both axes: past three node rows the panel scrolls down as well as sideways, and a cut card is
+  // as unreachable as a cut column. Two pieces of state, not one object, so an unchanged axis
+  // re-renders nothing.
   const measure = useCallback(() => {
     const node = row.current;
     if (node === null) return;
-    const room = node.scrollWidth - node.clientWidth;
-    const at = node.scrollLeft;
-    setMore(room <= 1 ? undefined : at <= 1 ? 'end' : at >= room - 1 ? 'start' : 'both');
+    setMore(moreOn(node.scrollWidth - node.clientWidth, node.scrollLeft));
+    setDown(moreOn(node.scrollHeight - node.clientHeight, node.scrollTop));
   }, []);
 
   // A callback ref, not an effect: the row exists only once a round has agents, which is later
@@ -75,11 +87,13 @@ export function Graph({round, graph}: GraphProps) {
           ref={attach}
           className="gflow"
           data-more={more}
+          data-down={down}
+          style={{maxHeight: CAP}}
           role="group"
           aria-label={`Round ${round} agents`}
-          // A tab stop only while it scrolls: not every browser focuses a scroll container on
-          // its own, and a row that fits has nothing for the keyboard to do.
-          tabIndex={more === undefined ? -1 : 0}
+          // A tab stop while it scrolls on either axis: not every browser focuses a scroll
+          // container on its own, and a panel that fits has nothing for the keyboard to do.
+          tabIndex={more === undefined && down === undefined ? -1 : 0}
           onScroll={measure}
         >
           <div className="gcanvas" style={{width: layout.width, height: layout.height}}>
