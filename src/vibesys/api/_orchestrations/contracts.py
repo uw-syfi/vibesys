@@ -33,17 +33,16 @@ class ExecutableOrchestration(Protocol):
     def execute(self, request: Any, runtime: VibeSysRuntime) -> bool: ...  # noqa: ANN401
 
 
-@runtime_checkable
-class Orchestration(Protocol):
-    """Internal lifecycle contract normalized at registry registration.
+class OrchestrationExecution(Protocol):
+    """Internal setup and policy-controlled execution of one run."""
 
-    The public extension point is ``ExecutableOrchestration``. Explicit public
-    imports of this full protocol remain compatible but are deprecated.
-    """
+    def prepare(self, request: RunRequestLike, runtime: VibeSysRuntime) -> None: ...
 
     def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool: ...
 
-    def prepare(self, request: RunRequestLike, runtime: VibeSysRuntime) -> None: ...
+
+class OrchestrationProjection(Protocol):
+    """Internal metadata, read-model, and resume projections."""
 
     def describe(self, request: RunRequestLike) -> RunDescription: ...
 
@@ -54,6 +53,15 @@ class Orchestration(Protocol):
     ) -> RunView | None: ...
 
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection: ...
+
+
+@runtime_checkable
+class Orchestration(OrchestrationExecution, OrchestrationProjection, Protocol):
+    """Registered internal contract combining execution and projections.
+
+    The public extension point is ``ExecutableOrchestration``. Explicit public
+    imports of this aggregate remain compatible but are deprecated.
+    """
 
 
 @runtime_checkable

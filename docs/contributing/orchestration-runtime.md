@@ -7,6 +7,26 @@ provisions agents and owns their sandbox and client lifetimes. The framework
 does not define a round or require a particular agent graph. The registry
 normalizes this hook to its internal lifecycle contract.
 
+The framework's internal registered contract has two parts:
+`OrchestrationExecution` handles run setup and policy execution, while
+`OrchestrationProjection` derives metadata and views. Their aggregate,
+`Orchestration`, is used by the registry and runner. Only `execute` is required
+of a custom policy; the registry supplies defaults for the other hooks.
+
+| Hook | When called | Input and output |
+| --- | --- | --- |
+| `describe` | Before `RUN_STARTED` and runtime setup | `RunRequestLike` to `RunDescription` (round budget and expected roles for the start event) |
+| `prepare` | After runtime setup, before `execute` | `RunRequestLike`, `VibeSysRuntime` to `None`; policy setup |
+| `execute` | Once per run, after `prepare` | `RunRequestLike`, `VibeSysRuntime` to `bool` (run success) |
+| `view` | On live session and persisted-history reads | `Project`, run ID, status, orchestration ID to `RunView` |
+| `project_committed` | After a state commit when a live view listener exists | State namespace, committed `BaseModel`, run ID to `RunView | None` |
+| `resume_projection` | During built-in CLI resume restoration | `OrchestrationRunManifest` to `ResumeProjection` |
+
+`execute` can spawn agents, route their messages, and schedule later turns
+dynamically from earlier outputs. Rounds are optional policy code. The built-in
+agent control flow is narrower: its fixed roles and round transactions implement
+one policy. Other policies can choose different agents and schedules.
+
 ```python
 import asyncio
 from pathlib import Path
