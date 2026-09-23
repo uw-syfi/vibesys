@@ -16,7 +16,8 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
-from typing import Protocol
+from types import ModuleType
+from typing import Protocol, cast
 
 import httpx
 
@@ -152,10 +153,14 @@ class HFTarget:
 
     def __init__(self, model: str, use_fla: bool = True, device: str = "cuda") -> None:
         if not use_fla:
+            # A None entry in sys.modules makes the import raise and find_spec return
+            # None (docs.python.org/3/reference/import.html#the-module-cache); typeshed
+            # types the values as ModuleType only.
+            modules = cast("dict[str, ModuleType | None]", sys.modules)
             for mod in ("fla", "causal_conv1d"):
-                if mod in sys.modules and sys.modules[mod] is not None:
+                if modules.get(mod) is not None:
                     raise RuntimeError("use_fla=False must be set before fla is imported")
-                sys.modules[mod] = None  # type: ignore[assignment]
+                modules[mod] = None
         import torch
         from transformers import AutoModelForCausalLM
 

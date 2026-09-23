@@ -18,6 +18,9 @@ qwen3.5-9b-mi210/
 ├── accuracy_checker/         # HF-golden gate (golden.json checked in)
 └── benchmark/
     ├── run.py                # --mode {smoke,quick,full}, wraps session_runner
+    ├── traces/               # checked-in session slices + full-trace manifest
+    ├── slice_trace.py        # cuts traces/ out of the full tracegen output
+    ├── fetch_corpus.py       # downloads and verifies the token corpus
     └── vllm_baseline.sh      # tuned vLLM launch (external comparison point)
 ```
 
@@ -29,7 +32,6 @@ VibeSys runs the accuracy checker against the candidate's server and
 require the Local run environment.
 
 ```bash
-export QWEN35_BENCH_ASSETS=/path/to/assets   # see "Benchmark inputs"
 vibesys --runs-dir /work/vibesys-runs --local \
   --input examples/model-serving/qwen3.5-9b-mi210
 ```
@@ -56,14 +58,23 @@ surface and the gate policy.
 
 ## Benchmark inputs
 
-The trace and token corpus are too large to commit. `run.py` reads them from
-`--trace` and `--text-file`, or from `$QWEN35_BENCH_ASSETS/coding_session_synthetic.csv`
-and `$QWEN35_BENCH_ASSETS/corpus.txt`, and errors if neither is set. The
-tokenizer comes from `--tokenizer` or the HF cache (`$HF_HOME`, default
+`run.py` needs no setup: by default it replays the checked-in
+`benchmark/traces/coding_session_0000-0259.csv` (checked against a pinned
+sha256 and row count) and reads the corpus that `fetch_corpus.py` builds.
+`--trace`/`--text-file`, or `$QWEN35_BENCH_ASSETS` naming a directory with
+`coding_session_synthetic.csv` and `corpus.txt`, override both. The tokenizer
+comes from `--tokenizer` or the HF cache (`$HF_HOME`, default
 `~/.cache/huggingface`). `smoke` needs only the trace.
 
-- **Trace.** Regenerate it deterministically with Request Factory's `tracegen`
-  at the pinned revision (`cargo build --release --bin tracegen --features runtime`):
+- **Trace.** The committed slices are sessions 0-259 (every session the warmup,
+  `quick`, and `full` runs replay; `--max-items` takes a prefix) and 3000-3299
+  (a disjoint range held out from tuning). `slice_trace.py` cuts them from the
+  full 6000-session trace, shifting arrivals so each slice starts at 0 (unused
+  under saturated replay). The full trace (manifest:
+  `traces/coding_session_synthetic.manifest.json`; sha256
+  `769f85b9c834f94b637086862a40882ea96e5d70aec8646b9f69a1315eaa1b1a`) regenerates
+  deterministically with Request Factory's `tracegen` at the pinned revision
+  (`cargo build --release --bin tracegen --features runtime`):
 
   ```bash
   tracegen synthetic --out coding_session_synthetic.csv \
@@ -75,11 +86,14 @@ tokenizer comes from `--tokenizer` or the HF cache (`$HF_HOME`, default
 
   Expected: 6000 sessions, 35,949 rounds, 112,990,467 prompt tokens, planned
   prefix-hit rate 0.78.
-- **Corpus.** Any plain-text corpus of at least ~1.5M tokens (the measured
-  runs used several concatenated public-domain books). `session_runner` draws
-  token ids from it at the lengths the trace specifies; the content does not
-  need to be code, since the benchmark measures throughput at these shapes,
-  not output quality.
+- **Corpus.** Eight Project Gutenberg ebooks concatenated in a fixed order,
+  plus a second copy of Pride and Prejudice (5,979,406 bytes, ~1.46M tokens).
+  `fetch_corpus.py` downloads them from pinned URLs, checks each file and the
+  result against pinned sha256 digests, and caches the output under
+  `~/.cache/vibesys/` (`$XDG_CACHE_HOME`). Run it ahead of time on nodes
+  without internet access. `session_runner` draws token ids from the corpus
+  at the lengths the trace specifies; the content only needs to be plausible
+  text, since the benchmark measures throughput, not output quality.
 
 ## Workload
 

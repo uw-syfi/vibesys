@@ -1,0 +1,23 @@
+{
+  "schema": "session-execution-v2",
+  "generator": "synthetic",
+  "millisecond_decimals": 6,
+  "sessions": 6000,
+  "rounds": 35949,
+  "total_prompt_tokens": 112990467,
+  "total_prefix_tokens": 88116352,
+  "total_output_tokens": 7017594,
+  "planned_prefix_hit_rate": 0.7798565165678977,
+  "parameters": {
+    "arrival_pattern": "poisson",
+    "arrival_rate_per_second": 5.0,
+    "compaction_probability": 0.0,
+    "compaction_rounds": 0,
+    "input_len": "lognormal:545,0.69",
+    "output_len": "lognormal:177,0.45",
+    "rounds": "uniform:3..9",
+    "seed": 42,
+    "sessions": 6000,
+    "tool_wait_ms": "lognormal:277,0.59"
+  }
+}

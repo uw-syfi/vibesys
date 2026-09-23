@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import importlib.util
 import sys
 from pathlib import Path
@@ -46,24 +47,79 @@ def test_manifest_runs_quick_mode_through_the_adapter() -> None:
     assert (_BUNDLE / "accuracy_checker" / "golden.json").is_file()
 
 
-def test_missing_assets_fail_with_the_flag_and_env_var(
+def _sessions(trace: Path) -> list[str]:
+    rows = list(csv.DictReader(trace.open(newline="")))
+    assert rows[0]["arrival_time_ms"] == "0.000000"
+    return list(dict.fromkeys(row["session_id"] for row in rows))
+
+
+def test_checked_in_slices_cover_every_mode_and_the_held_out_range(run: ModuleType) -> None:
+    traces = _BUNDLE / "benchmark" / "traces"
+
+    assert _sessions(run.DEFAULT_TRACE) == [f"synthetic_{i:06d}" for i in range(260)]
+    assert max(run.MODE_SESSIONS.values()) <= 260
+    assert run.WARMUP_SESSIONS <= 260
+    held_out = _sessions(traces / "coding_session_3000-3299.csv")
+    assert held_out == [f"synthetic_{i:06d}" for i in range(3000, 3300)]
+
+
+def test_default_inputs_are_the_verified_slice_and_fetched_corpus(
+    run: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv(_ASSETS_ENV, raising=False)
+    built = tmp_path / "corpus.txt"
+    monkeypatch.setattr(run.fetch_corpus, "build", lambda _path: built)
+    args = run.parse_args(["--mode", "quick", "--request-factory-engine", "rf"])
+
+    assert run.resolve_trace(args) == run.DEFAULT_TRACE
+    assert run.resolve_corpus(args) == built
+
+
+def test_a_modified_default_trace_is_rejected(run: ModuleType, tmp_path: Path) -> None:
+    tampered = tmp_path / "trace.csv"
+    tampered.write_bytes(run.DEFAULT_TRACE.read_bytes().replace(b",306,", b",307,", 1))
+
+    with pytest.raises(run.HarnessError, match=r"slice_trace\.py"):
+        run.verify_default_trace(tampered)
+
+
+def test_configured_inputs_must_exist(
     run: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv(_ASSETS_ENV, raising=False)
+    monkeypatch.setenv(_ASSETS_ENV, str(tmp_path))
     engine = tmp_path / "session_runner"
 
     assert run.main(["--mode", "smoke", "--request-factory-engine", str(engine)]) == 1
-    error = capsys.readouterr().err
-    assert "--trace" in error
-    assert _ASSETS_ENV in error
+    missing = tmp_path / "coding_session_synthetic.csv"
+    assert f"--trace does not exist: {missing}" in capsys.readouterr().err
 
-    (tmp_path / "coding_session_synthetic.csv").write_text("")
-    monkeypatch.setenv(_ASSETS_ENV, str(tmp_path))
-    assert run.main(["--mode", "quick", "--request-factory-engine", str(engine)]) == 1
-    assert f"--text-file does not exist: {tmp_path / 'corpus.txt'}" in capsys.readouterr().err
+
+def test_unreachable_corpus_download_names_the_fallbacks(
+    run: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(_ASSETS_ENV, raising=False)
+
+    failure = run.fetch_corpus.CorpusError("GET failed")
+
+    def offline(_path: Path) -> Path:
+        raise failure
+
+    monkeypatch.setattr(run.fetch_corpus, "build", offline)
+    args = run.parse_args(["--mode", "quick", "--request-factory-engine", "rf"])
+
+    with pytest.raises(run.HarnessError, match=r"fetch_corpus\.py") as error:
+        run.resolve_corpus(args)
+    assert _ASSETS_ENV in str(error.value)
+
+
+def test_corpus_order_uses_only_pinned_ebooks(run: ModuleType) -> None:
+    pinned = dict(run.fetch_corpus.EBOOKS)
+
+    assert set(run.fetch_corpus.ORDER) == set(pinned)
+    assert run.fetch_corpus.ORDER.count(1342) == 2
 
 
 def test_measured_metrics_read_the_session_runner_summary(run: ModuleType) -> None:

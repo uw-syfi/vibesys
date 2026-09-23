@@ -25,11 +25,11 @@ reports a genuine cache hit, `quick`/`full` will fail loudly at that gate --
 this is the tool working as intended, not a bug in this harness. `smoke` mode
 exists precisely so plumbing can still be validated against such a server.
 
-Inputs that are too large to commit (the session trace and the token corpus)
-come from --trace/--text-file or from the directory named by $QWEN35_BENCH_ASSETS
-(`coding_session_synthetic.csv`, `corpus.txt`). The tokenizer comes from
+Inputs: --trace/--text-file win; else $QWEN35_BENCH_ASSETS names a directory
+holding `coding_session_synthetic.csv` and `corpus.txt`; else the checked-in
+trace slice (traces/coding_session_0000-0259.csv, digest-checked) and the
+corpus that fetch_corpus.py builds and verifies. The tokenizer comes from
 --tokenizer or the Hugging Face cache ($HF_HOME, default ~/.cache/huggingface).
-See ../README.md for how to regenerate the trace.
 
 See ../OBJECTIVE.md and ../config/platforms/mi210.toml for the hardware facts
 referenced by the defaults below.
@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import glob
+import hashlib
 import json
 import os
 import subprocess
@@ -49,6 +50,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Literal
+
+# fetch_corpus.py sits next to this script; make it importable however run.py is loaded.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fetch_corpus
 
 Mode = Literal["smoke", "quick", "full"]
 
@@ -71,6 +76,10 @@ DEFAULT_MAX_MODEL_LEN = 16384
 ASSETS_ENV = "QWEN35_BENCH_ASSETS"
 TRACE_FILENAME = "coding_session_synthetic.csv"
 CORPUS_FILENAME = "corpus.txt"
+# Sessions 0-259 of the full trace (see slice_trace.py): every session any mode replays.
+DEFAULT_TRACE = Path(__file__).resolve().parent / "traces" / "coding_session_0000-0259.csv"
+DEFAULT_TRACE_SHA256 = "2bca5f7911816ee758b46a626b60e8518888e9464fc4533b627052eac8180d11"
+DEFAULT_TRACE_ROWS = 1513
 
 
 class HarnessError(RuntimeError):
@@ -428,25 +437,47 @@ class _ResolvedPaths:
     tokenizer: Path
 
 
-def _asset(explicit: Path | None, flag: str, filename: str) -> Path:
-    """Resolve one benchmark input from its flag, else from $QWEN35_BENCH_ASSETS."""
+def _configured(explicit: Path | None, flag: str, filename: str) -> Path | None:
+    """The input named by its flag, else by $QWEN35_BENCH_ASSETS, else None."""
     if explicit is not None:
         path = explicit
-    else:
-        assets = os.environ.get(ASSETS_ENV)
-        if not assets:
-            raise HarnessError(
-                f"{flag} not given and ${ASSETS_ENV} is unset; pass {flag} or set "
-                f"${ASSETS_ENV} to a directory containing {filename} (see ../README.md)."
-            )
+    elif assets := os.environ.get(ASSETS_ENV):
         path = Path(assets) / filename
+    else:
+        return None
     if not path.is_file():
         raise HarnessError(f"{flag} does not exist: {path}")
     return path
 
 
+def verify_default_trace(path: Path = DEFAULT_TRACE) -> Path:
+    """Check the checked-in trace slice against its pinned digest and row count."""
+    data = path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    rows = data.count(b"\n") - 1
+    if digest != DEFAULT_TRACE_SHA256 or rows != DEFAULT_TRACE_ROWS:
+        raise HarnessError(
+            f"{path}: sha256 {digest} with {rows} rows, expected {DEFAULT_TRACE_SHA256} "
+            f"with {DEFAULT_TRACE_ROWS}; regenerate it with slice_trace.py."
+        )
+    return path
+
+
 def resolve_trace(args: argparse.Namespace) -> Path:
-    return _asset(args.trace, "--trace", TRACE_FILENAME)
+    return _configured(args.trace, "--trace", TRACE_FILENAME) or verify_default_trace()
+
+
+def resolve_corpus(args: argparse.Namespace) -> Path:
+    configured = _configured(args.text_file, "--text-file", CORPUS_FILENAME)
+    if configured is not None:
+        return configured
+    try:
+        return fetch_corpus.build(fetch_corpus.default_path())
+    except fetch_corpus.CorpusError as exc:
+        raise HarnessError(
+            f"cannot build the default corpus ({exc}); run benchmark/fetch_corpus.py where "
+            f"the network is reachable, or pass --text-file / set ${ASSETS_ENV}."
+        ) from exc
 
 
 def resolve_paths(args: argparse.Namespace) -> _ResolvedPaths:
@@ -457,7 +488,7 @@ def resolve_paths(args: argparse.Namespace) -> _ResolvedPaths:
     which is what lets it run in seconds with no server or GPU dependency.
     """
     trace = resolve_trace(args)
-    text_file = _asset(args.text_file, "--text-file", CORPUS_FILENAME)
+    text_file = resolve_corpus(args)
     tokenizer = args.tokenizer or find_tokenizer_dir(hf_home(), args.model)
     return _ResolvedPaths(trace=trace, text_file=text_file, tokenizer=tokenizer)
 
