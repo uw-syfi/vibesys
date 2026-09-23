@@ -57,6 +57,13 @@ the web end-to-end tests, and `clients/scripts`). Beyond the package direction, 
 | Terminal widgets, rendering, keyboard and mouse events | `tui` |
 | Browser bindings, presentation, and browser-only interaction state | `web` |
 
+`@vibesys/backend-client` is the runtime-neutral entry. It exports protocol types, parsing,
+framing-independent stream policy, and the transport interfaces. `@vibesys/backend-client/node`
+contains the Unix-socket implementation used by the TUI, while
+`@vibesys/backend-client/websocket` contains the browser WebSocket implementation. The neutral
+entry and WebSocket entry have no Node builtin imports. The package exports and dependency-cruiser
+rule enforce this split, so a browser bundle cannot accidentally pull in `node:net`.
+
 The backend client performs I/O and exposes validated protocol messages. Core state is a pure fold
 over snapshots, ordered events, and active-execution checkpoints. The TUI owns all interaction and
 presentation state, renders the combined state, and sends user intents through the backend client.

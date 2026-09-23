@@ -2,13 +2,13 @@ import {createConnection, type Socket} from 'node:net';
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from '../backoff.js';
 import {BackendClientError, ServerError} from '../errors.js';
 import {NewlineFramer} from '../newline-framer.js';
-import type {
-  Diagnostic,
-  ProtocolRequest,
-  ProtocolResponse,
-  RequestInput,
-  ServerMessage,
-} from '../protocol.js';
+import type {ProtocolRequest, ProtocolResponse, RequestInput, ServerMessage} from '../protocol.js';
+import {
+  parseProtocolResponse,
+  parseServerMessage,
+  responseError,
+  streamFailure,
+} from '../protocol-parse.js';
 import {
   type AbortSignalLike,
   type RequestOptions,
@@ -804,16 +804,6 @@ function abortReason(signal: AbortSignalLike): Error {
 }
 
 /**
- * Pass a typed stream failure through; anything else escaped from processing a
- * line (a consumer callback throw included), so the stream could not be read.
- */
-function streamFailure(error: unknown): BackendClientError {
-  if (error instanceof BackendClientError) return error;
-  const cause = toError(error);
-  return new BackendClientError('parse', cause.message, {cause});
-}
-
-/**
  * Frame one socket chunk, or report an unreadable stream. Returns the completed
  * lines, or null when the framer rejects the chunk (an oversized newline-less
  * remainder), having first handed the typed failure to `onFramingError` so the
@@ -840,10 +830,6 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function responseError(response: ProtocolResponse): ServerError {
-  return new ServerError(response.error ?? 'Unknown server error', response.diagnostic ?? null);
-}
-
 /**
  * End a socket gracefully, then force it closed if the peer does not complete
  * the FIN handshake within `graceMs`. Resolves once the socket is actually
@@ -862,88 +848,4 @@ function closeSocketWithin(socket: Socket, graceMs: number): Promise<void> {
     });
     socket.end();
   });
-}
-
-function parseProtocolResponse(line: string): ProtocolResponse {
-  const value = parseRecord(line, 'response');
-  if (value['protocol_version'] !== 1) {
-    throw new BackendClientError('parse', 'Unsupported server protocol version');
-  }
-  if (typeof value['request_id'] !== 'string') {
-    throw new BackendClientError('parse', 'Invalid server response: request_id must be a string');
-  }
-  if (typeof value['ok'] !== 'boolean') {
-    throw new BackendClientError('parse', 'Invalid server response: ok must be a boolean');
-  }
-  return value as unknown as ProtocolResponse;
-}
-
-function parseServerMessage(line: string): ServerMessage {
-  const value = parseRecord(line, 'event-stream message');
-  const type = value['type'];
-  if (type === 'subscribed') {
-    if (
-      typeof value['request_id'] !== 'string' ||
-      typeof value['run_id'] !== 'string' ||
-      typeof value['latest_sequence'] !== 'number'
-    ) {
-      throw new BackendClientError('parse', 'Invalid subscribed message');
-    }
-  } else if (type === 'event') {
-    if (!isRecord(value['event'])) throw new BackendClientError('parse', 'Invalid event message');
-  } else if (type === 'event_batch') {
-    if (!Array.isArray(value['events'])) {
-      throw new BackendClientError('parse', 'Invalid event batch message');
-    }
-  } else if (type === 'protocol_error') {
-    if (typeof value['code'] !== 'string' || typeof value['message'] !== 'string') {
-      throw new BackendClientError('parse', 'Invalid protocol error message');
-    }
-  } else {
-    throw unknownStreamLineError(value);
-  }
-  return value as unknown as ServerMessage;
-}
-
-/**
- * A server that predates a subscribe field rejects the subscription the way it
- * rejects any request: with a `Response` line on the stream socket, `ok: false`
- * and no `type`. That line is the server refusing the request, the expected
- * answer to a capability probe, not a line the protocol cannot read; anything
- * else without a known `type` is one the protocol cannot read.
- */
-function unknownStreamLineError(value: Record<string, unknown>): BackendClientError {
-  const rejected =
-    value['type'] === undefined && value['ok'] === false && typeof value['request_id'] === 'string';
-  if (!rejected) {
-    return new BackendClientError(
-      'parse',
-      `Unknown server event-stream message: ${String(value['type'])}`,
-    );
-  }
-  return new ServerError(
-    typeof value['error'] === 'string' ? value['error'] : 'Server rejected the subscription',
-    isRecord(value['diagnostic']) ? (value['diagnostic'] as unknown as Diagnostic) : null,
-  );
-}
-
-function parseRecord(line: string, description: string): Record<string, unknown> {
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch (error) {
-    throw new BackendClientError(
-      'parse',
-      `Invalid server ${description} JSON: ${error instanceof Error ? error.message : String(error)}`,
-      {cause: error},
-    );
-  }
-  if (!isRecord(value)) {
-    throw new BackendClientError('parse', `Invalid server ${description}: expected an object`);
-  }
-  return value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -192,6 +192,10 @@ jobs:
       - name: Build TypeScript packages
         run: ./support/repoctl/repoctl run-checks --group tui_build
 
+      - name: Check browser transport bundle for Node builtins
+        working-directory: clients
+        run: pnpm check:web-browser-bundle
+
       - name: Install Chromium for the web smoke test
         working-directory: clients
         run: pnpm --filter @vibesys/web exec playwright install --with-deps chromium
