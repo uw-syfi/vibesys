@@ -13,6 +13,8 @@ From a repository root:
 ./support/repoctl/repoctl plan --base main --head HEAD
 ./support/repoctl/repoctl explain path/to/file --json
 ./support/repoctl/repoctl validate
+./support/repoctl/repoctl verify-policy --cases repoctl-cases.toml
+./support/repoctl/repoctl run-checks --group python_quality
 ```
 
 `test` and `plan` accept `--base`, `--head`, and `--event`. `test` also includes
@@ -21,9 +23,17 @@ for CI. Pull requests compare against the merge base; pushes use the exact
 endpoints. `--config` accepts a
 repository-relative or absolute policy path. The directory containing an
 absolute policy is the repository root; `REPOCTL_ROOT` can set it explicitly.
-CI can use `plan --github-output PATH` to emit configured job and collection
-names, then run jobs independently. `run-native --targets-json JSON` executes
-only registered native targets from a plan.
+CI uses `plan --github-output PATH` to emit configured job and collection
+names, then runs named `[[check_groups]]` independently with `run-checks
+--group NAME`. Groups can have ordered commands, environment overrides, and
+selected package collections. `run-native --targets-json JSON` executes only
+registered native targets from a plan. `test` runs groups marked
+`include_in_test` for affected jobs, plus affected native targets.
+Pass `--collection-json '["package-name"]'` to `run-checks` for a group with
+a configured collection; unknown or duplicate values fail before execution.
+In GitHub Actions, `plan --github-event` reads `GITHUB_EVENT_NAME` and
+`GITHUB_EVENT_PATH` and rejects malformed or unsupported events before
+publishing outputs.
 
 ## Extension contracts
 
@@ -37,14 +47,14 @@ not walk the graph or run tests. Implementations live in
 `discovery/python/`, `discovery/typescript/`, and `discovery/native/`.
 
 The shared execution contract is [execution/execution.go](execution/execution.go).
-An `execution.Planner` turns a configured suite and selected collection values
+An `execution.Planner` turns a configured check group and selected collection values
 into ordered `execution.Check` records. A check contains an argument-vector
 command, working directory, timeout, and environment. `execution.Runner`
 executes checks and reports failures. Language planners live in
 `execution/python/`, `execution/typescript/`, `execution/golang/`, and
 `execution/rust/`. TypeScript expands selected workspace packages; Go and Rust
 native targets run their configured commands within each selected manifest
-root. Python currently runs the configured suite for a selected job.
+root. Python currently runs its configured full suite for a selected job.
 
 To support a new manifest format, add a discovery adapter, register it in
 `policy.go`, and configure it in the repository policy. To support a new test
@@ -54,9 +64,15 @@ adapter discovers Go and Cargo roots; cross-root edges are declared in the
 policy, rather than inferred from Go or Cargo metadata.
 
 The policy rejects unknown keys, unowned changed paths, unsafe paths, missing
-dependencies, cycles, conflicting manifests, invalid commands, and
-unregistered in-scope native manifests. Commands are argument arrays, with no
-shell expansion. A selected job without a configured suite or native target
-fails instead of silently skipping checks.
+dependencies, cycles, conflicting manifests, invalid commands, jobs without
+runnable groups or targets, and unregistered in-scope native manifests.
+Commands are argument arrays, with no shell expansion. Invalid selected
+collections and missing check groups fail instead of silently skipping checks.
+
+`verify-policy --cases FILE` checks expected jobs and collections for
+repository-owned scenarios in a separate TOML file. CI runs it before
+publishing a plan. Generic tests generate fake graphs and compare selection
+against an independent reachability oracle. Bounded fuzz runs cover graph
+selection and Git diff parsing when the tool or its policy changes.
 
 To work on the tool itself, run `(cd support/repoctl && go test ./... && go vet ./...)`.

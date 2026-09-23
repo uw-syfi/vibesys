@@ -70,31 +70,107 @@ rust = [
   ["cargo", "test", "--locked"],
 ]
 
-[[test_suites]]
-job = "python"
+[[check_groups]]
+name = "python_tests"
+trigger_job = "python"
+include_in_test = true
 language = "python"
 directory = "."
 timeout_seconds = 1800
 commands = [["uv", "run", "python", "-m", "pytest", "-q"]]
 
-[[test_suites]]
-job = "tui"
+[[check_groups]]
+name = "python_quality"
+language = "python"
+directory = "."
+timeout_seconds = 600
+commands = [
+  ["./scripts/check_format.sh"],
+  ["./scripts/check_lint.sh"],
+  ["uv", "run", "python", "scripts/check_file_length.py"],
+  ["uv", "run", "tach", "check"],
+  ["uv", "run", "python", "scripts/check_tach_graph.py", "--check"],
+  ["python3", "scripts/check_doc_links.py"],
+  ["uv", "run", "vibesys", "--headless", "--help"],
+]
+
+[[check_groups]]
+name = "python_types"
+language = "python"
+directory = "."
+timeout_seconds = 600
+commands = [["./scripts/check_types.sh"]]
+
+[[check_groups]]
+name = "tui_tests"
+trigger_job = "tui"
+include_in_test = true
 language = "typescript"
 directory = "clients"
 collection = "pnpm_packages"
 timeout_seconds = 1200
-commands = [["pnpm", "test:clients"]]
+commands = [
+  ["pnpm", "--filter", "@vibesys/backend-client", "test"],
+  ["pnpm", "--filter", "@vibesys/core-state", "test"],
+  ["pnpm", "--filter", "@vibesys/tui", "test"],
+  ["pnpm", "--filter", "@vibesys/web", "test"],
+]
 package_commands = [["pnpm", "--filter", "{package}", "test"]]
+always_commands = [["pnpm", "test:ts-architecture"], ["pnpm", "test:conformance"]]
 
-[[test_suites]]
-job = "examples"
+[[check_groups]]
+name = "tui_quality"
+language = "typescript"
+directory = "clients"
+timeout_seconds = 1200
+commands = [
+  ["pnpm", "check:ts"],
+  ["pnpm", "check:ts-architecture"],
+  ["pnpm", "check:knip"],
+  ["pnpm", "--dir", "backend-client", "generate:protocol"],
+  ["git", "diff", "--exit-code", "--", "backend-client/src/generated/protocol.schema.json", "backend-client/src/generated/protocol.generated.ts"],
+  ["pnpm", "check:clients"],
+]
+
+[[check_groups]]
+name = "tui_build"
+language = "typescript"
+directory = "clients"
+timeout_seconds = 1200
+commands = [["pnpm", "build:clients"]]
+
+[[check_groups]]
+name = "tui_e2e"
+language = "typescript"
+directory = "clients"
+timeout_seconds = 1200
+commands = [["pnpm", "--filter", "@vibesys/web", "test:e2e"]]
+
+[[check_groups]]
+name = "tui_package_smoke"
+language = "typescript"
+directory = "clients"
+timeout_seconds = 600
+commands = [["bash", "scripts/check_package_smoke.sh"]]
+
+[[check_groups]]
+name = "examples_tests"
+trigger_job = "examples"
+include_in_test = true
 language = "python"
 directory = "."
 timeout_seconds = 1200
-commands = [["uv", "run", "python", "scripts/example_repositories.py"]]
+env = { VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS = "1" }
+commands = [
+  ["uv", "run", "python", "scripts/example_repositories.py"],
+  ["uv", "run", "python", "-m", "pytest", "tests/examples/test_example_registry.py", "-v", "--no-cov"],
+  ["uv", "run", "python", "-m", "pytest", "tests/vibesys/test_microservice_inputs.py", "tests/vibesys/test_input_sources.py", "-v", "--no-cov"],
+]
 
-[[test_suites]]
-job = "agent_image"
+[[check_groups]]
+name = "agent_image_tests"
+trigger_job = "agent_image"
+include_in_test = true
 language = "python"
 directory = "."
 timeout_seconds = 1200
@@ -104,12 +180,51 @@ commands = [
   ["uv", "run", "pytest", "tests/e2e/test_agent_image_e2e.py", "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "-v", "-s", "--no-cov"],
 ]
 
-[[test_suites]]
-job = "impact"
+[[check_groups]]
+name = "repoctl_tests"
+trigger_job = "impact"
+include_in_test = true
 language = "go"
 directory = "support/repoctl"
 timeout_seconds = 600
-commands = [["go", "test", "./..."]]
+commands = [
+  ["go", "test", "./..."],
+  ["go", "vet", "./..."],
+  ["go", "test", "-run=^$", "-fuzz=^FuzzGraphSelection$", "-fuzztime=20000x", "-parallel=2", "."],
+  ["go", "test", "-run=^$", "-fuzz=^FuzzParseNameStatusZ$", "-fuzztime=20000x", "-parallel=2", "."],
+]
+
+[[check_groups]]
+name = "sandbox_tests"
+language = "python"
+directory = "."
+timeout_seconds = 900
+env = { VIBESYS_REQUIRE_SANDBOX_TESTS = "1" }
+commands = [["uv", "run", "python", "-m", "pytest", "tests/vibesys/agents/test_hostsandbox.py", "-v"]]
+
+[[check_groups]]
+name = "microservice_workload_checks"
+language = "go"
+directory = "resources/evaluators/microservice"
+timeout_seconds = 1200
+commands = [["bash", "check_workloads.sh"]]
+
+[[check_groups]]
+name = "python_ci_tests"
+language = "python"
+directory = "."
+timeout_seconds = 1800
+commands = [
+  ["uv", "run", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--cov-report=xml", "--cov-report=json", "--cov-fail-under=75"],
+  ["uv", "run", "python", "scripts/check_coverage_floor.py", "coverage.json"],
+]
+
+[[check_groups]]
+name = "patch_coverage"
+language = "python"
+directory = "."
+timeout_seconds = 300
+commands = [["uv", "run", "diff-cover", "coverage.xml", "--compare-branch=origin/main", "--fail-under=80"]]
 
 [[native_check_overrides]]
 root = "sdk/vs-evaluator/vseval"
@@ -190,7 +305,7 @@ to = "native:examples/data-structures/repositories/queue-rs"
 id = "repo_policy"
 # Keep the previous paths owned while this rename appears in a diff.
 roots = ["support/repoctl", "support/ci_impact"]
-files = [".github/workflows/test.yml", "repoctl.toml", "ci-impact.toml"]
+files = [".github/workflows/test.yml", "repoctl.toml", "repoctl-cases.toml", "ci-impact.toml"]
 select_all_jobs = true
 select_all_collections = true
 

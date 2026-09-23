@@ -10,7 +10,7 @@ func TestOSRunnerMergesSuiteEnvironment(t *testing.T) {
 	t.Setenv("REPOCTL_TEST_OVERRIDE", "inherited")
 	t.Setenv("REPOCTL_TEST_KEEP", "retained")
 	suite := Suite{
-		Job: "example", Directory: ".", TimeoutSeconds: 5,
+		Name: "example", Directory: ".", TimeoutSeconds: 5,
 		Commands: [][]string{{"sh", "-c", "test \"$REPOCTL_TEST_OVERRIDE\" = suite && test \"$REPOCTL_TEST_KEEP\" = retained"}},
 		Env:      map[string]string{"REPOCTL_TEST_OVERRIDE": "suite"},
 	}

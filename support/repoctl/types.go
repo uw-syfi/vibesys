@@ -58,7 +58,7 @@ type policy struct {
 	Collections          []collectionSpec      `toml:"collections"`
 	NativeChecks         nativeChecks          `toml:"native_checks"`
 	NativeCheckOverrides []nativeCheckOverride `toml:"native_check_overrides"`
-	TestSuites           []execution.Suite     `toml:"test_suites"`
+	CheckGroups          []execution.Suite     `toml:"check_groups"`
 	Components           []component           `toml:"components"`
 	Edges                []edge                `toml:"edges"`
 }
@@ -79,7 +79,7 @@ type graph struct {
 	NativeTargets        map[string]nativeTarget
 	NativeChecks         nativeChecks
 	NativeCheckOverrides map[string]nativeCheckOverride
-	TestSuites           map[string]execution.Suite
+	CheckGroups          map[string]execution.Suite
 }
 type plan struct {
 	Jobs         map[string]bool     `json:"jobs"`

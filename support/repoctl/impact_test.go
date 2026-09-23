@@ -69,6 +69,35 @@ timeout_seconds = 90
 go = [["go", "test", "./..."]]
 rust = [["cargo", "test"]]
 
+[[check_groups]]
+name = "unit"
+trigger_job = "unit"
+include_in_test = true
+language = "python"
+directory = "."
+timeout_seconds = 30
+commands = [["python", "-m", "pytest"]]
+
+[[check_groups]]
+name = "web"
+trigger_job = "web"
+include_in_test = true
+language = "typescript"
+directory = "."
+collection = "packages"
+timeout_seconds = 30
+commands = [["pnpm", "test"]]
+package_commands = [["pnpm", "--filter", "{package}", "test"]]
+
+[[check_groups]]
+name = "policy"
+trigger_job = "policy"
+include_in_test = true
+language = "go"
+directory = "."
+timeout_seconds = 30
+commands = [["go", "test", "./..."]]
+
 [[components]]
 id = "protocol"
 class = "manual"
@@ -198,6 +227,27 @@ func TestConfiguredDiscoveriesAndEffects(t *testing.T) {
 	p, err = g.selectPaths([]string{"external/unowned.txt", "LICENSE"})
 	if err != nil || len(p.Jobs) != 4 {
 		t.Fatalf("ignored paths: %v, %v", p, err)
+	}
+}
+
+func TestPolicyChangeSelectsEveryJobAndCollection(t *testing.T) {
+	g, err := readPolicy(fixtureRepo(t), "repoctl.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := g.selectPaths([]string{"repoctl.toml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, job := range g.Jobs {
+		if !p.Jobs[job] {
+			t.Errorf("policy change did not select job %q", job)
+		}
+	}
+	for _, collection := range g.Collections {
+		if len(p.Collections[collection.Name]) == 0 {
+			t.Errorf("policy change did not select collection %q", collection.Name)
+		}
 	}
 }
 

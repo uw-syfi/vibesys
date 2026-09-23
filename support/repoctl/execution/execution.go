@@ -23,13 +23,16 @@ type Check struct {
 	Timeout   time.Duration
 }
 
-// Suite is a policy-owned set of commands for one selected CI job. Collection
-// names an impact-plan collection; PackageCommands run once for each value.
-// Commands run when the collection is empty, or when no collection is set.
+// Suite is a policy-owned named group of checks. Collection names an impact-plan
+// collection; PackageCommands run once for each value. Commands run when the
+// collection is empty, or when no collection is set.
 type Suite struct {
-	Job             string            `toml:"job"`
+	Name            string            `toml:"name"`
+	TriggerJob      string            `toml:"trigger_job"`
+	IncludeInTest   bool              `toml:"include_in_test"`
 	Language        string            `toml:"language"`
 	Directory       string            `toml:"directory"`
+	AlwaysCommands  [][]string        `toml:"always_commands"`
 	Commands        [][]string        `toml:"commands"`
 	PackageCommands [][]string        `toml:"package_commands"`
 	Collection      string            `toml:"collection"`
@@ -43,15 +46,24 @@ type Planner interface {
 	Plan(Suite, []string) ([]Check, error)
 }
 
-// Commands builds checks for an ordinary suite with no collection expansion.
+// Commands builds checks for a group with no collection expansion.
 func Commands(suite Suite) ([]Check, error) {
-	checks := make([]Check, 0, len(suite.Commands))
-	for _, args := range suite.Commands {
+	return checksForCommands(suite, append(append([][]string{}, suite.AlwaysCommands...), suite.Commands...))
+}
+
+// Always builds checks which run before any selected collection values.
+func Always(suite Suite) ([]Check, error) {
+	return checksForCommands(suite, suite.AlwaysCommands)
+}
+
+func checksForCommands(suite Suite, commands [][]string) ([]Check, error) {
+	checks := make([]Check, 0, len(commands))
+	for _, args := range commands {
 		if len(args) == 0 || args[0] == "" {
-			return nil, fmt.Errorf("test suite %q has an empty command", suite.Job)
+			return nil, fmt.Errorf("check group %q has an empty command", suite.Name)
 		}
 		checks = append(checks, Check{
-			Label: suite.Job, Directory: suite.Directory,
+			Label: suite.Name, Directory: suite.Directory,
 			Args: append([]string(nil), args...), Env: suite.Env,
 			Timeout: time.Duration(suite.TimeoutSeconds) * time.Second,
 		})

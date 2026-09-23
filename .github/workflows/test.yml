@@ -37,6 +37,7 @@ jobs:
       evaluators: ${{ steps.filter.outputs.evaluators }}
       native_targets: ${{ steps.filter.outputs.native_targets }}
       native_languages: ${{ steps.filter.outputs.native_languages }}
+      pnpm_packages: ${{ steps.filter.outputs.pnpm_packages }}
       impact: ${{ steps.filter.outputs.impact }}
 
     steps:
@@ -51,40 +52,13 @@ jobs:
 
       - name: Select affected CI jobs
         id: filter
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
-          PUSH_AFTER_SHA: ${{ github.event.after }}
         run: |
-          set -euo pipefail
-          case "$EVENT_NAME" in
-            pull_request)
-              base="$PR_BASE_SHA"
-              head="$PR_HEAD_SHA"
-              ;;
-            merge_group)
-              base="$GROUP_BASE_SHA"
-              head="$GROUP_HEAD_SHA"
-              ;;
-            push)
-              base="$PUSH_BEFORE_SHA"
-              head="$PUSH_AFTER_SHA"
-              ;;
-            *)
-              echo "Unsupported CI event: $EVENT_NAME" >&2
-              exit 1
-              ;;
-          esac
-          ./support/repoctl/repoctl plan --event "$EVENT_NAME" --base "$base" --head "$head" --github-output "$GITHUB_OUTPUT"
+          ./support/repoctl/repoctl validate
+          ./support/repoctl/repoctl verify-policy --cases repoctl-cases.toml
+          ./support/repoctl/repoctl plan --github-event --github-output "$GITHUB_OUTPUT"
 
-  # One environment setup for every cheap Python check. Issue #89 split these
-  # apart so a failure names the check that failed; each check is still its own
-  # step, so the failing step, its log, and the red annotation stay exactly as
-  # attributable as they were when each check owned a runner.
+  # One environment setup for the Python quality group. repoctl prints each
+  # command before running it and names the failing command in its error.
   python-checks:
     needs: changes
     if: needs.changes.outputs.python == 'true'
@@ -109,40 +83,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Check Python formatting
-        run: ./scripts/check_format.sh
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
 
-      - name: Check Python lint
-        run: ./scripts/check_lint.sh
-
-      # Ruff bounds individual functions (C901, PL) but not module size, so a
-      # file can grow without bound while every function in it stays legal.
-      # Ratchets against the allowlist in [tool.vibesys.file_length]; the
-      # TypeScript counterpart rides `pnpm check:ts` in the `tui` job.
-      - name: Check Python file length
-        run: uv run python scripts/check_file_length.py
-
-      # tach.toml freezes the current module graph (ratchet): a new
-      # cross-module import fails unless tach.toml is edited in the same PR.
-      - name: Check Tach module boundaries
-        run: uv run tach check
-
-      # The Mermaid graphs in docs/contributing/architecture.md are generated
-      # from tach.toml; refresh with `scripts/check_tach_graph.py --write`.
-      - name: Check Tach module graph doc is current
-        run: uv run python scripts/check_tach_graph.py --check
-
-      # docs/ and root Markdown are covered by website.yml, which this
-      # workflow's paths-ignore hands off to. This pass catches the rest:
-      # Markdown under src/, resources/, clients/, and examples/.
-      - name: Check Markdown links
-        run: python3 scripts/check_doc_links.py
-
-      # Lived in the `tui` job, which now skips for Python-only changes. It
-      # exercises the Python entry point rather than anything TypeScript, so it
-      # belongs with the other Python checks.
-      - name: Test repository launcher
-        run: uv run vibesys --headless --help >/dev/null
+      - name: Run Python quality checks
+        run: ./support/repoctl/repoctl run-checks --group python_quality
 
   # Python type checking is unnecessary when the Python watch set is untouched.
   typecheck:
@@ -165,8 +112,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
+
       - name: Check Python types
-        run: ./scripts/check_types.sh
+        run: ./support/repoctl/repoctl run-checks --group python_types
 
   tui:
     needs: changes
@@ -221,64 +173,31 @@ jobs:
         working-directory: clients
         run: pnpm install --frozen-lockfile
 
-      - name: Check TypeScript formatting and lint
-        working-directory: clients
-        run: pnpm check:ts
-
-      - name: Check TypeScript package boundaries
-        working-directory: clients
-        run: pnpm check:ts-architecture
-
-      - name: Check TypeScript unused code and dependencies
-        working-directory: clients
-        run: pnpm check:knip
-
-      - name: Check generated protocol bindings
-        working-directory: clients
-        run: |
-          pnpm --dir backend-client generate:protocol
-          git diff --exit-code -- backend-client/src/generated/protocol.schema.json backend-client/src/generated/protocol.generated.ts
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
 
       - name: Check TypeScript packages
-        working-directory: clients
-        run: pnpm check:clients
+        run: ./support/repoctl/repoctl run-checks --group tui_quality
 
-      - name: Test TypeScript packages
-        working-directory: clients
-        run: pnpm test:clients
+      - name: Test affected TypeScript packages
+        env:
+          PNPM_PACKAGES: ${{ needs.changes.outputs.pnpm_packages }}
+        run: ./support/repoctl/repoctl run-checks --group tui_tests --collection-json "$PNPM_PACKAGES"
 
       - name: Build TypeScript packages
-        working-directory: clients
-        run: pnpm build:clients
+        run: ./support/repoctl/repoctl run-checks --group tui_build
 
       - name: Install Chromium for the web smoke test
         working-directory: clients
         run: pnpm --filter @vibesys/web exec playwright install --with-deps chromium
 
       - name: Test the replay-driven web viewer
-        working-directory: clients
-        run: pnpm --filter @vibesys/web test:e2e
+        run: ./support/repoctl/repoctl run-checks --group tui_e2e
 
-      - name: Smoke-test packed public TUI package
-        working-directory: clients
-        run: |
-          pack_dir="$RUNNER_TEMP/vibesys-tui-pack"
-          install_dir="$RUNNER_TEMP/vibesys-tui-install"
-          mkdir -p "$pack_dir" "$install_dir"
-          pnpm --dir tui pack --pack-destination "$pack_dir"
-          npm install --prefix "$install_dir" --ignore-scripts "$pack_dir"/*.tgz
-          test -f "$install_dir/node_modules/@vibesys/tui/node_modules/@vibesys/backend-client/dist/index.js"
-          test -f "$install_dir/node_modules/@vibesys/tui/node_modules/@vibesys/core-state/dist/index.js"
-          bun "$install_dir/node_modules/@vibesys/tui/dist/self-test.js"
-
-      - name: Smoke-test deployed TUI workspace packages
-        working-directory: clients
-        run: |
-          deploy_dir="$RUNNER_TEMP/vibesys-tui-deploy"
-          pnpm --config.node-linker=hoisted --filter @vibesys/tui deploy --prod "$deploy_dir"
-          test -f "$deploy_dir/node_modules/@vibesys/backend-client/dist/index.js"
-          test -f "$deploy_dir/node_modules/@vibesys/core-state/dist/index.js"
-          bun "$deploy_dir/dist/self-test.js"
+      - name: Smoke-test TUI packages
+        run: ./support/repoctl/repoctl run-checks --group tui_package_smoke
 
   queue-native:
     needs: changes
@@ -337,10 +256,7 @@ jobs:
           go-version-file: support/repoctl/go.mod
 
       - name: Test repoctl
-        working-directory: support/repoctl
-        run: |
-          go test ./...
-          go vet ./...
+        run: ./support/repoctl/repoctl run-checks --group repoctl_tests
 
   # Owns everything that needs a repository-native example's external repository `.vibesys` directory,
   # so no other job pays for one. It fetches `.vibesys/` alone (blob-filtered,
@@ -362,7 +278,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: resources/evaluators/microservice/go.mod
+          go-version-file: support/repoctl/go.mod
           cache-dependency-path: resources/evaluators/microservice/go.sum
 
       - name: Install uv
@@ -377,37 +293,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Fetch external example repositories
-        run: uv run python scripts/example_repositories.py
-
-      # Iterates examples/registry.toml, not a glob: every registered example
-      # (both layouts, every task) is validated through `vibesys validate`,
-      # its trust policy and path references are checked, and an example that
-      # is not registered fails the build. External repositories are fetched above, so a
-      # missing one must fail rather than skip.
-      - name: Check registered examples
-        env:
-          VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS: "1"
-        run: uv run python -m pytest tests/examples/test_example_registry.py -v --no-cov
-
-      # The external repository is present here and nowhere else, so force the module to
-      # fail rather than skip if the fetch above ever stops producing it.
-      - name: Check microservice input contracts
-        env:
-          VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS: "1"
-        run: uv run python -m pytest tests/vibesys/test_microservice_inputs.py tests/vibesys/test_input_sources.py -v --no-cov
+      - name: Check registered examples and input contracts
+        run: ./support/repoctl/repoctl run-checks --group examples_tests
 
       - name: Validate microservice workloads
-        working-directory: resources/evaluators/microservice
-        run: |
-          go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" --validate-only
-          go run ./cmd/servicebench --mode accuracy --workload "$GITHUB_WORKSPACE/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" --validate-only
-          go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/train-ticket/.vibesys/tasks/default/benchmark/workload.toml" --profile offered-load --validate-only
-          go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/repositories/deathstarbench/.vibesys/tasks/social-network-read-timeline/benchmark/workload.toml" --validate-only
-          go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml" --telemetry-command-json '["go","run","./cmd/otelcapture","--input-json","/tmp/vibesys-hotel-traces.otlp.ndjson","--settle-seconds","5"]' --telemetry-output /tmp/vibesys-hotel-telemetry.json --telemetry-timeout 60 --validate-only
-          go run ./cmd/servicebench --mode accuracy --workload "$GITHUB_WORKSPACE/examples/microservices/repositories/deathstarbench/.vibesys/tasks/hotel-reservation/benchmark/workload.toml" --validate-only
-          go run ./cmd/servicebench --workload "$GITHUB_WORKSPACE/examples/microservices/hotel-correctness/.vibesys/tasks/compose/benchmark/workload.toml" --telemetry-command-json '["go","run","./cmd/otelcapture","--input-json","/tmp/vibesys-hotel-traces.otlp.ndjson","--settle-seconds","5"]' --telemetry-output /tmp/vibesys-hotel-telemetry.json --telemetry-timeout 60 --validate-only
-          go -C "$GITHUB_WORKSPACE/examples/microservices/hotel-correctness/.vibesys/tasks/compose/evaluator" run ./cmd/hotel-correctness --mode accuracy --workload "$GITHUB_WORKSPACE/examples/microservices/hotel-correctness/.vibesys/tasks/compose/benchmark/workload.toml" --validate-only
+        run: ./support/repoctl/repoctl run-checks --group microservice_workload_checks
 
   # Builds the CPU agent image for real and runs every shipped CLI inside it
   # as the non-root `agent` user (issue #675), then reuses that same build to
@@ -437,12 +327,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
+
       - name: Build the CPU agent image, run every shipped CLI in it, and prove the Docker sandbox contract
-        env:
-          VIBESYS_E2E_DOCKER: "1"
-        run: >-
-          uv run pytest tests/e2e/test_agent_image_e2e.py
-          libs/vs-sandbox/tests/test_docker_conformance_e2e.py -v -s --no-cov
+        run: ./support/repoctl/repoctl run-checks --group agent_image_tests
 
   # Several tests read clients/ directly (packaging, theme, and distribution
   # tests), so a TypeScript-only change still needs this job. Documentation-only
@@ -470,27 +361,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Run tests
-        # `addopts` in pyproject.toml already sets `--cov --cov-report=term-missing`
-        # against the source list in `[tool.coverage.run]` (vibesys, vs_feature_flags,
-        # vs_github, vs_issue_board, vs_sandbox). Add the report formats CI needs on
-        # top of that instead of repeating `--cov=...` for each package.
-        #
-        # `-n auto` fans the suite across the runner's cores; pytest-cov
-        # collects per worker and combines, so the two `--cov-fail-under`
-        # gates below still measure the whole suite. `--dist loadgroup` keeps
-        # each `xdist_group` on one worker, which is what the `serial` marker
-        # in conftest.py relies on. `--durations` keeps the slowest tests
-        # visible in every run instead of needing a local bisect.
-        run: >-
-          uv run python -m pytest -v -n auto --dist loadgroup --durations=25
-          --cov-report=xml --cov-report=json --cov-fail-under=75
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
 
-      - name: Enforce per-module coverage floor
-        # Repo-wide --cov-fail-under is an average and can't see a single
-        # near-zero module hiding inside it (issue #298). Reads the floor and
-        # allowlist from [tool.vibesys.per_module_coverage] in pyproject.toml.
-        run: uv run python scripts/check_coverage_floor.py coverage.json
+      - name: Run Python tests and coverage checks
+        run: ./support/repoctl/repoctl run-checks --group python_ci_tests
 
       - name: Upload coverage report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -504,7 +381,7 @@ jobs:
       # job already has the full history and the coverage report it needs.
       - name: Check patch coverage
         if: github.event_name == 'pull_request'
-        run: uv run diff-cover coverage.xml --compare-branch=origin/${{ github.base_ref }} --fail-under=80
+        run: ./support/repoctl/repoctl run-checks --group patch_coverage
 
   # Exercises the real Linux workspace-confinement boundary (issue #149). The
   # main `test` job skips these (no bubblewrap), so this job installs it and
@@ -546,10 +423,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
+
       - name: Run workspace-confinement tests
-        env:
-          VIBESYS_REQUIRE_SANDBOX_TESTS: "1"
-        run: uv run python -m pytest tests/vibesys/agents/test_hostsandbox.py -v
+        run: ./support/repoctl/repoctl run-checks --group sandbox_tests
 
   # macOS counterpart of sandbox-linux: exercises the Seatbelt confinement
   # boundary on a real macOS host. sandbox-exec ships with macOS, so no install
@@ -575,10 +455,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
+      - name: Set up Go for repoctl
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: support/repoctl/go.mod
+
       - name: Run workspace-confinement tests
-        env:
-          VIBESYS_REQUIRE_SANDBOX_TESTS: "1"
-        run: uv run python -m pytest tests/vibesys/agents/test_hostsandbox.py -v
+        run: ./support/repoctl/repoctl run-checks --group sandbox_tests
 
   # One stable, always-present result for branch protection and delegated merge
   # policy. Filtered jobs may skip, but every job that ran must succeed. Keep

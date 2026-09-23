@@ -133,7 +133,7 @@ func cli(args []string) error {
 	}
 	args = filtered
 	if len(args) == 0 {
-		return fmt.Errorf("usage: repoctl {plan|test|explain|validate|run-native}")
+		return fmt.Errorf("usage: repoctl {plan|test|run-checks|run-native|verify-policy|explain|validate}")
 	}
 	root, err := rootPath(configPath)
 	if err != nil {
@@ -144,6 +144,27 @@ func cli(args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "verify-policy":
+		return runVerifyPolicy(root, g, args[1:])
+	case "run-checks":
+		fs := flag.NewFlagSet("run-checks", flag.ContinueOnError)
+		group := fs.String("group", "", "Configured check group name")
+		collection := fs.String("collection-json", "", "Selected collection values as a JSON array")
+		dryRun := fs.Bool("dry-run", false, "Print selected commands without running them")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 || *group == "" {
+			return fmt.Errorf("run-checks requires --group and no positional arguments")
+		}
+		collectionProvided := false
+		fs.Visit(func(option *flag.Flag) {
+			collectionProvided = collectionProvided || option.Name == "collection-json"
+		})
+		if collectionProvided && *collection == "" {
+			return fmt.Errorf("--collection-json must be a JSON array of strings")
+		}
+		return runCheckGroup(root, g, *group, *collection, *dryRun, execution.OSRunner{})
 	case "test":
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
 		base := fs.String("base", g.DefaultBase, "Base revision")
@@ -225,6 +246,7 @@ func cli(args []string) error {
 		base := fs.String("base", g.DefaultBase, "Base revision")
 		head := fs.String("head", "HEAD", "Head revision")
 		event := fs.String("event", "pull_request", "Event type")
+		githubEvent := fs.Bool("github-event", false, "Read revisions from the GitHub Actions event payload")
 		asJSON := fs.Bool("json", false, "Print JSON plan")
 		output := fs.String("github-output", "", "Append GitHub outputs")
 		if err := fs.Parse(args[1:]); err != nil {
@@ -232,6 +254,21 @@ func cli(args []string) error {
 		}
 		if fs.NArg() != 0 {
 			return fmt.Errorf("unexpected plan arguments")
+		}
+		if *githubEvent {
+			conflicting := ""
+			fs.Visit(func(option *flag.Flag) {
+				if option.Name == "base" || option.Name == "head" || option.Name == "event" {
+					conflicting = option.Name
+				}
+			})
+			if conflicting != "" {
+				return fmt.Errorf("--github-event cannot be combined with --%s", conflicting)
+			}
+			*base, *head, *event, err = gitHubEventRevisions()
+			if err != nil {
+				return err
+			}
 		}
 		paths, err := changedPaths(root, *base, *head, *event)
 		if err != nil {

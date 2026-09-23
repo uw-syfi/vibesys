@@ -61,7 +61,7 @@ func readPolicy(root, configPath string) (graph, error) {
 		Collections: p.Collections, NativeTargets: map[string]nativeTarget{},
 		NativeChecks:         p.NativeChecks,
 		NativeCheckOverrides: map[string]nativeCheckOverride{},
-		TestSuites:           map[string]execution.Suite{},
+		CheckGroups:          map[string]execution.Suite{},
 	}
 	for _, group := range [][]string{p.IgnoredRoots, p.IgnoredFiles} {
 		for _, x := range group {
@@ -123,7 +123,7 @@ func readPolicy(root, configPath string) (graph, error) {
 			return g, fmt.Errorf("unsupported collection field %q", collection.Field)
 		}
 	}
-	if err := g.validateTestSuites(p.TestSuites); err != nil {
+	if err := g.validateCheckGroups(p.CheckGroups); err != nil {
 		return g, err
 	}
 	if err := g.validate(); err != nil {
@@ -141,6 +141,9 @@ func readPolicy(root, configPath string) (graph, error) {
 		g.NativeTargets[id] = nativeTarget{ComponentID: id, Root: r, Language: c.Language, Selected: c.Selected}
 	}
 	if err := g.validateNativeConfiguration(p.NativeCheckOverrides); err != nil {
+		return g, err
+	}
+	if err := g.validateRunnableJobs(); err != nil {
 		return g, err
 	}
 	return g, nil

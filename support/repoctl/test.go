@@ -39,21 +39,16 @@ func selectedTestChecks(g graph, p plan) ([]execution.Check, []string, error) {
 		}
 	}
 	sort.Strings(targets)
-	jobs := make([]string, 0, len(p.Jobs))
-	for job, selected := range p.Jobs {
-		if selected {
-			jobs = append(jobs, job)
-		}
-	}
-	sort.Strings(jobs)
 	checks := []execution.Check{}
-	for _, job := range jobs {
-		suite, ok := g.TestSuites[job]
-		if !ok {
-			if coveredJobs[job] {
-				continue
-			}
-			return nil, nil, fmt.Errorf("selected job %q has no test suite", job)
+	groups := make([]string, 0, len(g.CheckGroups))
+	for name := range g.CheckGroups {
+		groups = append(groups, name)
+	}
+	sort.Strings(groups)
+	for _, name := range groups {
+		suite := g.CheckGroups[name]
+		if !suite.IncludeInTest || !p.Jobs[suite.TriggerJob] {
+			continue
 		}
 		planner := testPlanners[suite.Language]
 		planned, err := planner.Plan(suite, p.Collections[suite.Collection])
@@ -61,6 +56,12 @@ func selectedTestChecks(g graph, p plan) ([]execution.Check, []string, error) {
 			return nil, nil, err
 		}
 		checks = append(checks, planned...)
+		coveredJobs[suite.TriggerJob] = true
+	}
+	for job, selected := range p.Jobs {
+		if selected && !coveredJobs[job] {
+			return nil, nil, fmt.Errorf("selected job %q has no runnable check group or native target", job)
+		}
 	}
 	return checks, targets, nil
 }
@@ -70,14 +71,8 @@ func runSelectedTests(root string, g graph, p plan, dryRun bool, runner executio
 	if err != nil {
 		return err
 	}
-	for _, check := range checks {
-		fmt.Printf("%s (%s): %s\n", check.Label, check.Directory, strings.Join(check.Args, " "))
-		if dryRun {
-			continue
-		}
-		if err := runner.Run(context.Background(), root, check); err != nil {
-			return err
-		}
+	if err := runChecks(root, checks, dryRun, runner); err != nil {
+		return err
 	}
 	if len(targets) == 0 {
 		return nil
@@ -103,4 +98,17 @@ func runSelectedTests(root string, g graph, p plan, dryRun bool, runner executio
 		return nil
 	}
 	return runNativeTargets(root, g, string(raw), nativeRun)
+}
+
+func runChecks(root string, checks []execution.Check, dryRun bool, runner execution.Runner) error {
+	for _, check := range checks {
+		fmt.Printf("%s (%s): %s\n", check.Label, check.Directory, strings.Join(check.Args, " "))
+		if dryRun {
+			continue
+		}
+		if err := runner.Run(context.Background(), root, check); err != nil {
+			return err
+		}
+	}
+	return nil
 }

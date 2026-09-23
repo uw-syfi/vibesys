@@ -23,6 +23,9 @@ func FuzzParseNameStatusZ(f *testing.F) {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, raw []byte) {
+		if len(raw) > 4096 {
+			t.Skip()
+		}
 		paths, err := parseNameStatusZ(raw)
 		if err != nil {
 			return

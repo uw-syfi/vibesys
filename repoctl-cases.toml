@@ -1,0 +1,55 @@
+# Repository-owned contracts for the impact policy. Verify with `repoctl verify-policy`.
+
+[[cases]]
+name = "server event changes reach the client"
+paths = ["src/server/events.py"]
+jobs = ["python", "tui"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "core state changes reach downstream TypeScript packages"
+paths = ["clients/core-state/src/core-state.test.ts"]
+jobs = ["tui"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = ["@vibesys/core-state", "@vibesys/tui", "@vibesys/web"]
+
+[[cases]]
+name = "evaluator SDK changes reach consumers"
+paths = ["sdk/vs-evaluator/vseval/go.mod"]
+jobs = ["evaluators", "python"]
+[cases.collections]
+native_languages = ["go"]
+native_targets = ["resources/evaluators/microservice", "resources/evaluators/queue", "sdk/vs-evaluator/vseval"]
+pnpm_packages = []
+
+[[cases]]
+name = "repository tool changes select all checks"
+paths = ["support/repoctl/main.go"]
+jobs = ["agent_image", "evaluators", "examples", "impact", "python", "tui"]
+[cases.collections]
+native_languages = ["go", "rust"]
+native_targets = [
+  "examples/data-structures/repositories/queue-rs",
+  "examples/evaluators/priority-queue",
+  "examples/evaluators/priority-queue/native_runner",
+  "examples/starters/priority-queue-rs",
+  "resources/evaluators/microservice",
+  "resources/evaluators/queue",
+  "resources/evaluators/queue/native_runner",
+  "sdk/vs-evaluator/vseval",
+]
+pnpm_packages = ["@vibesys/backend-client", "@vibesys/core-state", "@vibesys/tui", "@vibesys/web"]
+
+[[cases]]
+name = "website files do not start application CI"
+paths = ["website/package.json"]
+jobs = []
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
