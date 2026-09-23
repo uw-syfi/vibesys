@@ -1,15 +1,1 @@
-"""Public API for the ``vs-github`` library."""
-
-from vs_github.cli import (
-    GitHubAuthenticationError,
-    GitHubCLI,
-    GitHubCLIError,
-    GitHubCLIUnavailableError,
-)
-
-__all__ = [
-    "GitHubAuthenticationError",
-    "GitHubCLI",
-    "GitHubCLIError",
-    "GitHubCLIUnavailableError",
-]
+"""vs_github package. Import its public interface from :mod:`vs_github.api`."""

@@ -38,9 +38,10 @@ The main framework boundaries are:
 - `src/server/` owns serving and frontend-specific behavior. It may depend on
   `src/vibesys/`, but the headless core does not depend on it.
 - `src/vibesys/loops/` owns the outer-loop policies and shared loop helpers.
-- `libs/vs-agent/` (the `vs_agent` package) owns the agent-runner abstraction and integrations.
-  Import it only through its public `vs_agent.api` surface (and `vs_agent.api.testing`
-  for the library-owned fake); tach's interface check rejects imports of internal modules.
+- `libs/` owns reusable libraries. Import each library through its public
+  `<package>.api` surface, for example `vs_agent.api` or `vs_project.api`.
+  `vs_agent.api.testing` provides the library-owned fake. Tach rejects imports
+  of root-level exports and internal modules.
 - `src/vibesys/domains/` owns domain-specific prompt context and hooks.
 - `src/vibesys/backends/` owns compute and execution backends.
 - Candidate repositories own target-specific tasks and candidate contracts

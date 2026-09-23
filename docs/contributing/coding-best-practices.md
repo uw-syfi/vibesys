@@ -16,7 +16,8 @@ path.
 - Put process composition under `src/entrypoints/`, not in `libs/`: the shared
   CLI (argument parsing, `RunRequest` building) plus the thin mode entries that
   fork to the `headless` or `server` driver.
-- Put reusable standalone libraries under `libs/`.
+- Put reusable standalone libraries under `libs/`. Import each through its
+  `<package>.api` facade, not its root or internal modules.
 - Put prompt, loop, and domain behavior in the package that owns that surface.
 - Put long-form serving knowledge under `resources/skills/`, not in framework
   code or prompt skeletons.
@@ -48,9 +49,11 @@ path.
   and headless paths reach core only through the `vibesys.api` facade, so it
   lists no core-internal `vibesys.*` module. Upward imports (core to
   server, server to entrypoints, a `server.*` module to a higher one) fail
-  because the edge is undeclared. Tach is the single boundary tool. The libs
-  DAG holds because every lib edge is explicit (only `vs_project` to
-  `vs_loop_state` exists); reject any new one in review. The generated graphs
+  because the edge is undeclared. Tach is the single boundary tool. Its
+  interfaces expose only each library's `api` package and submodules. The libs
+  DAG holds because every lib edge is explicit: `vs_project` depends on
+  `vs_loop_state`, and `vs_agent` depends on `vs_sandbox`, `vs_loop_state`, and
+  `vs_project`. Reject any new lib edge in review. The generated graphs
   are in [architecture.md](architecture.md); after editing `tach.toml`, run
   `uv run python scripts/check_tach_graph.py --write`.
 
