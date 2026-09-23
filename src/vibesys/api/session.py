@@ -121,7 +121,7 @@ class RunSession(RunQuery, RunWorkspace, RunControl, RunAgentHost, Protocol):
     def on_committed_view(
         self, listener: Callable[[RunView, tuple[str, ...] | None], None]
     ) -> None:
-        """Register the sole application projection of freshly committed state."""
+        """Register a listener for policy views and policy-defined changed keys."""
         ...
 
     def on_run_resources(self, listener: Callable[[RunResourceHandoff], None]) -> None:
@@ -183,7 +183,7 @@ class _LocalRunSession:
     def on_committed_view(
         self, listener: Callable[[RunView, tuple[str, ...] | None], None]
     ) -> None:
-        """Register the sole application projection of freshly committed state."""
+        """Register a listener for policy views and policy-defined changed keys."""
         self._committed_view_listener = listener
 
     def _handle_committed_state(

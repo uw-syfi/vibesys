@@ -17,8 +17,9 @@ from uuid import UUID
 import pytest
 from mcp.server.fastmcp import FastMCP
 
+from vibesys.api import RunStatus, RunView
 from vibesys.api.chat_tools_server import build_parser, build_tools
-from vibesys.api.store import open_run_store
+from vibesys.api.store import RunStore, open_run_store
 from vibesys.loops.agent.model import AgentRunState, Hypothesis, HypothesisReview
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.schemas import OrchestratorPlan
@@ -186,6 +187,31 @@ class TestToolRegistration:
 
 
 class TestEndToEnd:
+    def test_non_agent_projection_has_neutral_run_tools(self, tmp_path: Path) -> None:
+        project, run_id = _project_with_run(tmp_path)
+
+        class CustomStore:
+            def get_run(self, requested: str) -> RunView:
+                assert requested == run_id
+                return RunView(
+                    run_id=run_id,
+                    loop="team-search",
+                    status=RunStatus.UNKNOWN,
+                    projection={"kind": "team-search", "workers": 3},
+                )
+
+        tools = build_tools(cast("RunStore", CustomStore()), project, run_id)
+        server = _server(tools)
+
+        summary = asyncio.run(_call(server, "run_summary"))
+        assert summary == f"run_id: {run_id}\nloop: team-search\nstatus: unknown"
+        assert asyncio.run(_call(server, "list_hypotheses")) == "(no hypotheses)"
+        assert asyncio.run(_call(server, "list_rounds")) == "(no rounds)"
+        assert (
+            asyncio.run(_call(server, "get_hypothesis", hypothesis_id="H-01"))
+            == "(no hypothesis 'H-01'; see list_hypotheses)"
+        )
+
     def test_run_summary_reports_top_level_status(self, tmp_path: Path) -> None:
         tools, run_id = _tools(tmp_path)
         server = _server(tools)

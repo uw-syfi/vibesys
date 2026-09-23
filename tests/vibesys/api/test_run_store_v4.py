@@ -38,7 +38,7 @@ def test_plain_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     assert type(direct.loop) is str
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
-    assert direct.rounds == []
+    assert direct.projection is None
     assert len(listed) == 1
     assert listed[0] == direct
 
@@ -66,7 +66,7 @@ def test_evolve_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     assert direct.loop == LoopKind.EVOLVE
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
-    assert direct.rounds == []
+    assert direct.projection is None
     assert store.list_runs() == [direct]
 
 
@@ -92,7 +92,7 @@ def test_unknown_v4_run_has_generic_history_view(tmp_path: Path) -> None:
 
     assert direct.loop == "team-search"
     assert direct.status is RunStatus.UNKNOWN
-    assert direct.rounds == []
+    assert direct.projection is None
     assert store.list_runs() == [direct]
     project.state.portable_namespace(manifest.run_id, "evidence").write_bytes(
         "notes.txt", b"candidate review"

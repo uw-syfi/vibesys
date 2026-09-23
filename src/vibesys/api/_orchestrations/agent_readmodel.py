@@ -13,14 +13,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, cast
 
-from vibesys.api.contracts import (
+from vibesys.api._orchestrations.agent_projection import (
+    AgentRunProjection,
     HypothesisRoundView,
     HypothesisView,
-    LoopKind,
     RoundView,
-    RunStatus,
-    RunView,
 )
+from vibesys.api.contracts import LoopKind, RunStatus, RunView
 from vibesys.loops.agent.hypotheses import measurement_delta_reason
 from vibesys.loops.agent.model import HypothesisResolution
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome, derive_hypothesis_title
@@ -55,10 +54,7 @@ def project_run_view(
     in-progress round, a server-journal round label) is journal-derived and
     out of scope for a core-state projection.
     """
-    return RunView(
-        run_id=run_id,
-        loop=loop,
-        status=status,
+    projection = AgentRunProjection(
         current_round=len(state.rounds),
         active_hypothesis_id=state.active_hypothesis_id,
         experiment_revision=experiment_revision,
@@ -67,6 +63,12 @@ def project_run_view(
             for hypothesis in state.hypotheses
         ],
         rounds=[_round_view(record) for record in state.rounds],
+    )
+    return RunView(
+        run_id=run_id,
+        loop=loop,
+        status=status,
+        projection=projection.model_dump(mode="json"),
     )
 
 

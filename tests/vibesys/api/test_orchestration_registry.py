@@ -158,8 +158,7 @@ def test_policy_owns_start_metadata_and_live_and_stored_views(tmp_path: Path) ->
                 run_id=run_id,
                 loop=loop,
                 status=status,
-                current_round=7,
-                experiment_revision=3,
+                projection={"kind": "team-search", "workers": ["scout", "reviewer"]},
             )
 
     request = _custom_request(tmp_path)
@@ -180,11 +179,13 @@ def test_policy_owns_start_metadata_and_live_and_stored_views(tmp_path: Path) ->
     assert isinstance(started.data, RunStartedData)
     assert started.data.max_rounds == 9
     assert started.data.expected_roles == ("scout", "reviewer")
-    assert session.view().current_round == 7
+    assert session.view().projection == {"kind": "team-search", "workers": ["scout", "reviewer"]}
     stored = open_run_store(Project.open(request.project_root), registry=registry).get_run(
         result.run_id
     )
-    assert stored.current_round == 7
+    assert stored.projection == session.view().projection
+    assert public_api.agent_projection(stored) is None
+    assert RunView.model_validate_json(stored.model_dump_json()) == stored
     assert stored.status is RunStatus.UNKNOWN
 
 
@@ -249,9 +250,7 @@ def test_descriptor_request_runs_without_legacy_loop_fields(tmp_path: Path) -> N
 
         def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
             del project
-            return RunView(
-                run_id=run_id, loop=loop, status=status, current_round=0, experiment_revision=0
-            )
+            return RunView(run_id=run_id, loop=loop, status=status)
 
         def project_committed(
             self, namespace: str, state: BaseModel, *, run_id: str

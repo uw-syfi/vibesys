@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from server.api.protocol import PerformanceContext
+from vibesys.api import agent_projection
 
 if TYPE_CHECKING:
     from vibesys.api import HypothesisView, RunView
@@ -107,9 +108,12 @@ def _latest_measurement(run_view: RunView | None) -> HypothesisView | None:
     """
     if run_view is None:
         return None
+    projection = agent_projection(run_view)
+    if projection is None:
+        return None
     latest: HypothesisView | None = None
     latest_round: int | None = None
-    for hypothesis in run_view.hypotheses:
+    for hypothesis in projection.hypotheses:
         round_number = hypothesis.perf_metric_round
         if round_number is None:
             continue

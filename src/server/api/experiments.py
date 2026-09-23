@@ -1,6 +1,6 @@
-"""Reshape a run's `RunView` into experiment-log protocol entries.
+"""Reshape a run's agent projection into experiment-log protocol entries.
 
-`vibesys.api`'s `RunView`/`HypothesisView`/`HypothesisRoundView` already
+`vibesys.api`'s `AgentRunProjection`/`HypothesisView`/`HypothesisRoundView` already
 derive every fact this module publishes -- copying authoritative state,
 never grouping rounds, selecting a baseline, or inferring a resolution (see
 `vibesys.api._readmodel`). This module only reshapes those boundary DTOs into
@@ -17,19 +17,32 @@ from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from server.api.protocol import ExperimentCursor, ExperimentUpdate, HypothesisEntry, HypothesisRound
+from vibesys.api import agent_projection
 
 if TYPE_CHECKING:
-    from vibesys.api import HypothesisRoundView, HypothesisView, RunView
+    from vibesys.api import AgentRunProjection, HypothesisRoundView, HypothesisView, RunView
 
 _StrategyDisposition = Literal["available", "parked", "abandoned"]
 
 
 def build_experiment_log(run_view: RunView) -> list[HypothesisEntry]:
     """Return the complete hypothesis history in stable start-round order."""
+    projection = agent_projection(run_view)
+    if projection is None:
+        return []
     return sorted(
-        (_to_hypothesis_entry(hypothesis) for hypothesis in run_view.hypotheses),
+        (_to_hypothesis_entry(hypothesis) for hypothesis in projection.hypotheses),
         key=lambda entry: (entry.first_round, entry.hypothesis_id),
     )
+
+
+def _required_agent_projection(view: RunView) -> AgentRunProjection:
+    """Require agent facts for the agent-only incremental experiment cache."""
+    projection = agent_projection(view)
+    if projection is None:
+        message = "agent projection required"
+        raise ValueError(message)
+    return projection
 
 
 def _strategy_disposition(value: str) -> _StrategyDisposition:
@@ -229,14 +242,16 @@ class ExperimentProjection:
             return self._delta_result(cursor.revision, changed_ids, removed_ids)
 
     def _replace(self, run_view: RunView, *, rotate: bool = False) -> None:
+        projection = _required_agent_projection(run_view)
         if rotate:
             self._projection_id = self._new_projection_id()
         entries = build_experiment_log(run_view)
         self._entries = {entry.hypothesis_id: entry for entry in entries}
         self._hypothesis_indices = {
-            hypothesis.hypothesis_id: index for index, hypothesis in enumerate(run_view.hypotheses)
+            hypothesis.hypothesis_id: index
+            for index, hypothesis in enumerate(projection.hypotheses)
         }
-        self._revision = run_view.experiment_revision
+        self._revision = projection.experiment_revision
         self._history.clear()
         self._ready = True
         self._force_reset = False
@@ -247,13 +262,14 @@ class ExperimentProjection:
         *,
         changed_keys: tuple[str, ...] | None,
     ) -> None:
-        if run_view.experiment_revision < self._revision:
+        projection = _required_agent_projection(run_view)
+        if projection.experiment_revision < self._revision:
             # The persisted cursor regressed under the same run id. This can
             # only be a restored or legacy state, so the old delta chain is no
             # longer a valid base for any client.
             self._replace(run_view, rotate=True)
             return
-        if run_view.experiment_revision == self._revision:
+        if projection.experiment_revision == self._revision:
             # A complete committed snapshot at the current revision can come
             # from restoring legacy state. It starts a new cursor chain so no
             # client can mistake different contents for an unchanged result.
@@ -262,24 +278,24 @@ class ExperimentProjection:
             return
         if changed_keys is None:
             previous_ids = set(self._entries)
-            current_ids = {hypothesis.hypothesis_id for hypothesis in run_view.hypotheses}
+            current_ids = {hypothesis.hypothesis_id for hypothesis in projection.hypotheses}
             removed_ids = previous_ids - current_ids
             changed_ids = {
                 hypothesis.hypothesis_id
-                for hypothesis in run_view.hypotheses
+                for hypothesis in projection.hypotheses
                 if hypothesis.last_experiment_revision > self._revision
             }
         else:
             removed_ids = set()
             changed_ids = set(changed_keys)
-            if len(run_view.hypotheses) < len(self._hypothesis_indices):
+            if len(projection.hypotheses) < len(self._hypothesis_indices):
                 self._replace(run_view)
                 return
             # Lifecycle transitions append new hypotheses and preserve all
             # existing positions. Index only the appended suffix, so one new
             # hypothesis does not require scanning the prior history.
-            for index in range(len(self._hypothesis_indices), len(run_view.hypotheses)):
-                hypothesis = run_view.hypotheses[index]
+            for index in range(len(self._hypothesis_indices), len(projection.hypotheses)):
+                hypothesis = projection.hypotheses[index]
                 self._hypothesis_indices[hypothesis.hypothesis_id] = index
         # A missing per-entry revision means the state came from a writer that
         # predates deltas. Rebuild rather than returning an incomplete update.
@@ -288,10 +304,10 @@ class ExperimentProjection:
             return
         for hypothesis_id in changed_ids:
             index = self._hypothesis_indices.get(hypothesis_id)
-            if index is None or index >= len(run_view.hypotheses):
+            if index is None or index >= len(projection.hypotheses):
                 self._replace(run_view)
                 return
-            hypothesis = run_view.hypotheses[index]
+            hypothesis = projection.hypotheses[index]
             if hypothesis.hypothesis_id != hypothesis_id:
                 self._replace(run_view)
                 return
@@ -301,12 +317,12 @@ class ExperimentProjection:
         self._history.append(
             _Delta(
                 from_revision=self._revision,
-                through_revision=run_view.experiment_revision,
+                through_revision=projection.experiment_revision,
                 changed_ids=frozenset(changed_ids),
                 removed_ids=frozenset(removed_ids),
             )
         )
-        self._revision = run_view.experiment_revision
+        self._revision = projection.experiment_revision
 
     def _changes_after(self, revision: int) -> tuple[set[str], set[str]] | None:
         cursor = revision

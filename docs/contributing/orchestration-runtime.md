@@ -91,6 +91,12 @@ compatibility imports for built-in CLI selection and are deprecated for new
 policies. Their policy options belong to the built-in adapters.
 `RunResult.loop` and `RunView.loop` return ID strings for every policy;
 `LoopKind` still compares equal to its corresponding string value.
+`RunView` contains run identity, lifecycle status, and an optional JSON object
+`projection` owned by the selected policy. Policies without a read model leave
+it absent. The built-in agent policy projects its experiment and round facts as
+`AgentRunProjection`; `agent_projection(view)` validates that payload and
+returns `None` for other policy projections. Committed-view `changed_keys` are
+policy-specific; for the built-in agent policy they identify changed hypotheses.
 
 `AgentDefinition` accepts an `AgentSpec` per agent and optional `resources` as
 `HostResource` grants. `spawn_agent` opens an agent environment with those

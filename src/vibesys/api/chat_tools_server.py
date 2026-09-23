@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from vibesys.api._orchestrations.agent_projection import agent_projection
 from vibesys.api.store import open_run_store
 from vs_agent.api import ToolSpec, serve_stdio
 from vs_project.api import Project
@@ -68,15 +69,17 @@ class _StateFileArgs(BaseModel):
 def _run_summary_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
         view = store.get_run(run_id)
+        summary = f"run_id: {view.run_id}\nloop: {view.loop}\nstatus: {view.status.value}"
+        projection = agent_projection(view)
+        if projection is None:
+            return summary
         return (
-            f"run_id: {view.run_id}\n"
-            f"loop: {view.loop}\n"
-            f"status: {view.status.value}\n"
-            f"current_round: {view.current_round}\n"
-            f"active_hypothesis_id: {view.active_hypothesis_id or '(none)'}\n"
-            f"experiment_revision: {view.experiment_revision}\n"
-            f"hypothesis_count: {len(view.hypotheses)}\n"
-            f"round_count: {len(view.rounds)}"
+            f"{summary}\n"
+            f"current_round: {projection.current_round}\n"
+            f"active_hypothesis_id: {projection.active_hypothesis_id or '(none)'}\n"
+            f"experiment_revision: {projection.experiment_revision}\n"
+            f"hypothesis_count: {len(projection.hypotheses)}\n"
+            f"round_count: {len(projection.rounds)}"
         )
 
     return ToolSpec(
@@ -92,12 +95,14 @@ def _run_summary_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
 
 def _list_hypotheses_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
-        view = store.get_run(run_id)
-        if not view.hypotheses:
+        projection = agent_projection(store.get_run(run_id))
+        if projection is None or not projection.hypotheses:
             return "(no hypotheses)"
         lines = []
-        for hypothesis in view.hypotheses:
-            marker = " [active]" if hypothesis.hypothesis_id == view.active_hypothesis_id else ""
+        for hypothesis in projection.hypotheses:
+            marker = (
+                " [active]" if hypothesis.hypothesis_id == projection.active_hypothesis_id else ""
+            )
             lines.append(
                 f"{hypothesis.hypothesis_id}{marker}: {hypothesis.title or '(untitled)'} "
                 f"(rounds {hypothesis.first_round}-{hypothesis.last_round}, "
@@ -115,9 +120,11 @@ def _list_hypotheses_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
 
 def _get_hypothesis_tool(store: RunStore, run_id: str) -> ToolSpec[_HypothesisArgs]:
     def handler(args: _HypothesisArgs) -> str:
-        view = store.get_run(run_id)
+        projection = agent_projection(store.get_run(run_id))
+        if projection is None:
+            return f"(no hypothesis {args.hypothesis_id!r}; see list_hypotheses)"
         hypothesis = next(
-            (h for h in view.hypotheses if h.hypothesis_id == args.hypothesis_id), None
+            (h for h in projection.hypotheses if h.hypothesis_id == args.hypothesis_id), None
         )
         if hypothesis is None:
             return f"(no hypothesis {args.hypothesis_id!r}; see list_hypotheses)"
@@ -161,15 +168,15 @@ def _get_hypothesis_tool(store: RunStore, run_id: str) -> ToolSpec[_HypothesisAr
 
 def _list_rounds_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
-        view = store.get_run(run_id)
-        if not view.rounds:
+        projection = agent_projection(store.get_run(run_id))
+        if projection is None or not projection.rounds:
             return "(no rounds)"
         lines = [
             f"round {round_view.round_number}: passed={round_view.passed} "
             f"commit={round_view.commit or '-'} perf={round_view.perf_metric} "
             f"{round_view.perf_unit or ''} official={round_view.official_evaluation} "
             f"profile_skipped={round_view.profile_skipped}"
-            for round_view in view.rounds
+            for round_view in projection.rounds
         ]
         return "\n".join(lines)
 

@@ -16,6 +16,12 @@ from __future__ import annotations
 from vibesys import boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.api._agent_state import agent_run_objectives, is_agent_run_manifest
+from vibesys.api._orchestrations.agent_projection import (
+    AgentRunProjection,
+    HypothesisRoundView,
+    HypothesisView,
+    agent_projection,
+)
 from vibesys.api._orchestrations.builtins import built_in_orchestrations
 
 # Deprecated public imports retained for existing callers; omitted from __all__.
@@ -35,8 +41,6 @@ from vibesys.api.contracts import (
     ConfigurationError,
     CoreEvent,
     EventStatus,
-    HypothesisRoundView,
-    HypothesisView,
     LoopKind,
     MetricSpace,
     Objective,
@@ -88,6 +92,7 @@ __all__ = [
     "AgentExecutionStartedData",
     "AgentHandle",
     "AgentOutputChunkData",
+    "AgentRunProjection",
     "AgentSpec",
     "ComputeBackend",
     "Config",
@@ -127,6 +132,7 @@ __all__ = [
     "ToolCallData",
     "ToolResultData",
     "VibeSysRuntime",
+    "agent_projection",
     "agent_run_objectives",
     "agent_spec_from_config",
     "boot_trace",

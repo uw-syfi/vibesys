@@ -86,8 +86,6 @@ def empty_run_view(
         run_id=run_id,
         loop=loop,
         status=status,
-        current_round=0,
-        experiment_revision=0,
     )
 
 

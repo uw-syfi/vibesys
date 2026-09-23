@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 # "agent" as an agent run, deliberately excluding "profile-guided" even
 # though both outer loops persist `AgentRunState` (see
 # `server.api.service.RunApi._is_agent_run`). Matched here so a run's
-# `RunView.hypotheses`/`rounds` agree with what the server would show for the
+# `AgentRunProjection.hypotheses`/`rounds` agree with what the server would show for the
 # same run today.
 _AGENT_OUTER_LOOP = "agent"
 

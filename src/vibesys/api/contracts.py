@@ -9,9 +9,9 @@ type defined here: a run's workspace is expressed as `vs_sandbox.HostResource`
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, JsonValue
 
 # Legacy public names remain here for import compatibility.
 from vibesys.api._orchestrations.legacy_request import LoopKind, RunRequest
@@ -42,8 +42,6 @@ __all__ = [
     "CoreEvent",
     "EventSink",
     "EventStatus",
-    "HypothesisRoundView",
-    "HypothesisView",
     "LoopKind",
     "MCPServerSpec",
     "MetricSpace",
@@ -52,7 +50,6 @@ __all__ = [
     "OrchestrationRunRequest",
     "PerfDeltaReason",
     "ResumeRef",
-    "RoundView",
     "RunRequest",
     "RunRequestLike",
     "RunResult",
@@ -94,110 +91,11 @@ class RunStatus(StrEnum):
     FAILED = "failed"
 
 
-class HypothesisRoundView(BaseModel):
-    """One hypothesis's round, copied verbatim from its authoritative record.
-
-    A one-way projection, matching `server.api.experiments._round`: it copies
-    fields, never groups rounds, selects a baseline, or infers a resolution.
-    `hypothesis_outcome`/`candidate_disposition` are pre-resolved to their
-    plain string value (rather than exposing the enum members
-    `server.api.experiments` resolves them to) because a round's outcome can
-    legitimately hold either of two distinct core-private vocabularies
-    (`HypothesisOutcome` or `HypothesisResolution`), which a single typed
-    field on a boundary DTO cannot express without leaking those types.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    round_number: int
-    passed: bool
-    reviewed: bool
-    hypothesis_outcome: str | None = None
-    judge_verdict: Literal["pass", "fail", "deferred"] | None = None
-    perf_metric: float | None = None
-    perf_unit: str | None = None
-    perf_delta_pct: float | None = None
-    commit: str | None = None
-    official_evaluation: bool = False
-    candidate_disposition: str | None = None
-
-
-class HypothesisView(BaseModel):
-    """One hypothesis's full history, matching `server.api.experiments.HypothesisEntry`.
-
-    `title`, `resolved_outcome`, `strategy_disposition`, and `perf_delta_reason`
-    are precomputed from `vibesys.loops.agent.model.Hypothesis` (core-private:
-    `plan: OrchestratorPlan`, `strategy: HypothesisStrategy`, ...) so this DTO
-    exposes only plain strings and the already-boundary-safe `PerfDeltaReason`.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    hypothesis_id: str
-    title: str | None = None
-    claim: str | None = None
-    action: str | None = None
-    first_round: int
-    last_round: int
-    rounds: list[HypothesisRoundView] = Field(default_factory=list)
-    resolved_outcome: str | None = None
-    judge_verdict: Literal["pass", "fail"] | None = None
-    # The measurement fields below are copied as one tuple from the
-    # hypothesis's single headline measurement: pairing a newer per-round
-    # metric with an older causal delta would misreport the measurement.
-    perf_metric: float | None = None
-    perf_unit: str | None = None
-    perf_delta_pct: float | None = None
-    # The round that produced the measurement above: `server.api.performance.
-    # _latest_measurement` selects the newest headline measurement across
-    # hypotheses by this round number, without needing `HypothesisMeasurement`
-    # itself.
-    perf_metric_round: int | None = None
-    perf_metric_name: str | None = None
-    perf_direction: Literal["max", "min"] | None = None
-    perf_baseline_value: float | None = None
-    perf_baseline_round: int | None = None
-    perf_baseline_commit: str | None = None
-    perf_delta_reason: PerfDeltaReason | None = None
-    kept: bool | None = None
-    strategy_disposition: str
-    strategy_reason: str | None = None
-    active: bool
-    last_experiment_revision: int
-    parent_commit: str | None = None
-
-
-class RoundView(BaseModel):
-    """One run-wide round, in chronological order across all hypotheses.
-
-    Unlike `server.api.service.performance_rounds`, this does not drop rounds
-    with no recorded measurement: it is the general-purpose round history,
-    not the performance-plot series.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    round_number: int
-    commit: str | None = None
-    perf_metric: float | None = None
-    perf_unit: str | None = None
-    passed: bool
-    profile_skipped: bool = False
-    official_evaluation: bool = False
-
-
 class RunView(BaseModel):
-    """Read-only snapshot of a run's authoritative facts.
+    """Read-only run identity, lifecycle, and a policy-owned JSON projection.
 
-    `hypotheses` preserves persisted append order (the order
-    `AgentRunState.hypotheses` stores them in), not `HypothesisEntry`'s
-    `(first_round, hypothesis_id)` sort: the sort is a
-    `server.api.experiments.build_experiment_log` presentation choice, not a
-    fact about the run.
-
-    Deliberately excludes `latest_execution`/`configuration_failure`: those
-    describe a server-journal-tracked process attached to a run, not a fact
-    `vibesys` core state ever records.
+    The selected orchestration owns the payload schema. An absent projection
+    means that the policy has no persisted read model or is unavailable.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -205,11 +103,7 @@ class RunView(BaseModel):
     run_id: str
     loop: str
     status: RunStatus
-    current_round: int
-    active_hypothesis_id: str | None = None
-    experiment_revision: int
-    hypotheses: list[HypothesisView] = Field(default_factory=list)
-    rounds: list[RoundView] = Field(default_factory=list)
+    projection: dict[str, JsonValue] | None = None
 
 
 class AgentEnvironment(Protocol):
