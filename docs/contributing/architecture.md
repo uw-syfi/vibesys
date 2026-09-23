@@ -15,6 +15,14 @@ uv run python scripts/check_tach_graph.py --write
 Views: a package-level overview, the `vibesys` core modules, and the full
 module graph. The graph is acyclic and `tach.toml` forbids cycles.
 
+`vibesys.api._orchestrations` contains transitional request adapters. Each
+adapter calls only its corresponding implementation under `vibesys.loops`, and
+the `builtins` module alone registers all adapters. Tach declares the agent,
+plain, and evolve implementations as sibling modules with no imports between
+them. New orchestration-specific logic, including agent configuration and
+resume policy, belongs in `vibesys`, not `vs_project`. `vs_project` owns generic
+project layout and persistence operations.
+
 [//]: # (tach-graph:start)
 ## Architecture overview
 
@@ -56,12 +64,48 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 ```mermaid
 graph TD
     vibesys.api --> vibesys
+    vibesys.api --> vibesys.api._orchestrations._common
+    vibesys.api --> vibesys.api._orchestrations.builtins
+    vibesys.api --> vibesys.api._orchestrations.contracts
+    vibesys.api --> vibesys.api._orchestrations.runner
+    vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
     vibesys.api --> vibesys.loops
+    vibesys.api --> vibesys.loops.agent
+    vibesys.api --> vibesys.loops.evolve
     vibesys.api --> vibesys.render
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.sandbox
+    vibesys.api._orchestrations._common --> vibesys
+    vibesys.api._orchestrations._common --> vibesys.api.contracts
+    vibesys.api._orchestrations.agent --> vibesys.api._orchestrations._common
+    vibesys.api._orchestrations.agent --> vibesys.api.contracts
+    vibesys.api._orchestrations.agent --> vibesys.loops.agent
+    vibesys.api._orchestrations.agent --> vibesys.run
+    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.agent
+    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.contracts
+    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.evolve
+    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.plain
+    vibesys.api._orchestrations.builtins --> vibesys.api.contracts
+    vibesys.api._orchestrations.contracts --> vibesys.api.contracts
+    vibesys.api._orchestrations.contracts --> vibesys.run
+    vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations._common
+    vibesys.api._orchestrations.evolve --> vibesys.api.contracts
+    vibesys.api._orchestrations.evolve --> vibesys.loops.evolve
+    vibesys.api._orchestrations.evolve --> vibesys.run
+    vibesys.api._orchestrations.plain --> vibesys.api._orchestrations._common
+    vibesys.api._orchestrations.plain --> vibesys.api.contracts
+    vibesys.api._orchestrations.plain --> vibesys.loops.plain
+    vibesys.api._orchestrations.plain --> vibesys.run
+    vibesys.api._orchestrations.runner --> vibesys.api._orchestrations.contracts
+    vibesys.api._orchestrations.runner --> vibesys.api.contracts
+    vibesys.api._orchestrations.runner --> vibesys.run
+    vibesys.api.contracts --> vibesys
+    vibesys.api.contracts --> vibesys.evaluators
+    vibesys.api.contracts --> vibesys.loops
+    vibesys.api.contracts --> vibesys.loops.evolve
+    vibesys.api.contracts --> vibesys.sandbox
     vibesys.backends --> vibesys
     vibesys.context --> vibesys
     vibesys.context --> vibesys.backends
@@ -74,13 +118,35 @@ graph TD
     vibesys.domains --> vibesys.prompts
     vibesys.evaluators --> vibesys
     vibesys.loops --> vibesys
-    vibesys.loops --> vibesys.context
-    vibesys.loops --> vibesys.domains
     vibesys.loops --> vibesys.evaluators
-    vibesys.loops --> vibesys.prompts
     vibesys.loops --> vibesys.render
     vibesys.loops --> vibesys.run
-    vibesys.loops --> vibesys.sandbox
+    vibesys.loops.agent --> vibesys
+    vibesys.loops.agent --> vibesys.context
+    vibesys.loops.agent --> vibesys.domains
+    vibesys.loops.agent --> vibesys.evaluators
+    vibesys.loops.agent --> vibesys.loops
+    vibesys.loops.agent --> vibesys.prompts
+    vibesys.loops.agent --> vibesys.render
+    vibesys.loops.agent --> vibesys.run
+    vibesys.loops.agent --> vibesys.sandbox
+    vibesys.loops.evolve --> vibesys
+    vibesys.loops.evolve --> vibesys.context
+    vibesys.loops.evolve --> vibesys.domains
+    vibesys.loops.evolve --> vibesys.evaluators
+    vibesys.loops.evolve --> vibesys.loops
+    vibesys.loops.evolve --> vibesys.prompts
+    vibesys.loops.evolve --> vibesys.render
+    vibesys.loops.evolve --> vibesys.run
+    vibesys.loops.evolve --> vibesys.sandbox
+    vibesys.loops.plain --> vibesys
+    vibesys.loops.plain --> vibesys.context
+    vibesys.loops.plain --> vibesys.domains
+    vibesys.loops.plain --> vibesys.evaluators
+    vibesys.loops.plain --> vibesys.prompts
+    vibesys.loops.plain --> vibesys.render
+    vibesys.loops.plain --> vibesys.run
+    vibesys.loops.plain --> vibesys.sandbox
     vibesys.prompts --> vibesys
     vibesys.render --> vibesys
     vibesys.run --> vibesys
@@ -185,9 +251,16 @@ graph TD
     vibesys --> vs_feature_flags
     vibesys --> vs_loop_state
     vibesys.api --> vibesys
+    vibesys.api --> vibesys.api._orchestrations._common
+    vibesys.api --> vibesys.api._orchestrations.builtins
+    vibesys.api --> vibesys.api._orchestrations.contracts
+    vibesys.api --> vibesys.api._orchestrations.runner
+    vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
     vibesys.api --> vibesys.loops
+    vibesys.api --> vibesys.loops.agent
+    vibesys.api --> vibesys.loops.evolve
     vibesys.api --> vibesys.render
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.sandbox
@@ -195,6 +268,37 @@ graph TD
     vibesys.api --> vs_loop_state
     vibesys.api --> vs_project
     vibesys.api --> vs_sandbox
+    vibesys.api._orchestrations._common --> vibesys
+    vibesys.api._orchestrations._common --> vibesys.api.contracts
+    vibesys.api._orchestrations.agent --> vibesys.api._orchestrations._common
+    vibesys.api._orchestrations.agent --> vibesys.api.contracts
+    vibesys.api._orchestrations.agent --> vibesys.loops.agent
+    vibesys.api._orchestrations.agent --> vibesys.run
+    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.agent
+    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.contracts
+    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.evolve
+    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.plain
+    vibesys.api._orchestrations.builtins --> vibesys.api.contracts
+    vibesys.api._orchestrations.contracts --> vibesys.api.contracts
+    vibesys.api._orchestrations.contracts --> vibesys.run
+    vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations._common
+    vibesys.api._orchestrations.evolve --> vibesys.api.contracts
+    vibesys.api._orchestrations.evolve --> vibesys.loops.evolve
+    vibesys.api._orchestrations.evolve --> vibesys.run
+    vibesys.api._orchestrations.plain --> vibesys.api._orchestrations._common
+    vibesys.api._orchestrations.plain --> vibesys.api.contracts
+    vibesys.api._orchestrations.plain --> vibesys.loops.plain
+    vibesys.api._orchestrations.plain --> vibesys.run
+    vibesys.api._orchestrations.runner --> vibesys.api._orchestrations.contracts
+    vibesys.api._orchestrations.runner --> vibesys.api.contracts
+    vibesys.api._orchestrations.runner --> vibesys.run
+    vibesys.api.contracts --> vibesys
+    vibesys.api.contracts --> vibesys.evaluators
+    vibesys.api.contracts --> vibesys.loops
+    vibesys.api.contracts --> vibesys.loops.evolve
+    vibesys.api.contracts --> vibesys.sandbox
+    vibesys.api.contracts --> vs_agent
+    vibesys.api.contracts --> vs_sandbox
     vibesys.backends --> vibesys
     vibesys.backends --> vs_sandbox
     vibesys.context --> vibesys
@@ -213,19 +317,49 @@ graph TD
     vibesys.evaluators --> vs_project
     vibesys.evaluators --> vs_sandbox
     vibesys.loops --> vibesys
-    vibesys.loops --> vibesys.context
-    vibesys.loops --> vibesys.domains
     vibesys.loops --> vibesys.evaluators
-    vibesys.loops --> vibesys.prompts
     vibesys.loops --> vibesys.render
     vibesys.loops --> vibesys.run
-    vibesys.loops --> vibesys.sandbox
     vibesys.loops --> vs_agent
     vibesys.loops --> vs_evaluator_protocol
-    vibesys.loops --> vs_issue_board
     vibesys.loops --> vs_loop_state
-    vibesys.loops --> vs_project
     vibesys.loops --> vs_sandbox
+    vibesys.loops.agent --> vibesys
+    vibesys.loops.agent --> vibesys.context
+    vibesys.loops.agent --> vibesys.domains
+    vibesys.loops.agent --> vibesys.evaluators
+    vibesys.loops.agent --> vibesys.loops
+    vibesys.loops.agent --> vibesys.prompts
+    vibesys.loops.agent --> vibesys.render
+    vibesys.loops.agent --> vibesys.run
+    vibesys.loops.agent --> vibesys.sandbox
+    vibesys.loops.agent --> vs_agent
+    vibesys.loops.agent --> vs_loop_state
+    vibesys.loops.agent --> vs_project
+    vibesys.loops.evolve --> vibesys
+    vibesys.loops.evolve --> vibesys.context
+    vibesys.loops.evolve --> vibesys.domains
+    vibesys.loops.evolve --> vibesys.evaluators
+    vibesys.loops.evolve --> vibesys.loops
+    vibesys.loops.evolve --> vibesys.prompts
+    vibesys.loops.evolve --> vibesys.render
+    vibesys.loops.evolve --> vibesys.run
+    vibesys.loops.evolve --> vibesys.sandbox
+    vibesys.loops.evolve --> vs_agent
+    vibesys.loops.evolve --> vs_loop_state
+    vibesys.loops.evolve --> vs_project
+    vibesys.loops.plain --> vibesys
+    vibesys.loops.plain --> vibesys.context
+    vibesys.loops.plain --> vibesys.domains
+    vibesys.loops.plain --> vibesys.evaluators
+    vibesys.loops.plain --> vibesys.prompts
+    vibesys.loops.plain --> vibesys.render
+    vibesys.loops.plain --> vibesys.run
+    vibesys.loops.plain --> vibesys.sandbox
+    vibesys.loops.plain --> vs_agent
+    vibesys.loops.plain --> vs_issue_board
+    vibesys.loops.plain --> vs_loop_state
+    vibesys.loops.plain --> vs_project
     vibesys.prompts --> vibesys
     vibesys.prompts --> vs_prompts
     vibesys.render --> vibesys
