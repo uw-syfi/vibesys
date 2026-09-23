@@ -181,12 +181,12 @@ async function checkInteractions(browser, origin) {
     });
   const lines = (number, kind, prefix, count) =>
     Array.from({length: count}, (_, index) => say(number, kind, `${prefix} ${index + 1}`));
-  const ran = (number, kind, command, stdout) => [
+  const ran = (number, kind, command, stdout, description = 'Ran a command') => [
     event('tool_call', number, kind, {
       kind: 'tool_call',
       tool: 'Bash',
       call_id: command,
-      args: {command, description: 'Ran a command'},
+      args: {command, description},
     }),
     event('tool_result', number, kind, {
       kind: 'tool_result',
@@ -427,8 +427,25 @@ async function checkInteractions(browser, origin) {
     // so the log is not a one-way door. The scroller is the stop it steps back through.
     await page.keyboard.press('Shift+Tab');
     assert.equal(await cursor(), 'log', 'Shift+Tab from a row bounced back to it');
+    // An arrow from the scroller resumes at the cursor rather than at the edge of the log.
+    await page.keyboard.press('ArrowDown');
+    assert.equal(await cursor(), await call.getAttribute('id'), 'the cursor restarted at the edge');
+    await page.keyboard.press('Shift+Tab');
     await page.keyboard.press('Shift+Tab');
     assert.equal(await inLog(), false, 'Shift+Tab could not leave the log');
+
+    // Tab back into a log that has scrolled on brings the cursor into view, clear of the
+    // sticky role header, the way an arrow key does.
+    await call.focus();
+    await page.keyboard.press('Tab');
+    await log.evaluate(node => node.scrollTo(0, node.scrollHeight));
+    await page.keyboard.press('Shift+Tab');
+    const seen = await call.evaluate(node => {
+      const box = node.getBoundingClientRect();
+      const port = node.closest('.log').getBoundingClientRect();
+      return [Math.round(box.top - port.top), box.bottom <= port.bottom];
+    });
+    assert.deepEqual(seen, [22, true], 'Tab back left the cursor out of view');
 
     // Enter on a tool row fills the inspector, and moves no row doing it.
     await call.focus();
@@ -578,8 +595,31 @@ async function checkInteractions(browser, origin) {
     await delay(300);
     assert.equal(await tip('Pause after').isVisible(), true, 'the focused tip stays pinned');
 
-    // Drawer (768-1023 px): an unknown change kind renders, and Esc on a tip hides only the tip.
+    // Drawer (768-1023 px): a row selection opens a modal dialog, which restores focus on close
+    // to the node it remembered on open. A commit behind it can replace that row, and focus then
+    // falls to <body>, where the arrows move the round. No React commit attends the close.
     await page.setViewportSize({width: 900, height: 1000});
+    // A verb of its own, so it is a row rather than a member of the run fold beside it.
+    push(ran(2, 'implementer', 'make delta', 'delta\n', 'Measured the delta'));
+    const picked = log.locator('.row[data-tool]:visible', {hasText: 'Measured the delta'});
+    await picked.waitFor();
+    await picked.focus();
+    const pickedId = await picked.getAttribute('id');
+    await page.keyboard.press('Enter');
+    await drawer.waitFor();
+    // Behind the dialog, a second call of that verb folds the row away.
+    push(ran(2, 'implementer', 'make delta again', 'delta\n', 'Measured the delta'));
+    await page.waitForFunction(
+      id => !(document.getElementById(id)?.checkVisibility() ?? false),
+      pickedId,
+    );
+    await page.keyboard.press('Escape');
+    await drawer.waitFor({state: 'hidden'});
+    assert.equal(await inLog(), true, `closing the drawer left focus on ${await cursor()}`);
+    await page.keyboard.press('ArrowUp');
+    assert.equal(await log.getAttribute('aria-label'), 'Round 2 log', 'the drawer lost the round');
+
+    // An unknown change kind renders, and Esc on a tip hides only the tip.
     await round(page, 1).click();
     await drawer.waitFor();
     assert.equal(

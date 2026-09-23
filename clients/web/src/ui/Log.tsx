@@ -106,6 +106,18 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
   // The test is on the node that held focus, not on its id: a remounted row answers to the id
   // with a node that never had focus, and <body> holds focus for plenty of reasons that are
   // none of the log's business.
+  //
+  // What lets the node survive to be tested is React's commit ordering, which is an internal
+  // rather than a contract. Chromium does fire `focusout` on removal, synchronously, before the
+  // node is detached and with `checkVisibility()` still true, so `onBlur` below would release
+  // the node and kill this restore; it does not run only because React detaches the row's fiber
+  // during the mutation phase and its delegated dispatch then finds no ancestor handler. If that
+  // ever flips, the browser fixture's `inLog()` assertions after each trigger are what fail.
+  //
+  // The one mutation this cannot survive is a row being *moved* rather than removed or hidden:
+  // `onBlur` does run there, with the fiber intact. It is unreachable only because rows are
+  // keyed by `item.id` and ordered by a monotonic sequence (`derive.ts`, `rows.sort`), so an
+  // insert never displaces a surviving sibling. Order the items by anything else and it is back.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `groups` is what can hide a row.
   useLayoutEffect(() => {
     const was = held.current;
@@ -171,7 +183,10 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
     // The cursor is the focused row, so it is announced like any other focus move, and there is
     // no second idea of "where the reader is" to keep in step with focus.
     const here = document.activeElement?.closest<HTMLElement>('[data-row]') ?? undefined;
-    const at = here === undefined ? -1 : visible.indexOf(here);
+    // Focus on the scroller rather than a row, after Shift+Tab out of one or a restore: the
+    // cursor resumes where it was rather than at the edge of the log.
+    const was = here ?? visible.find(row => row.id === held.current?.id);
+    const at = was === undefined ? -1 : visible.indexOf(was);
     const move = (next: HTMLElement | undefined) => {
       if (next === undefined) return;
       // Focus first, without its scroll, then bring it into view within the log only: the page
@@ -182,8 +197,11 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
     // Enter on a focused <summary> is the native toggle, which raises the click the fold
     // already listens for, so it is left alone.
     const enter = event.key === 'Enter' && here?.tagName !== 'SUMMARY';
-    if (event.key === 'ArrowDown') move(at < 0 ? visible[0] : visible[at + 1]);
-    else if (event.key === 'ArrowUp') move(at < 0 ? visible.at(-1) : visible[at - 1]);
+    // A row that holds focus moves to its neighbour; resuming from the scroller lands on the
+    // remembered row itself.
+    const step = here === undefined ? 0 : 1;
+    if (event.key === 'ArrowDown') move(at < 0 ? visible[0] : visible[at + step]);
+    else if (event.key === 'ArrowUp') move(at < 0 ? visible.at(-1) : visible[at - step]);
     else if (here === undefined) return;
     else if (event.key === 'ArrowRight' || enter) {
       if (here.dataset.tool !== undefined) onSelect(here.dataset.tool);
@@ -226,7 +244,11 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
           // The scroller is the log's one tab stop and the cursor is focus, so a trip out and
           // back would otherwise lose it: Tab back in returns to the row it was on.
           const back = held.current === null ? null : document.getElementById(held.current.id);
-          if (back?.checkVisibility()) back.focus({preventScroll: true});
+          if (!back?.checkVisibility()) return;
+          back.focus({preventScroll: true});
+          // The log may have scrolled on since: bring the cursor back into view, clear of the
+          // sticky role header, exactly as an arrow key does.
+          back.scrollIntoView({block: 'nearest'});
         }}
         onBlur={event => {
           // Focus the reader moved themselves, off a row that is still there to hold it: the

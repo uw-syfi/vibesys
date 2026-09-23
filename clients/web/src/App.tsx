@@ -227,7 +227,19 @@ export function App({session}: {session: WorkspaceSession}) {
               ? queries.design.error
               : null
           }
-          onClose={() => setInspectorOpen(false)}
+          onClose={() => {
+            setInspectorOpen(false);
+            // A modal <dialog> restores focus to the node it remembered on open, and a commit
+            // behind it can have replaced that row. Focus then stays somewhere the reader
+            // cannot use: on <body>, or on the dialog's own control now that the dialog is
+            // hidden. Either way the log's keys are dead and the arrows move the round, and no
+            // React commit attends the close, so the log cannot see it for itself. It takes
+            // focus here, the way the Banner's Retry above hands it over when it unmounts.
+            const at = document.activeElement;
+            const lost =
+              !(at instanceof HTMLElement) || at === document.body || !at.checkVisibility();
+            if (lost) document.getElementById('log')?.focus({preventScroll: true});
+          }}
           onRetryDesign={() => void session.load('design')}
         />
       </div>
