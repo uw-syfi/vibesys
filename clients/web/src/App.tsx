@@ -170,7 +170,7 @@ export function App({session}: {session: WorkspaceSession}) {
           onRetry={() => void session.load('experiments')}
         />
         <main className="center">
-          <Graph round={selected} columns={graph} />
+          <Graph round={selected} graph={graph} />
           <Log
             key={selected ?? 'none'}
             // Loading until the bootstrap batch folds an event or the snapshot gives a status:

@@ -143,6 +143,14 @@ const queued = () =>
 // loop's four roles plus `perf_eval`, which belongs to the `plain` loop. No recording runs five
 // roles in a round, and five is what it takes to overflow the graph row at 1440.
 const FIVE_ROLES = ['orchestrator', 'implementer', 'judge', 'profiler', 'perf_eval'];
+// The second orchestrator call of queue-rs round 1, on another model. Two orchestrator cards that
+// differ do not collapse, so both hand over to the implementer and it has two parents. Invented
+// the same way: the backend reports no edges, so the round's shape is inferred from its kinds, and
+// no recording runs one kind on two models.
+const FAN_IN = events =>
+  events.map(event =>
+    event.sequence === 129 ? {...event, data: {...event.data, model: 'claude-sonnet-5'}} : event,
+  );
 const rail = (page, round) =>
   page.getByRole('navigation', {name: 'Rounds'}).getByRole('button', {name: new RegExp(`^R${round}\\b`)});
 
@@ -151,7 +159,7 @@ const REPLAY = [
   {
     name: 'live',
     fixture: live(),
-    // The graph's four columns fit at 1440 and not at 1024 or 390, and neither resize crosses a
+    // The graph's four cards fit at 1440 and not at 1024 or 390, and neither resize crosses a
     // media query: React renders nothing, so only the row's own ResizeObserver can notice the
     // narrower scrollport. Without it the row overflows at 1024 with no fade to say so.
     each: async (page, width) => {
@@ -191,6 +199,13 @@ const REPLAY = [
     ),
     widths: [1440],
     expect: ['Profiler', 'Perf eval'],
+  },
+  {
+    // A node with two parents: the shape a chain of columns could not draw.
+    name: 'fan-in',
+    fixture: queue(FAN_IN(upTo(QUEUE, 623)), {active: QUEUE_ACTIVE}),
+    widths: [1440],
+    expect: ['claude-opus-5', 'claude-sonnet-5'],
   },
   {
     name: 'pausing',

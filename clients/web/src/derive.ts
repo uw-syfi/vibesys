@@ -1,4 +1,5 @@
 /** Pure derivations from store state to the view models in `model.ts`. No React, no DOM. */
+import {Graph, layout} from '@dagrejs/dagre';
 import type {
   DesignRound,
   HypothesisEntry,
@@ -19,11 +20,13 @@ import {
   type TranscriptEntry,
 } from '@vibesys/core-state';
 import type {
+  AgentGraph,
   Connection,
   ConsumedSteer,
   EdgeTone,
   EndedWord,
-  GraphColumn,
+  GraphEdge,
+  GraphLayout,
   GraphNode,
   HeaderModel,
   InspectorModel,
@@ -108,20 +111,19 @@ function runtimeLabel(
 const BROKEN = new Set<AgentPhase['status']>(['failed', 'cancelled', 'interrupted']);
 
 /**
- * The arrow from a column to the next one. A failure on the left outranks everything: it is why
- * the handover never happened. Otherwise an active agent on either side makes the arrow the live
- * one, and a column that has finished has handed over.
+ * The arrow between two agents. A failure at the source outranks everything: it is why the
+ * handover never happened. Otherwise an active agent at either end makes the arrow the live one,
+ * and a source that has finished has handed over.
  */
-function edgeTone(left: readonly AgentPhase[], right: readonly AgentPhase[]): EdgeTone {
-  if (left.some(phase => BROKEN.has(phase.status))) return 'failed';
-  if (left.some(phase => phase.status === 'active')) return 'live';
-  if (right.some(phase => phase.status === 'active')) return 'live';
-  if (left.every(phase => phase.status === 'completed')) return 'done';
+function edgeTone(from: GraphNode, to: GraphNode): EdgeTone {
+  if (BROKEN.has(from.status)) return 'failed';
+  if (from.status === 'active' || to.status === 'active') return 'live';
+  if (from.status === 'completed') return 'done';
   return 'idle';
 }
 
 /**
- * A column's cards. Adjacent agents of the kind that share a status and a runtime say the same
+ * One kind's cards. Adjacent agents of the kind that share a status and a runtime say the same
  * thing, so they become one card with a count; the loop running the orchestrator twice a round is
  * the common case. Agents that differ in either stay separate cards, and only adjacent ones
  * collapse, so a failure between two successes keeps all three.
@@ -154,28 +156,80 @@ function graphNodes(phases: readonly AgentPhase[], kind: string): GraphNode[] {
 }
 
 /**
- * The round's agent pipeline: one column per agent kind in the order the round first mentions
- * them, the agents of that kind stacked inside it, and the tone of the arrow to the next kind.
+ * The handovers of a round whose events carry none: every agent of a kind hands over to every
+ * agent of the next kind, in the order the kinds first appear. That is the chain the loop runs
+ * today, and it is a fallback: the moment the backend reports real edges, this call is replaced by
+ * reading them, and nothing else in the graph changes.
+ */
+function inferChainEdges(kinds: Array<{nodes: GraphNode[]}>): GraphEdge[] {
+  const edges: GraphEdge[] = [];
+  for (const [index, kind] of kinds.entries()) {
+    for (const from of kind.nodes) {
+      for (const to of kinds[index + 1]?.nodes ?? []) {
+        edges.push({from: from.id, to: to.id, tone: edgeTone(from, to)});
+      }
+    }
+  }
+  return edges;
+}
+
+/**
+ * The round's agents and the handovers between them: the agents of a kind collapsed into cards, in
+ * the order the round first mentions the kind, and one edge per handover. Nodes stay in loop order
+ * whatever the layout later does with them.
  *
  * Roles the loop has not reached are already in `core.phases` as pending: run-map seeds them from
  * the `expected_roles` that `run_started` advertised, so nothing is re-derived here. A round with
  * no phases (R0, or one the run has not started) yields nothing and the panel does not render.
  */
-export function agentGraph(core: CoreState, round: number | null): GraphColumn[] {
-  if (round === null) return [];
+export function agentGraph(core: CoreState, round: number | null): AgentGraph {
+  if (round === null) return {nodes: [], edges: []};
   const phases = phasesForRound(core.phases, round);
-  const columns = [...new Set(phases.map(phase => phase.kind))].map(kind => ({
-    kind,
-    phases: phases.filter(phase => phase.kind === kind),
+  const kinds = [...new Set(phases.map(phase => phase.kind))].map(kind => ({
+    nodes: graphNodes(
+      phases.filter(phase => phase.kind === kind),
+      kind,
+    ),
   }));
-  return columns.map((column, index) => {
-    const next = columns[index + 1];
-    return {
-      kind: column.kind,
-      nodes: graphNodes(column.phases, column.kind),
-      edge: next === undefined ? null : edgeTone(column.phases, next.phases),
-    };
-  });
+  return {nodes: kinds.flatMap(kind => kind.nodes), edges: inferChainEdges(kinds)};
+}
+
+/**
+ * The card's box. The study of comparable tools puts a pipeline node at roughly 150x40 (GitHub
+ * Actions' 292x100 is the outlier), and four ranks of 160 with a 32 px gap are 736 px, which is
+ * the widest a round can be and still fit the 744 px measure at 1440 without scrolling.
+ */
+export const NODE = {width: 160, height: 44};
+const RANK_GAP = 32;
+const NODE_GAP = 12;
+
+/**
+ * Where the cards and the arrows go: left to right, a rank per hop, ranks tight enough that the
+ * common four-agent round needs no scrollbar. Dagster's ranker, for the reason Dagster gives
+ * (`tight-tree` lays out comparably and is not the O(N^3) worst case network-simplex can be).
+ * Pure: dagre reads no DOM, so this runs in a test as it does in the browser.
+ */
+export function layoutGraph(graph: AgentGraph): GraphLayout {
+  const placed = new Graph();
+  placed.setGraph({rankdir: 'LR', ranksep: RANK_GAP, nodesep: NODE_GAP, ranker: 'tight-tree'});
+  placed.setDefaultEdgeLabel(() => ({}));
+  for (const node of graph.nodes) placed.setNode(node.id, {...NODE});
+  for (const edge of graph.edges) placed.setEdge(edge.from, edge.to);
+  layout(placed);
+  const size = placed.graph();
+  return {
+    width: size.width ?? 0,
+    height: size.height ?? 0,
+    // dagre centres a node on its box; the DOM positions it by its corner.
+    nodes: graph.nodes.map(node => {
+      const spot = placed.node(node.id);
+      return {...node, x: spot.x - NODE.width / 2, y: spot.y - NODE.height / 2};
+    }),
+    edges: graph.edges.map(edge => ({
+      ...edge,
+      points: placed.edge(edge.from, edge.to).points ?? [],
+    })),
+  };
 }
 
 type Facts = Map<number, {entry: HypothesisEntry; round: HypothesisRound}>;

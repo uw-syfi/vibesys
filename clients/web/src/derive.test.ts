@@ -23,7 +23,9 @@ import {
   formatValue,
   headerModel,
   inspectorModel,
+  layoutGraph,
   logGroups,
+  NODE,
   needsOlder,
   pathShortener,
   prose,
@@ -35,7 +37,7 @@ import {
   steersNeedOlder,
   trendModel,
 } from './derive.js';
-import type {Connection, LogItem} from './model.js';
+import type {AgentGraph, Connection, GraphNode, LogItem, PlacedNode} from './model.js';
 import {CAPTURED_TYPES} from './session.js';
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -750,40 +752,75 @@ const phase = (patch: Partial<AgentPhase> & Pick<AgentPhase, 'kind'>): AgentPhas
   ...patch,
 });
 const withPhases = (phases: AgentPhase[]): CoreState => ({...initialCoreState(), phases});
-const kinds = (core: CoreState, round: number | null) =>
-  agentGraph(core, round).map(column => column.kind);
+const roles = (core: CoreState, round: number | null) =>
+  agentGraph(core, round).nodes.map(node => node.role);
 const statuses = (core: CoreState, round: number | null) =>
-  agentGraph(core, round).map(column => column.nodes.map(node => node.status));
-const edges = (core: CoreState, round: number | null) =>
-  agentGraph(core, round).map(column => column.edge);
+  agentGraph(core, round).nodes.map(node => node.status);
+/** Each edge as `[source role, target role, tone]`, which reads better than execution ids. */
+const wires = (core: CoreState, round: number | null) => {
+  const graph = agentGraph(core, round);
+  const role = new Map(graph.nodes.map(node => [node.id, node.role]));
+  return graph.edges.map(edge => [role.get(edge.from), role.get(edge.to), edge.tone]);
+};
 
-test('agent graph: columns in first-mention order, stacked agents, pending roles, runtime', () => {
+test('agent graph: nodes in loop order, pending roles, runtime, and the inferred chain', () => {
   // queue-rs at 623: the orchestrator has run twice, the implementer is working.
   const core = fold(upTo(QUEUE, 623));
-  assert.deepEqual(kinds(core, 1), ['orchestrator', 'implementer', 'judge', 'profiler']);
+  assert.deepEqual(roles(core, 1), ['Orchestrator', 'Implementer', 'Judge', 'Profiler']);
   // The loop runs the orchestrator twice a round; both calls say the same thing, so they collapse
   // into one counted card (the stacking cases are in the collapse test below).
-  assert.deepEqual(statuses(core, 1), [['completed'], ['active'], ['pending'], ['pending']]);
+  assert.deepEqual(statuses(core, 1), ['completed', 'active', 'pending', 'pending']);
   const graph = agentGraph(core, 1);
-  assert.deepEqual(
-    graph.map(column => column.nodes[0]?.role),
-    ['Orchestrator', 'Implementer', 'Judge', 'Profiler'],
-  );
-  assert.equal(graph[1]?.nodes[0]?.runtime, 'claude-opus-5');
-  assert.equal(graph[1]?.nodes[0]?.runtimeTip, 'Claude Code (claude-opus-5)');
+  assert.equal(graph.nodes[1]?.runtime, 'claude-opus-5');
+  assert.equal(graph.nodes[1]?.runtimeTip, 'Claude Code (claude-opus-5)');
   // Judge and profiler are pending because run_started advertised them: run-map seeds them from
   // core.expectedRoles, and nothing here re-derives that list.
   assert.deepEqual(core.expectedRoles, ['orchestrator', 'implementer', 'judge', 'profiler']);
-  assert.equal(graph[2]?.nodes[0]?.runtime, null);
+  assert.equal(graph.nodes[2]?.runtime, null);
+  // The backend reports no edges, so the shape is the chain the kinds imply: one edge per pair of
+  // adjacent kinds, and none out of the last one.
+  assert.deepEqual(
+    graph.edges.map(edge => [edge.from, edge.to]),
+    [
+      [graph.nodes[0]?.id, graph.nodes[1]?.id],
+      [graph.nodes[1]?.id, graph.nodes[2]?.id],
+      [graph.nodes[2]?.id, graph.nodes[3]?.id],
+    ],
+  );
 });
 
-test('agent graph: edge tones for live, idle, done, and failed', () => {
-  // Active on either side is live; a column that has not started is idle.
-  assert.deepEqual(edges(fold(upTo(QUEUE, 623)), 1), ['live', 'live', 'idle', null]);
+test('agent graph: edge tones for live, idle, done, and failed, per edge', () => {
+  // Active on either end is live; an edge into a kind that has not started is idle.
+  assert.deepEqual(wires(fold(upTo(QUEUE, 623)), 1), [
+    ['Orchestrator', 'Implementer', 'live'],
+    ['Implementer', 'Judge', 'live'],
+    ['Judge', 'Profiler', 'idle'],
+  ]);
   // The run was interrupted inside the implementer, which fails its phase.
-  assert.deepEqual(edges(fold(QUEUE), 1), ['done', 'failed', 'idle', null]);
+  assert.deepEqual(wires(fold(QUEUE), 1), [
+    ['Orchestrator', 'Implementer', 'done'],
+    ['Implementer', 'Judge', 'failed'],
+    ['Judge', 'Profiler', 'idle'],
+  ]);
   // A finished round hands over all the way down.
-  assert.deepEqual(edges(fold(STUB), 3), ['done', 'done', null]);
+  assert.deepEqual(wires(fold(STUB), 3), [
+    ['Orchestrator', 'Implementer', 'done'],
+    ['Implementer', 'Judge', 'done'],
+  ]);
+});
+
+test('agent graph: two cards of one kind fan in to the next kind', () => {
+  // Two orchestrator calls that differ stay two cards, so the implementer has two parents: the
+  // in-degree > 1 case the chain layout could not draw.
+  const core = withPhases([
+    phase({kind: 'orchestrator', status: 'completed', model: 'claude-opus-5'}),
+    phase({kind: 'orchestrator', status: 'failed', model: 'claude-opus-5'}),
+    phase({kind: 'implementer', status: 'active', model: 'gpt-5.1-codex-max'}),
+  ]);
+  assert.deepEqual(wires(core, 1), [
+    ['Orchestrator', 'Implementer', 'live'],
+    ['Orchestrator', 'Implementer', 'failed'],
+  ]);
 });
 
 test('agent graph: the card shows the model, the tooltip pairs it with the harness', () => {
@@ -797,7 +834,7 @@ test('agent graph: the card shows the model, the tooltip pairs it with the harne
   // Model and harness: the model shows, the pair goes to the tooltip. Either alone shows alone
   // and needs no tooltip. Neither shows no runtime line.
   assert.deepEqual(
-    graph.map(column => [column.nodes[0]?.runtime, column.nodes[0]?.runtimeTip]),
+    graph.nodes.map(node => [node.runtime, node.runtimeTip]),
     [
       ['gpt-5.1-codex-max', 'Codex (gpt-5.1-codex-max)'],
       ['Stub', null],
@@ -806,7 +843,7 @@ test('agent graph: the card shows the model, the tooltip pairs it with the harne
     ],
   );
   assert.deepEqual(
-    graph.map(column => column.nodes[0]?.role),
+    graph.nodes.map(node => node.role),
     ['Implementer', 'Judge', 'Profiler', 'Perf eval'],
   );
 });
@@ -816,7 +853,7 @@ test('agent graph: adjacent agents that say the same thing collapse into one cou
     agentGraph(
       withPhases(patches.map(patch => phase({kind: 'orchestrator', ...patch}))),
       1,
-    )[0]?.nodes.map(node => [node.status, node.runtime, node.count]);
+    ).nodes.map(node => [node.status, node.runtime, node.count]);
   const claude = {provider: 'claude', model: 'claude-opus-5'};
   const opus = 'claude-opus-5';
   // Two identical agents are one fact stated twice.
@@ -882,13 +919,200 @@ test('agent graph: adjacent agents that say the same thing collapse into one cou
   );
   // The recorded run: both of the round's orchestrator calls completed on the same harness.
   assert.deepEqual(
-    agentGraph(fold(upTo(QUEUE, 623)), 1).map(column => column.nodes.map(node => node.count)),
-    [[2], [1], [1], [1]],
+    agentGraph(fold(upTo(QUEUE, 623)), 1).nodes.map(node => node.count),
+    [2, 1, 1, 1],
   );
 });
 
 test('agent graph: a round with no phases yields nothing', () => {
-  assert.deepEqual(agentGraph(fold(STUB), 0), []);
-  assert.deepEqual(agentGraph(fold(STUB), null), []);
-  assert.deepEqual(agentGraph(initialCoreState(), 1), []);
+  const empty: AgentGraph = {nodes: [], edges: []};
+  assert.deepEqual(agentGraph(fold(STUB), 0), empty);
+  assert.deepEqual(agentGraph(fold(STUB), null), empty);
+  assert.deepEqual(agentGraph(initialCoreState(), 1), empty);
+});
+
+// --- layout ------------------------------------------------------------------------------------
+
+const box = (id: string, status: AgentPhase['status'] = 'completed'): GraphNode => ({
+  id,
+  role: id,
+  status,
+  runtime: null,
+  runtimeTip: null,
+  count: 1,
+});
+const graphOf = (ids: string[], wired: Array<[string, string]>): AgentGraph => ({
+  nodes: ids.map(id => box(id)),
+  edges: wired.map(([from, to]) => ({from, to, tone: 'done' as const})),
+});
+const at = (nodes: PlacedNode[], id: string): PlacedNode => {
+  const found = nodes.find(node => node.id === id);
+  if (found === undefined) throw new Error(`no node ${id}`);
+  return found;
+};
+const overlap = (left: PlacedNode, right: PlacedNode) =>
+  left.x < right.x + NODE.width &&
+  right.x < left.x + NODE.width &&
+  left.y < right.y + NODE.height &&
+  right.y < left.y + NODE.height;
+/** Every point along a polyline, about one per pixel: no box is 1px wide, so nothing slips past. */
+const walk = (points: Array<{x: number; y: number}>) => {
+  const out: Array<{x: number; y: number}> = [];
+  for (let index = 1; index < points.length; index++) {
+    const from = points[index - 1] as {x: number; y: number};
+    const to = points[index] as {x: number; y: number};
+    const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y)));
+    for (let step = 0; step <= steps; step++) {
+      out.push({
+        x: from.x + ((to.x - from.x) * step) / steps,
+        y: from.y + ((to.y - from.y) * step) / steps,
+      });
+    }
+  }
+  return out;
+};
+const within = (point: {x: number; y: number}, node: PlacedNode) =>
+  point.x > node.x + 0.5 &&
+  point.x < node.x + NODE.width - 0.5 &&
+  point.y > node.y + 0.5 &&
+  point.y < node.y + NODE.height - 0.5;
+/** A point on the target's border, which is where dagre clips the last segment. */
+const lands = (point: {x: number; y: number}, node: PlacedNode) => {
+  const inside =
+    point.x >= node.x - 1 &&
+    point.x <= node.x + NODE.width + 1 &&
+    point.y >= node.y - 1 &&
+    point.y <= node.y + NODE.height + 1;
+  const onBorder =
+    Math.abs(point.x - node.x) <= 1 ||
+    Math.abs(point.x - node.x - NODE.width) <= 1 ||
+    Math.abs(point.y - node.y) <= 1 ||
+    Math.abs(point.y - node.y - NODE.height) <= 1;
+  return inside && onBorder;
+};
+
+/** Every shape must place its boxes apart and route every edge to its target, around the rest. */
+const readable = (graph: AgentGraph, what: string) => {
+  const layout = layoutGraph(graph);
+  assert.equal(layout.nodes.length, graph.nodes.length, `${what}: a box per node`);
+  assert.deepEqual(
+    layout.nodes.map(node => node.id),
+    graph.nodes.map(node => node.id),
+    `${what}: source order stays loop order`,
+  );
+  for (const [index, node] of layout.nodes.entries()) {
+    for (const other of layout.nodes.slice(index + 1)) {
+      assert.equal(overlap(node, other), false, `${what}: ${node.id} overlaps ${other.id}`);
+    }
+    assert.ok(node.x >= 0 && node.y >= 0, `${what}: ${node.id} is off the canvas`);
+    assert.ok(
+      node.x + NODE.width <= layout.width + 0.5 && node.y + NODE.height <= layout.height + 0.5,
+      `${what}: ${node.id} is outside the measured canvas`,
+    );
+  }
+  assert.equal(layout.edges.length, graph.edges.length, `${what}: an edge per wire`);
+  for (const edge of layout.edges) {
+    const target = at(layout.nodes, edge.to);
+    assert.ok(edge.points.length >= 2, `${what}: ${edge.from} to ${edge.to} has no path`);
+    const end = edge.points.at(-1) as {x: number; y: number};
+    assert.ok(lands(end, target), `${what}: ${edge.from} to ${edge.to} misses its target`);
+    for (const point of walk(edge.points)) {
+      for (const node of layout.nodes) {
+        if (node.id === edge.from || node.id === edge.to) continue;
+        assert.equal(within(point, node), false, `${what}: that edge crosses ${node.id}`);
+      }
+    }
+  }
+  return layout;
+};
+
+test('graph layout: a chain runs left to right on one row', () => {
+  const layout = readable(
+    graphOf(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+      ],
+    ),
+    'chain',
+  );
+  const [a, b, c] = [at(layout.nodes, 'a'), at(layout.nodes, 'b'), at(layout.nodes, 'c')];
+  assert.equal(a.y, b.y);
+  assert.equal(b.y, c.y);
+  assert.ok(b.x - a.x === NODE.width + 32 && c.x - b.x === NODE.width + 32);
+  // One row of cards, so the panel is one card tall and the log keeps the rest.
+  assert.equal(layout.height, NODE.height);
+});
+
+test('graph layout: a fan-in of two parents stacks them into one child', () => {
+  const layout = readable(
+    graphOf(
+      ['p', 'q', 'c'],
+      [
+        ['p', 'c'],
+        ['q', 'c'],
+      ],
+    ),
+    'fan-in',
+  );
+  const [p, q, c] = [at(layout.nodes, 'p'), at(layout.nodes, 'q'), at(layout.nodes, 'c')];
+  assert.equal(p.x, q.x, 'both parents share a rank');
+  assert.ok(c.x > p.x, 'the child is one rank to the right');
+  assert.ok(
+    Math.abs(p.y - q.y) >= NODE.height,
+    'the parents are stacked, not on top of each other',
+  );
+});
+
+test('graph layout: a fan-out of three children stacks them past one parent', () => {
+  const layout = readable(
+    graphOf(
+      ['a', 'x', 'y', 'z'],
+      [
+        ['a', 'x'],
+        ['a', 'y'],
+        ['a', 'z'],
+      ],
+    ),
+    'fan-out',
+  );
+  const children = ['x', 'y', 'z'].map(id => at(layout.nodes, id));
+  const parent = at(layout.nodes, 'a');
+  for (const child of children) assert.ok(child.x > parent.x);
+  assert.equal(new Set(children.map(child => child.y)).size, 3, 'three rows of children');
+  assert.equal(layout.height, NODE.height * 3 + 12 * 2, 'three node rows plus two gaps');
+});
+
+test('graph layout: a skip edge routes around the node it skips', () => {
+  // a to c jumps a rank. The `readable` check is the point: it must not cross b's box.
+  const layout = readable(
+    graphOf(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+        ['a', 'c'],
+      ],
+    ),
+    'skip edge',
+  );
+  assert.equal(layout.nodes.length, 3);
+});
+
+test('graph layout: two disconnected chains keep their own rows', () => {
+  const layout = readable(
+    graphOf(
+      ['a', 'b', 'c', 'd'],
+      [
+        ['a', 'b'],
+        ['c', 'd'],
+      ],
+    ),
+    'two chains',
+  );
+  const row = (id: string) => at(layout.nodes, id).y;
+  assert.equal(row('a'), row('b'));
+  assert.equal(row('c'), row('d'));
+  assert.notEqual(row('a'), row('c'), 'the two chains are on different rows');
 });

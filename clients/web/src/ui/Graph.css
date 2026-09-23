@@ -4,19 +4,18 @@
 .graph .col {
   padding-block: var(--space-3);
 }
-/* Columns centre on one line, so every arrow sits on that line whatever a column's height. */
+/* The scrollport. It is as tall as the layout up to three rows of cards (3 x 44 + 2 x 12, the
+   gap dagre is given), and scrolls past that. */
 .gflow {
-  display: flex;
-  align-items: center;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  padding-bottom: 2px;
+  max-height: 156px;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 .gflow:focus-visible {
   outline-offset: -2px;
 }
-/* More columns than fit: the row fades out at the edge there is more to scroll to. Focus drops
-   the fade, so the ring stays whole on the side the fade would have cut. */
+/* More graph than fits sideways: the row fades out at the edge there is more to scroll to. Focus
+   drops the fade, so the ring stays whole on the side the fade would have cut. */
 .gflow:not(:focus-visible)[data-more='end'] {
   mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
 }
@@ -32,62 +31,52 @@
     transparent
   );
 }
-.gcol {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-}
-.gstack {
-  display: grid;
-  gap: var(--space-2);
-}
-/* The arrow to the next kind, drawn in the band the column reserves on its right. */
-.gcol[data-edge] {
+/* Sized by the layout, and the origin every card and every arrow is placed against. */
+.gcanvas {
   position: relative;
-  padding-right: 34px;
+  flex: none;
 }
-.gcol[data-edge]::before,
-.gcol[data-edge]::after {
-  content: '';
+.gedges,
+.gnodes {
   position: absolute;
-  top: 50%;
-  translate: 0 -50%;
+  top: 0;
+  left: 0;
 }
-.gcol[data-edge]::before {
-  right: 14px;
-  width: 16px;
-  height: 1px;
-  background: var(--edge);
+.gnodes {
+  width: 100%;
+  height: 100%;
 }
-.gcol[data-edge]::after {
-  right: 8px;
-  border: 4px solid transparent;
-  border-left: 6px solid var(--edge);
+.gedge {
+  fill: none;
+  stroke: var(--edge);
+  stroke-width: 1px;
+}
+.gedges marker path {
+  fill: var(--edge);
 }
 /* --border-strong is 2.0:1 on the dark canvas and 1.8:1 on the light one, so an idle arrow was
    all but invisible. --text-subtle is the token for graphics, at 4.05:1, and still far quieter
    than the done and live arrows (8.5:1 and up). */
-.gcol[data-edge='idle'] {
+.gedges [data-tone='idle'] {
   --edge: var(--text-subtle);
 }
-.gcol[data-edge='done'] {
+.gedges [data-tone='done'] {
   --edge: var(--status-completed);
 }
-.gcol[data-edge='live'] {
+.gedges [data-tone='live'] {
   --edge: var(--accent);
 }
-.gcol[data-edge='failed'] {
+.gedges [data-tone='failed'] {
   --edge: var(--status-failed);
 }
 
-/* One card per agent run. A fixed width keeps the row a grid; each line is cut, never wrapped.
-   The height is the three-line card even when there is no runtime to put on the third line, the
-   way the TUI reserves that row, so every role label in the row sits on one line. */
+/* One card per agent run, at the box the layout gave it (width and height come with it, so the
+   layout and the card can never disagree). Two lines: the role, then the state and the model. */
 .gnode {
   display: grid;
-  width: 150px;
-  min-height: 71px;
-  padding: var(--space-2) var(--space-3);
+  position: absolute;
+  align-content: center;
+  padding-inline: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -108,10 +97,21 @@
   color: var(--text-muted);
   font-weight: 400;
 }
+/* The second line: the state word keeps its hue, the model is muted, and the model is the half
+   that gives way when the card runs out of room. */
+.gmeta {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-2);
+}
 .gstat,
 .grun {
   color: var(--text-muted);
   font-size: var(--text-xs);
+}
+.gstat {
+  flex: none;
 }
 .gnode[data-status='active'] .gstat {
   color: var(--status-running);

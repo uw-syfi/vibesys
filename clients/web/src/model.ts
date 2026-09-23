@@ -50,7 +50,7 @@ export interface TrendModel {
   lastRound: number;
 }
 
-/** How the arrow between two columns of the agent graph is toned. */
+/** How the arrow between two agents of the graph is toned. */
 export type EdgeTone = 'idle' | 'done' | 'live' | 'failed';
 
 /** A card in the agent graph: one agent, or the run of adjacent agents that say the same thing. */
@@ -68,12 +68,36 @@ export interface GraphNode {
   count: number;
 }
 
-/** One agent kind: the agents of that kind stacked, and the arrow to the next kind. */
-export interface GraphColumn {
-  kind: string;
+/** A handover, from one node's id to another's, toned by its two ends. */
+export interface GraphEdge {
+  from: string;
+  to: string;
+  tone: EdgeTone;
+}
+
+/** The round's agents and the handovers between them. Nodes are in loop order. */
+export interface AgentGraph {
   nodes: GraphNode[];
-  /** Tone of the arrow to the next column; null on the last one. */
-  edge: EdgeTone | null;
+  edges: GraphEdge[];
+}
+
+/** A node in the box the layout gave it: its top-left corner, in CSS pixels. */
+export interface PlacedNode extends GraphNode {
+  x: number;
+  y: number;
+}
+
+/** An edge on the polyline the layout routed it along, source border to target border. */
+export interface PlacedEdge extends GraphEdge {
+  points: Array<{x: number; y: number}>;
+}
+
+/** A laid-out graph and the canvas it needs. */
+export interface GraphLayout {
+  width: number;
+  height: number;
+  nodes: PlacedNode[];
+  edges: PlacedEdge[];
 }
 
 export interface ProsePart {
