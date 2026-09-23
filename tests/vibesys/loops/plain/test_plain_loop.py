@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 from vibesys.constants import DomainName
+from vibesys.errors import ConfigurationError
 from vibesys.loops.plain.loop import PlainLoopState
 from vibesys.loops.plain.loop import run_plain_loop as _run_plain_loop
 from vibesys.loops.plain.state import PlainStateStore
@@ -239,6 +240,66 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
     assert len(second_issues["issues"]) == 1
     assert second_issues["issues"][0]["id"] == 1
     assert second_issues["issues"][0]["created_by"] == "loop:bootstrap"
+
+
+@patch("vibesys.backends.cuda.make_local_shell_sandbox")
+@patch("vibesys.context.build_agent_client")
+def test_v4_plain_budget_increase_requires_clean_workspace(
+    mock_build_runner,  # noqa: ANN001
+    mock_backend,  # noqa: ANN001, ARG001
+    ref_file,  # noqa: ANN001
+    tmp_path,  # noqa: ANN001
+) -> None:
+    fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    fake.enqueue("implementer", _make_impl_resp(1))
+    fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
+    fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = fake
+    with patch("vibesys.context.PROJECT_ROOT", tmp_path):
+        run_plain_loop(
+            config={"model": {"name": "claude-sonnet-4-6"}},
+            exp_name="test",
+            runs_dir=tmp_path / "exp_env",
+            input_path=str(Path(ref_file).parent),
+            accuracy_command="uv run python accuracy_checker/checker.py",
+            benchmark_command="uv run python benchmark/benchmark.py",
+            max_rounds=1,
+        )
+
+    exp_dir = _run_exp_dir(tmp_path)
+    run_id = _run_id(exp_dir)
+    pending = exp_dir / "pending-change.txt"
+    pending.write_text("uncommitted candidate change")
+    resume = {
+        "config": {"model": {"name": "claude-sonnet-4-6"}},
+        "exp_name": run_id,
+        "runs_dir": tmp_path / "exp_env",
+        "input_path": str(exp_dir),
+        "accuracy_command": "uv run python accuracy_checker/checker.py",
+        "benchmark_command": "uv run python benchmark/benchmark.py",
+        "max_rounds": 2,
+        "existing": True,
+        "resume_state": PlainLoopState(bootstrap_done=True),
+    }
+    with (
+        patch("vibesys.context.PROJECT_ROOT", tmp_path),
+        pytest.raises(ConfigurationError, match="commit or discard pending project changes"),
+    ):
+        run_plain_loop(**resume)
+    recorded = Project.open(exp_dir).state.load_run(run_id)
+    assert isinstance(recorded, OrchestrationRunManifest)
+    assert recorded.orchestration.options["max_rounds"] == 1
+
+    pending.unlink()
+    resumed = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
+    resumed.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    resumed.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
+    mock_build_runner.return_value = resumed
+    with patch("vibesys.context.PROJECT_ROOT", tmp_path):
+        run_plain_loop(**resume)
+    updated = Project.open(exp_dir).state.load_run(run_id)
+    assert isinstance(updated, OrchestrationRunManifest)
+    assert updated.orchestration.options["max_rounds"] == 2
 
 
 # ---------------------------------------------------------------------------
