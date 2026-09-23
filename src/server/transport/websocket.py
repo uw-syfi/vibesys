@@ -27,6 +27,8 @@ from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 from server.transport.subscriptions import SubscriptionTracker
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from websockets.asyncio.server import ServerConnection
     from websockets.http11 import Request
     from websockets.http11 import Response as HttpResponse
@@ -60,6 +62,7 @@ class WebSocketGateway:
         token: str | None = None,
         instance_path: Path | None = None,
         project_root: Path | None = None,
+        allowed_origins: Sequence[str] = (),
     ) -> None:
         """Create a loopback gateway around a shared run API."""
         self.api = api
@@ -68,6 +71,7 @@ class WebSocketGateway:
         self.token = token or secrets.token_urlsafe(32)
         self.instance_path = instance_path
         self.project_root = project_root or Path.cwd()
+        self.allowed_origins = frozenset(allowed_origins)
         self.subscriptions = subscriptions or SubscriptionTracker()
         self._claim: WebInstanceClaim | None = None
         self._instance_record: WebInstanceRecord | None = None
@@ -222,8 +226,7 @@ class WebSocketGateway:
 
         if parsed.path == _WEB_SOCKET_PATH:
             origin = _request_header(request, "Origin")
-            allowed_origin = self._actual_origin()
-            if origin != allowed_origin:
+            if origin not in self._allowed_origins():
                 return _respond(connection, HTTPStatus.FORBIDDEN, "Invalid WebSocket origin\n")
             return None
 
@@ -242,6 +245,9 @@ class WebSocketGateway:
         if self._bound_port is None:
             return _ALLOWED_ORIGIN_TEMPLATE.format(port=self.port)
         return _ALLOWED_ORIGIN_TEMPLATE.format(port=self._bound_port)
+
+    def _allowed_origins(self) -> frozenset[str]:
+        return frozenset({self._actual_origin(), *self.allowed_origins})
 
     def _asset_response(self, relative: str, *, cache_control: str) -> HttpResponse:
         if self.assets_dir is None:

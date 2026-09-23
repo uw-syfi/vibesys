@@ -63,8 +63,22 @@ def test_gateway_rejects_wrong_origin_and_capability_token(tmp_path: Path) -> No
         )
 
 
-async def _request(gateway: WebSocketGateway, request: SnapshotQuery) -> dict[str, Any]:
-    origin = f"http://127.0.0.1:{gateway.bound_port}"
+def test_gateway_accepts_an_explicit_browser_harness_origin(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+
+    with WebSocketGateway(parts.api, allowed_origins=("http://127.0.0.1:5173",)) as gateway:
+        response = asyncio.run(_request(gateway, SnapshotQuery(), origin="http://127.0.0.1:5173"))
+
+    assert response["ok"] is True
+
+
+async def _request(
+    gateway: WebSocketGateway,
+    request: SnapshotQuery,
+    *,
+    origin: str | None = None,
+) -> dict[str, Any]:
+    origin = origin or f"http://127.0.0.1:{gateway.bound_port}"
     async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
         await websocket.send(request.model_dump_json())
         return json.loads(await websocket.recv())

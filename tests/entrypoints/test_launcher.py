@@ -86,6 +86,9 @@ def test_launcher_routes_noninteractive_commands_to_headless(
         ["-h"],
     ]
 
+    assert cli.main(["web", "dev"]) == 0
+    assert commands[-1] == [sys.executable, "-m", "entrypoints.web", "dev"]
+
 
 def test_launcher_routes_non_tty_commands_to_headless(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)

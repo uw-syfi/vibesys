@@ -11,6 +11,7 @@ import webbrowser
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
+from urllib.parse import urlsplit
 
 from entrypoints import cli
 from server.runtime import WebInstanceClaim, WebInstanceRecord
@@ -65,6 +66,39 @@ def _web_assets_from_argv(argv: list[str]) -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
+def _web_origins_from_argv(argv: list[str]) -> tuple[str, ...]:
+    origins: list[str] = []
+    index = 0
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "--web-origin":
+            if index + 1 >= len(argv):
+                raise ValueError("--web-origin requires an origin")  # noqa: TRY003
+            value = argv[index + 1]
+            index += 2
+        elif argument.startswith("--web-origin="):
+            value = argument.partition("=")[2]
+            index += 1
+        else:
+            index += 1
+            continue
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(  # noqa: TRY003
+                "--web-origin must be an http:// or https:// origin without a path"
+            )
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        if origin not in origins:
+            origins.append(origin)
+    return tuple(origins)
+
+
 def _web_instance_from_argv(argv: list[str]) -> Path:
     value = cli._option_from_argv(argv, "--web-instance")  # noqa: SLF001  # lint-waiver: LW-101042 [SLF001]; reuse the CLI's private option scanner for the launcher-only flag
     return (
@@ -92,6 +126,7 @@ def _headless_argv(argv: list[str]) -> list[str]:
             "--theme",
             "--web-port",
             "--web-assets",
+            "--web-origin",
             "--web-instance",
             "--web-reopen",
         }:
@@ -105,6 +140,7 @@ def _headless_argv(argv: list[str]) -> list[str]:
                 "--theme=",
                 "--web-port=",
                 "--web-assets=",
+                "--web-origin=",
                 "--web-instance=",
                 "--web-reopen=",
             )
@@ -299,6 +335,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
     try:
         web_port = _web_port_from_argv(arguments)
         web_assets = _web_assets_from_argv(arguments)
+        web_origins = _web_origins_from_argv(arguments)
         read_only_log = _read_only_log_from_argv(arguments)
     except ValueError as exc:
         cli.configuration_error(
@@ -315,6 +352,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
                 web=True,
                 web_port=web_port,
                 web_assets=web_assets,
+                web_origins=web_origins,
                 instance_path=instance_path,
                 detach=detach,
                 read_only_log=read_only_log,

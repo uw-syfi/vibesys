@@ -22,4 +22,10 @@ h2 { font-size: 16px; margin: 0; }
 .transcript { display: grid; gap: 13px; list-style: none; margin: 20px 0 0; padding: 0; }
 .transcript li { align-items: flex-start; color: #c9d1df; display: flex; gap: 12px; line-height: 1.45; }
 .marker { background: #70e0ae; border-radius: 50%; flex: 0 0 7px; height: 7px; margin-top: 7px; }
+.gateway-connect { display: grid; gap: 9px; margin: 16px auto 0; max-width: 1120px; padding: 0 24px; }
+.gateway-connect label { color: #8190a8; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+.gateway-connect-row { display: flex; gap: 10px; }
+.gateway-connect input { background: #111a2d; border: 1px solid #34425f; border-radius: 7px; color: #f1f5ff; flex: 1; font: inherit; min-width: 0; padding: 11px 13px; }
+.gateway-connect button { background: #79a8ff; border: 0; border-radius: 7px; color: #07101f; cursor: pointer; font: inherit; font-weight: 700; padding: 11px 16px; }
+.gateway-connect-error { color: #ff9c9c; margin: 0; }
 @media (max-width: 640px) { .shell { width: min(100% - 28px, 1120px); padding-top: 28px; } .summary { grid-template-columns: 1fr; } }

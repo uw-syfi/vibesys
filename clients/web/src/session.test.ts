@@ -119,6 +119,22 @@ describe('WebSession', () => {
     ).toBe('wss://example.test/ws?token=encoded+token');
   });
 
+  test('maps a browser harness capability URL to the gateway WebSocket endpoint', () => {
+    expect(
+      webSocketUrlFromLocation({
+        href: 'http://127.0.0.1:5173/?gateway=http%3A%2F%2F127.0.0.1%3A8765%2F%3Ftoken%3Dsecret',
+      } as Location),
+    ).toBe('ws://127.0.0.1:8765/ws?token=secret');
+  });
+
+  test('maps a direct gateway capability URL to a secure WebSocket endpoint', () => {
+    expect(
+      webSocketUrlFromLocation({
+        href: 'https://127.0.0.1:8765/?token=secret',
+      } as Location),
+    ).toBe('wss://127.0.0.1:8765/ws?token=secret');
+  });
+
   test('wakes a stale session after the browser returns online', async () => {
     const lifecycle = new FakeLifecycle();
     const transport = new FakeTransport();

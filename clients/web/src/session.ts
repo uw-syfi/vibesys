@@ -172,10 +172,13 @@ export class WebSession {
 }
 
 export function webSocketUrlFromLocation(location: Location): string {
-  const url = new URL(location.href);
+  const page = new URL(location.href);
+  const gateway = page.searchParams.get('gateway');
+  const url = gateway === null ? page : new URL(gateway, page.origin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.pathname = '/ws';
-  url.search = new URLSearchParams({token: url.searchParams.get('token') ?? ''}).toString();
+  const token = url.searchParams.get('token') ?? page.searchParams.get('token') ?? '';
+  url.search = new URLSearchParams({token}).toString();
   return url.toString();
 }
 

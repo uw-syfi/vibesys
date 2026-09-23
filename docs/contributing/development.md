@@ -141,6 +141,10 @@ When Python protocol models change, regenerate the files under
 See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
 TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
 
+The [web UI development guide](web-development.md) covers replay mode, live
+WebSocket smoke runs, detached gateway lifecycle, and SSH access from a local
+laptop to a remote VibeSys host.
+
 ## Extend VibeSys
 
 Use the guide that matches the surface you are adding:

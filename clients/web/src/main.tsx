@@ -6,7 +6,8 @@ import './styles.css';
 
 const root = document.querySelector('#root');
 if (root === null) throw new Error('Web viewer root is missing');
-const isGatewayPage = new URL(window.location.href).searchParams.has('token');
+const pageSearch = new URL(window.location.href).searchParams;
+const isGatewayPage = pageSearch.has('token') || pageSearch.has('gateway');
 const session = isGatewayPage ? new WebSession() : null;
 createRoot(root).render(
   <StrictMode>{session === null ? createDemoApp() : createLiveApp(session)}</StrictMode>,

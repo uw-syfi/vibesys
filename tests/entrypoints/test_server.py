@@ -16,6 +16,7 @@ from entrypoints.server import (
     _headless_argv,
     _web_assets_from_argv,
     _web_instance_from_argv,
+    _web_origins_from_argv,
     _web_port_from_argv,
     _web_requested,
     main,
@@ -37,9 +38,18 @@ def test_control_socket_argument_forms() -> None:
 def test_web_server_arguments_are_consumed_before_run_parsing() -> None:
     assert _web_requested(["--web", "--web-port", "4312"]) is True
     assert _web_port_from_argv(["--web-port=4312"]) == 4312
-    assert _headless_argv(["--web", "--web-port", "4312", "--web-assets", "dist", "--local"]) == [
-        "--local"
-    ]
+    assert _headless_argv(
+        [
+            "--web",
+            "--web-port",
+            "4312",
+            "--web-assets",
+            "dist",
+            "--web-origin",
+            "http://127.0.0.1:5173",
+            "--local",
+        ]
+    ) == ["--local"]
 
 
 def test_web_port_rejects_out_of_range_values() -> None:
@@ -53,6 +63,26 @@ def test_web_port_and_asset_parsers_cover_invalid_and_explicit_values(tmp_path: 
         _web_port_from_argv(["--web-port", "not-a-port"])
     asset_dir = tmp_path / "dist"
     assert _web_assets_from_argv(["--web-assets", str(asset_dir)]) == asset_dir.resolve()
+
+
+def test_web_origins_accept_repeated_explicit_origins() -> None:
+    assert _web_origins_from_argv(
+        [
+            "--web-origin",
+            "http://127.0.0.1:5173",
+            "--web-origin=https://localhost:5173/",
+            "--web-origin",
+            "http://127.0.0.1:5173",
+        ]
+    ) == ("http://127.0.0.1:5173", "https://localhost:5173")
+
+
+def test_web_origins_reject_paths() -> None:
+    with pytest.raises(ValueError, match="without a path"):
+        _web_origins_from_argv(["--web-origin", "http://localhost:5173/app"])
+
+    with pytest.raises(ValueError, match="without a path"):
+        _web_origins_from_argv(["--web-origin", "http://localhost:5173/?token=bad"])
 
 
 def test_web_instance_record_is_project_local(

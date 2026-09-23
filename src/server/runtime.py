@@ -65,6 +65,7 @@ class ServerRuntime:
         web: bool = False,
         web_port: int = 0,
         web_assets: Path | None = None,
+        web_origins: tuple[str, ...] = (),
         instance_path: Path | None = None,
         detach: bool = False,
         read_only_log: Path | None = None,
@@ -74,6 +75,7 @@ class ServerRuntime:
         self.web = web
         self.web_port = web_port
         self.web_assets = web_assets
+        self.web_origins = web_origins
         self.instance_path = instance_path
         self.detach = detach
         self.read_only_log = read_only_log
@@ -179,6 +181,7 @@ class ServerRuntime:
                             self.api,
                             assets_dir=self.web_assets,
                             port=self.web_port,
+                            allowed_origins=self.web_origins,
                             subscriptions=subscriptions,
                             instance_path=self.instance_path,
                         )
