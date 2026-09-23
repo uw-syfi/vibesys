@@ -32,6 +32,10 @@ class _LegacyImplementation(Protocol):
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection: ...
 
 
+class _BuiltinRequestError(ValueError):
+    """A built-in policy requires its legacy request options."""
+
+
 class _LegacyOrchestration:
     """Keep the existing loop adapters on their integration-only contract."""
 
@@ -66,8 +70,11 @@ class _LegacyOrchestration:
 
 def _legacy_request(request: RunRequestLike) -> RunRequest:
     if not isinstance(request, RunRequest):
-        message = "built-in orchestration requires the legacy request options"
-        raise TypeError(message)
+        message = (
+            f"built-in orchestration {request.orchestration_id!r} requires RunRequest "
+            "with loop selection; descriptor-only requests lack its legacy options"
+        )
+        raise _BuiltinRequestError(message)
     return request
 
 

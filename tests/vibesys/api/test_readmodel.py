@@ -288,7 +288,8 @@ def test_run_view_rounds_are_run_wide_and_chronological() -> None:
     # the general-purpose round history, not the performance-plot series.
     assert run_view.current_round == 2
     assert run_view.experiment_revision == 7
-    assert run_view.loop is LoopKind.AGENT
+    assert run_view.loop == LoopKind.AGENT
+    assert type(run_view.loop) is str
     assert run_view.run_id == "run-1"
     assert run_view.status is RunStatus.UNKNOWN
 

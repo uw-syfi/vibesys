@@ -71,7 +71,7 @@ class RunResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     run_id: str
-    loop: LoopKind | str = Field(union_mode="left_to_right")
+    loop: str
     succeeded: bool
 
 
@@ -203,7 +203,7 @@ class RunView(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     run_id: str
-    loop: LoopKind | str = Field(union_mode="left_to_right")
+    loop: str
     status: RunStatus
     current_round: int
     active_hypothesis_id: str | None = None

@@ -1,15 +1,11 @@
 # Custom orchestration runtime
 
-`Orchestration` is the complete policy interface. Its `execute(request,
+`ExecutableOrchestration` is the public policy hook. Its `execute(request,
 runtime) -> bool` method decides which agents exist, when they take turns,
-what messages they receive, and when the run succeeds. Its `describe`, `view`,
-`project_committed`, and `resume_projection` methods own run metadata and
-state interpretation. The optional `prepare` hook runs after the framework
-provisions a descriptor-based run. `OrchestrationRegistry.register` also
-accepts `ExecutableOrchestration` implementations with only `execute` and
-supplies neutral defaults for the other methods. `VibeSysRuntime` provisions
-agents and owns their sandbox and client lifetimes. The framework does not
-define a round or require a particular agent graph.
+what messages they receive, and when the run succeeds. `VibeSysRuntime`
+provisions agents and owns their sandbox and client lifetimes. The framework
+does not define a round or require a particular agent graph. The registry
+normalizes this hook to its internal lifecycle contract.
 
 ```python
 import asyncio
@@ -73,6 +69,8 @@ result = asyncio.run(session.await_result())
 reads it through `RunRequestLike`. `RunRequest` and `LoopKind` remain public
 compatibility imports for built-in CLI selection and are deprecated for new
 policies. Their policy options belong to the built-in adapters.
+`RunResult.loop` and `RunView.loop` return ID strings for every policy;
+`LoopKind` still compares equal to its corresponding string value.
 
 `AgentDefinition` accepts an `AgentSpec` per agent and optional `resources` as
 `HostResource` grants. `spawn_agent` opens an agent environment with those
@@ -101,11 +99,11 @@ profiler is rejected. SkyPilot custom runs are rejected until each spawned
 agent can own a bridge without replacing the run's bridge socket. Docker and
 Modal agent environments use each agent's backend and provider for container
 authentication. Custom resume is rejected until an orchestration-owned
-checkpoint contract exists. History currently has
-a generic view for execute-only policies. A policy can implement
-`view(project, run_id, *, status, loop)` to project its own durable state,
-`describe(request) -> RunDescription` to publish expected roles and budget,
-and `project_committed(namespace, state, *, run_id)` to project live commits.
-The broader
-agent spawning, sandbox, workspace, and remote-runtime design is tracked in
-[RFC #937](https://github.com/uw-syfi/vibesys/issues/937).
+checkpoint contract exists. History currently has a generic view for
+execute-only policies. The registry currently forwards optional `describe`,
+`view`, `project_committed`, `prepare`, and `resume_projection` methods if a
+policy supplies them. These are provisional internal lifecycle hooks, not the
+stable custom policy contract. The former public `Orchestration` and
+`RunDescription` imports remain available for compatibility but are deprecated.
+The broader agent spawning, sandbox, workspace, and remote runtime design is
+tracked in [RFC #937](https://github.com/uw-syfi/vibesys/issues/937).

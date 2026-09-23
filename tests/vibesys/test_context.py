@@ -588,7 +588,7 @@ def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path):  # noqa: ANN00
     assert stored.orchestration.id == "agent"
     assert stored.orchestration.options["max_rounds"] == 1
     assert is_agent_run_manifest(stored)
-    assert open_run_store(Project.open(project)).get_run(run_id).loop is LoopKind.AGENT
+    assert open_run_store(Project.open(project)).get_run(run_id).loop == LoopKind.AGENT
 
     with _create_context(
         project,

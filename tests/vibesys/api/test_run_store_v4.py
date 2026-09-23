@@ -33,7 +33,8 @@ def test_plain_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     direct = store.get_run(manifest.run_id)
     listed = store.list_runs()
 
-    assert direct.loop is LoopKind.PLAIN
+    assert direct.loop == LoopKind.PLAIN
+    assert type(direct.loop) is str
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
     assert direct.rounds == []
@@ -61,7 +62,7 @@ def test_evolve_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     store = open_run_store(project)
     direct = store.get_run(manifest.run_id)
 
-    assert direct.loop is LoopKind.EVOLVE
+    assert direct.loop == LoopKind.EVOLVE
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
     assert direct.rounds == []

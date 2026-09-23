@@ -249,6 +249,57 @@ def test_descriptor_request_runs_without_legacy_loop_fields(tmp_path: Path) -> N
     assert Project.open(request.project_root).state.load_run(result.run_id).schema_version == 4
 
 
+def test_builtin_adapter_rejects_descriptor_only_request_before_run_setup(tmp_path: Path) -> None:
+    legacy = _custom_request(tmp_path)
+    request = OrchestrationRunRequest(
+        project_root=legacy.project_root,
+        orchestration=OrchestrationDescriptor(id="agent", config_version=1, options={}),
+        config=legacy.config,
+        input_bundle=legacy.input_bundle,
+        exp_name="builtin-collision",
+    )
+    events: list[CoreEvent] = []
+
+    def record(event: CoreEvent) -> None:
+        events.append(event)
+
+    session = create_session(request, sink=record)
+    session.start()
+    with pytest.raises(ValueError, match="built-in orchestration 'agent' requires RunRequest"):
+        asyncio.run(session.await_result())
+
+    assert [event.type for event in events] == [CoreEventType.RUN_FAILED]
+    assert not (request.project_root / ".vibesys").exists()
+
+
+def test_custom_policy_id_matching_builtin_name_stays_a_string(tmp_path: Path) -> None:
+    legacy = _custom_request(tmp_path)
+    request = OrchestrationRunRequest(
+        project_root=legacy.project_root,
+        orchestration=OrchestrationDescriptor(id="agent", config_version=1, options={}),
+        config=legacy.config,
+        input_bundle=legacy.input_bundle,
+        exp_name="custom-agent-name",
+        run_environment=legacy.run_environment,
+        agent_backend=legacy.agent_backend,
+        profiler_kind=legacy.profiler_kind,
+        backend=legacy.backend,
+    )
+    registry = OrchestrationRegistry()
+    registry.register("agent", _StubOrchestration(result=True))
+
+    def discard(event: CoreEvent) -> None:
+        del event
+
+    session = create_session(request, sink=discard, registry=registry)
+    result = asyncio.run(session.await_result())
+
+    assert result.succeeded
+    assert result.loop == "agent"
+    assert type(result.loop) is str
+    assert type(session.view().loop) is str
+
+
 def test_describe_failure_emits_failed_event_and_closes_session(tmp_path: Path) -> None:
     class FailingPolicy(_StubOrchestration):
         def describe(self, request: RunRequest) -> RunDescription:
@@ -273,7 +324,7 @@ def test_describe_failure_emits_failed_event_and_closes_session(tmp_path: Path) 
     assert [event.type for event in events] == [CoreEventType.RUN_FAILED]
 
 
-def test_custom_selection_validates_descriptor_and_preserves_builtin_enum(
+def test_custom_selection_validates_descriptor_and_preserves_builtin_request_enum(
     tmp_path: Path, repo_root: Path
 ) -> None:
     custom = _custom_request(tmp_path)
@@ -290,10 +341,11 @@ def test_custom_selection_validates_descriptor_and_preserves_builtin_enum(
     assert built_in.loop is LoopKind.AGENT
     assert built_in.selected_loop is LoopKind.AGENT
     built_in_result = RunResult(run_id="builtin", loop=LoopKind.AGENT, succeeded=True)
-    assert RunResult.model_validate_json(built_in_result.model_dump_json()).loop is LoopKind.AGENT
+    assert built_in_result.loop == "agent"
+    assert type(built_in_result.loop) is str
+    assert RunResult.model_validate_json(built_in_result.model_dump_json()).loop == "agent"
     assert (
-        RunResult(run_id="builtin", loop=built_in.orchestration_id, succeeded=True).loop
-        is LoopKind.AGENT
+        RunResult(run_id="builtin", loop=built_in.orchestration_id, succeeded=True).loop == "agent"
     )
 
     values = built_in.model_dump()

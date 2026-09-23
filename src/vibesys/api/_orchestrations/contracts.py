@@ -21,25 +21,31 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class RunDescription:
-    """Policy-owned facts published when a run starts."""
+    """Internal policy metadata; the old public import is deprecated."""
 
     max_rounds: int = 1
     expected_roles: tuple[str, ...] = ()
 
 
 class ExecutableOrchestration(Protocol):
-    """Compatibility entry point for policies typed to either request DTO."""
+    """Public policy hook: execute a run using the agent runtime."""
 
     def execute(self, request: Any, runtime: VibeSysRuntime) -> bool: ...  # noqa: ANN401
 
 
 @runtime_checkable
-class Orchestration(ExecutableOrchestration, Protocol):
-    """Complete policy contract resolved by the framework core."""
+class Orchestration(Protocol):
+    """Internal lifecycle contract normalized at registry registration.
 
-    def prepare(self, request: Any, runtime: VibeSysRuntime) -> None: ...  # noqa: ANN401
+    The public extension point is ``ExecutableOrchestration``. Explicit public
+    imports of this full protocol remain compatible but are deprecated.
+    """
 
-    def describe(self, request: Any) -> RunDescription: ...  # noqa: ANN401
+    def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool: ...
+
+    def prepare(self, request: RunRequestLike, runtime: VibeSysRuntime) -> None: ...
+
+    def describe(self, request: RunRequestLike) -> RunDescription: ...
 
     def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView: ...
 

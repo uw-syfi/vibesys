@@ -17,11 +17,17 @@ from vibesys import boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.api._agent_state import agent_run_objectives, is_agent_run_manifest
 from vibesys.api._orchestrations.builtins import built_in_orchestrations
+
+# Deprecated public imports retained for existing callers; omitted from __all__.
 from vibesys.api._orchestrations.contracts import (
     ExecutableOrchestration,
-    Orchestration,
     OrchestrationRegistry,
-    RunDescription,
+)
+from vibesys.api._orchestrations.contracts import (
+    Orchestration as Orchestration,
+)
+from vibesys.api._orchestrations.contracts import (
+    RunDescription as RunDescription,
 )
 from vibesys.api.contracts import (
     Config,
@@ -93,7 +99,6 @@ __all__ = [
     "LoopKind",
     "MetricSpace",
     "Objective",
-    "Orchestration",
     "OrchestrationDescriptor",
     "OrchestrationRegistry",
     "OrchestrationRunRequest",
@@ -102,7 +107,6 @@ __all__ = [
     "RepositoryVisibility",
     "ResumeRef",
     "RunControl",
-    "RunDescription",
     "RunRequest",
     "RunRequestLike",
     "RunResourceHandoff",
