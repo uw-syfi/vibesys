@@ -21,6 +21,7 @@ from vs_github.api import GitHubCLI, GitHubCLIError
 if TYPE_CHECKING:
     import argparse
 
+    from vibesys.api.request import ResumeConfigSnapshot
     from vs_project.api import RunConfiguration
 
 
@@ -36,7 +37,7 @@ def _explicit_config_value(raw: object, path: tuple[str, ...]) -> tuple[bool, ob
 def _restore_project_config(
     args: argparse.Namespace,
     config: Config,
-    recorded: RunConfiguration,
+    recorded: RunConfiguration | ResumeConfigSnapshot,
 ) -> Config:
     """Restore persisted model settings, rejecting explicit config changes."""
     raw: object = {}

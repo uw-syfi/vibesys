@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from entrypoints.cli.args import _parse_cli_objective
 from entrypoints.cli.constants import (
@@ -16,8 +16,8 @@ from entrypoints.cli.constants import (
 )
 from entrypoints.cli.errors import _configuration_error, _project_resume_mismatch
 from entrypoints.cli.loops import _migrate_run_environment_command, _resolve_project_root
-from vibesys.api import ComputeBackend, ProfilerKind
-from vibesys.api.request import coerce_profiler_kind, legacy_resume_configuration
+from vibesys.api import ComputeBackend, Objective, ProfilerKind
+from vibesys.api.request import coerce_profiler_kind, resume_projection
 from vs_project.api import (
     AgentRunConfiguration,
     GitTracker,
@@ -32,6 +32,9 @@ from vs_project.api import (
 
 if TYPE_CHECKING:
     import argparse
+
+    from vibesys.api.request import ResumeProjection
+    from vs_project.api import RunEnvironmentRecord
 
 
 def _restore_resume_budget(
@@ -84,7 +87,7 @@ def _restore_resume_constraints(
 
 def _restore_resume_run_environment(  # noqa: C901
     args: argparse.Namespace,
-    recorded: RunConfiguration,
+    record: RunEnvironmentRecord,
     explicit: frozenset[str],
 ) -> list[str]:
     """Restore the recorded runtime environment and reject contradictions.
@@ -94,7 +97,6 @@ def _restore_resume_run_environment(  # noqa: C901
     wins whenever the resume invocation says nothing about it, and only an
     explicitly passed flag that contradicts the recording is an error.
     """
-    record = recorded.run_environment
     changed: list[str] = []
     if not hasattr(args, "docker") or not hasattr(args, "modal"):
         return changed
@@ -135,6 +137,10 @@ def _restore_resume_run_environment(  # noqa: C901
 
 
 def _normalized_resume_cli_value(destination: str, value: object) -> object:
+    if destination == "objective":
+        return tuple(f"{item.name}:{item.direction}" for item in cast("list[Objective]", value))
+    if destination == "constraint":
+        return tuple(item.strip() for item in cast("list[str]", value) if item.strip())
     if destination == "backend" and value is not None:
         assert isinstance(value, ComputeBackend)  # noqa: S101  # argparse contract
         return value.value
@@ -149,7 +155,11 @@ def _set_resume_cli_value(
     destination: str,
     value: object,
 ) -> None:
-    if destination == "backend":
+    if destination == "objective":
+        value = [_parse_cli_objective(item) for item in cast("tuple[str, ...]", value)]
+    elif destination == "constraint":
+        value = list(cast("tuple[str, ...]", value))
+    elif destination == "backend":
         try:
             value = ComputeBackend(value)
         except ValueError:
@@ -215,7 +225,7 @@ def _restore_loop_resume_fields(
 ) -> tuple[dict[str, str], list[str]]:
     """Restore a loop's budget and return its immutable CLI field map."""
     fields = dict(_COMMON_RESUME_CLI_FIELDS)
-    changed: list[str] = _restore_resume_run_environment(args, recorded, explicit)
+    changed: list[str] = _restore_resume_run_environment(args, recorded.run_environment, explicit)
     if isinstance(recorded, AgentRunConfiguration):
         _restore_resume_budget(
             args,
@@ -252,6 +262,40 @@ def _restore_loop_resume_fields(
         else:
             args.objective = [_parse_cli_objective(item) for item in recorded.objectives]
     return fields, changed
+
+
+def _restore_v4_resume_cli_args(
+    args: argparse.Namespace,
+    projection: ResumeProjection,
+    *,
+    loop_kind: str,
+) -> None:
+    """Restore v4 CLI values without constructing a version 3 configuration."""
+    if projection.orchestration_id != loop_kind:
+        _configuration_error(
+            f"Run uses --outer-loop {projection.orchestration_id}, not {loop_kind}",
+            code="project_resume_configuration_mismatch",
+            stage="resume_resolution",
+        )
+    explicit = getattr(args, "explicit_cli_dests", frozenset())
+    changed = _restore_resume_run_environment(args, projection.run_environment, explicit)
+    _restore_resume_budget(
+        args,
+        destination=projection.budget_destination,
+        recorded_value=projection.budget_value,
+        explicit=explicit,
+    )
+    for destination, expected in projection.cli_values.items():
+        if not hasattr(args, destination):
+            continue
+        if destination in explicit:
+            requested = _normalized_resume_cli_value(destination, getattr(args, destination))
+            if requested != expected:
+                changed.append(destination)
+        else:
+            _set_resume_cli_value(args, destination, expected)
+    if changed:
+        _project_resume_mismatch(changed)
 
 
 def _switch_project_resume_branch(project_root: Path, run_id: str) -> None:
@@ -314,10 +358,6 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
             stage="resume_resolution",
         )
     args.resume = run_id
-    if isinstance(run_manifest, OrchestrationRunManifest):
-        recorded_configuration = legacy_resume_configuration(run_manifest)
-    else:
-        recorded_configuration = run_manifest.configuration
     args.exp_name = run_id
     args.input = project_root
     if run_manifest.task_name is not None:
@@ -328,5 +368,10 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
                 stage="resume_resolution",
             )
         args.task = run_manifest.task_name
-    args.project_run_configuration = recorded_configuration
-    _restore_project_resume_cli_args(args, recorded_configuration, loop_kind=loop_kind)
+    if isinstance(run_manifest, OrchestrationRunManifest):
+        projection = resume_projection(run_manifest)
+        args.project_run_configuration = projection.config
+        _restore_v4_resume_cli_args(args, projection, loop_kind=loop_kind)
+    else:
+        args.project_run_configuration = run_manifest.configuration
+        _restore_project_resume_cli_args(args, run_manifest.configuration, loop_kind=loop_kind)

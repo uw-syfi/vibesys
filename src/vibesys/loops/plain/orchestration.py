@@ -7,7 +7,11 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.orchestration import OrchestrationResumeDecision
+from vibesys.orchestration import (
+    OrchestrationResumeDecision,
+    ResumeConfigSnapshot,
+    ResumeProjection,
+)
 from vs_project.api import (
     OrchestrationDescriptor,
     OrchestrationRunManifest,
@@ -106,15 +110,22 @@ def compare_resume(
     return OrchestrationResumeDecision(descriptor=requested, requires_clean_workspace=True)
 
 
-def legacy_resume_configuration(manifest: OrchestrationRunManifest) -> PlainRunConfiguration:
-    """Transitional v4-to-v3 projection for the existing CLI resume parser.
-
-    The v4 manifest remains authoritative. PR6 will replace this projection
-    with descriptor-native CLI restoration.
-    """
+def resume_projection(manifest: OrchestrationRunManifest) -> ResumeProjection:
+    """Project validated v4 plain settings directly into CLI resume values."""
     options = options_from_descriptor(manifest.orchestration)
-    return PlainRunConfiguration(
-        outer_loop="plain",
+    return ResumeProjection(
+        orchestration_id="plain",
         run_environment=manifest.run_environment,
-        **options.model_dump(),
+        config=ResumeConfigSnapshot.model_validate(options.model_dump()),
+        cli_values={
+            "agent_backend": options.agent_backend,
+            "cli_provider": options.cli_provider,
+            "backend": options.compute_backend,
+            "profiler": options.profiler,
+            "modality": options.modality,
+            "max_attempts_per_issue": options.max_attempts_per_issue,
+            "max_issues_per_perf_eval": options.max_issues_per_perf_eval,
+        },
+        budget_destination="max_rounds",
+        budget_value=options.max_rounds,
     )
