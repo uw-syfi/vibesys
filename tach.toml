@@ -163,7 +163,7 @@ depends_on = ["vibesys.api._orchestrations._common", "vibesys.api.contracts", "v
 
 [[modules]]
 path = "vibesys.api._orchestrations.evolve"
-depends_on = ["vibesys.run", "vibesys.loops.evolve", "vibesys.api._orchestrations._common", "vibesys.api.contracts"]
+depends_on = ["vibesys.run", "vibesys.loops.evolve", "vibesys.api._orchestrations._common", "vibesys.api.contracts", "vs_project"]
 
 [[modules]]
 path = "vibesys.api._orchestrations.runner"
@@ -195,7 +195,7 @@ depends_on = ["vibesys.run", "vibesys.evaluators", "vs_loop_state", "vs_issue_bo
 
 [[modules]]
 path = "vibesys.loops.evolve"
-depends_on = ["vibesys.loops", "vibesys.evaluators", "vs_project", "vibesys.prompts", "vibesys", "vibesys.domains", "vibesys.render", "vibesys.run", "vs_agent", "vibesys.sandbox", "vs_loop_state", "vibesys.context"]
+depends_on = ["vibesys.loops", "vibesys.evaluators", "vs_project", "vibesys.prompts", "vibesys", "vibesys.domains", "vibesys.render", "vibesys.run", "vs_agent", "vibesys.sandbox", "vs_loop_state", "vibesys.context", "vibesys.orchestration"]
 
 [[modules]]
 path = "vibesys.run"

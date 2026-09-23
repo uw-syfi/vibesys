@@ -60,7 +60,12 @@ from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentSpec
 from vibesys.schemas import JudgeResponse, ProfilerSummary, Verdict
 from vs_agent.api.testing import FakeAgentClient
-from vs_project.api import EvolveRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import (
+    EvolveRunConfiguration,
+    OrchestrationRunManifest,
+    Project,
+    RunEnvironmentRecord,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -541,6 +546,9 @@ def test_evolve_with_preexisting_passing_seed_skips_bootstrap(tmp_path, ref_file
     exp_envs = list((tmp_path / "exp_env").iterdir())
     assert len(exp_envs) == 1
     exp_name = exp_envs[0].name
+    recorded = Project.open(exp_envs[0]).state.load_run(exp_name)
+    assert isinstance(recorded, OrchestrationRunManifest)
+    assert recorded.orchestration.id == "evolve"
 
     # Second run resumes that exp dir; bootstrap must NOT be called, and a
     # gen-1 child must be appended off the seed.
@@ -557,6 +565,7 @@ def test_evolve_with_preexisting_passing_seed_skips_bootstrap(tmp_path, ref_file
         )
         spy.assert_not_called()
     assert result is True
+    assert Project.open(exp_envs[0]).state.load_run(exp_name) == recorded
 
     pop = _load_population(tmp_path)
     assert len(pop) == 2  # gen-0 seed + one gen-1 child (same exp dir, resumed)
