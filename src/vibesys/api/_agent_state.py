@@ -14,14 +14,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
+from vibesys.loops.agent.orchestration import (
+    AGENT_ORCHESTRATION_IDS,
+    configuration_from_manifest,
+)
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.run.state import RunStateNamespace
-from vs_project.api import AgentRunConfiguration, RunManifest
+from vs_project.api import AgentRunConfiguration, OrchestrationRunManifest
 
 if TYPE_CHECKING:
     from vibesys.loops.agent.model import AgentRunState
-    from vs_project.api import Project
+    from vs_project.api import Project, RunManifestRecord
 
 # The server's own experiment/design/performance projections treat only
 # "agent" as an agent run, deliberately excluding "profile-guided" even
@@ -32,12 +36,26 @@ if TYPE_CHECKING:
 _AGENT_OUTER_LOOP = "agent"
 
 
+def agent_run_objectives(manifest: RunManifestRecord) -> tuple[str, ...] | None:
+    """Return validated objective axes for an agent run, or ``None``."""
+    if isinstance(manifest, OrchestrationRunManifest):
+        if manifest.orchestration.id not in AGENT_ORCHESTRATION_IDS:
+            return None
+        return configuration_from_manifest(manifest).objectives
+    if isinstance(manifest.configuration, AgentRunConfiguration):
+        return manifest.configuration.objectives
+    return None
+
+
 def load_agent_run_state(project: Project, run_id: str) -> AgentRunState | None:
     """Return *run_id*'s reprojected agent state, or `None` for a non-agent run."""
     manifest = project.state.load_run(run_id)
-    if not isinstance(manifest, RunManifest):
-        return None
-    configuration = manifest.configuration
+    if isinstance(manifest, OrchestrationRunManifest):
+        if manifest.orchestration.id != _AGENT_OUTER_LOOP:
+            return None
+        configuration = configuration_from_manifest(manifest)
+    else:
+        configuration = manifest.configuration
     if not isinstance(configuration, AgentRunConfiguration):
         return None
     if configuration.outer_loop != _AGENT_OUTER_LOOP:

@@ -48,13 +48,11 @@ from server.api.protocol import (
 from server.api.workspace_git import WorkspacePatchReader
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
-from vibesys.api import open_run_store
+from vibesys.api import LoopKind, agent_run_objectives, open_run_store
 from vs_project.api import (
-    AgentRunConfiguration,
     GitTracker,
     NullGitTrackerEvents,
     ProjectStateError,
-    RunManifest,
 )
 
 if TYPE_CHECKING:
@@ -421,14 +419,13 @@ class RunApi:
         if project_run is None:
             return None
         manifest = project_run.project.state.load_run(project_run.run_id)
-        if not isinstance(manifest, RunManifest) or not isinstance(
-            manifest.configuration, AgentRunConfiguration
-        ):
+        objectives = agent_run_objectives(manifest)
+        if objectives is None:
             return None
         run_view = open_run_store(project_run.project).get_run(project_run.run_id)
         return build_performance_context(
             run_view,
-            objectives=manifest.configuration.objectives,
+            objectives=objectives,
             objective_description=self._objective_description(),
         )
 
@@ -587,10 +584,7 @@ class RunApi:
             cached = self._experiment_run_kind
             if cached is not None and cached[0] == key:
                 return cached[1]
-        manifest = project.state.load_run(run_id)
-        is_agent = (
-            isinstance(manifest, RunManifest) and manifest.configuration.outer_loop == "agent"
-        )
+        is_agent = open_run_store(project).get_run(run_id).loop is LoopKind.AGENT
         with self._experiment_run_kind_lock:
             self._experiment_run_kind = (key, is_agent)
         return is_agent

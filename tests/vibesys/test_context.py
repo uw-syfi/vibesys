@@ -9,6 +9,7 @@ import pytest
 from pydantic import BaseModel
 
 from vibesys import boot_trace
+from vibesys.api import LoopKind, open_run_store
 from vibesys.backends.cuda import CudaBackend
 from vibesys.backends.cuda.gpu_monitor import GpuInfo
 from vibesys.config import Config
@@ -30,6 +31,10 @@ from vibesys.evaluators import (
 from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.events import CoreEventType
 from vibesys.loops.agent.model import AgentRunState
+from vibesys.loops.agent.orchestration import (
+    compare_resume_descriptors,
+    descriptor_from_configuration,
+)
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.run import (
     DeviceLease,
@@ -49,7 +54,13 @@ from vs_agent.api import (
 from vs_agent.api.testing import FakeAgentClient
 from vs_agent.contracts import AgentTurnRequest, AgentTurnResult
 from vs_loop_state.api import PlainLoopCursor
-from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord, RunManifest
+from vs_project.api import (
+    AgentRunConfiguration,
+    OrchestrationRunManifest,
+    Project,
+    RunEnvironmentRecord,
+    RunManifest,
+)
 from vs_sandbox.api import HostResourceAccess, SandboxLifecycle
 
 
@@ -194,6 +205,7 @@ def _create_context(  # noqa: PLR0913
     exp_name: str = "queue",
     existing: bool = False,
     configuration: AgentRunConfiguration | None = None,
+    orchestration_v4: bool = False,
     objective: str = "Make the queue faster.\n",
     task_name: str | None = None,
     task_root: Path | None = None,
@@ -201,6 +213,7 @@ def _create_context(  # noqa: PLR0913
     hooks=None,  # noqa: ANN001
     integration: LocalRunIntegration | None = None,
 ) -> _RunContext:
+    selected_configuration = configuration or _configuration()
     return create_run_context(
         config=Config.model_validate({"model": {"name": "gpt-test"}}),
         exp_name=exp_name,
@@ -214,7 +227,15 @@ def _create_context(  # noqa: PLR0913
         evaluator_package_root=evaluator_package_root,
         objective=objective,
         existing=existing,
-        project_configuration=configuration or _configuration(),
+        project_configuration=selected_configuration,
+        orchestration_descriptor=(
+            lambda profiler: descriptor_from_configuration(
+                selected_configuration.model_copy(update={"profiler": profiler.value})
+            )
+        )
+        if orchestration_v4
+        else None,
+        orchestration_resume=compare_resume_descriptors if orchestration_v4 else None,
         profiler_kind=ProfilerKind.NONE,
         profiler_domain=DomainName.GENERIC,
         run_environment=RunEnvironmentSpec("local"),
@@ -551,6 +572,34 @@ def test_resume_reuses_project_and_run_id_and_only_increases_limit(tmp_path):  #
     assert isinstance(stored, RunManifest)
     assert isinstance(stored.configuration, AgentRunConfiguration)
     assert stored.configuration.max_rounds == 2
+    assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
+
+
+def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path):  # noqa: ANN001, ANN201
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    with _create_context(project, evaluator=evaluator, orchestration_v4=True) as first:
+        run_id = first.run_id
+
+    stored = Project.open(project).state.load_run(run_id)
+    assert isinstance(stored, OrchestrationRunManifest)
+    assert stored.orchestration.id == "agent"
+    assert stored.orchestration.options["max_rounds"] == 1
+    assert open_run_store(Project.open(project)).get_run(run_id).loop is LoopKind.AGENT
+
+    with _create_context(
+        project,
+        evaluator=evaluator,
+        exp_name=run_id,
+        existing=True,
+        configuration=_configuration(max_rounds=2),
+        orchestration_v4=True,
+    ):
+        pass
+
+    resumed = Project.open(project).state.load_run(run_id)
+    assert isinstance(resumed, OrchestrationRunManifest)
+    assert resumed.orchestration.options["max_rounds"] == 2
     assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
 
 
