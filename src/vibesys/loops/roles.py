@@ -1,8 +1,9 @@
 """The advertised loop-to-agent-roles contract.
 
 Single authoritative mapping from ``--outer-loop`` kind to the agent roles
-that loop can run as per-round executions: the ``kind=`` values its call
-sites pass to ``LoopContext.invoke``. ``run_started`` advertises this
+that loop can run as per-round executions: the ``kind=`` values passed to
+``LoopContext.invoke`` or the IDs declared by named agent handles.
+``run_started`` advertises this
 sequence to frontends, which seed one pending placeholder per role for each
 round. Conditional roles are included (``profiler`` runs only when profiling
 is enabled and requested) because a pending placeholder is the correct
