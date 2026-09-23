@@ -214,8 +214,7 @@ def test_custom_policy_projects_committed_state_for_its_own_namespace(tmp_path: 
                 run_id=run_id,
                 loop="team-search",
                 status=RunStatus.ACTIVE,
-                current_round=state.revision,
-                experiment_revision=state.revision,
+                projection={"kind": "evidence", "revision": state.revision},
             )
 
     request = _custom_request(tmp_path)
@@ -235,7 +234,7 @@ def test_custom_policy_projects_committed_state_for_its_own_namespace(tmp_path: 
     view, keys = committed[0]
     assert view.run_id == result.run_id
     assert view.loop == "team-search"
-    assert view.current_round == 4
+    assert view.projection == {"kind": "evidence", "revision": 4}
     assert keys == ("candidate-4",)
 
 
