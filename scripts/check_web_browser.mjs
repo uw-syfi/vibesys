@@ -604,6 +604,32 @@ async function checkInteractions(browser, origin) {
     // Either way the log's keys are dead and the next arrow moves the round, and no React commit
     // attends the close, so the log cannot see it for itself.
     const sheet = page.locator('dialog.insp-sheet');
+    // Every focus move, and every `close` the page handles. `close` does not bubble, so the
+    // listener captures instead.
+    await page.evaluate(() => {
+      window.trail = [];
+      window.closes = 0;
+      document.addEventListener('focusin', event => window.trail.push(event.target.id), true);
+      document.addEventListener(
+        'close',
+        () => {
+          window.closes += 1;
+        },
+        true,
+      );
+    });
+    /**
+     * Escape, and then wait for the page's own `close` handling. A native close hides the
+     * dialog a task before that runs, so waiting on the dialog alone returns inside the gap:
+     * a selection there finds the inspector still open and opens nothing, and a focus check
+     * there reads the state before the hand-off has run or declined to.
+     */
+    const shut = async dialog => {
+      const before = await page.evaluate(() => window.closes);
+      await page.keyboard.press('Escape');
+      await dialog.waitFor({state: 'hidden'});
+      await page.waitForFunction(seen => window.closes > seen, before);
+    };
     let delta = 0;
     /** A row with a verb of its own, so it is a row and not a member of the fold beside it. */
     const freshRow = async () => {
@@ -622,7 +648,6 @@ async function checkInteractions(browser, origin) {
         id,
       );
     };
-    // The hand-off runs in React's own `close` handling, a turn after the dialog goes.
     const landed = (id = 'log') =>
       page
         .waitForFunction(
@@ -647,8 +672,7 @@ async function checkInteractions(browser, origin) {
       await page.keyboard.press('Enter');
       await dialog.waitFor();
       await foldAway(picked);
-      await page.keyboard.press('Escape');
-      await dialog.waitFor({state: 'hidden'});
+      await shut(dialog);
       await keepsTheRound(`closing the ${what}`);
     };
     // Crossing 1024 swaps the dialog for an aside, and removing an open <dialog> fires no
@@ -662,20 +686,11 @@ async function checkInteractions(browser, origin) {
       await page.locator('aside.insp').waitFor();
       await keepsTheRound(`crossing 1024 from the ${what}`);
     };
-    /**
-     * Back to the drawer, with the dialog shut. Whether it comes back open depends on whether
-     * the removed dialog fired `close` on the way out, which is what N5 is about and is
-     * asserted on its own below; here it only has to end closed.
-     */
+    /** Back to the drawer, which the still-open inspector brings back, and shut it. */
     const backToDrawer = async () => {
       await page.setViewportSize({width: 900, height: 1000});
-      const reopened = await drawer.waitFor({state: 'visible', timeout: 1000}).then(
-        () => true,
-        () => false,
-      );
-      if (!reopened) return;
-      await page.keyboard.press('Escape');
-      await drawer.waitFor({state: 'hidden'});
+      await drawer.waitFor();
+      await shut(drawer);
     };
 
     await page.setViewportSize({width: 900, height: 1000});
@@ -696,10 +711,8 @@ async function checkInteractions(browser, origin) {
     await drawer.waitFor();
     await page.evaluate(() => {
       window.trail = [];
-      document.addEventListener('focusin', event => window.trail.push(event.target.id), true);
     });
-    await page.keyboard.press('Escape');
-    await drawer.waitFor({state: 'hidden'});
+    await shut(drawer);
     assert.equal(await landed(kept.id), true, 'an ordinary close lost the row the dialog holds');
     // Exactly one focus move, the dialog restoring the row: any hand-off would add its own.
     assert.deepEqual(

@@ -129,8 +129,10 @@ export function App({session}: {session: WorkspaceSession}) {
   // Past 1024px the inspector is an aside, so an open dialog is removed rather than closed, and
   // removing an open <dialog> fires no `close` at all: the hand-off below never runs and focus
   // falls to <body>. A reader at 125% zoom is in the drawer layout, and one Cmd+0 crosses this.
-  // Keyed on the width rather than on the dialog's own teardown, which would fire on an ordinary
-  // close too and take the focus the dialog was about to restore itself.
+  // Keyed on the width rather than on the dialog's own teardown, which would also fire on an
+  // ordinary close: there the dialog has already restored focus synchronously inside `close()`,
+  // so the guard would find a visible row and take nothing. Firing it on a path with no focus
+  // to reclaim is the wrong place for it, not a theft.
   useEffect(() => {
     if (wide && inspectorOpen) reclaimFocus();
   }, [wide, inspectorOpen]);
