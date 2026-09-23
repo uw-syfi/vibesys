@@ -32,7 +32,7 @@ func TestRealGraphEffects(t *testing.T) {
 		{"src/server/api/schema.py", "tui", nil, nil, nil},
 		{"sdk/vs-evaluator/vseval/go.mod", "evaluators", []string{"resources/evaluators/microservice", "resources/evaluators/queue", "sdk/vs-evaluator/vseval"}, []string{"go"}, nil},
 		{"resources/evaluators/queue/native_runner/Cargo.toml", "evaluators", []string{"resources/evaluators/queue", "resources/evaluators/queue/native_runner"}, []string{"go", "rust"}, nil},
-		{"clients/backend-client/src/index.ts", "tui", nil, nil, []string{"@vibesys/backend-client", "@vibesys/core-state", "@vibesys/tui"}},
+		{"clients/backend-client/src/index.ts", "tui", nil, nil, []string{"@vibesys/backend-client", "@vibesys/core-state", "@vibesys/tui", "@vibesys/web"}},
 		{"examples/microservices/hotel-correctness/.vibesys/tasks/compose/evaluator/go.mod", "examples", nil, nil, nil},
 	}
 	for _, tt := range tests {
