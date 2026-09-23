@@ -101,6 +101,25 @@ class WebInstanceClaim:
         self._stream = stream
         return True
 
+    @classmethod
+    def is_held(cls, path: Path) -> bool:
+        """Return whether another process currently owns the startup claim."""
+        if fcntl is None:  # pragma: no cover - defensive for non-Unix packaging.
+            return False
+        try:
+            stream = path.with_name(f"{path.name}.lock").open("a+")
+        except OSError:
+            return False
+        try:
+            try:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            return False
+        finally:
+            stream.close()
+
     def close(self) -> None:
         """Release the startup claim without deleting the reusable lock path."""
         stream = self._stream

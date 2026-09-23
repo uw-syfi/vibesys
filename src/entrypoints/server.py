@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
 from entrypoints import cli
-from server.runtime import WebInstanceRecord
+from server.runtime import WebInstanceClaim, WebInstanceRecord
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
 from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
@@ -242,6 +242,20 @@ def _spawn_detached(arguments: list[str], instance_path: Path) -> None:
     raise RuntimeError("Detached VibeSys web gateway did not become ready")  # noqa: TRY003  # lint-waiver: LW-101037 [TRY003]; report a bounded child-startup failure to the launcher
 
 
+def _discover_web_instance(path: Path) -> WebInstanceRecord | None:
+    """Wait through the bind-to-record race before deciding to launch again."""
+    deadline = time.monotonic() + 2
+    while True:
+        record = WebInstanceRecord.discover(path, cleanup_stale=False)
+        if record is not None:
+            return record
+        if not WebInstanceClaim.is_held(path):
+            return WebInstanceRecord.discover(path)
+        if time.monotonic() >= deadline:
+            return WebInstanceRecord.discover(path)
+        time.sleep(0.05)
+
+
 def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR0912, PLR0915]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
     """Run the frontend server and headless engine in one process."""
     arguments = sys.argv[1:] if argv is None else argv
@@ -264,7 +278,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
     if web and os.environ.get("VIBESYS_DETACHED_CHILD") != "1":
         if instance_path is None:  # pragma: no cover - web always supplies a path.
             raise RuntimeError("Web instance path was not resolved")  # noqa: TRY003  # lint-waiver: LW-101038 [TRY003]; guard an impossible parser/launcher invariant
-        existing = WebInstanceRecord.discover(instance_path)
+        existing = _discover_web_instance(instance_path)
         if existing is not None:
             print(f"VibeSys web UI: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101039 [T201]; expose the reused capability URL to the launcher user
             webbrowser.open(existing.url, new=2)
