@@ -446,6 +446,9 @@ async function checkInteractions(browser, origin) {
       return [Math.round(box.top - port.top), box.bottom <= port.bottom];
     });
     assert.deepEqual(seen, [22, true], 'Tab back left the cursor out of view');
+    // That scroll leaves the live edge, which mounts the pill and re-renders the log: let it
+    // settle before measuring row positions below.
+    await delay(150);
 
     // Enter on a tool row fills the inspector, and moves no row doing it.
     await call.focus();
@@ -595,29 +598,55 @@ async function checkInteractions(browser, origin) {
     await delay(300);
     assert.equal(await tip('Pause after').isVisible(), true, 'the focused tip stays pinned');
 
-    // Drawer (768-1023 px): a row selection opens a modal dialog, which restores focus on close
-    // to the node it remembered on open. A commit behind it can replace that row, and focus then
-    // falls to <body>, where the arrows move the round. No React commit attends the close.
+    // Below 1024 px a row selection opens a modal dialog, which remembers the node it was
+    // opened from and focuses it again on close. A commit behind it can replace that row, and
+    // focus then lands on <body>, or on the dialog's own control now that the dialog is hidden.
+    // Either way the log's keys are dead and the next arrow moves the round, and no React commit
+    // attends the close, so the log cannot see it for itself.
+    let delta = 0;
+    const dialogKeepsTheRound = async (what, dialog) => {
+      const verb = `Measured delta ${++delta}`;
+      // A verb of its own, so it is a row rather than a member of the run fold beside it.
+      push(ran(2, 'implementer', `make delta ${delta}`, 'delta\n', verb));
+      const picked = log.locator('.row[data-tool]:visible', {hasText: verb});
+      await picked.waitFor();
+      await picked.focus();
+      const pickedId = await picked.getAttribute('id');
+      await page.keyboard.press('Enter');
+      await dialog.waitFor();
+      // Behind the dialog, a second call of that verb folds the row away.
+      push(ran(2, 'implementer', `make delta ${delta} again`, 'delta\n', verb));
+      await page.waitForFunction(
+        id => !(document.getElementById(id)?.checkVisibility() ?? false),
+        pickedId,
+      );
+      await page.keyboard.press('Escape');
+      await dialog.waitFor({state: 'hidden'});
+      // The hand-off runs in React's own `close` handling, a turn after the dialog hides.
+      const landed = await page
+        .waitForFunction(
+          () => document.getElementById('log')?.contains(document.activeElement) ?? false,
+          null,
+          {timeout: 2000},
+        )
+        .then(
+          () => true,
+          () => false,
+        );
+      assert.equal(landed, true, `closing the ${what} left focus on ${await cursor()}`);
+      await page.keyboard.press('ArrowUp');
+      assert.equal(
+        await log.getAttribute('aria-label'),
+        'Round 2 log',
+        `the ${what} lost the round`,
+      );
+    };
+    // Drawer (768-1023 px) and sheet (below 768), which share the one expression that fixes it.
     await page.setViewportSize({width: 900, height: 1000});
-    // A verb of its own, so it is a row rather than a member of the run fold beside it.
-    push(ran(2, 'implementer', 'make delta', 'delta\n', 'Measured the delta'));
-    const picked = log.locator('.row[data-tool]:visible', {hasText: 'Measured the delta'});
-    await picked.waitFor();
-    await picked.focus();
-    const pickedId = await picked.getAttribute('id');
-    await page.keyboard.press('Enter');
-    await drawer.waitFor();
-    // Behind the dialog, a second call of that verb folds the row away.
-    push(ran(2, 'implementer', 'make delta again', 'delta\n', 'Measured the delta'));
-    await page.waitForFunction(
-      id => !(document.getElementById(id)?.checkVisibility() ?? false),
-      pickedId,
-    );
-    await page.keyboard.press('Escape');
-    await drawer.waitFor({state: 'hidden'});
-    assert.equal(await inLog(), true, `closing the drawer left focus on ${await cursor()}`);
-    await page.keyboard.press('ArrowUp');
-    assert.equal(await log.getAttribute('aria-label'), 'Round 2 log', 'the drawer lost the round');
+    await dialogKeepsTheRound('drawer', drawer);
+    await page.setViewportSize({width: 390, height: 844});
+    await dialogKeepsTheRound('sheet', page.locator('dialog.insp-sheet'));
+    await page.setViewportSize({width: 900, height: 1000});
 
     // An unknown change kind renders, and Esc on a tip hides only the tip.
     await round(page, 1).click();
