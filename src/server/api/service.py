@@ -48,7 +48,7 @@ from server.api.protocol import (
 from server.api.workspace_git import WorkspacePatchReader
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
-from vibesys.api import LoopKind, agent_run_objectives, open_run_store
+from vibesys.api import agent_run_objectives, is_agent_run_manifest, open_run_store
 from vs_project.api import (
     GitTracker,
     NullGitTrackerEvents,
@@ -584,7 +584,7 @@ class RunApi:
             cached = self._experiment_run_kind
             if cached is not None and cached[0] == key:
                 return cached[1]
-        is_agent = open_run_store(project).get_run(run_id).loop is LoopKind.AGENT
+        is_agent = is_agent_run_manifest(project.state.load_run(run_id))
         with self._experiment_run_kind_lock:
             self._experiment_run_kind = (key, is_agent)
         return is_agent

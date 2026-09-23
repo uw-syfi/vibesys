@@ -47,6 +47,16 @@ def agent_run_objectives(manifest: RunManifestRecord) -> tuple[str, ...] | None:
     return None
 
 
+def is_agent_run_manifest(manifest: RunManifestRecord) -> bool:
+    """Identify the agent run kind from metadata without loading round state."""
+    if isinstance(manifest, OrchestrationRunManifest):
+        return manifest.orchestration.id == _AGENT_OUTER_LOOP
+    return (
+        isinstance(manifest.configuration, AgentRunConfiguration)
+        and manifest.configuration.outer_loop == _AGENT_OUTER_LOOP
+    )
+
+
 def load_agent_run_state(project: Project, run_id: str) -> AgentRunState | None:
     """Return *run_id*'s reprojected agent state, or `None` for a non-agent run."""
     manifest = project.state.load_run(run_id)

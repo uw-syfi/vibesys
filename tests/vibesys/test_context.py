@@ -9,7 +9,7 @@ import pytest
 from pydantic import BaseModel
 
 from vibesys import boot_trace
-from vibesys.api import LoopKind, open_run_store
+from vibesys.api import LoopKind, is_agent_run_manifest, open_run_store
 from vibesys.backends.cuda import CudaBackend
 from vibesys.backends.cuda.gpu_monitor import GpuInfo
 from vibesys.config import Config
@@ -585,6 +585,7 @@ def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path):  # noqa: ANN00
     assert isinstance(stored, OrchestrationRunManifest)
     assert stored.orchestration.id == "agent"
     assert stored.orchestration.options["max_rounds"] == 1
+    assert is_agent_run_manifest(stored)
     assert open_run_store(Project.open(project)).get_run(run_id).loop is LoopKind.AGENT
 
     with _create_context(
