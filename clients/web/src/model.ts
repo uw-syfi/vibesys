@@ -112,20 +112,27 @@ export interface ToolResultSummary {
 
 export type LogItem =
   | {kind: 'prose'; id: string; paragraphs: ProsePart[][]}
-  | {
-      kind: 'tool';
-      id: string;
-      verb: string;
-      /** What the row shows: for a command, the executable and the first path it names. */
-      arg: string | null;
-      /** The whole command, when `arg` is a reduction of it; null when the row shows all of it. */
-      argFull: string | null;
-      result: ToolResultSummary | null;
-      /** The call's wall clock, which only a command payload reports; null when it did not. */
-      duration: string | null;
-      inFlight: boolean;
-    }
-  | {kind: 'steer'; id: string; text: string};
+  | LogTool
+  | {kind: 'steer'; id: string; text: string}
+  /**
+   * Adjacent calls of one verb, read as one counted row that opens in place. A client
+   * heuristic, not a fold the producer declared: the protocol carries no fold level.
+   */
+  | {kind: 'run'; id: string; verb: string; items: LogTool[]};
+
+export interface LogTool {
+  kind: 'tool';
+  id: string;
+  verb: string;
+  /** What the row shows: for a command, the executable and the first path it names. */
+  arg: string | null;
+  /** The whole command, when `arg` is a reduction of it; null when the row shows all of it. */
+  argFull: string | null;
+  result: ToolResultSummary | null;
+  /** The call's wall clock, which only a command payload reports; null when it did not. */
+  duration: string | null;
+  inFlight: boolean;
+}
 
 export interface LogGroup {
   id: string;

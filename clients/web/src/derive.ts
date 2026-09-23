@@ -558,6 +558,43 @@ function plain(parts: readonly ProsePart[]): string {
   return parts.map(part => part.text).join('');
 }
 
+/**
+ * Adjacent calls of one verb read as one counted row: fifteen reads cost fifteen rows otherwise.
+ *
+ * ponytail: a client heuristic, not a fold the producer declared. The protocol carries no fold
+ * level, so the bound is what a client can see: adjacent, same verb, no failure, nothing in
+ * flight. A failed call and the call at the live edge each stay a row of their own, so nothing
+ * a reader is waiting on or has to act on is ever behind a fold.
+ */
+function foldRuns(items: readonly LogItem[]): LogItem[] {
+  const folded: LogItem[] = [];
+  for (const item of items) {
+    if (item.kind !== 'tool' || item.inFlight || item.result?.failed === true) {
+      folded.push(item);
+      continue;
+    }
+    const open = folded.at(-1);
+    if (open?.kind === 'run' && open.verb === item.verb) {
+      open.items.push(item);
+    } else if (
+      open?.kind === 'tool' &&
+      open.verb === item.verb &&
+      !open.inFlight &&
+      open.result?.failed !== true
+    ) {
+      folded[folded.length - 1] = {
+        kind: 'run',
+        id: `run-${open.id}`,
+        verb: item.verb,
+        items: [open, item],
+      };
+    } else {
+      folded.push(item);
+    }
+  }
+  return folded;
+}
+
 interface Row {
   sequence: number;
   role: string;
@@ -677,6 +714,8 @@ export function logGroups(
         : tool?.kind === 'tool'
           ? tool.verb
           : '';
+    // After the summary, which reads the group's own last call rather than a fold of them.
+    group.items = foldRuns(group.items);
   });
   return groups;
 }

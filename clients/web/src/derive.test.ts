@@ -453,6 +453,85 @@ test('tool rows: a command row names its executable and the first path it touche
   }
 });
 
+test('log rows: adjacent calls of one verb fold into one counted row', () => {
+  const base = {
+    round_label: 'round-1-pre',
+    agent_kind: 'orchestrator',
+    invocation_id: 'x',
+    execution_id: 'x',
+    timestamp: '2026-09-21T12:00:00Z',
+  };
+  const call = (sequence: number, tool: string, args: Record<string, string>) =>
+    ({
+      ...base,
+      sequence,
+      type: 'tool_call',
+      data: {kind: 'tool_call', tool, call_id: `c${sequence}`, args},
+    }) as RunEvent;
+  const back = (sequence: number, tool: string, error: boolean) =>
+    ({
+      ...base,
+      sequence,
+      type: 'tool_result',
+      data: {
+        kind: 'tool_result',
+        tool,
+        call_id: `c${sequence - 1}`,
+        content: 'ok',
+        is_error: error,
+      },
+    }) as RunEvent;
+  const read = (sequence: number, file: string, error = false) => [
+    call(sequence, 'Read', {file_path: file}),
+    back(sequence + 1, 'Read', error),
+  ];
+  const events: RunEvent[] = [
+    {
+      ...base,
+      sequence: 1,
+      type: 'agent_execution_started',
+      data: {
+        kind: 'agent_execution_started',
+        stage: 'pre',
+        activity: {mode: 'tool', summary: 'working'},
+      },
+    } as RunEvent,
+    ...Array.from({length: 15}, (_, index) => read(10 + index * 2, `a${index}.rs`)).flat(),
+    ...read(40, 'broken.rs', true),
+    ...read(44, 'b0.rs'),
+    ...read(46, 'b1.rs'),
+    // The open call at the live edge: it is not folded, so the row in flight stays a row.
+    call(50, 'Read', {file_path: 'b2.rs'}),
+  ];
+  const items = logGroups(fold(events), [], 1, null).flatMap(group => group.items);
+  assert.deepEqual(
+    items.map(item =>
+      item.kind === 'run' ? ['run', item.verb, item.items.length] : [item.kind, item.id],
+    ),
+    [
+      ['run', 'Read', 15],
+      ['tool', '40'],
+      ['run', 'Read', 2],
+      ['tool', '50'],
+    ],
+    'a failure and the call in flight each stand alone; everything adjacent to them folds',
+  );
+  const first = items[0];
+  assert.equal(first?.kind === 'run' && first.items[3]?.arg, 'a3.rs', 'members keep their target');
+  assert.equal(
+    logGroups(fold(events), [], 1, null)[0]?.calls,
+    19,
+    'the group still counts every call, folded or not',
+  );
+  assert.deepEqual(
+    logGroups(fold(QUEUE), [], 1, QUEUE_RUN)
+      .flatMap(group => group.items)
+      .filter(item => item.kind === 'run'),
+    [],
+    'the recording shells out for everything, so no two adjacent calls share a verb',
+  );
+});
+
 test('log groups: the acting role shows before its first entry', () => {
   // queue-rs at 263: the implementer has started and said nothing yet.
   const groups = logGroups(fold(upTo(QUEUE, 263)), [], 1, QUEUE_RUN);

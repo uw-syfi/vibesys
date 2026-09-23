@@ -163,37 +163,19 @@ function Group({group, onOpen}: {group: LogGroup; onOpen: () => void}) {
           {group.collapsed ? (
             <>
               {steers.map(item => (
-                <Item key={item.id} item={item} />
+                <Item key={item.id} item={item} onOpen={onOpen} />
               ))}
               {rest.length === 0 ? null : (
-                <details className="fold">
-                  {/* biome-ignore lint/a11y/noStaticElementInteractions: <summary> is natively interactive. */}
-                  <summary
-                    className="row"
-                    // Opening history leaves the live edge, so following stops before the fold
-                    // grows. Enter and Space also fire click; `toggle` would come too late.
-                    onClick={event => {
-                      if (!(event.currentTarget.parentElement as HTMLDetailsElement).open) onOpen();
-                    }}
-                  >
-                    <span className="lab">
-                      <span className="verb">{group.summary || titleCase(group.role)}</span>
-                      {group.calls === 0 ? null : (
-                        <span className="n mono">{calls(group.calls)}</span>
-                      )}
-                    </span>
-                    <ChevronRight {...icon} className="chev" />
-                  </summary>
-                  <div className="what">
-                    {rest.map(item => (
-                      <Item key={item.id} item={item} />
-                    ))}
-                  </div>
-                </details>
+                <Fold
+                  verb={group.summary || titleCase(group.role)}
+                  count={group.calls}
+                  items={rest}
+                  onOpen={onOpen}
+                />
               )}
             </>
           ) : (
-            group.items.map(item => <Item key={item.id} item={item} />)
+            group.items.map(item => <Item key={item.id} item={item} onOpen={onOpen} />)
           )}
         </div>
       </li>
@@ -201,7 +183,48 @@ function Group({group, onOpen}: {group: LogGroup; onOpen: () => void}) {
   );
 }
 
-function Item({item}: {item: LogItem}) {
+/** A counted row that opens in place: a whole role's turn, or a run of calls of one verb. */
+function Fold({
+  verb,
+  count,
+  items,
+  onOpen,
+}: {
+  verb: string;
+  count: number;
+  items: LogItem[];
+  onOpen: () => void;
+}) {
+  return (
+    <details className="fold">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: <summary> is natively interactive. */}
+      <summary
+        className="row"
+        // Opening history leaves the live edge, so following stops before the fold grows. Enter
+        // and Space also fire click; `toggle` would come too late.
+        onClick={event => {
+          if (!(event.currentTarget.parentElement as HTMLDetailsElement).open) onOpen();
+        }}
+      >
+        <span className="lab">
+          <span className="verb">{verb}</span>
+          {count === 0 ? null : <span className="n mono">{calls(count)}</span>}
+        </span>
+        <ChevronRight {...icon} className="chev" />
+      </summary>
+      <div className="what">
+        {items.map(item => (
+          <Item key={item.id} item={item} onOpen={onOpen} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function Item({item, onOpen}: {item: LogItem; onOpen: () => void}) {
+  if (item.kind === 'run') {
+    return <Fold verb={item.verb} count={item.items.length} items={item.items} onOpen={onOpen} />;
+  }
   if (item.kind === 'steer') {
     return (
       <p className="said">
