@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
+from vibesys.api import is_agent_run_manifest
 from vibesys.errors import ConfigurationError
 from vibesys.loops.agent.orchestration import (
     UnsupportedAgentOrchestrationError,
@@ -91,6 +93,7 @@ def test_v4_agent_manifest_projects_into_cli_resume_contract() -> None:
     assert projected.outer_loop == "profile-guided"
     assert projected.objectives == ("score:max",)
     assert projected.run_environment.name == "local"
+    assert not is_agent_run_manifest(manifest)
 
 
 def test_agent_resume_rejects_changed_policy_and_unknown_version() -> None:
@@ -102,3 +105,11 @@ def test_agent_resume_rejects_changed_policy_and_unknown_version() -> None:
     unknown = OrchestrationDescriptor(id="agent", config_version=2, options=recorded.options)
     with pytest.raises(UnsupportedAgentOrchestrationError):
         options_from_descriptor(unknown)
+
+    invalid_text = OrchestrationDescriptor(
+        id="agent",
+        config_version=1,
+        options={**recorded.options, "inner_loop": ""},
+    )
+    with pytest.raises(ValidationError, match="inner_loop"):
+        options_from_descriptor(invalid_text)

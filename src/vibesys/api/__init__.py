@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from vibesys import boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config
-from vibesys.api._agent_state import agent_run_objectives
+from vibesys.api._agent_state import agent_run_objectives, is_agent_run_manifest
 from vibesys.api.contracts import (
     Config,
     ConfigurationDiagnostic,
@@ -97,6 +97,7 @@ __all__ = [
     "format_framework_event",
     "format_status_prefix",
     "framework_memory_paths",
+    "is_agent_run_manifest",
     "load_config",
     "open_run_store",
     "output_sink",

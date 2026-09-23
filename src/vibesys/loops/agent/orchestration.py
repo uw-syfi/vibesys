@@ -21,6 +21,7 @@ from vs_project.api import (
 
 AGENT_CONFIG_VERSION = 1
 AGENT_ORCHESTRATION_IDS = frozenset({"agent", "profile-guided"})
+PortableText = Annotated[str, Field(min_length=1, max_length=256)]
 
 
 class UnsupportedAgentOrchestrationError(ValueError):
@@ -38,28 +39,28 @@ class AgentOrchestrationOptions(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    inner_loop: str
-    interface: str
-    model: str | None = None
-    agent_backend: str
-    agent_driver: str | None = None
-    cli_provider: str | None = None
+    inner_loop: PortableText
+    interface: PortableText
+    model: PortableText | None = None
+    agent_backend: PortableText
+    agent_driver: PortableText | None = None
+    cli_provider: PortableText | None = None
     cli_timeout: Annotated[int, Field(gt=0)] | None = None
-    compute_backend: str
-    profiler: str | None = None
-    modality: str | None = None
-    default_reasoning_effort: str | None = None
-    outer_model: str | None = None
-    outer_reasoning_effort: str | None = None
-    inner_model: str | None = None
-    inner_reasoning_effort: str | None = None
+    compute_backend: PortableText
+    profiler: PortableText | None = None
+    modality: PortableText | None = None
+    default_reasoning_effort: PortableText | None = None
+    outer_model: PortableText | None = None
+    outer_reasoning_effort: PortableText | None = None
+    inner_model: PortableText | None = None
+    inner_reasoning_effort: PortableText | None = None
     max_rounds: Annotated[int, Field(gt=0)]
     max_retries_per_round: Annotated[int, Field(gt=0)]
     judge_every: Annotated[int, Field(gt=0)]
     official_eval_every: Annotated[int, Field(gt=0)]
-    memory_layout: str
+    memory_layout: PortableText
     operator_constraints: tuple[str, ...] = ()
-    objectives: tuple[str, ...] = ()
+    objectives: tuple[PortableText, ...] = ()
 
 
 def descriptor_from_configuration(configuration: AgentRunConfiguration) -> OrchestrationDescriptor:
