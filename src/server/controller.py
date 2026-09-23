@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
 from server.events import EventStatus, EventType, RunStatusChangedData
 from server.run_lifecycle import RunStatus, RunTrigger, transition
+from vibesys.api import _portable_history_snapshots
 
 if TYPE_CHECKING:
     import threading
@@ -27,10 +28,7 @@ class ProjectRunState:
 
     def history_snapshots(self) -> tuple[StateSnapshot, ...]:
         """Return portable history snapshots relevant to frontend queries."""
-        return tuple(
-            self.project.state.portable_namespace(self.run_id, namespace).snapshot()
-            for namespace in ("agent", "plain", "evolve")
-        )
+        return _portable_history_snapshots(self.project, self.run_id)
 
 
 class RunController:

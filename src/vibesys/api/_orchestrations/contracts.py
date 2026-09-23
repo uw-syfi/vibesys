@@ -56,6 +56,15 @@ class Orchestration(Protocol):
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection: ...
 
 
+@runtime_checkable
+class HistoryNamespaces(Protocol):
+    """Optional policy-owned selection of portable history namespaces."""
+
+    def history_namespaces(self) -> tuple[str, ...]:
+        """Return the namespaces that history queries may inspect."""
+        ...
+
+
 def empty_run_view(
     *,
     run_id: str,
@@ -119,6 +128,13 @@ class _ExecuteOnlyAdapter:
             return projector(manifest)
         message = "execute-only orchestration has no resume projection"
         raise ValueError(message)
+
+    def history_namespaces(self) -> tuple[str, ...]:
+        """Preserve an execute-only policy's optional history selection."""
+        implementation = self._implementation
+        if isinstance(implementation, HistoryNamespaces):
+            return implementation.history_namespaces()
+        return ()
 
 
 def project_run(

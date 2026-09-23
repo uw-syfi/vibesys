@@ -21,7 +21,7 @@ from vibesys.loops.agent.orchestration import (
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.run.agent_round_compat import LegacyAgentRoundStore
-from vibesys.run.state import RunStateNamespace
+from vibesys.run.legacy_namespaces import RunStateNamespace
 from vs_project.api import AgentRunConfiguration, OrchestrationRunManifest
 
 if TYPE_CHECKING:

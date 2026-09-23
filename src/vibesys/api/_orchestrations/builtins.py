@@ -67,6 +67,11 @@ class _LegacyOrchestration:
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
         return self._implementation.resume_projection(manifest)
 
+    def history_namespaces(self) -> tuple[str, ...]:
+        """Delegate portable history ownership to the built-in policy."""
+        namespaces = getattr(self._implementation, "history_namespaces", None)
+        return namespaces() if callable(namespaces) else ()
+
 
 def _legacy_request(request: RunRequestLike) -> RunRequest:
     if not isinstance(request, RunRequest):

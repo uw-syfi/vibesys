@@ -19,6 +19,9 @@ from vibesys.run import (
 )
 from vibesys.run.agent_round_compat import LegacyAgentRoundStore
 from vibesys.run.git_events import NullGitTrackerEvents
+from vibesys.run.round_transaction import (
+    RoundTransactionCoordinator as GenericRoundTransactionCoordinator,
+)
 from vs_loop_state.api import RoundRecord
 from vs_project.api import (
     AgentRunConfiguration,
@@ -155,6 +158,28 @@ def test_complete_commits_candidate_and_exact_typed_agent_state(tmp_path: Path) 
         == _state_slot(project).snapshot_transition(transition).files[0].contents
     )
     assert coordinator.recover() is RoundRecoveryOutcome.NO_TRANSACTION
+
+
+def test_generic_transaction_commits_a_policy_owned_state_slot(tmp_path: Path) -> None:
+    project, tracker, _legacy = _project(tmp_path)
+    state_slot = project.state.portable_namespace(_RUN_ID, "team-search").slot(
+        "state.json", _AgentState
+    )
+    coordinator = GenericRoundTransactionCoordinator(
+        project, tracker, _RUN_ID, state_slot=state_slot
+    )
+    transition = state_slot.transition(_AgentState(active_hypothesis_id="candidate-1"))
+
+    coordinator.begin(1, state_transition=transition).complete()
+
+    assert state_slot.load_optional() == _AgentState(active_hypothesis_id="candidate-1")
+    assert _state_slot(project).load_optional() is None
+    assert (
+        tracker.run(
+            ["git", "show", f"HEAD:.vibesys/state/runs/{_RUN_ID}/team-search/state.json"]
+        ).stdout
+        == state_slot.snapshot_transition(transition).files[0].contents
+    )
 
 
 def test_recovery_rolls_prepared_state_and_candidate_forward(tmp_path: Path) -> None:

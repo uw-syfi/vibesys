@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 class EvolveOrchestration:
     """Preserve the existing evolve loop call contract."""
 
+    def history_namespaces(self) -> tuple[str, ...]:
+        """Expose this policy's portable state to run history queries."""
+        return ("evolve",)
+
     def describe(self, request: RunRequest) -> RunDescription:
         return built_in_description(request, round_budget=False)
 

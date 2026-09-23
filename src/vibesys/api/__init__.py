@@ -52,7 +52,13 @@ from vibesys.api.contracts import (
 )
 from vibesys.api.entry import load_config
 from vibesys.api.session import RunControl, RunSession, create_session
-from vibesys.api.store import RunStore, open_run_store
+from vibesys.api.store import (
+    RunStore,
+    open_run_store,
+)
+from vibesys.api.store import (
+    portable_history_snapshots as _portable_history_snapshots,  # noqa: F401
+)
 from vibesys.constants import KNOWN_COMPUTE_BACKENDS, ComputeBackend, DomainName
 from vibesys.events import (
     AgentExecutionStartedData,

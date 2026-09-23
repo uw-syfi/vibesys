@@ -1,14 +1,13 @@
-"""Recoverable transaction for one completed agent optimization round.
+"""Recoverable transaction for one completed optimization round.
 
-The agent loop owns one portable ``agent/state.json`` document. A v4 write-
-ahead log (WAL) records the exact typed transition for that document before
+A v4 write-ahead log (WAL) records the exact typed state transition before
 candidate or framework state is committed. Completing or recovering the
 transaction applies that transition and commits it atomically with candidate
 edits.
 
 Version 3 journals from older VibeSys releases remain recoverable. Their
 completed-round payload and machine-local ``active.json`` transition are
-handled only at this compatibility boundary.
+handled by an injected compatibility adapter.
 """
 
 # These boundary errors deliberately name the relevant path or transaction.
@@ -19,23 +18,19 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-import json
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     RootModel,
-    ValidationError,
     field_validator,
 )
 
-from vibesys.run.agent_round_compat import LegacyAgentRoundStore
 from vibesys.run.git_tracker import FrameworkSnapshotStatus
-from vs_loop_state.api import RoundRecord, parse_round_record
 from vs_project.api import ProjectStateError, StateSlot, StateTransition
 
 if TYPE_CHECKING:
@@ -111,7 +106,7 @@ class _V4RoundJournal(_StrictJournal):
         _decode_base64(value)
         return value
 
-    def state_transition(self, slot: StateSlot[BaseModel]) -> StateTransition:
+    def state_transition[StateT: BaseModel](self, slot: StateSlot[StateT]) -> StateTransition:
         """Decode the portable state transition through its typed slot."""
         return slot.deserialize_transition(_decode_base64(self.state_transition_base64))
 
@@ -132,12 +127,6 @@ class _RoundJournal(RootModel[_Journal]):
     model_config = ConfigDict(frozen=True, strict=True)
 
 
-class _LegacyActiveState(BaseModel):
-    """Lossless compatibility model for removed v3 active checkpoints."""
-
-    model_config = ConfigDict(extra="allow", frozen=True, strict=True)
-
-
 @dataclass(frozen=True)
 class CompletedRound:
     """Durable outputs produced by a successful round transaction."""
@@ -145,10 +134,22 @@ class CompletedRound:
     checkpoint: str
 
 
-class RoundTransaction:
+class LegacyRoundRecovery(Protocol):
+    """Policy adapter for journals written before typed v4 state transitions."""
+
+    def validate(self, journal: _V3RoundJournal) -> None:
+        """Validate one legacy journal before any mutation."""
+        ...
+
+    def commit(self, journal: _V3RoundJournal) -> CompletedRound:
+        """Apply one legacy journal and return its committed checkpoint."""
+        ...
+
+
+class RoundTransaction[StateT: BaseModel]:
     """A prepared round transition obtained from ``coordinator.begin``."""
 
-    def __init__(self, coordinator: RoundTransactionCoordinator, round_number: int) -> None:
+    def __init__(self, coordinator: RoundTransactionCoordinator[StateT], round_number: int) -> None:
         """Bind this handle to one coordinator and round number."""
         self._coordinator = coordinator
         self.round_number = round_number
@@ -167,11 +168,11 @@ class RoundTransaction:
         return result
 
 
-class RoundTransactionCoordinator:
-    """Coordinate crash-safe agent-state and candidate Git commits.
+class RoundTransactionCoordinator[StateT: BaseModel]:
+    """Coordinate crash-safe typed state and candidate Git commits.
 
     ``begin(round_number, state_transition=...)`` durably journals an exact
-    typed transition for portable ``agent/state.json``. ``complete()`` applies
+    typed transition for the supplied portable slot. ``complete()`` applies
     and commits that transition with the candidate worktree. ``recover()`` is
     idempotent and rolls any journaled transition forward.
     """
@@ -182,7 +183,8 @@ class RoundTransactionCoordinator:
         git: GitTracker,
         run_id: str,
         *,
-        agent_state_model_type: type[BaseModel],
+        state_slot: StateSlot[StateT],
+        legacy_recovery: LegacyRoundRecovery | None = None,
     ) -> None:
         """Validate and bind the project, Git tracker, and run identity."""
         project_root = project.root.resolve()
@@ -196,17 +198,10 @@ class RoundTransactionCoordinator:
             )
 
         project.state.load_run(run_id)
-        self._legacy_rounds = LegacyAgentRoundStore(project, run_id)
         self._git = git
         self.run_id = run_id
-        self._agent_state_slot: StateSlot[BaseModel] = project.state.portable_namespace(
-            run_id,
-            "agent",
-        ).slot("state.json", agent_state_model_type)
-        self._legacy_active_slot: StateSlot[BaseModel] = project.state.local_namespace(
-            run_id,
-            "agent",
-        ).slot("active.json", _LegacyActiveState)
+        self._state_slot = state_slot
+        self._legacy_recovery = legacy_recovery
         self._journal_slot = project.state.local_namespace(run_id, "transaction").slot(
             "round.json",
             _RoundJournal,
@@ -217,8 +212,8 @@ class RoundTransactionCoordinator:
         round_number: int,
         *,
         state_transition: StateTransition,
-    ) -> RoundTransaction:
-        """Durably prepare an exact agent-state transition."""
+    ) -> RoundTransaction[StateT]:
+        """Durably prepare an exact typed state transition."""
         if round_number < 1:
             raise RoundTransactionError(f"Round number must be positive, got {round_number}")
         if self._load_optional_journal() is not None:
@@ -232,7 +227,7 @@ class RoundTransactionCoordinator:
         self._require_clean_index()
         self._validate_state_transition(state_transition)
 
-        transition_payload = self._agent_state_slot.serialize_transition(state_transition)
+        transition_payload = self._state_slot.serialize_transition(state_transition)
         journal = _V4RoundJournal(
             schema_version=_JOURNAL_SCHEMA_VERSION,
             run_id=self.run_id,
@@ -277,64 +272,31 @@ class RoundTransactionCoordinator:
 
     def _commit_prepared(self, journal: _Journal) -> CompletedRound:
         if isinstance(journal, _V3RoundJournal):
-            return self._commit_legacy_round(journal)
-        return self._commit_agent_state(journal)
+            if self._legacy_recovery is None:
+                raise RoundTransactionError("Legacy round recovery is unavailable")
+            return self._legacy_recovery.commit(journal)
+        return self._commit_state(journal)
 
-    def _commit_agent_state(self, journal: _V4RoundJournal) -> CompletedRound:
-        transition = journal.state_transition(self._agent_state_slot)
+    def _commit_state(self, journal: _V4RoundJournal) -> CompletedRound:
+        transition = journal.state_transition(self._state_slot)
         self._validate_state_transition(transition)
-        snapshot = self._agent_state_slot.snapshot_transition(transition)
+        snapshot = self._state_slot.snapshot_transition(transition)
         status = self._git.framework_snapshot_status(snapshot)
         current_sha = self._git.current_sha()
 
         if status is FrameworkSnapshotStatus.EXACT:
-            self._agent_state_slot.apply(transition)
+            self._state_slot.apply(transition)
         elif current_sha == journal.pre_commit:
-            self._agent_state_slot.apply(transition)
+            self._state_slot.apply(transition)
             self._git.snapshot_with_framework_metadata(
                 f"vibesys(round {journal.round_number}): record result",
                 snapshot,
             )
         else:
-            raise RoundTransactionError(
-                "Committed agent state differs from the transaction journal"
-            )
+            raise RoundTransactionError("Committed state differs from the transaction journal")
 
         if self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
-            raise RoundTransactionError("Git snapshot did not commit the exact agent state")
-        checkpoint = self._git.current_sha()
-        if checkpoint is None:
-            raise RoundTransactionError("Git snapshot completed without an accessible HEAD")
-        return CompletedRound(checkpoint=checkpoint)
-
-    def _commit_legacy_round(self, journal: _V3RoundJournal) -> CompletedRound:
-        """Roll a v3 journal forward without importing its removed domain model."""
-        round_payload = journal.round_payload()
-        record = _parse_round_payload(round_payload, source="round transaction journal")
-        if record.round_number != journal.round_number:
-            raise RoundTransactionError(
-                f"Round transaction journal payload is for round {record.round_number}, "
-                f"not round {journal.round_number}"
-            )
-        expected_snapshot = self._legacy_rounds.prepare_snapshot(record)
-        status = self._git.framework_snapshot_status(expected_snapshot)
-        if status is FrameworkSnapshotStatus.DIFFERENT:
-            raise RoundTransactionError(
-                "Committed round metadata differs from the transaction journal"
-            )
-        if status is FrameworkSnapshotStatus.EXACT:
-            snapshot = self._legacy_rounds.restore(record)
-        else:
-            snapshot = self._legacy_rounds.save(record)
-            self._git.snapshot_with_framework_metadata(
-                f"vibesys(round {journal.round_number}): record result",
-                snapshot,
-            )
-        if self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
-            raise RoundTransactionError(
-                "Git snapshot did not commit the exact completed-round metadata"
-            )
-        self._legacy_active_slot.apply(journal.active_transition(self._legacy_active_slot))
+            raise RoundTransactionError("Git snapshot did not commit the exact state")
         checkpoint = self._git.current_sha()
         if checkpoint is None:
             raise RoundTransactionError("Git snapshot completed without an accessible HEAD")
@@ -360,23 +322,12 @@ class RoundTransactionCoordinator:
                 f"Round transaction journal belongs to run {journal.run_id!r}, not {self.run_id!r}"
             )
         if isinstance(journal, _V3RoundJournal):
-            self._validate_v3_journal(journal)
+            if self._legacy_recovery is None:
+                raise RoundTransactionError("Legacy round recovery is unavailable")
+            self._legacy_recovery.validate(journal)
         else:
             self._validate_v4_journal(journal)
         return journal
-
-    def _validate_v3_journal(self, journal: _V3RoundJournal) -> None:
-        if _sha256(journal.round_payload()) != journal.round_payload_sha256:
-            raise RoundTransactionError("Round transaction journal payload digest does not match")
-        _parse_round_payload(journal.round_payload(), source="round transaction journal")
-        try:
-            self._legacy_active_slot.validate_transition(
-                journal.active_transition(self._legacy_active_slot)
-            )
-        except (TypeError, ValueError, ProjectStateError) as exc:
-            raise RoundTransactionError(
-                f"Invalid active-state transition in round transaction journal: {exc}"
-            ) from exc
 
     def _validate_v4_journal(self, journal: _V4RoundJournal) -> None:
         payload = journal.transition_payload()
@@ -385,10 +336,10 @@ class RoundTransactionCoordinator:
                 "Round transaction journal state-transition digest does not match"
             )
         try:
-            self._validate_state_transition(journal.state_transition(self._agent_state_slot))
+            self._validate_state_transition(journal.state_transition(self._state_slot))
         except (TypeError, ValueError, ProjectStateError, RoundTransactionError) as exc:
             raise RoundTransactionError(
-                f"Invalid agent-state transition in round transaction journal: {exc}"
+                f"Invalid state transition in round transaction journal: {exc}"
             ) from exc
 
     def _pre_commit_is_ancestor(self, pre_commit: str) -> bool:
@@ -407,11 +358,11 @@ class RoundTransactionCoordinator:
 
     def _validate_state_transition(self, transition: StateTransition) -> None:
         try:
-            self._agent_state_slot.validate_transition(transition)
-            self._agent_state_slot.snapshot_transition(transition)
+            self._state_slot.validate_transition(transition)
+            self._state_slot.snapshot_transition(transition)
         except ProjectStateError as exc:
             raise RoundTransactionError(
-                f"Invalid round transaction agent-state transition: {exc}"
+                f"Invalid round transaction state transition: {exc}"
             ) from exc
 
     def _clear_journal(self) -> None:
@@ -427,23 +378,3 @@ def _decode_base64(value: str) -> bytes:
 
 def _sha256(contents: bytes) -> str:
     return hashlib.sha256(contents).hexdigest()
-
-
-def _parse_round_payload(contents: bytes, *, source: str) -> RoundRecord:
-    try:
-        payload = json.loads(contents)
-    except (TypeError, ValueError) as exc:
-        raise RoundTransactionError(
-            f"Invalid completed-round payload in transaction journal {source}: {exc}"
-        ) from exc
-    if not isinstance(payload, dict):
-        raise RoundTransactionError(
-            f"Invalid completed-round payload in transaction journal {source}: "
-            "payload must be a JSON object"
-        )
-    try:
-        return parse_round_record(payload)
-    except (TypeError, ValueError, ValidationError) as exc:
-        raise RoundTransactionError(
-            f"Invalid completed-round payload in transaction journal {source}: {exc}"
-        ) from exc

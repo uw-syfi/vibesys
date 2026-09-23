@@ -43,6 +43,8 @@ from vibesys.run import (
     RunPaths,
     RunStateNamespace,
 )
+from vibesys.run.agent_round_transaction import agent_round_transaction_factory
+from vibesys.run.legacy_state import LegacyRunState
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vs_agent.api import (
     AgentCapabilities,
@@ -244,7 +246,8 @@ def _create_context(  # noqa: PLR0913
         agent_backend="stub",
         environment_hooks=hooks or NoopEnvironmentHooks(),
         remote_repo=remote_repo,
-        agent_state_model_type=AgentRunState,
+        round_transaction_factory=agent_round_transaction_factory(AgentRunState),
+        run_state_factory=LegacyRunState,
         integration=integration,
     )
 
@@ -872,7 +875,8 @@ def test_omnigent_accepts_active_profiler_configuration(tmp_path):  # noqa: ANN0
         profiler_kind=ProfilerKind.MACOS_CPU,
         profiler_domain=DomainName.GENERIC,
         run_environment=RunEnvironmentSpec("local"),
-        agent_state_model_type=AgentRunState,
+        round_transaction_factory=agent_round_transaction_factory(AgentRunState),
+        run_state_factory=LegacyRunState,
     ) as context:
         assert context.profiler_kind is ProfilerKind.MACOS_CPU
 

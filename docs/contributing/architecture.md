@@ -258,6 +258,7 @@ graph TD
     server.controller --> server.execution
     server.controller --> server.journal
     server.controller --> server.run_lifecycle
+    server.controller --> vibesys.api
     server.controller --> vs_project
     server.events --> server.diagnostics
     server.events --> server.event_index

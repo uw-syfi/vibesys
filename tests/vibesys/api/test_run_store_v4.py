@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vibesys.api import OrchestrationRegistry
 from vibesys.api.contracts import LoopKind, RunStatus
-from vibesys.api.store import open_run_store
+from vibesys.api.store import open_run_store, portable_history_snapshots
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
@@ -93,3 +94,42 @@ def test_unknown_v4_run_has_generic_history_view(tmp_path: Path) -> None:
     assert direct.status is RunStatus.UNKNOWN
     assert direct.rounds == []
     assert store.list_runs() == [direct]
+    project.state.portable_namespace(manifest.run_id, "evidence").write_bytes(
+        "notes.txt", b"candidate review"
+    )
+    assert portable_history_snapshots(project, manifest.run_id) == ()
+
+    class EvidencePolicy:
+        def execute(self, request: object, runtime: object) -> bool:
+            del request, runtime
+            return True
+
+        def history_namespaces(self) -> tuple[str, ...]:
+            return ("evidence",)
+
+    registry = OrchestrationRegistry()
+    registry.register("team-search", EvidencePolicy())
+    snapshots = portable_history_snapshots(project, manifest.run_id, registry=registry)
+    assert [file.relative_path.name for file in snapshots[0].files] == ["notes.txt"]
+
+
+def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
+    project = Project.open(tmp_path)
+    project.state.create_project("profile project")
+    manifest = project.state.new_orchestration_run_manifest(
+        "profile run",
+        run_id="profile-run",
+        branch="vibesys-runs/profile-run",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="local"),
+        orchestration=OrchestrationDescriptor(id="profile-guided", config_version=1, options={}),
+        trusted_input_baseline="0" * 40,
+    )
+    project.state.create_run(manifest)
+    project.state.portable_namespace(manifest.run_id, "agent").write_bytes("agent.json", b"{}")
+    project.state.portable_namespace(manifest.run_id, "plain").write_bytes("plain.json", b"{}")
+
+    snapshots = portable_history_snapshots(project, manifest.run_id)
+
+    assert len(snapshots) == 1
+    assert [file.relative_path.name for file in snapshots[0].files] == ["agent.json"]

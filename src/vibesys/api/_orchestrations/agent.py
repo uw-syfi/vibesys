@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 class AgentOrchestration:
     """Preserve the existing agent loop call contract."""
 
+    def history_namespaces(self) -> tuple[str, ...]:
+        """Expose this policy's portable state to run history queries."""
+        return ("agent",)
+
     def describe(self, request: RunRequest) -> RunDescription:
         return built_in_description(request, round_budget=True)
 

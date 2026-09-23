@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.api._orchestrations.builtins import built_in_orchestrations
-from vibesys.api._orchestrations.contracts import project_run
+from vibesys.api._orchestrations.contracts import HistoryNamespaces, project_run
+from vibesys.api._orchestrations.manifest_compat import orchestration_id
 from vibesys.api.contracts import RunStatus
-from vs_project.api import OrchestrationRunManifest
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from vibesys.api._orchestrations.contracts import OrchestrationRegistry
     from vibesys.api.contracts import RunView
-    from vs_project.api import Project, RunManifestRecord
+    from vs_project.api import Project, RunManifestRecord, StateSnapshot
 
 
 class RunStore(Protocol):
@@ -41,6 +41,21 @@ class RunStore(Protocol):
 def open_run_store(project: Project, *, registry: OrchestrationRegistry | None = None) -> RunStore:
     """Open a read-only run history store for *project*."""
     return _LocalRunStore(project, registry=registry or built_in_orchestrations())
+
+
+def portable_history_snapshots(
+    project: Project, run_id: str, *, registry: OrchestrationRegistry | None = None
+) -> tuple[StateSnapshot, ...]:
+    """Read the portable namespaces selected by the run's policy."""
+    manifest = project.state.load_run(run_id)
+    policy_id = orchestration_id(manifest)
+    selected = registry or built_in_orchestrations()
+    try:
+        policy = selected.resolve(policy_id)
+    except ValueError:
+        policy = None
+    names = policy.history_namespaces() if isinstance(policy, HistoryNamespaces) else ()
+    return tuple(project.state.portable_namespace(run_id, name).snapshot() for name in names)
 
 
 class _LocalRunStore:
@@ -80,11 +95,7 @@ class _LocalRunStore:
         )
 
     def _view(self, manifest: RunManifestRecord) -> RunView:
-        loop = (
-            manifest.orchestration.id
-            if isinstance(manifest, OrchestrationRunManifest)
-            else manifest.configuration.outer_loop
-        )
+        loop = orchestration_id(manifest)
         try:
             policy = self._registry.resolve(loop)
         except ValueError:

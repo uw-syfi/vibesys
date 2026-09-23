@@ -68,7 +68,6 @@ from vibesys.run import (
     RunLogger,
     RunPaths,
     RunResourceHandoff,
-    RunState,
     RunStateNamespace,
     Workspace,
     provision_project,
@@ -85,6 +84,7 @@ from vibesys.run.round_transaction import (
     RoundTransaction,
     RoundTransactionCoordinator,
 )
+from vibesys.run.state import RunState
 from vibesys.sandbox.run_environment import (
     RunEnvironment,
     RunEnvironmentRequest,
@@ -316,7 +316,11 @@ def create_run_context(  # noqa: PLR0913  # tracked: #288
     environment_hooks: EnvironmentHooks | None = None,
     remote_repo: str | None = None,
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
-    agent_state_model_type: type[BaseModel] | None = None,
+    round_transaction_factory: Callable[
+        [Project, GitTracker, str], RoundTransactionCoordinator[BaseModel]
+    ]
+    | None = None,
+    run_state_factory: Callable[[Project, GitTracker, str], RunState] = RunState,
     integration: LocalRunIntegration | None = None,
     build_default_agent_client: bool = True,
 ) -> "_RunContext":
@@ -362,7 +366,8 @@ def create_run_context(  # noqa: PLR0913  # tracked: #288
             environment_hooks=environment_hooks,
             remote_repo=remote_repo,
             repo_visibility=repo_visibility,
-            agent_state_model_type=agent_state_model_type,
+            round_transaction_factory=round_transaction_factory,
+            run_state_factory=run_state_factory,
             integration=integration,
             build_default_agent_client=build_default_agent_client,
         )
@@ -420,7 +425,11 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
     environment_hooks: EnvironmentHooks | None,
     remote_repo: str | None,
     repo_visibility: RepositoryVisibility,
-    agent_state_model_type: type[BaseModel] | None,
+    round_transaction_factory: Callable[
+        [Project, GitTracker, str], RoundTransactionCoordinator[BaseModel]
+    ]
+    | None,
+    run_state_factory: Callable[[Project, GitTracker, str], RunState],
     integration: LocalRunIntegration | None,
     build_default_agent_client: bool,
 ) -> "_RunContext":
@@ -844,13 +853,8 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 )
 
         with boot_trace.span("round_transaction_recovery"):
-            if agent_state_model_type is not None:
-                round_transaction_coordinator = RoundTransactionCoordinator(
-                    project,
-                    git,
-                    run_id,
-                    agent_state_model_type=agent_state_model_type,
-                )
+            if round_transaction_factory is not None:
+                round_transaction_coordinator = round_transaction_factory(project, git, run_id)
                 if existing:
                     recovery = round_transaction_coordinator.recover()
                     if recovery is not RoundRecoveryOutcome.NO_TRANSACTION:
@@ -1033,7 +1037,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             evaluator_tool_roots=evaluator_tool_roots,
         )
 
-        run_state = RunState(project, git, run_id)
+        run_state = run_state_factory(project, git, run_id)
 
         agent_client: AgentClientProtocol | None = None
         if build_default_agent_client:

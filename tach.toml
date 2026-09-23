@@ -79,7 +79,7 @@ depends_on = ["server.api", "vs_project"]
 
 [[modules]]
 path = "server.controller"
-depends_on = ["server.diagnostics", "server.events", "server.execution", "server.run_lifecycle", "server.journal", "vs_project"]
+depends_on = ["server.diagnostics", "server.events", "server.execution", "server.run_lifecycle", "server.journal", "vs_project", "vibesys.api"]
 
 [[modules]]
 path = "server.diagnostics"

@@ -7,11 +7,22 @@ tracking) rather than reusable standalone libraries, so they live under
 
 from vibesys.events import CoreEvent, CoreEventType
 from vibesys.repository import RepositoryVisibility
+
+# Compatibility constructor for existing agent callers. New policies use
+# vibesys.run.round_transaction.RoundTransactionCoordinator with a typed slot.
+from vibesys.run.agent_round_transaction import (
+    AgentRoundTransactionCoordinator as RoundTransactionCoordinator,
+)
 from vibesys.run.device import DeviceLease
 from vibesys.run.event_journal import EventJournal
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_tracker import GitTracker
 from vibesys.run.integration import LocalRunIntegration, RunResourceHandoff
+
+# Compatibility names for existing loop callers. New code passes namespace
+# strings to vibesys.run.state.RunState directly.
+from vibesys.run.legacy_namespaces import RunStateNamespace
+from vibesys.run.legacy_state import LegacyRunState as RunState
 from vibesys.run.logger import RunLogger
 from vibesys.run.paths import RunCommands, RunPaths
 from vibesys.run.project import (
@@ -24,11 +35,9 @@ from vibesys.run.round_transaction import (
     CompletedRound,
     RoundRecoveryOutcome,
     RoundTransaction,
-    RoundTransactionCoordinator,
     RoundTransactionError,
 )
 from vibesys.run.run_control import RunControlChannel, RunStopped, splice_steering
-from vibesys.run.state import RunState, RunStateNamespace
 from vibesys.run.workspace import (
     EXCLUDED_WORKSPACE_DIRS,
     CopySpec,
