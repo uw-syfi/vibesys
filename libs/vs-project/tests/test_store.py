@@ -13,10 +13,13 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from vs_loop_state.api import RoundRecord, parse_round_record, serialize_round_record
 from vs_project.api import (
+    ORCHESTRATION_RUN_SCHEMA_VERSION,
     PROJECT_SCHEMA_VERSION,
     RUN_SCHEMA_VERSION,
     AgentRunConfiguration,
     EvolveRunConfiguration,
+    OrchestrationDescriptor,
+    OrchestrationRunManifest,
     PlainRunConfiguration,
     Project,
     ProjectManifest,
@@ -142,6 +145,112 @@ def _run(store: Project, *, minute: int = 0) -> RunManifest:
     )
     store.state.create_run(manifest)
     return manifest
+
+
+def _orchestration_run(store: Project) -> OrchestrationRunManifest:
+    manifest = store.state.new_orchestration_run_manifest(
+        "Queue SPSC",
+        branch="vibesys/queue-orchestration",
+        vibesys_version="0.2.0",
+        run_environment=RunEnvironmentRecord(name="local"),
+        orchestration=OrchestrationDescriptor(
+            id="team-search",
+            config_version=1,
+            options={"agents": [{"role": "worker", "budget": 4}], "seed": None},
+        ),
+        trusted_input_baseline="a" * 40,
+        now=NOW,
+        unique=UNIQUE,
+    )
+    store.state.create_run(manifest)
+    return manifest
+
+
+def test_version_4_run_manifest_round_trips_without_loop_configuration(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    old_run = _run(store)
+    new_run = _orchestration_run(store)
+
+    assert store.state.load_run(old_run.run_id) == old_run
+    assert store.state.load_run(new_run.run_id) == new_run
+    assert {run.schema_version for run in store.state.list_runs()} == {
+        RUN_SCHEMA_VERSION,
+        ORCHESTRATION_RUN_SCHEMA_VERSION,
+    }
+    raw = json.loads(store.state._run_manifest_path(new_run.run_id).read_text())
+    assert "configuration" not in raw
+    assert raw["orchestration"]["id"] == "team-search"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("id", "../unsafe"),
+        ("config_version", 0),
+        ("options", {"score": float("nan")}),
+        ("options", {"bad": object()}),
+        ("options", {1: "not a string key"}),
+    ],
+)
+def test_orchestration_descriptor_rejects_invalid_envelope(field: str, value: object) -> None:
+    payload = {"id": "team-search", "config_version": 1, "options": {}}
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        OrchestrationDescriptor.model_validate(payload, strict=True)
+
+
+def test_version_4_run_rejects_unknown_keys_on_load(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    run = _orchestration_run(store)
+    path = store.state._run_manifest_path(run.run_id)
+    raw = json.loads(path.read_text())
+    raw["orchestration"]["outer_loop"] = "agent"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ProjectStateError, match="outer_loop"):
+        store.state.load_run(run.run_id)
+
+
+def test_version_4_run_is_not_migrated_as_an_older_manifest(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    run = _orchestration_run(store)
+
+    with pytest.raises(ProjectStateError, match="already at run schema version 4"):
+        store.state.migrate_run_environment(run.run_id, run.run_environment)
+
+
+def test_loading_unknown_run_schema_fails_explicitly(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    run = _orchestration_run(store)
+    path = store.state._run_manifest_path(run.run_id)
+    raw = json.loads(path.read_text())
+    raw["schema_version"] = 99
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ProjectStateError, match="unsupported run schema version 99"):
+        store.state.load_run(run.run_id)
+
+
+def test_update_orchestration_preserves_identity_and_rejects_version_change(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    run = _orchestration_run(store)
+    changed = OrchestrationDescriptor(
+        id="team-search", config_version=1, options={"agents": [], "seed": 9}
+    )
+
+    store.state.update_run_orchestration(run.run_id, changed)
+
+    assert store.state.load_run(run.run_id) == run.model_copy(update={"orchestration": changed})
+    with pytest.raises(ProjectStateError, match="cannot change orchestration"):
+        store.state.update_run_orchestration(
+            run.run_id,
+            changed.model_copy(update={"config_version": 2}),
+        )
+    with pytest.raises(ProjectStateError, match="version 4 orchestration"):
+        store.state.update_run_configuration(run.run_id, _configuration())
 
 
 def test_generate_run_id_is_sortable_safe_and_deterministic() -> None:
@@ -807,6 +916,7 @@ def test_run_manifest_round_trips_each_outer_loop_configuration(
     store.state.create_run(manifest)
     loaded = store.state.load_run(manifest.run_id)
 
+    assert isinstance(loaded, RunManifest)
     assert type(loaded.configuration) is expected_type
     assert loaded.configuration == configuration
 
@@ -906,6 +1016,7 @@ def test_update_run_configuration_preserves_manifest_identity(tmp_path: Path) ->
     result = store.state.update_run_configuration(manifest.run_id, updated_configuration)
     updated = store.state.load_run(manifest.run_id)
 
+    assert isinstance(updated, RunManifest)
     assert result is None
     assert updated.configuration == updated_configuration
     assert updated.model_copy(update={"configuration": manifest.configuration}) == manifest
@@ -1796,6 +1907,7 @@ def test_run_environment_round_trips_portable_resources(tmp_path: Path) -> None:
 
     loaded = store.state.load_run(run.run_id)
 
+    assert isinstance(loaded, RunManifest)
     assert loaded.configuration.run_environment.resources == resources
 
 
@@ -1825,7 +1937,7 @@ def test_corrupt_metadata_error_names_the_path(tmp_path: Path) -> None:
     path = store.state._run_manifest_path(run.run_id)
     path.write_text('{"schema_version": 99}', encoding="utf-8")
 
-    with pytest.raises(ProjectStateError, match=r"Invalid VibeSys metadata.*run\.json"):
+    with pytest.raises(ProjectStateError, match=r"run\.json.*unsupported run schema version"):
         store.state.load_run(run.run_id)
 
 

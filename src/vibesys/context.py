@@ -106,6 +106,7 @@ from vs_agent.api import (
 from vs_project.api import (
     Project,
     RunConfiguration,
+    RunManifest,
     StateTransition,
     compare_resume_configurations,
     generate_run_id,
@@ -602,6 +603,14 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             if existing:
                 project_state.load_project()
                 run_manifest = project_state.load_run(run_id)
+                if not isinstance(run_manifest, RunManifest):
+                    raise ConfigurationError(
+                        ConfigurationDiagnostic(
+                            code="project_resume_configuration_mismatch",
+                            stage="resume_resolution",
+                            message=f"run {run_id!r} uses a version 4 orchestration descriptor",
+                        )
+                    )
                 if git.trusted_input_baseline is None:
                     git.configure_trusted_input_baseline(run_manifest.trusted_input_baseline)
                 elif git.trusted_input_baseline != run_manifest.trusted_input_baseline:

@@ -1,9 +1,9 @@
-"""Resume compatibility policy for persisted run configurations."""
+"""Deprecated for new code: version 3 loop-specific resume compatibility."""
 
 from dataclasses import dataclass
 from typing import Literal
 
-from vs_project._state import (
+from vs_project._manifests import (
     AgentRunConfiguration,
     EvolveRunConfiguration,
     RunConfiguration,
@@ -14,7 +14,7 @@ ResumeLimitField = Literal["max_rounds", "max_generations"]
 
 @dataclass(frozen=True)
 class ResumeConfigurationComparison:
-    """Typed result of comparing recorded and requested resume settings."""
+    """Deprecated for new code: version 3 resume-comparison result."""
 
     changed_fields: tuple[str, ...]
     limit_field: ResumeLimitField
@@ -27,7 +27,7 @@ def compare_resume_configurations(
     recorded: RunConfiguration,
     requested: RunConfiguration,
 ) -> ResumeConfigurationComparison:
-    """Compare same-loop configurations under the persisted resume policy."""
+    """Deprecated for new code: compare version 3 loop configurations."""
     if recorded.outer_loop != requested.outer_loop:
         raise ValueError(  # noqa: TRY003  # tracked: #288
             "resume configuration outer loops must match"
