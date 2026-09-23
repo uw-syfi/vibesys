@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, TypeVar
+
+from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
-    from vs_agent.api import AgentSpec
+    from vs_agent.api import AgentSessionKey, AgentSpec, MCPServerSpec
     from vs_sandbox.api import HostResource
+
+T = TypeVar("T", bound=BaseModel)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +37,21 @@ class AgentHandle(Protocol):
         label: str = "",
     ) -> str:
         """Send one turn and return its text; labels are policy-defined."""
+        ...
+
+    def turn_structured(  # noqa: PLR0913
+        self,
+        message: str,
+        *,
+        response_cls: type[T],
+        fallback_factory: Callable[[], T],
+        system_prompt: str = "",
+        label: str = "",
+        session_key: AgentSessionKey | None = None,
+        reuse_session: bool | None = None,
+        mcp_servers: list[MCPServerSpec] | None = None,
+    ) -> T:
+        """Run a typed turn, retaining the caller's fallback and session policy."""
         ...
 
     def close(self) -> None:

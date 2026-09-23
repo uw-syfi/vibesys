@@ -173,7 +173,7 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 # agent-library refactor swapped DEFAULT_AGENT_BACKEND/resolve_agent_driver for
 # the AgentBackend/Driver enums (ruff re-wrapped the affected lines). +3 when the
 # vs_agent imports were consolidated into one parenthesized `vs_agent.api` block.
-"src/vibesys/loops/agent/loop.py" = 3710
+"src/vibesys/loops/agent/loop.py" = 3675
 # Sandbox run environment: setup, execution, and teardown across strategies.
 # Grew +1 from the agent-library refactor's AgentBackend enum swap.
 "src/vibesys/sandbox/run_environment.py" = 2240
