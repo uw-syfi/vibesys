@@ -149,7 +149,7 @@ depends_on = ["base"]
 			t.Fatal(err)
 		}
 	}
-	gitTest(t, root, "init", "-q")
+	initGitRepo(t, root)
 	return root
 }
 

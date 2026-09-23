@@ -130,9 +130,14 @@ def test_submodule_examples_are_registered_as_external_repos() -> None:
 def test_ci_fetches_external_repos_and_runs_this_module() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "test.yml").read_text()
     job = workflow.split("\n  validate-examples:", 1)[1].split("\n  # ", 1)[0]
-    assert "scripts/example_repositories.py" in job
-    assert 'VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS: "1"' in job
-    assert "tests/examples/test_example_registry.py" in job
+    assert "repoctl run-checks --group examples_tests" in job
+
+    policy = tomllib.loads((REPO_ROOT / "repoctl.toml").read_text())
+    group = next(group for group in policy["check_groups"] if group["name"] == "examples_tests")
+    commands = group["commands"]
+    assert any("scripts/example_repositories.py" in command for command in commands)
+    assert any("tests/examples/test_example_registry.py" in command for command in commands)
+    assert group["env"]["VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS"] == "1"
 
 
 # --- validation through the CLI entry point ---------------------------------
