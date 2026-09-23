@@ -30,7 +30,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vibesys.api.contracts import AgentEnvironment, AnyRunRequest
+    from vibesys.api.contracts import AgentEnvironment
+    from vibesys.api.run_request import RunRequestLike
     from vibesys.context import _RunContext
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.runtime import AgentDefinition
@@ -220,7 +221,7 @@ class _LocalAgentHandle:
 class _LocalVibeSysRuntime:
     def __init__(
         self,
-        request: AnyRunRequest,
+        request: RunRequestLike,
         integration: LocalRunIntegration,
         *,
         open_agent_environment: Callable[..., AgentEnvironment] | None,

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import BaseModel, ValidationError
 
+import vibesys.api as public_api
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -226,6 +227,10 @@ def test_descriptor_request_runs_without_legacy_loop_fields(tmp_path: Path) -> N
     )
     assert "loop" not in OrchestrationRunRequest.model_fields
     assert "inner_loop" not in OrchestrationRunRequest.model_fields
+    assert "max_rounds" not in OrchestrationRunRequest.model_fields
+    assert "search_policy" not in OrchestrationRunRequest.model_fields
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        OrchestrationRunRequest.model_validate({**request.model_dump(), "max_rounds": 2})
     registry = OrchestrationRegistry()
     policy = CompletePolicy(result=True)
     registry.register("team-search", policy)
@@ -280,10 +285,16 @@ def test_custom_selection_validates_descriptor_and_preserves_builtin_enum(
     )
 
     built_in = default_request(Project.open(repo_root / _EXAMPLE), LoopKind.AGENT)
+    assert public_api.LoopKind is LoopKind
+    assert public_api.RunRequest is RunRequest
     assert built_in.loop is LoopKind.AGENT
     assert built_in.selected_loop is LoopKind.AGENT
     built_in_result = RunResult(run_id="builtin", loop=LoopKind.AGENT, succeeded=True)
     assert RunResult.model_validate_json(built_in_result.model_dump_json()).loop is LoopKind.AGENT
+    assert (
+        RunResult(run_id="builtin", loop=built_in.orchestration_id, succeeded=True).loop
+        is LoopKind.AGENT
+    )
 
     values = built_in.model_dump()
     with pytest.raises(ValidationError, match="select exactly one"):

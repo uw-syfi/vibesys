@@ -12,14 +12,15 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vibesys.api._orchestrations.contracts import Orchestration, OrchestrationRegistry
-    from vibesys.api.contracts import AgentEnvironment, AnyRunRequest
+    from vibesys.api.contracts import AgentEnvironment
+    from vibesys.api.run_request import RunRequestLike
     from vibesys.run.integration import LocalRunIntegration
 
 resolved_run_id = _resolved_run_id
 
 
 def dispatch_loop(
-    request: AnyRunRequest,
+    request: RunRequestLike,
     integration: LocalRunIntegration,
     registry: OrchestrationRegistry | None = None,
     *,

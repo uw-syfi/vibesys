@@ -31,7 +31,8 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.api._orchestrations.contracts import OrchestrationRegistry
-    from vibesys.api.contracts import AgentEnvironment, AnyRunRequest, EventSink, RunView
+    from vibesys.api.contracts import AgentEnvironment, EventSink, RunView
+    from vibesys.api.run_request import RunRequestLike
     from vibesys.config import Config
     from vibesys.run.integration import RunResourceHandoff
     from vibesys.sandbox.run_environment import RunEnvironmentSession
@@ -129,7 +130,7 @@ class RunSession(RunQuery, RunWorkspace, RunControl, RunAgentHost, Protocol):
 
 
 def create_session(
-    request: AnyRunRequest,
+    request: RunRequestLike,
     *,
     sink: EventSink,
     registry: OrchestrationRegistry | None = None,
@@ -156,7 +157,7 @@ class _LocalRunSession:
 
     def __init__(
         self,
-        request: AnyRunRequest,
+        request: RunRequestLike,
         *,
         sink: EventSink,
         registry: OrchestrationRegistry | None,

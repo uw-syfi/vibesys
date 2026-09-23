@@ -10,12 +10,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vibesys.api._orchestrations.contracts import Orchestration, OrchestrationRegistry
-    from vibesys.api.contracts import AgentEnvironment, AnyRunRequest
+    from vibesys.api.contracts import AgentEnvironment
+    from vibesys.api.run_request import RunRequestLike
     from vibesys.run.integration import LocalRunIntegration
 
 
 def run_orchestration(
-    request: AnyRunRequest,
+    request: RunRequestLike,
     integration: LocalRunIntegration,
     registry: OrchestrationRegistry,
     *,

@@ -69,6 +69,11 @@ session.start()
 result = asyncio.run(session.await_result())
 ```
 
+`OrchestrationRunRequest` is the generic descriptor-based request. The framework
+reads it through `RunRequestLike`. `RunRequest` and `LoopKind` remain public
+compatibility imports for built-in CLI selection and are deprecated for new
+policies. Their policy options belong to the built-in adapters.
+
 `AgentDefinition` accepts an `AgentSpec` per agent and optional `resources` as
 `HostResource` grants. `spawn_agent` opens an agent environment with those
 mounts, passes the grants to the driver, and rejects drivers that cannot enforce

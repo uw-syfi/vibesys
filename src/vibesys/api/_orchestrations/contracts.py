@@ -12,7 +12,8 @@ from vibesys.api.contracts import OrchestrationDescriptor
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.api.contracts import AnyRunRequest, RunStatus, RunView
+    from vibesys.api.contracts import RunStatus, RunView
+    from vibesys.api.run_request import RunRequestLike
     from vibesys.orchestration import ResumeProjection
     from vibesys.runtime import VibeSysRuntime
     from vs_project.api import OrchestrationRunManifest, Project
@@ -73,15 +74,15 @@ class _ExecuteOnlyAdapter:
     def __init__(self, implementation: ExecutableOrchestration) -> None:
         self._implementation = implementation
 
-    def execute(self, request: AnyRunRequest, runtime: VibeSysRuntime) -> bool:
+    def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool:
         return self._implementation.execute(request, runtime)
 
-    def prepare(self, request: AnyRunRequest, runtime: VibeSysRuntime) -> None:
+    def prepare(self, request: RunRequestLike, runtime: VibeSysRuntime) -> None:
         prepare_policy = getattr(self._implementation, "prepare", None)
         if callable(prepare_policy):
             prepare_policy(request, runtime)
 
-    def describe(self, request: AnyRunRequest) -> RunDescription:
+    def describe(self, request: RunRequestLike) -> RunDescription:
         describe = getattr(self._implementation, "describe", None)
         if callable(describe):
             return describe(request)

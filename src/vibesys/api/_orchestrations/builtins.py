@@ -18,7 +18,8 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.api._orchestrations.runtime import _LocalVibeSysRuntime
-    from vibesys.api.contracts import AnyRunRequest, RunStatus, RunView
+    from vibesys.api.contracts import RunStatus, RunView
+    from vibesys.api.run_request import RunRequestLike
     from vibesys.orchestration import ResumeProjection
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.runtime import VibeSysRuntime
@@ -37,15 +38,15 @@ class _LegacyOrchestration:
     def __init__(self, implementation: _LegacyImplementation) -> None:
         self._implementation = implementation
 
-    def execute(self, request: AnyRunRequest, runtime: VibeSysRuntime) -> bool:
+    def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool:
         local = cast("_LocalVibeSysRuntime", runtime)
         return self._implementation.execute(_legacy_request(request), local.legacy_integration)
 
-    def prepare(self, request: AnyRunRequest, runtime: VibeSysRuntime) -> None:
+    def prepare(self, request: RunRequestLike, runtime: VibeSysRuntime) -> None:
         """The existing loop constructs its own run context during execute."""
         del request, runtime
 
-    def describe(self, request: AnyRunRequest) -> RunDescription:
+    def describe(self, request: RunRequestLike) -> RunDescription:
         describe = getattr(self._implementation, "describe", None)
         return describe(_legacy_request(request)) if callable(describe) else RunDescription()
 
@@ -63,7 +64,7 @@ class _LegacyOrchestration:
         return self._implementation.resume_projection(manifest)
 
 
-def _legacy_request(request: AnyRunRequest) -> RunRequest:
+def _legacy_request(request: RunRequestLike) -> RunRequest:
     if not isinstance(request, RunRequest):
         message = "built-in orchestration requires the legacy request options"
         raise TypeError(message)
