@@ -1,15 +1,17 @@
-package main
+// Package native discovers configured Go and Rust manifest directories.
+package native
 
 import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"repoctl/discovery"
 	"sort"
 )
 
-type manifestDirectoryAdapter struct{}
+type Adapter struct{ Run discovery.RunCommand }
 
-func (manifestDirectoryAdapter) Discover(root string, spec discoverySpec) ([]component, error) {
+func (a Adapter) Discover(root string, spec discovery.Spec) ([]discovery.Component, error) {
 	if len(spec.Manifests) == 0 {
 		return nil, fmt.Errorf("manifest_directories discovery requires manifests")
 	}
@@ -19,7 +21,7 @@ func (manifestDirectoryAdapter) Discover(root string, spec discoverySpec) ([]com
 		}
 	}
 	for _, targetRoot := range append(append([]string{}, spec.ScopeRoots...), spec.SelectedRoots...) {
-		if !validPath(targetRoot) {
+		if !discovery.ValidPath(targetRoot) {
 			return nil, fmt.Errorf("unsafe target root %q", targetRoot)
 		}
 	}
@@ -28,7 +30,7 @@ func (manifestDirectoryAdapter) Discover(root string, spec discoverySpec) ([]com
 	for manifest := range spec.Manifests {
 		args = append(args, "**/"+manifest)
 	}
-	output, err := run(root, "git", args...)
+	output, err := a.Run(root, "git", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +42,7 @@ func (manifestDirectoryAdapter) Discover(root string, spec discoverySpec) ([]com
 			continue
 		}
 		path := string(rawPath)
-		if !validPath(path) {
+		if !discovery.ValidPath(path) {
 			return nil, fmt.Errorf("git returned unsafe manifest path %q", path)
 		}
 		manifest := filepath.Base(path)
@@ -66,12 +68,12 @@ func (manifestDirectoryAdapter) Discover(root string, spec discoverySpec) ([]com
 		}
 	}
 
-	components := make([]component, 0, len(languageByRoot))
+	components := make([]discovery.Component, 0, len(languageByRoot))
 	for targetRoot, language := range languageByRoot {
-		selected := contains(spec.SelectedRoots, targetRoot)
+		selected := discovery.Contains(spec.SelectedRoots, targetRoot)
 		inScope := false
 		for _, scopeRoot := range spec.ScopeRoots {
-			if under(targetRoot, scopeRoot) {
+			if discovery.Under(targetRoot, scopeRoot) {
 				inScope = true
 				break
 			}
@@ -84,7 +86,7 @@ func (manifestDirectoryAdapter) Discover(root string, spec discoverySpec) ([]com
 		if selected {
 			jobs = spec.SelectedJobs
 		}
-		components = append(components, component{
+		components = append(components, discovery.Component{
 			ID:             spec.IDPrefix + targetRoot,
 			Class:          spec.Class,
 			Name:           targetRoot,

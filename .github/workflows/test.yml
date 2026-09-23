@@ -47,7 +47,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: support/ci_impact/go.mod
+          go-version-file: support/repoctl/go.mod
 
       - name: Select affected CI jobs
         id: filter
@@ -79,7 +79,7 @@ jobs:
               exit 1
               ;;
           esac
-          ./support/ci_impact/ci-impact plan --event "$EVENT_NAME" --base "$base" --head "$head" --github-output "$GITHUB_OUTPUT"
+          ./support/repoctl/repoctl plan --event "$EVENT_NAME" --base "$base" --head "$head" --github-output "$GITHUB_OUTPUT"
 
   # One environment setup for every cheap Python check. Issue #89 split these
   # apart so a failure names the check that failed; each check is still its own
@@ -291,7 +291,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: support/ci_impact/go.mod
+          go-version-file: support/repoctl/go.mod
           cache-dependency-path: |
             resources/evaluators/queue/go.sum
             resources/evaluators/microservice/go.sum
@@ -321,7 +321,7 @@ jobs:
       - name: Check selected native targets
         env:
           NATIVE_TARGETS: ${{ needs.changes.outputs.native_targets }}
-        run: ./support/ci_impact/ci-impact run-native --targets-json "$NATIVE_TARGETS"
+        run: ./support/repoctl/repoctl run-native --targets-json "$NATIVE_TARGETS"
 
   impact-tool:
     needs: changes
@@ -334,10 +334,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: support/ci_impact/go.mod
+          go-version-file: support/repoctl/go.mod
 
-      - name: Test CI impact tool
-        working-directory: support/ci_impact
+      - name: Test repoctl
+        working-directory: support/repoctl
         run: |
           go test ./...
           go vet ./...

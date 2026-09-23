@@ -1,4 +1,4 @@
-module ci-impact
+module repoctl
 
 go 1.25
 

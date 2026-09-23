@@ -13,7 +13,7 @@ func fixtureRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"ci-impact.toml": `default_base = "trunk"
+		"repoctl.toml": `default_base = "trunk"
 jobs = ["unit", "web", "native", "policy"]
 ignored_roots = ["external"]
 ignored_files = ["LICENSE"]
@@ -76,7 +76,7 @@ files = ["shared/protocol.txt"]
 
 [[components]]
 id = "policy"
-files = ["ci-impact.toml"]
+files = ["repoctl.toml"]
 jobs = ["unit", "web", "native", "policy"]
 select_all_jobs = true
 select_all_collections = true
@@ -161,7 +161,7 @@ func commitFixture(t *testing.T, root, message string) string {
 }
 
 func TestConfiguredDiscoveriesAndEffects(t *testing.T) {
-	g, err := readPolicy(fixtureRepo(t), "ci-impact.toml")
+	g, err := readPolicy(fixtureRepo(t), "repoctl.toml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestNativeDiscoveryRejectsTwoManifestsInOneDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "native/app/Cargo.toml"), []byte("[package]\nname=\"app\"\nversion=\"0.1.0\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readPolicy(root, "ci-impact.toml"); err == nil || !strings.Contains(err.Error(), "multiple configured manifests") {
+	if _, err := readPolicy(root, "repoctl.toml"); err == nil || !strings.Contains(err.Error(), "multiple configured manifests") {
 		t.Fatalf("dual manifest error = %v", err)
 	}
 }
@@ -256,8 +256,8 @@ func TestPathValidationAndCollectionSelection(t *testing.T) {
 
 func TestAbsoluteConfigLocatesItsRepository(t *testing.T) {
 	root := fixtureRepo(t)
-	t.Setenv("CI_IMPACT_ROOT", filepath.Join(root, "wrong-root"))
-	configPath := filepath.Join(root, "ci-impact.toml")
+	t.Setenv("REPOCTL_ROOT", filepath.Join(root, "wrong-root"))
+	configPath := filepath.Join(root, "repoctl.toml")
 	got, err := rootPath(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -329,7 +329,7 @@ func TestPullRequestUsesMergeBaseAndPushUsesExactEndpoints(t *testing.T) {
 
 func TestGitHubOutputsUseConfiguredJobsAndCollections(t *testing.T) {
 	root := fixtureRepo(t)
-	g, err := readPolicy(root, "ci-impact.toml")
+	g, err := readPolicy(root, "repoctl.toml")
 	if err != nil {
 		t.Fatal(err)
 	}

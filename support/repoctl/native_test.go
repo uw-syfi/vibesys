@@ -109,7 +109,7 @@ func TestNativeCommandFailures(t *testing.T) {
 		command []string
 		want    string
 	}{
-		{"missing executable", []string{"ci-impact-command-that-does-not-exist"}, "executable file not found"},
+		{"missing executable", []string{"repoctl-command-that-does-not-exist"}, "executable file not found"},
 		{"nonzero exit", []string{"sh", "-c", "exit 7"}, "exit status 7"},
 		{"timeout", []string{"sh", "-c", "exec sleep 5"}, "timed out"},
 	}

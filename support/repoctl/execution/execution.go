@@ -1,0 +1,114 @@
+// Package execution defines checks independently of CI policy and language adapters.
+// A check runs one argument-vector command from a repository-relative directory.
+// Callers select checks; Runner owns the process and reports command failures.
+package execution
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// Check is one configured command. Args are passed directly to the executable,
+// without shell expansion. Directory is relative to the repository root.
+type Check struct {
+	Label     string
+	Directory string
+	Args      []string
+	Env       map[string]string
+	Timeout   time.Duration
+}
+
+// Suite is a policy-owned set of commands for one selected CI job. Collection
+// names an impact-plan collection; PackageCommands run once for each value.
+// Commands run when the collection is empty, or when no collection is set.
+type Suite struct {
+	Job             string            `toml:"job"`
+	Language        string            `toml:"language"`
+	Directory       string            `toml:"directory"`
+	Commands        [][]string        `toml:"commands"`
+	PackageCommands [][]string        `toml:"package_commands"`
+	Collection      string            `toml:"collection"`
+	Env             map[string]string `toml:"env"`
+	TimeoutSeconds  int               `toml:"timeout_seconds"`
+}
+
+// Planner translates a configured suite and selected collection values to
+// executable checks. It must preserve configured command order.
+type Planner interface {
+	Plan(Suite, []string) ([]Check, error)
+}
+
+// Commands builds checks for an ordinary suite with no collection expansion.
+func Commands(suite Suite) ([]Check, error) {
+	checks := make([]Check, 0, len(suite.Commands))
+	for _, args := range suite.Commands {
+		if len(args) == 0 || args[0] == "" {
+			return nil, fmt.Errorf("test suite %q has an empty command", suite.Job)
+		}
+		checks = append(checks, Check{
+			Label: suite.Job, Directory: suite.Directory,
+			Args: append([]string(nil), args...), Env: suite.Env,
+			Timeout: time.Duration(suite.TimeoutSeconds) * time.Second,
+		})
+	}
+	return checks, nil
+}
+
+// Runner executes checks. Implementations should honor cancellation and return
+// errors for missing executables and nonzero exits.
+type Runner interface {
+	Run(context.Context, string, Check) error
+}
+
+// OSRunner runs checks with inherited standard output and error streams.
+type OSRunner struct{}
+
+func (OSRunner) Run(parent context.Context, root string, check Check) error {
+	if len(check.Args) == 0 || check.Args[0] == "" {
+		return fmt.Errorf("%s: empty command", check.Label)
+	}
+	ctx := parent
+	cancel := func() {}
+	if check.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(parent, check.Timeout)
+	}
+	defer cancel()
+	cmd := exec.CommandContext(ctx, check.Args[0], check.Args[1:]...)
+	cmd.Dir = filepath.Join(root, filepath.FromSlash(check.Directory))
+	cmd.Env = mergedEnvironment(os.Environ(), check.Env)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("%s: %s: timed out after %s", check.Label, strings.Join(check.Args, " "), check.Timeout)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil {
+		return fmt.Errorf("%s: %s: %w", check.Label, strings.Join(check.Args, " "), err)
+	}
+	return nil
+}
+
+func mergedEnvironment(base []string, overrides map[string]string) []string {
+	if len(overrides) == 0 {
+		return base
+	}
+	env := make([]string, 0, len(base)+len(overrides))
+	for _, entry := range base {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, replaced := overrides[key]; !replaced {
+			env = append(env, entry)
+		}
+	}
+	for key, value := range overrides {
+		env = append(env, key+"="+value)
+	}
+	return env
+}

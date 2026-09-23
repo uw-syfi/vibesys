@@ -107,6 +107,52 @@ func changedPaths(root, base, head, event string) ([]string, error) {
 	}
 	return parseNameStatusZ(out)
 }
+
+// worktreePaths includes staged and unstaged tracked changes and untracked files.
+// Both sides of a rename are retained so ownership at either path is selected.
+func worktreePaths(root string) ([]string, error) {
+	tracked, err := run(root, "git", "diff", "--name-status", "-z", "--find-renames", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	paths, err := parseNameStatusZ(tracked)
+	if err != nil {
+		return nil, err
+	}
+	untracked, err := run(root, "git", "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		seen[path] = true
+	}
+	for _, raw := range bytes.Split(untracked, []byte{0}) {
+		if len(raw) == 0 {
+			continue
+		}
+		path := string(raw)
+		if !seen[path] {
+			paths = append(paths, path)
+			seen[path] = true
+		}
+	}
+	return paths, nil
+}
+
+func appendUniquePaths(paths, added []string) []string {
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		seen[path] = true
+	}
+	for _, path := range added {
+		if !seen[path] {
+			paths = append(paths, path)
+			seen[path] = true
+		}
+	}
+	return paths
+}
 func trackedPaths(root string) ([]string, error) {
 	out, err := run(root, "git", "ls-files", "-z")
 	if err != nil {

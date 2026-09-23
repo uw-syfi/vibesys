@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"repoctl/execution"
 )
 
 func rootPath(configPath string) (string, error) {
@@ -17,7 +19,7 @@ func rootPath(configPath string) (string, error) {
 		}
 		return filepath.Dir(configPath), nil
 	}
-	if root := os.Getenv("CI_IMPACT_ROOT"); root != "" {
+	if root := os.Getenv("REPOCTL_ROOT"); root != "" {
 		return root, nil
 	}
 	wd, err := os.Getwd()
@@ -112,7 +114,7 @@ func writeOutputs(path string, p plan) error {
 	return nil
 }
 func cli(args []string) error {
-	configPath := "ci-impact.toml"
+	configPath := "repoctl.toml"
 	filtered := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--config" {
@@ -131,7 +133,7 @@ func cli(args []string) error {
 	}
 	args = filtered
 	if len(args) == 0 {
-		return fmt.Errorf("usage: ci-impact {plan|explain|validate|run-native}")
+		return fmt.Errorf("usage: repoctl {plan|test|explain|validate|run-native}")
 	}
 	root, err := rootPath(configPath)
 	if err != nil {
@@ -142,6 +144,35 @@ func cli(args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "test":
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		base := fs.String("base", g.DefaultBase, "Base revision")
+		head := fs.String("head", "HEAD", "Head revision")
+		event := fs.String("event", "pull_request", "Event type")
+		dryRun := fs.Bool("dry-run", false, "Print selected commands without running them")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 {
+			return fmt.Errorf("unexpected test arguments")
+		}
+		paths, err := changedPaths(root, *base, *head, *event)
+		if err != nil {
+			return err
+		}
+		localPaths, err := worktreePaths(root)
+		if err != nil {
+			return err
+		}
+		paths = appendUniquePaths(paths, localPaths)
+		p, err := g.selectPaths(paths)
+		if err != nil {
+			return err
+		}
+		if err := emit(p, false); err != nil {
+			return err
+		}
+		return runSelectedTests(root, g, p, *dryRun, execution.OSRunner{}, runNativeCommand)
 	case "run-native":
 		fs := flag.NewFlagSet("run-native", flag.ContinueOnError)
 		targets := fs.String("targets-json", "", "Selected native roots as a JSON array")
@@ -223,7 +254,7 @@ func cli(args []string) error {
 }
 func main() {
 	if err := cli(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "CI impact failed:", err)
+		fmt.Fprintln(os.Stderr, "repoctl failed:", err)
 		os.Exit(2)
 	}
 }

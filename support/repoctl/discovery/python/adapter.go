@@ -1,9 +1,11 @@
-package main
+// Package python discovers Python modules from a Tach manifest.
+package python
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"repoctl/discovery"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -17,11 +19,11 @@ type tachManifest struct {
 	} `toml:"modules"`
 }
 
-type tachAdapter struct{}
+type Adapter struct{}
 
-func (tachAdapter) Discover(root string, spec discoverySpec) ([]component, error) {
+func (Adapter) Discover(root string, spec discovery.Spec) ([]discovery.Component, error) {
 	var manifest tachManifest
-	if spec.Config == "" || !validPath(spec.Config) {
+	if spec.Config == "" || !discovery.ValidPath(spec.Config) {
 		return nil, fmt.Errorf("tach discovery requires a safe config path")
 	}
 	configPath := filepath.Join(root, filepath.FromSlash(spec.Config))
@@ -34,15 +36,15 @@ func (tachAdapter) Discover(root string, spec discoverySpec) ([]component, error
 		sourceRoots = manifest.SourceRoots
 	}
 	for _, sourceRoot := range sourceRoots {
-		if !validPath(sourceRoot) {
+		if !discovery.ValidPath(sourceRoot) {
 			return nil, fmt.Errorf("unsafe source root %q", sourceRoot)
 		}
 	}
 
-	components := make([]component, 0, len(manifest.Modules))
+	components := make([]discovery.Component, 0, len(manifest.Modules))
 	for _, module := range manifest.Modules {
 		modulePath := strings.ReplaceAll(module.Path, ".", "/")
-		if modulePath == "" || !validPath(modulePath) {
+		if modulePath == "" || !discovery.ValidPath(modulePath) {
 			return nil, fmt.Errorf("invalid module path %q", module.Path)
 		}
 
@@ -63,7 +65,7 @@ func (tachAdapter) Discover(root string, spec discoverySpec) ([]component, error
 		for _, dependency := range module.DependsOn {
 			dependencies = append(dependencies, spec.IDPrefix+dependency)
 		}
-		components = append(components, component{
+		components = append(components, discovery.Component{
 			ID:             spec.IDPrefix + module.Path,
 			Class:          spec.Class,
 			Name:           module.Path,

@@ -6,21 +6,20 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"repoctl/discovery"
+	"repoctl/discovery/native"
+	"repoctl/discovery/python"
+	"repoctl/discovery/typescript"
+	"repoctl/execution"
 )
 
 func splitPath(s string) []string  { return strings.Split(s, "/") }
 func under(path, root string) bool { return path == root || strings.HasPrefix(path, root+"/") }
 
-// discoveryAdapter translates a language or package manager manifest into the
-// common component graph. Adapters own format parsing; the graph owns impact.
-type discoveryAdapter interface {
-	Discover(root string, spec discoverySpec) ([]component, error)
-}
-
-var discoveryAdapters = map[string]discoveryAdapter{
-	"tach":                 tachAdapter{},
-	"package_json":         packageJSONAdapter{},
-	"manifest_directories": manifestDirectoryAdapter{},
+var discoveryAdapters = map[string]discovery.Adapter{
+	"tach":                 python.Adapter{},
+	"package_json":         typescript.Adapter{},
+	"manifest_directories": native.Adapter{Run: run},
 }
 
 func readPolicy(root, configPath string) (graph, error) {
@@ -62,6 +61,7 @@ func readPolicy(root, configPath string) (graph, error) {
 		Collections: p.Collections, NativeTargets: map[string]nativeTarget{},
 		NativeChecks:         p.NativeChecks,
 		NativeCheckOverrides: map[string]nativeCheckOverride{},
+		TestSuites:           map[string]execution.Suite{},
 	}
 	for _, group := range [][]string{p.IgnoredRoots, p.IgnoredFiles} {
 		for _, x := range group {
@@ -122,6 +122,9 @@ func readPolicy(root, configPath string) (graph, error) {
 		if !validCollectionField(collection.Field) {
 			return g, fmt.Errorf("unsupported collection field %q", collection.Field)
 		}
+	}
+	if err := g.validateTestSuites(p.TestSuites); err != nil {
+		return g, err
 	}
 	if err := g.validate(); err != nil {
 		return g, err

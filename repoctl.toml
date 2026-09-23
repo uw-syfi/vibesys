@@ -1,4 +1,4 @@
-# Repository policy consumed by the generic CI impact utility.
+# Repository policy consumed by repoctl.
 default_base = "main"
 jobs = ["python", "tui", "examples", "agent_image", "evaluators", "impact"]
 
@@ -69,6 +69,47 @@ rust = [
   ["cargo", "clippy", "--locked", "--all-targets", "--", "-D", "warnings"],
   ["cargo", "test", "--locked"],
 ]
+
+[[test_suites]]
+job = "python"
+language = "python"
+directory = "."
+timeout_seconds = 1800
+commands = [["uv", "run", "python", "-m", "pytest", "-q"]]
+
+[[test_suites]]
+job = "tui"
+language = "typescript"
+directory = "clients"
+collection = "pnpm_packages"
+timeout_seconds = 1200
+commands = [["pnpm", "test:clients"]]
+package_commands = [["pnpm", "--filter", "{package}", "test"]]
+
+[[test_suites]]
+job = "examples"
+language = "python"
+directory = "."
+timeout_seconds = 1200
+commands = [["uv", "run", "python", "scripts/example_repositories.py"]]
+
+[[test_suites]]
+job = "agent_image"
+language = "python"
+directory = "."
+timeout_seconds = 1200
+env = { VIBESYS_E2E_DOCKER = "1" }
+commands = [
+  ["docker", "info", "--format", "{{.ServerVersion}}"],
+  ["uv", "run", "pytest", "tests/e2e/test_agent_image_e2e.py", "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "-v", "-s", "--no-cov"],
+]
+
+[[test_suites]]
+job = "impact"
+language = "go"
+directory = "support/repoctl"
+timeout_seconds = 600
+commands = [["go", "test", "./..."]]
 
 [[native_check_overrides]]
 root = "sdk/vs-evaluator/vseval"
@@ -146,9 +187,10 @@ from = "native:examples/data-structures/repositories/queue-rs/verus-mpmc"
 to = "native:examples/data-structures/repositories/queue-rs"
 
 [[components]]
-id = "ci_policy"
-roots = ["support/ci_impact"]
-files = [".github/workflows/test.yml", "ci-impact.toml", "ci-components.toml"]
+id = "repo_policy"
+# Keep the previous paths owned while this rename appears in a diff.
+roots = ["support/repoctl", "support/ci_impact"]
+files = [".github/workflows/test.yml", "repoctl.toml", "ci-impact.toml"]
 select_all_jobs = true
 select_all_collections = true
 

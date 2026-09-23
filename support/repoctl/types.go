@@ -1,6 +1,11 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"repoctl/discovery"
+	"repoctl/execution"
+)
 
 func validOutputName(s string) bool {
 	if s == "" {
@@ -18,44 +23,12 @@ func validOutputName(s string) bool {
 	return true
 }
 
-type component struct {
-	ID                   string   `toml:"id"`
-	Class                string   `toml:"class"`
-	Root                 string   `toml:"root"`
-	Roots                []string `toml:"roots"`
-	Files                []string `toml:"files"`
-	DependsOn            []string `toml:"depends_on"`
-	Job                  string   `toml:"job"`
-	Jobs                 []string `toml:"jobs"`
-	Language             string   `toml:"language"`
-	Name                 string   `toml:"name"`
-	Selected             bool     `toml:"selected"`
-	Target               bool     `toml:"target"`
-	OwnershipGroup       string   `toml:"ownership_group"`
-	SelectAllJobs        bool     `toml:"select_all_jobs"`
-	SelectAllCollections bool     `toml:"select_all_collections"`
-}
+type component = discovery.Component
 type edge struct {
 	From string `toml:"from"`
 	To   string `toml:"to"`
 }
-type discoverySpec struct {
-	Adapter          string            `toml:"adapter"`
-	Config           string            `toml:"config"`
-	Class            string            `toml:"class"`
-	IDPrefix         string            `toml:"id_prefix"`
-	Job              string            `toml:"job"`
-	OwnershipGroup   string            `toml:"ownership_group"`
-	SourceRoots      []string          `toml:"source_roots"`
-	ManifestGlob     string            `toml:"manifest_glob"`
-	DependencyFields []string          `toml:"dependency_fields"`
-	WorkspacePrefix  string            `toml:"workspace_prefix"`
-	Manifests        map[string]string `toml:"manifests"`
-	ScopeRoots       []string          `toml:"scope_roots"`
-	SelectedRoots    []string          `toml:"selected_roots"`
-	SelectedJobs     []string          `toml:"selected_jobs"`
-	Target           bool              `toml:"target"`
-}
+type discoverySpec = discovery.Spec
 type collectionSpec struct {
 	Name         string `toml:"name"`
 	Class        string `toml:"class"`
@@ -85,6 +58,7 @@ type policy struct {
 	Collections          []collectionSpec      `toml:"collections"`
 	NativeChecks         nativeChecks          `toml:"native_checks"`
 	NativeCheckOverrides []nativeCheckOverride `toml:"native_check_overrides"`
+	TestSuites           []execution.Suite     `toml:"test_suites"`
 	Components           []component           `toml:"components"`
 	Edges                []edge                `toml:"edges"`
 }
@@ -105,6 +79,7 @@ type graph struct {
 	NativeTargets        map[string]nativeTarget
 	NativeChecks         nativeChecks
 	NativeCheckOverrides map[string]nativeCheckOverride
+	TestSuites           map[string]execution.Suite
 }
 type plan struct {
 	Jobs         map[string]bool     `json:"jobs"`
@@ -115,15 +90,7 @@ type plan struct {
 }
 
 func validPath(s string) bool {
-	if s == "" || s[0] == '/' {
-		return false
-	}
-	for _, part := range splitPath(s) {
-		if part == "." || part == ".." || part == "" {
-			return false
-		}
-	}
-	return true
+	return discovery.ValidPath(s)
 }
 func unique(items []string, label string) error {
 	seen := map[string]bool{}

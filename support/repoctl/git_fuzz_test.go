@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -63,5 +65,42 @@ func TestParseNameStatusZRejectsMalformedRecords(t *testing.T) {
 		if _, err := parseNameStatusZ(raw); err == nil {
 			t.Errorf("parseNameStatusZ(%q) succeeded, want an error", raw)
 		}
+	}
+}
+
+func TestWorktreePathsIncludesStagedUnstagedUntrackedAndRename(t *testing.T) {
+	root := t.TempDir()
+	initGitRepo(t, root)
+	for _, name := range []string{"staged.txt", "unstaged.txt", "old.txt", "deleted.txt"} {
+		writeFixtureFile(t, root, name, "original\n")
+	}
+	commitFixture(t, root, "initial")
+	writeFixtureFile(t, root, "staged.txt", "staged\n")
+	gitTest(t, root, "add", "staged.txt")
+	writeFixtureFile(t, root, "unstaged.txt", "unstaged\n")
+	gitTest(t, root, "mv", "old.txt", "renamed.txt")
+	if err := os.Remove(filepath.Join(root, "deleted.txt")); err != nil {
+		t.Fatal(err)
+	}
+	writeFixtureFile(t, root, "untracked.txt", "new\n")
+
+	got, err := worktreePaths(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"staged.txt": true, "unstaged.txt": true, "old.txt": true,
+		"renamed.txt": true, "deleted.txt": true, "untracked.txt": true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("worktree paths = %q, want %v", got, want)
+	}
+	for _, path := range got {
+		if !want[path] {
+			t.Fatalf("unexpected worktree path %q in %q", path, got)
+		}
+	}
+	if got := appendUniquePaths([]string{"staged.txt", "committed.txt"}, got); len(got) != len(want)+1 {
+		t.Fatalf("combined paths contain duplicates: %q", got)
 	}
 }

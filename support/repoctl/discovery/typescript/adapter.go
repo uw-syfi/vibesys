@@ -1,21 +1,23 @@
-package main
+// Package typescript discovers workspace packages from package.json files.
+package typescript
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"repoctl/discovery"
 	"sort"
 	"strings"
 )
 
-type packageJSONAdapter struct{}
+type Adapter struct{}
 
-func (packageJSONAdapter) Discover(root string, spec discoverySpec) ([]component, error) {
+func (Adapter) Discover(root string, spec discovery.Spec) ([]discovery.Component, error) {
 	if spec.ManifestGlob == "" || spec.WorkspacePrefix == "" {
 		return nil, fmt.Errorf("package_json discovery requires manifest_glob and workspace_prefix")
 	}
-	if filepath.IsAbs(spec.ManifestGlob) || !validPath(filepath.ToSlash(spec.ManifestGlob)) {
+	if filepath.IsAbs(spec.ManifestGlob) || !discovery.ValidPath(filepath.ToSlash(spec.ManifestGlob)) {
 		return nil, fmt.Errorf("unsafe manifest glob %q", spec.ManifestGlob)
 	}
 
@@ -29,7 +31,7 @@ func (packageJSONAdapter) Discover(root string, spec discoverySpec) ([]component
 	if len(dependencyFields) == 0 {
 		dependencyFields = []string{"dependencies", "devDependencies", "optionalDependencies"}
 	}
-	components := make([]component, 0, len(files))
+	components := make([]discovery.Component, 0, len(files))
 	for _, file := range files {
 		raw, err := os.ReadFile(file)
 		if err != nil {
@@ -65,7 +67,7 @@ func (packageJSONAdapter) Discover(root string, spec discoverySpec) ([]component
 		if err != nil {
 			return nil, err
 		}
-		components = append(components, component{
+		components = append(components, discovery.Component{
 			ID:             spec.IDPrefix + name,
 			Class:          spec.Class,
 			Name:           name,

@@ -181,17 +181,17 @@ Every pull request must pass the following gates before it can be merged.
 You can run each one locally before pushing.
 
 The `changes` job selects checks from the repository policy in
-`ci-impact.toml`. `support/ci_impact/` provides configurable adapters for
+`repoctl.toml`. `support/repoctl/` provides configurable adapters for
 language and package manifests. The top-level graph records cross-component
 effects those manifests cannot express. The job prints each selection and its
 reason; an unowned changed path fails selection instead of silently skipping
-checks. To inspect a branch's plan locally, run:
+checks. To run the selected checks locally, use one command:
 
 ```bash
-./support/ci_impact/ci-impact plan
-(cd support/ci_impact && go test ./... && go vet ./...)
+./support/repoctl/repoctl test
 ```
 
+Use `./support/repoctl/repoctl plan` to inspect the selection without running checks.
 The Go CLI also runs selected native checks with `run-native --targets-json`.
 
 ### Format
