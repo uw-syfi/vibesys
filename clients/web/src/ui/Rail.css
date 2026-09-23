@@ -68,9 +68,10 @@
   margin-bottom: var(--space-1);
   background: var(--surface-raised);
 }
-/* The sparkline: the rows' content width, aligned with them, under the last row. */
+/* The sparkline: the rows' content width, aligned with them, below them. Its top padding is the
+   seam between the scrolling rows and the pinned footer, so it takes the rail's own 16px edge. */
 .trend {
-  padding: var(--space-2) var(--space-2) 0;
+  padding: var(--space-4) var(--space-2) 0;
 }
 .tplot {
   display: block;
