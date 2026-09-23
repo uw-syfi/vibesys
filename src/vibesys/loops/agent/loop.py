@@ -14,7 +14,7 @@ import subprocess
 from collections.abc import Sequence  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import Any, Literal
+from typing import Literal
 
 from vibesys import constants
 from vibesys.agent_spec_config import resolve_agent_driver
@@ -77,6 +77,11 @@ from vibesys.loops.agent.orchestration import (
     descriptor_from_options,
     legacy_configuration_from_options,
     recorded_objectives,
+)
+from vibesys.loops.agent.roles import (
+    BuiltInAgentRoles,
+    SharedAgentHandle,
+    _invoke_read_only_role,
 )
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.gates import (
@@ -862,63 +867,6 @@ def _terminal_workspace_notice(records: list[RoundRecord]) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _invoke_read_only_role(
-    ctx: LoopContext,
-    *,
-    role: str,
-    checkpoint_label: str,
-    allowed_workspace_paths: tuple[str, ...] = (),
-    **invoke_kwargs: Any,  # noqa: ANN401  # tracked: #288
-) -> Any:  # noqa: ANN401  # tracked: #288
-    """Invoke an evidence-reading role and undo unauthorized mutations.
-
-    Prompt-level role boundaries are useful guidance, but they are not an
-    enforcement mechanism. Commit the framework's current state before the
-    turn, then restore that exact tree if the agent writes tracked or untracked
-    files outside its narrow allowlist. The structured response remains usable
-    after restoration. Allowlisted text files are preserved across a full-tree
-    restore so one permitted write cannot smuggle unrelated candidate edits.
-    """
-    ctx.snapshot_workspace(checkpoint_label)
-    checkpoint = ctx.git.current_sha()
-    if checkpoint is None:
-        raise RuntimeError(f"Cannot isolate {role}: workspace checkpoint is unavailable")  # noqa: TRY003  # tracked: #288
-
-    try:
-        return ctx.invoke(**invoke_kwargs)
-    finally:
-
-        def is_allowed(path: str) -> bool:
-            return any(
-                path == allowed.rstrip("/") or path.startswith(f"{allowed.rstrip('/')}/")
-                for allowed in allowed_workspace_paths
-            )
-
-        changes = ctx.git.pending_changes()
-        unauthorized = [path for path in changes if not is_allowed(path)]
-        if unauthorized:
-            checkout_kwargs: dict[str, Any] = {"clean": True}
-            if allowed_workspace_paths:
-                checkout_kwargs["preserve_paths"] = allowed_workspace_paths
-            if not ctx.git.checkout_tree(checkpoint, **checkout_kwargs):
-                raise RuntimeError(  # noqa: TRY003  # tracked: #288
-                    f"Cannot isolate {role}: failed to restore workspace checkpoint "
-                    f"{checkpoint[:12]}"
-                )
-            remaining = [path for path in ctx.git.pending_changes() if not is_allowed(path)]
-            if remaining:
-                raise RuntimeError(  # noqa: TRY003  # tracked: #288
-                    f"Cannot isolate {role}: workspace is still modified after restore: "
-                    f"{', '.join(remaining[:8])}"
-                )
-            shown = ", ".join(unauthorized[:8])
-            suffix = "" if len(unauthorized) <= 8 else f", ... (+{len(unauthorized) - 8} more)"  # noqa: PLR2004  # tracked: #288
-            ctx.lprint(
-                f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
-                f"attempted by {role}: {shown}{suffix}"
-            )
-
-
 def _is_fresh_cold_start(round_number: int, records: list[RoundRecord]) -> bool:
     """True for round 1 of a fresh run (no prior rounds recorded)."""
     return round_number == 1 and not records
@@ -927,6 +875,7 @@ def _is_fresh_cold_start(round_number: int, records: list[RoundRecord]) -> bool:
 def _run_pre_round_decision(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    agent: SharedAgentHandle,
     round_number: int,
     objective: str,
     carry: _CarryOver,
@@ -948,6 +897,7 @@ def _run_pre_round_decision(  # noqa: PLR0913  # tracked: #288
     )
     decision = _invoke_read_only_role(
         ctx,
+        agent=agent,
         role="orchestrator",
         checkpoint_label=f"round-{round_number}-pre-input",
         kind="orchestrator",
@@ -1005,6 +955,7 @@ def _effective_profiler_definition(  # noqa: ANN202  # tracked: #288
 def _run_profiler(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    agent: SharedAgentHandle,
     round_number: int,
     profile_focus: str,
     modality: str | None,
@@ -1069,6 +1020,7 @@ Write bounded durable profile evidence only below
     try:
         summary = _invoke_read_only_role(
             ctx,
+            agent=agent,
             role="profiler",
             checkpoint_label=f"round-{round_number}-profiler-input",
             allowed_workspace_paths=(profiler_artifact_location,),
@@ -1131,6 +1083,7 @@ def _domain_render_context(
 def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    agent: SharedAgentHandle,
     agent_run_state: AgentRunState,
     round_number: int,
     objective: str,
@@ -1201,6 +1154,7 @@ def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
         label = f"round-{round_number}" + (f"-retry-{attempt - 1}" if attempt > 1 else "") + "-plan"
         plan = _invoke_read_only_role(
             ctx,
+            agent=agent,
             role="orchestrator",
             checkpoint_label=f"{label}-input",
             allowed_workspace_paths=(
@@ -1376,6 +1330,7 @@ def _validate_skill_selections(
 def _run_implementer(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    agent: SharedAgentHandle,
     round_number: int,
     retry: int,
     plan: OrchestratorPlan,
@@ -1467,18 +1422,17 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
     fallback = ResponseFallback(_missing_implementer_response)
     timed_out = False
     try:
-        response = ctx.invoke(
-            kind="implementer",
-            system_prompt=system_prompt,
-            user_prompt=(
+        response = agent.turn_structured(
+            (
                 "Execute the required continuation step for the active hypothesis; "
                 "do not merely restate prior work. Return only the JSON object."
                 if continuation_step
                 else "Work persistently on the active hypothesis and return only the JSON object."
             ),
+            system_prompt=system_prompt,
             response_cls=ImplementerResponse,
             fallback_factory=fallback,
-            round_label=f"round-{round_number}-retry-{retry}-implementer",
+            label=f"round-{round_number}-retry-{retry}-implementer",
             reuse_session=True,
             session_key=AgentSessionKey(SessionScope.HYPOTHESIS, plan.hypothesis_id),
         )
@@ -1509,6 +1463,7 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
 def _run_judge(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    agent: SharedAgentHandle,
     round_number: int,
     retry: int,
     plan: OrchestratorPlan,
@@ -1613,6 +1568,7 @@ def _run_judge(  # noqa: PLR0913  # tracked: #288
     )
     response = _invoke_read_only_role(
         ctx,
+        agent=agent,
         role="judge",
         checkpoint_label=f"round-{round_number}-retry-{retry}-judge-input",
         kind="judge",
@@ -1659,6 +1615,7 @@ def _run_judge(  # noqa: PLR0913  # tracked: #288
 def _run_single_agent_round(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    agent: SharedAgentHandle,
     round_number: int,
     retry: int,
     plan: OrchestratorPlan,
@@ -1748,13 +1705,12 @@ def _run_single_agent_round(  # noqa: PLR0913  # tracked: #288
         official_evaluation_reason=official_evaluation_reason,
         framework_benchmark_enabled=framework_benchmark_enabled,
     )
-    response = ctx.invoke(
-        kind="implementer",
-        system_prompt=system_prompt,
-        user_prompt=(
+    response = agent.turn_structured(
+        (
             "Carry out the orchestrator's task above end-to-end "
             "(implement, self-judge, profile) and return only the JSON object."
         ),
+        system_prompt=system_prompt,
         response_cls=SingleAgentRoundResponse,
         fallback_factory=lambda: SingleAgentRoundResponse(
             summary="Single-agent produced no structured response.",
@@ -1766,7 +1722,7 @@ def _run_single_agent_round(  # noqa: PLR0913  # tracked: #288
             suggestions="",
             profile_analysis="",
         ),
-        round_label=f"round-{round_number}-retry-{retry}-single-agent",
+        label=f"round-{round_number}-retry-{retry}-single-agent",
         reuse_session=True,
         session_key=AgentSessionKey(SessionScope.HYPOTHESIS, plan.hypothesis_id),
     )
@@ -2457,6 +2413,9 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         agent_state_model_type=AgentRunState,
         integration=integration,
     )
+    # This policy declares its participants once. The handles share the
+    # context's existing client; turn order and handoffs remain below.
+    agents = BuiltInAgentRoles.bind(ctx)
     output_sink().run_configured(
         run_log_path=str(ctx.run_log_path),
         project_root=str(ctx.project_root),
@@ -2569,6 +2528,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         # entry to read and must establish runnability itself.
                         pre_decision = _run_pre_round_decision(
                             ctx,
+                            agent=agents.orchestrator,
                             round_number=round_number,
                             objective=objective,
                             carry=carry,
@@ -2579,6 +2539,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         if pre_decision.need_profile and ctx.profiler_kind is not ProfilerKind.NONE:
                             profiler_summary = _run_profiler(
                                 ctx,
+                                agent=agents.profiler,
                                 round_number=round_number,
                                 profile_focus=pre_decision.profile_focus
                                 or "general steady-state benchmark hotspots",
@@ -2596,6 +2557,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                     provisional_candidates = _provisional_candidates_since_official(records)
                     plan = _run_orchestrator_plan(
                         ctx,
+                        agent=agents.orchestrator,
                         agent_run_state=agent_run_state,
                         round_number=round_number,
                         objective=objective,
@@ -2797,6 +2759,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         ctx.reselect_gpu()
                         attempt = _run_implementer(
                             ctx,
+                            agent=agents.implementer,
                             round_number=round_number,
                             retry=retry,
                             plan=plan,
@@ -2904,6 +2867,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         ctx.reselect_gpu()
                         verdict = _run_judge(
                             ctx,
+                            agent=agents.judge,
                             round_number=round_number,
                             retry=retry,
                             plan=plan,
@@ -3095,6 +3059,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         ctx.reselect_gpu()
                         single_agent_response = _run_single_agent_round(
                             ctx,
+                            agent=agents.implementer,
                             round_number=round_number,
                             retry=retry,
                             plan=plan,

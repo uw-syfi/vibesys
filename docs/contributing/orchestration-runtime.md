@@ -70,8 +70,18 @@ mounts, passes the grants to the driver, and rejects drivers that cannot enforce
 them. `AgentHandle.turn(message, system_prompt="", label="")` returns text;
 the policy routes that text. Handles close when execution ends, including on
 failure, and may be closed earlier. Agent IDs must be unique within a run.
+`turn_structured(message, response_cls=..., fallback_factory=...)` returns a
+validated Pydantic response and accepts an optional session key and reuse
+choice. It uses the same run control and event path as text turns.
 Use `AgentDefinition.resources` for grants; nondefault `AgentSpec.execution`
 is rejected by this runtime slice rather than silently ignored.
+
+The built-in multi-agent policy declares orchestrator, implementer, judge, and
+profiler roles as named handles over its existing shared run context. Its policy
+code still chooses whether to profile or review, routes typed plans and feedback,
+and controls retries and round completion. These internal bindings do not call
+`VibeSysRuntime.spawn_agent`; preserving the built-in client, sandbox, hypothesis
+sessions, and round transaction behavior is part of this incremental migration.
 
 This is the first runtime slice. Agents share the run workspace unless the
 selected run environment isolates it. The runtime does not yet offer a generic

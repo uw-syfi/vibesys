@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import uuid
 from contextlib import ExitStack
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
+
+from pydantic import BaseModel
 
 from vibesys.api._orchestrations._common import resolved_run_id
 from vibesys.context import _execution_status, create_run_context
@@ -17,6 +19,7 @@ from vibesys.events import (
     EventStatus,
     InvocationFinishedData,
     InvocationStartedData,
+    json_value,
 )
 from vibesys.profilers import ProfilerKind
 from vibesys.render.sink import output_sink
@@ -31,7 +34,9 @@ if TYPE_CHECKING:
     from vibesys.context import _RunContext
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.runtime import AgentDefinition
-    from vs_agent.api import AgentClientProtocol
+    from vs_agent.api import AgentClientProtocol, MCPServerSpec
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class _RuntimeClosedError(RuntimeError):
@@ -83,6 +88,67 @@ class _LocalAgentHandle:
 
     def turn(self, message: str, *, system_prompt: str = "", label: str = "") -> str:
         """Run one text turn with run control and attributed lifecycle events."""
+        kind = self._definition.id
+
+        def invoke(routed: str, execution_id: str) -> str:
+            return self._client.invoke_text(
+                kind=kind,
+                workspace=self._context.workspace,
+                system_prompt=system_prompt,
+                user_prompt=routed,
+                round_label=label,
+                env=self._agent_env(),
+                invocation_id=execution_id,
+                session_key=AgentSessionKey(SessionScope.ROLE, kind),
+            )
+
+        return self._run_turn(message, system_prompt=system_prompt, label=label, invoke=invoke)
+
+    def turn_structured(  # noqa: PLR0913
+        self,
+        message: str,
+        *,
+        response_cls: type[T],
+        fallback_factory: Callable[[], T],
+        system_prompt: str = "",
+        label: str = "",
+        session_key: AgentSessionKey | None = None,
+        reuse_session: bool | None = None,
+        mcp_servers: list[MCPServerSpec] | None = None,
+    ) -> T:
+        """Run a typed turn through the same control and event path as text turns."""
+        kind = self._definition.id
+
+        def invoke(routed: str, execution_id: str) -> T:
+            return self._client.invoke(
+                kind=kind,
+                workspace=self._context.workspace,
+                system_prompt=system_prompt,
+                user_prompt=routed,
+                response_cls=response_cls,
+                fallback_factory=fallback_factory,
+                round_label=label,
+                env=self._agent_env(),
+                invocation_id=execution_id,
+                session_key=session_key or AgentSessionKey(SessionScope.ROLE, kind),
+                reuse_session=reuse_session,
+                mcp_servers=mcp_servers,
+            )
+
+        return self._run_turn(message, system_prompt=system_prompt, label=label, invoke=invoke)
+
+    def _agent_env(self) -> dict[str, str]:
+        context = self._context
+        return {} if context.run_environment_view.cli_sandboxed else context.device.gpu_env()
+
+    def _run_turn[Result](
+        self,
+        message: str,
+        *,
+        system_prompt: str,
+        label: str,
+        invoke: Callable[[str, str], Result],
+    ) -> Result:
         if self._closed:
             raise _AgentClosedError(self._definition.id)
         context = self._context
@@ -119,19 +185,10 @@ class _LocalAgentHandle:
             data=InvocationStartedData(system_prompt=system_prompt, user_prompt=message),
             **fields,
         )
-        result: str | None = None
+        result: Result | None = None
         error: BaseException | None = None
         try:
-            result = self._client.invoke_text(
-                kind=kind,
-                workspace=context.workspace,
-                system_prompt=system_prompt,
-                user_prompt=message,
-                round_label=label,
-                env={} if context.run_environment_view.cli_sandboxed else context.device.gpu_env(),
-                invocation_id=execution_id,
-                session_key=AgentSessionKey(SessionScope.ROLE, kind),
-            )
+            result = invoke(message, execution_id)
         except BaseException as exc:
             error = exc
             raise
@@ -141,13 +198,13 @@ class _LocalAgentHandle:
             events.emit(
                 CoreEventType.AGENT_EXECUTION_FINISHED,
                 status=status,
-                data=AgentExecutionFinishedData(result=result, error=error_text),
+                data=AgentExecutionFinishedData(result=json_value(result), error=error_text),
                 **fields,
             )
             events.emit(
                 CoreEventType.INVOCATION_FINISHED,
                 status=status,
-                data=InvocationFinishedData(result=result, error=error_text),
+                data=InvocationFinishedData(result=json_value(result), error=error_text),
                 **fields,
             )
         return result

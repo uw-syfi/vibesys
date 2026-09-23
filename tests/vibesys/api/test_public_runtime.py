@@ -6,6 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import BaseModel
 
 from vibesys.api import (
     AgentBackend,
@@ -29,10 +30,10 @@ from vibesys.api import (
 from vibesys.api._orchestrations.runtime import _LocalVibeSysRuntime
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.api.session import _OpenedAgentEnvironment
-from vibesys.events import CoreEventType
+from vibesys.events import AgentExecutionFinishedData, CoreEventType
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.sandbox.run_environment import LocalEnvironment
-from vs_agent.api import AgentExecutionPolicy
+from vs_agent.api import AgentExecutionPolicy, AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import OrchestrationRunManifest, Project
 
@@ -74,6 +75,28 @@ class _ThreeAgentPolicy:
             implementation = worker.turn(plan, label=label)
             feedback = reviewer.turn(implementation, label=label)
         return feedback == "review 2"
+
+
+class _TypedPlan(BaseModel):
+    task: str
+
+
+class _TypedPolicy:
+    def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool:
+        del request
+        planner = runtime.spawn_agent(
+            AgentDefinition("planner", AgentSpec(backend=AgentBackend.STUB, model="typed"))
+        )
+        plan = planner.turn_structured(
+            "choose task",
+            response_cls=_TypedPlan,
+            fallback_factory=lambda: _TypedPlan(task="fallback"),
+            system_prompt="plan carefully",
+            label="round-1-plan",
+            session_key=AgentSessionKey(SessionScope.ROLE, "planner"),
+            reuse_session=True,
+        )
+        return plan.task == "implement"
 
 
 class _CleanupError(RuntimeError):
@@ -254,6 +277,43 @@ def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
         open_run_store(Project.open(project_root)).get_run(result.run_id).loop
         == "three-agent-rounds"
     )
+
+
+def test_structured_turn_preserves_schema_session_and_event_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    client = FakeAgentClient().enqueue("planner", _TypedPlan(task="implement"))
+    monkeypatch.setattr(
+        "vibesys.api._orchestrations.runtime.build_agent_client", lambda **_kwargs: client
+    )
+    request = _request(project_root)
+    registry = OrchestrationRegistry()
+    registry.register("three-agent-rounds", _TypedPolicy())
+    events: list[CoreEvent] = []
+
+    def record(event: CoreEvent) -> None:
+        events.append(event)
+
+    session = create_session(request, sink=record, registry=registry)
+
+    session.start()
+    assert asyncio.run(session.await_result()).succeeded
+
+    call = client.calls_for("planner")[0]
+    assert call.method == "invoke"
+    assert call.response_cls is _TypedPlan
+    assert call.session_key == AgentSessionKey(SessionScope.ROLE, "planner")
+    assert call.reuse_session is True
+    assert call.system_prompt == "plan carefully"
+    assert call.user_prompt == "choose task"
+    finished = next(
+        event for event in events if event.type is CoreEventType.AGENT_EXECUTION_FINISHED
+    )
+    assert isinstance(finished.data, AgentExecutionFinishedData)
+    assert finished.data.result == {"task": "implement"}
+    assert finished.round_label == "round-1-plan"
 
 
 def test_custom_resume_requires_policy_checkpoint_contract(tmp_path: Path) -> None:
