@@ -18,10 +18,6 @@ if TYPE_CHECKING:
     from vs_project.api import Project, RunManifestRecord
 
 
-class UnsupportedOrchestrationRunError(TypeError):
-    """A version 4 run has no projection in the legacy loop-specific view."""
-
-
 class RunStore(Protocol):
     """Read-only history of runs recorded under one project.
 
@@ -85,9 +81,9 @@ class _LocalRunStore:
     def _view(self, manifest: RunManifestRecord) -> RunView:
         if isinstance(manifest, OrchestrationRunManifest):
             try:
-                loop = LoopKind(manifest.orchestration.id)
-            except ValueError as exc:
-                raise UnsupportedOrchestrationRunError from exc
+                loop: LoopKind | str = LoopKind(manifest.orchestration.id)
+            except ValueError:
+                loop = manifest.orchestration.id
         else:
             loop = LoopKind(manifest.configuration.outer_loop)
         state = load_agent_run_state(self._project, manifest.run_id) or AgentRunState()

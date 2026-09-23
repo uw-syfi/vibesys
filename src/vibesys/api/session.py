@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vibesys.api._orchestrations.contracts import OrchestrationRegistry
     from vibesys.api.contracts import AgentEnvironment, EventSink, RunRequest, RunView
     from vibesys.config import Config
     from vibesys.run.integration import RunResourceHandoff
@@ -123,16 +124,22 @@ class RunSession(RunQuery, RunWorkspace, RunControl, RunAgentHost, Protocol):
         ...
 
 
-def create_session(request: RunRequest, *, sink: EventSink) -> RunSession:
+def create_session(
+    request: RunRequest,
+    *,
+    sink: EventSink,
+    registry: OrchestrationRegistry | None = None,
+) -> RunSession:
     """Build a session for *request*, publishing its event stream to *sink*.
 
     Headless calls `create_session(req, sink=renderer.handle).start()`
     then `await session.await_result()`; server does the same with its own
     presentation sink, and reaches optional committed-state/resource-handoff
     seams through `on_committed_view`/`on_run_resources` instead of an
-    injected integration object.
+    injected integration object. Pass a registry to execute a custom
+    orchestration ID; otherwise the built-in registry is used.
     """
-    return _LocalRunSession(request, sink=sink)
+    return _LocalRunSession(request, sink=sink, registry=registry)
 
 
 class _LocalRunSession:
@@ -148,9 +155,11 @@ class _LocalRunSession:
         request: RunRequest,
         *,
         sink: EventSink,
+        registry: OrchestrationRegistry | None,
     ) -> None:
         self._request = request
         self._sink = sink
+        self._registry = registry
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -254,14 +263,14 @@ class _LocalRunSession:
             CoreEventType.RUN_STARTED,
             status=EventStatus.ACTIVE,
             data=RunStartedData(
-                outer_loop=request.loop.value,
+                outer_loop=request.orchestration_id,
                 input=str(request.input_bundle.root),
                 max_rounds=_max_rounds_for_started_event(request),
                 expected_roles=_expected_roles(request),
             ),
         )
         try:
-            succeeded = dispatch_loop(request, self._integration)
+            succeeded = dispatch_loop(request, self._integration, registry=self._registry)
         except BaseException as exc:
             self._status = RunStatus.FAILED
             self._integration.events.emit(
@@ -278,7 +287,7 @@ class _LocalRunSession:
             )
             return RunResult(
                 run_id=resolved_run_id(request),
-                loop=request.loop,
+                loop=request.selected_loop,
                 succeeded=succeeded,
             )
         finally:
@@ -295,14 +304,17 @@ class _LocalRunSession:
         (`ACTIVE` until it returns or raises), not a re-derivation from state.
         """
         run_id = resolved_run_id(self._request)
-        project = Project.open(self._request.project_root)
-        state = load_agent_run_state(project, run_id) or AgentRunState()
+        if self._request.orchestration is not None:
+            state = AgentRunState()
+        else:
+            project = Project.open(self._request.project_root)
+            state = load_agent_run_state(project, run_id) or AgentRunState()
         return project_run_view(
             state,
             run_id=run_id,
             status=self._status,
             experiment_revision=state.experiment_revision,
-            loop=self._request.loop,
+            loop=self._request.selected_loop,
         )
 
     def workspace(self) -> HostResource:
@@ -429,6 +441,8 @@ def _max_rounds_for_started_event(request: RunRequest) -> int:
 
 
 def _expected_roles(request: RunRequest) -> tuple[str, ...]:
+    if request.loop is None:
+        return ()
     roles = expected_agent_roles(request.loop.value)
     if request.profiler_kind is ProfilerKind.NONE:
         # A disabled profiler never runs (see loop.py's profiler-kind gate),

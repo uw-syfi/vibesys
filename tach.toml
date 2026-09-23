@@ -139,7 +139,7 @@ depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "v
 
 [[modules]]
 path = "vibesys.api.contracts"
-depends_on = ["vs_agent", "vibesys", "vibesys.loops.evolve", "vibesys.evaluators", "vs_sandbox", "vibesys.loops", "vibesys.sandbox"]
+depends_on = ["vs_agent", "vibesys", "vibesys.loops.evolve", "vibesys.evaluators", "vs_sandbox", "vibesys.loops", "vibesys.sandbox", "vs_project"]
 
 [[modules]]
 path = "vibesys.api._orchestrations"

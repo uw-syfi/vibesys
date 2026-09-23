@@ -31,13 +31,13 @@ def _required_objective(request: RunRequest) -> str:
             ConfigurationDiagnostic(
                 code="missing_objective",
                 stage="dispatch",
-                message=f"RunRequest for outer loop {request.loop.value!r} must set objective",
+                message=f"RunRequest for outer loop {request.orchestration_id!r} must set objective",
             )
         )
     return request.objective
 
 
-def _agent_outer_loop(loop: LoopKind) -> Literal["agent", "profile-guided"]:
+def _agent_outer_loop(loop: LoopKind | None) -> Literal["agent", "profile-guided"]:
     """Narrow `loop` to the two values registered for the agent adapter.
 
     The registry maps `LoopKind.AGENT` and `LoopKind.PROFILE_GUIDED` to the

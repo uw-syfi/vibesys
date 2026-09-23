@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from vibesys.api.contracts import LoopKind, RunRequest
+    from vibesys.api.contracts import RunRequest
     from vibesys.run.integration import LocalRunIntegration
 
 
@@ -19,17 +19,20 @@ class OrchestrationRegistry:
     """Map stable loop IDs to implementations, rejecting duplicate registrations."""
 
     def __init__(self) -> None:
-        self._implementations: dict[LoopKind, Orchestration] = {}
+        self._implementations: dict[str, Orchestration] = {}
 
-    def register(self, kind: LoopKind, implementation: Orchestration) -> None:
+    def register(self, kind: str, implementation: Orchestration) -> None:
+        if not kind:
+            msg = "orchestration ID must not be empty"
+            raise ValueError(msg)
         if kind in self._implementations:
-            msg = f"orchestration {kind.value!r} is already registered"
+            msg = f"orchestration {kind!r} is already registered"
             raise ValueError(msg)
         self._implementations[kind] = implementation
 
-    def resolve(self, kind: LoopKind) -> Orchestration:
+    def resolve(self, kind: str) -> Orchestration:
         try:
             return self._implementations[kind]
         except KeyError as exc:
-            msg = f"orchestration {kind.value!r} is not registered"
+            msg = f"orchestration {kind!r} is not registered"
             raise ValueError(msg) from exc

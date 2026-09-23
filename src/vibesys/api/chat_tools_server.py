@@ -70,7 +70,7 @@ def _run_summary_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
         view = store.get_run(run_id)
         return (
             f"run_id: {view.run_id}\n"
-            f"loop: {view.loop.value}\n"
+            f"loop: {view.loop}\n"
             f"status: {view.status.value}\n"
             f"current_round: {view.current_round}\n"
             f"active_hypothesis_id: {view.active_hypothesis_id or '(none)'}\n"
