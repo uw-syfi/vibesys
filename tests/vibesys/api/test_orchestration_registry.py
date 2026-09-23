@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -33,6 +33,7 @@ from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Pr
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.api.session import _LocalRunSession
     from vibesys.orchestration import ResumeProjection
 
 _EXAMPLE = "examples/model-serving/whisper-large-v3"
@@ -185,6 +186,56 @@ def test_policy_owns_start_metadata_and_live_and_stored_views(tmp_path: Path) ->
     )
     assert stored.current_round == 7
     assert stored.status is RunStatus.UNKNOWN
+
+
+def test_custom_policy_projects_committed_state_for_its_own_namespace(tmp_path: Path) -> None:
+    class Evidence(BaseModel):
+        revision: int
+
+    class EvidencePolicy(_StubOrchestration):
+        def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool:
+            # Exercise commits while the run is active and its ID is provisioned.
+            session._integration.publish_committed_state(  # noqa: SLF001
+                "unrelated", Evidence(revision=1)
+            )
+            session._integration.publish_committed_state(  # noqa: SLF001
+                "evidence", Evidence(revision=4), changed_keys=("candidate-4",)
+            )
+            return super().execute(request, runtime)
+
+        def project_committed(
+            self, namespace: str, state: BaseModel, *, run_id: str
+        ) -> RunView | None:
+            if namespace != "evidence":
+                return None
+            assert isinstance(state, Evidence)
+            return RunView(
+                run_id=run_id,
+                loop="team-search",
+                status=RunStatus.ACTIVE,
+                current_round=state.revision,
+                experiment_revision=state.revision,
+            )
+
+    request = _custom_request(tmp_path)
+    registry = OrchestrationRegistry()
+    registry.register("team-search", EvidencePolicy(result=True))
+
+    def discard(event: CoreEvent) -> None:
+        del event
+
+    session = cast("_LocalRunSession", create_session(request, sink=discard, registry=registry))
+    committed: list[tuple[RunView, tuple[str, ...] | None]] = []
+    session.on_committed_view(lambda view, keys: committed.append((view, keys)))
+
+    result = asyncio.run(session.await_result())
+
+    assert len(committed) == 1
+    view, keys = committed[0]
+    assert view.run_id == result.run_id
+    assert view.loop == "team-search"
+    assert view.current_round == 4
+    assert keys == ("candidate-4",)
 
 
 def test_descriptor_request_runs_without_legacy_loop_fields(tmp_path: Path) -> None:
