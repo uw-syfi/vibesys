@@ -1,7 +1,17 @@
+/* The rows scroll; the trend and the rounds-left line below them do not, so they stay at the
+   bottom of the rail whatever the round count. The rail's own padding separates them, as it
+   separates every other edge: the rows are clipped by their own box, so nothing shows through. */
 .rail {
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: var(--space-4) var(--space-3);
   border-right: 1px solid var(--border);
+}
+.rail-rows {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
 }
 .rrow {
   display: grid;
@@ -106,6 +116,7 @@
 @media (max-width: 767px) {
   .rail {
     display: flex;
+    flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
     column-gap: var(--space-1);

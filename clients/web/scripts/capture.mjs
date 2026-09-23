@@ -151,6 +151,22 @@ const FAN_IN = events =>
   events.map(event =>
     event.sequence === 129 ? {...event, data: {...event.data, model: 'claude-sonnet-5'}} : event,
   );
+// Rounds 9 to 32, cloned from the stub's last hypothesis with a rising metric. No recording has
+// enough rounds to scroll the rail at 900px tall, which is the state that pins the trend.
+const MANY_ROUNDS = [
+  ...STUB_EXPERIMENTS,
+  ...Array.from({length: 24}, (unused, index) => {
+    const last = STUB_EXPERIMENTS.at(-1);
+    const round = 9 + index;
+    return {
+      ...last,
+      hypothesis_id: `H-${String(round).padStart(2, '0')}`,
+      first_round: round,
+      last_round: round,
+      rounds: [{...last.rounds.at(-1), round, perf_metric: 1320 + index * 6}],
+    };
+  }),
+];
 const rail = (page, round) =>
   page.getByRole('navigation', {name: 'Rounds'}).getByRole('button', {name: new RegExp(`^R${round}\\b`)});
 
@@ -260,6 +276,16 @@ const REPLAY = [
       await page.getByRole('img', {name: 'Metric trend: 900 to 1.315K, R0 to R8'}).waitFor();
     },
     expect: ['R0', '+11.1%', 'vs R0'],
+  },
+  {
+    // 32 rounds overflow the rail at 900px tall. The rows scroll; the trend and the rounds-left
+    // line stay at the bottom of the rail.
+    name: 'many-rounds',
+    fixture: stub({experiments: MANY_ROUNDS}),
+    widths: [1440],
+    after: page => page.getByRole('img', {name: /^Metric trend: .* R1 to R32$/}).waitFor(),
+    each: page => page.locator('.rail-rows').evaluate(rows => rows.scrollTo(0, rows.scrollHeight)),
+    expect: ['R32'],
   },
   {
     // A 300-event tail hides rounds 1-3; selecting R3 backfills once and shows its steer.
