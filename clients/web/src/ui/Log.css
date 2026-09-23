@@ -23,7 +23,9 @@
   display: grid;
 }
 /* A full-width header, so rows get the whole measure. Sticky, so the acting role stays named
-   while its rows scroll under it; opaque, so they disappear cleanly at its edge. */
+   while its rows scroll under it; opaque, so they disappear cleanly at its edge. It carries the
+   rows' own bleed, or a row passing under it leaks the 8px its band sits outside the text into
+   the gutter beside the role name. */
 .who {
   position: sticky;
   top: 0;
@@ -31,7 +33,10 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  width: calc(100% + 2 * var(--space-2));
   height: 22px;
+  margin: 0 calc(-1 * var(--space-2));
+  padding: 0 var(--space-2);
   background: var(--canvas);
   color: var(--text-muted);
   font-weight: 500;

@@ -69,8 +69,12 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
   const scroller = useRef<HTMLDivElement>(null);
   const [away, setAway] = useState(false);
   const rows = groups.reduce((total, group) => total + leaves(group.items), 0);
-  /** The row the cursor was last on, by DOM id: focus can be taken away, this cannot. */
-  const held = useRef<string | null>(null);
+  /**
+   * The row the cursor was last on. `node` is the element while it still holds focus, so a
+   * commit that took focus away can be told from the reader moving it; `id` outlives the node,
+   * because a row can be remounted rather than hidden and the new one answers to the same id.
+   */
+  const held = useRef<{node: HTMLElement | null; id: string} | null>(null);
   /** Rows at the moment the reader left the live edge: the count the button reports is since. */
   const mark = useRef(0);
   const fresh = Math.max(0, rows - mark.current);
@@ -92,17 +96,23 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
     return () => observer.disconnect();
   }, [follow, away, groups]);
 
-  // A render can put the cursor's row inside a fold that closed over it, or drop the row for a
-  // new one: an adjacent call of the same verb settling folds a run, and a new role speaking
-  // collapses the group the cursor was in. Chromium then blurs to <body>, where the log's
-  // keydown never fires and the global handler reads the arrows as the rail's, so a reader
-  // pressing up to move one row loses the round instead. Focus comes back to the scroller.
+  // A render can hide the cursor's row behind a fold that closed over it, or replace it with a
+  // new node: an adjacent call of the same verb settling folds a run, a new role speaking
+  // collapses the group the cursor was in, and a steer row in a collapsing group is remounted
+  // into the branch that renders outside the fold. Chromium then blurs to <body>, where the
+  // log's keydown never fires and the global handler reads the arrows as the rail's, so a
+  // reader pressing up to move one row loses the round instead.
+  //
+  // The test is on the node that held focus, not on its id: a remounted row answers to the id
+  // with a node that never had focus, and <body> holds focus for plenty of reasons that are
+  // none of the log's business.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `groups` is what can hide a row.
   useLayoutEffect(() => {
-    const id = held.current;
-    if (id === null || document.activeElement !== document.body) return;
-    if (document.getElementById(id)?.checkVisibility()) return;
-    held.current = null;
+    const was = held.current;
+    if (was === null || was.node === null || document.activeElement !== document.body) return;
+    if (was.node.isConnected && was.node.checkVisibility()) return;
+    // The id stays: a remount put a new row there, and the reader can still Tab back to it.
+    held.current = {node: null, id: was.id};
     scroller.current?.focus({preventScroll: true});
   }, [groups]);
 
@@ -207,13 +217,24 @@ export function Log({state, round, groups, follow, history, selected, onSelect, 
         onFocus={event => {
           const row = (event.target as HTMLElement).closest<HTMLElement>('[data-row]');
           if (row !== null) {
-            held.current = row.id;
+            held.current = {node: row, id: row.id};
             return;
           }
+          // Only focus arriving from outside is a reader coming back. Focus arriving from a row
+          // is Shift+Tab on its way out, and handing it back would make the log a one-way door.
+          if (event.currentTarget.contains(event.relatedTarget)) return;
           // The scroller is the log's one tab stop and the cursor is focus, so a trip out and
           // back would otherwise lose it: Tab back in returns to the row it was on.
-          const back = held.current === null ? null : document.getElementById(held.current);
+          const back = held.current === null ? null : document.getElementById(held.current.id);
           if (back?.checkVisibility()) back.focus({preventScroll: true});
+        }}
+        onBlur={event => {
+          // Focus the reader moved themselves, off a row that is still there to hold it: the
+          // cursor stays for a Tab back, but the restore above must not claim it.
+          const was = held.current;
+          if (was?.node != null && was.node === event.target && was.node.checkVisibility()) {
+            held.current = {node: null, id: was.id};
+          }
         }}
         // Delegated, so a row stays a row rather than becoming one tab stop each: the keyboard
         // path is the cursor this scroller carries.

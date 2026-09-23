@@ -337,6 +337,25 @@ async function checkInteractions(browser, origin) {
     // The header's context meter, from the run's own usage_update.
     await page.getByRole('banner').getByText('12k/200k context').waitFor();
 
+    // The sticky role header covers the rows' own band, or a selected row passing under it
+    // leaks its edge mark into the gutter beside the role name. The band itself is unchanged:
+    // 20px rows on a 22px pitch.
+    const band = await log.evaluate(node => {
+      const group = [...node.querySelectorAll('.grp')].find(
+        grp => grp.querySelector(':scope > .what > .row') !== null,
+      );
+      const what = group.querySelector(':scope > .what');
+      const row = what.querySelector(':scope > .row').getBoundingClientRect();
+      const who = group.querySelector('.who').getBoundingClientRect();
+      // Row height plus the gap between rows is the pitch.
+      const gap = Number.parseFloat(getComputedStyle(what).rowGap);
+      return [who.left, row.left, who.right, row.right, row.height, row.height + gap];
+    });
+    assert.deepEqual(band.slice(0, 2), [band[1], band[1]], 'the header left the rows a gutter');
+    assert.deepEqual(band.slice(2, 4), [band[3], band[3]], 'the header left the rows a gutter');
+    assert.equal(band[4], 20, 'the row height moved');
+    assert.equal(band[5], 22, 'the row pitch moved');
+
     // The live row carries both marks when it is also the selected one: the tint says which
     // call is running, the edge says which one the inspector is quoting.
     const running = log.locator('.row.now');
@@ -355,6 +374,8 @@ async function checkInteractions(browser, origin) {
     // Arrows in the log move a row cursor that is real focus, so it is announced; the round
     // stays where it is, and so does every row.
     const cursor = () => page.evaluate(() => document.activeElement?.id ?? null);
+    const inLog = () =>
+      page.evaluate(() => document.getElementById('log')?.contains(document.activeElement));
     const onCall = await cursor();
     assert.match(onCall, /^row-/, 'clicking a row put the cursor on it');
     await page.keyboard.press('Escape');
@@ -402,6 +423,12 @@ async function checkInteractions(browser, origin) {
     );
     await page.keyboard.press('Shift+Tab');
     assert.equal(await cursor(), await call.getAttribute('id'), 'Shift+Tab lost the cursor');
+    // And out again: focus arriving from inside is Shift+Tab leaving, not a reader coming back,
+    // so the log is not a one-way door. The scroller is the stop it steps back through.
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await cursor(), 'log', 'Shift+Tab from a row bounced back to it');
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await inLog(), false, 'Shift+Tab could not leave the log');
 
     // Enter on a tool row fills the inspector, and moves no row doing it.
     await call.focus();
@@ -421,7 +448,12 @@ async function checkInteractions(browser, origin) {
         id,
       );
       assert.equal(shown, false, `${what} did not hide the cursor's row`);
-      assert.equal(await cursor(), 'log', `${what} left focus on ${await cursor()}`);
+      await recoveredFocus(what);
+    };
+    // Focus back inside the log, wherever it landed: on <body> the log's keys are dead and the
+    // global handler reads the arrows as the rail's, so the next press would move the round.
+    const recoveredFocus = async what => {
+      assert.equal(await inLog(), true, `${what} left focus on ${await cursor()}`);
       await page.keyboard.press('ArrowUp');
       assert.equal(await log.getAttribute('aria-label'), 'Round 2 log', `${what} lost the round`);
     };
@@ -444,6 +476,45 @@ async function checkInteractions(browser, origin) {
     );
     await log.locator('.who', {hasText: 'Judge'}).waitFor();
     await recovered('a group collapsing', lastId);
+    // Three: the cursor on a steer row when its group collapses. A collapsed group renders its
+    // steers outside the fold, so that row is not hidden, it is built again from nothing: the
+    // id still resolves, to a node that never had focus.
+    const steered = text =>
+      [
+        {
+          ...event('control', 2, 'implementer', null),
+          status: 'pending',
+          text: `/steer: ${text}`,
+        },
+        {...event('control', 2, 'implementer', null), status: 'consumed', text: '/steer'},
+      ].map(({data, ...rest}) => rest);
+    push([
+      ...lines(2, 'implementer', 'Before the steer', 1),
+      ...steered('Look at the harness'),
+      ...lines(2, 'implementer', 'After the steer', 1),
+    ]);
+    const said = log.locator('.said:visible', {hasText: 'Look at the harness'});
+    await said.waitFor();
+    await said.focus();
+    const saidId = await said.getAttribute('id');
+    // Marked, so the assertion below can tell a node that was rebuilt from one that was kept.
+    await page.evaluate(id => {
+      document.getElementById(id).dataset.probe = 'held';
+    }, saidId);
+    push(
+      [event('phase_started', 2, 'profiler', {kind: 'phase', phase: 'profiler', attempt: null})],
+      [
+        implementer,
+        {...implementer, execution_id: 'profiler-2', agent_kind: 'profiler', stage: 'profiler'},
+      ],
+    );
+    await log.locator('.who', {hasText: 'Profiler'}).waitFor();
+    const after = await page.evaluate(id => {
+      const row = document.getElementById(id);
+      return row === null ? 'gone' : row.dataset.probe === 'held' ? 'kept' : 'rebuilt';
+    }, saidId);
+    assert.equal(after, 'rebuilt', 'the steer row was not remounted: this case tests nothing');
+    await recoveredFocus('a steer remounting');
 
     // Away from the live edge the pill counts what arrived since, and `l` goes back to it.
     // Back at the edge first, so the count is taken from a mark this test set. `l` does it
