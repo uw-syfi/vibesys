@@ -13,7 +13,7 @@ export interface HeaderProps {
 const icon = {size: 16, strokeWidth: 1.75, 'aria-hidden': true} as const;
 
 export function Header({model, error, onControl}: HeaderProps) {
-  const {project, objective, startedAt, endedAt, control} = model;
+  const {project, objective, startedAt, endedAt, usage, control} = model;
   return (
     <header className="hdr">
       <a className="brand" href="/">
@@ -42,6 +42,12 @@ export function Header({model, error, onControl}: HeaderProps) {
             (endedAt === null ? now.getTime() : Date.parse(endedAt)) - Date.parse(startedAt)
           }
         />
+      )}
+      {usage === null ? null : (
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: focus shows the tooltip that names it.
+        <span className="ctx mono" tabIndex={0} data-tip="Context the last agent call carried">
+          {usage}
+        </span>
       )}
       {error === null ? null : (
         <p className="ctl-error" role="alert">

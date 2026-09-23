@@ -186,6 +186,8 @@ export interface HeaderModel {
   objective: {first: string; full: string} | null;
   startedAt: string | null;
   endedAt: string | null;
+  /** How close the last agent call came to its context ceiling; null when none reported it. */
+  usage: string | null;
   control: RunControl;
 }
 

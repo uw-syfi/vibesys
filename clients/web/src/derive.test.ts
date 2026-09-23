@@ -36,6 +36,7 @@ import {
   steers,
   steersNeedOlder,
   trendModel,
+  usageText,
 } from './derive.js';
 import type {AgentGraph, Connection, GraphNode, LogItem, PlacedNode} from './model.js';
 import {CAPTURED_TYPES} from './session.js';
@@ -300,6 +301,40 @@ test('header: project basename, run clock bounds', () => {
     first: 'Optimize a queue.',
     full: 'Optimize a queue.\n\nKeep the C ABI. Stay linearizable.',
   });
+});
+
+test('context meter: the count alone unless a window honestly bounds it', () => {
+  const meter = (inputTokens: number, contextWindow: number | null) =>
+    usageText(
+      fold([
+        {
+          sequence: 1,
+          type: 'usage_update',
+          timestamp: '2026-08-31T21:04:26Z',
+          round_label: 'round-1-pre',
+          agent_kind: 'orchestrator',
+          data: {
+            kind: 'usage_update',
+            input_tokens: inputTokens,
+            context_window: contextWindow,
+            model: 'claude-opus-5',
+          },
+        } as RunEvent,
+      ]),
+    );
+  assert.equal(usageText(initialCoreState()), null, 'no usage_update, no meter');
+  assert.equal(meter(0, 200_000), null, 'a call that carried nothing says nothing');
+  // The recording's own value, which is what the header renders from it.
+  assert.equal(meter(2, 200_000), '2/200k context');
+  assert.equal(meter(12_400, 200_000), '12k/200k context');
+  assert.equal(meter(1_240_000, 2_000_000), '1.2M/2.0M context');
+  assert.equal(meter(12_400, null), '12k tokens', 'no window, no ratio');
+  assert.equal(meter(220_000, 200_000), '220k tokens', 'a ratio over 100% is not a true statement');
+  assert.equal(
+    headerModel(fold(upTo(QUEUE, 623)), [], 'connected', null).usage,
+    '2/200k context',
+    'the header carries the meter',
+  );
 });
 
 test('header objective: soft wraps joined, paragraphs and list items kept, backticks stripped', () => {

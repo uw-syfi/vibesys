@@ -158,6 +158,15 @@ const RETRY_LABEL = events =>
       ? {...event, round_label: 'round-1-retry-2-implementer'}
       : event,
   );
+// Every usage_update in the recording carries 2 input tokens against a 200k window, so the live
+// frames show `2/200k context` and nothing shows the meter near its ceiling. This raises the
+// count the way `baseline` invents a baseline value; the window stays the recording's.
+const NEAR_FULL = events =>
+  events.map(event =>
+    event.data?.kind === 'usage_update'
+      ? {...event, data: {...event.data, input_tokens: 184_320}}
+      : event,
+  );
 // Rounds 9 to 32, cloned from the stub's last hypothesis with a rising metric. No recording has
 // enough rounds to scroll the rail at 900px tall, which is the state that pins the trend.
 const MANY_ROUNDS = [
@@ -204,10 +213,19 @@ const REPLAY = [
       'Pause',
       'Measure baseline vs ring, 3 reps each',
       'Pending',
+      // The recording's own usage_update, in the header's context meter.
+      '2/200k context',
       // Graph only: a role the round has not reached, and the model the live agent runs on.
       'Profiler',
       'claude-opus-5',
     ],
+  },
+  {
+    // The context meter near its ceiling, which no recording reaches.
+    name: 'context',
+    fixture: queue(NEAR_FULL(upTo(QUEUE, 623)), {active: QUEUE_ACTIVE}),
+    widths: [1440, 390],
+    expect: ['184k/200k context'],
   },
   {
     // Five roles overflow the graph row at every width, which is what the edge fade marks.

@@ -1011,6 +1011,31 @@ function objective(text: string | null | undefined): HeaderModel['objective'] {
   return {first, full};
 }
 
+function tokenCount(count: number): string {
+  if (count < 1_000) return String(count);
+  if (count < 1_000_000) return `${Math.floor(count / 1_000)}k`;
+  return `${(count / 1_000_000).toFixed(1)}M`;
+}
+
+/**
+ * The context meter, with an honest denominator or none at all, as the TUI writes it
+ * (`tui/src/ui/header.ts`, `usageText`).
+ *
+ * `inputTokens` is the context the last agent call carried; `contextWindow` is a static
+ * per-model lookup that can be absent or stale. When the two disagree the count alone is the
+ * true statement, since a ratio over 100% is not one. Labelled `context` rather than `tokens`:
+ * the denominator bounds one call's context, and "tokens" reads as run spend.
+ */
+export function usageText(core: CoreState): string | null {
+  const usage = core.usage;
+  if (usage === null || usage.inputTokens <= 0) return null;
+  const used = tokenCount(usage.inputTokens);
+  if (usage.contextWindow === null || usage.inputTokens > usage.contextWindow) {
+    return `${used} tokens`;
+  }
+  return `${used}/${tokenCount(usage.contextWindow)} context`;
+}
+
 export function headerModel(
   core: CoreState,
   captured: readonly RunEvent[],
@@ -1023,6 +1048,7 @@ export function headerModel(
     project: input?.split('/').filter(Boolean).at(-1) ?? null,
     objective: objective(context?.objective_description),
     startedAt: started?.timestamp ?? null,
+    usage: usageText(core),
     endedAt: hasRunEnded(core)
       ? (captured.find(event => TERMINAL.has(event.type))?.timestamp ?? null)
       : null,

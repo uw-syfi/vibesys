@@ -38,6 +38,11 @@
 .elapsed {
   color: var(--text-muted);
 }
+/* How close the last agent call came to its context ceiling. Nothing else on screen says it. */
+.ctx {
+  flex: none;
+  color: var(--text-muted);
+}
 .ctl {
   display: flex;
   align-items: center;
