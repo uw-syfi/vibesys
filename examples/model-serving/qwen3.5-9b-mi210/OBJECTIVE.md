@@ -77,3 +77,22 @@ metric" for the secondary metrics.
 `accuracy_checker/` gates the candidate against HF transformers greedy output
 and teacher-forced logprobs. Throughput counts only if that gate passes; do
 not trade correctness for throughput, and do not retune its thresholds.
+
+## Held-out evaluation (anti-overfitting safeguard)
+
+`quick` and `full` mode replay fixed prefixes (sessions 0-59 and 0-259) of one
+6000-session synthetic trace, and every optimization on this task is tuned
+against those same sessions. `benchmark/run.py --mode holdout` replays a
+disjoint, fixed 260-session slice of the same trace (sessions 3000-3259; see
+`benchmark/README.md` "Held-out evaluation" and `benchmark/slice_trace.py`)
+that no `quick`/`full` run ever touches. Every mode's warmup sub-run also
+replays its own disjoint pool (sessions 5000-5011), never a prefix of the
+measured sessions -- see `README.md` "Warmup".
+
+Binding rule: holdout is never used to tune a knob or choose between
+candidates -- that stays on `quick`/`full`. It is run only at milestones (e.g.
+a parity or win claim vs. tuned vLLM), always paired with tuned vLLM
+(`benchmark/vllm_baseline.sh`) on the same node in the same job. A claimed
+win or parity result must hold on holdout too; a `full`-mode win that does not
+reproduce on holdout is evidence of overfitting to the tuned sessions, not
+noise, and must not be reported as a validated result.

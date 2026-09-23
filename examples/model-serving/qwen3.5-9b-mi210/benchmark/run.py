@@ -8,28 +8,52 @@ completions server, and reports a single headline throughput number plus
 supporting percentiles.
 
 Modes:
-  smoke  -- seconds. Validates plumbing only: a `session_runner --dry-run`
-            static trace check (no server contact, so it cannot trip the
-            prefix-cache preflight) plus a direct HTTP liveness/shape check
-            against the live server. Produces no throughput number.
-  quick  -- ~2-3 minutes of replay against a vLLM-class server. Small warmup
-            sub-run, then a measured sub-run over a session subset.
-  full   -- ~10 minutes of replay against a vLLM-class server. Same shape
-            as quick, larger subset.
+  smoke   -- seconds. Validates plumbing only: a `session_runner --dry-run`
+             static trace check (no server contact, so it cannot trip the
+             prefix-cache preflight) plus a direct HTTP liveness/shape check
+             against the live server. Produces no throughput number.
+  quick   -- ~2-3 minutes of replay against a vLLM-class server. Small warmup
+             sub-run, then a measured sub-run over a session subset.
+  full    -- ~10 minutes of replay against a vLLM-class server. Same shape
+             as quick, larger subset.
+  holdout -- same shape and session count as full, but replays a disjoint,
+             fixed slice (sessions 3000-3259 of the same seed-42 trace, see
+             traces/coding_session_3000-3299.csv and slice_trace.py) that
+             quick/full never touch. NEVER use holdout to tune a knob or
+             choose between candidates -- see ../README.md "Held-out
+             evaluation" and ../OBJECTIVE.md for the binding rule.
+
+Warmup (kernel compile, HIP/CUDA graph capture, allocator warm-up) runs
+against its own checked-in pool, `traces/coding_session_5000-5011.csv` --
+12 sessions disjoint from every mode's measured range (0-259, 3000-3259),
+for every mode. Before this, quick/full warmed up on sessions 0-11 of their
+own measured trace, so those 12 sessions started pre-cached during
+measurement; see ../README.md "Warmup" for what that means for numbers
+recorded before this change.
 
 Prefix-cache preflight (see ../README.md "Prefix-cache preflight" section):
 session_runner runs a hard, unconditional prefix-cache preflight before any
 `text-generation-session-execution-v2` replay (source-verified: there is no
 flag to skip it for a session-topology trace). Against a server that never
-reports a genuine cache hit, `quick`/`full` will fail loudly at that gate --
-this is the tool working as intended, not a bug in this harness. `smoke` mode
-exists precisely so plumbing can still be validated against such a server.
+reports a genuine cache hit, `quick`/`full`/`holdout` will fail loudly at
+that gate -- this is the tool working as intended, not a bug in this
+harness. `smoke` mode exists precisely so plumbing can still be validated
+against such a server.
 
 Inputs: --trace/--text-file win; else $QWEN35_BENCH_ASSETS names a directory
 holding `coding_session_synthetic.csv` and `corpus.txt`; else the checked-in
-trace slice (traces/coding_session_0000-0259.csv, digest-checked) and the
-corpus that fetch_corpus.py builds and verifies. The tokenizer comes from
---tokenizer or the Hugging Face cache ($HF_HOME, default ~/.cache/huggingface).
+trace slice for the mode (digest-checked: coding_session_0000-0259.csv for
+smoke/quick/full, coding_session_3000-3299.csv for holdout) and the corpus
+that fetch_corpus.py builds and verifies. An explicit --trace/$QWEN35_BENCH_ASSETS
+override is taken as-is and is the caller's responsibility to size correctly
+for the mode: session_runner only truncates a prefix, so a holdout run given
+the full 6000-session trace this way would silently replay sessions 0-259
+(quick/full's own range), not the held-out slice -- pass a trace already cut
+to start at session 3000 instead. The warmup pool
+(coding_session_5000-5011.csv) is always the checked-in slice, not
+overridable, regardless of --trace/$QWEN35_BENCH_ASSETS. The tokenizer comes
+from --tokenizer or the Hugging Face cache ($HF_HOME, default
+~/.cache/huggingface).
 
 See ../OBJECTIVE.md and ../config/platforms/mi210.toml for the hardware facts
 referenced by the defaults below.
@@ -55,31 +79,54 @@ from typing import Any, Literal
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fetch_corpus
 
-Mode = Literal["smoke", "quick", "full"]
+Mode = Literal["smoke", "quick", "full", "holdout"]
 
 DEFAULT_MODEL = "Qwen/Qwen3.5-9B"
 DEFAULT_BASE_URL = "http://127.0.0.1:8000/v1"
 
 # Session-count knobs for each mode. Calibrated against the tuned vLLM
 # baseline on 1x MI210 (see ../README.md "Modes"): quick lands at ~2-3
-# minutes, full at ~10 minutes, at --max-concurrency 128. A slower candidate
-# engine takes longer; these are session counts, not a wall-clock cap
-# (session_runner has no deadline flag).
+# minutes, full/holdout at ~10 minutes, at --max-concurrency 128. A slower
+# candidate engine takes longer; these are session counts, not a wall-clock
+# cap (session_runner has no deadline flag).
 WARMUP_SESSIONS = 12
 MODE_SESSIONS: dict[Mode, int] = {
     "smoke": 2,
     "quick": 60,
     "full": 260,
+    "holdout": 260,
 }
 DEFAULT_MAX_CONCURRENCY = 128
 DEFAULT_MAX_MODEL_LEN = 16384
 ASSETS_ENV = "QWEN35_BENCH_ASSETS"
 TRACE_FILENAME = "coding_session_synthetic.csv"
 CORPUS_FILENAME = "corpus.txt"
-# Sessions 0-259 of the full trace (see slice_trace.py): every session any mode replays.
-DEFAULT_TRACE = Path(__file__).resolve().parent / "traces" / "coding_session_0000-0259.csv"
+TRACES_DIR = Path(__file__).resolve().parent / "traces"
+
+# Sessions 0-259 of the full trace (see slice_trace.py): every session
+# smoke/quick/full ever measure.
+DEFAULT_TRACE = TRACES_DIR / "coding_session_0000-0259.csv"
 DEFAULT_TRACE_SHA256 = "2bca5f7911816ee758b46a626b60e8518888e9464fc4533b627052eac8180d11"
 DEFAULT_TRACE_ROWS = 1513
+
+# Sessions 3000-3299 of the full trace: disjoint from anything smoke/quick/full
+# ever measure. holdout measures the first 260 of these (3000-3259), matching
+# full's session count -- see run_replay/resolve_trace and README.md "Held-out
+# evaluation" for the binding usage rule (never tune on this; milestones only).
+HOLDOUT_TRACE = TRACES_DIR / "coding_session_3000-3299.csv"
+HOLDOUT_TRACE_SHA256 = "d6a21a06a83459df25099babc5814d662ec674e83e9c61a3f0dfd758542c7290"
+HOLDOUT_TRACE_ROWS = 1818
+
+# Sessions 5000-5011 of the full trace: disjoint from every mode's measured
+# range (0-259 and 3000-3259). Every mode's warmup sub-run replays this fixed
+# pool instead of a prefix of its own measured trace, so warmup's purpose
+# (kernel compile, HIP/CUDA graph capture, allocator warm-up) is served
+# without any measured session starting the measured sub-run pre-cached.
+# Numbers recorded before this file gained WARMUP_TRACE used sessions 0-11 of
+# the measured trace for warmup instead -- see README.md "Warmup".
+WARMUP_TRACE = TRACES_DIR / "coding_session_5000-5011.csv"
+WARMUP_TRACE_SHA256 = "d179a756f8343eb6b27e492b3c88b81e87b8a5870872370e6e46e0e7b4ce85fd"
+WARMUP_TRACE_ROWS = 72
 
 
 class HarnessError(RuntimeError):
@@ -356,7 +403,7 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
     work_dir.mkdir(parents=True, exist_ok=True)
 
     warmup_argv = _base_replay_argv(
-        trace=paths.trace,
+        trace=paths.warmup_trace,
         text_file=paths.text_file,
         tokenizer=paths.tokenizer,
         base_url=args.base_url,
@@ -421,6 +468,7 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         **metrics,
         "wall_clock_s": wall_s,
         "warmup_sessions": WARMUP_SESSIONS,
+        "warmup_trace": str(paths.warmup_trace),
         "sessions_replayed": session_count,
         "max_concurrency": args.max_concurrency,
         "base_url": args.base_url,
@@ -435,6 +483,7 @@ class _ResolvedPaths:
     trace: Path
     text_file: Path
     tokenizer: Path
+    warmup_trace: Path
 
 
 def _configured(explicit: Path | None, flag: str, filename: str) -> Path | None:
@@ -450,21 +499,45 @@ def _configured(explicit: Path | None, flag: str, filename: str) -> Path | None:
     return path
 
 
-def verify_default_trace(path: Path = DEFAULT_TRACE) -> Path:
-    """Check the checked-in trace slice against its pinned digest and row count."""
+def verify_trace(path: Path, sha256_hex: str, rows: int, *, label: str) -> Path:
+    """Check a checked-in trace slice against its pinned digest and row count."""
     data = path.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
-    rows = data.count(b"\n") - 1
-    if digest != DEFAULT_TRACE_SHA256 or rows != DEFAULT_TRACE_ROWS:
+    actual_rows = data.count(b"\n") - 1
+    if digest != sha256_hex or actual_rows != rows:
         raise HarnessError(
-            f"{path}: sha256 {digest} with {rows} rows, expected {DEFAULT_TRACE_SHA256} "
-            f"with {DEFAULT_TRACE_ROWS}; regenerate it with slice_trace.py."
+            f"{path}: sha256 {digest} with {actual_rows} rows, expected {sha256_hex} "
+            f"with {rows} ({label}); regenerate it with slice_trace.py."
         )
     return path
 
 
-def resolve_trace(args: argparse.Namespace) -> Path:
-    return _configured(args.trace, "--trace", TRACE_FILENAME) or verify_default_trace()
+def verify_default_trace(path: Path = DEFAULT_TRACE) -> Path:
+    return verify_trace(path, DEFAULT_TRACE_SHA256, DEFAULT_TRACE_ROWS, label="quick/full trace")
+
+
+def verify_holdout_trace(path: Path = HOLDOUT_TRACE) -> Path:
+    return verify_trace(path, HOLDOUT_TRACE_SHA256, HOLDOUT_TRACE_ROWS, label="holdout trace")
+
+
+def verify_warmup_trace(path: Path = WARMUP_TRACE) -> Path:
+    return verify_trace(path, WARMUP_TRACE_SHA256, WARMUP_TRACE_ROWS, label="warmup trace")
+
+
+def resolve_trace(args: argparse.Namespace, mode: Mode) -> Path:
+    """Resolve the *measured* trace for `mode` (see module docstring "Inputs").
+
+    An explicit --trace/$QWEN35_BENCH_ASSETS override is returned as-is,
+    including for `holdout` -- it is the caller's responsibility to hand
+    holdout a trace already cut to start at session 3000 (or wherever the
+    caller intends), since session_runner only truncates a *prefix*: handing
+    holdout the raw, unsliced full trace would silently replay sessions
+    0-259 again, not a held-out set.
+    """
+    configured = _configured(args.trace, "--trace", TRACE_FILENAME)
+    if configured is not None:
+        return configured
+    return verify_holdout_trace() if mode == "holdout" else verify_default_trace()
 
 
 def resolve_corpus(args: argparse.Namespace) -> Path:
@@ -480,24 +553,34 @@ def resolve_corpus(args: argparse.Namespace) -> Path:
         ) from exc
 
 
-def resolve_paths(args: argparse.Namespace) -> _ResolvedPaths:
-    """Full resolution (trace, corpus, tokenizer), needed by quick/full.
+def resolve_paths(args: argparse.Namespace, mode: Mode) -> _ResolvedPaths:
+    """Full resolution (trace, corpus, tokenizer, warmup trace), needed by
+    quick/full/holdout.
 
     `smoke` mode's dry-run needs only the trace (see `resolve_trace`): it
     validates schema and static shape without loading a corpus or tokenizer,
     which is what lets it run in seconds with no server or GPU dependency.
+
+    The warmup trace is always the checked-in, digest-verified pool
+    (`WARMUP_TRACE`), never overridable via --trace/$QWEN35_BENCH_ASSETS:
+    its whole purpose is being a fixed session range no mode ever measures,
+    and letting it track a caller's arbitrary `--trace` would remove that
+    guarantee silently.
     """
-    trace = resolve_trace(args)
+    trace = resolve_trace(args, mode)
     text_file = resolve_corpus(args)
     tokenizer = args.tokenizer or find_tokenizer_dir(hf_home(), args.model)
-    return _ResolvedPaths(trace=trace, text_file=text_file, tokenizer=tokenizer)
+    warmup_trace = verify_warmup_trace()
+    return _ResolvedPaths(
+        trace=trace, text_file=text_file, tokenizer=tokenizer, warmup_trace=warmup_trace
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--mode", choices=["smoke", "quick", "full"], required=True)
+    parser.add_argument("--mode", choices=["smoke", "quick", "full", "holdout"], required=True)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--output-json", type=Path, default=None)
@@ -532,9 +615,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         if args.mode == "smoke":
-            result = run_smoke(args, resolve_trace(args))
+            result = run_smoke(args, resolve_trace(args, args.mode))
         else:
-            paths = resolve_paths(args)
+            paths = resolve_paths(args, args.mode)
             result = run_replay(args, paths, args.mode)
     except HarnessError as exc:
         print(f"error: {exc}", file=sys.stderr)

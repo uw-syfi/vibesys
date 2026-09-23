@@ -17,7 +17,8 @@ qwen3.5-9b-mi210/
 ├── reference/                # minimal PyTorch engine + OpenAI-compatible server
 ├── accuracy_checker/         # HF-golden gate (golden.json checked in)
 └── benchmark/
-    ├── run.py                # --mode {smoke,quick,full}, wraps session_runner
+    ├── run.py                # --mode {smoke,quick,full,holdout}, wraps session_runner
+    ├── test_run.py           # unit tests: mode/trace resolution, digest + disjointness checks
     ├── traces/               # checked-in session slices + full-trace manifest
     ├── slice_trace.py        # cuts traces/ out of the full tracegen output
     ├── fetch_corpus.py       # downloads and verifies the token corpus
@@ -66,9 +67,11 @@ sha256 and row count) and reads the corpus that `fetch_corpus.py` builds.
 comes from `--tokenizer` or the HF cache (`$HF_HOME`, default
 `~/.cache/huggingface`). `smoke` needs only the trace.
 
-- **Trace.** The committed slices are sessions 0-259 (every session the warmup,
-  `quick`, and `full` runs replay; `--max-items` takes a prefix) and 3000-3299
-  (a disjoint range held out from tuning). `slice_trace.py` cuts them from the
+- **Trace.** The committed slices are sessions 0-259 (every session `quick`
+  and `full` measure; `--max-items` takes a prefix), 3000-3299 (a disjoint
+  range held out from tuning -- `holdout` measures the first 260 of these,
+  see "Held-out evaluation" below), and 5000-5011 (the warmup pool shared by
+  every mode, see "Warmup" below). `slice_trace.py` cuts them from the
   full 6000-session trace, shifting arrivals so each slice starts at 0 (unused
   under saturated replay). The full trace (manifest:
   `traces/coding_session_synthetic.manifest.json`; sha256
@@ -156,11 +159,60 @@ a 12-session warmup sub-run that is excluded from the metric:
 | `smoke` | 2 | - | ~5 s (dry run + one completion) |
 | `quick` | 60 | 334 | ~130-160 s |
 | `full` | 260 | ~1,450 | ~510-570 s |
+| `holdout` | 260 | ~1,450 (of 3000-3299) | ~510-570 s (same shape as `full`) |
 
 `vibesys.input.toml` runs `quick`. Confirm a candidate on `full` before
 accepting it: `full` sustains enough KV pressure to expose prefix-cache
 eviction that `quick` does not, and quick-mode deltas under ~5% are within
 noise.
+
+## Warmup
+
+Every mode's warmup sub-run (12 sessions, kernel compile, HIP/CUDA graph
+capture, allocator warm-up -- excluded from the reported metric) replays the
+checked-in `traces/coding_session_5000-5011.csv`, disjoint from every mode's
+own measured range (0-259 and 3000-3259).
+
+**This was not always true.** Before this file's warmup/measured split,
+`quick`/`full` warmed up on sessions 0-11 of their *own* measured trace, so
+those 12 sessions started the measured sub-run already cache-warm (prefix
+cache, any per-session engine state) in a way the other 48-248 measured
+sessions never were. Numbers recorded before this change are not directly
+comparable to numbers recorded after it, in either direction: a candidate
+whose advantage was concentrated in the pre-cached first 12 sessions would
+look relatively worse post-fix, and vice versa. The task ledger notes which
+side of this change a given entry falls on.
+
+## Held-out evaluation
+
+`quick` (sessions 0-59) and `full` (sessions 0-259) are prefixes of the same
+trace, and every optimization on this task is tuned or gate-checked against
+those sessions. `--mode holdout` replays a disjoint, fixed 260-session slice
+of the same seed-42 trace instead: sessions 3000-3259 (the first 260 sessions
+of the checked-in `traces/coding_session_3000-3299.csv`; the file's remaining
+sessions, 3260-3299, are unused headroom, not part of any measured or warmup
+range).
+
+**Binding usage rule:**
+
+- Holdout is **never** used to tune a knob, choose between candidate designs,
+  or decide whether an experiment worked. That stays on `quick`/`full`.
+- Holdout is run only at milestones (e.g. a parity or win claim vs. tuned
+  vLLM), always paired with tuned vLLM (`benchmark/vllm_baseline.sh`) on the
+  same node in the same job.
+- A claimed win or parity result must hold on holdout too. A `full`-mode win
+  that does not reproduce on holdout is a real overfitting signal, not noise
+  to explain away.
+- Report holdout's ratio vs. tuned vLLM and its server-vs-planned prefix-hit
+  rate alongside the same numbers on `full` mode, to flag any divergence
+  between the two.
+
+An explicit `--trace` (or `$QWEN35_BENCH_ASSETS`) override is taken as-is for
+every mode, including `holdout`: `session_runner` only truncates a *prefix*,
+so handing `holdout` the raw, unsliced 6000-session trace this way would
+silently replay sessions 0-259 again (`quick`/`full`'s own range), not a held
+out set. Pass a trace already cut to start at session 3000 (e.g. with
+`slice_trace.py`) if overriding holdout's input.
 
 ## Headline metric
 

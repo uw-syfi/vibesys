@@ -5,9 +5,14 @@ The full trace (6000 sessions, 3.4 MB; see ../README.md "Benchmark inputs")
 is not committed. The modes replay only a prefix of it, so the bundle commits
 contiguous session ranges instead:
 
-  traces/coding_session_0000-0259.csv  warmup (first 12), quick (first 60),
-                                       and full (all 260) sessions
-  traces/coding_session_3000-3299.csv  a disjoint range held out from tuning
+  traces/coding_session_0000-0259.csv  quick (first 60) and full (all 260)
+                                       sessions, measured only
+  traces/coding_session_3000-3299.csv  a disjoint range held out from tuning;
+                                       holdout measures the first 260
+  traces/coding_session_5000-5011.csv  the warmup pool for every mode (12
+                                       sessions, disjoint from both measured
+                                       ranges above -- see run.py's
+                                       `WARMUP_TRACE` and README.md "Warmup")
 
 Each slice keeps the source rows byte for byte except `arrival_time_ms`, which
 is shifted so the slice's first session arrives at 0 (session_runner requires
@@ -21,7 +26,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-SLICES: tuple[tuple[int, int], ...] = ((0, 260), (3000, 3300))
+SLICES: tuple[tuple[int, int], ...] = ((0, 260), (3000, 3300), (5000, 5012))
 
 
 def slice_name(start: int, stop: int) -> str:

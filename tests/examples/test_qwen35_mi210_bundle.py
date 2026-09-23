@@ -61,6 +61,34 @@ def test_checked_in_slices_cover_every_mode_and_the_held_out_range(run: ModuleTy
     assert run.WARMUP_SESSIONS <= 260
     held_out = _sessions(traces / "coding_session_3000-3299.csv")
     assert held_out == [f"synthetic_{i:06d}" for i in range(3000, 3300)]
+    assert traces / "coding_session_3000-3299.csv" == run.HOLDOUT_TRACE
+    # holdout measures only the first MODE_SESSIONS["holdout"] sessions of that
+    # file (3000-3259); the remaining 3260-3299 are unused headroom.
+    assert run.MODE_SESSIONS["holdout"] == run.MODE_SESSIONS["full"]
+    assert held_out[: run.MODE_SESSIONS["holdout"]] == [
+        f"synthetic_{i:06d}" for i in range(3000, 3260)
+    ]
+
+
+def test_warmup_pool_is_disjoint_from_every_mode_s_measured_sessions(run: ModuleType) -> None:
+    # Regression coverage: before WARMUP_TRACE existed, quick/full warmed up on
+    # sessions 0-11 of their own measured trace, so those 12 sessions started
+    # the measured sub-run pre-cached (see README.md "Warmup"). Every mode's
+    # warmup and measured session ids must now be disjoint.
+    warmup_ids = set(_sessions(run.WARMUP_TRACE))
+    assert len(warmup_ids) == run.WARMUP_SESSIONS
+
+    measured_by_mode = {
+        "quick": set(_sessions(run.DEFAULT_TRACE)[: run.MODE_SESSIONS["quick"]]),
+        "full": set(_sessions(run.DEFAULT_TRACE)[: run.MODE_SESSIONS["full"]]),
+        "holdout": set(_sessions(run.HOLDOUT_TRACE)[: run.MODE_SESSIONS["holdout"]]),
+    }
+    for mode, measured_ids in measured_by_mode.items():
+        assert warmup_ids.isdisjoint(measured_ids), mode
+
+    # And the two measured ranges quick/full and holdout draw from must
+    # themselves be disjoint (the whole point of a held-out set).
+    assert measured_by_mode["full"].isdisjoint(measured_by_mode["holdout"])
 
 
 def test_default_inputs_are_the_verified_slice_and_fetched_corpus(
@@ -71,8 +99,40 @@ def test_default_inputs_are_the_verified_slice_and_fetched_corpus(
     monkeypatch.setattr(run.fetch_corpus, "build", lambda _path: built)
     args = run.parse_args(["--mode", "quick", "--request-factory-engine", "rf"])
 
-    assert run.resolve_trace(args) == run.DEFAULT_TRACE
+    assert run.resolve_trace(args, "quick") == run.DEFAULT_TRACE
     assert run.resolve_corpus(args) == built
+
+
+def test_holdout_mode_defaults_to_the_checked_in_holdout_trace(
+    run: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(_ASSETS_ENV, raising=False)
+    args = run.parse_args(["--mode", "holdout", "--request-factory-engine", "rf"])
+
+    assert run.resolve_trace(args, "holdout") == run.HOLDOUT_TRACE
+
+
+def test_resolve_paths_attaches_the_checked_in_warmup_trace(
+    run: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv(_ASSETS_ENV, raising=False)
+    built = tmp_path / "corpus.txt"
+    monkeypatch.setattr(run.fetch_corpus, "build", lambda _path: built)
+    args = run.parse_args(
+        [
+            "--mode",
+            "holdout",
+            "--request-factory-engine",
+            "rf",
+            "--tokenizer",
+            str(tmp_path),
+        ]
+    )
+
+    paths = run.resolve_paths(args, "holdout")
+
+    assert paths.trace == run.HOLDOUT_TRACE
+    assert paths.warmup_trace == run.WARMUP_TRACE
 
 
 def test_a_modified_default_trace_is_rejected(run: ModuleType, tmp_path: Path) -> None:
