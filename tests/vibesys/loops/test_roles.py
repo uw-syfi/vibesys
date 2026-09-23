@@ -74,8 +74,16 @@ def _invoked_roles(package: ModuleType) -> set[str]:
                 if (
                     keyword.arg == "agent"
                     and isinstance(keyword.value, ast.Attribute)
-                    and isinstance(keyword.value.value, ast.Name)
-                    and keyword.value.value.id == "agents"
+                    and (
+                        (
+                            isinstance(keyword.value.value, ast.Name)
+                            and keyword.value.value.id == "agents"
+                        )
+                        or (
+                            isinstance(keyword.value.value, ast.Attribute)
+                            and keyword.value.value.attr == "agents"
+                        )
+                    )
                 ):
                     handle_uses.add(keyword.value.attr)
     if package is agent_package:
