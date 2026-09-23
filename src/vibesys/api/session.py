@@ -90,7 +90,13 @@ class RunControl(Protocol):
 class RunAgentHost(Protocol):
     """Capability to open a live agent-construction environment for this run."""
 
-    def open_agent_environment(self, *, mounts: tuple[HostResource, ...] = ()) -> AgentEnvironment:
+    def open_agent_environment(
+        self,
+        *,
+        mounts: tuple[HostResource, ...] = (),
+        agent_backend: str | None = None,
+        cli_provider: str | None = None,
+    ) -> AgentEnvironment:
         """Open this run's environment for agent construction, plus extra *mounts*.
 
         *mounts* are folded into the run's own environment request the same
@@ -98,6 +104,8 @@ class RunAgentHost(Protocol):
         server-evidence mount today: each becomes an
         `vibesys.domains.environment.EnvironmentBindMount` at the mount's own
         `HostResource.agent_path` (or the host path unchanged, when unset).
+        Backend and provider default to the run's selection; a spawned agent
+        may override them so container authentication matches its `AgentSpec`.
         """
         ...
 
@@ -206,7 +214,13 @@ class _LocalRunSession:
             return self._resource_handoff.run_id
         return resolved_run_id(self._request)
 
-    def open_agent_environment(self, *, mounts: tuple[HostResource, ...] = ()) -> AgentEnvironment:
+    def open_agent_environment(
+        self,
+        *,
+        mounts: tuple[HostResource, ...] = (),
+        agent_backend: str | None = None,
+        cli_provider: str | None = None,
+    ) -> AgentEnvironment:
         """Open this run's environment for agent construction, plus extra *mounts*.
 
         Reads the run-resource facts this session already captured from its
@@ -228,6 +242,16 @@ class _LocalRunSession:
             )
         request = replace(
             handoff.environment_request,
+            agent_backend=(
+                agent_backend
+                if agent_backend is not None
+                else handoff.environment_request.agent_backend
+            ),
+            cli_provider=(
+                cli_provider
+                if cli_provider is not None
+                else handoff.environment_request.cli_provider
+            ),
             environment_bind_mounts=(
                 *handoff.environment_request.environment_bind_mounts,
                 *(_environment_bind_mount(mount) for mount in mounts),
