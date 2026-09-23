@@ -1,0 +1,34 @@
+[project]
+name = "qwen3.5-9b-mi210-input"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.110",
+  "httpx>=0.27",
+  "huggingface-hub>=0.30",
+  "pydantic>=2",
+  # torch's ROCm wheels depend on it; listed so the source below applies.
+  "pytorch-triton-rocm; sys_platform == 'linux'",
+  "safetensors>=0.4",
+  "torch>=2.9",
+  "transformers>=5.17",
+  "uvicorn>=0.29",
+]
+
+[tool.uv]
+package = false
+# ROCm wheels exist only for x86_64 Linux; macOS resolves for editing and tests.
+environments = [
+  "sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "sys_platform == 'darwin'",
+]
+
+# MI210 needs a ROCm torch build; PyPI's Linux wheels are CUDA builds.
+[tool.uv.sources]
+torch = { index = "pytorch-rocm", marker = "sys_platform == 'linux'" }
+pytorch-triton-rocm = { index = "pytorch-rocm", marker = "sys_platform == 'linux'" }
+
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm6.4"
+explicit = true

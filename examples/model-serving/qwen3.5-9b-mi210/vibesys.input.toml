@@ -1,0 +1,30 @@
+version = 1
+
+[agent]
+domain = "llm-serving"
+
+[evaluator]
+name = "vibesys-evaluator-request-factory"
+version = "0.1.0"
+
+[accuracy]
+command = ["uv", "run", "python", "accuracy_checker/checker.py"]
+timeout_seconds = 300
+
+[benchmark]
+# Adapter entrypoint pattern (not the direct `request-factory-engine`
+# entrypoint whisper-large-v3 uses): benchmark/run.py owns mode selection,
+# warmup, and JSON summarization on top of the pinned session_runner binary.
+# The adapter injects `--request-factory-engine <trusted-path>` ahead of
+# these arguments; see resources/evaluators/request-factory/adapter.py.
+#
+# `quick` is the mode the optimization loop iterates on (~2-3 minutes of
+# replay). Run `--mode full` directly (see README.md) for the ~10 minute
+# acceptance measurement before calling a change accepted.
+entrypoint = "request-factory-adapter"
+args = ["benchmark/run.py", "--mode", "quick"]
+timeout_seconds = 600
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "output_tokens_per_s"

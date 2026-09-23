@@ -1,0 +1,72 @@
+schema_version = 1
+
+# Hardware and platform facts for 1x AMD MI210 (gfx90a, CDNA2), the optimization
+# target for this bundle. These are facts about the accelerator, independent of
+# which cluster hosts it.
+
+[platform.mi210]
+gfx_target = "gfx90a"
+cdna_generation = "CDNA2"
+compute_units = 104
+memory_gb = 64
+memory_type = "HBM2e"
+memory_bandwidth_gb_s = 1600
+fp8_native = false
+notes = """
+Older than the MI300 family (gfx942) the serving-systems knowledge tree
+(resources/skills/serving-systems/references/platforms/rocm/) targets. gfx90a
+has no native FP8 and lacks the AITER/CK paths documented there; treat that
+tree's AITER recipes as unverified on gfx90a. The floor.md continuous batching,
+paged-KV, prefix-caching, and chunked-prefill contracts still apply
+(backend-independent design); the fused-kernel and quantization specifics do
+not carry over as-is.
+"""
+
+[platform.mi210.model]
+name = "Qwen/Qwen3.5-9B"
+precision = "bf16"
+weights_gb = 19.3
+architecture = "hybrid attention + Gated DeltaNet (GDN) linear-attention layers"
+kv_bytes_per_token = 32768        # 32 KiB/token, full-attention layers only
+gdn_state_bytes_per_sequence = 51380224  # ~49 MiB/sequence, fixed regardless of context length
+attention_kv_block_tokens = 528   # vLLM forces this block size on this model/GPU
+                                   # (hybrid mamba page alignment: attention page
+                                   # size must be >= mamba page size). Observed
+                                   # directly in a vLLM v0.3.1.dev190 boot log:
+                                   # "Setting attention block size to 528 tokens
+                                   # to ensure that attention page size is >= mamba
+                                   # page size."
+
+[platform.mi210.capacity_notes]
+# Worked budget for sizing the workload (see ../../OBJECTIVE.md): weights consume 19.3 GB,
+# leaving ~44.7 GB nominal for KV + GDN state + activation/runtime overhead.
+# A vLLM boot at --gpu-memory-utilization 0.85 on this GPU/model reported
+# "GPU KV cache size: 547,401 tokens" (--max-model-len 4096), i.e. roughly
+# 150-250 concurrent sequences at the several-thousand-token contexts this
+# workload's sessions reach, depending on how much of that pool a candidate
+# engine's scheduler keeps resident at once.
+observed_gpu_kv_cache_tokens = 547401
+observed_at = "vLLM v0.3.1.dev190+g3df4ae153 (ROCm ci nightly), --gpu-memory-utilization 0.85, --max-model-len 4096, single MI210"
+
+# At this bundle's actual --max-model-len 16384: 806,696 tokens at gmu 0.85
+# (attention_backend-independent -- KV block accounting doesn't change with
+# attention_backend, only which kernel serves it); 926,127-977,434 tokens at
+# gmu 0.92-0.95. gmu 0.95 wins on full mode (the larger resident KV pool
+# reduces prefix-cache eviction at this workload's concurrency) while being
+# flat on quick mode.
+
+[platform.mi210.known_facts]
+requires_enable_prompt_tokens_details = true
+prompt_tokens_details_flag = "--enable-prompt-tokens-details"
+single_stream_decode_tok_s_approx = 66
+attention_backends_available = ["ROCM_ATTN", "TRITON_ATTN"]
+attention_backend_default = "ROCM_ATTN"
+# vLLM's own default (ROCM_ATTN) measurably underperforms on this model/GPU:
+# its custom paged-attention kernel isn't available for the chunked-prefill/
+# decode path here and falls back to Triton with extra dispatch overhead
+# ("Cannot use ROCm custom paged attention kernel, falling back to Triton
+# implementation", chunked_prefill_paged_decode.py:433). Selecting
+# TRITON_ATTN directly measured +21-33% output tok/s. Recommended:
+# TRITON_ATTN (benchmark/vllm_baseline.sh's default), not attention_backend_default.
+attention_backend_recommended = "TRITON_ATTN"
+attention_backend_incompatible = ["TURBOQUANT"]

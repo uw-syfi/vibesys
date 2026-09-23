@@ -1,0 +1,106 @@
+# Accuracy checker: Qwen3.5-9B
+
+Gates a serving engine against HF transformers greedy output on a fixed prompt
+set. Exit status 0 = PASS, 1 = FAIL. Run from the bundle root.
+
+```bash
+# any running server (reference, candidate, or vLLM); --target http is the default
+uv run python accuracy_checker/checker.py --base-url http://127.0.0.1:8000
+# in-process reference engine
+uv run python accuracy_checker/checker.py --target inproc
+# add --json-out result.json for the full per-case report
+```
+
+The HTTP target needs `/v1/completions` with `ignore_eos`, `return_token_ids`,
+and `echo` + `logprobs` + `return_tokens_as_token_ids` (vLLM-compatible). It
+also checks that a streamed response yields the same token ids and a correct
+usage chunk.
+
+## Golden data
+
+`golden.json` (checked in) holds, for 12 prompts (`prompts.py`: raw and
+chat-templated, code, arithmetic, JSON, and two long ledger prompts of ~1.2k
+and ~4k tokens): frozen prompt token ids, 64 HF greedy tokens with EOS ignored,
+and HF's teacher-forced logprob, top-1 id, and top-1 minus top-2 margin at each
+of those 64 positions. Regenerate only if the prompt set changes:
+
+```bash
+uv run python -m accuracy_checker.make_golden --model Qwen/Qwen3.5-9B
+```
+
+Source: HF `Qwen3_5ForCausalLM`, bf16, SDPA attention, fla 0.5.2 GDN kernels,
+transformers 5.17.0, torch 2.9.1+rocm6.4, MI210 (`meta` in the file).
+
+## Gate policy
+
+bf16 with a different kernel or reduction order does not reproduce HF's greedy
+tokens bit-for-bit: a near-tie (top-1 and top-2 within bf16 noise) can flip,
+after which the continuations legitimately differ. So the gate never requires
+full-length token equality. It requires that the candidate compute the same
+distribution, measured two ways:
+
+1. Teacher-forced (primary). The candidate scores prompt + golden
+   continuation. Per position, compare its logprob of the golden token with
+   HF's, and its argmax with HF's top-1. No divergence cascade, so every one of
+   the 768 positions is informative.
+2. Free-running greedy. The candidate generates 64 tokens per prompt. Where it
+   first departs from golden, the contexts were identical up to that point, so
+   HF's margin at that position says whether the departure is a near-tie.
+
+| Check | Threshold |
+|:--|:--|
+| Free-run: every first divergence is at a near-tie (HF margin < 0.5 nats) | 0 non-tie divergences |
+| Teacher-forced: argmax differs from HF top-1 where HF margin >= 0.5 nats | 0 flips |
+| Teacher-forced mean \|Δlogprob\| of the golden token | <= 0.05 |
+| Teacher-forced p99 \|Δlogprob\| | <= 0.25 |
+| Free-run mean matched-prefix fraction | >= 0.5 |
+
+Thresholds are fixed in `checker.Thresholds` and were set from the calibration
+below, before any optimized engine existed. Do not retune them to admit a
+candidate.
+
+## Calibration evidence
+
+Measured on MI210, 2026-09-23, against the checked-in golden (HF with fla):
+
+| Candidate | Identical | Non-tie div. | Flips | mean \|Δlp\| | p99 \|Δlp\| | max \|Δlp\| | Prefix frac. | Result |
+|:--|--:|--:|--:|--:|--:|--:|--:|:--|
+| Reference engine, in-process | 8/12 | 0 | 0 | 0.0055 | 0.079 | 0.111 | 0.855 | PASS |
+| Reference engine, over HTTP (+ stream check ok) | 8/12 | 0 | 0 | 0.0055 | 0.079 | 0.111 | 0.855 | PASS |
+| HF with torch GDN fallback (no fla) | 8/12 | 0 | 0 | 0.0055 | 0.079 | 0.111 | 0.855 | PASS |
+| Fault: layer 0 GDN decay gate off | 1/12 | 6 | 78 | 0.507 | 8.83 | 11.3 | 0.30 | FAIL (5/5 checks) |
+| Fault: layer 16 GDN decay gate off | 5/12 | 2 | 7 | 0.038 | 0.569 | 2.32 | 0.647 | FAIL (3/5 checks) |
+| Fault: layer 15 attention output gate constant 0.5 | 1/12 | 7 | 38 | 0.149 | 2.03 | 6.91 | ~0.3 | FAIL (5/5 checks) |
+
+Notes:
+- The reference engine is bit-identical to HF's torch fallback path: scored
+  against a golden produced with `--no-fla`, it gives 12/12 identical and
+  Δlogprob 0.0 everywhere. So the whole Δ above is HF-fla vs HF-torch kernel
+  noise, and it is the noise floor a correct engine sees. The four reference
+  divergences are at HF margins 0.0, 0.125, 0.125, and 0.25 nats.
+- Margin to thresholds for the reference: mean Δlp 9x under, p99 3x under,
+  max Δlp 0.11 vs the 0.5-nat near-tie cut, 0 flips.
+- The subtle fault (decay off in one middle layer) stays under the mean Δlp
+  threshold; the flip, near-tie, and p99 checks catch it. The mean is the
+  least sensitive check; do not rely on it alone.
+- Faults are injected by `--fault` (in-process target only), e.g.
+  `--fault gdn-decay-off:16`, `--fault attn-gate-off:15`.
+
+## Same-numbers vs different-numbers changes
+
+"Same-numbers": the change should leave every logit bit-identical to the
+reference for the same request (the gate passes with the reference's own
+figures). "Different-numbers": the change legitimately alters rounding; it must
+still pass the gate, and the reviewer should expect Δlogprob to move.
+
+| Change | Class |
+|:--|:--|
+| HTTP/server plumbing, detokenization, streaming, CPU/GPU overlap, async scheduling | same-numbers |
+| Continuous batching / paged KV where each sequence's math is unchanged (per-row GEMM results can still vary with batch size on rocBLAS/hipBLASLt; treat as different-numbers if they do) | same-numbers in intent, verify |
+| HIP graph capture of the identical kernel sequence | same-numbers |
+| Prefix caching of attention KV and GDN state snapshots | same-numbers for the cached part; chunk boundaries change GDN reduction order |
+| Chunked prefill (changes GDN chunk boundaries and attention tiling) | different-numbers |
+| fla / Triton GDN kernels, causal-conv1d kernels, flash attention, fused norms/activations/rope | different-numbers |
+| Batched decode GEMMs (M > 1) | different-numbers |
+| GDN recurrent state or KV cache in a lower precision than the reference (state fp32, KV bf16) | different-numbers, likely fails |
+| Weight or activation quantization (e.g. int8/fp8 emulation; MI210 has no FP8) | different-numbers, likely fails |

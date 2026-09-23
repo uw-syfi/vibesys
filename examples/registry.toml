@@ -132,6 +132,10 @@ path = "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke"
 layout = "legacy"
 
 [[example]]
+path = "examples/model-serving/qwen3.5-9b-mi210"
+layout = "legacy"
+
+[[example]]
 path = "examples/model-serving/qwen3.6-35b-a3b-2xh100"
 layout = "legacy"
 
