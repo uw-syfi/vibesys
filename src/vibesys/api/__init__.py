@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from vibesys import boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config
+from vibesys.api._agent_state import agent_run_objectives
 from vibesys.api.contracts import (
     Config,
     ConfigurationDiagnostic,
@@ -89,6 +90,7 @@ __all__ = [
     "TodoUpdateData",
     "ToolCallData",
     "ToolResultData",
+    "agent_run_objectives",
     "agent_spec_from_config",
     "boot_trace",
     "create_session",

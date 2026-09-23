@@ -8,7 +8,7 @@ from vibesys.api._agent_state import load_agent_run_state
 from vibesys.api._readmodel import project_run_view
 from vibesys.api.contracts import LoopKind, RunStatus
 from vibesys.loops.agent.model import AgentRunState
-from vs_project.api import OrchestrationRunManifest, RunManifest
+from vs_project.api import OrchestrationRunManifest
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -83,15 +83,13 @@ class _LocalRunStore:
         )
 
     def _view(self, manifest: RunManifestRecord) -> RunView:
-        if isinstance(manifest, RunManifest):
-            loop = LoopKind(manifest.configuration.outer_loop)
-        elif isinstance(manifest, OrchestrationRunManifest) and manifest.orchestration.id in {
-            LoopKind.PLAIN.value,
-            LoopKind.EVOLVE.value,
-        }:
-            loop = LoopKind(manifest.orchestration.id)
+        if isinstance(manifest, OrchestrationRunManifest):
+            try:
+                loop = LoopKind(manifest.orchestration.id)
+            except ValueError as exc:
+                raise UnsupportedOrchestrationRunError from exc
         else:
-            raise UnsupportedOrchestrationRunError
+            loop = LoopKind(manifest.configuration.outer_loop)
         state = load_agent_run_state(self._project, manifest.run_id) or AgentRunState()
         return project_run_view(
             state,

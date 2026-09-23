@@ -71,6 +71,10 @@ from vibesys.loops.agent.model import (
     Hypothesis,
     HypothesisResolution,
 )
+from vibesys.loops.agent.orchestration import (
+    compare_resume_descriptors,
+    descriptor_from_configuration,
+)
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.gates import (
     GATE_LOG_TAIL_CHARS,
@@ -2442,6 +2446,10 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         objective=objective,
         existing=existing,
         project_configuration=project_configuration,
+        orchestration_descriptor=lambda resolved_profiler: descriptor_from_configuration(
+            project_configuration.model_copy(update={"profiler": resolved_profiler.value})
+        ),
+        orchestration_resume=compare_resume_descriptors,
         trusted_input_baseline=trusted_input_baseline,
         debug=debug,
         profiler_kind=profiler_kind,

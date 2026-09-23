@@ -13,10 +13,21 @@ from vibesys.api._orchestrations._common import (
 if TYPE_CHECKING:
     from vibesys.api.contracts import RunRequest
     from vibesys.run.integration import LocalRunIntegration
+    from vs_project.api import AgentRunConfiguration, OrchestrationRunManifest
 
 
 class AgentOrchestration:
     """Preserve the existing agent loop call contract."""
+
+    def legacy_resume_configuration(
+        self, manifest: OrchestrationRunManifest
+    ) -> AgentRunConfiguration:
+        """Project v4 policy into the transitional CLI resume contract."""
+        from vibesys.loops.agent.orchestration import (  # noqa: PLC0415  # tracked: #288
+            configuration_from_manifest,
+        )
+
+        return configuration_from_manifest(manifest)
 
     def execute(self, request: RunRequest, integration: LocalRunIntegration) -> bool:
         from vibesys.loops.agent.loop import run_agent_loop  # noqa: PLC0415  # tracked: #288

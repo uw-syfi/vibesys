@@ -127,6 +127,7 @@ graph TD
     vibesys.loops.agent --> vibesys.domains
     vibesys.loops.agent --> vibesys.evaluators
     vibesys.loops.agent --> vibesys.loops
+    vibesys.loops.agent --> vibesys.orchestration
     vibesys.loops.agent --> vibesys.prompts
     vibesys.loops.agent --> vibesys.render
     vibesys.loops.agent --> vibesys.run
@@ -277,6 +278,7 @@ graph TD
     vibesys.api._orchestrations.agent --> vibesys.api.contracts
     vibesys.api._orchestrations.agent --> vibesys.loops.agent
     vibesys.api._orchestrations.agent --> vibesys.run
+    vibesys.api._orchestrations.agent --> vs_project
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.agent
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.contracts
     vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.evolve
@@ -336,6 +338,7 @@ graph TD
     vibesys.loops.agent --> vibesys.domains
     vibesys.loops.agent --> vibesys.evaluators
     vibesys.loops.agent --> vibesys.loops
+    vibesys.loops.agent --> vibesys.orchestration
     vibesys.loops.agent --> vibesys.prompts
     vibesys.loops.agent --> vibesys.render
     vibesys.loops.agent --> vibesys.run
