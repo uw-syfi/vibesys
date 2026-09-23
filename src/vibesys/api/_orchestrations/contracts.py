@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import ValidationError
 
@@ -12,7 +12,7 @@ from vibesys.api.contracts import OrchestrationDescriptor
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.api.contracts import RunRequest, RunStatus, RunView
+    from vibesys.api.contracts import AnyRunRequest, RunStatus, RunView
     from vibesys.orchestration import ResumeProjection
     from vibesys.runtime import VibeSysRuntime
     from vs_project.api import OrchestrationRunManifest, Project
@@ -27,18 +27,18 @@ class RunDescription:
 
 
 class ExecutableOrchestration(Protocol):
-    """Compatibility entry point for existing execute-only policies."""
+    """Compatibility entry point for policies typed to either request DTO."""
 
-    def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool: ...
+    def execute(self, request: Any, runtime: VibeSysRuntime) -> bool: ...  # noqa: ANN401
 
 
 @runtime_checkable
 class Orchestration(ExecutableOrchestration, Protocol):
     """Complete policy contract resolved by the framework core."""
 
-    def prepare(self, request: RunRequest, runtime: VibeSysRuntime) -> None: ...
+    def prepare(self, request: Any, runtime: VibeSysRuntime) -> None: ...  # noqa: ANN401
 
-    def describe(self, request: RunRequest) -> RunDescription: ...
+    def describe(self, request: Any) -> RunDescription: ...  # noqa: ANN401
 
     def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView: ...
 
@@ -73,21 +73,15 @@ class _ExecuteOnlyAdapter:
     def __init__(self, implementation: ExecutableOrchestration) -> None:
         self._implementation = implementation
 
-    def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool:
+    def execute(self, request: AnyRunRequest, runtime: VibeSysRuntime) -> bool:
         return self._implementation.execute(request, runtime)
 
-    def prepare(self, request: RunRequest, runtime: VibeSysRuntime) -> None:
+    def prepare(self, request: AnyRunRequest, runtime: VibeSysRuntime) -> None:
         prepare_policy = getattr(self._implementation, "prepare", None)
         if callable(prepare_policy):
             prepare_policy(request, runtime)
-            return
-        prepare = getattr(runtime, "prepare", None)
-        if not callable(prepare):
-            message = "orchestration runtime has no prepare method"
-            raise TypeError(message)
-        prepare()
 
-    def describe(self, request: RunRequest) -> RunDescription:
+    def describe(self, request: AnyRunRequest) -> RunDescription:
         describe = getattr(self._implementation, "describe", None)
         if callable(describe):
             return describe(request)

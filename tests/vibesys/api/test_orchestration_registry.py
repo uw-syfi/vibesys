@@ -6,12 +6,14 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from vibesys.api import (
     ComputeBackend,
     Config,
+    Orchestration,
     OrchestrationRegistry,
+    OrchestrationRunRequest,
     ProfilerKind,
     VibeSysRuntime,
     built_in_orchestrations,
@@ -25,10 +27,12 @@ from vibesys.api.entry import default_request
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
 from vibesys.run.integration import LocalRunIntegration
-from vs_project.api import OrchestrationDescriptor, Project
+from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vibesys.orchestration import ResumeProjection
 
 _EXAMPLE = "examples/model-serving/whisper-large-v3"
 
@@ -161,7 +165,11 @@ def test_policy_owns_start_metadata_and_live_and_stored_views(tmp_path: Path) ->
     registry = OrchestrationRegistry()
     registry.register("team-search", policy)
     events: list[CoreEvent] = []
-    session = create_session(request, sink=events.append, registry=registry)
+
+    def record(event: CoreEvent) -> None:
+        events.append(event)
+
+    session = create_session(request, sink=record, registry=registry)
 
     session.start()
     result = asyncio.run(session.await_result())
@@ -176,6 +184,88 @@ def test_policy_owns_start_metadata_and_live_and_stored_views(tmp_path: Path) ->
     )
     assert stored.current_round == 7
     assert stored.status is RunStatus.UNKNOWN
+
+
+def test_descriptor_request_runs_without_legacy_loop_fields(tmp_path: Path) -> None:
+    class CompletePolicy(_StubOrchestration):
+        def prepare(self, request: OrchestrationRunRequest, runtime: VibeSysRuntime) -> None:
+            del request, runtime
+
+        def describe(self, request: OrchestrationRunRequest) -> RunDescription:
+            del request
+            return RunDescription()
+
+        def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+            del project
+            return RunView(
+                run_id=run_id, loop=loop, status=status, current_round=0, experiment_revision=0
+            )
+
+        def project_committed(
+            self, namespace: str, state: BaseModel, *, run_id: str
+        ) -> RunView | None:
+            del namespace, state, run_id
+            return None
+
+        def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
+            del manifest
+            raise NotImplementedError
+
+    legacy = _custom_request(tmp_path)
+    assert legacy.orchestration is not None
+    request = OrchestrationRunRequest(
+        project_root=legacy.project_root,
+        orchestration=legacy.orchestration,
+        config=legacy.config,
+        input_bundle=legacy.input_bundle,
+        exp_name="descriptor-run",
+        run_environment=legacy.run_environment,
+        agent_backend=legacy.agent_backend,
+        profiler_kind=legacy.profiler_kind,
+        backend=legacy.backend,
+    )
+    assert "loop" not in OrchestrationRunRequest.model_fields
+    assert "inner_loop" not in OrchestrationRunRequest.model_fields
+    registry = OrchestrationRegistry()
+    policy = CompletePolicy(result=True)
+    registry.register("team-search", policy)
+    assert isinstance(policy, Orchestration)
+    assert registry.resolve("team-search") is policy
+
+    def discard(event: CoreEvent) -> None:
+        del event
+
+    session = create_session(request, sink=discard, registry=registry)
+    result = asyncio.run(session.await_result())
+
+    assert result.succeeded
+    assert result.loop == "team-search"
+    assert policy.calls[0][0] is request
+    assert Project.open(request.project_root).state.load_run(result.run_id).schema_version == 4
+
+
+def test_describe_failure_emits_failed_event_and_closes_session(tmp_path: Path) -> None:
+    class FailingPolicy(_StubOrchestration):
+        def describe(self, request: RunRequest) -> RunDescription:
+            del request
+            message = "invalid policy metadata"
+            raise RuntimeError(message)
+
+    request = _custom_request(tmp_path)
+    registry = OrchestrationRegistry()
+    registry.register("team-search", FailingPolicy(result=True))
+    events: list[CoreEvent] = []
+
+    def record(event: CoreEvent) -> None:
+        events.append(event)
+
+    session = create_session(request, sink=record, registry=registry)
+    session.start()
+
+    with pytest.raises(RuntimeError, match="invalid policy metadata"):
+        asyncio.run(session.await_result())
+
+    assert [event.type for event in events] == [CoreEventType.RUN_FAILED]
 
 
 def test_custom_selection_validates_descriptor_and_preserves_builtin_enum(

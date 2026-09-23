@@ -51,6 +51,7 @@ __all__ = [
     "MetricSpace",
     "Objective",
     "OrchestrationDescriptor",
+    "OrchestrationRunRequest",
     "PerfDeltaReason",
     "ResumeRef",
     "RoundView",
@@ -189,6 +190,41 @@ class RunRequest(BaseModel):
     def selected_loop(self) -> LoopKind | str:
         """Keep the enum for built-ins and expose custom IDs as strings."""
         return self.loop if self.loop is not None else self.orchestration_id
+
+
+class OrchestrationRunRequest(BaseModel):
+    """Descriptor-based request for a registered orchestration policy.
+
+    Policy-specific settings belong in ``orchestration.options``. The legacy
+    ``RunRequest`` remains available for callers of the built-in loops.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    project_root: Path
+    orchestration: OrchestrationDescriptor
+    config: Config
+    input_bundle: InputBundle
+    objective: str | None = None
+    resume: ResumeRef | None = None
+    exp_name: str | None = None
+    runs_dir: Path | None = None
+    profiler_kind: ProfilerKind = ProfilerKind.AUTO
+    skills_dirs: list[str] | None = None
+    run_environment: RunEnvironmentSpec | None = None
+    agent_backend: str | None = None
+    cli_provider: str | None = None
+    backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND
+    remote_repo: str | None = None
+    repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE
+
+    @property
+    def orchestration_id(self) -> str:
+        """Return the stable ID selected by this descriptor."""
+        return self.orchestration.id
+
+
+type AnyRunRequest = RunRequest | OrchestrationRunRequest
 
 
 class RunResult(BaseModel):

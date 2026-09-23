@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.api._orchestrations.contracts import OrchestrationRegistry
-    from vibesys.api.contracts import AgentEnvironment, EventSink, RunRequest, RunView
+    from vibesys.api.contracts import AgentEnvironment, AnyRunRequest, EventSink, RunView
     from vibesys.config import Config
     from vibesys.run.integration import RunResourceHandoff
     from vibesys.sandbox.run_environment import RunEnvironmentSession
@@ -129,7 +129,7 @@ class RunSession(RunQuery, RunWorkspace, RunControl, RunAgentHost, Protocol):
 
 
 def create_session(
-    request: RunRequest,
+    request: AnyRunRequest,
     *,
     sink: EventSink,
     registry: OrchestrationRegistry | None = None,
@@ -156,7 +156,7 @@ class _LocalRunSession:
 
     def __init__(
         self,
-        request: RunRequest,
+        request: AnyRunRequest,
         *,
         sink: EventSink,
         registry: OrchestrationRegistry | None,
@@ -287,18 +287,18 @@ class _LocalRunSession:
 
     def _run_sync(self) -> RunResult:
         request = self._request
-        description = self._policy.describe(request)
-        self._integration.events.emit(
-            CoreEventType.RUN_STARTED,
-            status=EventStatus.ACTIVE,
-            data=RunStartedData(
-                outer_loop=request.orchestration_id,
-                input=str(request.input_bundle.root),
-                max_rounds=description.max_rounds,
-                expected_roles=description.expected_roles,
-            ),
-        )
         try:
+            description = self._policy.describe(request)
+            self._integration.events.emit(
+                CoreEventType.RUN_STARTED,
+                status=EventStatus.ACTIVE,
+                data=RunStartedData(
+                    outer_loop=request.orchestration_id,
+                    input=str(request.input_bundle.root),
+                    max_rounds=description.max_rounds,
+                    expected_roles=description.expected_roles,
+                ),
+            )
             succeeded = dispatch_loop(
                 request,
                 self._integration,
@@ -322,7 +322,7 @@ class _LocalRunSession:
             )
             return RunResult(
                 run_id=self._run_id(),
-                loop=request.selected_loop,
+                loop=request.orchestration_id,
                 succeeded=succeeded,
             )
         finally:

@@ -10,12 +10,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vibesys.api._orchestrations.contracts import Orchestration, OrchestrationRegistry
-    from vibesys.api.contracts import AgentEnvironment, RunRequest
+    from vibesys.api.contracts import AgentEnvironment, AnyRunRequest
     from vibesys.run.integration import LocalRunIntegration
 
 
 def run_orchestration(
-    request: RunRequest,
+    request: AnyRunRequest,
     integration: LocalRunIntegration,
     registry: OrchestrationRegistry,
     *,
@@ -27,5 +27,6 @@ def run_orchestration(
     with _LocalVibeSysRuntime(
         request, integration, open_agent_environment=open_agent_environment
     ) as runtime:
+        runtime.prepare()
         policy.prepare(request, runtime)
         return policy.execute(request, runtime)

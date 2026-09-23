@@ -1,10 +1,15 @@
 # Custom orchestration runtime
 
-`Orchestration` is the policy interface. Its `execute(request, runtime) -> bool`
-method decides which agents exist, when they take turns, what messages they
-receive, and when the run succeeds. `VibeSysRuntime` provisions agents and owns
-their sandbox and client lifetimes. The framework does not define a round or
-require a particular agent graph.
+`Orchestration` is the complete policy interface. Its `execute(request,
+runtime) -> bool` method decides which agents exist, when they take turns,
+what messages they receive, and when the run succeeds. Its `describe`, `view`,
+`project_committed`, and `resume_projection` methods own run metadata and
+state interpretation. The optional `prepare` hook runs after the framework
+provisions a descriptor-based run. `OrchestrationRegistry.register` also
+accepts `ExecutableOrchestration` implementations with only `execute` and
+supplies neutral defaults for the other methods. `VibeSysRuntime` provisions
+agents and owns their sandbox and client lifetimes. The framework does not
+define a round or require a particular agent graph.
 
 ```python
 import asyncio
@@ -17,7 +22,7 @@ from vibesys.api import (
     OrchestrationDescriptor,
     OrchestrationRegistry,
     ProfilerKind,
-    RunRequest,
+    OrchestrationRunRequest,
     VibeSysRuntime,
     create_session,
 )
@@ -25,9 +30,9 @@ from vibesys.api.request import load_input_bundle
 
 
 class ThreeAgentRounds:
-    def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool:
+    def execute(self, request: OrchestrationRunRequest, runtime: VibeSysRuntime) -> bool:
         descriptor = request.orchestration
-        if descriptor is None or descriptor.config_version != 1:
+        if descriptor.config_version != 1:
             raise ValueError("unsupported three-agent-rounds configuration")
         rounds = descriptor.options.get("rounds")
         if not isinstance(rounds, int) or rounds < 1:
@@ -47,7 +52,7 @@ class ThreeAgentRounds:
 
 
 project_root = Path("path/to/project")  # Contains vibesys.input.toml.
-request = RunRequest(
+request = OrchestrationRunRequest(
     project_root=project_root,
     orchestration=OrchestrationDescriptor(
         id="three-agent-rounds", config_version=1, options={"rounds": 2}
@@ -92,6 +97,10 @@ agent can own a bridge without replacing the run's bridge socket. Docker and
 Modal agent environments use each agent's backend and provider for container
 authentication. Custom resume is rejected until an orchestration-owned
 checkpoint contract exists. History currently has
-a generic view for custom IDs, without policy-specific rounds. The broader
+a generic view for execute-only policies. A policy can implement
+`view(project, run_id, *, status, loop)` to project its own durable state,
+`describe(request) -> RunDescription` to publish expected roles and budget,
+and `project_committed(namespace, state, *, run_id)` to project live commits.
+The broader
 agent spawning, sandbox, workspace, and remote-runtime design is tracked in
 [RFC #937](https://github.com/uw-syfi/vibesys/issues/937).

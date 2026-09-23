@@ -17,7 +17,12 @@ from vibesys import boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.api._agent_state import agent_run_objectives, is_agent_run_manifest
 from vibesys.api._orchestrations.builtins import built_in_orchestrations
-from vibesys.api._orchestrations.contracts import Orchestration, OrchestrationRegistry
+from vibesys.api._orchestrations.contracts import (
+    ExecutableOrchestration,
+    Orchestration,
+    OrchestrationRegistry,
+    RunDescription,
+)
 from vibesys.api.contracts import (
     Config,
     ConfigurationDiagnostic,
@@ -30,6 +35,7 @@ from vibesys.api.contracts import (
     MetricSpace,
     Objective,
     OrchestrationDescriptor,
+    OrchestrationRunRequest,
     PerfDeltaReason,
     ResumeRef,
     RunRequest,
@@ -78,6 +84,7 @@ __all__ = [
     "CoreEventType",
     "DomainName",
     "EventStatus",
+    "ExecutableOrchestration",
     "HostResource",
     "HostResourceAccess",
     "HypothesisRoundView",
@@ -88,11 +95,13 @@ __all__ = [
     "Orchestration",
     "OrchestrationDescriptor",
     "OrchestrationRegistry",
+    "OrchestrationRunRequest",
     "PerfDeltaReason",
     "ProfilerKind",
     "RepositoryVisibility",
     "ResumeRef",
     "RunControl",
+    "RunDescription",
     "RunRequest",
     "RunResourceHandoff",
     "RunResult",

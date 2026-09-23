@@ -11,7 +11,7 @@ from vibesys.loops.roles import expected_agent_roles
 from vibesys.profilers import ProfilerKind
 
 if TYPE_CHECKING:
-    from vibesys.api.contracts import RunRequest
+    from vibesys.api.contracts import AnyRunRequest, RunRequest
 
 
 def _required_objective(request: RunRequest) -> str:
@@ -56,7 +56,7 @@ def _agent_outer_loop(loop: LoopKind | None) -> Literal["agent", "profile-guided
     return "agent"
 
 
-def resolved_run_id(request: RunRequest) -> str:
+def resolved_run_id(request: AnyRunRequest) -> str:
     """Return the run id the loop should use: the resume target, or `exp_name`."""
     if request.resume is not None:
         return request.resume.run_id

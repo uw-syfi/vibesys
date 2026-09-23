@@ -12,13 +12,13 @@ from vibesys.api._orchestrations.contracts import (
 )
 from vibesys.api._orchestrations.evolve import EvolveOrchestration
 from vibesys.api._orchestrations.plain import PlainOrchestration
-from vibesys.api.contracts import LoopKind
+from vibesys.api.contracts import LoopKind, RunRequest
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.api._orchestrations.runtime import _LocalVibeSysRuntime
-    from vibesys.api.contracts import RunRequest, RunStatus, RunView
+    from vibesys.api.contracts import AnyRunRequest, RunStatus, RunView
     from vibesys.orchestration import ResumeProjection
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.runtime import VibeSysRuntime
@@ -37,17 +37,17 @@ class _LegacyOrchestration:
     def __init__(self, implementation: _LegacyImplementation) -> None:
         self._implementation = implementation
 
-    def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool:
+    def execute(self, request: AnyRunRequest, runtime: VibeSysRuntime) -> bool:
         local = cast("_LocalVibeSysRuntime", runtime)
-        return self._implementation.execute(request, local.legacy_integration)
+        return self._implementation.execute(_legacy_request(request), local.legacy_integration)
 
-    def prepare(self, request: RunRequest, runtime: VibeSysRuntime) -> None:
+    def prepare(self, request: AnyRunRequest, runtime: VibeSysRuntime) -> None:
         """The existing loop constructs its own run context during execute."""
         del request, runtime
 
-    def describe(self, request: RunRequest) -> RunDescription:
+    def describe(self, request: AnyRunRequest) -> RunDescription:
         describe = getattr(self._implementation, "describe", None)
-        return describe(request) if callable(describe) else RunDescription()
+        return describe(_legacy_request(request)) if callable(describe) else RunDescription()
 
     def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
         view = getattr(self._implementation, "view", None)
@@ -61,6 +61,13 @@ class _LegacyOrchestration:
 
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
         return self._implementation.resume_projection(manifest)
+
+
+def _legacy_request(request: AnyRunRequest) -> RunRequest:
+    if not isinstance(request, RunRequest):
+        message = "built-in orchestration requires the legacy request options"
+        raise TypeError(message)
+    return request
 
 
 def built_in_orchestrations() -> OrchestrationRegistry:
