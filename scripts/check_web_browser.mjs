@@ -446,9 +446,9 @@ async function checkInteractions(browser, origin) {
       return [Math.round(box.top - port.top), box.bottom <= port.bottom];
     });
     assert.deepEqual(seen, [22, true], 'Tab back left the cursor out of view');
-    // That scroll leaves the live edge, which mounts the pill and re-renders the log: let it
-    // settle before measuring row positions below.
-    await delay(150);
+    // That scroll leaves the live edge, which mounts the pill and re-renders the log, and the
+    // pill shortens the scrollport: wait for it before measuring row positions below.
+    await jump.waitFor();
 
     // Enter on a tool row fills the inspector, and moves no row doing it.
     await call.focus();
@@ -603,50 +603,110 @@ async function checkInteractions(browser, origin) {
     // focus then lands on <body>, or on the dialog's own control now that the dialog is hidden.
     // Either way the log's keys are dead and the next arrow moves the round, and no React commit
     // attends the close, so the log cannot see it for itself.
+    const sheet = page.locator('dialog.insp-sheet');
     let delta = 0;
-    const dialogKeepsTheRound = async (what, dialog) => {
+    /** A row with a verb of its own, so it is a row and not a member of the fold beside it. */
+    const freshRow = async () => {
       const verb = `Measured delta ${++delta}`;
-      // A verb of its own, so it is a row rather than a member of the run fold beside it.
       push(ran(2, 'implementer', `make delta ${delta}`, 'delta\n', verb));
-      const picked = log.locator('.row[data-tool]:visible', {hasText: verb});
-      await picked.waitFor();
-      await picked.focus();
-      const pickedId = await picked.getAttribute('id');
-      await page.keyboard.press('Enter');
-      await dialog.waitFor();
-      // Behind the dialog, a second call of that verb folds the row away.
-      push(ran(2, 'implementer', `make delta ${delta} again`, 'delta\n', verb));
+      const row = log.locator('.row[data-tool]:visible', {hasText: verb});
+      await row.waitFor();
+      await row.focus();
+      return {id: await row.getAttribute('id'), verb};
+    };
+    /** A second call of that verb folds the row away, behind whatever is over the log. */
+    const foldAway = async ({id, verb}) => {
+      push(ran(2, 'implementer', `make ${verb} again`, 'delta\n', verb));
       await page.waitForFunction(
-        id => !(document.getElementById(id)?.checkVisibility() ?? false),
-        pickedId,
+        row => !(document.getElementById(row)?.checkVisibility() ?? false),
+        id,
       );
-      await page.keyboard.press('Escape');
-      await dialog.waitFor({state: 'hidden'});
-      // The hand-off runs in React's own `close` handling, a turn after the dialog hides.
-      const landed = await page
+    };
+    // The hand-off runs in React's own `close` handling, a turn after the dialog goes.
+    const landed = (id = 'log') =>
+      page
         .waitForFunction(
-          () => document.getElementById('log')?.contains(document.activeElement) ?? false,
-          null,
+          row =>
+            row === 'log'
+              ? (document.getElementById('log')?.contains(document.activeElement) ?? false)
+              : document.activeElement?.id === row,
+          id,
           {timeout: 2000},
         )
         .then(
           () => true,
           () => false,
         );
-      assert.equal(landed, true, `closing the ${what} left focus on ${await cursor()}`);
+    const keepsTheRound = async what => {
+      assert.equal(await landed(), true, `${what} left focus adrift`);
       await page.keyboard.press('ArrowUp');
-      assert.equal(
-        await log.getAttribute('aria-label'),
-        'Round 2 log',
-        `the ${what} lost the round`,
-      );
+      assert.equal(await log.getAttribute('aria-label'), 'Round 2 log', `${what} lost the round`);
     };
-    // Drawer (768-1023 px) and sheet (below 768), which share the one expression that fixes it.
+    const closing = async (what, dialog) => {
+      const picked = await freshRow();
+      await page.keyboard.press('Enter');
+      await dialog.waitFor();
+      await foldAway(picked);
+      await page.keyboard.press('Escape');
+      await dialog.waitFor({state: 'hidden'});
+      await keepsTheRound(`closing the ${what}`);
+    };
+    // Crossing 1024 swaps the dialog for an aside, and removing an open <dialog> fires no
+    // `close` at all, so the hand-off on its close cannot be the one that catches this.
+    const crossing = async (what, dialog) => {
+      const picked = await freshRow();
+      await page.keyboard.press('Enter');
+      await dialog.waitFor();
+      await foldAway(picked);
+      await page.setViewportSize({width: 1440, height: 1000});
+      await page.locator('aside.insp').waitFor();
+      await keepsTheRound(`crossing 1024 from the ${what}`);
+    };
+    /**
+     * Back to the drawer, with the dialog shut. Whether it comes back open depends on whether
+     * the removed dialog fired `close` on the way out, which is what N5 is about and is
+     * asserted on its own below; here it only has to end closed.
+     */
+    const backToDrawer = async () => {
+      await page.setViewportSize({width: 900, height: 1000});
+      const reopened = await drawer.waitFor({state: 'visible', timeout: 1000}).then(
+        () => true,
+        () => false,
+      );
+      if (!reopened) return;
+      await page.keyboard.press('Escape');
+      await drawer.waitFor({state: 'hidden'});
+    };
+
     await page.setViewportSize({width: 900, height: 1000});
-    await dialogKeepsTheRound('drawer', drawer);
+    await closing('drawer', drawer);
     await page.setViewportSize({width: 390, height: 844});
-    await dialogKeepsTheRound('sheet', page.locator('dialog.insp-sheet'));
-    await page.setViewportSize({width: 900, height: 1000});
+    await closing('sheet', sheet);
+    await crossing('sheet', sheet);
+    await backToDrawer();
+    await crossing('drawer', drawer);
+    await backToDrawer();
+
+    // An ordinary close hands nothing over: the row is still there, so the dialog restores it
+    // and the hand-off has to stay out of the way. Watched rather than sampled at the end,
+    // because the log's own Tab-back hand-off would carry focus from the scroller to that same
+    // row and hide the steal.
+    const kept = await freshRow();
+    await page.keyboard.press('Enter');
+    await drawer.waitFor();
+    await page.evaluate(() => {
+      window.trail = [];
+      document.addEventListener('focusin', event => window.trail.push(event.target.id), true);
+    });
+    await page.keyboard.press('Escape');
+    await drawer.waitFor({state: 'hidden'});
+    assert.equal(await landed(kept.id), true, 'an ordinary close lost the row the dialog holds');
+    // Exactly one focus move, the dialog restoring the row: any hand-off would add its own.
+    assert.deepEqual(
+      await page.evaluate(() => window.trail),
+      [kept.id],
+      'an ordinary close moved focus more than the dialog did',
+    );
 
     // An unknown change kind renders, and Esc on a tip hides only the tip.
     await round(page, 1).click();

@@ -49,6 +49,18 @@ function useMedia(query: string): boolean {
   return useSyncExternalStore(subscribe, () => matchMedia(query).matches);
 }
 
+/**
+ * Hands the log focus that is nowhere a reader can use it: on `<body>`, or on an element that
+ * has been hidden under it. A reader left there has arrow keys that move the round instead of
+ * the log's cursor, which is the whole of it. Focus that is somewhere real is left alone.
+ */
+function reclaimFocus(): void {
+  const at = document.activeElement;
+  if (!(at instanceof HTMLElement) || at === document.body || !at.checkVisibility()) {
+    document.getElementById('log')?.focus({preventScroll: true});
+  }
+}
+
 function hintSeen(): boolean {
   try {
     return localStorage.getItem(HINT_KEY) === 'seen';
@@ -113,6 +125,15 @@ export function App({session}: {session: WorkspaceSession}) {
     if (wantsHistory && !historyLoading && historyError === null) void session.loadOlder();
   }, [session, wantsHistory, historyLoading, historyError]);
   const commandError = error === null ? null : `${ACTIONS[error.action]} failed: ${error.message}`;
+
+  // Past 1024px the inspector is an aside, so an open dialog is removed rather than closed, and
+  // removing an open <dialog> fires no `close` at all: the hand-off below never runs and focus
+  // falls to <body>. A reader at 125% zoom is in the drawer layout, and one Cmd+0 crosses this.
+  // Keyed on the width rather than on the dialog's own teardown, which would fire on an ordinary
+  // close too and take the focus the dialog was about to restore itself.
+  useEffect(() => {
+    if (wide && inspectorOpen) reclaimFocus();
+  }, [wide, inspectorOpen]);
 
   function select(round: number) {
     const again = round === selected;
@@ -232,13 +253,8 @@ export function App({session}: {session: WorkspaceSession}) {
             // A modal <dialog> restores focus to the node it remembered on open, and a commit
             // behind it can have replaced that row. Focus then stays somewhere the reader
             // cannot use: on <body>, or on the dialog's own control now that the dialog is
-            // hidden. Either way the log's keys are dead and the arrows move the round, and no
-            // React commit attends the close, so the log cannot see it for itself. It takes
-            // focus here, the way the Banner's Retry above hands it over when it unmounts.
-            const at = document.activeElement;
-            const lost =
-              !(at instanceof HTMLElement) || at === document.body || !at.checkVisibility();
-            if (lost) document.getElementById('log')?.focus({preventScroll: true});
+            // hidden. No React commit attends the close, so the log cannot see it for itself.
+            reclaimFocus();
           }}
           onRetryDesign={() => void session.load('design')}
         />
