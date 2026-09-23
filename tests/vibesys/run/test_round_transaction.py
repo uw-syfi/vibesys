@@ -17,11 +17,13 @@ from vibesys.run import (
     RoundTransactionCoordinator,
     RoundTransactionError,
 )
+from vibesys.run.agent_round_compat import LegacyAgentRoundStore
 from vibesys.run.git_events import NullGitTrackerEvents
 from vs_loop_state.api import RoundRecord
 from vs_project.api import (
     AgentRunConfiguration,
     Project,
+    ProjectStateError,
     RunEnvironmentRecord,
     StateTransition,
     serialize_round,
@@ -358,6 +360,7 @@ def test_recovery_accepts_v3_round_and_permissive_active_transition(tmp_path: Pa
 
     assert coordinator.recover() is RoundRecoveryOutcome.COMMITTED
     assert project.state.load_rounds(_RUN_ID) == [record]
+    assert LegacyAgentRoundStore(project, _RUN_ID).load() == [record]
     assert json.loads(
         (
             project.state.local_namespace(_RUN_ID, "agent").external_directory() / "active.json"
@@ -366,3 +369,47 @@ def test_recovery_accepts_v3_round_and_permissive_active_transition(tmp_path: Pa
         "hypothesis_id": "legacy-hypothesis",
         "nested": {"unknown": [1, 2, 3]},
     }
+
+
+def test_legacy_round_store_preserves_bytes_and_repairs_missing_file(tmp_path: Path) -> None:
+    project, tracker, _coordinator = _project(tmp_path)
+    record = RoundRecord(
+        round_number=1,
+        commit=tracker.current_sha(),
+        perf_metric=12.5,
+        perf_unit="ns/op",
+        passed=True,
+    )
+    rounds = LegacyAgentRoundStore(project, _RUN_ID)
+    expected = rounds.prepare_snapshot(record)
+
+    assert rounds.save(record) == expected
+    assert rounds.save(record) == expected
+    assert rounds.load() == [record]
+    namespace = project.state.portable_namespace(_RUN_ID, "agent")
+    assert namespace.read_bytes("rounds/0001.json") == serialize_round(record)
+
+    namespace.delete("rounds/0001.json")
+    assert rounds.restore(record) == expected
+    assert rounds.load() == [record]
+
+
+def test_legacy_round_store_rejects_unexpected_directory(tmp_path: Path) -> None:
+    project, _tracker, _coordinator = _project(tmp_path)
+    project.state.portable_namespace(_RUN_ID, "agent").external_directory("rounds/extra")
+
+    with pytest.raises(ProjectStateError, match="Unexpected completed-round entry"):
+        LegacyAgentRoundStore(project, _RUN_ID).load()
+
+
+def test_legacy_round_store_rejects_symlinked_round_file(tmp_path: Path) -> None:
+    project, _tracker, _coordinator = _project(tmp_path)
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"round":1}', encoding="utf-8")
+    rounds_directory = project.state.portable_namespace(_RUN_ID, "agent").external_directory(
+        "rounds"
+    )
+    (rounds_directory / "0001.json").symlink_to(outside)
+
+    with pytest.raises(ProjectStateError, match="symlinks"):
+        LegacyAgentRoundStore(project, _RUN_ID).load()

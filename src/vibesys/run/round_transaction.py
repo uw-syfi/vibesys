@@ -33,6 +33,7 @@ from pydantic import (
     field_validator,
 )
 
+from vibesys.run.agent_round_compat import LegacyAgentRoundStore
 from vibesys.run.git_tracker import FrameworkSnapshotStatus
 from vs_loop_state.api import RoundRecord, parse_round_record
 from vs_project.api import ProjectStateError, StateSlot, StateTransition
@@ -195,7 +196,7 @@ class RoundTransactionCoordinator:
             )
 
         project.state.load_run(run_id)
-        self._project = project
+        self._legacy_rounds = LegacyAgentRoundStore(project, run_id)
         self._git = git
         self.run_id = run_id
         self._agent_state_slot: StateSlot[BaseModel] = project.state.portable_namespace(
@@ -315,19 +316,16 @@ class RoundTransactionCoordinator:
                 f"Round transaction journal payload is for round {record.round_number}, "
                 f"not round {journal.round_number}"
             )
-        expected_snapshot = self._project.state.prepare_completed_round_snapshot(
-            self.run_id,
-            record,
-        )
+        expected_snapshot = self._legacy_rounds.prepare_snapshot(record)
         status = self._git.framework_snapshot_status(expected_snapshot)
         if status is FrameworkSnapshotStatus.DIFFERENT:
             raise RoundTransactionError(
                 "Committed round metadata differs from the transaction journal"
             )
         if status is FrameworkSnapshotStatus.EXACT:
-            snapshot = self._project.state.restore_completed_round(self.run_id, record)
+            snapshot = self._legacy_rounds.restore(record)
         else:
-            snapshot = self._project.state.save_round(self.run_id, record)
+            snapshot = self._legacy_rounds.save(record)
             self._git.snapshot_with_framework_metadata(
                 f"vibesys(round {journal.round_number}): record result",
                 snapshot,

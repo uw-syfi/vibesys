@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from vibesys.run.agent_round_compat import LegacyAgentRoundStore
+
 if TYPE_CHECKING:
     from vibesys.run.git_tracker import GitTracker
     from vs_loop_state.api import RoundRecord
@@ -60,5 +62,5 @@ class RunState:
         self.git.snapshot_framework_state(label, namespace.snapshot())
 
     def completed_rounds(self) -> list[RoundRecord]:
-        """Load the validated completed-round history for this run."""
-        return self.project.state.load_rounds(self.run_id)
+        """Load the former agent completed-round history via its VibeSys store."""
+        return LegacyAgentRoundStore(self.project, self.run_id).load()
