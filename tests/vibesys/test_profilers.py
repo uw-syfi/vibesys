@@ -293,3 +293,17 @@ def test_headroom_profiler_domains_and_preflight():  # noqa: ANN201  # tracked: 
     assert ProfilerKind.HEADROOM not in allowed_profiler_kinds(DomainName.MICROSERVICES)
     # Capture is target-owned; the analysis side needs no host tooling.
     assert preflight_profiler_kind(ProfilerKind.HEADROOM).usable
+
+
+def test_rocprof_profiler_domains_and_preflight():  # noqa: ANN201  # tracked: #288
+    definition = PROFILER_DEFINITIONS[ProfilerKind.ROCPROF]
+
+    assert definition.domains == frozenset({DomainName.LLM_SERVING})
+    assert not definition.requires_domain_torch_support
+    assert ProfilerKind.ROCPROF in allowed_profiler_kinds(DomainName.LLM_SERVING)
+    assert ProfilerKind.ROCPROF not in allowed_profiler_kinds(DomainName.GENERIC)
+    assert ProfilerKind.ROCPROF not in allowed_profiler_kinds(DomainName.MICROSERVICES)
+    # rocprofv3/rocprof-compute normally run inside the ROCm container, like
+    # nsys on CUDA; no host command-availability check, to avoid a false
+    # negative on an editor host that never runs the profiler itself.
+    assert preflight_profiler_kind(ProfilerKind.ROCPROF).usable
