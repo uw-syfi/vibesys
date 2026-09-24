@@ -37,7 +37,7 @@ The single most useful habit on this backend. A fallback is silent and presents 
 
 Check via the engine's backend-selection logging, or profile and confirm the kernel names on the timeline match the library you intended — see [`profiler.md`](profiler.md).
 
-Do this before concluding anything about relative hardware performance.
+Do this before concluding anything about relative hardware performance. For the full engagement-proof recipe (`AITER_LOG_TUNED_CONFIG`, the per-shape lookup key, and why offline `hipBLASLt`/`TunableOp` tuning often doesn't reach the live dispatch), see [`aiter-engagement.md`](aiter-engagement.md).
 
 ## Paged KV
 
@@ -66,6 +66,7 @@ Writing new CDNA kernels (HIP, CK templates) is outside this collection. This fi
 
 ## See also
 
+- [`aiter-engagement.md`](aiter-engagement.md) — prove a tuning or dispatch change reached the live server before trusting a measured delta
 - [`floor.md`](floor.md) — where the fused kernel sits in the optimization floor
 - [`hardware.md`](hardware.md) — CDNA3/CDNA4 precision support and GFX IDs
 - [`frameworks/triton.md`](../../frameworks/triton.md) — the portable fallback

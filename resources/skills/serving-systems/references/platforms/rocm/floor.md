@@ -51,3 +51,4 @@ Capture decode, keep prefill eager or bucketed. The shape-stability and address-
 - [`hardware.md`](hardware.md) — MI300X / MI325X / MI350X specs, GFX IDs, precision support
 - [`aiter.md`](aiter.md) — AITER / Composable Kernel
 - [`profiler.md`](profiler.md) — rocprofv3 / rocprof-compute
+- [`roofline.md`](roofline.md) — per-arch compute/bandwidth ceilings, including this repo's measured MI210 sustained ceiling

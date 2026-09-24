@@ -38,3 +38,4 @@ Beyond a node: Ethernet / InfiniBand with RDMA (RoCE). No NVL72-equivalent domai
 - [`floor.md`](floor.md) — the ROCm optimization floor
 - [`aiter.md`](aiter.md) — AITER / Composable Kernel, the fused-attention path on CDNA
 - [`profiler.md`](profiler.md) — rocprof / omniperf
+- [`roofline.md`](roofline.md) — per-arch compute/bandwidth peaks and ridge points derived from these specs
