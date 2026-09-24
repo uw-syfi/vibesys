@@ -196,19 +196,21 @@ COUNTER_SETS: dict[str, dict[str, CounterSet]] = {
         ),
         "mfma": CounterSet(
             (
+                "SQ_VALU_MFMA_BUSY_CYCLES",
+                "GRBM_GUI_ACTIVE",
                 "SQ_INSTS_MFMA",
-                "SQ_INSTS_VALU_MFMA_MOPS_BF16",
-                "SQ_INSTS_VALU_MFMA_MOPS_F16",
                 "GRBM_COUNT",
             ),
             verified=True,
-            note="SQ_INSTS_MFMA (total MFMA instructions issued) is the counter a real MI210 "
-            "capture used (job1 pass1) and is what report/triage prefer for the MFMA issue "
-            "rate. MOPS_BF16/MOPS_F16 (per-dtype math-op counts, a different unit -- already "
-            "divided by 512) and GRBM_COUNT are confirmed present in --list-avail but weren't "
-            "captured in the same pass as SQ_INSTS_MFMA. SQ_VALU_MFMA_BUSY_CYCLES also exists "
-            "on gfx90a as an alternative (per-SIMD MFMA-busy cycles) if instruction counts turn "
-            "out too coarse; not yet captured on real hardware.",
+            note="SQ_VALU_MFMA_BUSY_CYCLES + GRBM_GUI_ACTIVE feed rocprof-compute's own MfmaUtil "
+            "derived metric (reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/(reduce(GRBM_GUI_ACTIVE,max)*"
+            "SIMD_NUM), confirmed in a real MI210 --list-avail dump) -- the fraction of MFMA-pipe "
+            "capacity actually used, interpretable against a peak, unlike a raw instruction rate. "
+            "Both are confirmed present in --list-avail; not yet captured together on real "
+            "hardware. SQ_INSTS_MFMA (total MFMA instructions issued, the counter a real MI210 "
+            "capture used -- job1 pass1) and GRBM_COUNT are kept as the fallback path report/"
+            "triage use (mfma_issue_rate, or --flops-derived FLOP/s) when SQ_VALU_MFMA_BUSY_CYCLES "
+            "wasn't captured.",
         ),
         "valu": CounterSet(
             ("SQ_INSTS_VALU", "GRBM_GUI_ACTIVE", "GRBM_COUNT"),
@@ -323,6 +325,7 @@ CANDIDATES: dict[str, tuple[str, ...]] = {
     "waves": ("SQ_WAVES",),
     "valu_insts": ("SQ_INSTS_VALU",),
     "mfma_insts_total": ("SQ_INSTS_MFMA",),
+    "mfma_busy_cycles": ("SQ_VALU_MFMA_BUSY_CYCLES",),
     "mfma_insts_bf16": ("SQ_INSTS_VALU_MFMA_MOPS_BF16",),
     "mfma_insts_f16": ("SQ_INSTS_VALU_MFMA_MOPS_F16",),
     "mfma_insts_fp8": ("SQ_INSTS_VALU_MFMA_MOPS_FP8",),
@@ -488,6 +491,61 @@ def _load_kernel_trace_durations(dirs: list[str]) -> dict[str, float]:
     return dict(totals)
 
 
+@dataclass(frozen=True)
+class AgentInfo:
+    """GPU topology read straight from a real rocprofv3 ``*_agent_info.csv`` capture.
+
+    Overrides the static per-arch ``PeakSpec``/``SIMDS_PER_CU`` table's CU and
+    SIMD-per-CU counts when a real capture is available, so the MFMA
+    peak-fraction denominator reflects the exact GPU that ran rather than just
+    its architecture family -- useful for gfx942, which shares one family
+    entry across SKUs with CU counts from 228 to 304 (see ``PEAK_ARCH_NOTE``).
+    """
+
+    cu_count: int
+    simds_per_cu: int
+
+    @property
+    def simd_num(self) -> int:
+        """Total SIMD count across the whole GPU (CU_NUM * SIMD_PER_CU in rocprof-compute terms)."""
+        return self.cu_count * self.simds_per_cu
+
+
+def _load_agent_info(dirs: list[str]) -> AgentInfo | None:
+    """Read ``Cu_Count``/``Simd_Count`` off the first GPU row in any ``*agent_info*.csv``.
+
+    rocprofv3 writes one row per agent (CPU and GPU) to this file alongside a
+    PMC or kernel-trace capture. This returns the first GPU row found across
+    the given directories -- every fixture and real capture this toolkit
+    targets is a single-GPU job. Returns ``None`` when no such file exists;
+    the caller then falls back to the static per-arch ``PeakSpec`` table.
+    """  # tracked: #288
+    for path in _discover(dirs, "agent_info", (".csv",)):
+        try:
+            with path.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+        except (OSError, csv.Error) as exc:
+            print(f"warning: could not parse {path}: {exc}", file=sys.stderr)  # noqa: T201  # tracked: #288
+            continue
+        for row in rows:
+            if row.get("Agent_Type") != "GPU":
+                continue
+            cu_count = _to_int(row.get("Cu_Count"))
+            simd_count = _to_int(row.get("Simd_Count"))
+            if cu_count > 0 and simd_count > 0 and simd_count % cu_count == 0:
+                return AgentInfo(cu_count=cu_count, simds_per_cu=simd_count // cu_count)
+    return None
+
+
+def _simd_num_for(spec: PeakSpec | None, agent_info: AgentInfo | None) -> int | None:
+    """Total SIMD count for the MFMA busy-fraction denominator: agent_info.csv wins when present."""
+    if agent_info is not None:
+        return agent_info.simd_num
+    if spec is not None:
+        return spec.compute_units * SIMDS_PER_CU
+    return None
+
+
 def _duration_from_counter_rows(rows: list[CounterRow]) -> dict[str, float]:
     """Sum per-dispatch wall-clock duration (ns) straight from the PMC rows'
     own ``Start_Timestamp``/``End_Timestamp`` columns.
@@ -634,6 +692,10 @@ class DerivedMetrics:
     achieved_bw_gb_s: float | None = None
     gpu_busy_pct: float | None = None
     mfma_issue_rate: float | None = None
+    mfma_busy_fraction: float | None = None
+    mfma_busy_source: str | None = (
+        None  # "measured" (SQ_VALU_MFMA_BUSY_CYCLES) or "flops-hint" (--flops)
+    )
     lds_bank_conflict_rate_pct: float | None = None
     duration_ns: float | None = None
 
@@ -697,8 +759,107 @@ def _mfma_instruction_count(counters: dict[str, float]) -> float | None:
     return dtype_sum if dtype_sum > 0 else None
 
 
-def derive_metrics(agg: KernelAgg, duration_ns: float | None) -> DerivedMetrics:
-    """Compute every derived metric whose inputs are present in ``agg.counters``."""
+def _clamp_unit_fraction(value: float, source: str) -> float:
+    """Clamp a utilization fraction to [0, 1], warning when the raw value fell outside it.
+
+    A busy fraction should never be negative or exceed 1.0, but nothing
+    guarantees that in practice: PMC passes stitched from different capture
+    windows, a measurement race between the numerator and denominator
+    counters, or (for the ``--flops`` path) a hint that doesn't match the
+    kernel that actually ran. Clamping keeps the derived metric interpretable
+    instead of printing "142% of peak"; the warning is what tells the reader
+    to distrust the inputs rather than the GPU.
+    """
+    if 0.0 <= value <= 1.0:
+        return value
+    print(  # noqa: T201  # tracked: #288
+        f"warning: MFMA busy fraction from {source} was {value:.4f}, outside [0, 1] -- clamping; "
+        "this usually means inconsistent/stitched counters or a --flops hint that doesn't match "
+        "the kernel that ran",
+        file=sys.stderr,
+    )
+    return min(1.0, max(0.0, value))
+
+
+@dataclass(frozen=True)
+class MfmaPeakContext:
+    """Peak-normalization inputs for ``_mfma_busy_fraction``, grouped to keep its arg count down.
+
+    ``simd_num`` comes from ``_simd_num_for`` (agent_info.csv, else the static
+    per-arch table); ``spec`` is the arch's ``PeakSpec``; ``flops`` is an
+    optional caller-supplied FLOP count (e.g. ``--flops``) for the fallback
+    achieved-FLOP/s-over-spec-peak path.
+    """
+
+    simd_num: int | None = None
+    spec: PeakSpec | None = None
+    flops: float | None = None
+
+
+def _mfma_busy_fraction(
+    *,
+    counters: dict[str, float],
+    busy_cycles: float | None,
+    duration_ns: float | None,
+    peak: MfmaPeakContext,
+) -> tuple[float | None, str | None]:
+    """MFMA utilization as a fraction of peak issue capacity, not a raw instruction rate.
+
+    Prefers the measured path: mirrors rocprof-compute's own ``MfmaUtil`` derived
+    metric (confirmed in a real MI210 ``rocprofv3 --list-avail`` dump --
+    ``reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)``),
+    the fraction of (SIMD x busy-cycle) slots where the MFMA ALU was actually
+    busy. Falls back to a caller-supplied FLOP count (``--flops``, e.g.
+    ``2*M*N*K`` for a GEMM of known shape) divided by elapsed time and the
+    arch's spec dense bf16/fp16 TFLOP/s peak, when ``SQ_VALU_MFMA_BUSY_CYCLES``
+    wasn't captured. The fallback only ever fires for a kernel that actually
+    issued MFMA instructions (the ``mfma_total`` guard), so a ``--flops`` hint
+    can never mislabel a kernel with no MFMA activity as compute-bound.
+    """
+    mfma_busy_cycles = _lookup(counters, "mfma_busy_cycles")
+    if (
+        mfma_busy_cycles is not None
+        and busy_cycles is not None
+        and busy_cycles > 0
+        and peak.simd_num is not None
+        and peak.simd_num > 0
+    ):
+        fraction = mfma_busy_cycles / (busy_cycles * peak.simd_num)
+        source = "SQ_VALU_MFMA_BUSY_CYCLES/(GRBM_GUI_ACTIVE*SIMD_NUM)"
+        return _clamp_unit_fraction(fraction, source), "measured"
+
+    mfma_total = _mfma_instruction_count(counters)
+    if (
+        peak.flops is not None
+        and peak.flops > 0
+        and mfma_total is not None
+        and mfma_total > 0
+        and duration_ns is not None
+        and duration_ns > 0
+        and peak.spec is not None
+        and peak.spec.dense_bf16_fp16_tflops > 0
+    ):
+        achieved_flops_per_s = peak.flops / (duration_ns / 1e9)
+        peak_flops_per_s = peak.spec.dense_bf16_fp16_tflops * 1e12
+        fraction = achieved_flops_per_s / peak_flops_per_s
+        return _clamp_unit_fraction(fraction, "--flops achieved/spec dense peak"), "flops-hint"
+
+    return None, None
+
+
+def derive_metrics(
+    agg: KernelAgg,
+    duration_ns: float | None,
+    *,
+    simd_num: int | None = None,
+    spec: PeakSpec | None = None,
+    flops: float | None = None,
+) -> DerivedMetrics:
+    """Compute every derived metric whose inputs are present in ``agg.counters``.
+
+    ``simd_num``/``spec``/``flops`` are only needed for ``mfma_busy_fraction``
+    (a peak-normalized MFMA utilization); every other metric ignores them.
+    """
     counters = agg.counters
     metrics = DerivedMetrics(duration_ns=duration_ns)
 
@@ -736,6 +897,13 @@ def derive_metrics(agg: KernelAgg, duration_ns: float | None) -> DerivedMetrics:
     )
     if lds_insts is not None and bank_conflicts is not None and lds_insts > 0:
         metrics.lds_bank_conflict_rate_pct = 100.0 * bank_conflicts / lds_insts
+
+    metrics.mfma_busy_fraction, metrics.mfma_busy_source = _mfma_busy_fraction(
+        counters=counters,
+        busy_cycles=busy,
+        duration_ns=duration_ns,
+        peak=MfmaPeakContext(simd_num=simd_num, spec=spec, flops=flops),
+    )
 
     return metrics
 
@@ -916,6 +1084,11 @@ def cmd_report(ns: argparse.Namespace) -> None:
 OCCUPANCY_LOW_WAVES_PER_CU = 8  # out of a max of 32 (8 waves/SIMD * 4 SIMD/CU)
 BANDWIDTH_BOUND_FRACTION_OF_PEAK = 0.5
 MFMA_ISSUE_RATE_COMPUTE_BOUND = 0.05
+# Fraction of spec MFMA peak (measured SQ_VALU_MFMA_BUSY_CYCLES fraction, or a
+# --flops-derived achieved/peak FLOP/s ratio). Tuned GEMM libraries realistically
+# land at ~45-55% of spec peak (see PeakSpec's docstring); 30% is comfortably
+# below that "well tuned" ceiling while staying well above measurement noise.
+MFMA_BUSY_FRACTION_COMPUTE_BOUND = 0.30
 LDS_BANK_CONFLICT_BOUND_PCT = 5.0
 SMALL_GRID_CU_MULTIPLE = 2
 
@@ -927,6 +1100,45 @@ class Verdict:
     label: str
     evidence: str
     lever: str
+
+
+_COMPUTE_BOUND_LEVER = (
+    "tune MFMA shape/wave scheduling, or move to a lower-precision path (FP8/FP6/FP4) before "
+    "grinding further -- ~45-55% of the dense TFLOP/s peak is the practical ceiling for tuned GEMM"
+)
+
+
+def _classify_mfma_compute_bound(metrics: DerivedMetrics) -> Verdict | None:
+    """COMPUTE-BOUND verdict from MFMA utilization, or ``None`` if neither signal clears threshold.
+
+    Prefers the peak-normalized fraction (measured ``SQ_VALU_MFMA_BUSY_CYCLES``,
+    or a ``--flops``-derived achieved/peak FLOP/s ratio); falls back to the raw,
+    honestly-labeled instruction rate when no peak reference is available at all.
+    """
+    busy = _fmt(metrics.gpu_busy_pct, "%", 1)
+    if (
+        metrics.mfma_busy_fraction is not None
+        and metrics.mfma_busy_fraction >= MFMA_BUSY_FRACTION_COMPUTE_BOUND
+    ):
+        source_note = (
+            "measured" if metrics.mfma_busy_source == "measured" else "spec peak, from --flops"
+        )
+        return Verdict(
+            "COMPUTE-BOUND",
+            f"MFMA busy {metrics.mfma_busy_fraction * 100:.0f}% of peak ({source_note}), GPU busy {busy}",
+            _COMPUTE_BOUND_LEVER,
+        )
+    if (
+        metrics.mfma_issue_rate is not None
+        and metrics.mfma_issue_rate >= MFMA_ISSUE_RATE_COMPUTE_BOUND
+    ):
+        return Verdict(
+            "COMPUTE-BOUND",
+            f"MFMA issue rate {metrics.mfma_issue_rate:.4f} insts/cycle (no peak reference -- capture "
+            f"SQ_VALU_MFMA_BUSY_CYCLES or pass --flops for % of peak), GPU busy {busy}",
+            _COMPUTE_BOUND_LEVER,
+        )
+    return None
 
 
 def _classify(
@@ -948,17 +1160,9 @@ def _classify(
                 f"({bw_fraction * 100:.0f}% of {spec.hbm_tb_s * 1000:.0f} GB/s spec peak)",
                 "raise arithmetic intensity: fuse epilogues, tile for L2/Infinity-Cache reuse, check XCD locality",
             )
-    if (
-        metrics.mfma_issue_rate is not None
-        and metrics.mfma_issue_rate >= MFMA_ISSUE_RATE_COMPUTE_BOUND
-    ):
-        busy = _fmt(metrics.gpu_busy_pct, "%", 1)
-        return Verdict(
-            "COMPUTE-BOUND",
-            f"MFMA issue rate {metrics.mfma_issue_rate:.4f} insts/cycle, GPU busy {busy}",
-            "tune MFMA shape/wave scheduling, or move to a lower-precision path (FP8/FP6/FP4) before "
-            "grinding further -- ~45-55% of the dense TFLOP/s peak is the practical ceiling for tuned GEMM",
-        )
+    mfma_verdict = _classify_mfma_compute_bound(metrics)
+    if mfma_verdict is not None:
+        return mfma_verdict
     if (
         metrics.lds_bank_conflict_rate_pct is not None
         and metrics.lds_bank_conflict_rate_pct >= LDS_BANK_CONFLICT_BOUND_PCT
@@ -1019,6 +1223,8 @@ def cmd_triage(ns: argparse.Namespace) -> None:
     durations.update(_load_kernel_trace_durations(ns.dirs))
     aggs = _aggregate_by_kernel(rows)
     kernels = _filter_kernels(aggs, ns.kernel)
+    simd_num = _simd_num_for(spec, _load_agent_info(ns.dirs))
+    flops = getattr(ns, "flops", None)
 
     _print_peak_table(spec, arch)
     for agg in kernels[: ns.top]:
@@ -1029,7 +1235,9 @@ def cmd_triage(ns: argparse.Namespace) -> None:
             workgroup_size=agg.workgroup_size,
             arch=arch,
         )
-        metrics = derive_metrics(agg, durations.get(agg.name))
+        metrics = derive_metrics(
+            agg, durations.get(agg.name), simd_num=simd_num, spec=spec, flops=flops
+        )
         verdict = _classify(agg=agg, occ=occ, metrics=metrics, spec=spec)
         print(f"\n{_short_kernel_name(agg.name)}")  # noqa: T201  # tracked: #288
         print(f"  verdict: {verdict.label}")  # noqa: T201  # tracked: #288
@@ -1074,6 +1282,17 @@ def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
     triage = sub.add_parser("triage", help="classify each hot kernel's bottleneck with evidence")
     _add_dirs_arg(triage)
     triage.add_argument("--arch", required=True)
+    triage.add_argument(
+        "--flops",
+        type=float,
+        default=None,
+        help=(
+            "Total FLOP count for the matched kernel's dispatch (e.g. 2*M*N*K for a GEMM of known "
+            "shape). Fallback MFMA-busy-%%-of-peak signal when SQ_VALU_MFMA_BUSY_CYCLES wasn't "
+            "captured; only applies to kernels with MFMA activity, but still scope with --kernel "
+            "when triaging one specific kernel."
+        ),
+    )
     triage.set_defaults(fn=cmd_triage)
 
     ns = parser.parse_args(argv)
