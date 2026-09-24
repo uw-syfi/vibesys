@@ -65,7 +65,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
 # access pattern.
 _load_module(_MODULE_NAME, _MODULE_PATH)
 
-from rocprof_compute_under_test import (  # noqa: E402  (module must load first)
+from rocprof_compute_under_test import (  # noqa: E402  (module must load first)  # ty: ignore[unresolved-import]  # tracked: #288
     _build_profile_cmd,
     _clean_analyze_output,
     _empty_match_message,
@@ -651,9 +651,9 @@ def test_cmd_profile_end_to_end_with_mocked_tool(monkeypatch, tmp_path, capsys, 
     """The command construction, out-dir creation, and workload resolution --
     everything except actually shelling out to rocprof-compute."""
     out_dir = tmp_path / "out"
-    recorded: dict[str, object] = {}
+    recorded: dict[str, list[str]] = {}
 
-    def fake_run_with_timeout(cmd, *, timeout=None, **_kw: object):  # noqa: ANN001, ANN202, ARG001
+    def fake_run_with_timeout(cmd: list[str], *, timeout=None, **_kw: object):  # noqa: ANN001, ANN202, ARG001
         recorded["cmd"] = cmd
         workload_dir = Path(cmd[cmd.index("-p") + 1])
         workload_dir.mkdir(parents=True)

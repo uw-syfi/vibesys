@@ -211,7 +211,7 @@ def test_stall_category_totals_ranks_vmem_load_and_wait_highest():  # noqa: ANN2
     assert totals["VMEM-load"] == 8500  # tracked: #288
     assert totals["VMEM-wait"] == 8400  # tracked: #288
     assert list(dict(stall_category_totals(instructions))) == sorted(
-        totals, key=totals.get, reverse=True
+        totals, key=lambda k: totals[k], reverse=True
     )
 
 

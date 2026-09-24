@@ -729,8 +729,8 @@ _KNOWN_COLUMN_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
 @given(data=st.data())
 @FAST
 def test_get_resolves_known_aliases_under_permutation_case_and_unknown_columns(data):  # noqa: ANN001, ANN201  # tracked: #288
-    names = []
-    values = []
+    names: list[str] = []
+    values: list[object] = []
     for value, aliases in _KNOWN_COLUMN_SPECS:
         alias = data.draw(case_variant(data.draw(st.sampled_from(aliases))))
         names.append(alias)
@@ -822,7 +822,7 @@ def test_gaps_for_key_busy_plus_all_gaps_equals_window_with_no_negative_gap(ival
     # flags as unsafe to reuse across `@given` examples) and restore it
     # unconditionally afterwards.
     original_threshold = analyze_rocprof._IDLE_GAP_THRESHOLD_NS  # noqa: SLF001  # tracked: #288
-    analyze_rocprof._IDLE_GAP_THRESHOLD_NS = -1.0  # noqa: SLF001  # tracked: #288
+    analyze_rocprof._IDLE_GAP_THRESHOLD_NS = -1.0  # noqa: SLF001  # ty: ignore[invalid-assignment]  # tracked: #288
     try:
         evs = [(float(s), float(s + d), f"k{i}") for i, (s, d) in enumerate(ivals)]
         busy_ns, gaps = _gaps_for_key(("agent0", "queue0"), evs)

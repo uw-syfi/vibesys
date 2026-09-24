@@ -61,7 +61,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
 # private-attribute access pattern.
 _load_module(_MODULE_NAME, _MODULE_PATH)
 
-from rocprof_kernel_bench_under_test import (  # noqa: E402  (module must load first)
+from rocprof_kernel_bench_under_test import (  # noqa: E402  (module must load first)  # ty: ignore[unresolved-import]  # tracked: #288
     DEFAULT_THRESHOLD_PCT,
     MIN_PAIRS_FOR_VERDICT,
     MIN_SAMPLES_FOR_TREND,

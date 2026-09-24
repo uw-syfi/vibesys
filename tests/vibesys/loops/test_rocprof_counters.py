@@ -1150,7 +1150,7 @@ def test_load_counter_rows_handles_permuted_noisy_and_huge_name_csvs_without_cra
     order: list[int], *, include_unknown_column: bool, kernel_name: str, kernel_name_col: str
 ):
     header = list(_COUNTERS_CSV_HEADER)
-    row = [
+    row: list[object] = [
         "1",
         "1",
         "0",
