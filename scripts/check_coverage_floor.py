@@ -17,7 +17,7 @@ Configuration lives in `pyproject.toml` under
                   be preceded by a comment explaining why it is there.
 
 Usage:
-    uv run python scripts/check_coverage_floor.py coverage.json.
+    uv run python scripts/check_coverage_floor.py coverage.json
 """
 
 from __future__ import annotations

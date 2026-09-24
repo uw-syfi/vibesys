@@ -148,6 +148,9 @@ allowlist = [
     # decision, not a test gap, and is tracked separately from coverage
     # enforcement. See #298.
     "src/vibesys/_model_config/",
+    # Protocol-only typing module, imported solely under TYPE_CHECKING, so it
+    # is never executed at runtime and has no statements for tests to cover.
+    "src/vibesys/loops/request.py",
 ]
 
 [tool.vibesys.file_length]
