@@ -33,14 +33,17 @@ from resources.profilers.rocprof.counters import (
     COUNTER_SETS,
     MFMA_BUSY_FRACTION_COMPUTE_BOUND,
     MFMA_CANDIDATE_KEYS,
+    MFMA_ISSUE_RATE_COMPUTE_BOUND,
     PEAK_SPECS,
     SIMDS_PER_CU,
     AgentInfo,
     CounterRow,
     CounterSet,
+    DerivedMetrics,
     KernelAgg,
     MfmaPeakContext,
     _aggregate_by_kernel,
+    _classify_mfma_compute_bound,
     _discover,
     _duration_from_counter_rows,
     _filter_kernels,
@@ -962,6 +965,78 @@ def test_mfma_busy_fraction_compute_bound_threshold_is_well_below_the_practical_
     # comfortably below that so a well-tuned kernel is still classified
     # COMPUTE-BOUND rather than falling through to a different verdict.
     assert 0.0 < MFMA_BUSY_FRACTION_COMPUTE_BOUND < 0.45
+
+
+def test_mfma_compute_bound_below_threshold_does_not_fall_back_to_uninterpretable_rate():  # noqa: ANN201  # tracked: #288
+    # Real MI210 bug (Qwen3.5-9B decode-phase GEMM triage, mfma+hbm counter
+    # sets in one triage call): a kernel with a genuinely LOW measured MFMA
+    # busy fraction (5.1% of peak, well under the 30% compute-bound
+    # threshold) still has a raw MFMA issue rate (0.66 insts/cycle) above
+    # MFMA_ISSUE_RATE_COMPUTE_BOUND. The pre-fix code fell through to the
+    # "no peak reference -- capture SQ_VALU_MFMA_BUSY_CYCLES" fallback verdict
+    # in that case, which is doubly wrong: SQ_VALU_MFMA_BUSY_CYCLES WAS
+    # captured and used (mfma_busy_fraction is not None), and re-capturing it
+    # would just reproduce the same low fraction, not fix anything. When a
+    # peak-normalized fraction was computed at all, it must be the only
+    # signal this function trusts -- never the raw rate.
+    metrics = DerivedMetrics(
+        mfma_busy_fraction=0.0510,
+        mfma_busy_source="measured",
+        mfma_issue_rate=0.6628,
+        gpu_busy_pct=100.0,
+    )
+    assert metrics.mfma_issue_rate is not None
+    assert metrics.mfma_issue_rate >= MFMA_ISSUE_RATE_COMPUTE_BOUND  # the fallback WOULD have fired
+    verdict = _classify_mfma_compute_bound(metrics)
+    assert verdict is None
+
+
+def test_mfma_compute_bound_still_uses_raw_rate_fallback_when_no_peak_reference_exists():  # noqa: ANN201  # tracked: #288
+    # Contrast case: when SQ_VALU_MFMA_BUSY_CYCLES truly wasn't captured
+    # (mfma_busy_fraction is None), the honestly-labeled raw-rate fallback
+    # must still fire -- this function's other branch is not the bug.
+    metrics = DerivedMetrics(
+        mfma_busy_fraction=None,
+        mfma_busy_source=None,
+        mfma_issue_rate=0.6628,
+        gpu_busy_pct=100.0,
+    )
+    verdict = _classify_mfma_compute_bound(metrics)
+    assert verdict is not None
+    assert verdict.label == "COMPUTE-BOUND"
+    assert "no peak reference" in verdict.evidence
+
+
+@given(
+    mfma_busy_fraction=st.floats(
+        min_value=0.0,
+        max_value=MFMA_BUSY_FRACTION_COMPUTE_BOUND,
+        exclude_max=True,
+        allow_nan=False,
+    ),
+    mfma_issue_rate=st.one_of(
+        st.none(),
+        st.floats(min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False),
+    ),
+    gpu_busy_pct=st.one_of(st.none(), st.floats(min_value=0.0, max_value=100.0)),
+)
+@FAST
+def test_mfma_compute_bound_never_emits_no_peak_reference_when_a_fraction_was_computed(  # noqa: ANN201
+    mfma_busy_fraction: float, mfma_issue_rate: float | None, gpu_busy_pct: float | None
+):
+    # Generalizes the fixed bug: for ANY sub-threshold measured/flops-hint
+    # fraction, paired with ANY raw issue rate (including one that would
+    # itself clear MFMA_ISSUE_RATE_COMPUTE_BOUND), this function must never
+    # claim "no peak reference" -- a peak reference was computed, it just
+    # says this kernel isn't MFMA-compute-bound.
+    metrics = DerivedMetrics(
+        mfma_busy_fraction=mfma_busy_fraction,
+        mfma_busy_source="measured",
+        mfma_issue_rate=mfma_issue_rate,
+        gpu_busy_pct=gpu_busy_pct,
+    )
+    verdict = _classify_mfma_compute_bound(metrics)
+    assert verdict is None
 
 
 # ---------------------------------------------------------------------------

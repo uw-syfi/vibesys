@@ -1153,22 +1153,27 @@ def _classify_mfma_compute_bound(metrics: DerivedMetrics) -> Verdict | None:
     """COMPUTE-BOUND verdict from MFMA utilization, or ``None`` if neither signal clears threshold.
 
     Prefers the peak-normalized fraction (measured ``SQ_VALU_MFMA_BUSY_CYCLES``,
-    or a ``--flops``-derived achieved/peak FLOP/s ratio); falls back to the raw,
-    honestly-labeled instruction rate when no peak reference is available at all.
+    or a ``--flops``-derived achieved/peak FLOP/s ratio). The raw, honestly-
+    labeled instruction-rate fallback only fires when NO peak reference is
+    available at all (``mfma_busy_fraction is None``): if a peak-normalized
+    fraction was computed but simply landed under the compute-bound
+    threshold, that already tells us this kernel isn't MFMA-compute-bound,
+    and the fallback's "no peak reference -- capture SQ_VALU_MFMA_BUSY_CYCLES"
+    text would be false (the counter WAS captured and used) as well as bad
+    advice (recapturing it would just reproduce the same low fraction).
     """
     busy = _fmt(metrics.gpu_busy_pct, "%", 1)
-    if (
-        metrics.mfma_busy_fraction is not None
-        and metrics.mfma_busy_fraction >= MFMA_BUSY_FRACTION_COMPUTE_BOUND
-    ):
-        source_note = (
-            "measured" if metrics.mfma_busy_source == "measured" else "spec peak, from --flops"
-        )
-        return Verdict(
-            "COMPUTE-BOUND",
-            f"MFMA busy {metrics.mfma_busy_fraction * 100:.0f}% of peak ({source_note}), GPU busy {busy}",
-            _COMPUTE_BOUND_LEVER,
-        )
+    if metrics.mfma_busy_fraction is not None:
+        if metrics.mfma_busy_fraction >= MFMA_BUSY_FRACTION_COMPUTE_BOUND:
+            source_note = (
+                "measured" if metrics.mfma_busy_source == "measured" else "spec peak, from --flops"
+            )
+            return Verdict(
+                "COMPUTE-BOUND",
+                f"MFMA busy {metrics.mfma_busy_fraction * 100:.0f}% of peak ({source_note}), GPU busy {busy}",
+                _COMPUTE_BOUND_LEVER,
+            )
+        return None
     if (
         metrics.mfma_issue_rate is not None
         and metrics.mfma_issue_rate >= MFMA_ISSUE_RATE_COMPUTE_BOUND
