@@ -1,4 +1,5 @@
 """Minimal Python RESP server — single-threaded asyncio, Python dict.
+
 This is the seed implementation that VibeSys's agent will iterate on.
 Speaks a subset of Redis RESP2: string ops (GET, SET, DEL) and hash ops
 (HSET, HMSET, HGETALL) needed by YCSB.
@@ -76,11 +77,13 @@ def handle_command(args: list[bytes]) -> bytes:
     if not args:
         return _err("empty command")
     cmd = args[0].upper()
+
     if cmd == b"SET":
         if len(args) < 3:
             return _err("wrong number of arguments for 'set' command")
         data[args[1]] = args[2]
         return _ok()
+
     elif cmd == b"GET":
         if len(args) < 2:
             return _err("wrong number of arguments for 'get' command")
@@ -88,16 +91,19 @@ def handle_command(args: list[bytes]) -> bytes:
         if not isinstance(val, bytes):
             return _NULL
         return _bulk(val)
+
     elif cmd == b"DEL":
         if len(args) < 2:
             return _err("wrong number of arguments for 'del' command")
         count = sum(1 for k in args[1:] if data.pop(k, None) is not None)
         return _int(count)
+
     elif cmd == b"HSET" or cmd == b"HMSET":
         if len(args) < 4 or len(args) % 2 != 0:
             return _err(f"wrong number of arguments for '{cmd.decode().lower()}' command")
         created = _hset(args[1], args, 2)
         return _ok() if cmd == b"HMSET" else _int(created)
+
     elif cmd == b"HGETALL":
         if len(args) < 2:
             return _err("wrong number of arguments for 'hgetall' command")
@@ -109,13 +115,17 @@ def handle_command(args: list[bytes]) -> bytes:
             parts.append(_bulk(k))
             parts.append(_bulk(v))
         return b"*" + str(len(parts)).encode() + b"\r\n" + b"".join(parts)
+
     elif cmd == b"DBSIZE":
         return _int(len(data))
+
     elif cmd == b"FLUSHDB" or cmd == b"FLUSHALL":
         data.clear()
         return _ok()
+
     elif cmd in (b"PING", b"COMMAND", b"CLIENT", b"HELLO"):
         return b"+PONG\r\n" if cmd == b"PING" else _ok()
+
     else:
         return _err(f"unknown command '{cmd.decode()}'")
 

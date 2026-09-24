@@ -1,7 +1,10 @@
 """HTTP benchmark for a Show-o2 image generation server.
+
 The server contract is intentionally simple and OpenAI-like:
+
     POST /v1/images/generations
     {"prompt": "...", "num_inference_steps": 20, "guidance_scale": 5.0}
+
 The response must include `data[0].b64_json` containing PNG bytes.
 """
 
@@ -85,6 +88,7 @@ async def send_request(
         body["postprocess_mode"] = postprocess_mode
     if response_format != "b64_json":
         body["response_format"] = response_format
+
     started = time.perf_counter()
     try:
         resp = await client.post(url, json=body, timeout=timeout)
@@ -209,6 +213,7 @@ async def run_warmup(
 ) -> tuple[list[dict], float]:
     if args.warmup_requests <= 0:
         return [], 0.0
+
     results = []
     warmup_start = time.perf_counter()
     for idx in range(args.warmup_requests):
@@ -317,6 +322,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     url = args.url.rstrip("/") + args.endpoint
     total_requests = args.num_requests if args.num_requests is not None else 10**9
     use_duration = args.num_requests is None
+
     async with httpx.AsyncClient() as client:
         warmup_results, warmup_duration = await run_warmup(client, args, url)
         bench_start = time.perf_counter()
@@ -341,12 +347,14 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                 bench_start,
             )
         bench_end = time.perf_counter()
+
     wall_clock = bench_end - bench_start
     successes = [r for r in results if r["error"] is None]
     errors = [r for r in results if r["error"] is not None]
     latencies = [r["latency"] for r in successes]
     image_sizes = [r["image_bytes"] for r in successes]
     measured_summary = summarize_results(results, wall_clock)
+
     print()
     print("=" * 40)
     print("  Show-o2 Benchmark Results")
@@ -375,6 +383,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         print("Errors:")
         for idx, err in enumerate(errors[:5]):
             print(f"  [{idx}] {err['error'][:160]}")
+
     result = {
         "config": {
             "url": url,
@@ -408,10 +417,12 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         "image_paths": measured_summary["image_paths"],
         "server_timings": measured_summary["server_timings"],
     }
+
     if args.output_json:
         with open(args.output_json, "w") as f:
             json.dump(result, f, indent=2)
         print(f"Results written to {args.output_json}")
+
     return result
 
 

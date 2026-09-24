@@ -1,4 +1,5 @@
 """Reference loader and inference wrapper for showlab/show-o2-1.5B-HQ.
+
 The official Show-o2 repository is not packaged on PyPI, so this reference
 bundle imports it from the pinned `Show-o` git submodule. Model weights stay
 outside git and are resolved from Hugging Face using `meta.json`.
@@ -118,8 +119,10 @@ def ensure_model_dir(model_dir: str | Path | None = None) -> Path:
             return candidate
         if candidate != DEFAULT_MODEL_DIR.resolve():
             raise FileNotFoundError(f"Model directory does not exist: {candidate}")
+
     if DEFAULT_MODEL_DIR.exists():
         return DEFAULT_MODEL_DIR.resolve()
+
     meta = _read_meta()
     from huggingface_hub import snapshot_download
 
@@ -146,9 +149,11 @@ def ensure_wan_vae(vae_path: str | Path | None = None) -> Path:
         if candidate.exists():
             return candidate
         raise FileNotFoundError(f"Wan VAE path does not exist: {candidate}")
+
     local = REFERENCE_DIR / "Wan2.1_VAE.pth"
     if local.exists():
         return local.resolve()
+
     meta = _read_meta()["wan_vae"]
     from huggingface_hub import hf_hub_download
 
@@ -409,6 +414,7 @@ class ShowO2Model:
         configure_environment_for_device(vae_device)
         source = Path(source_dir or DEFAULT_SOURCE_DIR).expanduser().resolve()
         _add_source_to_path(source)
+
         from models import Showo2Qwen2_5
         from models.misc import get_text_tokenizer
         from omegaconf import OmegaConf
@@ -424,8 +430,10 @@ class ShowO2Model:
 
             resolved_vae_device = torch.device("cpu")
             resolved_vae_dtype = torch.float32
+
         config = OmegaConf.load(_config_path_for_resolution(source, resolution))
         config.model.showo.pretrained_model_path = str(resolved_model_dir)
+
         tokenizer, showo_token_ids = get_text_tokenizer(
             config.model.showo.llm_model_path,
             add_showo_tokens=True,
@@ -433,16 +441,19 @@ class ShowO2Model:
             llm_name=path_to_llm_name[config.model.showo.llm_model_path],
         )
         config.model.showo.llm_vocab_size = len(tokenizer)
+
         if config.model.showo.add_time_embeds:
             config.dataset.preprocessing.num_t2i_image_tokens += 1
             config.dataset.preprocessing.num_mmu_image_tokens += 1
             config.dataset.preprocessing.num_video_tokens += 1
+
         model = Showo2Qwen2_5.from_pretrained(
             str(resolved_model_dir),
             use_safetensors=False,
         ).to(resolved_device)
         model.to(resolved_dtype)
         model.eval()
+
         runtime = cls(
             model=model,
             tokenizer=tokenizer,
@@ -573,9 +584,11 @@ class ShowO2Model:
 
         timings: dict[str, float] = {}
         total_started = time.perf_counter()
+
         load_started = time.perf_counter()
         self.load_vae()
         timings["load_vae_ms"] = (time.perf_counter() - load_started) * 1000.0
+
         hyper_params = getattr(self, "_hyper_params", None)
         if hyper_params is not None:
             image_latent_dim = int(hyper_params[5])
@@ -585,6 +598,7 @@ class ShowO2Model:
         else:
             image_latent_dim = 16
             latent_width = latent_height = self.resolution // 8
+
         if self.vae_decoder_backend in {"coreml", "mlx"}:
             latent_device = "cpu"
             latent_dtype = torch.float32
@@ -596,6 +610,7 @@ class ShowO2Model:
             device=latent_device,
             dtype=latent_dtype,
         )
+
         decode_started = time.perf_counter()
         with torch.inference_mode():
             decoded = self.vae_model.batch_decode(latents)
@@ -603,6 +618,7 @@ class ShowO2Model:
                 synchronize_device(torch.device(self.vae_device or self.device))
         timings["decode_ms"] = (time.perf_counter() - decode_started) * 1000.0
         timings["total_ms"] = (time.perf_counter() - total_started) * 1000.0
+
         del decoded, latents
         self.prewarm_timings_ms = timings
         return timings
@@ -616,6 +632,7 @@ class ShowO2Model:
     ) -> dict[str, float]:
         total_started = time.perf_counter()
         timings: dict[str, float] = {}
+
         (
             num_t2i_image_tokens,
             _num_mmu_image_tokens,
@@ -637,6 +654,7 @@ class ShowO2Model:
             _vid_pad_id,
             _default_guidance_scale,
         ) = self._hyper_params
+
         prepare_started = time.perf_counter()
         text_tokens, positions, prompt_cache_hit = self._get_prepared_prompt_inputs(
             prompt,
@@ -652,6 +670,7 @@ class ShowO2Model:
         )
         timings["prepare_ms"] = (time.perf_counter() - prepare_started) * 1000.0
         timings["prepare_cache_hit"] = 1.0 if prompt_cache_hit else 0.0
+
         mask_started = time.perf_counter()
         _attention_mask, mask_cache_hit = self._get_attention_mask(
             text_tokens.size(0),
@@ -661,6 +680,7 @@ class ShowO2Model:
         )
         timings["mask_ms"] = (time.perf_counter() - mask_started) * 1000.0
         timings["mask_cache_hit"] = 1.0 if mask_cache_hit else 0.0
+
         sampler_started = time.perf_counter()
         self._get_sample_fn(num_inference_steps, num_t2i_image_tokens)
         timings["sampler_setup_ms"] = (time.perf_counter() - sampler_started) * 1000.0
@@ -711,6 +731,7 @@ class ShowO2Model:
         if cached is not None:
             text_tokens, positions = cached
             return text_tokens, positions, True
+
         text_tokens, text_tokens_null, positions, positions_null = prepare_gen_input(
             [prompt],
             self.tokenizer,
@@ -737,6 +758,7 @@ class ShowO2Model:
         sample_fn = self._sample_fn_cache.get(key)
         if sample_fn is not None:
             return sample_fn
+
         transport = create_transport(
             path_type=self.config.transport.path_type,
             prediction=self.config.transport.prediction,
@@ -774,6 +796,7 @@ class ShowO2Model:
         cached = self._attention_base_mask_cache.get(key)
         if cached is not None:
             return cached, True
+
         blocked_value = torch.tensor(torch.iinfo(torch.long).min, dtype=dtype, device=self.device)
         mask = torch.zeros(
             (int(batch_size), 1, int(max_seq_len), int(max_seq_len)),
@@ -797,6 +820,7 @@ class ShowO2Model:
         cached = self._attention_mask_identity_cache.get(identity_key)
         if cached is not None:
             return cached, True
+
         position_values = tuple(
             int(value) for value in positions.detach().cpu().reshape(-1).tolist()
         )
@@ -805,6 +829,7 @@ class ShowO2Model:
         if cached is not None:
             self._limited_cache_set(self._attention_mask_identity_cache, identity_key, cached)
             return cached, True
+
         base_mask, _base_hit = self._get_base_attention_mask(batch_size, max_seq_len, dtype)
         mask = base_mask.clone()
         for batch_index, modality_batch in enumerate(positions.detach().cpu().tolist()):
@@ -835,6 +860,7 @@ class ShowO2Model:
         token_ids = [self.showo_token_ids["bos_id"]]
         token_ids.extend(self.tokenizer(prompt, add_special_tokens=False).input_ids)
         output_ids: list[int] = []
+
         with torch.inference_mode():
             for _ in range(max_new_tokens):
                 input_ids = torch.tensor([token_ids], device=self.device)
@@ -856,6 +882,7 @@ class ShowO2Model:
                     break
                 token_ids.append(next_token)
                 output_ids.append(next_token)
+
         return self.tokenizer.decode(output_ids, skip_special_tokens=True)
 
     def generate_image(
@@ -890,6 +917,7 @@ class ShowO2Model:
                 and hasattr(torch.mps, "manual_seed")
             ):
                 torch.mps.manual_seed(seed)
+
         (
             num_t2i_image_tokens,
             _num_mmu_image_tokens,
@@ -911,6 +939,7 @@ class ShowO2Model:
             _vid_pad_id,
             _default_guidance_scale,
         ) = self._hyper_params
+
         with torch.inference_mode():
             prepare_started = time.perf_counter()
             text_tokens, positions, prompt_cache_hit = self._get_prepared_prompt_inputs(
@@ -927,6 +956,7 @@ class ShowO2Model:
             )
             timings["prepare_ms"] = (time.perf_counter() - prepare_started) * 1000.0
             timings["prepare_cache_hit"] = 1.0 if prompt_cache_hit else 0.0
+
             latent_started = time.perf_counter()
             z = torch.randn(
                 (
@@ -938,9 +968,11 @@ class ShowO2Model:
                 device=self.device,
                 dtype=self.dtype,
             )
+
             if guidance_scale > 0:
                 z = torch.cat([z, z], dim=0)
             timings["latent_ms"] = (time.perf_counter() - latent_started) * 1000.0
+
             mask_started = time.perf_counter()
             attention_mask, mask_cache_hit = self._get_attention_mask(
                 text_tokens.size(0),
@@ -950,6 +982,7 @@ class ShowO2Model:
             )
             timings["mask_ms"] = (time.perf_counter() - mask_started) * 1000.0
             timings["mask_cache_hit"] = 1.0 if mask_cache_hit else 0.0
+
             sampler_started = time.perf_counter()
             sample_fn = (
                 None
@@ -960,6 +993,7 @@ class ShowO2Model:
                 )
             )
             timings["sampler_setup_ms"] = (time.perf_counter() - sampler_started) * 1000.0
+
             sample_started = time.perf_counter()
             if sample_fn is None:
                 samples = z.float()
@@ -974,9 +1008,11 @@ class ShowO2Model:
                     max_seq_len=max_seq_len,
                     guidance_scale=guidance_scale,
                 )[-1]
+
             if guidance_scale > 0:
                 samples = torch.chunk(samples, 2)[0]
             timings["sample_ms"] = (time.perf_counter() - sample_started) * 1000.0
+
             decode_started = time.perf_counter()
             samples = samples.unsqueeze(2)
             if self.vae_decoder_backend == "mlx":
@@ -989,6 +1025,7 @@ class ShowO2Model:
             profile_timings = getattr(self.vae_model, "last_profile_timings_ms", None)
             if isinstance(profile_timings, dict):
                 timings.update(profile_timings)
+
             postprocess_started = time.perf_counter()
             if self.vae_decoder_backend == "mlx":
                 arrays = images
@@ -1005,6 +1042,7 @@ class ShowO2Model:
             if self.vae_decoder_backend not in {"coreml", "mlx"}:
                 synchronize_device(self.device)
             timings["postprocess_ms"] = (time.perf_counter() - postprocess_started) * 1000.0
+
         pil_started = time.perf_counter()
         result = list(arrays) if return_arrays else [Image.fromarray(image) for image in arrays]
         timings["pil_ms"] = (time.perf_counter() - pil_started) * 1000.0

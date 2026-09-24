@@ -1,5 +1,7 @@
 """Generate `golden.json` with HF transformers on the GPU (run once; the output is checked in).
+
     python -m accuracy_checker.make_golden --model Qwen/Qwen3.5-9B [--no-fla] [--out PATH]
+
 For every prompt in `prompts.CASES`: greedy-decode `max_new_tokens` tokens with
 EOS ignored, then run one teacher-forced forward over prompt + continuation and
 record, per continuation position, HF's logprob of the golden token, its top-1
@@ -43,6 +45,7 @@ def main() -> None:
     )
     p.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = p.parse_args()
+
     hf = HFTarget(args.model, use_fla=not args.no_fla)  # must precede any other torch/fla import
     import torch
     import transformers

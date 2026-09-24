@@ -18,6 +18,7 @@ def main() -> None:
     parser.add_argument("--guidance-scale", type=float, default=5.0, help="Guidance scale")
     parser.add_argument("--timeout", type=float, default=600.0, help="Request timeout")
     args = parser.parse_args()
+
     url = args.url.rstrip("/") + args.endpoint
     body = {
         "prompt": args.prompt,
@@ -34,6 +35,7 @@ def main() -> None:
     except Exception as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
+
     print(f"PASS: received {len(image_bytes)} PNG bytes from {url}")
 
 

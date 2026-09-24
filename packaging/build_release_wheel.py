@@ -26,6 +26,7 @@ from tui_packaging import BUN_VERSION, validate_tui_payload
 from wheel_targets import resolve_wheel_target
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 _WORKSPACE_RUNTIME_PACKAGES = ("@vibesys/backend-client", "@vibesys/core-state")
 
@@ -77,6 +78,7 @@ def build_release_wheel(
     existing_wheels = sorted(output_dir.glob("*.whl"))
     if existing_wheels:
         _fail(f"Output directory already contains wheels: {output_dir}")
+
     version_result = _run(
         [str(bun), "--version"],
         cwd=repo_root,
@@ -88,6 +90,7 @@ def build_release_wheel(
     if actual_bun_version != BUN_VERSION:
         error = ReleaseBuildError.wrong_bun(actual_bun_version)
         raise error
+
     distribution_version, tui_version = _project_versions(repo_root)
     try:
         distribution_identity = python_release_identity(
@@ -99,6 +102,7 @@ def build_release_wheel(
         raise ReleaseBuildError(str(exc)) from exc
     if distribution_identity != tui_identity:
         _fail(f"Python version {distribution_version} does not match TUI version {tui_version}")
+
     workspace = repo_root / "clients"
     _run(
         ["pnpm", "install", "--frozen-lockfile"],
@@ -110,6 +114,7 @@ def build_release_wheel(
         cwd=workspace,
         runner=build_environment.runner,
     )
+
     with tempfile.TemporaryDirectory(prefix=f"vibesys-{target.key}-") as temporary:
         payload = Path(temporary) / "payload"
         app = payload / "app"
@@ -136,6 +141,7 @@ def build_release_wheel(
             expected_target=target.key,
             expected_distribution_version=distribution_version,
         )
+
         env = {
             **os.environ,
             "VIBESYS_TUI_BUNDLE": str(payload),
@@ -147,6 +153,7 @@ def build_release_wheel(
             runner=build_environment.runner,
             env=env,
         )
+
     wheels = sorted(output_dir.glob("*.whl"))
     if len(wheels) != 1:
         _fail(f"Expected exactly one wheel in {output_dir}, found {len(wheels)}")
@@ -200,6 +207,7 @@ def _prune_deployment(app: Path, *, expected_native_package: str) -> None:
         _fail("TUI build did not produce dist/launcher.js")
     if not (app / "dist" / "self-test.js").is_file():
         _fail("TUI build did not produce dist/self-test.js")
+
     opentui_root = app / "node_modules" / "@opentui"
     if not opentui_root.is_dir():
         _fail("Production deployment has no @opentui dependencies")
@@ -210,7 +218,9 @@ def _prune_deployment(app: Path, *, expected_native_package: str) -> None:
     expected_path = opentui_root / expected_native_package.removeprefix("@opentui/")
     if not expected_path.is_dir():
         _fail(f"Production deployment is missing {expected_native_package}")
+
     _remove_path(app / "node_modules" / ".bin")
+
     for source_map in app.rglob("*.map"):
         source_map.unlink()
 
@@ -220,6 +230,7 @@ def _stage_runtime_and_licenses(repo_root: Path, *, bun: Path, payload: Path) ->
     runtime.parent.mkdir(parents=True)
     shutil.copy2(bun, runtime)
     runtime.chmod(0o755)
+
     licenses = payload / "licenses"
     licenses.mkdir()
     bun_license = repo_root / "third_party" / "bun" / "LICENSE"

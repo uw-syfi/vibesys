@@ -35,6 +35,7 @@ def load_cases(
         from datasets import load_dataset
     except ImportError as exc:
         raise SystemExit("The `datasets` package is required to load JSONSchemaBench.") from exc
+
     ds = load_dataset(
         DATASET_ID,
         subset,
@@ -46,6 +47,7 @@ def load_cases(
     indices = list(range(len(ds)))
     if limit is not None and limit < len(indices):
         indices = rng.sample(indices, k=limit)
+
     cases = []
     for idx in indices:
         row = ds[idx]
@@ -195,6 +197,7 @@ def main() -> None:
     parser.add_argument("--min-valid-rate", type=float, default=0.95)
     parser.add_argument("--min-sentinel-rate", type=float, default=0.90)
     args = parser.parse_args()
+
     cases = load_cases(
         args.dataset_subset,
         args.split,
@@ -209,6 +212,7 @@ def main() -> None:
     sentinel_checked = 0
     sentinel_ok = 0
     failures: list[str] = []
+
     with httpx.Client() as client:
         for idx, case in enumerate(cases, 1):
             schema = case["schema"]
@@ -230,6 +234,7 @@ def main() -> None:
                     sentinel_ok += 1
                 else:
                     failures.append(f"[{idx}] sentinel missing: {sentinel!r}")
+
     valid_rate = valid / len(cases)
     sentinel_rate = sentinel_ok / sentinel_checked if sentinel_checked else 1.0
     passed = (
@@ -237,6 +242,7 @@ def main() -> None:
         and sentinel_rate >= args.min_sentinel_rate
         and not any(failure.startswith("[") and "request failed" in failure for failure in failures)
     )
+
     print(
         f"schema_valid={valid}/{len(cases)} ({valid_rate:.3f}) "
         f"sentinel={sentinel_ok}/{sentinel_checked} ({sentinel_rate:.3f})"

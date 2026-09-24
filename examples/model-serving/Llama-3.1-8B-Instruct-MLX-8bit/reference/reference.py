@@ -1,9 +1,12 @@
 """Reference inference for the MLX 8-bit Llama 3.1 8B Instruct target.
+
 This bundle is the MLX 8-bit quantized target model used by the speculative
 decoding playground. Implementations should match this reference for greedy
 decoding when no structured-output constraints are active.
+
 Install:
     uv pip install mlx mlx-lm huggingface_hub
+
 Run:
     python reference.py --prompt "The capital of France is" --max-tokens 16
 """
@@ -34,8 +37,10 @@ def ensure_model_dir(model_dir: str | Path | None = None) -> Path:
             return candidate
         if candidate != DEFAULT_MODEL_DIR.resolve():
             raise FileNotFoundError(f"Model directory does not exist: {candidate}")
+
     if DEFAULT_MODEL_DIR.exists():
         return DEFAULT_MODEL_DIR.resolve()
+
     meta = _read_meta()
     from huggingface_hub import snapshot_download
 

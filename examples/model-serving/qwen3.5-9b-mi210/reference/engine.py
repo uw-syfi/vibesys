@@ -1,4 +1,5 @@
 """Reference inference engine: one sequence at a time, contiguous per-request state.
+
 Scheduling surface for later optimization rounds:
 - `Engine.generate` runs prefill then a decode loop for a single request. A
   continuous-batching scheduler would replace the per-request loop with a step
@@ -23,6 +24,7 @@ from .model import Qwen35ForCausalLM, new_sequence_state
 from .weights import load_model
 
 log = logging.getLogger(__name__)
+
 MAX_LOGPROBS = 20
 
 
@@ -93,6 +95,7 @@ class Engine:
         self.stop_token_ids = frozenset(stop)
 
     # ------------------------------------------------------------------ primitives
+
     def _prefill(self, token_ids: list[int], capacity: int):
         state = new_sequence_state(self.cfg, 1, capacity, self.device, self.dtype)
         ids = torch.tensor([token_ids], device=self.device)
@@ -118,6 +121,7 @@ class Engine:
         return int(torch.multinomial(probs, 1, generator=gen))
 
     # ------------------------------------------------------------------ public API
+
     @torch.inference_mode()
     def generate(self, prompt_ids: list[int], params: SamplingParams) -> Iterator[StepOutput]:
         """Yield one `StepOutput` per generated token. Consumes GPU until exhausted."""

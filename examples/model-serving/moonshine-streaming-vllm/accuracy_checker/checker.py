@@ -2,12 +2,16 @@
 Accuracy checker: verify that the custom moonshine-streaming-medium serving
 implementation produces transcriptions consistent with the HuggingFace
 `MoonshineStreamingModel` reference.
+
 The custom side is expected to expose:
+
     class VibeServeModel:
         @classmethod
         def from_pretrained(cls, model_dir, device, dtype) -> "VibeServeModel": ...
         def transcribe(self, audio: np.ndarray, sampling_rate: int = 16000) -> str: ...
+
 importable from `main.py` on `sys.path`.
+
 Usage:
     .venv/bin/python checker.py --model-dir <local model dir>
 """
@@ -41,6 +45,8 @@ def _load_custom_model_class():
 
 
 # ---------- audio loading ----------
+
+
 def load_test_samples(audio_dir: Path):
     manifest_path = audio_dir / "manifest.json"
     if not manifest_path.exists():
@@ -59,10 +65,13 @@ def load_test_samples(audio_dir: Path):
 
 
 # ---------- HF reference ----------
+
+
 @torch.inference_mode()
 def transcribe_reference(model, proj_out, tokenizer, audio: np.ndarray, sr: int) -> str:
     """Greedy decode with HF MoonshineStreamingModel + a separately-loaded
     proj_out (lm_head) projection.  Matches the offline-transcribe contract."""
+
     device = next(model.parameters()).device
     dtype = next(model.parameters()).dtype
     audio_t = torch.from_numpy(audio).to(device).to(dtype).unsqueeze(0)
@@ -86,6 +95,8 @@ def transcribe_reference(model, proj_out, tokenizer, audio: np.ndarray, sr: int)
 
 
 # ---------- text comparison ----------
+
+
 def normalize_text(s: str) -> str:
     s = s.lower().strip()
     s = re.sub(r"[^\w\s]", "", s)
@@ -114,6 +125,8 @@ def compare_outputs(ref_text: str, custom_text: str, threshold: float):
 
 
 # ---------- main ----------
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -130,15 +143,19 @@ def main():
         "--threshold", type=float, default=0.7, help="Minimum word overlap ratio to pass"
     )
     args = parser.parse_args()
+
     model_dir = str(Path(args.model_dir).resolve())
     dtype = torch.float16
+
     if args.audio_dir:
         audio_dir = Path(args.audio_dir).resolve()
     else:
         audio_dir = (Path(__file__).parent.parent / "test_audio").resolve()
+
     print(f"Loading test audio from: {audio_dir}")
     test_samples = load_test_samples(audio_dir)
     print(f"  Loaded {len(test_samples)} samples\n")
+
     # ---- HF reference ----
     print(f"Loading HF reference (MoonshineStreamingModel) on {args.device} ...")
     from safetensors.torch import load_file
@@ -163,25 +180,30 @@ def main():
     proj_out = proj_out.to(args.device).to(dtype)
     tokenizer = Tokenizer.from_file(str(Path(model_dir) / "tokenizer.json"))
     print(f"  HF model loaded in {time.perf_counter() - t0:.1f}s")
+
     print("Generating reference outputs ...")
     ref_outputs: list[str] = []
     for _desc, audio, sr, _ in test_samples:
         ref_outputs.append(transcribe_reference(ref_model, proj_out, tokenizer, audio, sr))
+
     del ref_model, proj_out, sd
     torch.cuda.empty_cache()
     print("  HF model unloaded.\n")
+
     # ---- custom model ----
     print(f"Loading custom model (VibeServeModel) on {args.device} ...")
     t0 = time.perf_counter()
     VibeServeModel = _load_custom_model_class()
     custom_model = VibeServeModel.from_pretrained(model_dir, args.device, dtype)
     print(f"  Custom model loaded in {time.perf_counter() - t0:.1f}s\n")
+
     # ---- run tests ----
     total = len(test_samples)
     passed = 0
     print("=" * 70)
     print(f"Running {total} test cases (threshold={args.threshold:.0%} word overlap)")
     print("=" * 70)
+
     for i, (desc, audio, sr, _gt) in enumerate(test_samples, 1):
         print(f"\n[{i}/{total}] {desc}")
         ref_text = ref_outputs[i - 1]
@@ -190,6 +212,7 @@ def main():
         print(("  PASS - " if ok else "  FAIL - ") + detail)
         if ok:
             passed += 1
+
     print("\n" + "=" * 70)
     print(f"Results: {passed}/{total} passed, {total - passed}/{total} failed")
     print("=" * 70)

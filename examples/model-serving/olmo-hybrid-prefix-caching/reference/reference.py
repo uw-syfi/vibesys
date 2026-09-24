@@ -17,6 +17,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+
 import math
 from collections.abc import Callable
 from typing import Any, Optional
@@ -49,12 +51,15 @@ else:
     chunk_gated_delta_rule, fused_recurrent_gated_delta_rule = None, None
     FusedRMSNormGated = None
     ShortConvolution = None
+
+
 logger = logging.get_logger(__name__)
 
 
 class OlmoHybridDynamicCache:
     """
     Cache for hybrid model supporting both attention KV cache and linear attention state.
+
     The main difference is that this cache stores separate conv states for q, k, v (instead of a single conv_states).
     """
 
@@ -95,6 +100,7 @@ class OlmoHybridDynamicCache:
             self.value_cache[layer_idx] = torch.cat(
                 [self.value_cache[layer_idx], value_states], dim=2
             )
+
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
     def reorder_cache(self, beam_idx: torch.LongTensor):
@@ -186,6 +192,7 @@ class OlmoHybridRMSNormGated(nn.Module):
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
         hidden_states = self.weight * hidden_states.to(input_dtype)
         hidden_states = hidden_states * F.silu(gate.to(torch.float32))
+
         return hidden_states.to(input_dtype)
 
 
@@ -238,7 +245,9 @@ class OlmoHybridShortConvolution(nn.Conv1d):
         **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         seq_len, dim = hidden_states.shape[-2:]
+
         hidden_states = hidden_states.transpose(1, 2)
+
         if use_precomputed and seq_len == 1:
             # Single-token decode: rolling-window update against the cached context.
             x_with_state = torch.cat([cache, hidden_states], dim=-1)
@@ -266,7 +275,9 @@ class OlmoHybridShortConvolution(nn.Conv1d):
             )
             if use_precomputed:
                 out = out[:, :, -seq_len:]
+
         out = self.act_fn(out)
+
         return out.transpose(1, 2), conv_state
 
 
@@ -296,18 +307,22 @@ def eager_attention_forward(
 ):
     key_states = repeat_kv(key, module.num_key_value_groups)
     value_states = repeat_kv(value, module.num_key_value_groups)
+
     attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
     if attention_mask is not None:
         attn_weights = attn_weights + attention_mask
+
     attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
     attn_weights = nn.functional.dropout(attn_weights, p=dropout, training=module.training)
     attn_output = torch.matmul(attn_weights, value_states)
     attn_output = attn_output.transpose(1, 2).contiguous()
+
     return attn_output, attn_weights
 
 
 def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
     """Applies Rotary Position Embedding to the query and key tensors.
+
     Args:
         q (`torch.Tensor`): The query tensor.
         k (`torch.Tensor`): The key tensor.
@@ -342,6 +357,7 @@ def rotate_half(x):
 class OlmoHybridAttention(nn.Module):
     """
     Multi-headed attention for OLMo Hybrid that supports optional RoPE (NoPE mode).
+
     Inherits from Olmo3Attention. The only behavioral difference is that when
     position_embeddings is None, rotary position embeddings are skipped entirely,
     enabling NoPE mode for long context extension.
@@ -358,6 +374,7 @@ class OlmoHybridAttention(nn.Module):
         self.scaling = self.head_dim**-0.5
         self.attention_dropout = config.attention_dropout
         self.is_causal = True
+
         self.q_proj = nn.Linear(
             config.hidden_size,
             config.num_attention_heads * self.head_dim,
@@ -395,24 +412,30 @@ class OlmoHybridAttention(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
+
         query_states = self.q_norm(self.q_proj(hidden_states))
         key_states = self.k_norm(self.k_proj(hidden_states))
         value_states = self.v_proj(hidden_states)
+
         query_states = query_states.view(hidden_shape).transpose(1, 2)
         key_states = key_states.view(hidden_shape).transpose(1, 2)
         value_states = value_states.view(hidden_shape).transpose(1, 2)
+
         # NoPE mode: skip RoPE when position_embeddings is None
         cos, sin = None, None
         if position_embeddings is not None:
             cos, sin = position_embeddings
             query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
         if past_key_values is not None:
             key_states, value_states = past_key_values.update(
                 key_states, value_states, self.layer_idx
             )
+
         attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
             self.config._attn_implementation, eager_attention_forward
         )
+
         attn_output, attn_weights = attention_interface(
             self,
             query_states,
@@ -423,6 +446,7 @@ class OlmoHybridAttention(nn.Module):
             scaling=self.scaling,
             **kwargs,
         )
+
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
         return attn_output, attn_weights
@@ -439,12 +463,15 @@ class OlmoHybridRotaryEmbedding(nn.Module):
         super().__init__()
         self.max_seq_len_cached = config.max_position_embeddings
         self.original_max_seq_len = config.max_position_embeddings
+
         self.config = config
+
         self.rope_type = self.config.rope_parameters["rope_type"]
         rope_init_fn: Callable = self.compute_default_rope_parameters
         if self.rope_type != "default":
             rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
         inv_freq, self.attention_scaling = rope_init_fn(self.config, device)
+
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self.register_buffer("original_inv_freq", inv_freq.clone(), persistent=False)
 
@@ -469,7 +496,9 @@ class OlmoHybridRotaryEmbedding(nn.Module):
         """
         base = config.rope_parameters["rope_theta"]
         dim = getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
+
         attention_factor = 1.0  # Unused in this type of RoPE
+
         # Compute the inverse frequencies
         inv_freq = 1.0 / (
             base
@@ -487,6 +516,7 @@ class OlmoHybridRotaryEmbedding(nn.Module):
             self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1).to(x.device)
         )
         position_ids_expanded = position_ids[:, None, :].float()
+
         device_type = (
             x.device.type if isinstance(x.device.type, str) and x.device.type != "mps" else "cpu"
         )
@@ -495,6 +525,7 @@ class OlmoHybridRotaryEmbedding(nn.Module):
             emb = torch.cat((freqs, freqs), dim=-1)
             cos = emb.cos() * self.attention_scaling
             sin = emb.sin() * self.attention_scaling
+
         # KEY difference from parent: return float32, don't cast to x.dtype
         return cos, sin
 
@@ -507,6 +538,7 @@ def apply_mask_to_padding_states(hidden_states, attention_mask):
     if attention_mask is not None and attention_mask.shape[1] > 1 and attention_mask.shape[0] > 1:
         dtype = hidden_states.dtype
         hidden_states = (hidden_states * attention_mask[:, :, None]).to(dtype)
+
     return hidden_states
 
 
@@ -534,6 +566,7 @@ def torch_chunk_gated_delta_rule(
     query, key, value, beta, g = [
         x.transpose(1, 2).contiguous().to(torch.float32) for x in (query, key, value, beta, g)
     ]
+
     batch_size, num_heads, sequence_length, k_head_dim = key.shape
     v_head_dim = value.shape[-1]
     pad_size = (chunk_size - sequence_length % chunk_size) % chunk_size
@@ -545,6 +578,7 @@ def torch_chunk_gated_delta_rule(
     total_sequence_length = sequence_length + pad_size
     scale = 1 / (query.shape[-1] ** 0.5)
     query = query * scale
+
     v_beta = value * beta.unsqueeze(-1)
     k_beta = key * beta.unsqueeze(-1)
     # reshape to chunks
@@ -556,6 +590,7 @@ def torch_chunk_gated_delta_rule(
     mask = torch.triu(
         torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=query.device), diagonal=0
     )
+
     # chunk decay
     g = g.cumsum(dim=-1)
     decay_mask = ((g.unsqueeze(-1) - g.unsqueeze(-2)).tril().exp().float()).tril()
@@ -578,6 +613,7 @@ def torch_chunk_gated_delta_rule(
     mask = torch.triu(
         torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=query.device), diagonal=1
     )
+
     # for each chunk
     for i in range(0, total_sequence_length // chunk_size):
         q_i, k_i, v_i = query[:, :, i], key[:, :, i], value[:, :, i]
@@ -590,6 +626,7 @@ def torch_chunk_gated_delta_rule(
             last_recurrent_state * g[:, :, i, -1, None, None].exp()
             + (k_i * (g[:, :, i, -1, None] - g[:, :, i]).exp()[..., None]).transpose(-1, -2) @ v_new
         )
+
     if not output_final_state:
         last_recurrent_state = None
     core_attn_out = core_attn_out.reshape(
@@ -610,10 +647,12 @@ def torch_recurrent_gated_delta_rule(
     query, key, value, beta, g = [
         x.transpose(1, 2).contiguous().to(torch.float32) for x in (query, key, value, beta, g)
     ]
+
     batch_size, num_heads, sequence_length, k_head_dim = key.shape
     v_head_dim = value.shape[-1]
     scale = 1 / (query.shape[-1] ** 0.5)
     query = query * scale
+
     core_attn_out = torch.zeros(
         batch_size, num_heads, sequence_length, v_head_dim, dtype=value.dtype, device=value.device
     )
@@ -624,17 +663,20 @@ def torch_recurrent_gated_delta_rule(
         if initial_state is None
         else initial_state.to(value)
     )
+
     for i in range(sequence_length):
         q_t = query[:, :, i]
         k_t = key[:, :, i]
         v_t = value[:, :, i]
         g_t = g[:, :, i].exp().unsqueeze(-1).unsqueeze(-1)
         beta_t = beta[:, :, i].unsqueeze(-1)
+
         last_recurrent_state = last_recurrent_state * g_t
         kv_mem = (last_recurrent_state * k_t.unsqueeze(-1)).sum(dim=-2)
         delta = (v_t - kv_mem) * beta_t
         last_recurrent_state = last_recurrent_state + k_t.unsqueeze(-1) * delta.unsqueeze(-2)
         core_attn_out[:, :, i] = (last_recurrent_state * q_t.unsqueeze(-1)).sum(dim=-2)
+
     if not output_final_state:
         last_recurrent_state = None
     core_attn_out = core_attn_out.transpose(1, 2).contiguous().to(initial_dtype)
@@ -649,6 +691,7 @@ is_fast_path_available = all(
 class OlmoHybridGatedDeltaNet(nn.Module):
     """
     GatedDeltaNet linear attention for OLMo Hybrid.
+
     Key differences from Qwen3NextGatedDeltaNet:
     - Fully separate q/k/v/a/b projections (vs. fused qkvz + partially split ba)
     - Per-projection conv1d for q, k, v (vs. single conv1d over concatenated qkv)
@@ -669,16 +712,21 @@ class OlmoHybridGatedDeltaNet(nn.Module):
         self.conv_kernel_size = config.linear_conv_kernel_dim
         self.allow_neg_eigval = config.linear_allow_neg_eigval
         self.eps = config.rms_norm_eps
+
         self.q_proj = nn.Linear(self.hidden_size, self.key_dim, bias=False)
         self.k_proj = nn.Linear(self.hidden_size, self.key_dim, bias=False)
         self.v_proj = nn.Linear(self.hidden_size, self.value_dim, bias=False)
         self.a_proj = nn.Linear(self.hidden_size, self.num_v_heads, bias=False)
         self.b_proj = nn.Linear(self.hidden_size, self.num_v_heads, bias=False)
+
         self.g_proj = nn.Linear(self.hidden_size, self.value_dim, bias=False)
+
         self.o_proj = nn.Linear(self.value_dim, self.hidden_size, bias=False)
+
         Conv1dClass = (
             ShortConvolution if ShortConvolution is not None else OlmoHybridShortConvolution
         )
+
         self.q_conv1d = Conv1dClass(
             hidden_size=self.key_dim,
             kernel_size=self.conv_kernel_size,
@@ -697,10 +745,12 @@ class OlmoHybridGatedDeltaNet(nn.Module):
             bias=False,
             activation="silu",
         )
+
         A = torch.empty(self.num_v_heads, dtype=torch.float32).uniform_(
             config.linear_a_log_min, config.linear_a_log_max
         )
         self.A_log = nn.Parameter(torch.log(A))
+
         dt = torch.exp(
             torch.rand(self.num_v_heads)
             * (math.log(config.linear_dt_max) - math.log(config.linear_dt_min))
@@ -709,6 +759,7 @@ class OlmoHybridGatedDeltaNet(nn.Module):
         dt = torch.clamp(dt, min=config.linear_dt_init_floor)
         inv_dt = dt + torch.log(-torch.expm1(-dt))
         self.dt_bias = nn.Parameter(inv_dt)
+
         # Output norm - NOTE: FLA's FusedRMSNormGated uses eps=1e-5 by default
         self.o_norm = (
             OlmoHybridRMSNormGated(self.head_v_dim, eps=1e-5)
@@ -720,10 +771,12 @@ class OlmoHybridGatedDeltaNet(nn.Module):
                 dtype=config.dtype if config.dtype is not None else torch.get_default_dtype(),
             )
         )
+
         self.chunk_gated_delta_rule = chunk_gated_delta_rule or torch_chunk_gated_delta_rule
         self.recurrent_gated_delta_rule = (
             fused_recurrent_gated_delta_rule or torch_recurrent_gated_delta_rule
         )
+
         if not is_fast_path_available:
             logger.warning_once(
                 "The fast path is not available because one of the required libraries is not installed. "
@@ -740,19 +793,24 @@ class OlmoHybridGatedDeltaNet(nn.Module):
     ) -> torch.Tensor:
         # Requires LEFT padding to work correctly
         hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
+
         batch_size, seq_len, _ = hidden_states.shape
+
         use_cache = cache_params is not None
         # Reads "we have cached conv/recurrent state to continue from". Single-token vs multi-token
         # branching lives inside `ShortConvolution` and in the recurrent-vs-chunk kernel dispatch
         # below, each of which gates on `seq_len == 1` locally.
         use_precomputed = use_cache and cache_params.has_previous_state()
+
         conv_state_q = cache_params.conv_states_q[self.layer_idx] if cache_params else None
         conv_state_k = cache_params.conv_states_k[self.layer_idx] if cache_params else None
         conv_state_v = cache_params.conv_states_v[self.layer_idx] if cache_params else None
         recurrent_state = cache_params.recurrent_states[self.layer_idx] if cache_params else None
+
         q = self.q_proj(hidden_states)
         k = self.k_proj(hidden_states)
         v = self.v_proj(hidden_states)
+
         q, new_conv_state_q = self.q_conv1d(
             q, cache=conv_state_q, use_precomputed=use_precomputed, output_final_state=use_cache
         )
@@ -762,23 +820,29 @@ class OlmoHybridGatedDeltaNet(nn.Module):
         v, new_conv_state_v = self.v_conv1d(
             v, cache=conv_state_v, use_precomputed=use_precomputed, output_final_state=use_cache
         )
+
         if cache_params is not None:
             cache_params.conv_states_q[self.layer_idx] = new_conv_state_q
             cache_params.conv_states_k[self.layer_idx] = new_conv_state_k
             cache_params.conv_states_v[self.layer_idx] = new_conv_state_v
+
         q = q.view(batch_size, seq_len, -1, self.head_k_dim)
         k = k.view(batch_size, seq_len, -1, self.head_k_dim)
         v = v.view(batch_size, seq_len, -1, self.head_v_dim)
+
         if self.num_v_heads > self.num_k_heads:
             expand_ratio = self.num_v_heads // self.num_k_heads
             q = q.repeat_interleave(expand_ratio, dim=2)
             k = k.repeat_interleave(expand_ratio, dim=2)
+
         beta = self.b_proj(hidden_states).sigmoid()
         if self.allow_neg_eigval:
             beta = beta * 2.0
+
         g = -self.A_log.float().exp() * F.softplus(
             self.a_proj(hidden_states).float() + self.dt_bias
         )
+
         if use_precomputed and seq_len == 1:
             output, new_recurrent_state = self.recurrent_gated_delta_rule(
                 q,
@@ -801,14 +865,18 @@ class OlmoHybridGatedDeltaNet(nn.Module):
                 output_final_state=use_cache,
                 use_qk_l2norm_in_kernel=True,
             )
+
         if cache_params is not None:
             cache_params.recurrent_states[self.layer_idx] = new_recurrent_state
+
         gate = self.g_proj(hidden_states)
         output = output.reshape(-1, self.head_v_dim)
         gate = gate.reshape(-1, self.head_v_dim)
         output = self.o_norm(output, gate)
         output = output.reshape(batch_size, seq_len, -1)
+
         output = self.o_proj(output)
+
         return output
 
 
@@ -833,6 +901,7 @@ class OlmoHybridAttentionDecoderLayer(GradientCheckpointingLayer):
         super().__init__()
         self.hidden_size = config.hidden_size
         self.self_attn = OlmoHybridAttention(config=config, layer_idx=layer_idx)
+
         self.mlp = OlmoHybridMLP(config)
         self.post_attention_layernorm = OlmoHybridRMSNorm(
             config.hidden_size, eps=config.rms_norm_eps
@@ -864,6 +933,7 @@ class OlmoHybridAttentionDecoderLayer(GradientCheckpointingLayer):
         )
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = residual + hidden_states
+
         # Fully Connected
         residual = hidden_states
         hidden_states = self.mlp(hidden_states)
@@ -904,10 +974,12 @@ class OlmoHybridLinearAttentionDecoderLayer(GradientCheckpointingLayer):
             attention_mask=attention_mask,
         )
         hidden_states = residual + hidden_states
+
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
+
         return hidden_states
 
 
@@ -984,10 +1056,13 @@ class OlmoHybridModel(OlmoHybridPreTrainedModel):
     ) -> BaseModelOutputWithPast:
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
+
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
+
         if use_cache and past_key_values is None:
             past_key_values = OlmoHybridDynamicCache(config=self.config)
+
         if position_ids is None:
             past_seen_tokens = (
                 past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -996,6 +1071,7 @@ class OlmoHybridModel(OlmoHybridPreTrainedModel):
                 torch.arange(inputs_embeds.shape[1], device=inputs_embeds.device) + past_seen_tokens
             )
             position_ids = position_ids.unsqueeze(0)
+
         causal_mask = create_causal_mask(
             config=self.config,
             input_embeds=inputs_embeds,
@@ -1004,11 +1080,13 @@ class OlmoHybridModel(OlmoHybridPreTrainedModel):
             position_ids=position_ids,
         )
         linear_attn_mask = self._update_linear_attn_mask(attention_mask, past_key_values)
+
         hidden_states = inputs_embeds
         # RoPE or NoPE
         position_embeddings = (
             self.rotary_emb(hidden_states, position_ids) if self.rotary_emb is not None else None
         )
+
         for i, decoder_layer in enumerate(self.layers):
             layer_mask = (
                 linear_attn_mask
@@ -1018,6 +1096,7 @@ class OlmoHybridModel(OlmoHybridPreTrainedModel):
             layer_position_embeddings = (
                 position_embeddings if self.config.layer_types[i] == "full_attention" else None
             )
+
             hidden_states = decoder_layer(
                 hidden_states,
                 position_embeddings=layer_position_embeddings,
@@ -1027,7 +1106,9 @@ class OlmoHybridModel(OlmoHybridPreTrainedModel):
                 use_cache=use_cache,
                 **kwargs,
             )
+
         hidden_states = self.norm(hidden_states)
+
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=past_key_values,
@@ -1059,6 +1140,7 @@ class OlmoHybridForCausalLM(OlmoHybridPreTrainedModel, GenerationMixin):
         self.model = OlmoHybridModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1078,12 +1160,16 @@ class OlmoHybridForCausalLM(OlmoHybridPreTrainedModel, GenerationMixin):
     ) -> CausalLMOutputWithPast:
         r"""
         Example:
+
         ```python
         >>> from transformers import AutoTokenizer, OlmoHybridForCausalLM
+
         >>> model = OlmoHybridForCausalLM.from_pretrained("meta-olmo_hybrid/OlmoHybrid-2-7b-hf")
         >>> tokenizer = AutoTokenizer.from_pretrained("meta-olmo_hybrid/OlmoHybrid-2-7b-hf")
+
         >>> prompt = "Hey, are you conscious? Can you talk to me?"
         >>> inputs = tokenizer(prompt, return_tensors="pt")
+
         >>> # Generate
         >>> generate_ids = model.generate(inputs.input_ids, max_length=30)
         >>> tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
@@ -1098,17 +1184,20 @@ class OlmoHybridForCausalLM(OlmoHybridPreTrainedModel, GenerationMixin):
             use_cache=use_cache,
             **kwargs,
         )
+
         hidden_states = outputs.last_hidden_state
         # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
         slice_indices = (
             slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         )
         logits = self.lm_head(hidden_states[:, slice_indices, :])
+
         loss = None
         if labels is not None:
             loss = self.loss_function(
                 logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs
             )
+
         return CausalLMOutputWithPast(
             loss=loss,
             logits=logits,

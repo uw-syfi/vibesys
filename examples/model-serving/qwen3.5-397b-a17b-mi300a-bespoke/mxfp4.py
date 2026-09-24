@@ -1,4 +1,5 @@
 """OCP MXFP4 dequantization in plain torch.
+
 A weight of logical shape [..., K] is stored as uint8 [..., K/2] (two fp4 e2m1
 values per byte, low nibble = even element, verified against the FP8 source
 checkpoint, see reference/README.md) plus uint8 e8m0 scales [..., K/32].

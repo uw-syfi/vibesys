@@ -1,10 +1,12 @@
 # Copyright 2026. Licensed under the Apache License, Version 2.0.
 """Reference transcription for whisper-large-v3.
+
 whisper-large-v3 is native to `transformers` (`WhisperForConditionalGeneration`),
 so — unlike a model whose modeling code must be vendored — the reference here is
 the stock HuggingFace implementation driven through `generate()`. This module
 wraps it behind a single `reference_transcribe` used by the accuracy checker as
 the correctness ground truth.
+
 Greedy, `<|en|>` + `<|transcribe|>` + `<|notimestamps|>`, as the offline-
 transcribe contract the candidate `VibeServeModel.transcribe` must match.
 """

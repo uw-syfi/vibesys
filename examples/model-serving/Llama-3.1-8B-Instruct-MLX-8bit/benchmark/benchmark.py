@@ -34,6 +34,7 @@ def load_cases(
         from datasets import load_dataset
     except ImportError as exc:
         raise SystemExit("The `datasets` package is required to load JSONSchemaBench.") from exc
+
     ds = load_dataset(
         DATASET_ID,
         subset,
@@ -45,6 +46,7 @@ def load_cases(
     if limit is not None and limit < len(indices):
         rng = random.Random(seed)
         indices = rng.sample(indices, k=limit)
+
     cases = []
     for idx in indices:
         row = ds[idx]
@@ -100,6 +102,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         args.dataset_cache_dir,
     )
     url = args.url.rstrip("/") + args.endpoint
+
     async with httpx.AsyncClient() as client:
 
         async def send(i: int) -> dict:
@@ -149,7 +152,9 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         else:
             schedule = closed_loop(len(cases))
             conc = len(cases)
+
         result = await run(schedule, send, concurrency=conc)
+
     summary = _summarize(result.results, result.wall_clock)
     output = {
         "config": {
@@ -167,6 +172,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         **summary,
         "results": result.results,
     }
+
     print()
     print("=" * 48)
     print("  MLX 8-bit Llama JSONSchemaBench Results")
@@ -185,6 +191,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         print(f"TTFT p50:          {summary['ttft_ms']['p50']:.1f} ms")
     if summary["tpot_ms"]:
         print(f"TPOT p50:          {summary['tpot_ms']['p50']:.1f} ms")
+
     if args.output_json:
         with open(args.output_json, "w") as f:
             json.dump(output, f, indent=2)

@@ -1,10 +1,12 @@
 """
 Serving performance benchmark for LLM inference servers.
+
 Generates load following a Poisson arrival process and measures:
 - Time to First Token (TTFT)
 - Time per Output Token (TPOT)
 - End-to-end latency
 - Request and token throughput
+
 Usage:
     .venv/bin/python benchmark.py --url http://localhost:8002 --rate 2 --duration 30 --max-tokens 64
 """
@@ -21,6 +23,7 @@ import httpx
 # ---------------------------------------------------------------------------
 # Prompt pool — diverse prompts reused from accuracy_checker.py + extras
 # ---------------------------------------------------------------------------
+
 PROMPT_POOL = [
     "The capital of France is",
     "Once upon a time, in a land far away,",
@@ -53,6 +56,8 @@ PROMPT_POOL = [
 # ---------------------------------------------------------------------------
 # Per-request measurement
 # ---------------------------------------------------------------------------
+
+
 async def send_request(
     client: httpx.AsyncClient,
     url: str,
@@ -67,12 +72,14 @@ async def send_request(
         "temperature": temperature,
         "stream": True,
     }
+
     t_send = time.perf_counter()
     t_first_token = None
     t_done = None
     output_tokens = 0
     finish_reason = None
     error = None
+
     try:
         async with client.stream("POST", url, json=body, timeout=120.0) as resp:
             resp.raise_for_status()
@@ -95,15 +102,18 @@ async def send_request(
     except Exception as exc:
         error = str(exc)
         t_done = time.perf_counter()
+
     # Compute metrics
     if t_done is None:
         t_done = time.perf_counter()
+
     result: dict = {
         "error": error,
         "output_tokens": output_tokens,
         "finish_reason": finish_reason,
         "total_latency": t_done - t_send,
     }
+
     if t_first_token is not None:
         result["ttft"] = t_first_token - t_send
         if output_tokens > 1:
@@ -113,12 +123,15 @@ async def send_request(
     else:
         result["ttft"] = None
         result["tpot"] = None
+
     return result
 
 
 # ---------------------------------------------------------------------------
 # Aggregation helpers
 # ---------------------------------------------------------------------------
+
+
 def percentile(sorted_vals: list[float], p: float) -> float:
     """Return the p-th percentile (0-100) from a pre-sorted list."""
     if not sorted_vals:
@@ -151,33 +164,42 @@ def format_stats(values: list[float], unit: str = "ms", multiplier: float = 1000
 # ---------------------------------------------------------------------------
 # Main benchmark driver
 # ---------------------------------------------------------------------------
+
+
 async def run_benchmark(args: argparse.Namespace) -> None:
     rng = random.Random(args.seed)
     url = args.url.rstrip("/") + args.endpoint
+
     # Build prompt list
     if args.prompt_len is not None:
         # Synthetic prompts: repeat a filler word to approximate token count
         prompts = [" ".join(["token"] * args.prompt_len) for _ in range(20)]
     else:
         prompts = list(PROMPT_POOL)
+
     # Determine stopping condition
     use_duration = args.num_requests is None
     total_requests = args.num_requests if not use_duration else 10**9
+
     tasks: list[asyncio.Task] = []
     results: list[dict] = []
     sent = 0
+
     async with httpx.AsyncClient() as client:
         t_bench_start = time.perf_counter()
+
         while sent < total_requests:
             # Check duration limit
             if use_duration and (time.perf_counter() - t_bench_start) >= args.duration:
                 break
+
             prompt = rng.choice(prompts)
             task = asyncio.create_task(
                 send_request(client, url, prompt, args.max_tokens, args.temperature)
             )
             tasks.append(task)
             sent += 1
+
             # Poisson inter-arrival delay
             if sent < total_requests:
                 delay = -math.log(1.0 - rng.random()) / args.rate
@@ -188,17 +210,22 @@ async def run_benchmark(args: argparse.Namespace) -> None:
                         break
                     delay = min(delay, remaining)
                 await asyncio.sleep(delay)
+
         # Wait for in-flight requests to finish
         results = await asyncio.gather(*tasks)
         t_bench_end = time.perf_counter()
+
     wall_clock = t_bench_end - t_bench_start
+
     # Separate successes and errors
     successes = [r for r in results if r["error"] is None]
     errors = [r for r in results if r["error"] is not None]
+
     ttfts = [r["ttft"] for r in successes if r["ttft"] is not None]
     tpots = [r["tpot"] for r in successes if r["tpot"] is not None]
     latencies = [r["total_latency"] for r in successes]
     total_output_tokens = sum(r["output_tokens"] for r in successes)
+
     # Print results
     print()
     print("=" * 40)
@@ -218,6 +245,7 @@ async def run_benchmark(args: argparse.Namespace) -> None:
     print(format_stats(tpots))
     print("Total Latency (end-to-end):")
     print(format_stats(latencies))
+
     if errors:
         print("Errors:")
         for i, r in enumerate(errors[:5]):
@@ -230,6 +258,8 @@ async def run_benchmark(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Benchmark an OpenAI-compatible streaming completion server."

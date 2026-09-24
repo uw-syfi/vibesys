@@ -1,25 +1,33 @@
 """
 Single-batch code-edit latency benchmark for predicted-outputs headroom.
+
 Drives an OpenAI-compatible ``/v1/completions`` server with code-debug
 samples drawn from ``m-a-p/CodeEditorBench``. Each request is sent
 **sequentially** (no concurrency) — the goal is to measure *single-batch*
 latency, which is what matters when you're optimizing speculative
 decoding for an interactive code-edit endpoint.
+
 Each request body carries the OpenAI predicted-outputs envelope
 (``prediction.content``) **in addition to** ``prompt``. Servers that
 don't implement predicted outputs (vLLM, SGLang today) ignore the
 field and the request still parses as a normal completion; a server
 that consumes the field is the configuration this benchmark scores.
+
 What the server MUST implement to score well here:
+
 1. ``POST /v1/completions`` accepting the usual OpenAI body plus an
    optional ``prediction`` field of shape::
+
        {"type": "content", "content": "<predicted output text>"}
+
 2. Streaming SSE response with ``choices[0].text`` deltas, terminated
    by ``data: [DONE]``.
+
 Token count is canonicalised by re-tokenising the concatenated server
 output. This keeps tok/s independent of how the server batches accepted
 spec tokens into SSE chunks (vLLM/SGLang flush all accepted tokens in
 one chunk, which would otherwise undercount).
+
 Usage:
     python benchmark.py --url http://localhost:8000 --num-samples 50 \\
         --max-tokens 512 --output-json /tmp/code_edit.json
@@ -43,10 +51,11 @@ import httpx
 from vs_bench.stats import pct_block, percentile
 from vs_bench.transport import stream_sse
 
-
 # ---------------------------------------------------------------------------
 # Dataset loading
 # ---------------------------------------------------------------------------
+
+
 def _load_codeeditorbench(
     languages: list[str],
     max_input_chars: int,
@@ -54,6 +63,7 @@ def _load_codeeditorbench(
     seed: int,
 ) -> list[dict]:
     """Load ``num_samples`` code-debug rows from m-a-p/CodeEditorBench.
+
     Returns a list of dicts with keys:
         - ``unique_id`` (str)
         - ``language`` (str)  -- one of ``python3``, ``cpp``, ``java``
@@ -66,6 +76,7 @@ def _load_codeeditorbench(
         from datasets import load_dataset
     except ImportError as exc:
         raise SystemExit("The ``datasets`` library is required — pip install datasets.") from exc
+
     # The dataset on the hub has four task files at the repo root; their
     # schemas don't unify, so the default loader fails. Pin to the
     # code_debug shards — those are the rows with both
@@ -77,6 +88,7 @@ def _load_codeeditorbench(
         streaming=True,
     )
     rng = random.Random(seed)
+
     buffer: list[dict] = []
     seen_keys: set[tuple[str, str]] = set()
     for i, row in enumerate(ds):
@@ -110,6 +122,7 @@ def _load_codeeditorbench(
         )
         if len(buffer) >= max(num_samples * 5, 500):
             break
+
     rng.shuffle(buffer)
     return buffer[:num_samples]
 
@@ -133,6 +146,7 @@ def _build_user_message(language: str, incorrect_code: str, bug_type: str) -> st
 
 def _load_tokenizer(tokenizer_path: str):
     """Load the model's tokenizer for client-side chat templating.
+
     Pinning the tokenizer here is required for cross-engine fairness:
     every engine must see byte-identical input tokens. If we let each
     server apply its own template, prompt content drifts per engine.
@@ -149,6 +163,7 @@ def _load_tokenizer(tokenizer_path: str):
 
 def _build_prompt(tokenizer, sample: dict) -> str:
     """Build the FULL chat-templated prompt the model will see.
+
     Done client-side so every inference engine receives byte-identical
     input. Servers should treat the result as raw text (no further
     templating). Qwen3 supports ``enable_thinking=False``; we always
@@ -175,6 +190,8 @@ def _build_prompt(tokenizer, sample: dict) -> str:
 # ---------------------------------------------------------------------------
 # Per-request measurement
 # ---------------------------------------------------------------------------
+
+
 async def send_request(
     client: httpx.AsyncClient,
     url: str,
@@ -201,6 +218,7 @@ async def send_request(
     }
     if model_name:
         body["model"] = model_name
+
     if print_stream:
         header = f"sample={sample_id}" if sample_id else ""
         sys.stderr.write(f"\n===== >>> PROMPT {header} =====\n{prompt}\n")
@@ -208,10 +226,13 @@ async def send_request(
             f"===== >>> PREDICTION ({len(prediction_content)} chars) =====\n{prediction_content}\n"
         )
         sys.stderr.flush()
+
     r = await stream_sse(client, url, body, timeout=600.0)
+
     if print_stream:
         sys.stderr.write(f"===== <<< OUTPUT =====\n{r.text}\n===== <<< END =====\n")
         sys.stderr.flush()
+
     output_tokens = len(tokenizer.encode(r.text, add_special_tokens=False)) if r.text else 0
     result: dict = {
         "error": r.error,
@@ -233,8 +254,11 @@ async def send_request(
 # ---------------------------------------------------------------------------
 # Per-sample diff stats: drives the headroom estimator downstream
 # ---------------------------------------------------------------------------
+
+
 def _strip_code_fence(text: str) -> str:
     """Heuristically strip a single Markdown code fence pair.
+
     Models occasionally re-wrap their output even when told not to. The
     diff math is much cleaner if we drop the fence so it doesn't show up
     as a "diverged token run" at the start and end.
@@ -256,12 +280,14 @@ def _token_align(
     output_text: str,
 ) -> dict:
     """Align the model's output against the prediction at TOKEN level.
+
     Returns a summary dict suitable for headroom math:
         - num_output_tokens
         - num_matched_tokens               (sum of matched-run lengths)
         - num_diverged_tokens              (output - matched)
         - matched_run_lengths              (list[int], each token-length of an equal block in the output)
         - longest_matched_run              (int)
+
     Token-level alignment is what the predicted-outputs verify path
     actually consumes. Char-level alignment is misleading because a
     single token boundary mismatch can split a "matched" string into
@@ -291,6 +317,7 @@ def _quality_score(
     gold_text: str,
 ) -> dict:
     """Cheap correctness signal: closeness to gold vs to incorrect input.
+
     A pure echo-the-prediction bypass scores 1.0 on ``ratio_to_input``
     and ~the original similarity on ``ratio_to_gold``, so
     ``improved_over_input`` distinguishes it from a real fix.
@@ -308,6 +335,8 @@ def _quality_score(
 # ---------------------------------------------------------------------------
 # Aggregation
 # ---------------------------------------------------------------------------
+
+
 def _fmt_stats(values: list[float], unit: str = "ms", multiplier: float = 1000.0) -> str:
     if not values:
         return "  (no data)\n"
@@ -323,6 +352,8 @@ def _fmt_stats(values: list[float], unit: str = "ms", multiplier: float = 1000.0
 # ---------------------------------------------------------------------------
 # Main driver
 # ---------------------------------------------------------------------------
+
+
 async def run_benchmark(args: argparse.Namespace) -> dict:
     url = args.url.rstrip("/") + args.endpoint
     languages = [s.strip() for s in args.languages.split(",") if s.strip()]
@@ -339,15 +370,18 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     )
     if not samples:
         raise SystemExit("No samples could be loaded from CodeEditorBench.")
+
     print(f"[bench] sending {len(samples)} sequential requests to {url}", file=sys.stderr)
     print(
         f"[bench] loading tokenizer for client-side chat templating: {args.tokenizer_path}",
         file=sys.stderr,
     )
     tokenizer = _load_tokenizer(args.tokenizer_path)
+
     results: list[dict] = []
     async with httpx.AsyncClient() as client:
         t_start = time.perf_counter()
+
         for idx, sample in enumerate(samples):
             prompt = _build_prompt(tokenizer, sample)
             result = await send_request(
@@ -385,6 +419,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                 result["alignment"] = None
                 result["quality"] = None
             results.append(result)
+
             align = result["alignment"]
             qual = result["quality"]
             print(
@@ -404,15 +439,20 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                 + (f"err={result['error'][:80]}" if result["error"] else ""),
                 file=sys.stderr,
             )
+
         t_end = time.perf_counter()
+
     wall_clock = t_end - t_start
+
     steady = [r for r in results if not r["is_warmup"]]
     successes = [r for r in steady if r["error"] is None]
     errors = [r for r in steady if r["error"] is not None]
+
     ttfts = [r["ttft"] for r in successes if r["ttft"] is not None]
     tpots = [r["tpot"] for r in successes if r["tpot"] is not None]
     latencies = [r["total_latency"] for r in successes]
     output_tokens = [r["output_tokens"] for r in successes]
+
     # Diff stats aggregated over successes (drives headroom math).
     all_matched_runs: list[int] = []
     matched_tokens_total = 0
@@ -435,6 +475,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         "p95": percentile(sorted_runs, 95) if sorted_runs else None,
         "p99": percentile(sorted_runs, 99) if sorted_runs else None,
     }
+
     qual_improved = [
         r
         for r in successes
@@ -444,6 +485,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     qual_echo = [
         r for r in successes if r["quality"] is not None and r["quality"]["equals_input_verbatim"]
     ]
+
     print()
     print("=" * 60)
     print("  Single-batch code-edit latency benchmark")
@@ -467,6 +509,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         tok_per_s = med_tokens / med_latency if med_latency else float("nan")
         print(f"Median output tokens:  {med_tokens:.0f}")
         print(f"Median tok/s:          {tok_per_s:.1f}")
+
     print()
     print("Token-level diff vs prediction (drives headroom estimator):")
     print(f"  Aggregated match rate:  {aggregated_match_rate:.1%}")
@@ -475,6 +518,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         f"p50={matched_run_pct['p50']} p75={matched_run_pct['p75']} "
         f"p90={matched_run_pct['p90']} p95={matched_run_pct['p95']}"
     )
+
     p50_latency_ms = percentile(sorted(latencies), 50) * 1000 if latencies else float("nan")
     median_tok_per_sec = (
         statistics.median(output_tokens) / statistics.median(latencies)
@@ -485,6 +529,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     print(f"Primary metric: median_tok_per_sec = {median_tok_per_sec:.2f}")
     print(f"  (also: p50_total_latency_ms = {p50_latency_ms:.1f})")
     print(f"Completed: {len(successes)}/{len(steady)} requests")
+
     chunk_counts = [r["num_chunks"] for r in successes]
     median_chunks = statistics.median(chunk_counts) if chunk_counts else None
     median_tok_per_chunk = (
@@ -536,15 +581,18 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
             for r in successes
         ],
     }
+
     if errors:
         print("\nErrors:")
         for i, r in enumerate(errors[:5]):
             print(f"  [{i}] {r['error'][:120]}")
         if len(errors) > 5:
             print(f"  ... and {len(errors) - 5} more")
+
     if args.output_json:
         Path(args.output_json).write_text(json.dumps(result_dict, indent=2))
         print(f"\nResults written to {args.output_json}")
+
     return result_dict
 
 
@@ -622,6 +670,7 @@ def main() -> None:
     parser.add_argument(
         "--audio-dir", type=str, default=None, help="Ignored — text-only benchmark."
     )
+
     args = parser.parse_args()
     if args.num_requests is not None:
         args.num_samples = args.num_requests

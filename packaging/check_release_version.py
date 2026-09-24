@@ -52,6 +52,7 @@ def check_release_version(
     python_raw = cast("str", project["version"])
     project_identity = _python_identity(python_raw, source="project.version")
     version = Version(python_raw)
+
     tui_document = json.loads((source_root / "clients/tui/package.json").read_text())
     if not isinstance(tui_document, dict) or not isinstance(tui_document.get("version"), str):
         _fail("clients/tui/package.json must declare version as a string")
@@ -59,6 +60,7 @@ def check_release_version(
     tui_identity = _npm_identity(tui_raw, source="TUI version")
     if tui_identity != project_identity:
         _fail(f"TUI version {tui_raw!r} does not match project version {python_raw!r}")
+
     if tag is not None:
         prefix = "refs/tags/v"
         if not tag.startswith(prefix) or len(tag) == len(prefix):
@@ -67,6 +69,7 @@ def check_release_version(
         tag_identity = _python_identity(tag_raw, source="release tag")
         if tag_identity != project_identity:
             _fail(f"Release tag version {tag_raw!r} does not match project version {python_raw!r}")
+
     if wheel_dir is not None:
         _check_wheels(wheel_dir.resolve(), version=version)
     return version
