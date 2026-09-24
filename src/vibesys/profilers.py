@@ -15,6 +15,7 @@ class ProfilerKind(StrEnum):
     AUTO = "auto"
     NONE = "none"
     NSYS = "nsys"
+    ROCPROF = "rocprof"
     OTEL = "otel"
     TORCH = "torch"
     NEURON = "neuron"
@@ -75,6 +76,7 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
     definition.kind: definition
     for definition in (
         ProfilerDefinition(ProfilerKind.NSYS, frozenset({DomainName.LLM_SERVING})),
+        ProfilerDefinition(ProfilerKind.ROCPROF, frozenset({DomainName.LLM_SERVING})),
         ProfilerDefinition(ProfilerKind.OTEL, frozenset({DomainName.MICROSERVICES})),
         ProfilerDefinition(
             ProfilerKind.TORCH,

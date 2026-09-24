@@ -251,6 +251,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
             "Which profiler to use between rounds. "
             "'none' to disable standalone profiling, "
             "'nsys' for NVIDIA Nsight Systems (needs /proc/driver/nvidia), "
+            "'rocprof' for AMD rocprofv3 / rocprof-compute (ROCm system trace, "
+            "PMC counters, ATT, kernel-altitude counters), "
             "'torch' for torch.profiler (works under the Modal run environment), "
             "'neuron' for AWS neuron-explorer (Trainium/NeuronCores), "
             "'otel' for OpenTelemetry service/span/datastore latency on "
