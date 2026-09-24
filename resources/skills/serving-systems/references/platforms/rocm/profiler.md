@@ -1,25 +1,29 @@
 # Profiling on ROCm
 
 Which `rocprof`-family tool answers which question, at which altitude, and
-how to capture one cleanly against a running vLLM or SGLang server on CDNA.
-The discipline is the portable one in [`tooling/profiler.md`](../../tooling/profiler.md)
-(classify with a system timeline before descending); this file is the tool
-substitution table plus the ROCm-specific mechanics.
+how to capture one cleanly on CDNA. The discipline is the portable one in
+[`tooling/profiler.md`](../../tooling/profiler.md) (classify with a system
+timeline before descending); this file is the tool substitution table plus
+the ROCm-specific mechanics. For the engine-side settings that go into a
+capture tool's `command`/`env`/`ready_command`/`stop_signal` arguments (how
+a specific serving engine needs to be launched and shut down for a clean
+capture), see
+[`tooling/profiling-serving-engines.md`](../../tooling/profiling-serving-engines.md).
 
 > **Status.** The `rocprof` profiler kind is wired up: system trace, PMC
 > counters, thread trace, kernel-internal, and paired A/B timing all have a
 > workspace tool (`rocprof_profiler/`, below). PMC counter capture, tool
 > inventory, **ATT thread-trace capture + decode**, **`rocprof-compute`
 > kernel-internal `profile`/`analyze`**, and **end-to-end `rocprofv3` system
-> trace of a real vLLM serving workload** are all verified on this repo's
+> trace of a real serving workload** are all verified on this repo's
 > MI210 test cluster (ROCm 6.2.1 through 7.2.0 modules available; host venv
 > runs ROCm 6.4.1 to match `torch 2.9.1+rocm6.4`; `rocprof-compute` version
-> confirmed `3.1.0`; the vLLM capture used a ROCm 7.2.3 container). The
-> `torch.profiler` pitfall in this file's Pitfalls section **is** measured on
-> this repo's MI210 bundle. The capture recipe below reflects what actually
-> worked, not just what the flags document: see the clean-exit requirement
-> in step 2, which was the root cause behind an earlier "zero trace files"
-> failure mode.
+> confirmed `3.1.0`; the serving-workload capture used a ROCm 7.2.3
+> container). The `torch.profiler` pitfall in this file's Pitfalls section
+> **is** measured on this repo's MI210 bundle. The capture recipe below
+> reflects what actually worked, not just what the flags document: see the
+> clean-exit requirement in step 2, which was the root cause behind an
+> earlier "zero trace files" failure mode.
 
 ## Altitudes and tools
 
@@ -63,68 +67,49 @@ profiler kind: it runs on ROCm as-is and covers that altitude directly.
 | `att.py` (thread trace) | **very high** | per-instruction stall attribution inside one kernel, one CU | anything broader than that one kernel |
 | `kernel_bench.py` (paired A/B) | low (untraced) | "did this change help," same-session, drift-controlled | attribution (it verifies, it doesn't diagnose) |
 
-## Capture recipes for vLLM / SGLang
+## Capturing a serving workload
 
-### 1. Identify the real command and prewarm
+Engine identity (which command to launch, which env vars keep it
+single-process, how to shut it down cleanly, whether the torch.profiler
+contract is env-var-based or a Python kwarg) is **not** a ROCm concern: see
+[`tooling/profiling-serving-engines.md`](../../tooling/profiling-serving-engines.md)
+for vLLM and SGLang specifics. This section covers only the rocprofv3
+mechanics that apply once you know what to launch and how to stop it.
 
-Same shape as every other backend's diagnosis step: find the declared server
-command and port, then warm it before capturing. On ROCm the warmup also
-resolves AITER/Triton JIT and, if enabled, `TunableOp`/AITER online tuning:
-none of that belongs inside the captured window, and for HIP-graph decode
-this is also where graph capture happens.
+### 1. Prewarm before capturing
 
-```bash
-VLLM_ENABLE_V1_MULTIPROCESSING=0 <declared server command> > /tmp/prewarm.log 2>&1 &
-PID=$!
-for i in $(seq 1 120); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
-curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
-  -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
-kill $PID 2>/dev/null; wait $PID 2>/dev/null; sleep 2
-```
-
-`VLLM_ENABLE_V1_MULTIPROCESSING=0` keeps vLLM's engine in the server process
-instead of forking a separate `EngineCore`, required for step 2's clean-exit
-requirement. SGLang: use its equivalent single-process/non-multiprocessing
-flag if one exists for the version in use.
+Warm the target process under load before capturing anything. On ROCm this
+also resolves AITER/Triton JIT and, if enabled, `TunableOp`/AITER online
+tuning: none of that belongs inside the captured window, and for HIP-graph
+decode this is also where graph capture happens. Use whatever single-process
+launch settings the engine doc above specifies, then discard the warmup
+process and start the traced capture fresh.
 
 ### 2. Capture the system timeline under representative load
 
 **`rocprofv3` only flushes its trace buffers to disk on a clean process
-exit.** Killing a wrapped server (SIGTERM/SIGKILL) loses the trace even
-though the run otherwise looked fine, because vLLM's engine-core subprocess
-(under V1 multiprocessing) and SGLang's per-TP-rank workers do not always
-exit cleanly on an external kill of the parent: confirmed end to end on
-this repo's MI210 cluster: the earlier "zero trace files" failure mode was
-exactly this, not a rocprofv3 bug.
-
-**Preferred: an offline single-process script.** Drive the workload through
-the framework's own Python API in one process that exits on its own once the
-run finishes (e.g. `vllm.LLM(...).generate(...)`), rather than wrapping the
-long-running HTTP server. No forked worker, no signal-timing games:
+exit.** Killing a wrapped process (SIGTERM/SIGKILL) loses the trace even
+though the run otherwise looked fine: confirmed end to end on this repo's
+MI210 cluster: an earlier "zero trace files" failure mode traced back
+exactly to this, not a rocprofv3 bug. Prefer capturing against a
+single-process entry point that exits on its own once the workload finishes
+(see the engine doc for how to get one); wrap a long-running server only
+when the objective specifically concerns the HTTP path, and then shut it
+down through its own graceful path with a generous grace period, never a
+hard kill of the process tree:
 
 ```bash
-VLLM_ENABLE_V1_MULTIPROCESSING=0 \
 rocprofv3 --kernel-trace --memory-copy-trace --stats --output-format csv \
   -d /tmp/rocprof_profile -o capture \
-  -- python offline_generate.py --model <model> --num-prompts 32 --max-tokens 128
+  -- <single-process capture command, env already applied>
 ```
 
-Do one untraced warmup `generate()` call first inside the script (a couple of
-prompts, few tokens): in HIP-graph mode this is where graph capture
-happens, so the traced region only contains steady-state replay kernels, not
-one-time capture kernels, then call `generate()` again over the real batch
-inside the traced region.
-
-**If a server must be captured**, shut it down through its own graceful path
-(never a hard kill of the process tree) and give the exit *and* the flush a
-generous bounded wait: the post-exit flush to disk can itself take minutes
-on a large capture, scaling with how much was traced (see the
-`--hip-runtime-trace` note below), not with how long the run took:
+or, wrapping a server that must stay up for the duration of the load:
 
 ```bash
-VLLM_ENABLE_V1_MULTIPROCESSING=0 rocprofv3 --kernel-trace --memory-copy-trace --stats --output-format csv \
+rocprofv3 --kernel-trace --memory-copy-trace --stats --output-format csv \
   -d /tmp/rocprof_profile -o capture \
-  -- <declared server command> &
+  -- <server command> &
 ROCPROF_PID=$!
 # ... drive the representative benchmark load against the server ...
 kill -INT $ROCPROF_PID 2>/dev/null
@@ -134,21 +119,21 @@ wait $ROCPROF_PID 2>/dev/null
 
 Either way: use `--output-format csv` only; `json` duplicates every CSV's
 content inside one JSON blob and reached 1.1-1.7GB on a 32-prompt/128-token
-Qwen3.5-9B capture for zero extra information (same schema, just wrapped).
-Add `--hip-runtime-trace` only when `cpu_overhead`/`graphs`/launch-bound
-analysis is actually needed: it traces one HIP runtime API call per kernel
-launch/memcpy/event, so on a batched-decode workload it measured 2-4x the
-size of the paired kernel trace (233-381MB / 2.5-4M rows on the Qwen3.5-9B
-capture above); don't enable it by default on a large capture. As with
-`nsys`, constrain the window to representative load: a multi-minute full
-trace is unreadable.
+capture (a 9B-parameter model, bf16) for zero extra information (same
+schema, just wrapped). Add `--hip-runtime-trace` only when
+`cpu_overhead`/`graphs`/launch-bound analysis is actually needed: it traces
+one HIP runtime API call per kernel launch/memcpy/event, so on a
+batched-decode workload it measured 2-4x the size of the paired kernel
+trace (233-381MB / 2.5-4M rows on the capture above); don't enable it by
+default on a large capture. As with `nsys`, constrain the window to
+representative load: a multi-minute full trace is unreadable.
 
 ### 3. Mind the process tree
 
-vLLM v1 runs the engine core in a process separate from the API server, and
-tensor-parallel workers add one process per GPU; SGLang similarly forks one
-worker per TP rank. Each such process loads its own HIP runtime context and
-issues its own kernels.
+A serving engine's request-handling process is commonly separate from its
+API-server/driver process, and tensor-parallel serving adds one worker
+process per GPU (see the engine doc for the specific fork shape). Each such
+process loads its own HIP runtime context and issues its own kernels.
 
 - **Profile the process that actually issues HIP kernels**, not the
   API-server/driver process. A driver-only capture shows near-zero GPU
@@ -159,9 +144,9 @@ issues its own kernels.
 - **ROCm 7.x's `rocprofv3` can attach to an already-running process**
   (`--attach PID`, verified present in the 7.x CLI, absent from 6.4.1). Where
   available, this is the cleaner way to profile a specific already-spawned
-  engine-core or TP-worker process without relaunching the whole server tree
-  under the profiler wrapper. On ROCm 6.x, without `--attach`, wrap the
-  top-level launch command instead.
+  worker process without relaunching the whole server tree under the
+  profiler wrapper. On ROCm 6.x, without `--attach`, wrap the top-level
+  launch command instead.
 - Before trusting an `idle_gaps` or `host_idle` read, confirm with
   `analyze_rocprof.py kernels` that the captured process's trace actually
   contains model kernels.
