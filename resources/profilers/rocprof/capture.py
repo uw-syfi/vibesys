@@ -1,0 +1,1176 @@
+#!/usr/bin/env python3
+"""Agent-facing capture tools for the rocprof profiler plugin.
+
+An agent with only MCP access needs to be able to profile anything of
+interest (a server under its own load, an offline script, a microbenchmark)
+on an AMD GPU. Each ``profile_*`` function here answers one question (whole-
+run timeline, PMC counters, kernel-internal Speed-of-Light, instruction-level
+stalls, a torch.profiler trace) and shares one generic capture lifecycle,
+implemented once in ``capture_runtime`` (start, optionally wait-ready + load,
+stop, escalate if needed). Nothing here knows about any specific serving
+engine: what goes into ``lifecycle.command``/``env``/``ready_command``/
+``load_command`` is chosen by the calling agent, guided by
+``serving-systems/references/tooling/profiling-serving-engines.md``, not by
+this module.
+
+Every ``profile_*`` function takes a ``capture_runtime.Lifecycle`` (the
+common start/ready/load/stop args) plus a few scoped args, and returns a
+prompt-sized text: capture id, status, timings, validity checks, and a short
+auto-summary, plus hints of the next drill-down tools. ``server.py`` is the
+thin MCP boundary: it flattens ``Lifecycle`` into individual tool arguments
+(required for FastMCP's per-argument JSON schema, which is what makes each
+tool's args discoverable to an agent) and calls straight through to the
+functions here, which stay independently unit-testable without FastMCP.
+
+``summary``/``compare`` dispatch on a capture's ``manifest.json`` ``kind``
+field (``timeline``, ``counters``, ``kernel_deep``, ``instructions``,
+``ops``), written by whichever ``profile_*`` function produced it.
+
+Standalone module, stdlib only (plus the sibling analyzer CLIs in this same
+directory): imports ``capture_runtime`` via the same path shim documented in
+its own docstring, since this module is staged as a sibling of
+``resources/profilers/<kind>/`` too.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import csv
+import importlib
+import io
+import os
+import re
+import shutil
+import subprocess
+import sys
+import textwrap
+import types
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+_HERE = Path(__file__).resolve().parent
+
+# capture_runtime is a sibling of every profiler plugin, not just rocprof's
+# own directory -- see resources/profilers/_common/capture_runtime.py's
+# docstring for why this checks two names.
+for _common_name in ("_common", "profilers_common"):
+    _common_candidate = _HERE.parent / _common_name
+    if (_common_candidate / "capture_runtime.py").is_file():
+        if str(_common_candidate) not in sys.path:
+            sys.path.insert(0, str(_common_candidate))
+        break
+import capture_runtime  # noqa: E402
+
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+import analyze_rocprof  # noqa: E402
+import att  # noqa: E402
+import compute  # noqa: E402
+import counters  # noqa: E402
+
+_ATT_MIN_ROCPROFV3_VERSION = (7, 1, 0)
+_ATT_DECODER_LIB_NAME = "librocprof-trace-decoder.so"
+_ATT_LIBRARY_PATH_ENV_VARS = ("VIBESYS_ROCPROF_ATT_LIBRARY_PATH", "ROCPROF_ATT_LIBRARY_PATH")
+_WORKLOAD_KERNEL_CSV_NAMES = ("pmc_kernel_top.csv", "pmc_perf.csv")
+_TOP_DELTA_ROWS = 15
+_VERSION_TUPLE_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+_COUNTER_METRIC_FIELDS = (
+    "l2_hit_rate_pct",
+    "achieved_bw_gb_s",
+    "gpu_busy_pct",
+    "mfma_issue_rate",
+    "mfma_busy_fraction",
+    "lds_bank_conflict_rate_pct",
+)
+_STATUS_SEVERITY: dict[capture_runtime.CaptureStatus, int] = {
+    capture_runtime.CaptureStatus.OK: 0,
+    capture_runtime.CaptureStatus.NOT_READY: 1,
+    capture_runtime.CaptureStatus.LOAD_FAILED: 2,
+    capture_runtime.CaptureStatus.TARGET_FAILED: 3,
+    capture_runtime.CaptureStatus.TIMED_OUT: 4,
+    capture_runtime.CaptureStatus.KILLED_AFTER_GRACE: 5,
+}
+
+
+def run_cli(fn: Callable[[types.SimpleNamespace], None], **kwargs: object) -> str:
+    """Run a ``cmd_*`` with an argparse-like namespace and capture its stdout.
+
+    Several ``cmd_*`` functions reject bad input via ``sys.exit(message)``
+    rather than raising; that becomes an ``error: ...`` string here instead
+    of killing the process.
+    """
+    ns = types.SimpleNamespace(**kwargs)
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            fn(ns)
+    except SystemExit as exc:
+        return f"error: {exc}"
+    out = buf.getvalue()
+    return out or "(no output)"
+
+
+# ---------------------------------------------------------------------------
+# Host capability detection
+# ---------------------------------------------------------------------------
+
+
+def _run(argv: list[str], *, timeout: float = 10.0) -> tuple[int | None, str]:
+    """Run a short-lived command; ``rc`` is ``None`` if it could not be launched at all."""
+    try:
+        result = subprocess.run(  # noqa: S603  # tracked: #288
+            argv, capture_output=True, text=True, timeout=timeout, check=False
+        )
+    except FileNotFoundError:
+        return None, "executable not found"
+    except OSError as exc:
+        return None, str(exc)
+    except subprocess.TimeoutExpired:
+        return None, "timed out"
+    return result.returncode, result.stdout + result.stderr
+
+
+def _parse_version(text: str) -> tuple[int, int, int] | None:
+    """Extract the first ``X.Y.Z`` version triplet from free-form tool output."""
+    match = _VERSION_TUPLE_RE.search(text)
+    if not match:
+        return None
+    major, minor, patch = (int(part) for part in match.groups())
+    return (major, minor, patch)
+
+
+def _rocprofv3_version(rocprofv3_bin: str) -> tuple[int, int, int] | None:
+    rc, output = _run([rocprofv3_bin, "--version"])
+    if rc != 0:
+        return None
+    return _parse_version(output)
+
+
+def _torch_available() -> tuple[bool, str]:
+    rc, output = _run(
+        [sys.executable, "-c", "import torch; print(torch.__version__)"], timeout=20.0
+    )
+    if rc == 0:
+        return True, output.strip()
+    lines = output.strip().splitlines()
+    return False, (lines[-1] if lines else "import failed")
+
+
+def _parse_rocminfo_agents(text: str) -> list[dict[str, str | None]]:
+    """Best-effort parse of ``rocminfo`` output into GPU agent records.
+
+    Only ``rocminfo``'s flat ``Name:``/``Marketing Name:``/``Compute Unit:``
+    fields are used; a GPU agent is any block whose ``Name:`` value starts
+    with ``gfx`` (CPU agents' ``Name:`` is the CPU model string).
+    """
+    agents: list[dict[str, str | None]] = []
+    current: dict[str, str | None] | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("Name:"):
+            value = line.split(":", 1)[1].strip()
+            if value.startswith("gfx"):
+                current = {"gfx": value, "marketing_name": None, "compute_units": None}
+                agents.append(current)
+            else:
+                current = None
+        elif current is not None and line.startswith("Marketing Name:"):
+            current["marketing_name"] = line.split(":", 1)[1].strip()
+        elif current is not None and line.startswith("Compute Unit:"):
+            current["compute_units"] = line.split(":", 1)[1].strip()
+    return agents
+
+
+def _detect_gpu_agents() -> list[dict[str, str | None]]:
+    rocminfo = shutil.which("rocminfo")
+    if not rocminfo:
+        return []
+    rc, output = _run([rocminfo])
+    if rc != 0:
+        return []
+    return _parse_rocminfo_agents(output)
+
+
+def _detect_arch() -> str | None:
+    """The first detected GPU agent's ``gfxNNN`` id, or ``None``."""
+    agents = _detect_gpu_agents()
+    return agents[0]["gfx"] if agents else None
+
+
+def _standard_rocm_lib_dirs() -> list[str]:
+    roots = [os.environ.get("ROCM_PATH", "").strip(), "/opt/rocm"]
+    return [f"{root}/lib" for root in roots if root]
+
+
+def _find_att_decoder_dir() -> str | None:
+    """Directory containing ``librocprof-trace-decoder.so``, or ``None``."""
+    for env_var in _ATT_LIBRARY_PATH_ENV_VARS:
+        candidate = os.environ.get(env_var, "").strip()
+        if candidate and (Path(candidate) / _ATT_DECODER_LIB_NAME).is_file():
+            return candidate
+    for lib_dir in _standard_rocm_lib_dirs():
+        if (Path(lib_dir) / _ATT_DECODER_LIB_NAME).is_file():
+            return lib_dir
+    return None
+
+
+def import_torch_sibling(module_name: str) -> types.ModuleType | None:
+    """Import *module_name* from the torch plugin's staged sibling directory, if present.
+
+    Checkout layout: sibling directory ``torch`` (``resources/profilers/torch/``).
+    Agent workspace: staged as ``torch_profiler`` (see the rocprof
+    ``ProfilerDefinition``'s ``extra_support_kinds``). Returns ``None``
+    (never raises) when neither is found, so callers can degrade with a
+    clear message instead of crashing the MCP server.
+    """
+    for sibling_name in ("torch", "torch_profiler"):
+        candidate_dir = _HERE.parent / sibling_name
+        if (candidate_dir / f"{module_name}.py").is_file():
+            if str(candidate_dir) not in sys.path:
+                sys.path.insert(0, str(candidate_dir))
+            return importlib.import_module(module_name)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# report/dirs argument resolution: accept a capture id OR an explicit path
+# ---------------------------------------------------------------------------
+
+
+def resolve_report_arg(value: str) -> str:
+    """Accept a capture id OR an explicit path for a drill-down's ``report`` argument.
+
+    Passes an existing file or directory straight through (preserving every
+    analyzer's own path-based error messages), otherwise tries the capture
+    store (a capture id from a ``profile_*`` tool or ``captures()``),
+    falling back to *value* unchanged so the analyzer raises its own clear
+    "not found" error rather than this function raising a different one.
+    """
+    if Path(value).exists():
+        return value
+    try:
+        return str(capture_runtime.resolve(value))
+    except FileNotFoundError:
+        return value
+
+
+def _is_counters_capture_dir(path: Path) -> bool:
+    try:
+        manifest = capture_runtime.load_manifest(path)
+    except (FileNotFoundError, ValueError):
+        return False
+    return manifest.get("kind") == "counters"
+
+
+def resolve_counter_dirs(dirs: list[str]) -> list[str]:
+    """Expand any ``profile_counters`` capture id in *dirs* into its per-set pass directories.
+
+    A ``profile_counters`` capture bundles one pass directory per requested
+    counter set; passing its capture id here expands to every pass so the
+    agent doesn't need to know the internal layout. An explicit path (to a
+    single pass directory, or anything else) passes through unchanged.
+    """
+    resolved: list[str] = []
+    for entry in dirs:
+        try:
+            candidate_dir = capture_runtime.resolve(entry)
+        except FileNotFoundError:
+            resolved.append(entry)
+            continue
+        if _is_counters_capture_dir(candidate_dir):
+            manifest = capture_runtime.load_manifest(candidate_dir)
+            resolved.extend(manifest.get("set_dirs", {}).values())
+        else:
+            resolved.append(str(candidate_dir))
+    return resolved
+
+
+def resolve_kernel_deep_workload_arg(value: str) -> str:
+    """Accept a workload dir path OR a ``profile_kernel_deep`` capture id for ``compute_analyze``.
+
+    A kernel_deep capture's id resolves to its top-level capture directory,
+    not the rocprof-compute workload directory nested under it (recorded in
+    the manifest's ``meta.workload_dir``); this looks that up.
+    """
+    if Path(value).is_dir():
+        return value
+    try:
+        capture_dir = capture_runtime.resolve(value)
+    except FileNotFoundError:
+        return value
+    try:
+        manifest = capture_runtime.load_manifest(capture_dir)
+    except (FileNotFoundError, ValueError):
+        return value
+    workload_dir = manifest.get("meta", {}).get("workload_dir")
+    return workload_dir or value
+
+
+def resolve_ops_trace_arg(value: str) -> str:
+    """Accept a trace file path OR a ``profile_ops`` capture id for certify/gemm_shapes/roofline.
+
+    Mirrors the torch plugin's own resolution: a ``profile_ops`` capture
+    records the trace it picked as primary directly on its manifest
+    (``primary_trace``, relative to the capture directory).
+    """
+    if Path(value).is_file():
+        return value
+    try:
+        capture_dir = capture_runtime.resolve(value)
+    except FileNotFoundError:
+        return value
+    try:
+        manifest = capture_runtime.load_manifest(capture_dir)
+    except (FileNotFoundError, ValueError):
+        return value
+    primary = manifest.get("primary_trace")
+    return str(capture_dir / primary) if primary else value
+
+
+def _capability_rocprofv3_line(
+    rocprofv3_bin: str | None, version: tuple[int, int, int] | None
+) -> str:
+    if rocprofv3_bin and version is not None:
+        return (
+            f"rocprofv3: {rocprofv3_bin} (version {'.'.join(map(str, version))}) -- used by "
+            "profile_timeline, profile_counters, profile_instructions."
+        )
+    if rocprofv3_bin:
+        return (
+            f"rocprofv3: {rocprofv3_bin} (version unparsable from --version output) -- used by "
+            "profile_timeline, profile_counters, profile_instructions."
+        )
+    return (
+        "rocprofv3: NOT FOUND on PATH or under $ROCM_PATH/bin -- profile_timeline, "
+        "profile_counters, profile_instructions cannot run. Install ROCm's rocprofiler-sdk "
+        "package, or add rocprofv3 to PATH."
+    )
+
+
+def _capability_gpu_agent_lines(agents: list[dict[str, str | None]]) -> list[str]:
+    if not agents:
+        return [
+            "GPU agent: NOT DETECTED (rocminfo missing, or found no gfx agent) -- "
+            "profile_counters/profile_kernel_deep need a detectable architecture; install "
+            "rocminfo, or point $ROCM_PATH at a working ROCm install."
+        ]
+    return [
+        f"GPU agent: {agent['gfx']} ({agent.get('marketing_name') or 'unknown SKU'}, "
+        f"{agent.get('compute_units') or '?'} CUs) -- used by profile_counters (counter-set "
+        "catalogue), profile_kernel_deep (occupancy model)."
+        for agent in agents
+    ]
+
+
+def _capability_att_line(rocprofv3_bin: str | None, version: tuple[int, int, int] | None) -> str:
+    decoder_dir = _find_att_decoder_dir()
+    version_ok = version is not None and version >= _ATT_MIN_ROCPROFV3_VERSION
+    if rocprofv3_bin and version_ok and decoder_dir:
+        return (
+            f"ATT (instruction-level trace): available (decoder at {decoder_dir}) -- used by "
+            "profile_instructions."
+        )
+    reasons = []
+    if not rocprofv3_bin or not version_ok:
+        reasons.append("rocprofv3 >= 7.1 required (--att does not exist before that)")
+    if not decoder_dir:
+        reasons.append(
+            "rocprof-trace-decoder library not found (set $VIBESYS_ROCPROF_ATT_LIBRARY_PATH or "
+            "$ROCPROF_ATT_LIBRARY_PATH to its containing directory, or install it under "
+            "$ROCM_PATH/lib)"
+        )
+    return (
+        "ATT (instruction-level trace): NOT AVAILABLE -- "
+        + "; ".join(reasons)
+        + ". profile_instructions will fail."
+    )
+
+
+def _capability_compute_block() -> str:
+    doctor_output = run_cli(compute.cmd_doctor)
+    return (
+        "rocprof-compute (kernel-internal Speed-of-Light/Roofline, used by profile_kernel_deep):\n"
+        + textwrap.indent(doctor_output, "  ")
+    )
+
+
+def _capability_torch_line() -> str:
+    ok, detail = _torch_available()
+    if ok:
+        return f"torch: available ({detail}) -- used by profile_ops."
+    return f"torch: NOT AVAILABLE ({detail}) -- profile_ops cannot run."
+
+
+def _capability_ops_line() -> str:
+    ops_module = import_torch_sibling("capture_ops")
+    if ops_module is None:
+        return "torch capture_ops plugin: NOT STAGED alongside rocprof -- profile_ops cannot run."
+    return "torch capture_ops plugin: available -- used by profile_ops."
+
+
+def _capability_counter_sets_line(agents: list[dict[str, str | None]]) -> str | None:
+    if not agents:
+        return None
+    arch = agents[0]["gfx"]
+    if not arch:
+        return None
+    try:
+        family = counters.normalize_arch(arch)
+    except ValueError:
+        return None
+    catalogue = counters.COUNTER_SETS.get(family, {})
+    if not catalogue:
+        return (
+            f"PMC counter sets for {arch}: none in the catalogue -- profile_counters will "
+            "reject any set."
+        )
+    names = ", ".join(sorted(catalogue))
+    return f"PMC counter sets for {arch}: {names} -- used by profile_counters (sets=[...])."
+
+
+def profiling_capabilities() -> str:
+    """Report what this host actually supports, and which tool each line gates.
+
+    Call this first, every round: each line names the ``profile_*`` tool it
+    gates, or why it's unavailable and how to fix it -- so a missing
+    capability is ruled out up front instead of discovered by a failed
+    capture. Covers rocprofv3 (path + version), GPU agents (rocminfo), ATT
+    availability, rocprof-compute (via its own doctor checks), torch, the
+    torch ``profile_ops`` delegate, the capture store location, and the PMC
+    counter-set catalogue for the detected architecture.
+    """
+    rocprofv3_bin = compute.find_rocprofv3_bin()
+    version = _rocprofv3_version(rocprofv3_bin) if rocprofv3_bin else None
+    agents = _detect_gpu_agents()
+
+    sections = [
+        _capability_rocprofv3_line(rocprofv3_bin, version),
+        *_capability_gpu_agent_lines(agents),
+        _capability_att_line(rocprofv3_bin, version),
+        _capability_compute_block(),
+        _capability_torch_line(),
+        _capability_ops_line(),
+        f"capture store: {capture_runtime.profiles_root()} (override with $VIBESYS_PROFILE_DIR).",
+    ]
+    counter_line = _capability_counter_sets_line(agents)
+    if counter_line:
+        sections.append(counter_line)
+    return "\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
+# profile_timeline: rocprofv3 system trace
+# ---------------------------------------------------------------------------
+
+
+def profile_timeline(
+    lifecycle: capture_runtime.Lifecycle,
+    *,
+    hip_api: bool = False,
+    kernel_include: str | None = None,
+    collection_delay_s: float | None = None,
+    collection_duration_s: float | None = None,
+) -> str:
+    """Capture a whole-run rocprofv3 system trace: host/device timeline.
+
+    Runs ``rocprofv3 --kernel-trace --memory-copy-trace --stats`` (plus
+    ``--hip-runtime-trace`` when ``hip_api=True``, and ``--collection-period``
+    when both ``collection_delay_s``/``collection_duration_s`` are given, to
+    skip a warmup window) through the shared capture lifecycle, then runs
+    ``host_idle`` and ``summary`` against the result automatically. Next:
+    ``kernels``, ``families``, ``idle_gaps``, ``cpu_overhead``, ``memory``,
+    ``graphs``, ``host_idle``, ``summary``, or ``compare`` against another
+    timeline capture.
+    """
+    if (collection_delay_s is None) != (collection_duration_s is None):
+        raise ValueError(  # noqa: TRY003  # tracked: #288
+            "collection_delay_s and collection_duration_s must both be given, or neither "
+            "(rocprofv3's --collection-period needs a start_delay:collection_time:repeat triplet)"
+        )
+    _capture_id, out_dir = capture_runtime.new_capture("timeline")
+    prefix = ["rocprofv3", "--kernel-trace"]
+    if hip_api:
+        prefix.append("--hip-runtime-trace")
+    prefix += ["--memory-copy-trace", "--stats", "--output-format", "csv"]
+    if kernel_include:
+        prefix += ["--kernel-include-regex", kernel_include]
+    if collection_delay_s is not None and collection_duration_s is not None:
+        prefix += ["--collection-period", f"{collection_delay_s:g}:{collection_duration_s:g}:1"]
+    prefix += ["-d", str(out_dir), "--"]
+
+    result = capture_runtime.run_capture(
+        prefix,
+        lifecycle,
+        kind="timeline",
+        out_dir=out_dir,
+        meta={"hip_api": hip_api, "kernel_include": kernel_include},
+    )
+    return _format_timeline_result(result)
+
+
+def _format_timeline_result(result: capture_runtime.CaptureResult) -> str:
+    lines = [capture_runtime.format_result(result)]
+    if result.status is not capture_runtime.CaptureStatus.OK:
+        lines.append(
+            "\nCapture did not complete cleanly; see the log tail above before trusting any "
+            "analysis of partial output."
+        )
+        return "\n".join(lines)
+    lines.append("")
+    lines.append(run_cli(analyze_rocprof.cmd_host_idle, report=str(result.out_dir)))
+    lines.append("")
+    lines.append(run_cli(analyze_rocprof.cmd_summary, report=str(result.out_dir), top=15))
+    lines.append(
+        f"\nNext: kernels/families/idle_gaps/cpu_overhead/memory/graphs(report={result.capture_id!r}), "
+        "or compare(a, b) against another timeline capture."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# profile_counters: one rocprofv3 --pmc pass per requested counter set
+# ---------------------------------------------------------------------------
+
+
+def _worst_status(
+    statuses: Iterable[capture_runtime.CaptureStatus],
+) -> capture_runtime.CaptureStatus:
+    return max(statuses, key=lambda status: _STATUS_SEVERITY[status])
+
+
+def profile_counters(
+    lifecycle: capture_runtime.Lifecycle,
+    *,
+    sets: list[str],
+    kernel: str | None = None,
+) -> str:
+    """Capture PMC hardware counters for one or more named counter sets.
+
+    Runs one rocprofv3 --pmc pass PER requested set -- the profiled workload
+    is re-run in full once per set, since <=4 counters per hardware pass is
+    a hard rocprofv3/CDNA constraint (see ``counters.py``). Requires a
+    detectable GPU architecture (see ``profiling_capabilities``); target one
+    already-identified hot kernel via ``kernel``, not a whole run. After
+    every pass completes, runs ``counter_triage`` automatically. Next:
+    ``counter_report``, ``counter_triage``, or ``compare`` against another
+    counters capture.
+    """
+    if not sets:
+        raise ValueError("sets must name at least one counter set (see profiling_capabilities)")  # noqa: TRY003  # tracked: #288
+    arch = _detect_arch()
+    if arch is None:
+        raise ValueError(  # noqa: TRY003  # tracked: #288
+            "could not detect a GPU architecture (rocminfo missing, or found no gfx agent); "
+            "check profiling_capabilities"
+        )
+    family = counters.normalize_arch(arch)
+    catalogue = counters.COUNTER_SETS.get(family, {})
+    unknown = [s for s in sets if s not in catalogue]
+    if unknown:
+        known = ", ".join(sorted(catalogue))
+        raise ValueError(f"unknown counter set(s) {unknown} for {family}; known sets: {known}")  # noqa: TRY003  # tracked: #288
+
+    capture_id, out_dir = capture_runtime.new_capture("counters")
+    pass_results: list[capture_runtime.CaptureResult] = []
+    set_dirs: dict[str, Path] = {}
+    for set_name in sets:
+        cset = catalogue[set_name]
+        sub_dir = out_dir / set_name
+        prefix = ["rocprofv3", "--pmc", *cset.counters, "--output-format", "csv"]
+        if kernel:
+            prefix += ["--kernel-include-regex", kernel]
+        prefix += ["-d", str(sub_dir), "--"]
+        result = capture_runtime.run_capture(
+            prefix,
+            lifecycle,
+            kind="counters_pass",
+            out_dir=sub_dir,
+            meta={"set": set_name, "arch": family},
+        )
+        pass_results.append(result)
+        set_dirs[set_name] = sub_dir
+
+    overall_status = _worst_status(r.status for r in pass_results)
+    capture_runtime.write_manifest(
+        out_dir,
+        {
+            "capture_id": capture_id,
+            "kind": "counters",
+            "status": overall_status.value,
+            "arch": family,
+            "kernel": kernel,
+            "sets": sets,
+            "set_dirs": {name: str(path) for name, path in set_dirs.items()},
+        },
+    )
+    return _format_counters_result(
+        capture_id=capture_id,
+        sets=sets,
+        pass_results=pass_results,
+        overall_status=overall_status,
+        set_dirs=set_dirs,
+        arch=family,
+        kernel=kernel,
+        out_dir=out_dir,
+    )
+
+
+def _format_counters_result(  # noqa: PLR0913  # tracked: #288
+    *,
+    capture_id: str,
+    sets: list[str],
+    pass_results: list[capture_runtime.CaptureResult],
+    overall_status: capture_runtime.CaptureStatus,
+    set_dirs: dict[str, Path],
+    arch: str,
+    kernel: str | None,
+    out_dir: Path,
+) -> str:
+    lines = [
+        f"capture {capture_id} (counters): {overall_status.value}  "
+        f"({len(sets)} pass(es), one per set)"
+    ]
+    for set_name, result in zip(sets, pass_results, strict=True):
+        lines.append(
+            f"  pass {set_name}: {result.status.value} "
+            f"({result.timings.get('duration_s', 0.0):.2f}s)"
+        )
+    if overall_status is not capture_runtime.CaptureStatus.OK:
+        lines.append(f"\nAt least one pass did not complete cleanly; see each pass under {out_dir}")
+        return "\n".join(lines)
+    lines.append("")
+    lines.append(
+        run_cli(
+            counters.cmd_triage,
+            dirs=[str(d) for d in set_dirs.values()],
+            arch=arch,
+            kernel=kernel,
+            top=15,
+        )
+    )
+    lines.append(
+        f"\nNext: counter_report(dirs={[str(d) for d in set_dirs.values()]}), or compare(a, b) "
+        "against another counters capture."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# profile_kernel_deep: rocprof-compute profile + analyze
+# ---------------------------------------------------------------------------
+
+
+def _workload_has_kernel_data(workload_dir: Path) -> bool:
+    for name in _WORKLOAD_KERNEL_CSV_NAMES:
+        path = workload_dir / name
+        if not path.is_file():
+            continue
+        with path.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.reader(handle))
+        return len(rows) > 1
+    return False
+
+
+def profile_kernel_deep(
+    lifecycle: capture_runtime.Lifecycle,
+    *,
+    kernel: str,
+    dispatch: int | None = None,
+) -> str:
+    """Capture full Speed-of-Light + roofline for one targeted kernel (rocprof-compute).
+
+    Runs ``rocprof-compute profile`` through the shared capture lifecycle,
+    then ``rocprof-compute analyze``. ``kernel`` matches a literal substring
+    of the real kernel name, not a friendly alias (torch GEMMs dispatch as
+    Tensile kernels like ``Cijk_Ailk_Bljk_...``, not anything containing
+    "gemm"): list real names with ``profile_timeline`` + ``kernels`` first.
+    Costs one full counter-collection sweep (minutes, not seconds). If
+    rocprof-compute isn't usable on this host, returns a clear error
+    pointing at ``profiling_capabilities`` instead of attempting a capture.
+    Next: ``compute_analyze``, or ``compare`` against another kernel_deep
+    capture.
+    """
+    if not kernel:
+        raise ValueError("kernel is required (a literal substring of the real kernel name)")  # noqa: TRY003  # tracked: #288
+    rocprof_bin = compute.find_rocprof_compute_bin()
+    python = compute.find_deps_python(rocprof_bin) if rocprof_bin else None
+    if not rocprof_bin or not python:
+        return (
+            "error: rocprof-compute is not usable on this host (no binary, or no interpreter "
+            "satisfies its dependency gate); see profiling_capabilities for the fix."
+        )
+
+    capture_id, out_dir = capture_runtime.new_capture("kernel_deep")
+    workload_dir = out_dir / "workloads" / capture_id
+    prefix = [
+        python,
+        rocprof_bin,
+        "profile",
+        "-n",
+        capture_id,
+        "-p",
+        str(workload_dir),
+        "-k",
+        kernel,
+    ]
+    if dispatch is not None:
+        prefix += ["--dispatch", str(dispatch)]
+    prefix.append("--")
+
+    result = capture_runtime.run_capture(
+        prefix,
+        lifecycle,
+        kind="kernel_deep",
+        out_dir=out_dir,
+        meta={"kernel": kernel, "dispatch": dispatch, "workload_dir": str(workload_dir)},
+    )
+    return _format_kernel_deep_result(
+        result, kernel=kernel, dispatch=dispatch, workload_dir=workload_dir
+    )
+
+
+def _format_kernel_deep_result(
+    result: capture_runtime.CaptureResult, *, kernel: str, dispatch: int | None, workload_dir: Path
+) -> str:
+    lines = [capture_runtime.format_result(result)]
+    if result.status is not capture_runtime.CaptureStatus.OK:
+        lines.append("\nCapture did not complete cleanly; see the log tail above.")
+        return "\n".join(lines)
+    if not _workload_has_kernel_data(workload_dir):
+        dispatch_note = f", dispatch={dispatch}" if dispatch is not None else ""
+        lines.append(
+            f"\nProfile completed but matched no kernel dispatches for kernel={kernel!r}"
+            f"{dispatch_note}. torch GEMMs dispatch through hipBLASLt/Tensile kernels (e.g. "
+            "'Cijk_Ailk_Bljk_...'), not a literal 'gemm' substring; list real kernel names with "
+            "profile_timeline + kernels first."
+        )
+        return "\n".join(lines)
+    lines.append("")
+    lines.append(
+        run_cli(
+            compute.cmd_analyze,
+            workload_dir=str(workload_dir),
+            blocks=",".join(compute.DEFAULT_ANALYZE_BLOCKS),
+            max_stat=compute.DEFAULT_MAX_STAT,
+            kernel="",
+            timeout=compute.DEFAULT_ANALYZE_TIMEOUT,
+        )
+    )
+    lines.append(
+        f"\nNext: compute_analyze(workload_dir={str(workload_dir)!r}), or compare(a, b) against "
+        "another kernel_deep capture."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# profile_instructions: rocprofv3 ATT capture + decode + hotspots
+# ---------------------------------------------------------------------------
+
+
+def _find_att_dispatch_dir(out_dir: Path) -> Path | None:
+    matches = sorted(out_dir.rglob("ui_output_agent_*_dispatch_*/code.json"))
+    return matches[0].parent if matches else None
+
+
+def profile_instructions(
+    lifecycle: capture_runtime.Lifecycle,
+    *,
+    kernel: str,
+    target_cu: int = att.DEFAULT_TARGET_CU,
+    buffer_bytes: int = att.DEFAULT_BUFFER_SIZE,
+) -> str:
+    """Capture per-instruction stalls inside one kernel, one compute unit (ATT).
+
+    Runs ``rocprofv3 --att`` through the shared capture lifecycle, then
+    decodes and summarizes stall hotspots. Requires rocprofv3 >= 7.1 and the
+    separate rocprof-trace-decoder library (see ``profiling_capabilities``);
+    costs the most overhead of any capture tool here -- only reach for it
+    after counters already point at a specific stall class. Next:
+    ``att_hotspots``, or ``compare`` against another instructions capture.
+    """
+    if not kernel:
+        raise ValueError("kernel is required (a --kernel-include-regex value)")  # noqa: TRY003  # tracked: #288
+    decoder_dir = _find_att_decoder_dir()
+    if decoder_dir is None:
+        return (
+            "error: no rocprof-trace-decoder library found (set $VIBESYS_ROCPROF_ATT_LIBRARY_PATH "
+            "or $ROCPROF_ATT_LIBRARY_PATH, or install it under $ROCM_PATH/lib); see "
+            "profiling_capabilities."
+        )
+    rocprofv3_bin = compute.find_rocprofv3_bin()
+    if rocprofv3_bin is None:
+        return "error: rocprofv3 not found; see profiling_capabilities."
+    version = _rocprofv3_version(rocprofv3_bin)
+    if version is None or version < _ATT_MIN_ROCPROFV3_VERSION:
+        found = ".".join(map(str, version)) if version else "unknown"
+        needed = ".".join(map(str, _ATT_MIN_ROCPROFV3_VERSION))
+        return f"error: rocprofv3 {found} does not support --att (needs >= {needed}); see profiling_capabilities."
+
+    _capture_id, out_dir = capture_runtime.new_capture("instructions")
+    prefix = [
+        "rocprofv3",
+        "--att",
+        "--att-target-cu",
+        str(target_cu),
+        "--att-simd-select",
+        att.DEFAULT_SIMD_SELECT,
+        "--att-shader-engine-mask",
+        att.DEFAULT_SE_MASK,
+        "--att-buffer-size",
+        str(buffer_bytes),
+        "--att-library-path",
+        decoder_dir,
+        "--kernel-include-regex",
+        kernel,
+        "-d",
+        str(out_dir),
+        "--output-format",
+        "csv",
+        "json",
+        "--",
+    ]
+    result = capture_runtime.run_capture(
+        prefix,
+        lifecycle,
+        kind="instructions",
+        out_dir=out_dir,
+        meta={"kernel": kernel, "target_cu": target_cu, "buffer_bytes": buffer_bytes},
+    )
+    return _format_instructions_result(result)
+
+
+def _format_instructions_result(result: capture_runtime.CaptureResult) -> str:
+    lines = [capture_runtime.format_result(result)]
+    if result.status is not capture_runtime.CaptureStatus.OK:
+        lines.append("\nCapture did not complete cleanly; see the log tail above.")
+        return "\n".join(lines)
+    dispatch_dir = _find_att_dispatch_dir(result.out_dir)
+    if dispatch_dir is None:
+        lines.append(
+            "\nNo decoded ui_output_agent_*_dispatch_* directory was produced: the kernel matched "
+            "no dispatches, or matched dispatches the decoder could not resolve (e.g. degenerate "
+            "fill kernels). Confirm the kernel name with profile_timeline + kernels first."
+        )
+        return "\n".join(lines)
+    lines.append("")
+    lines.append(run_cli(att.cmd_hotspots, dispatch_dir=str(dispatch_dir), top=15))
+    lines.append(
+        f"\nNext: att_hotspots(dispatch_dir={str(dispatch_dir)!r}), or compare(a, b) against "
+        "another instructions capture."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# profile_ops: delegate to the torch plugin's capture_ops
+# ---------------------------------------------------------------------------
+
+
+def profile_ops(  # noqa: PLR0913  # tracked: #288
+    *,
+    command: str,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    ready_command: str | None = None,
+    ready_timeout_s: float = 600.0,
+    load_command: str | None = None,
+    stop_signal: str = "SIGINT",
+    grace_s: float = 120.0,
+    timeout_s: float = 1800.0,
+    delay_s: float = 0.0,
+    duration_s: float | None = None,
+    record_shapes: bool = True,
+) -> str:
+    """Capture a torch.profiler trace of an offline script or microbenchmark.
+
+    Thin delegation to the torch plugin's ``capture_ops.profile_ops``,
+    staged alongside rocprof (see the rocprof ``ProfilerDefinition``'s
+    ``extra_support_kinds``). Its lifecycle args and defaults match that
+    module directly (grace/timeout are generous: the in-process torch trace
+    write can itself take a while). Returns a clear error, rather than
+    raising, if that module isn't importable. Next: ``certify``,
+    ``gemm_shapes``, ``roofline``, or ``summary`` (dispatches to the torch
+    analyzer).
+    """
+    ops_module = import_torch_sibling("capture_ops")
+    if ops_module is None:
+        return (
+            "error: the torch profiler plugin's capture_ops module is not staged alongside "
+            "rocprof (expected a 'torch' or 'torch_profiler' sibling directory with "
+            "capture_ops.py); profile_ops is unavailable."
+        )
+    profile_ops_fn = getattr(ops_module, "profile_ops", None)
+    if profile_ops_fn is None:
+        return "error: torch capture_ops module has no profile_ops() function."
+    try:
+        return profile_ops_fn(
+            command=command,
+            cwd=cwd,
+            env=env,
+            ready_command=ready_command,
+            ready_timeout_s=ready_timeout_s,
+            load_command=load_command,
+            stop_signal=stop_signal,
+            grace_s=grace_s,
+            timeout_s=timeout_s,
+            delay_s=delay_s,
+            duration_s=duration_s,
+            record_shapes=record_shapes,
+        )
+    except TypeError as exc:
+        return f"error: torch capture_ops.profile_ops() signature mismatch: {exc}"
+
+
+# ---------------------------------------------------------------------------
+# captures: list what's been taken this session
+# ---------------------------------------------------------------------------
+
+
+def _command_head(capture_dir: Path, *, max_chars: int = 60) -> str:
+    try:
+        manifest = capture_runtime.load_manifest(capture_dir)
+    except (FileNotFoundError, ValueError):
+        return ""
+    lifecycle = manifest.get("lifecycle")
+    command = lifecycle.get("command") if isinstance(lifecycle, dict) else None
+    if not isinstance(command, str):
+        return ""
+    return command if len(command) <= max_chars else command[: max_chars - 1] + "…"
+
+
+def captures(limit: int = 10) -> str:
+    """List recent captures: id, kind, status, and the profiled command's head.
+
+    Args:
+        limit: Maximum number of captures to show, newest first (default 10).
+    """
+    summaries = capture_runtime.list_captures(limit=limit)
+    if not summaries:
+        return f"(no captures under {capture_runtime.profiles_root()})"
+    lines = [f"{'capture_id':<32} {'kind':<14} {'status':<20} command"]
+    lines.extend(
+        f"{entry.capture_id:<32} {entry.kind or '?':<14} {entry.status or '?':<20} "
+        f"{_command_head(entry.dir)}"
+        for entry in summaries
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# summary: dispatch on manifest kind
+# ---------------------------------------------------------------------------
+
+
+def _counters_triage_from_manifest(manifest: dict[str, Any]) -> str:
+    set_dirs = manifest.get("set_dirs")
+    arch = manifest.get("arch")
+    if not isinstance(set_dirs, dict) or not set_dirs or not arch:
+        return "error: counters manifest is missing set_dirs/arch"
+    return run_cli(
+        counters.cmd_triage,
+        dirs=list(set_dirs.values()),
+        arch=arch,
+        kernel=manifest.get("kernel"),
+        top=15,
+    )
+
+
+def _kernel_deep_analyze_from_manifest(manifest: dict[str, Any]) -> str:
+    workload_dir = manifest.get("meta", {}).get("workload_dir")
+    if not workload_dir:
+        return "error: kernel_deep manifest is missing meta.workload_dir"
+    return run_cli(
+        compute.cmd_analyze,
+        workload_dir=workload_dir,
+        blocks=",".join(compute.DEFAULT_ANALYZE_BLOCKS),
+        max_stat=compute.DEFAULT_MAX_STAT,
+        kernel="",
+        timeout=compute.DEFAULT_ANALYZE_TIMEOUT,
+    )
+
+
+def _ops_summary(capture_dir: Path, manifest: dict[str, Any]) -> str:
+    """Summarize an ``ops`` capture via the torch analyzer, using its ``capture_ops``-recorded primary trace."""
+    analyze_torch_profile = import_torch_sibling("analyze_torch_profile")
+    if analyze_torch_profile is None:
+        return "error: the torch analyzer module is not staged alongside rocprof."
+    # capture_ops.profile_ops records the trace it picked as "primary_trace"
+    # (relative to the capture dir) directly on the manifest; fall back to a
+    # glob in case an older/foreign ops capture didn't.
+    primary_trace = manifest.get("primary_trace")
+    if primary_trace:
+        report: str | None = str(capture_dir / primary_trace)
+    else:
+        candidates = sorted(capture_dir.rglob("*.pt.trace.json*")) + sorted(
+            capture_dir.rglob("prof.json")
+        )
+        report = str(candidates[0]) if candidates else None
+    if not report:
+        return "error: could not locate a torch trace/report file under this ops capture"
+    return run_cli(analyze_torch_profile.cmd_summary, report=report, top=15)
+
+
+def _summary_timeline(capture_dir: Path, _manifest: dict[str, Any]) -> str:
+    return run_cli(analyze_rocprof.cmd_summary, report=str(capture_dir), top=15)
+
+
+def _summary_counters(_capture_dir: Path, manifest: dict[str, Any]) -> str:
+    return _counters_triage_from_manifest(manifest)
+
+
+def _summary_kernel_deep(_capture_dir: Path, manifest: dict[str, Any]) -> str:
+    return _kernel_deep_analyze_from_manifest(manifest)
+
+
+def _summary_instructions(capture_dir: Path, _manifest: dict[str, Any]) -> str:
+    dispatch_dir = _find_att_dispatch_dir(capture_dir)
+    if dispatch_dir is None:
+        return "error: no decoded ATT dispatch directory found under this capture"
+    return run_cli(att.cmd_hotspots, dispatch_dir=str(dispatch_dir), top=15)
+
+
+_SUMMARY_DISPATCH: dict[str, Callable[[Path, dict[str, Any]], str]] = {
+    "timeline": _summary_timeline,
+    "counters": _summary_counters,
+    "kernel_deep": _summary_kernel_deep,
+    "instructions": _summary_instructions,
+    "ops": _ops_summary,
+}
+
+
+def summary(capture: str) -> str:
+    """All-in-one analysis of one capture, dispatched by its recorded kind.
+
+    Args:
+        capture: A capture id (from a ``profile_*`` tool or ``captures()``),
+            or an explicit capture directory path.
+    """
+    try:
+        capture_dir = capture_runtime.resolve(capture)
+        manifest = capture_runtime.load_manifest(capture_dir)
+    except (FileNotFoundError, ValueError) as exc:
+        return f"error: {exc}"
+    handler = _SUMMARY_DISPATCH.get(manifest.get("kind"))
+    if handler is None:
+        return (
+            f"error: unknown or unsupported capture kind {manifest.get('kind')!r} for {capture_dir}"
+        )
+    return handler(capture_dir, manifest)
+
+
+# ---------------------------------------------------------------------------
+# compare: diff two captures of the same kind
+# ---------------------------------------------------------------------------
+
+
+def _delta_rows(
+    totals_a: dict[str, float], totals_b: dict[str, float]
+) -> list[tuple[str, float, float, float]]:
+    """(name, a_value, b_value, b-a) for every name in either side, ranked by |delta| descending.
+
+    Antisymmetric by construction: swapping the two inputs negates every
+    row's delta (and a_value/b_value swap), which lets a property test
+    verify ``compare`` without depending on rocprofv3 output at all.
+    """
+    names = set(totals_a) | set(totals_b)
+    return sorted(
+        (
+            (
+                name,
+                totals_a.get(name, 0.0),
+                totals_b.get(name, 0.0),
+                totals_b.get(name, 0.0) - totals_a.get(name, 0.0),
+            )
+            for name in names
+        ),
+        key=lambda row: abs(row[3]),
+        reverse=True,
+    )
+
+
+def _compare_timeline(dir_a: Path, dir_b: Path) -> str:
+    kernels_a = analyze_rocprof.kernel_time_totals(str(dir_a))
+    kernels_b = analyze_rocprof.kernel_time_totals(str(dir_b))
+    families_a = analyze_rocprof.family_time_totals(str(dir_a))
+    families_b = analyze_rocprof.family_time_totals(str(dir_b))
+
+    lines = ["Family time deltas (b - a, nanoseconds):"]
+    for name, va, vb, delta in _delta_rows(families_a, families_b)[:_TOP_DELTA_ROWS]:
+        lines.append(f"  {name:<28} a={va:>14,.0f}  b={vb:>14,.0f}  delta={delta:>+14,.0f}")
+
+    lines.append("\nTop kernel time deltas (b - a, nanoseconds):")
+    for name, va, vb, delta in _delta_rows(kernels_a, kernels_b)[:_TOP_DELTA_ROWS]:
+        lines.append(f"  {name[:60]:<60} a={va:>14,.0f}  b={vb:>14,.0f}  delta={delta:>+14,.0f}")
+
+    new_kernels = sorted(set(kernels_b) - set(kernels_a))
+    removed_kernels = sorted(set(kernels_a) - set(kernels_b))
+    if new_kernels:
+        lines.append(f"\nNew kernels in b (not in a): {len(new_kernels)}")
+        lines.extend(f"  + {name[:80]}" for name in new_kernels[:_TOP_DELTA_ROWS])
+    if removed_kernels:
+        lines.append(f"\nKernels removed in b (present in a): {len(removed_kernels)}")
+        lines.extend(f"  - {name[:80]}" for name in removed_kernels[:_TOP_DELTA_ROWS])
+    return "\n".join(lines)
+
+
+def _fmt_optional(value: float | None, *, signed: bool = False) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:+.4f}" if signed else f"{value:.4f}"
+
+
+def _compare_counters(manifest_a: dict[str, Any], manifest_b: dict[str, Any]) -> str:
+    set_dirs_a, set_dirs_b = manifest_a.get("set_dirs"), manifest_b.get("set_dirs")
+    arch_a, arch_b = manifest_a.get("arch"), manifest_b.get("arch")
+    if not set_dirs_a or not set_dirs_b or not arch_a or not arch_b:
+        return "error: counters manifest(s) missing set_dirs/arch"
+    if arch_a != arch_b:
+        return f"error: cannot compare counters captures from different architectures ({arch_a!r} vs {arch_b!r})"
+    metrics_a = counters.kernel_metrics_by_name(list(set_dirs_a.values()), arch=arch_a)
+    metrics_b = counters.kernel_metrics_by_name(list(set_dirs_b.values()), arch=arch_b)
+
+    names = sorted(set(metrics_a) | set(metrics_b))
+    lines = [f"Counter metric deltas for {arch_a} (b - a):"]
+    for name in names:
+        metric_a, metric_b = metrics_a.get(name), metrics_b.get(name)
+        lines.append(f"\n{name[:80]}")
+        for field_name in _COUNTER_METRIC_FIELDS:
+            va = getattr(metric_a, field_name, None) if metric_a else None
+            vb = getattr(metric_b, field_name, None) if metric_b else None
+            delta = (vb - va) if va is not None and vb is not None else None
+            lines.append(
+                f"  {field_name:<24} a={_fmt_optional(va)}  b={_fmt_optional(vb)}  "
+                f"delta={_fmt_optional(delta, signed=True)}"
+            )
+    return "\n".join(lines)
+
+
+def compare(a: str, b: str) -> str:
+    """Diff two captures of the same kind: top kernel/family deltas, or counter-metric deltas.
+
+    Args:
+        a: The baseline capture id or path.
+        b: The candidate capture id or path; every delta is ``b - a``
+            (negative means ``b`` used less time / a lower rate than ``a``).
+    """
+    try:
+        dir_a, dir_b = capture_runtime.resolve(a), capture_runtime.resolve(b)
+        manifest_a = capture_runtime.load_manifest(dir_a)
+        manifest_b = capture_runtime.load_manifest(dir_b)
+    except (FileNotFoundError, ValueError) as exc:
+        return f"error: {exc}"
+    kind_a, kind_b = manifest_a.get("kind"), manifest_b.get("kind")
+    if kind_a != kind_b:
+        return f"error: cannot compare captures of different kinds ({kind_a!r} vs {kind_b!r})"
+    if kind_a == "timeline":
+        return _compare_timeline(dir_a, dir_b)
+    if kind_a == "counters":
+        return _compare_counters(manifest_a, manifest_b)
+    return (
+        f"error: compare is not implemented for {kind_a!r} captures; call summary({a!r}) and "
+        f"summary({b!r}) and compare manually."
+    )
