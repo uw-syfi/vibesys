@@ -17,7 +17,6 @@ from vibesys.agent_run.readmodel import (
     RoundView,
     agent_projection,
 )
-from vibesys.loops.registry import built_in_orchestrations
 
 if TYPE_CHECKING:
     from vs_project.api import OrchestrationRunManifest
@@ -25,6 +24,8 @@ if TYPE_CHECKING:
 
 def is_agent_run_manifest(manifest: OrchestrationRunManifest) -> bool:
     """Identify runs whose registered projection uses agent-run state."""
+    from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
+
     try:
         registration = built_in_orchestrations().resolve(manifest.orchestration.id)
     except ValueError:

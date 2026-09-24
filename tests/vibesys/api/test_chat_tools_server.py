@@ -269,7 +269,7 @@ class TestEndToEnd:
         out = asyncio.run(_call(server, "list_state_files"))
 
         assert "run.json" in out
-        assert "agent/state.json" in out
+        assert "multi/state.json" in out
 
     def test_read_state_file_returns_the_run_manifest_contents(self, tmp_path: Path) -> None:
         tools, run_id = _tools(tmp_path)

@@ -169,12 +169,17 @@ class _FakeRunContext:
             self.run_environment_view = run_environment_view
         if run_environment is not None:
             active_environment = run_environment
+
+            def candidate_runtime(
+                generation: int, child_idx: int, *, scope: object | None = None
+            ) -> CandidateRuntime:
+                assert scope is None
+                return active_environment.candidate_runtime(
+                    self.run_environment_view, generation, child_idx
+                )
+
             self.environment = SimpleNamespace(
-                candidate_runtime=lambda generation, child_idx, _scope=None: (
-                    active_environment.candidate_runtime(
-                        self.run_environment_view, generation, child_idx
-                    )
-                ),
+                candidate_runtime=candidate_runtime,
                 teardown_deployment=AsyncMock(
                     side_effect=lambda name: active_environment.teardown_deployment(name, log=log)
                 ),

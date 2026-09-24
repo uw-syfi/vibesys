@@ -131,11 +131,6 @@ class _UnsupportedAgentExecutionPolicyError(ValueError):
         )
 
 
-class _MissingAgentHostError(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("this caller did not provide an agent environment host")
-
-
 async def _wait_until_done(task: asyncio.Task) -> None:
     """Wait for a worker to finish even if the caller is canceled again."""
     while not task.done():
@@ -1257,8 +1252,6 @@ class RunContext:
             raise _AgentRegistrationError(definition.id)
         if definition.spec.execution != AgentExecutionPolicy():
             raise _UnsupportedAgentExecutionPolicyError
-        if scope_id is None and self._open_agent_environment is None:
-            raise _MissingAgentHostError
         with ExitStack() as resources:
             if context.run_environment_view.share_agent_session:
                 opened = borrow_run_agent_environment(
@@ -1267,11 +1260,8 @@ class RunContext:
                     agent_backend=definition.spec.backend.value,
                     cli_provider=definition.spec.provider,
                 )
-            elif scope_id is None:
-                opener = self._open_agent_environment
-                if opener is None:
-                    raise _MissingAgentHostError
-                opened = opener(
+            elif scope_id is None and self._open_agent_environment is not None:
+                opened = self._open_agent_environment(
                     mounts=definition.resources,
                     agent_backend=definition.spec.backend.value,
                     cli_provider=definition.spec.provider,

@@ -315,7 +315,7 @@ def test_project_smoke_reads_rounds_from_authoritative_agent_state(
             return [SimpleNamespace(run_id=run_id)]
 
         def portable_namespace(self, actual_run_id: str, name: str) -> object:
-            assert (actual_run_id, name) == (run_id, "agent")
+            assert (actual_run_id, name) == (run_id, "multi")
             return namespace
 
         def current_run_id(self) -> str:

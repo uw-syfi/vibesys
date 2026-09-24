@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import BaseModel
@@ -27,11 +28,11 @@ from vibesys.api import (
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.api.session import _OpenedAgentEnvironment
-from vibesys.context import RunSetup
+from vibesys.context import RunSetup, borrow_run_agent_environment
 from vibesys.events import AgentExecutionFinishedData, CoreEventType
 from vibesys.orchestration.runtime import RunContext
 from vibesys.run.integration import LocalRunIntegration
-from vibesys.sandbox.run_environment import LocalEnvironment
+from vibesys.sandbox.run_environment import LocalEnvironment, SkyPilotEnvironment
 from vs_agent.api import AgentExecutionPolicy, AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import OrchestrationRunManifest, Project
@@ -39,6 +40,7 @@ from vs_project.api import OrchestrationRunManifest, Project
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.context import _RunResources
     from vibesys.sandbox.run_environment import RunEnvironmentRequest, RunEnvironmentSession
 
 
@@ -243,13 +245,8 @@ def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
         granted[spec.model] = resources
         return clients[spec.model]
 
-    def reject_default_client(**_kwargs: object) -> None:
-        raise AssertionError
-
     environment_requests, closed_environments = _capture_environments(monkeypatch)
     monkeypatch.setattr("vibesys.orchestration.runtime.build_agent_client", build_client)
-    monkeypatch.setattr("vibesys.context.build_agent_client", reject_default_client)
-    monkeypatch.setattr("vibesys.context.agent_spec_from_config", reject_default_client)
 
     request = _request(project_root)
     registry = OrchestrationRegistry()
@@ -332,20 +329,32 @@ def test_structured_turn_preserves_schema_session_and_event_payload(
     assert finished.round_label == "round-1-plan"
 
 
-def test_skypilot_custom_agents_are_rejected_before_agent_open(tmp_path: Path) -> None:
-    project_root = tmp_path / "project"
-    _write_project(project_root)
-    request = _request(project_root).model_copy(
-        update={"run_environment": RunEnvironmentSpec("skypilot")}
+def test_skypilot_agents_borrow_the_workspace_session() -> None:
+    environment = SkyPilotEnvironment.from_options({"profile": "test-cluster"})
+    assert environment.config.profile == "test-cluster"
+    closed: list[bool] = []
+    session = SimpleNamespace(
+        view=SimpleNamespace(cli_sandboxed=False),
+        close=lambda: closed.append(True),
     )
-    registry = OrchestrationRegistry()
-    registry.register("three-agent-rounds", _ThreeAgentPolicy)
-
-    def discard(event: CoreEvent) -> None:
-        del event
-
-    with pytest.raises(ConfigurationError, match="per-agent bridge ownership"):
-        asyncio.run(create_session(request, sink=discard, registry=registry).await_result())
+    context = cast(
+        "_RunResources",
+        SimpleNamespace(
+            environment_request=SimpleNamespace(
+                agent_backend="stub", cli_provider="claude", project_path_policy=None
+            ),
+            run_environment_session=session,
+            skill_source_paths=(),
+            backend=ComputeBackend.CPU,
+            agent_host_resources=(),
+        ),
+    )
+    borrowed = borrow_run_agent_environment(context, agent_backend="stub", cli_provider="claude")
+    assert borrowed.session is session
+    borrowed.close()
+    assert not closed
+    with pytest.raises(ConfigurationError, match="must use its configured backend"):
+        borrow_run_agent_environment(context, cli_provider="codex")
 
 
 def test_agent_spec_execution_policy_is_rejected_explicitly(tmp_path: Path) -> None:
@@ -368,12 +377,12 @@ def test_runtime_closes_all_agents_and_preserves_policy_failure() -> None:
     closed: list[str] = []
 
     class _ProbeRunContext(RunContext):
-        def prepare(self) -> None:
-            vars(self)["_context"] = _CloseProbe("context", closed)
+        def _prepare(self) -> None:
+            vars(self)["_resource_owner"] = _CloseProbe("context", closed)
             vars(self)["_agents"] = {
-                "first": _AsyncCloseProbe("first", closed),
-                "middle": _AsyncCloseProbe("middle", closed, fail=True),
-                "last": _AsyncCloseProbe("last", closed),
+                (None, "first"): _AsyncCloseProbe("first", closed),
+                (None, "middle"): _AsyncCloseProbe("middle", closed, fail=True),
+                (None, "last"): _AsyncCloseProbe("last", closed),
             }
 
     async def fail_inside_runtime() -> None:

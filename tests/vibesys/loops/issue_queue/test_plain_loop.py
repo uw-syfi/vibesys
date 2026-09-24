@@ -3,7 +3,7 @@
 These tests mock ``vibesys.orchestration.runtime.build_agent_client`` so the real
 agent CLI plumbing never executes. Each test exercises one focused
 behaviour of the drain-and-perf-eval outer loop in
-``vibesys/plain/loop.py``.
+``vibesys/loops/issue_queue/loop.py``.
 """
 
 from __future__ import annotations

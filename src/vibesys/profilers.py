@@ -5,9 +5,12 @@ from __future__ import annotations
 import platform
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vs_agent.api import MCPServerSpec
+
+if TYPE_CHECKING:
+    from vs_agent.api import MCPServerSpec
 
 
 class ProfilerKind(StrEnum):
@@ -26,6 +29,8 @@ class ProfilerKind(StrEnum):
 
 def mcp_spec(profiler_kind: ProfilerKind) -> MCPServerSpec | None:
     """Build the analysis server grant for a selected profiler."""
+    from vs_agent.api import MCPServerSpec  # noqa: PLC0415
+
     kind = require_profiler_kind(profiler_kind)
     if kind is ProfilerKind.NONE:
         return None

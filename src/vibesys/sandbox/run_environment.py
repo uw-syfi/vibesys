@@ -4,9 +4,7 @@ Layering:
 
     policy -> RunContext -> RunEnvironment -> ComputeBackendImpl.make_sandbox -> Sandbox
 
-``RunContext`` owns the experiment lifecycle. Its private resource assembly
-prepares the workspace, logs, reference inputs, Git tracker, and device monitor
-before asking this module for a run-environment session.
+``RunContext`` prepares run resources before opening this session.
 
 ``RunEnvironment`` owns run-level execution policy for a location such as local,
 Docker, or Modal.  It decides path exposure, bind mounts, execution constraints,
@@ -147,8 +145,7 @@ class RunEnvironmentView:
     prompt_notes: str = ""
     isolated: bool = False
     cli_sandboxed: bool = False
-    # The environment session owns one shared agent sandbox and any bridge it
-    # starts. Agent clients may borrow it but must not open or close a sibling.
+    # Agent clients borrow the run-owned sandbox and bridge.
     share_agent_session: bool = False
     host_device_reselect: bool = True
     # Coarse environment label for diagnostics and adapter selection:
