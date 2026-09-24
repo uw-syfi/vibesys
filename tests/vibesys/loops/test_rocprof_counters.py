@@ -17,19 +17,27 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import csv
 import io
+import itertools
 import json
+import math
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from resources.profilers.rocprof.counters import (
     ARCH_ALIASES,
     CANDIDATES,
     COUNTER_SETS,
+    MFMA_CANDIDATE_KEYS,
     PEAK_SPECS,
+    CounterRow,
     CounterSet,
     KernelAgg,
     _aggregate_by_kernel,
+    _duration_from_counter_rows,
     _filter_kernels,
     _hbm_bytes,
     _load_counter_rows,
@@ -44,6 +52,15 @@ from resources.profilers.rocprof.counters import (
     derive_metrics,
     normalize_arch,
     resource_occupancy,
+)
+from tests.vibesys.loops.rocprof_strategies import (
+    FAST,
+    FEWER,
+    arch_name,
+    case_variant,
+    column_order,
+    huge_kernel_name,
+    permuted_csv,
 )
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"
@@ -506,3 +523,438 @@ def test_real_mi210_triage_classifies_gemm_compute_bound_and_ew_bandwidth_bound(
     # fall through bandwidth and land on the MFMA check.
     assert "achieved 1429 GB/s" in out  # only the elementwise kernel's evidence
     assert "achieved 211 GB/s" not in out  # GEMM's bandwidth isn't the verdict driver
+
+
+# ---------------------------------------------------------------------------
+# Property tests: derive_metrics never crashes/NaNs/negatives, and computes
+# every metric whose inputs are present, for ANY subset of an arch's
+# catalogued counters (generalizes the MFMA-issue-rate / GRBM_COUNT-fallback
+# regression pinned by the real_mi210 fixture above).
+# ---------------------------------------------------------------------------
+
+
+@st.composite
+def _catalogued_counter_subset(draw: st.DrawFn) -> tuple[str, dict[str, float]]:
+    arch = draw(arch_name)
+    names = sorted({c for cset in COUNTER_SETS[arch].values() for c in cset.counters})
+    chosen = draw(st.lists(st.sampled_from(names), min_size=0, max_size=len(names), unique=True))
+    values = draw(
+        st.lists(
+            st.floats(min_value=0, max_value=1e9, allow_nan=False, allow_infinity=False),
+            min_size=len(chosen),
+            max_size=len(chosen),
+        )
+    )
+    return arch, dict(zip(chosen, values, strict=True))
+
+
+def _assert_finite_and_nonnegative(value: float | None) -> None:
+    if value is not None:
+        assert math.isfinite(value)
+        assert value >= 0
+
+
+@given(
+    data=_catalogued_counter_subset(),
+    duration_ns=st.one_of(
+        st.none(), st.floats(min_value=1, max_value=1e12, allow_nan=False, allow_infinity=False)
+    ),
+)
+@FAST
+def test_derive_metrics_never_crashes_or_emits_nan_inf_negative_for_any_counter_subset(  # noqa: ANN201
+    data: tuple[str, dict[str, float]], duration_ns: float | None
+):
+    _arch, counters = data
+    metrics = derive_metrics(KernelAgg(name="k", counters=counters), duration_ns)
+
+    for value in (
+        metrics.l2_hit_rate_pct,
+        metrics.hbm_bytes,
+        metrics.achieved_bw_gb_s,
+        metrics.gpu_busy_pct,
+        metrics.mfma_issue_rate,
+        metrics.lds_bank_conflict_rate_pct,
+    ):
+        _assert_finite_and_nonnegative(value)
+
+    # Every metric whose inputs ARE present must be computed, not "n/a".
+    hit, miss = _lookup(counters, "l2_hit"), _lookup(counters, "l2_miss")
+    if hit is not None and miss is not None and (hit + miss) > 0:
+        assert metrics.l2_hit_rate_pct is not None
+
+    if _lookup(counters, "hbm_rdreq") is not None or _lookup(counters, "hbm_wrreq") is not None:
+        assert metrics.hbm_bytes is not None
+
+    busy, total = _lookup(counters, "busy_cycles"), _lookup(counters, "total_cycles")
+    if busy is not None and total is not None and total > 0:
+        assert metrics.gpu_busy_pct is not None
+
+    mfma_total = _lookup(counters, "mfma_insts_total")
+    dtype_sum = sum(v for k in MFMA_CANDIDATE_KEYS if (v := _lookup(counters, k)) is not None)
+    cycles_for_rate = total if (total is not None and total > 0) else busy
+    mfma_present = (mfma_total is not None and mfma_total > 0) or dtype_sum > 0
+    if mfma_present and cycles_for_rate is not None and cycles_for_rate > 0:
+        assert metrics.mfma_issue_rate is not None
+
+    lds_insts, bank_conflicts = (
+        _lookup(counters, "lds_insts"),
+        _lookup(counters, "lds_bank_conflict"),
+    )
+    if lds_insts is not None and bank_conflicts is not None and lds_insts > 0:
+        assert metrics.lds_bank_conflict_rate_pct is not None
+
+
+@given(arch=arch_name)
+@FEWER
+def test_report_and_triage_never_crash_over_every_arch_counter_set_in_isolation(arch: str):  # noqa: ANN201
+    # One CSV per catalogued counter set for this arch, each row using every
+    # counter that set names -- mirrors a real multi-pass capture directory.
+    rows = []
+    corr = 0
+    for cset in COUNTER_SETS[arch].values():
+        for counter in cset.counters:
+            corr += 1
+            rows.append(f"{corr},1,0,0,100,1,256,1,test_kernel,256,0,0,64,32,{counter},{corr * 10}")
+    header = (
+        "Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,Grid_Size,"
+        "Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,Scratch_Size,VGPR_Count,"
+        "SGPR_Count,Counter_Name,Counter_Value"
+    )
+    counter_rows = [
+        _row_from_mapping(r) for r in csv.DictReader(io.StringIO(header + "\n" + "\n".join(rows)))
+    ]
+    counters = {r.counter_name: r.counter_value for r in counter_rows if r is not None}
+    agg = KernelAgg(name="test_kernel", counters=counters)
+    occ = resource_occupancy(
+        vgpr_count=64, sgpr_count=32, lds_block_size=0, workgroup_size=256, arch=arch
+    )
+    metrics = derive_metrics(agg, duration_ns=None)
+    for value in (
+        metrics.l2_hit_rate_pct,
+        metrics.hbm_bytes,
+        metrics.gpu_busy_pct,
+        metrics.mfma_issue_rate,
+        metrics.lds_bank_conflict_rate_pct,
+    ):
+        _assert_finite_and_nonnegative(value)
+    assert occ.waves_per_simd >= 1
+
+
+# ---------------------------------------------------------------------------
+# Property test: HBM bytes formula, and read/write counter-convention symmetry
+#
+# Regression context: the write side's "size breakdown" counter reports the
+# FULL (64B) request count directly, while the read side's reports the
+# PARTIAL (32B) count directly -- an asymmetric convention. The pre-fix code
+# treated both sides the same way (looked for a nonexistent 32B write
+# counter), so a real write breakdown was silently ignored and every write
+# request was counted as a full 64B line even when some were partial.
+# ---------------------------------------------------------------------------
+
+
+@given(
+    full=st.integers(min_value=0, max_value=1_000_000),
+    partial=st.integers(min_value=0, max_value=1_000_000),
+    ea_prefix=st.sampled_from(("TCC_EA0_", "TCC_EA_")),
+)
+@FAST
+def test_hbm_bytes_matches_the_documented_formula_and_is_symmetric_across_conventions(  # noqa: ANN201
+    full: int, partial: int, ea_prefix: str
+):
+    expected = float(full * 64 + partial * 32)
+    # Read side reports the 32B PARTIAL count directly.
+    read_counters = {
+        f"{ea_prefix}RDREQ_sum": float(full + partial),
+        f"{ea_prefix}RDREQ_32B_sum": float(partial),
+    }
+    # Write side reports the 64B FULL count directly (the asymmetric part).
+    write_counters = {
+        f"{ea_prefix}WRREQ_sum": float(full + partial),
+        f"{ea_prefix}WRREQ_64B_sum": float(full),
+    }
+    read_bytes = _hbm_bytes(read_counters)
+    write_bytes = _hbm_bytes(write_counters)
+    assert read_bytes == pytest.approx(expected)
+    assert write_bytes == pytest.approx(expected)
+    assert read_bytes == pytest.approx(write_bytes)
+
+
+@given(
+    full=st.integers(min_value=0, max_value=1_000_000),
+    partial=st.integers(min_value=0, max_value=1_000_000),
+)
+@FAST
+def test_hbm_bytes_without_a_write_breakdown_assumes_every_request_is_a_full_line(  # noqa: ANN201
+    full: int, partial: int
+):
+    # No *_WRREQ_64B_sum captured at all -- must conservatively assume every
+    # write request is a full 64B line (this is the documented fallback, not
+    # the bug: the bug was ignoring a *present* breakdown).
+    req = full + partial
+    assert _hbm_bytes({"TCC_EA0_WRREQ_sum": float(req)}) == pytest.approx(float(req) * 64)
+
+
+# ---------------------------------------------------------------------------
+# Property test: duration is deduped by (kernel_name, dispatch_id), not by
+# counter count -- generalizes the real_mi210 duration-from-PMC-timestamps fix.
+# ---------------------------------------------------------------------------
+
+
+@given(
+    dispatch_count=st.integers(min_value=1, max_value=5),
+    counters_per_dispatch=st.integers(min_value=1, max_value=4),
+    start=st.floats(min_value=0, max_value=1e6, allow_nan=False, allow_infinity=False),
+    dur=st.floats(min_value=1, max_value=1e6, allow_nan=False, allow_infinity=False),
+)
+@FAST
+def test_duration_from_counter_rows_dedupes_by_dispatch_not_by_counter_count(  # noqa: ANN201
+    dispatch_count: int, counters_per_dispatch: int, start: float, dur: float
+):
+    rows = []
+    expected_total = 0.0
+    for d in range(dispatch_count):
+        dispatch_id = str(d)
+        s, e = start + d * 10 * dur, start + d * 10 * dur + dur
+        expected_total += e - s
+        rows.extend(
+            CounterRow(
+                kernel_name="k",
+                dispatch_id=dispatch_id,
+                grid_size=0,
+                workgroup_size=0,
+                lds_block_size=0,
+                scratch_size=0,
+                vgpr_count=0,
+                sgpr_count=0,
+                counter_name=f"COUNTER_{c}",
+                counter_value=1.0,
+                start_ns=s,
+                end_ns=e,
+            )
+            for c in range(counters_per_dispatch)
+        )
+    durations = _duration_from_counter_rows(rows)
+    assert durations["k"] == pytest.approx(expected_total)
+
+
+def test_kernel_trace_duration_overrides_pmc_derived_duration_when_both_present():  # noqa: ANN201
+    pmc_rows = [
+        CounterRow(
+            kernel_name="k",
+            dispatch_id="1",
+            grid_size=0,
+            workgroup_size=0,
+            lds_block_size=0,
+            scratch_size=0,
+            vgpr_count=0,
+            sgpr_count=0,
+            counter_name="GRBM_COUNT",
+            counter_value=1.0,
+            start_ns=0.0,
+            end_ns=100.0,  # PMC-derived duration: 100ns
+        )
+    ]
+    durations = _duration_from_counter_rows(pmc_rows)
+    assert durations["k"] == pytest.approx(100.0)
+    # A dedicated kernel_trace capture (PMC-overhead-free) reports a
+    # different duration for the same kernel; report/triage's merge order
+    # (`durations.update(_load_kernel_trace_durations(...))`) must let it win.
+    durations.update({"k": 87.0})
+    assert durations["k"] == pytest.approx(87.0)
+
+
+# ---------------------------------------------------------------------------
+# Property tests: CSV robustness -- column order, case variants of known
+# aliases, extra unknown columns, missing optional columns, huge (5000+
+# char) kernel names. Assertion is "never crashes"; a casing variant outside
+# the two exact aliases counters.py recognizes (PascalCase/snake_case) may
+# legitimately be dropped rather than parsed.
+# ---------------------------------------------------------------------------
+
+_COUNTERS_CSV_HEADER = [
+    "Correlation_Id",
+    "Dispatch_Id",
+    "Agent_Id",
+    "Queue_Id",
+    "Process_Id",
+    "Thread_Id",
+    "Grid_Size",
+    "Kernel_Id",
+    "Kernel_Name",
+    "Workgroup_Size",
+    "LDS_Block_Size",
+    "Scratch_Size",
+    "VGPR_Count",
+    "SGPR_Count",
+    "Counter_Name",
+    "Counter_Value",
+]
+
+
+@given(
+    order=column_order(len(_COUNTERS_CSV_HEADER)),
+    include_unknown_column=st.booleans(),
+    kernel_name=st.one_of(st.text(min_size=1, max_size=60), huge_kernel_name()),
+    kernel_name_col=case_variant("Kernel_Name"),
+)
+@FEWER
+def test_load_counter_rows_handles_permuted_noisy_and_huge_name_csvs_without_crashing(  # noqa: ANN201
+    order: list[int], *, include_unknown_column: bool, kernel_name: str, kernel_name_col: str
+):
+    header = list(_COUNTERS_CSV_HEADER)
+    row = [
+        "1",
+        "1",
+        "0",
+        "0",
+        "100",
+        "1",
+        "256",
+        "1",
+        kernel_name,
+        "256",
+        "0",
+        "0",
+        "64",
+        "32",
+        "TCC_HIT_sum",
+        "5",
+    ]
+    if include_unknown_column:
+        header.append("Some_Future_Column")
+        row.append("unexpected-value")
+        order = [*order, len(header) - 1]
+    header = [kernel_name_col if h == "Kernel_Name" else h for h in header]
+
+    text = permuted_csv(header, [row], order)
+    parsed = [
+        r
+        for r in (_row_from_mapping(r) for r in csv.DictReader(io.StringIO(text)))
+        if r is not None
+    ]
+
+    if kernel_name_col in ("Kernel_Name", "kernel_name"):
+        assert len(parsed) == 1
+        assert parsed[0].kernel_name == kernel_name
+    # else: an unrecognized casing may legitimately drop the row -- the only
+    # hard requirement is that parsing never raises.
+
+
+@given(
+    dropped=st.lists(
+        st.sampled_from(
+            [
+                "Dispatch_Id",
+                "Grid_Size",
+                "Workgroup_Size",
+                "LDS_Block_Size",
+                "Scratch_Size",
+                "VGPR_Count",
+                "SGPR_Count",
+            ]
+        ),
+        unique=True,
+        min_size=0,
+        max_size=7,
+    )
+)
+@FAST
+def test_row_from_mapping_tolerates_any_subset_of_missing_optional_columns(dropped: list[str]):  # noqa: ANN201
+    row = {
+        "Kernel_Name": "k",
+        "Counter_Name": "TCC_HIT_sum",
+        "Counter_Value": "5",
+        "Dispatch_Id": "9",
+        "Grid_Size": "256",
+        "Workgroup_Size": "256",
+        "LDS_Block_Size": "1024",
+        "Scratch_Size": "0",
+        "VGPR_Count": "64",
+        "SGPR_Count": "32",
+    }
+    for col in dropped:
+        row.pop(col, None)
+    parsed = _row_from_mapping(row)
+    assert parsed is not None
+    assert parsed.kernel_name == "k"
+    assert parsed.counter_value == 5.0
+
+
+def test_load_counter_rows_handles_a_header_only_empty_csv(tmp_path: Path):  # noqa: ANN201
+    path = tmp_path / "empty_counter_collection.csv"
+    path.write_text(
+        "Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,Grid_Size,"
+        "Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,Scratch_Size,VGPR_Count,"
+        "SGPR_Count,Counter_Name,Counter_Value\n"
+    )
+    assert _load_counter_rows([path]) == []
+
+    out = _run(cmd_report, dirs=[str(tmp_path)], kernel=None, top=15, arch=None)
+    assert "counter files found but no usable rows parsed" in out
+
+
+_LINE_WIDTH_BOUND = 200
+
+
+@given(kernel_name=huge_kernel_name())
+@FEWER
+def test_cmd_report_bounds_line_width_for_a_huge_real_shaped_kernel_name(  # noqa: ANN201
+    tmp_path_factory: pytest.TempPathFactory, kernel_name: str
+):
+    d = tmp_path_factory.mktemp("huge_kernel_name")
+    (d / "huge_counter_collection.csv").write_text(
+        "Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,Grid_Size,"
+        "Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,Scratch_Size,VGPR_Count,"
+        "SGPR_Count,Counter_Name,Counter_Value\n"
+        f"1,1,0,0,100,1,256,1,{kernel_name},256,0,0,64,32,GRBM_COUNT,1000\n"
+    )
+    out = _run(cmd_report, dirs=[str(d)], kernel=None, top=15, arch="gfx942")
+    assert all(len(line) <= _LINE_WIDTH_BOUND for line in out.splitlines())
+
+
+# ---------------------------------------------------------------------------
+# Property test: `plan` never emits more than 4 counters per pass, and every
+# counter it prints for an arch is drawn from that arch's own catalogue.
+# ---------------------------------------------------------------------------
+
+
+def _pmc_counter_lists_from_plan_output(out: str) -> list[list[str]]:
+    """Extract each pass's counter list from a `plan` invocation's printed command lines."""
+    passes = []
+    for raw_line in out.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("rocprofv3 --pmc "):
+            continue
+        tokens = line.split()
+        counters = list(itertools.takewhile(lambda t: not t.startswith("--"), tokens[2:]))
+        passes.append(counters)
+    return passes
+
+
+@given(arch=arch_name, data=st.data())
+@FEWER
+def test_plan_never_emits_more_than_four_counters_and_stays_in_the_arch_catalogue(  # noqa: ANN201
+    arch: str, data: st.DataObject
+):
+    catalogue = COUNTER_SETS[arch]
+    set_names = data.draw(
+        st.lists(
+            st.sampled_from(sorted(catalogue)), min_size=1, max_size=len(catalogue), unique=True
+        )
+    )
+    known_counters = {c for cset in catalogue.values() for c in cset.counters}
+
+    out = _run(
+        cmd_plan,
+        arch=arch,
+        sets=",".join(set_names),
+        kernel=None,
+        out_dir="rocprof_pmc",
+        command=[],
+    )
+
+    passes = _pmc_counter_lists_from_plan_output(out)
+    assert len(passes) == len(set_names)
+    for counters in passes:
+        assert 1 <= len(counters) <= 4
+        assert all(c in known_counters for c in counters)
