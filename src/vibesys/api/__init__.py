@@ -13,10 +13,6 @@ the resource-handoff seam) so they never import their private home modules.
 
 from __future__ import annotations
 
-import warnings
-from importlib import import_module
-from typing import TYPE_CHECKING, Any
-
 from vibesys import boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.api.contracts import (
@@ -28,10 +24,9 @@ from vibesys.api.contracts import (
     MetricSpace,
     Objective,
     OrchestrationDescriptor,
-    OrchestrationRunRequest,
     PerfDeltaReason,
     ResumeRef,
-    RunRequestLike,
+    RunRequest,
     RunResult,
     RunStatus,
     RunView,
@@ -55,6 +50,7 @@ from vibesys.events import (
     ToolCallData,
     ToolResultData,
 )
+from vibesys.orchestration.contracts import OrchestrationRegistry, Orchestrator
 from vibesys.profilers import ProfilerKind
 from vibesys.render.format import format_status_prefix
 from vibesys.render.run_log import format_framework_event
@@ -66,22 +62,6 @@ from vibesys.runtime import AgentDefinition, AgentHandle, VibeSysRuntime
 from vs_agent.api import AgentBackend, AgentSpec
 from vs_sandbox.api import HostResource, HostResourceAccess
 
-if TYPE_CHECKING:
-    from vibesys.loops.registry import built_in_orchestrations as built_in_orchestrations
-    from vibesys.orchestration.contracts import (
-        ExecutableOrchestration as ExecutableOrchestration,
-    )
-    from vibesys.orchestration.contracts import (
-        Orchestration as Orchestration,
-    )
-    from vibesys.orchestration.contracts import (
-        OrchestrationRegistry as OrchestrationRegistry,
-    )
-    from vibesys.orchestration.contracts import (
-        RunDescription as RunDescription,
-    )
-
-
 __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
     "AgentBackend",
@@ -89,7 +69,6 @@ __all__ = [
     "AgentExecutionStartedData",
     "AgentHandle",
     "AgentOutputChunkData",
-    "AgentRunProjection",
     "AgentSpec",
     "ComputeBackend",
     "Config",
@@ -101,20 +80,17 @@ __all__ = [
     "EventStatus",
     "HostResource",
     "HostResourceAccess",
-    "HypothesisRoundView",
-    "HypothesisView",
-    "LoopKind",
     "MetricSpace",
     "Objective",
     "OrchestrationDescriptor",
-    "OrchestrationRunRequest",
+    "OrchestrationRegistry",
+    "Orchestrator",
     "PerfDeltaReason",
     "ProfilerKind",
     "RepositoryVisibility",
     "ResumeRef",
     "RunControl",
     "RunRequest",
-    "RunRequestLike",
     "RunResourceHandoff",
     "RunResult",
     "RunSession",
@@ -127,65 +103,12 @@ __all__ = [
     "ToolCallData",
     "ToolResultData",
     "VibeSysRuntime",
-    "agent_projection",
-    "agent_run_objectives",
     "agent_spec_from_config",
     "boot_trace",
     "create_session",
     "format_framework_event",
     "format_status_prefix",
-    "framework_memory_paths",
-    "is_agent_run_manifest",
     "load_config",
     "open_run_store",
     "output_sink",
 ]
-
-_AGENT_COMPAT_EXPORTS = frozenset(
-    {
-        "AgentRunProjection",
-        "HypothesisRoundView",
-        "HypothesisView",
-        "agent_projection",
-        "agent_run_objectives",
-        "framework_memory_paths",
-        "is_agent_run_manifest",
-    }
-)
-_ORCHESTRATION_COMPAT_EXPORTS = frozenset(
-    {"ExecutableOrchestration", "Orchestration", "OrchestrationRegistry", "RunDescription"}
-)
-
-
-def __getattr__(name: str) -> Any:  # noqa: ANN401
-    """Resolve deprecated built-in imports without loading them eagerly."""
-    if name in {"LoopKind", "RunRequest"}:
-        warnings.warn(
-            f"vibesys.api.{name} is deprecated for new policies; use OrchestrationRunRequest",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return getattr(import_module("vibesys.loops.legacy_request"), name)
-    if name in _ORCHESTRATION_COMPAT_EXPORTS:
-        warnings.warn(
-            f"vibesys.api.{name} is deprecated; import it from vibesys.orchestration.contracts",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return getattr(import_module("vibesys.orchestration.contracts"), name)
-    if name == "built_in_orchestrations":
-        warnings.warn(
-            "vibesys.api.built_in_orchestrations is deprecated; "
-            "import it from vibesys.loops.registry",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return import_module("vibesys.loops.registry").built_in_orchestrations
-    if name not in _AGENT_COMPAT_EXPORTS:
-        raise AttributeError(name)
-    warnings.warn(
-        f"vibesys.api.{name} is deprecated; import it from vibesys.api.agent",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return getattr(import_module("vibesys.api.agent"), name)

@@ -1,134 +1,88 @@
-"""Persisted configuration and resume policy for the agent orchestrations.
-
-Version 4 stores this policy as an opaque descriptor. ``vs_project`` only
-validates its JSON shape; these settings and their meaning belong here.
-"""
+"""Validated, versioned options for the four built-in agent orchestrators."""
 
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.orchestration import (
-    OrchestrationResumeDecision,
-    ResumeConfigSnapshot,
-    ResumeProjection,
-)
-from vs_project.api import (
-    AgentRunConfiguration,
-    OrchestrationDescriptor,
-    OrchestrationRunManifest,
-    RunEnvironmentRecord,
-)
+from vibesys.evaluators.input_manifest import ProfileGuidedInput
+from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.orchestration import OrchestrationResumeDecision
+from vs_project.api import OrchestrationDescriptor
 
 if TYPE_CHECKING:
     from vibesys.evaluators.input_manifest import BenchmarkResult
-    from vibesys.loops.metrics import MetricSpace
 
 AGENT_CONFIG_VERSION = 1
-AGENT_ORCHESTRATION_IDS = frozenset({"agent", "profile-guided"})
+AGENT_ORCHESTRATION_IDS = frozenset(
+    {
+        "multi-agent",
+        "single-agent",
+        "profile-guided-multi-agent",
+        "profile-guided-single-agent",
+    }
+)
 PortableText = Annotated[str, Field(min_length=1, max_length=256)]
 
 
 class UnsupportedAgentOrchestrationError(ValueError):
-    """A run descriptor names an unknown agent policy or version."""
+    """A descriptor names an unsupported agent policy or option version."""
 
     def __init__(self, orchestration_id: str, version: int) -> None:
-        """Name the descriptor identity and unsupported config version."""
+        """Identify the offending ID and configuration version."""
         super().__init__(
             f"Unsupported agent orchestration {orchestration_id!r} configuration version {version}"
         )
 
 
-def recorded_objectives(
-    metrics: MetricSpace, benchmark_result: BenchmarkResult | None
-) -> tuple[str, ...]:
-    """Record frontier axes plus the framework benchmark's scalar axis."""
-    axes: dict[str, Literal["max", "min"]] = {
-        objective.name: objective.direction for objective in metrics.objectives
-    }
-    if benchmark_result is not None:
-        axes.setdefault(benchmark_result.metric, "max")
-    return tuple(f"{name}:{direction}" for name, direction in axes.items())
-
-
 class AgentOrchestrationOptions(BaseModel):
-    """Strict version 1 agent policy options, excluding shared run environment."""
+    """Strict execution options common to the four agent policy classes."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    inner_loop: PortableText
     interface: PortableText
-    model: PortableText | None = None
-    agent_backend: PortableText
-    agent_driver: PortableText | None = None
-    cli_provider: PortableText | None = None
-    cli_timeout: Annotated[int, Field(gt=0)] | None = None
-    compute_backend: PortableText
-    profiler: PortableText | None = None
     modality: PortableText | None = None
-    default_reasoning_effort: PortableText | None = None
-    outer_model: PortableText | None = None
-    outer_reasoning_effort: PortableText | None = None
-    inner_model: PortableText | None = None
-    inner_reasoning_effort: PortableText | None = None
     max_rounds: Annotated[int, Field(gt=0)]
     max_retries_per_round: Annotated[int, Field(gt=0)]
     judge_every: Annotated[int, Field(gt=0)]
     official_eval_every: Annotated[int, Field(gt=0)]
     memory_layout: PortableText
     operator_constraints: tuple[str, ...] = ()
-    objectives: tuple[PortableText, ...] = ()
+    metric_space: MetricSpace = Field(default_factory=MetricSpace)
+    profile_guided: ProfileGuidedInput | None = None
 
 
-def descriptor_from_configuration(configuration: AgentRunConfiguration) -> OrchestrationDescriptor:
-    """Adapt a version 3 fixture to the owner-native descriptor builder."""
-    options = AgentOrchestrationOptions.model_validate(
-        configuration.model_dump(exclude={"outer_loop", "run_environment"})
-    )
-    return descriptor_from_options(options, outer_loop=configuration.outer_loop)
-
-
-def descriptor_from_options(
-    options: AgentOrchestrationOptions,
-    *,
-    outer_loop: Literal["agent", "profile-guided"],
-    profiler: str | None = None,
-) -> OrchestrationDescriptor:
-    """Persist resolved agent options without constructing version 3 settings."""
-    resolved = (
-        options.model_copy(update={"profiler": profiler}) if profiler is not None else options
-    )
-    return OrchestrationDescriptor(
-        id=outer_loop,
-        config_version=AGENT_CONFIG_VERSION,
-        options=resolved.model_dump(mode="json"),
-    )
-
-
-def legacy_configuration_from_options(
-    options: AgentOrchestrationOptions,
-    *,
-    outer_loop: Literal["agent", "profile-guided"],
-    run_environment: RunEnvironmentRecord,
-    profiler: str,
-) -> AgentRunConfiguration:
-    """Construct version 3 settings only when resuming an old run."""
-    return AgentRunConfiguration.model_validate(
-        {
-            **options.model_dump(),
-            "outer_loop": outer_loop,
-            "run_environment": run_environment,
-            "profiler": profiler,
+def recorded_metric_space(
+    metrics: MetricSpace, benchmark_result: BenchmarkResult | None
+) -> MetricSpace:
+    """Include the benchmark axis without losing task noise tolerance."""
+    if benchmark_result is None or metrics.axis(benchmark_result.metric) is not None:
+        return metrics
+    return metrics.model_copy(
+        update={
+            "objectives": (*metrics.objectives, Objective(benchmark_result.metric, "max")),
         }
     )
 
 
+def descriptor_from_options(
+    options: AgentOrchestrationOptions, *, orchestration_id: str
+) -> OrchestrationDescriptor:
+    """Persist one canonical policy identity and its validated options."""
+    if orchestration_id not in AGENT_ORCHESTRATION_IDS:
+        raise UnsupportedAgentOrchestrationError(orchestration_id, AGENT_CONFIG_VERSION)
+    return OrchestrationDescriptor(
+        id=orchestration_id,
+        config_version=AGENT_CONFIG_VERSION,
+        options=options.model_dump(mode="json"),
+    )
+
+
 def options_from_descriptor(descriptor: OrchestrationDescriptor) -> AgentOrchestrationOptions:
-    """Reject unknown IDs, versions, and options before interpreting them."""
+    """Reject unknown policy IDs, versions, and keys before opening resources."""
     if (
         descriptor.id not in AGENT_ORCHESTRATION_IDS
         or descriptor.config_version != AGENT_CONFIG_VERSION
@@ -141,7 +95,7 @@ def compare_resume_descriptors(
     recorded: OrchestrationDescriptor,
     requested: OrchestrationDescriptor,
 ) -> OrchestrationResumeDecision:
-    """Allow only a larger total round budget for a resumed v4 agent run."""
+    """Allow only a larger total round budget for the same agent policy."""
     recorded_options = options_from_descriptor(recorded)
     requested_options = options_from_descriptor(requested)
     changed = [
@@ -181,29 +135,3 @@ def compare_resume_descriptors(
             requires_clean_workspace=True,
         )
     return OrchestrationResumeDecision(descriptor=None)
-
-
-def resume_projection(manifest: OrchestrationRunManifest) -> ResumeProjection:
-    """Project validated agent options directly into CLI resume settings."""
-    options = options_from_descriptor(manifest.orchestration)
-    return ResumeProjection(
-        orchestration_id=manifest.orchestration.id,
-        run_environment=manifest.run_environment,
-        config=ResumeConfigSnapshot.model_validate(options.model_dump()),
-        cli_values={
-            "agent_backend": options.agent_backend,
-            "cli_provider": options.cli_provider,
-            "backend": options.compute_backend,
-            "profiler": options.profiler,
-            "modality": options.modality,
-            "inner_loop": options.inner_loop,
-            "interface": options.interface,
-            "max_retries_per_round": options.max_retries_per_round,
-            "judge_every": options.judge_every,
-            "official_eval_every": options.official_eval_every,
-            "memory_layout": options.memory_layout,
-            "constraint": options.operator_constraints,
-        },
-        budget_destination="max_rounds",
-        budget_value=options.max_rounds,
-    )

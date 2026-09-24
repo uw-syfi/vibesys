@@ -12,12 +12,12 @@ from pathlib import Path  # noqa: TC003  # tracked: #288
 
 import pytest
 
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.evolve.population import Individual, Population
 from vibesys.loops.evolve.search_policy import (
     OpenEvolveSearchConfig,
     OpenEvolveSearchPolicy,
 )
-from vibesys.loops.metrics import MetricSpace, Objective
 
 
 class _IterationOrderSet(set[str]):

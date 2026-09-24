@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.server.support import build_server_parts
+from tests.server.support import agent_descriptor, build_server_parts
+from tests.support.run_execution import run_execution_record
 
 from server.api.performance import build_performance_context, summarize_objective
 from server.api.protocol import PerformanceQuery
-from vibesys.api._readmodel import project_run_view
 from vibesys.api.contracts import RunStatus
+from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.agent.model import AgentRunState, Hypothesis, HypothesisMeasurement
+from vibesys.loops.agent.readmodel import project_run_view
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.schemas import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
-from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,21 +51,15 @@ def _measurement(round_number: int, **overrides: object) -> HypothesisMeasuremen
     return HypothesisMeasurement.model_validate(fields)
 
 
-def _configuration(objectives: tuple[str, ...]) -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        outer_loop="agent",
-        inner_loop="single-agent",
-        interface="inprocess",
-        agent_backend="stub",
-        compute_backend="cpu",
-        profiler="none",
-        max_rounds=3,
-        max_retries_per_round=1,
-        judge_every=1,
-        official_eval_every=1,
-        memory_layout="files",
-        run_environment=RunEnvironmentRecord(name="local"),
-        objectives=objectives,
+def _configuration(objectives: tuple[str, ...]) -> MetricSpace:
+    return MetricSpace.model_validate(
+        {
+            "objectives": [
+                {"name": name, "direction": direction}
+                for objective in objectives
+                for name, _, direction in (objective.partition(":"),)
+            ]
+        }
     )
 
 
@@ -77,7 +73,9 @@ def _project_run(project: Path, objectives: tuple[str, ...]) -> tuple[Project, s
         run_id="queue-run",
         branch="vibesys/queue-run",
         vibesys_version="0.2.0-test",
-        configuration=_configuration(objectives),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=agent_descriptor(metric_space=_configuration(objectives)),
         trusted_input_baseline="0" * 40,
     )
     vibesys_project.state.create_run(manifest)
@@ -91,6 +89,7 @@ def _view(state: AgentRunState) -> RunView:
         run_id="run-1",
         status=RunStatus.ACTIVE,
         experiment_revision=state.experiment_revision,
+        loop="single-agent",
     )
 
 

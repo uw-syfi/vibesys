@@ -6,7 +6,6 @@ when an application explicitly handles the built-in agent policy.
 
 from __future__ import annotations
 
-from vibesys.api._agent_state import agent_run_objectives, is_agent_run_manifest
 from vibesys.loops.agent.issue_board import framework_memory_paths
 from vibesys.loops.agent.projection import (
     AgentRunProjection,
@@ -15,6 +14,7 @@ from vibesys.loops.agent.projection import (
     RoundView,
     agent_projection,
 )
+from vibesys.loops.agent.read_state import agent_run_objectives, is_agent_run_manifest
 
 __all__ = [
     "AgentRunProjection",

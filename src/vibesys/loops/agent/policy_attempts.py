@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, cast
 
+from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.loops.agent.attempt import (
     JudgeOutcome,
     JudgeSkipped,
@@ -15,7 +16,6 @@ from vibesys.loops.agent.policy_support import (
     _official_evaluation_reason,
     _provisional_candidates_since_official,
 )
-from vibesys.loops.gates import FrameworkBenchmarkOutcome
 
 if TYPE_CHECKING:
     from vibesys.loops.agent.hypothesis_controller import HypothesisEngine

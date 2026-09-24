@@ -1,72 +1,217 @@
-"""Adapter from RunRequest to the existing plain loop."""
+"""The issue-board orchestrator and its committed-state projection."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.loops.legacy_bridge import (
-    LegacyBuiltinDefaults,
-    built_in_description,
-    legacy_integration,
-    legacy_request,
-)
-from vibesys.orchestration._common import resolved_run_id
+from vibesys.context import RunSetup, RunStartHints
+from vibesys.loops.plain.loop import PlainRun
+from vibesys.loops.plain.orchestration import compare_resume, options_from_descriptor
+from vibesys.loops.plain.policy import resume_point
+from vibesys.orchestration.view import RunStatus, RunView
+from vibesys.schemas import Verdict
+from vs_issue_board.api import Issue, IssueStatus
+from vs_loop_state.api import PlainLoopCursor
 
 if TYPE_CHECKING:
-    from vibesys.orchestration import ResumeProjection
-    from vibesys.orchestration.contracts import RunDescription
-    from vibesys.orchestration.request import RunRequestLike
-    from vibesys.runtime import VibeSysRuntime
-    from vs_project.api import OrchestrationRunManifest
+    from pydantic import BaseModel
+
+    from vibesys.orchestration.runtime import RunContext
+    from vs_project.api import OrchestrationDescriptor, Project
 
 
-class PlainOrchestration(LegacyBuiltinDefaults):
-    """Preserve the existing plain loop call contract."""
+class PlainOrchestrator:
+    """Drain issues, review each attempt, and evaluate the resulting candidate."""
 
-    namespace = "plain"
+    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
+        """Validate plain options before host setup."""
+        self.options = options_from_descriptor(descriptor)
+        self.setup = RunSetup(
+            state_namespace="plain",
+            state_model=PlainLoopCursor,
+            resume_policy=compare_resume,
+            use_default_agent=True,
+            start_hints=RunStartHints(
+                max_rounds=self.options.max_rounds,
+                expected_roles=("implementer", "judge", "perf_eval"),
+            ),
+        )
 
-    def describe(self, request: RunRequestLike) -> RunDescription:
-        """Describe the plain loop's round budget and expected roles."""
-        return built_in_description(legacy_request(request), round_budget=True)
+    async def run(self, ctx: RunContext) -> bool:
+        """Run one total round budget through the shared host."""
+        run = await PlainRun.open(ctx, self.options)
+        await run.bootstrap()
+        await run.prepare_resume()
+        round_idx, next_phase, pending_issue_id = resume_point(run.state, run.board)
 
-    def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
-        """Project the plain-owned descriptor without constructing v3 settings."""
-        from vibesys.loops.plain.orchestration import resume_projection  # noqa: PLC0415
+        while round_idx < self.options.max_rounds:
+            await ctx.control.boundary()
+            iteration = round_idx + 1
+            with run.progress(iteration, self.options.max_rounds):
+                await self._drain(run, round_idx, iteration, next_phase, pending_issue_id)
+                result = await self._evaluate(run, round_idx, iteration)
+                if result is not None:
+                    return result
+            round_idx += 1
+            next_phase, pending_issue_id = "implementer", None
+        run.log("Run completed: round budget exhausted.")
+        return False
 
-        return resume_projection(manifest)
+    async def _drain(
+        self,
+        run: PlainRun,
+        round_idx: int,
+        iteration: int,
+        next_phase: str,
+        pending_issue_id: int | None,
+    ) -> None:
+        while issue := (
+            run.board.get(pending_issue_id)
+            if pending_issue_id is not None
+            else run.board.next_open()
+        ):
+            resume_judge = next_phase == "judge"
+            pending_issue_id, next_phase = None, "implementer"
+            if issue.attempts >= self.options.max_attempts_per_issue and not resume_judge:
+                run.board.update_status(
+                    issue.id,
+                    IssueStatus.BLOCKED,
+                    actor="loop",
+                    iteration=iteration,
+                    note=f"exhausted {self.options.max_attempts_per_issue} attempts",
+                )
+                run.log(f"[block] issue #{issue.id} blocked after {issue.attempts} attempts")
+                continue
+            await self._process_issue(run, issue, round_idx, iteration, resume_judge=resume_judge)
 
-    def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool:
-        """Execute the plain issue policy through the shared runtime contract."""
-        from vibesys.loops.plain.loop import run_plain_loop  # noqa: PLC0415  # tracked: #288
+    async def _process_issue(
+        self,
+        run: PlainRun,
+        issue: Issue,
+        round_idx: int,
+        iteration: int,
+        *,
+        resume_judge: bool,
+    ) -> None:
+        if issue.status == IssueStatus.OPEN:
+            issue = run.board.update_status(
+                issue.id,
+                IssueStatus.IN_PROGRESS,
+                actor="loop",
+                iteration=iteration,
+                note="claimed for processing",
+            )
+        if not resume_judge:
+            await run.checkpoint(
+                round_idx,
+                "implementer",
+                issue.id,
+                f"plain: begin implementer for issue {issue.id}",
+            )
+            response = await run.host.run_blocking(run.turns.implement, issue)
+            issue = run.board.increment_attempts(
+                issue.id,
+                actor="implementer",
+                iteration=iteration,
+                note=response.summary[:200],
+                payload=response.model_dump(mode="json"),
+            )
+            await run.host.run_blocking(run.turns.record_implementation, issue, response, iteration)
 
-        request = legacy_request(request)
-        bundle = request.input_bundle
-        resuming = request.resume is not None
-        return run_plain_loop(
-            config=request.config,
-            exp_name=resolved_run_id(request),
-            runs_dir=request.runs_dir,
-            input_path=str(bundle.root),
-            task_name=bundle.task_name,
-            task_root=bundle.task_root,
-            accuracy_command=bundle.accuracy_command_display,
-            benchmark_command=bundle.benchmark_command_display,
-            workspace_sources=bundle.workspace_sources,
-            evaluator_path=bundle.evaluator_path,
-            evaluator_package_root=bundle.evaluator_package_root,
-            max_rounds=request.max_rounds if request.max_rounds is not None else 5,
-            max_attempts_per_issue=request.max_attempts_per_issue,
-            max_issues_per_perf_eval=request.max_issues_per_perf_eval,
-            existing=resuming,
-            debug=request.debug,
-            profiler_kind=request.profiler_kind,
-            skills_dirs=request.skills_dirs,
-            run_environment=request.run_environment,
-            agent_backend=request.agent_backend,
-            cli_provider=request.cli_provider,
-            backend=request.backend,
-            domain=bundle.domain,
-            remote_repo=request.remote_repo,
-            repo_visibility=request.repo_visibility,
-            integration=legacy_integration(runtime),
+        await run.checkpoint(
+            round_idx, "judge", issue.id, f"plain: begin judge for issue {issue.id}"
+        )
+        verdict = await run.host.run_blocking(run.turns.judge, issue, iteration)
+        if verdict.verdict == Verdict.PASS:
+            run.board.update_status(
+                issue.id,
+                IssueStatus.CLOSED,
+                actor="judge",
+                iteration=iteration,
+                note=f"closed by judge after attempt {issue.attempts}",
+                payload=verdict.model_dump(mode="json"),
+            )
+        else:
+            run.board.update_status(
+                issue.id,
+                IssueStatus.OPEN,
+                actor="judge",
+                iteration=iteration,
+                note=verdict.feedback[:500],
+                payload=verdict.model_dump(mode="json"),
+            )
+        await run.checkpoint(
+            round_idx,
+            "implementer",
+            None,
+            f"plain: record judge result for issue {issue.id}",
+        )
+
+    async def _evaluate(self, run: PlainRun, round_idx: int, iteration: int) -> bool | None:
+        remaining = [issue for issue in run.board.list() if issue.status != IssueStatus.CLOSED]
+        if remaining and all(issue.status == IssueStatus.BLOCKED for issue in remaining):
+            run.log(f"[stop] all remaining issues are blocked ({len(remaining)} blocked).")
+            await run.checkpoint(round_idx, "perf_eval", None, "plain: record blocked queue")
+            return False
+
+        await run.checkpoint(
+            round_idx,
+            "perf_eval",
+            None,
+            f"plain: begin performance evaluation {iteration}",
+        )
+        recorded = run.performance_record(iteration)
+        if recorded is None:
+            response = await run.host.run_blocking(run.turns.evaluate_performance, iteration)
+            new_issue_ids = response.new_issue_ids
+        else:
+            new_issue_ids = recorded.new_issue_ids
+        await run.checkpoint(
+            round_idx,
+            "perf_eval",
+            None,
+            f"plain: record performance evaluation {iteration}",
+        )
+        if not run.board.list(status=IssueStatus.OPEN) and not new_issue_ids:
+            run.log("[done] no open issues and perf_eval filed none.")
+            await run.checkpoint(
+                round_idx + 1,
+                "implementer",
+                None,
+                f"plain: complete performance evaluation {iteration}",
+            )
+            return True
+        await run.checkpoint(
+            round_idx + 1,
+            "implementer",
+            None,
+            f"plain: complete round {iteration}",
+        )
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class PlainProjector:
+    """Expose the same committed cursor for live and historical readers."""
+
+    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+        """Read the committed cursor from the plain portable namespace."""
+        slot = project.state.portable_namespace(run_id, "plain").slot("state.json", PlainLoopCursor)
+        state = slot.load_optional() or PlainLoopCursor()
+        return self._view(state, run_id=run_id, status=status, loop=loop)
+
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        """Project an in-memory cursor only after its host checkpoint commits."""
+        if namespace != "plain" or not isinstance(state, PlainLoopCursor):
+            return None
+        return self._view(state, run_id=run_id, status=RunStatus.ACTIVE, loop="plain")
+
+    @staticmethod
+    def _view(state: PlainLoopCursor, *, run_id: str, status: RunStatus, loop: str) -> RunView:
+        return RunView(
+            run_id=run_id,
+            loop=loop,
+            status=status,
+            projection=state.model_dump(mode="json"),
         )

@@ -44,15 +44,15 @@ class ProfilePolicy(Protocol):
         """Return the profile controller configuration, if active."""
         ...
 
-    def prepare(self, request: ProfilePreparation) -> tuple[HypothesisEngine, AgentRunState]:
+    def prepare(self, request: ProfilePreparation, /) -> tuple[HypothesisEngine, AgentRunState]:
         """Prepare profile guidance before a new designer plan."""
         ...
 
-    def official_reason(self, reason: str | None, engine: HypothesisEngine) -> str | None:
+    def official_reason(self, reason: str | None, engine: HypothesisEngine, /) -> str | None:
         """Possibly require an official component measurement."""
         ...
 
-    def outcome(self, request: ProfileOutcomeInput) -> ProfileGuidanceOutcome | None:
+    def outcome(self, request: ProfileOutcomeInput, /) -> ProfileGuidanceOutcome | None:
         """Return profile controller evidence for the completed round."""
         ...
 

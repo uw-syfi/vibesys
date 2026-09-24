@@ -1,88 +1,130 @@
-"""Adapter from RunRequest to the existing evolve loop."""
+"""Evolutionary-search orchestrator and committed-state projection."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.loops.evolve.orchestration import resume_projection
-from vibesys.loops.legacy_bridge import (
-    LegacyBuiltinDefaults,
-    built_in_description,
-    legacy_integration,
-    legacy_request,
-    required_objective,
+from vibesys.context import RunSetup, RunStartHints
+from vibesys.loops.evolve.orchestration import compare_resume, options_from_descriptor
+from vibesys.loops.evolve.run import EvolveRun
+from vibesys.loops.evolve.state import (
+    EvolutionProjection,
+    EvolutionStateStore,
+    restore_uncommitted_evolve_state,
 )
-from vibesys.orchestration._common import resolved_run_id
+from vibesys.orchestration.view import RunStatus, RunView
 
 if TYPE_CHECKING:
-    from vibesys.orchestration import ResumeProjection
-    from vibesys.orchestration.contracts import RunDescription
-    from vibesys.orchestration.request import RunRequestLike
-    from vibesys.runtime import VibeSysRuntime
-    from vs_project.api import OrchestrationRunManifest
+    from pydantic import BaseModel
+
+    from vibesys.orchestration.runtime import RunContext
+    from vs_project.api import OrchestrationDescriptor, Project
 
 
-class EvolveOrchestration(LegacyBuiltinDefaults):
-    """Preserve the existing evolve loop call contract."""
+class _UncommittedSelectionError(RuntimeError):
+    def __init__(self, individual_id: int) -> None:
+        super().__init__(f"selected individual {individual_id} has no Git commit")
 
-    namespace = "evolve"
 
-    def describe(self, request: RunRequestLike) -> RunDescription:
-        """Describe evolutionary search's start metadata."""
-        return built_in_description(legacy_request(request), round_budget=False)
+class EvolveOrchestrator:
+    """Bootstrap, evaluate each generation, then select the final candidate."""
 
-    def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
-        """Project evolve-owned settings without constructing v3 configuration."""
-        return resume_projection(manifest)
+    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
+        """Validate evolve settings before the run host opens resources."""
+        self.options = options_from_descriptor(descriptor)
+        self.setup = RunSetup(
+            resume_policy=compare_resume,
+            resume_recovery=restore_uncommitted_evolve_state,
+            use_default_agent=True,
+            start_hints=RunStartHints(
+                max_rounds=self.options.max_generations,
+                expected_roles=("implementer", "judge"),
+            ),
+        )
 
-    def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool:
-        """Execute evolutionary search through the shared runtime contract."""
-        from vibesys.loops.evolve.loop import run_evolve_loop  # noqa: PLC0415  # tracked: #288
+    async def run(self, ctx: RunContext) -> bool:
+        """Run the full generation budget through the shared host."""
+        run = await ctx.run_blocking(EvolveRun.open, ctx, self.options)
+        if not await self._bootstrap_if_needed(ctx, run):
+            return False
 
-        request = legacy_request(request)
-        bundle = request.input_bundle
-        resuming = request.resume is not None
-        return run_evolve_loop(
-            config=request.config,
-            exp_name=resolved_run_id(request),
-            runs_dir=request.runs_dir,
-            input_path=str(bundle.root),
-            task_name=bundle.task_name,
-            task_root=bundle.task_root,
-            accuracy_command=bundle.accuracy_command_display,
-            benchmark_command=bundle.benchmark_command_display,
-            workspace_sources=bundle.workspace_sources,
-            evaluator_path=bundle.evaluator_path,
-            evaluator_package_root=bundle.evaluator_package_root,
-            accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
-            benchmark_result=bundle.benchmark_result,
-            benchmark_result_protocol=bundle.benchmark_result_protocol,
-            benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
-            objective=required_objective(request),
-            max_generations=request.max_generations,
-            children_per_generation=request.children_per_generation,
-            k_top_inspirations=request.k_top_inspirations,
-            k_random_inspirations=request.k_random_inspirations,
-            selection_temperature=request.selection_temperature,
-            seed=request.seed,
-            existing=resuming,
-            debug=request.debug,
-            profiler_kind=request.profiler_kind,
-            skills_dirs=request.skills_dirs,
-            run_environment=request.run_environment,
-            agent_backend=request.agent_backend,
-            cli_provider=request.cli_provider,
-            backend=request.backend,
-            modality=request.modality,
-            domain=bundle.domain,
-            space=request.space,
-            frontier_bias=request.frontier_bias,
-            bootstrap_max_attempts=request.bootstrap_max_attempts,
-            keep_deployments=request.keep_deployments,
-            max_parallelism=request.max_parallelism,
-            search_policy=request.search_policy,
-            openevolve_config=request.openevolve_config,
-            remote_repo=request.remote_repo,
-            repo_visibility=request.repo_visibility,
-            integration=legacy_integration(runtime),
+        parallel = run.parallel
+        run.report_parallel_mode()
+        for generation in range(run.first_generation, self.options.max_generations + 1):
+            await ctx.control.boundary()
+            await ctx.run_blocking(run.begin_generation, generation)
+            if parallel:
+                plans = await ctx.run_blocking(run.plan_generation, generation)
+                outcomes = await ctx.run_blocking(run.evaluate_parallel, generation, plans)
+                for child_idx in range(
+                    run.next_child(generation), self.options.children_per_generation + 1
+                ):
+                    await ctx.run_blocking(
+                        run.record_candidate,
+                        generation,
+                        child_idx,
+                        outcomes.get(child_idx),
+                        serial=False,
+                    )
+            else:
+                for child_idx in range(
+                    run.next_child(generation), self.options.children_per_generation + 1
+                ):
+                    await ctx.control.boundary()
+                    with run.candidate_progress(generation, child_idx):
+                        plan = await ctx.run_blocking(run.plan_candidate, generation, child_idx)
+                        if plan is None:
+                            continue
+                        outcome = await ctx.run_blocking(
+                            run.evaluate_candidate, generation, child_idx, plan
+                        )
+                        await ctx.run_blocking(
+                            run.record_candidate, generation, child_idx, outcome, serial=True
+                        )
+            await ctx.run_blocking(run.complete_generation, generation)
+
+        best = run.search.final_choice()
+        if best is not None:
+            if best.commit is None:
+                raise _UncommittedSelectionError(best.id)
+            await ctx.workspaces.adopt(best.commit)
+            await ctx.workspaces.snapshot(f"evolve: select individual {best.id}")
+        run.report_final(best)
+        return True
+
+    @staticmethod
+    async def _bootstrap_if_needed(ctx: RunContext, run: EvolveRun) -> bool:
+        """Produce the first passing seed before sampling descendants."""
+        if not run.search.needs_bootstrap():
+            return True
+        await ctx.control.boundary()
+        if await ctx.run_blocking(run.bootstrap) is not None:
+            return True
+        run.ctx.lprint("[evolutionary] bootstrap produced no passing seed.")
+        return False
+
+
+@dataclass(frozen=True, slots=True)
+class EvolveProjector:
+    """Project the same committed population for live and historical readers."""
+
+    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+        """Read the committed evolve namespace for historical observation."""
+        state = EvolutionStateStore(project.state.portable_namespace(run_id, "evolve"))
+        return self._view(state.projection(), run_id=run_id, status=status, loop=loop)
+
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        """Project a newly committed evolve state into the live run view."""
+        if namespace != "evolve" or not isinstance(state, EvolutionProjection):
+            return None
+        return self._view(state, run_id=run_id, status=RunStatus.ACTIVE, loop="evolve")
+
+    @staticmethod
+    def _view(state: EvolutionProjection, *, run_id: str, status: RunStatus, loop: str) -> RunView:
+        return RunView(
+            run_id=run_id,
+            loop=loop,
+            status=status,
+            projection=state.model_dump(mode="json"),
         )

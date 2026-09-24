@@ -6,7 +6,7 @@ import argparse
 import shlex
 from pathlib import Path
 
-from entrypoints.cli.constants import _MIGRATE_RUN_ENVIRONMENT_COMMAND, _MODALITIES, _OUTER_LOOPS
+from entrypoints.cli.constants import _MODALITIES, _OUTER_LOOPS
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
 from vibesys.api import (
     KNOWN_COMPUTE_BACKENDS,
@@ -473,46 +473,6 @@ def _apply_common_args(parser: argparse.ArgumentParser) -> None:
 def _make_parser(prog: str, description: str) -> argparse.ArgumentParser:
     parser = _RunArgumentParser(prog=prog, description=description)
     _apply_common_args(parser)
-    return parser
-
-
-def _build_migrate_run_environment_parser() -> argparse.ArgumentParser:
-    parser = _RunArgumentParser(
-        prog=f"vibesys {_MIGRATE_RUN_ENVIRONMENT_COMMAND}",
-        description=(
-            "Migrate an existing run's execution metadata. Version 1 never "
-            "captured the runtime environment, so the operator supplies it. "
-            "For version 2, the supplied environment must match the recording "
-            "before portable resource metadata is added. The migration is one-way."
-        ),
-    )
-    parser.add_argument(
-        "--project",
-        type=Path,
-        default=None,
-        help="Project directory holding the run metadata. Defaults to the current directory.",
-    )
-    parser.add_argument(
-        "--run",
-        default=None,
-        help="Run ID to migrate. Defaults to the project's current run.",
-    )
-    parser.add_argument(
-        "--run-environment",
-        choices=["local", "docker", "modal"],
-        required=True,
-        help="Runtime environment the run was launched with.",
-    )
-    # These mirror the run flags, defaults included, so a migrated recording is
-    # identical to what the same launch would have written today.
-    parser.add_argument("--docker-image", default=None, help="Recorded --docker-image value.")
-    parser.add_argument("--modal-gpu", default="H100!", help="Recorded --modal-gpu value.")
-    parser.add_argument(
-        "--modal-model-volume",
-        default=None,
-        help="Recorded --modal-model-volume value.",
-    )
-    parser.add_argument("--modal-app", default="vibesys", help="Recorded --modal-app value.")
     return parser
 
 

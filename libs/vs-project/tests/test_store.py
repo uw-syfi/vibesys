@@ -10,38 +10,27 @@ from typing import cast
 from uuid import UUID
 
 import pytest
-from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
+from tests.support.run_execution import run_execution_record
 
-from vs_loop_state.api import RoundRecord, parse_round_record, serialize_round_record
 from vs_project.api import (
-    ORCHESTRATION_RUN_SCHEMA_VERSION,
     PROJECT_SCHEMA_VERSION,
     RUN_SCHEMA_VERSION,
-    AgentRunConfiguration,
-    EvolveRunConfiguration,
     OrchestrationDescriptor,
     OrchestrationRunManifest,
-    PlainRunConfiguration,
     Project,
     ProjectManifest,
     ProjectStateError,
-    RunConfiguration,
     RunEnvironmentRecord,
-    RunManifest,
-    RunResourceRequest,
-    RunSchemaMigrationRequiredError,
     StateFile,
     StateModelNotFoundError,
     StateSnapshot,
-    compare_resume_configurations,
     generate_run_id,
     is_project_state_path,
-    serialize_round,
 )
 
 NOW = datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC)
 UNIQUE = UUID("12345678-1234-5678-1234-567812345678")
-RUN_CONFIGURATION_ADAPTER = TypeAdapter(RunConfiguration)
 
 
 class _Cursor(BaseModel):
@@ -51,78 +40,11 @@ class _Cursor(BaseModel):
     phase: str
 
 
-def _configuration() -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        model="gpt-5",
-        outer_loop="agent",
-        run_environment=RunEnvironmentRecord(name="local"),
-        inner_loop="multi-agent",
-        interface="inprocess",
-        agent_backend="cli",
-        agent_driver="agentshim",
-        cli_provider="codex",
-        cli_timeout=1800,
-        compute_backend="cpu",
-        profiler="linux-cpu",
-        max_rounds=10,
-        max_retries_per_round=3,
-        judge_every=3,
-        official_eval_every=3,
-        memory_layout="files",
-        modality="text_generation",
-        default_reasoning_effort="high",
-        outer_model="gpt-5.6-sol",
-        outer_reasoning_effort="xhigh",
-        inner_model="gpt-5.6-luna",
-        inner_reasoning_effort="medium",
-        operator_constraints=("Do not change the ABI",),
-    )
-
-
-def _plain_configuration() -> PlainRunConfiguration:
-    return PlainRunConfiguration(
-        model="gpt-5",
-        outer_loop="plain",
-        run_environment=RunEnvironmentRecord(name="local"),
-        agent_backend="cli",
-        cli_provider="codex",
-        cli_timeout=1800,
-        compute_backend="cpu",
-        profiler="none",
-        max_rounds=5,
-        max_attempts_per_issue=3,
-        max_issues_per_perf_eval=3,
-    )
-
-
-def _evolve_configuration() -> EvolveRunConfiguration:
-    return EvolveRunConfiguration(
-        model="gpt-5",
-        outer_loop="evolve",
-        run_environment=RunEnvironmentRecord(name="local"),
-        agent_backend="cli",
-        cli_provider="codex",
-        cli_timeout=1800,
-        compute_backend="cpu",
-        profiler="none",
-        modality="text_generation",
-        max_generations=8,
-        children_per_generation=2,
-        k_top_inspirations=2,
-        k_random_inspirations=2,
-        selection_temperature=0.5,
-        seed=17,
-        search_policy="openevolve",
-        openevolve_population_size=100,
-        openevolve_archive_size=20,
-        openevolve_num_islands=5,
-        openevolve_migration_interval=50,
-        openevolve_migration_rate=0.1,
-        frontier_bias=0.7,
-        bootstrap_max_attempts=5,
-        keep_deployments=False,
-        max_parallelism=1,
-        objectives=("throughput:max", "memory:min"),
+def _descriptor() -> OrchestrationDescriptor:
+    return OrchestrationDescriptor(
+        id="team-search",
+        config_version=1,
+        options={"agents": [{"role": "worker", "budget": 4}], "seed": None},
     )
 
 
@@ -133,13 +55,15 @@ def _store(tmp_path: Path) -> Project:
     return store
 
 
-def _run(store: Project, *, minute: int = 0) -> RunManifest:
+def _run(store: Project, *, minute: int = 0) -> OrchestrationRunManifest:
     created_at = NOW + timedelta(minutes=minute)
     manifest = store.state.new_run_manifest(
         "Queue SPSC",
         branch=f"vibesys/queue-{minute}",
         vibesys_version="0.2.0",
-        configuration=_configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=_descriptor(),
         trusted_input_baseline="a" * 40,
         now=created_at,
         unique=UUID(int=minute + 1),
@@ -148,36 +72,12 @@ def _run(store: Project, *, minute: int = 0) -> RunManifest:
     return manifest
 
 
-def _orchestration_run(store: Project) -> OrchestrationRunManifest:
-    manifest = store.state.new_orchestration_run_manifest(
-        "Queue SPSC",
-        branch="vibesys/queue-orchestration",
-        vibesys_version="0.2.0",
-        run_environment=RunEnvironmentRecord(name="local"),
-        orchestration=OrchestrationDescriptor(
-            id="team-search",
-            config_version=1,
-            options={"agents": [{"role": "worker", "budget": 4}], "seed": None},
-        ),
-        trusted_input_baseline="a" * 40,
-        now=NOW,
-        unique=UNIQUE,
-    )
-    store.state.create_run(manifest)
-    return manifest
-
-
 def test_version_4_run_manifest_round_trips_without_loop_configuration(tmp_path: Path) -> None:
     store = _store(tmp_path)
-    old_run = _run(store)
-    new_run = _orchestration_run(store)
+    new_run = _run(store)
 
-    assert store.state.load_run(old_run.run_id) == old_run
     assert store.state.load_run(new_run.run_id) == new_run
-    assert {run.schema_version for run in store.state.list_runs()} == {
-        RUN_SCHEMA_VERSION,
-        ORCHESTRATION_RUN_SCHEMA_VERSION,
-    }
+    assert {run.schema_version for run in store.state.list_runs()} == {RUN_SCHEMA_VERSION}
     raw = json.loads(store.state._run_manifest_path(new_run.run_id).read_text())
     assert "configuration" not in raw
     assert raw["orchestration"]["id"] == "team-search"
@@ -203,7 +103,7 @@ def test_orchestration_descriptor_rejects_invalid_envelope(field: str, value: ob
 
 def test_version_4_run_rejects_unknown_keys_on_load(tmp_path: Path) -> None:
     store = _store(tmp_path)
-    run = _orchestration_run(store)
+    run = _run(store)
     path = store.state._run_manifest_path(run.run_id)
     raw = json.loads(path.read_text())
     raw["orchestration"]["outer_loop"] = "agent"
@@ -213,23 +113,16 @@ def test_version_4_run_rejects_unknown_keys_on_load(tmp_path: Path) -> None:
         store.state.load_run(run.run_id)
 
 
-def test_version_4_run_is_not_migrated_as_an_older_manifest(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", [1, 2, 3, 99])
+def test_loading_unknown_run_schema_fails_explicitly(tmp_path: Path, version: int) -> None:
     store = _store(tmp_path)
-    run = _orchestration_run(store)
-
-    with pytest.raises(ProjectStateError, match="already at run schema version 4"):
-        store.state.migrate_run_environment(run.run_id, run.run_environment)
-
-
-def test_loading_unknown_run_schema_fails_explicitly(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _orchestration_run(store)
+    run = _run(store)
     path = store.state._run_manifest_path(run.run_id)
     raw = json.loads(path.read_text())
-    raw["schema_version"] = 99
+    raw["schema_version"] = version
     path.write_text(json.dumps(raw), encoding="utf-8")
 
-    with pytest.raises(ProjectStateError, match="unsupported run schema version 99"):
+    with pytest.raises(ProjectStateError, match=f"unsupported run schema version {version}"):
         store.state.load_run(run.run_id)
 
 
@@ -237,7 +130,7 @@ def test_update_orchestration_preserves_identity_and_rejects_version_change(
     tmp_path: Path,
 ) -> None:
     store = _store(tmp_path)
-    run = _orchestration_run(store)
+    run = _run(store)
     changed = OrchestrationDescriptor(
         id="team-search", config_version=1, options={"agents": [], "seed": 9}
     )
@@ -250,8 +143,6 @@ def test_update_orchestration_preserves_identity_and_rejects_version_change(
             run.run_id,
             changed.model_copy(update={"config_version": 2}),
         )
-    with pytest.raises(ProjectStateError, match="version 4 orchestration"):
-        store.state.update_run_configuration(run.run_id, _configuration())
 
 
 def test_generate_run_id_is_sortable_safe_and_deterministic() -> None:
@@ -280,7 +171,7 @@ def test_manifests_are_strict_versioned_contracts() -> None:
         )
     forbidden_field = {"provider_token": ""}
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        RunManifest(
+        OrchestrationRunManifest(
             schema_version=RUN_SCHEMA_VERSION,
             run_id="run-1",
             project_id="queue-abc",
@@ -290,200 +181,11 @@ def test_manifests_are_strict_versioned_contracts() -> None:
             trusted_input_baseline="b" * 40,
             branch="vibesys/run-1",
             vibesys_version="0.2.0",
-            configuration=_configuration(),
+            run_environment=RunEnvironmentRecord(name="local"),
+            execution=run_execution_record(),
+            orchestration=_descriptor(),
             **forbidden_field,
         )
-
-
-def test_run_configuration_rejects_secret_and_machine_local_fields() -> None:
-    raw = _configuration().model_dump()
-    raw["environment"] = {"TOKEN": "not persisted"}
-
-    with pytest.raises(ValidationError, match="environment"):
-        RUN_CONFIGURATION_ADAPTER.validate_python(raw, strict=True)
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("max_rounds", 0),
-        ("max_retries_per_round", 0),
-        ("judge_every", 0),
-        ("official_eval_every", 0),
-        ("cli_timeout", 0),
-        ("max_retries_per_round", "3"),
-    ],
-)
-def test_run_configuration_strictly_validates_positive_counts(
-    field: str,
-    value: object,
-) -> None:
-    raw = _configuration().model_dump()
-    raw[field] = value
-
-    with pytest.raises(ValidationError, match=field):
-        RUN_CONFIGURATION_ADAPTER.validate_python(raw, strict=True)
-
-
-@pytest.mark.parametrize("field", ["inner_loop", "interface", "max_retries_per_round"])
-def test_run_configuration_requires_core_agent_loop_behavior(field: str) -> None:
-    raw = _configuration().model_dump()
-    del raw[field]
-
-    with pytest.raises(ValidationError, match=field):
-        RUN_CONFIGURATION_ADAPTER.validate_python(raw, strict=True)
-
-
-def test_run_configuration_allows_optional_behavior_overrides_to_be_absent() -> None:
-    raw = _configuration().model_dump()
-    for field in (
-        "model",
-        "agent_driver",
-        "cli_provider",
-        "cli_timeout",
-        "profiler",
-        "modality",
-        "default_reasoning_effort",
-        "outer_model",
-        "outer_reasoning_effort",
-        "inner_model",
-        "inner_reasoning_effort",
-    ):
-        raw[field] = None
-
-    configuration = RUN_CONFIGURATION_ADAPTER.validate_python(raw, strict=True)
-
-    assert configuration.cli_timeout is None
-    assert configuration.modality is None
-    assert configuration.outer_model is None
-    assert configuration.inner_reasoning_effort is None
-
-
-def test_run_configuration_is_frozen() -> None:
-    configuration = _configuration()
-    frozen_field = "inner_loop"
-
-    with pytest.raises(ValidationError, match="frozen"):
-        setattr(configuration, frozen_field, "single-agent")
-
-
-@pytest.mark.parametrize(
-    ("configuration", "expected_type"),
-    [
-        (_configuration(), AgentRunConfiguration),
-        (_plain_configuration(), PlainRunConfiguration),
-        (_evolve_configuration(), EvolveRunConfiguration),
-    ],
-)
-def test_run_configuration_discriminates_outer_loop(
-    configuration: RunConfiguration,
-    expected_type: type[RunConfiguration],
-) -> None:
-    parsed = RUN_CONFIGURATION_ADAPTER.validate_python(
-        configuration.model_dump(),
-        strict=True,
-    )
-
-    assert type(parsed) is expected_type
-    with pytest.raises(ValidationError, match="frozen"):
-        parsed.agent_backend = "stub"
-
-
-def test_profile_guided_run_configuration_round_trips_as_agent_configuration() -> None:
-    payload = _configuration().model_dump()
-    payload["outer_loop"] = "profile-guided"
-
-    parsed = RUN_CONFIGURATION_ADAPTER.validate_python(
-        payload,
-        strict=True,
-    )
-
-    assert type(parsed) is AgentRunConfiguration
-    assert parsed.model_dump() == payload
-
-
-def test_run_configurations_declare_resume_limits() -> None:
-    agent = compare_resume_configurations(_configuration(), _configuration())
-    plain = compare_resume_configurations(_plain_configuration(), _plain_configuration())
-    evolve = compare_resume_configurations(_evolve_configuration(), _evolve_configuration())
-
-    assert (agent.limit_field, agent.recorded_limit) == ("max_rounds", 10)
-    assert (plain.limit_field, plain.recorded_limit) == ("max_rounds", 5)
-    assert (evolve.limit_field, evolve.recorded_limit) == ("max_generations", 8)
-
-
-def test_resume_comparison_requires_matching_outer_loops() -> None:
-    with pytest.raises(ValueError, match="outer loops must match"):
-        compare_resume_configurations(_configuration(), _plain_configuration())
-
-
-def test_agent_resume_comparison_adopts_only_omitted_legacy_objectives() -> None:
-    requested = _configuration().model_copy(update={"objectives": ("throughput:max",)})
-    legacy_payload = requested.model_dump(exclude={"objectives"})
-    recorded = AgentRunConfiguration.model_validate(legacy_payload)
-
-    comparison = compare_resume_configurations(recorded, requested)
-    assert comparison.migration_required
-    assert comparison.changed_fields == ()
-
-    explicit = recorded.model_copy(update={"objectives": ()})
-    comparison = compare_resume_configurations(explicit, requested)
-    assert not comparison.migration_required
-    assert comparison.changed_fields == ("objectives",)
-
-
-@pytest.mark.parametrize("outer_loop", [None, "unknown"])
-def test_run_configuration_requires_known_outer_loop(outer_loop: str | None) -> None:
-    raw = _configuration().model_dump()
-    if outer_loop is None:
-        del raw["outer_loop"]
-    else:
-        raw["outer_loop"] = outer_loop
-
-    with pytest.raises(ValidationError, match="outer_loop"):
-        RUN_CONFIGURATION_ADAPTER.validate_python(raw, strict=True)
-
-
-def test_run_configuration_rejects_fields_from_another_loop() -> None:
-    raw = _plain_configuration().model_dump()
-    raw["inner_loop"] = "multi-agent"
-
-    with pytest.raises(ValidationError, match="inner_loop"):
-        RUN_CONFIGURATION_ADAPTER.validate_python(raw, strict=True)
-
-
-@pytest.mark.parametrize(
-    ("configuration", "field", "value"),
-    [
-        (_plain_configuration(), "max_attempts_per_issue", 0),
-        (_plain_configuration(), "max_issues_per_perf_eval", "3"),
-        (_evolve_configuration(), "max_generations", 0),
-        (_evolve_configuration(), "k_top_inspirations", -1),
-        (_evolve_configuration(), "selection_temperature", 0.0),
-        (_evolve_configuration(), "selection_temperature", float("inf")),
-        (_evolve_configuration(), "openevolve_migration_rate", 1.1),
-        (_evolve_configuration(), "frontier_bias", -0.1),
-        (_evolve_configuration(), "max_parallelism", 0),
-    ],
-)
-def test_loop_specific_configuration_constraints(
-    configuration: RunConfiguration,
-    field: str,
-    value: object,
-) -> None:
-    raw = configuration.model_dump()
-    raw[field] = value
-
-    with pytest.raises(ValidationError, match=field):
-        RUN_CONFIGURATION_ADAPTER.validate_python(raw, strict=True)
-
-
-def test_evolve_configuration_rejects_openevolve_settings_for_vibesys_policy() -> None:
-    raw = _evolve_configuration().model_dump()
-    raw["search_policy"] = "vibesys"
-
-    with pytest.raises(ValidationError, match="OpenEvolve settings"):
-        RUN_CONFIGURATION_ADAPTER.validate_python(raw, strict=True)
 
 
 def test_create_project_writes_portable_committed_manifest(tmp_path: Path) -> None:
@@ -766,7 +468,9 @@ def test_create_run_rejects_symlinked_local_root_before_writing(tmp_path: Path) 
         "Queue SPSC",
         branch="vibesys/queue",
         vibesys_version="0.2.0",
-        configuration=_configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=_descriptor(),
         trusted_input_baseline="a" * 40,
         now=NOW,
         unique=UNIQUE,
@@ -828,9 +532,6 @@ def test_run_manifest_and_local_state_use_separate_trees(tmp_path: Path) -> None
     assert store.state.log_directory(manifest.run_id) == (
         store.state._local_dir / "runs" / manifest.run_id / "logs"
     )
-    assert store.state._rounds_dir(manifest.run_id) == (
-        tmp_path / ".vibesys/state" / "runs" / manifest.run_id / "agent" / "rounds"
-    )
     with pytest.raises(ProjectStateError, match="not agent-visible"):
         store.state.local_namespace(manifest.run_id, "agent").agent_visible_path("active.json")
     assert store.state._round_transaction_path(manifest.run_id) == (
@@ -848,87 +549,15 @@ def test_run_manifest_and_local_state_use_separate_trees(tmp_path: Path) -> None
     assert "token" not in committed
 
 
-def test_run_manifest_persists_complete_agent_loop_behavior(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    manifest = _run(store)
-
-    raw = json.loads(store.state._run_manifest_path(manifest.run_id).read_text(encoding="utf-8"))
-
-    assert raw["trusted_input_baseline"] == "a" * 40
-    assert raw["configuration"] == {
-        "agent_backend": "cli",
-        "agent_driver": "agentshim",
-        "cli_provider": "codex",
-        "cli_timeout": 1800,
-        "compute_backend": "cpu",
-        "default_reasoning_effort": "high",
-        "inner_loop": "multi-agent",
-        "inner_model": "gpt-5.6-luna",
-        "inner_reasoning_effort": "medium",
-        "interface": "inprocess",
-        "judge_every": 3,
-        "max_retries_per_round": 3,
-        "max_rounds": 10,
-        "memory_layout": "files",
-        "modality": "text_generation",
-        "model": "gpt-5",
-        "official_eval_every": 3,
-        "objectives": [],
-        "operator_constraints": ["Do not change the ABI"],
-        "outer_loop": "agent",
-        "outer_model": "gpt-5.6-sol",
-        "outer_reasoning_effort": "xhigh",
-        "profiler": "linux-cpu",
-        "run_environment": {
-            "app": None,
-            "gpu": None,
-            "image": None,
-            "model_volume": None,
-            "name": "local",
-            "resources": None,
-        },
-    }
-
-
-@pytest.mark.parametrize(
-    ("configuration", "expected_type"),
-    [
-        (_configuration(), AgentRunConfiguration),
-        (_plain_configuration(), PlainRunConfiguration),
-        (_evolve_configuration(), EvolveRunConfiguration),
-    ],
-)
-def test_run_manifest_round_trips_each_outer_loop_configuration(
-    tmp_path: Path,
-    configuration: RunConfiguration,
-    expected_type: type[RunConfiguration],
-) -> None:
-    store = _store(tmp_path)
-    manifest = store.state.new_run_manifest(
-        "queue",
-        branch="vibesys/queue",
-        vibesys_version="0.2.0",
-        configuration=configuration,
-        trusted_input_baseline="a" * 40,
-        now=NOW,
-        unique=UNIQUE,
-    )
-
-    store.state.create_run(manifest)
-    loaded = store.state.load_run(manifest.run_id)
-
-    assert isinstance(loaded, RunManifest)
-    assert type(loaded.configuration) is expected_type
-    assert loaded.configuration == configuration
-
-
 def test_run_manifest_round_trips_optional_task_identity(tmp_path: Path) -> None:
     store = _store(tmp_path)
     manifest = store.state.new_run_manifest(
         "queue",
         branch="vibesys/queue",
         vibesys_version="0.2.0",
-        configuration=_configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=_descriptor(),
         trusted_input_baseline="a" * 40,
         task_name="queue-spsc",
         now=NOW,
@@ -942,7 +571,7 @@ def test_run_manifest_round_trips_optional_task_identity(tmp_path: Path) -> None
     assert raw["task_name"] == "queue-spsc"
 
 
-def test_run_manifest_loads_legacy_state_without_task_identity(tmp_path: Path) -> None:
+def test_run_manifest_loads_without_optional_task_identity(tmp_path: Path) -> None:
     store = _store(tmp_path)
     manifest = _run(store)
     path = store.state._run_manifest_path(manifest.run_id)
@@ -962,7 +591,9 @@ def test_run_manifest_rejects_invalid_task_identity(tmp_path: Path, task_name: s
             "queue",
             branch="vibesys/queue",
             vibesys_version="0.2.0",
-            configuration=_configuration(),
+            run_environment=RunEnvironmentRecord(name="local"),
+            execution=run_execution_record(),
+            orchestration=_descriptor(),
             trusted_input_baseline="a" * 40,
             task_name=task_name,
             now=NOW,
@@ -981,7 +612,9 @@ def test_run_manifest_accepts_git_sha1_and_sha256_object_ids(
         "queue",
         branch="vibesys/queue",
         vibesys_version="0.2.0",
-        configuration=_configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=_descriptor(),
         trusted_input_baseline=object_id,
         now=NOW,
         unique=UNIQUE,
@@ -1002,35 +635,13 @@ def test_run_manifest_rejects_invalid_git_object_ids(
             "queue",
             branch="vibesys/queue",
             vibesys_version="0.2.0",
-            configuration=_configuration(),
+            run_environment=RunEnvironmentRecord(name="local"),
+            execution=run_execution_record(),
+            orchestration=_descriptor(),
             trusted_input_baseline=object_id,
             now=NOW,
             unique=UNIQUE,
         )
-
-
-def test_update_run_configuration_preserves_manifest_identity(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    manifest = _run(store)
-    updated_configuration = manifest.configuration.model_copy(update={"max_rounds": 20})
-
-    result = store.state.update_run_configuration(manifest.run_id, updated_configuration)
-    updated = store.state.load_run(manifest.run_id)
-
-    assert isinstance(updated, RunManifest)
-    assert result is None
-    assert updated.configuration == updated_configuration
-    assert updated.model_copy(update={"configuration": manifest.configuration}) == manifest
-
-
-def test_update_run_configuration_rejects_outer_loop_change(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    manifest = _run(store)
-
-    with pytest.raises(ProjectStateError, match="uses outer loop 'agent', not 'plain'"):
-        store.state.update_run_configuration(manifest.run_id, _plain_configuration())
-
-    assert store.state.load_run(manifest.run_id) == manifest
 
 
 def test_new_run_manifest_accepts_a_preallocated_safe_run_id(tmp_path: Path) -> None:
@@ -1040,7 +651,9 @@ def test_new_run_manifest_accepts_a_preallocated_safe_run_id(tmp_path: Path) -> 
         "queue",
         branch="vibesys/preallocated-run",
         vibesys_version="0.2.0",
-        configuration=_configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=_descriptor(),
         trusted_input_baseline="b" * 40,
         run_id="preallocated-run",
         now=NOW,
@@ -1057,7 +670,9 @@ def test_new_run_manifest_rejects_an_unsafe_preallocated_run_id(tmp_path: Path) 
             "queue",
             branch="vibesys/queue",
             vibesys_version="0.2.0",
-            configuration=_configuration(),
+            run_environment=RunEnvironmentRecord(name="local"),
+            execution=run_execution_record(),
+            orchestration=_descriptor(),
             trusted_input_baseline="b" * 40,
             run_id="../escape",
             now=NOW,
@@ -1070,7 +685,9 @@ def test_create_run_rejects_a_manifest_for_another_project(tmp_path: Path) -> No
         "queue",
         branch="vibesys/queue",
         vibesys_version="0.2.0",
-        configuration=_configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=_descriptor(),
         trusted_input_baseline="c" * 40,
         now=NOW,
         unique=UNIQUE,
@@ -1202,24 +819,6 @@ def test_worktrees_directory_rejects_symlink_alias(tmp_path: Path) -> None:
 
     with pytest.raises(ProjectStateError, match=r"(?:escapes|must not be a symlink)"):
         store.state._worktrees_dir(run.run_id)
-
-
-def test_completed_round_directory_rejects_symlink_alias(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    agent_dir = tmp_path / ".vibesys/state" / "runs" / run.run_id / "agent"
-    agent_dir.mkdir()
-    (agent_dir / "rounds").symlink_to(outside, target_is_directory=True)
-
-    with pytest.raises(ProjectStateError, match=r"(?:escapes|must not be a symlink)"):
-        store.state.save_round(
-            run.run_id,
-            RoundRecord(1, "a" * 40, 10.0, "ops/s", True),  # noqa: FBT003
-        )
-
-    assert list(outside.iterdir()) == []
 
 
 def test_state_namespace_round_trips_strict_models_atomically(tmp_path: Path) -> None:
@@ -1538,40 +1137,6 @@ def test_run_manifest_snapshot_is_rooted_at_the_selected_run(tmp_path: Path) -> 
     )
 
 
-def test_completed_round_snapshot_contains_one_canonical_round(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    first = RoundRecord(1, "a" * 40, 10.0, "ops/s", True)  # noqa: FBT003
-    second = RoundRecord(2, "b" * 40, 20.0, "ops/s", True)  # noqa: FBT003
-    store.state.save_round(run.run_id, first)
-    second_snapshot = store.state.save_round(run.run_id, second)
-
-    snapshot = store.state.completed_round_snapshot(run.run_id, 2)
-
-    assert snapshot == StateSnapshot._create(
-        namespace_root=PurePosixPath(f".vibesys/state/runs/{run.run_id}/agent"),
-        files=(
-            StateFile(
-                relative_path=PurePosixPath("rounds/0002.json"),
-                contents=second_snapshot.files[0].contents,
-            ),
-        ),
-    )
-    assert snapshot.files[0].contents == serialize_round(second)
-
-
-@pytest.mark.parametrize("round_number", [0, 1, 2])
-def test_completed_round_snapshot_rejects_missing_or_invalid_round(
-    tmp_path: Path,
-    round_number: int,
-) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-
-    with pytest.raises(ProjectStateError, match=r"positive|does not exist"):
-        store.state.completed_round_snapshot(run.run_id, round_number)
-
-
 def test_metadata_snapshot_rejects_symlinked_files(tmp_path: Path) -> None:
     store = _store(tmp_path)
     run = _run(store)
@@ -1626,366 +1191,6 @@ def test_machine_local_state_namespace_cannot_be_snapshotted(tmp_path: Path) -> 
 
     with pytest.raises(ProjectStateError, match=r"Machine-local.*cannot be snapshotted"):
         namespace.snapshot()
-
-
-def test_round_record_serializer_is_public_and_round_trips() -> None:
-    record = RoundRecord(
-        round_number=7,
-        commit="a" * 40,
-        perf_metric=123.0,
-        perf_unit="ops/s",
-        passed=True,
-        official_evaluation=True,
-    )
-
-    payload = serialize_round_record(record)
-
-    assert payload["round"] == 7
-    assert "round_number" not in payload
-    assert parse_round_record(payload) == record
-
-
-def test_project_state_serializes_validated_canonical_round_bytes() -> None:
-    record = RoundRecord(
-        round_number=7,
-        commit="a" * 40,
-        perf_metric=123.0,
-        perf_unit="ops/s",
-        passed=True,
-        official_evaluation=True,
-    )
-
-    contents = serialize_round(record)
-
-    assert contents.endswith(b"\n")
-    assert json.loads(contents) == serialize_round_record(record)
-    assert contents == serialize_round(record)
-
-
-def test_project_state_serializer_rejects_non_portable_round_without_writing() -> None:
-    record = RoundRecord(
-        round_number=1,
-        commit="a" * 40,
-        perf_metric=123.0,
-        perf_unit="ops/s",
-        passed=True,
-        evaluation_artifact="/host/result.json",
-    )
-
-    with pytest.raises(ProjectStateError, match="portable project-relative path"):
-        serialize_round(record)
-
-
-def test_completed_rounds_use_one_file_per_round_and_are_idempotent(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    second = RoundRecord(2, "b" * 40, 20.0, "ops/s", True)  # noqa: FBT003
-    first = RoundRecord(1, "a" * 40, 10.0, "ops/s", True)  # noqa: FBT003
-
-    first_snapshot = store.state.save_round(run.run_id, first)
-    second_snapshot = store.state.save_round(run.run_id, second)
-    assert store.state.save_round(run.run_id, first) == first_snapshot
-
-    assert first_snapshot.files[0].relative_path.name == "0001.json"
-    assert second_snapshot.files[0].relative_path.name == "0002.json"
-    assert store.state.load_rounds(run.run_id) == [first, second]
-    first_path = store.state._rounds_dir(run.run_id) / "0001.json"
-    assert json.loads(first_path.read_text(encoding="utf-8"))["round"] == 1
-    assert first_path.read_bytes() == serialize_round(first)
-
-
-def test_completed_rounds_must_be_saved_in_append_order(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    first = RoundRecord(1, "a" * 40, 10.0, "ops/s", True)  # noqa: FBT003
-    second = RoundRecord(2, "b" * 40, 20.0, "ops/s", True)  # noqa: FBT003
-    third = RoundRecord(3, "c" * 40, 30.0, "ops/s", True)  # noqa: FBT003
-
-    with pytest.raises(ProjectStateError, match="expected round 1, got 2"):
-        store.state.save_round(run.run_id, second)
-
-    store.state.save_round(run.run_id, first)
-    with pytest.raises(ProjectStateError, match="expected round 2, got 3"):
-        store.state.save_round(run.run_id, third)
-
-
-def test_restoring_a_completed_round_validates_sequence_before_writing(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    second = RoundRecord(2, "b" * 40, 20.0, "ops/s", True)  # noqa: FBT003
-
-    with pytest.raises(ProjectStateError, match="without completed round 1"):
-        store.state.restore_completed_round(run.run_id, second)
-
-    assert store.state.load_rounds(run.run_id) == []
-
-
-def test_restoring_a_completed_round_repairs_its_corrupt_local_copy(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    first = RoundRecord(1, "a" * 40, 10.0, "ops/s", True)  # noqa: FBT003
-    store.state.save_round(run.run_id, first)
-    target = store.state._rounds_dir(run.run_id) / "0001.json"
-    target.write_text("{not-json", encoding="utf-8")
-
-    restored = store.state.restore_completed_round(run.run_id, first)
-
-    assert restored == store.state.completed_round_snapshot(run.run_id, 1)
-    assert store.state.load_rounds(run.run_id) == [first]
-
-
-def test_loaded_rounds_must_form_contiguous_sequence(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    directory = store.state._rounds_dir(run.run_id)
-    directory.mkdir(parents=True)
-    for round_number in (1, 3):
-        record = RoundRecord(
-            round_number,
-            str(round_number) * 40,
-            float(round_number),
-            "ops/s",
-            True,  # noqa: FBT003
-        )
-        (directory / f"{round_number:04d}.json").write_text(
-            json.dumps(serialize_round_record(record)),
-            encoding="utf-8",
-        )
-
-    with pytest.raises(ProjectStateError, match="expected round 2, found 3"):
-        store.state.load_rounds(run.run_id)
-
-
-def test_completed_round_cannot_be_overwritten(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    original = RoundRecord(1, "a" * 40, 10.0, "ops/s", True)  # noqa: FBT003
-    conflicting = RoundRecord(1, "b" * 40, 11.0, "ops/s", True)  # noqa: FBT003
-    store.state.save_round(run.run_id, original)
-
-    with pytest.raises(ProjectStateError, match="already exists with different data"):
-        store.state.save_round(run.run_id, conflicting)
-
-
-@pytest.mark.parametrize(
-    "artifact",
-    ["/absolute/result.json", "../result.json", "results\\host.json", ""],
-)
-def test_completed_round_rejects_machine_local_artifact_paths(
-    tmp_path: Path, artifact: str
-) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    record = RoundRecord(
-        1,
-        "a" * 40,
-        10.0,
-        "ops/s",
-        True,  # noqa: FBT003
-        evaluation_artifact=artifact,
-    )
-
-    with pytest.raises(ProjectStateError, match="portable project-relative path"):
-        store.state.save_round(run.run_id, record)
-
-
-def test_completed_round_rejects_non_finite_metrics(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    record = RoundRecord(1, "a" * 40, float("nan"), "ops/s", True)  # noqa: FBT003
-
-    with pytest.raises(ProjectStateError, match="finite numbers"):
-        store.state.save_round(run.run_id, record)
-
-
-def test_loaded_round_rejects_machine_local_artifact_path(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    path = store.state._rounds_dir(run.run_id) / "0001.json"
-    path.parent.mkdir(parents=True)
-    record = RoundRecord(
-        1,
-        "a" * 40,
-        10.0,
-        "ops/s",
-        True,  # noqa: FBT003
-        evaluation_artifact="/absolute/result.json",
-    )
-    path.write_text(json.dumps(serialize_round_record(record)), encoding="utf-8")
-
-    with pytest.raises(
-        ProjectStateError,
-        match=r"0001\.json.*portable project-relative path",
-    ):
-        store.state.load_rounds(run.run_id)
-
-
-def test_loaded_round_rejects_non_finite_metrics(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    path = store.state._rounds_dir(run.run_id) / "0001.json"
-    path.parent.mkdir(parents=True)
-    record = RoundRecord(1, "a" * 40, float("nan"), "ops/s", True)  # noqa: FBT003
-    path.write_text(json.dumps(serialize_round_record(record)), encoding="utf-8")
-
-    with pytest.raises(ProjectStateError, match=r"0001\.json.*finite numbers"):
-        store.state.load_rounds(run.run_id)
-
-
-def _downgrade_run_schema(store: Project, run_id: str) -> Path:
-    """Rewrite one run manifest as a version 1 recording without an environment."""
-    path = store.state._run_manifest_path(run_id)
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    raw["schema_version"] = 1
-    del raw["configuration"]["run_environment"]
-    path.write_text(json.dumps(raw), encoding="utf-8")
-    return path
-
-
-def _downgrade_run_schema_to_v2(store: Project, run_id: str) -> Path:
-    """Rewrite one run manifest as a version 2 recording without resources."""
-    path = store.state._run_manifest_path(run_id)
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    raw["schema_version"] = 2
-    del raw["configuration"]["run_environment"]["resources"]
-    path.write_text(json.dumps(raw), encoding="utf-8")
-    return path
-
-
-def test_loading_a_pre_environment_run_requires_migration(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    _downgrade_run_schema(store, run.run_id)
-
-    with pytest.raises(RunSchemaMigrationRequiredError) as caught:
-        store.state.load_run(run.run_id)
-
-    assert caught.value.recorded_version == 1
-    assert caught.value.run_id == run.run_id
-    assert "run.json" in str(caught.value)
-    assert "runtime environment" in str(caught.value)
-
-
-def test_migrating_a_run_records_the_supplied_environment(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    _downgrade_run_schema(store, run.run_id)
-    environment = RunEnvironmentRecord(name="modal", gpu="H100!", app="vibesys")
-
-    migrated = store.state.migrate_run_environment(run.run_id, environment)
-
-    assert migrated.schema_version == RUN_SCHEMA_VERSION
-    assert migrated.configuration.run_environment == environment
-    assert store.state.load_run(run.run_id) == migrated
-    assert migrated.model_dump(exclude={"schema_version", "configuration"}) == run.model_dump(
-        exclude={"schema_version", "configuration"}
-    )
-
-
-def test_migrating_a_version_2_run_preserves_its_environment(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    _downgrade_run_schema_to_v2(store, run.run_id)
-
-    with pytest.raises(RunSchemaMigrationRequiredError) as caught:
-        store.state.load_run(run.run_id)
-    assert caught.value.recorded_version == 2
-
-    migrated = store.state.migrate_run_environment(run.run_id, run.configuration.run_environment)
-
-    assert migrated.schema_version == RUN_SCHEMA_VERSION
-    assert migrated.configuration.run_environment == run.configuration.run_environment
-    assert store.state.load_run(run.run_id) == migrated
-
-
-def test_migrating_a_version_2_run_rejects_a_different_environment(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    _downgrade_run_schema_to_v2(store, run.run_id)
-
-    with pytest.raises(ProjectStateError, match="different run environment"):
-        store.state.migrate_run_environment(run.run_id, RunEnvironmentRecord(name="modal"))
-
-
-def test_run_environment_round_trips_portable_resources(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    resources = RunResourceRequest(
-        nodes=2,
-        accelerators_per_node=4,
-        accelerator_backend="rocm",
-        cpus_per_node=192,
-    )
-    configuration = _configuration().model_copy(
-        update={"run_environment": RunEnvironmentRecord(name="skypilot", resources=resources)}
-    )
-    run = store.state.new_run_manifest(
-        "Remote Queue",
-        branch="vibesys/remote-queue",
-        vibesys_version="0.2.0",
-        configuration=configuration,
-        trusted_input_baseline="a" * 40,
-        now=NOW,
-        unique=UUID(int=99),
-    )
-    store.state.create_run(run)
-
-    loaded = store.state.load_run(run.run_id)
-
-    assert isinstance(loaded, RunManifest)
-    assert loaded.configuration.run_environment.resources == resources
-
-
-def test_migrating_a_current_run_is_rejected(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-
-    with pytest.raises(ProjectStateError, match="already at run schema version"):
-        store.state.migrate_run_environment(run.run_id, RunEnvironmentRecord(name="local"))
-
-
-def test_migrating_an_unknown_schema_version_is_rejected(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    path = store.state._run_manifest_path(run.run_id)
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    raw["schema_version"] = 99
-    path.write_text(json.dumps(raw), encoding="utf-8")
-
-    with pytest.raises(ProjectStateError, match="unsupported run schema version"):
-        store.state.migrate_run_environment(run.run_id, RunEnvironmentRecord(name="local"))
-
-
-def test_corrupt_metadata_error_names_the_path(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    path = store.state._run_manifest_path(run.run_id)
-    path.write_text('{"schema_version": 99}', encoding="utf-8")
-
-    with pytest.raises(ProjectStateError, match=r"run\.json.*unsupported run schema version"):
-        store.state.load_run(run.run_id)
-
-
-def test_unknown_round_field_is_rejected_with_its_path(tmp_path: Path) -> None:
-    store = _store(tmp_path)
-    run = _run(store)
-    path = store.state._rounds_dir(run.run_id) / "0001.json"
-    path.parent.mkdir(parents=True)
-    path.write_text(
-        json.dumps(
-            {
-                "round": 1,
-                "commit": None,
-                "perf_metric": None,
-                "perf_unit": None,
-                "passed": False,
-                "surprise": True,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ProjectStateError, match=r"Invalid completed-round.*0001\.json"):
-        store.state.load_rounds(run.run_id)
 
 
 def test_git_paths_resolve_portable_snapshot_without_layout_work_by_consumer(

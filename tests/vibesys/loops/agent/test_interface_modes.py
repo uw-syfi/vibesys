@@ -8,22 +8,23 @@ artifact requirements.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import cast
 
 import pytest
 
-from vibesys.config import as_config
 from vibesys.constants import DomainName
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError
+from vibesys.loops.agent.entrypoint import MultiAgentOrchestrator
+from vibesys.loops.agent.orchestration import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.agent.policy_support import (
+    _INTERFACES,
+    DEFAULT_INTERFACE,
     _effective_profiler_definition,
     _profiler_prompt_template,
 )
-from vibesys.loops.metrics import MetricSpace
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, render_template
 
@@ -71,25 +72,21 @@ def test_cli_rejects_unknown_interface(interface):  # noqa: ANN001, ANN201  # tr
 
 
 def test_loop_constants_and_rejects_unknown_interface():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _INTERFACES,
-        DEFAULT_INTERFACE,
-        run_agent_loop,
-    )
-
     assert DEFAULT_INTERFACE == "inprocess"
     assert _INTERFACES == ("inprocess", "service")
     with pytest.raises(ValueError, match="interface"):
-        run_agent_loop(
-            config=as_config({"model": {"name": "test-model"}}),
-            exp_name="e",
-            input_path="/x",
-            accuracy_command="accuracy-checker",
-            benchmark_command="benchmark",
-            objective="o",
-            runs_dir=Path("/tmp/vibesys-test-runs"),  # noqa: S108
-            metrics=MetricSpace(),
-            interface="native",
+        MultiAgentOrchestrator(
+            descriptor_from_options(
+                AgentOrchestrationOptions(
+                    interface="native",
+                    max_rounds=1,
+                    max_retries_per_round=1,
+                    judge_every=1,
+                    official_eval_every=1,
+                    memory_layout="files",
+                ),
+                orchestration_id="multi-agent",
+            )
         )
 
 
@@ -181,8 +178,6 @@ def test_inprocess_implementer_handles_missing_reference_explicitly():  # noqa: 
 
 
 def test_default_interface_matches_inprocess_for_implementer():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import DEFAULT_INTERFACE  # noqa: PLC0415  # tracked: #288
-
     explicit = _render_implementer("inprocess")
     implied = render_template(
         "implementer_prompt.j2",

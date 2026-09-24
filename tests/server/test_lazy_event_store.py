@@ -431,7 +431,7 @@ def test_run_started_payload_is_readable_without_forcing_the_history(tmp_path): 
         run_id="persisted-run",
         timestamp=_TIMESTAMP,
         type=EventType.RUN_STARTED,
-        data=RunStartedData(outer_loop="agent", input="objective", max_rounds=24),
+        data=RunStartedData(outer_loop="single-agent", input="objective"),
     )
     _write_events(path, events)
     store = EventStore(path, run_id="active-run")
@@ -446,5 +446,5 @@ def test_run_started_payload_is_readable_without_forcing_the_history(tmp_path): 
     )
 
     assert isinstance(started[0].data, RunStartedData)
-    assert started[0].data.max_rounds == 24
+    assert started[0].data.outer_loop == "single-agent"
     assert store.parsed_record_count == parsed + 1

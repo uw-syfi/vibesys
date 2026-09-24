@@ -1,4 +1,4 @@
-"""Internal DTOs remain identical through their public compatibility facades."""
+"""Canonical orchestration DTOs keep one public identity and dependency direction."""
 
 from __future__ import annotations
 
@@ -7,35 +7,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-from vibesys.api import (
-    OrchestrationRunRequest,
-    ResumeRef,
-    RunRequestLike,
-    RunResult,
-    RunStatus,
-    RunView,
-)
+from vibesys.api import ResumeRef, RunRequest, RunResult, RunStatus, RunView
 from vibesys.api import contracts as api_contracts
-from vibesys.api import run_request as api_request
 from vibesys.orchestration.environment import AgentEnvironment
-from vibesys.orchestration.request import (
-    OrchestrationRunRequest as InternalRequest,
-)
-from vibesys.orchestration.request import (
-    ResumeRef as InternalResumeRef,
-)
-from vibesys.orchestration.request import (
-    RunRequestLike as InternalRequestLike,
-)
+from vibesys.orchestration.request import ResumeRef as InternalResumeRef
+from vibesys.orchestration.request import RunRequest as InternalRequest
 from vibesys.orchestration.view import RunResult as InternalResult
 from vibesys.orchestration.view import RunStatus as InternalStatus
 from vibesys.orchestration.view import RunView as InternalView
 
 
 def test_public_dtos_reexport_internal_classes() -> None:
-    assert OrchestrationRunRequest is api_request.OrchestrationRunRequest is InternalRequest
-    assert ResumeRef is api_request.ResumeRef is InternalResumeRef
-    assert RunRequestLike is api_request.RunRequestLike is InternalRequestLike
+    assert RunRequest is api_contracts.RunRequest is InternalRequest
+    assert ResumeRef is api_contracts.ResumeRef is InternalResumeRef
     assert RunResult is api_contracts.RunResult is InternalResult
     assert RunStatus is api_contracts.RunStatus is InternalStatus
     assert RunView is api_contracts.RunView is InternalView

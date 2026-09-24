@@ -3,11 +3,12 @@
 from datetime import UTC, datetime
 
 import pytest
+from tests.support.run_execution import run_execution_record
 
+from vibesys.loops.plain.orchestration import PlainOrchestrationOptions, descriptor_from_options
 from vibesys.loops.plain.state import PlainStateStore
 from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
 from vs_project.api import (
-    PlainRunConfiguration,
     Project,
     ProjectStateError,
     RunEnvironmentRecord,
@@ -23,14 +24,14 @@ def _store(tmp_path) -> PlainStateStore:  # noqa: ANN001
         branch="vibesys/run-1",
         vibesys_version="test",
         trusted_input_baseline="a" * 40,
-        configuration=PlainRunConfiguration(
-            outer_loop="plain",
-            run_environment=RunEnvironmentRecord(name="local"),
-            agent_backend="stub",
-            compute_backend="cpu",
-            max_rounds=1,
-            max_attempts_per_issue=1,
-            max_issues_per_perf_eval=1,
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=descriptor_from_options(
+            PlainOrchestrationOptions(
+                max_rounds=1,
+                max_attempts_per_issue=1,
+                max_issues_per_perf_eval=1,
+            ),
         ),
     )
     project.state.create_run(run)

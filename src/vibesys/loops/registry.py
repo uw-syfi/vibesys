@@ -1,31 +1,44 @@
-"""Composition point for built-in orchestration implementations."""
+"""Composition point for concrete built-in orchestrators."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from vibesys.loops.agent.entrypoint import AgentOrchestration
-from vibesys.loops.agent.profile_entrypoint import ProfileGuidedOrchestration
-from vibesys.loops.evolve.entrypoint import EvolveOrchestration
-from vibesys.loops.legacy_request import LoopKind
-from vibesys.loops.plain.entrypoint import PlainOrchestration
+from vibesys.loops.agent.entrypoint import (
+    AgentProjector,
+    MultiAgentOrchestrator,
+    ProfileGuidedMultiAgentOrchestrator,
+    ProfileGuidedSingleAgentOrchestrator,
+    SingleAgentOrchestrator,
+)
+from vibesys.loops.evolve.entrypoint import EvolveOrchestrator, EvolveProjector
+from vibesys.loops.plain.entrypoint import PlainOrchestrator, PlainProjector
 from vibesys.orchestration.contracts import OrchestrationRegistry
-
-if TYPE_CHECKING:
-    from vibesys.orchestration import ResumeProjection
-    from vs_project.api import OrchestrationRunManifest
 
 
 def built_in_orchestrations() -> OrchestrationRegistry:
-    """Register each current loop ID with its own concrete implementation."""
+    """Register each strategy by ID, execution class, and read projector."""
     registry = OrchestrationRegistry()
-    registry.register(LoopKind.AGENT, AgentOrchestration())
-    registry.register(LoopKind.PROFILE_GUIDED, ProfileGuidedOrchestration())
-    registry.register(LoopKind.PLAIN, PlainOrchestration())
-    registry.register(LoopKind.EVOLVE, EvolveOrchestration())
+    for kind, orchestrator in (
+        ("multi-agent", MultiAgentOrchestrator),
+        ("single-agent", SingleAgentOrchestrator),
+        ("profile-guided-multi-agent", ProfileGuidedMultiAgentOrchestrator),
+        ("profile-guided-single-agent", ProfileGuidedSingleAgentOrchestrator),
+    ):
+        registry.register(
+            kind,
+            orchestrator,
+            projector=AgentProjector(kind),
+            portable_namespaces=("agent",),
+        )
+    registry.register(
+        "plain",
+        PlainOrchestrator,
+        projector=PlainProjector(),
+        portable_namespaces=("plain",),
+    )
+    registry.register(
+        "evolve",
+        EvolveOrchestrator,
+        projector=EvolveProjector(),
+        portable_namespaces=("evolve",),
+    )
     return registry
-
-
-def resume_projection(manifest: OrchestrationRunManifest) -> ResumeProjection:
-    """Delegate descriptor validation and CLI projection to its owner."""
-    return built_in_orchestrations().resolve(manifest.orchestration.id).resume_projection(manifest)

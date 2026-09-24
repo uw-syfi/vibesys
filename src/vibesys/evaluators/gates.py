@@ -8,9 +8,9 @@ import math
 import shlex
 import uuid
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Protocol
 
-from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: TC001  # tracked: #288
+from vibesys.evaluators.input_manifest import benchmark_output_argument
 from vibesys.events import (
     CoreEventType,
     EventStatus,
@@ -19,9 +19,7 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
-from vibesys.loops.metrics import Objective  # noqa: TC001  # tracked: #288
 from vibesys.render.sink import output_sink
-from vibesys.run import LoopContext  # noqa: TC001  # tracked: #288
 from vs_evaluator_protocol.api import (
     Hello,
     ProtocolError,
@@ -33,7 +31,50 @@ from vs_evaluator_protocol.api import (
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from vibesys.evaluators.input_manifest import BenchmarkResult
+    from vibesys.evaluators.metrics import Objective
     from vs_sandbox.api import SandboxExecutionResult
+
+
+class _GateEvents(Protocol):
+    def emit(self, event_type: CoreEventType, *, data: SubprocessOutputData) -> object:
+        """Publish one trusted subprocess output fact."""
+        ...
+
+
+class _GateSandbox(Protocol):
+    def execute(self, command: str, *, timeout: int | None = None) -> SandboxExecutionResult:
+        """Execute a trusted command in the selected run environment."""
+        ...
+
+
+class TrustedGateContext(Protocol):
+    """The small host surface trusted gates need to evaluate a candidate."""
+
+    @property
+    def events(self) -> _GateEvents:
+        """Return the semantic event publisher for this run."""
+        ...
+
+    @property
+    def judge_backend(self) -> _GateSandbox:
+        """Return the trusted command sandbox for this workspace."""
+        ...
+
+    @property
+    def judge_accuracy_command(self) -> str | None:
+        """Return the environment-resolved accuracy command."""
+        ...
+
+    @property
+    def judge_benchmark_command(self) -> str | None:
+        """Return the environment-resolved benchmark command."""
+        ...
+
+    def trusted_input_changes(self) -> list[str]:
+        """Return evaluator-owned input edits since the trusted baseline."""
+        ...
+
 
 # Truncation lengths for gate failure output. All three values are defined
 # here so that the logged window, the agent-feedback window, and the record
@@ -92,7 +133,7 @@ def emit_gate_finished(  # noqa: PLR0913  # independent payload dimensions
     )
 
 
-def framework_command_timeout(ctx: LoopContext, timeout_seconds: int | None) -> int | None:
+def framework_command_timeout(ctx: TrustedGateContext, timeout_seconds: int | None) -> int | None:
     """Add environment-owned setup time without weakening the command's own budget.
 
     Environment-owned Modal/SkyPilot deployment and readiness happens before the
@@ -121,7 +162,7 @@ class AccuracyGateResult:
 
 
 def run_accuracy_gate(  # tracked: #288
-    ctx: LoopContext,
+    ctx: TrustedGateContext,
     *,
     process_id: str,
     timeout_seconds: int | None = None,
@@ -200,7 +241,7 @@ def run_accuracy_gate(  # tracked: #288
 
 
 def _publish_subprocess_output(
-    ctx: LoopContext,
+    ctx: TrustedGateContext,
     *,
     process_id: str,
     result: SandboxExecutionResult,
@@ -225,7 +266,6 @@ FRAMEWORK_BENCHMARK_END_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
 
 # The flag every result-protocol evaluator registers for its output file; see
 # ``OutputFlag`` in the evaluator SDK (``sdk/vs-evaluator/vseval/schema.go``).
-PROTOCOL_OUTPUT_FLAG = "--vs-output"
 
 # The SkyPilot bridge allowlists framework result artifacts by this path
 # shape (``_FRAMEWORK_ARTIFACT`` in ``vibesys.skypilot.bridge``); the nonce
@@ -278,11 +318,7 @@ class BenchmarkContract:
         and the sandbox is told the same value so it can allowlist the result
         artifact, so both must read it from here rather than restating it.
         """
-        if self.result_spec is not None:
-            return self.result_spec.json_argument
-        if self.result_protocol is not None:
-            return PROTOCOL_OUTPUT_FLAG
-        return None
+        return benchmark_output_argument(self.result_spec, self.result_protocol)
 
 
 @dataclass(frozen=True)
@@ -417,7 +453,7 @@ def _check_output_slug(output_slug: str) -> None:
 
 
 def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
-    ctx: LoopContext,
+    ctx: TrustedGateContext,
     *,
     result_spec: BenchmarkResult | None,
     result_protocol: Literal[2] | None = None,

@@ -21,7 +21,6 @@ from vibesys.loops.agent.projection import (
     HypothesisView,
     RoundView,
 )
-from vibesys.loops.legacy_request import LoopKind
 from vibesys.orchestration.view import RunStatus, RunView
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome, derive_hypothesis_title
 
@@ -38,7 +37,7 @@ def project_run_view(
     run_id: str,
     status: RunStatus,
     experiment_revision: int,
-    loop: LoopKind | str = LoopKind.AGENT,
+    loop: str,
 ) -> RunView:
     """Return *state* as the `RunView` a caller sees across the boundary.
 
@@ -73,7 +72,7 @@ def project_run_view(
     )
 
 
-def project_committed_run_view(state: BaseModel, *, run_id: str) -> RunView:
+def project_committed_run_view(state: BaseModel, *, run_id: str, loop: str) -> RunView:
     """Project a just-committed agent state into a `RunView`, entirely in memory.
 
     For a committed-state listener registered on `LocalRunIntegration`
@@ -90,6 +89,7 @@ def project_committed_run_view(state: BaseModel, *, run_id: str) -> RunView:
         run_id=run_id,
         status=RunStatus.ACTIVE,
         experiment_revision=agent_state.experiment_revision,
+        loop=loop,
     )
 
 

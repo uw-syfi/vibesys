@@ -7,7 +7,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
-from vibesys.loops.metrics import MetricSpace
+from vibesys.evaluators.metrics import MetricSpace
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,

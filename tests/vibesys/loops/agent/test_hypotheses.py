@@ -6,6 +6,7 @@ from typing import Literal
 import pytest
 from pydantic import ValidationError
 
+from vibesys.evaluators.metrics import Measurement, MetricComparison, MetricSpace, Objective
 from vibesys.loops.agent.hypotheses import (
     ResolutionEvidence,
     adopt_metric_space,
@@ -27,7 +28,6 @@ from vibesys.loops.agent.model import (
     HypothesisResolution,
     HypothesisStrategy,
 )
-from vibesys.loops.metrics import Measurement, MetricComparison, MetricSpace, Objective
 from vibesys.schemas import (
     HypothesisOutcome,
     HypothesisStrategyUpdate,

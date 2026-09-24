@@ -1,33 +1,32 @@
-"""Orchestration runner, independent of built-in implementations."""
+"""Run one descriptor-validated orchestration in the shared host."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.runtime import _LocalVibeSysRuntime
+from vibesys.orchestration.runtime import RunContext
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.orchestration.contracts import Orchestration, OrchestrationRegistry
+    from vibesys.orchestration.contracts import Orchestrator
     from vibesys.orchestration.environment import AgentEnvironment
-    from vibesys.orchestration.request import RunRequestLike
+    from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
 
 
-def run_orchestration(
-    request: RunRequestLike,
+async def run_orchestration(
+    request: RunRequest,
     integration: LocalRunIntegration,
-    registry: OrchestrationRegistry,
+    orchestrator: Orchestrator,
     *,
     open_agent_environment: Callable[..., AgentEnvironment] | None = None,
-    implementation: Orchestration | None = None,
 ) -> bool:
-    """Execute the selected implementation through the shared contract."""
-    policy = implementation or registry.resolve(request.orchestration_id)
-    with _LocalVibeSysRuntime(
-        request, integration, open_agent_environment=open_agent_environment
-    ) as runtime:
-        runtime.prepare()
-        policy.prepare(request, runtime)
-        return policy.execute(request, runtime)
+    """Open the run host and invoke the selected policy once."""
+    async with RunContext.open(
+        request,
+        integration,
+        setup=orchestrator.setup,
+        open_agent_environment=open_agent_environment,
+    ) as ctx:
+        return await orchestrator.run(ctx)

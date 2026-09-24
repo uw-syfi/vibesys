@@ -26,10 +26,19 @@ class AgentDefinition:
     resources: tuple[HostResource, ...] = ()
 
 
+@dataclass(slots=True)
+class WorkspaceScope:
+    """An isolated candidate tree and its current retained revision."""
+
+    id: str
+    path: Path
+    revision: str
+
+
 class AgentHandle(Protocol):
     """A live agent conversation owned by one runtime."""
 
-    def turn(
+    async def turn(
         self,
         message: str,
         *,
@@ -39,7 +48,7 @@ class AgentHandle(Protocol):
         """Send one turn and return its text; labels are policy-defined."""
         ...
 
-    def turn_structured(  # noqa: PLR0913
+    async def turn_structured(  # noqa: PLR0913
         self,
         message: str,
         *,
@@ -54,7 +63,7 @@ class AgentHandle(Protocol):
         """Run a typed turn, retaining the caller's fallback and session policy."""
         ...
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Release this agent and its sandbox; safe to call more than once."""
         ...
 
@@ -72,6 +81,8 @@ class VibeSysRuntime(Protocol):
         """Return the prepared run's writable project workspace."""
         ...
 
-    def spawn_agent(self, definition: AgentDefinition) -> AgentHandle:
-        """Open an independently configured agent in this run's environment."""
+    async def spawn(
+        self, definition: AgentDefinition, *, scope: WorkspaceScope | None = None
+    ) -> AgentHandle:
+        """Open an agent in the parent or a live isolated workspace."""
         ...

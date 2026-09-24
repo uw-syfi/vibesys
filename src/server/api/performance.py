@@ -2,8 +2,8 @@
 
 Like the experiment log, this is a one-way projection: recorded measurement
 facts and manifest objectives are copied onto the wire, never recomputed.
-`vibesys.api`'s `HypothesisView` already carries the headline measurement
-each hypothesis recorded (see `vibesys.api._readmodel`); this module only
+`vibesys.api.agent`'s `HypothesisView` already carries the headline measurement
+each hypothesis recorded (see `vibesys.loops.agent.readmodel`); this module only
 selects the newest one and reshapes it into the wire DTO.
 """
 

@@ -1,9 +1,8 @@
-"""Generic run request contract and versioned descriptor request."""
+"""The descriptor-backed request for one orchestration run."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -24,11 +23,11 @@ class ResumeRef(BaseModel):
     run_id: str
 
 
-class OrchestrationRunRequest(BaseModel):
-    """Descriptor-based request for a registered orchestration policy.
+class RunRequest(BaseModel):
+    """Resolved input and execution settings for a registered orchestration.
 
-    Policy-specific settings belong in ``orchestration.options``. The legacy
-    ``RunRequest`` remains available for callers of the built-in loops.
+    The selected policy owns and validates ``orchestration.options`` before
+    run setup begins.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
@@ -38,6 +37,7 @@ class OrchestrationRunRequest(BaseModel):
     config: Config
     input_bundle: InputBundle
     objective: str | None = None
+    debug: bool = False
     resume: ResumeRef | None = None
     exp_name: str | None = None
     runs_dir: Path | None = None
@@ -54,92 +54,3 @@ class OrchestrationRunRequest(BaseModel):
     def orchestration_id(self) -> str:
         """Return the stable ID selected by this descriptor."""
         return self.orchestration.id
-
-
-class RunRequestLike(Protocol):
-    """Facts the framework needs to run any registered orchestration."""
-
-    @property
-    def project_root(self) -> Path:
-        """Return the project workspace root."""
-        ...
-
-    @property
-    def orchestration(self) -> OrchestrationDescriptor | None:
-        """Return the versioned descriptor when selected."""
-        ...
-
-    @property
-    def config(self) -> Config:
-        """Return shared agent and runtime configuration."""
-        ...
-
-    @property
-    def input_bundle(self) -> InputBundle:
-        """Return the resolved input bundle."""
-        ...
-
-    @property
-    def objective(self) -> str | None:
-        """Return the objective text when supplied."""
-        ...
-
-    @property
-    def resume(self) -> ResumeRef | None:
-        """Return the run to resume when supplied."""
-        ...
-
-    @property
-    def exp_name(self) -> str | None:
-        """Return the requested experiment name."""
-        ...
-
-    @property
-    def runs_dir(self) -> Path | None:
-        """Return the optional runs directory."""
-        ...
-
-    @property
-    def profiler_kind(self) -> ProfilerKind:
-        """Return the requested profiler selection."""
-        ...
-
-    @property
-    def skills_dirs(self) -> list[str] | None:
-        """Return optional skill source directories."""
-        ...
-
-    @property
-    def run_environment(self) -> RunEnvironmentSpec | None:
-        """Return the selected execution environment."""
-        ...
-
-    @property
-    def agent_backend(self) -> str | None:
-        """Return the default agent backend."""
-        ...
-
-    @property
-    def cli_provider(self) -> str | None:
-        """Return the default CLI provider."""
-        ...
-
-    @property
-    def backend(self) -> ComputeBackend:
-        """Return the compute backend."""
-        ...
-
-    @property
-    def remote_repo(self) -> str | None:
-        """Return the optional remote repository."""
-        ...
-
-    @property
-    def repo_visibility(self) -> RepositoryVisibility:
-        """Return the remote repository visibility."""
-        ...
-
-    @property
-    def orchestration_id(self) -> str:
-        """Return the registered orchestration stable ID."""
-        ...

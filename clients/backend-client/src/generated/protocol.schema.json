@@ -3470,8 +3470,16 @@
           "type": "string"
         },
         "max_rounds": {
-          "title": "Max Rounds",
-          "type": "integer"
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Rounds"
         },
         "expected_roles": {
           "default": [],
@@ -3484,8 +3492,7 @@
       },
       "required": [
         "outer_loop",
-        "input",
-        "max_rounds"
+        "input"
       ],
       "title": "RunStartedData",
       "type": "object"

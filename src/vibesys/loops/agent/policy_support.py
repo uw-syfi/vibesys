@@ -12,6 +12,11 @@ from typing import TYPE_CHECKING
 
 from vibesys.domains.base import DomainDefinition, DomainRole
 from vibesys.domains.rendering import render_domain_section
+from vibesys.evaluators.metrics import (
+    Measurement,
+    MetricSpace,
+    Objective,
+)
 from vibesys.events import (
     CoreEventType,
     EventStatus,
@@ -31,11 +36,6 @@ from vibesys.loops.agent.model import (
 from vibesys.loops.agent.roles import (
     SharedAgentHandle,
     _invoke_read_only_role,
-)
-from vibesys.loops.metrics import (
-    Measurement,
-    MetricSpace,
-    Objective,
 )
 from vibesys.loops.profiler import mcp_spec as profiler_mcp_spec
 from vibesys.profilers import (

@@ -1,11 +1,14 @@
-"""Plain orchestration decisions with in-memory effects only."""
+"""Plain orchestration decisions against a real issue board and fake turns."""
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
+from unittest.mock import AsyncMock, patch
 
-from vibesys.loops.plain.policy import PlainPolicy
+from vibesys.loops.plain.entrypoint import PlainOrchestrator
+from vibesys.loops.plain.orchestration import PlainOrchestrationOptions, descriptor_from_options
 from vibesys.schemas import (
     IssueImplementerResponse,
     IssueJudgeResponse,
@@ -14,47 +17,78 @@ from vibesys.schemas import (
     PerfTrend,
     Verdict,
 )
-from vs_issue_board.api import Issue, IssueStatus, IssueType
+from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
 from vs_loop_state.api import PlainLoopCursor
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
+
+    from vibesys.orchestration.runtime import RunContext
+    from vs_issue_board.api import Issue
+
+PlainPhase = Literal["implementer", "judge", "perf_eval"]
 
 
-def _issue(issue_id: int, *, status: IssueStatus = IssueStatus.OPEN, attempts: int = 0) -> Issue:
-    return Issue(
-        id=issue_id,
-        type=IssueType.FEATURE,
-        title=f"Issue {issue_id}",
-        description="Improve the candidate.",
-        status=status,
-        created_by="test",
-        created_iter=1,
-        created_at="2026-01-01",
-        updated_at="2026-01-01",
-        attempts=attempts,
-    )
+class _Context:
+    def __init__(self) -> None:
+        self.control = self
+
+    async def boundary(self) -> None:
+        return
+
+    async def run_blocking(self, operation, *args) -> object:  # noqa: ANN001, ANN002
+        return operation(*args)
 
 
-class _FakePlainPort:
+class _PlainRun:
     def __init__(
-        self, issues: list[Issue], verdicts: list[Verdict], perf_issues: list[list[int]]
+        self,
+        path: Path,
+        verdicts: list[Verdict],
+        perf_issues: list[list[int]],
+        *,
+        state: PlainLoopCursor | None = None,
+        resuming: bool = False,
     ) -> None:
-        self.issues = {issue.id: issue for issue in issues}
+        self.host = _Context()
+        self.board = IssueBoard(path / "issues.json")
+        self.turns = self
+        self.state = state or PlainLoopCursor()
+        self.resuming = resuming
         self.verdicts = iter(verdicts)
         self.perf_issues = iter(perf_issues)
         self.calls: list[str] = []
         self.checkpoints: list[tuple[str, PlainLoopCursor]] = []
 
-    def bootstrap(self, state: PlainLoopCursor) -> None:
+    async def bootstrap(self) -> None:
+        if self.state.bootstrap_done:
+            return
+        self.board.create(
+            type=IssueType.FEATURE,
+            title="Initial issue",
+            description="Improve the candidate",
+            created_by="loop:bootstrap",
+            iteration=1,
+        )
+        self.state = self.state.model_copy(update={"bootstrap_done": True})
         self.calls.append("bootstrap")
-        if not state.bootstrap_done:
-            self.issues[1] = _issue(1)
-            state.bootstrap_done = True
-            self.checkpoint(state, "plain: initialize issue board")
+        await self.checkpoint(0, "implementer", None, "plain: initialize issue board")
 
-    def checkpoint(self, state: PlainLoopCursor, label: str) -> None:
-        self.checkpoints.append((label, state.model_copy(deep=True)))
+    async def prepare_resume(self) -> None:
+        if self.resuming:
+            self.board.reopen_blocked(actor="loop:resume", iteration=self.state.round_idx + 1)
+
+    async def checkpoint(
+        self, round_idx: int, phase: PlainPhase, issue_id: int | None, label: str
+    ) -> None:
+        self.state = self.state.transition(
+            round_idx=round_idx, phase=phase, current_issue_id=issue_id
+        )
+        self.checkpoints.append((label, self.state.model_copy(deep=True)))
+
+    def performance_record(self, iteration: int) -> None:
+        del iteration
 
     @contextmanager
     def progress(self, iteration: int, total: int) -> Iterator[None]:
@@ -63,60 +97,6 @@ class _FakePlainPort:
 
     def log(self, message: str) -> None:
         self.calls.append(message)
-
-    def get_issue(self, issue_id: int) -> Issue | None:
-        return self.issues.get(issue_id)
-
-    def next_open_issue(self) -> Issue | None:
-        return next(
-            (issue for issue in self.issues.values() if issue.status == IssueStatus.OPEN),
-            None,
-        )
-
-    def list_issues(self, status: IssueStatus | None = None) -> list[Issue]:
-        return [issue for issue in self.issues.values() if status is None or issue.status == status]
-
-    def reopen_blocked(self, iteration: int) -> list[int]:
-        del iteration
-        reopened = [
-            issue.id for issue in self.issues.values() if issue.status == IssueStatus.BLOCKED
-        ]
-        for issue_id in reopened:
-            self.issues[issue_id] = self.issues[issue_id].model_copy(
-                update={"status": IssueStatus.OPEN, "attempts": 0}
-            )
-        return reopened
-
-    def claim(self, issue: Issue, iteration: int) -> Issue:
-        del iteration
-        claimed = issue.model_copy(update={"status": IssueStatus.IN_PROGRESS})
-        self.issues[issue.id] = claimed
-        self.calls.append(f"claim:{issue.id}")
-        return claimed
-
-    def block(self, issue: Issue, iteration: int, max_attempts: int) -> None:
-        del iteration, max_attempts
-        self.issues[issue.id] = issue.model_copy(update={"status": IssueStatus.BLOCKED})
-        self.calls.append(f"block:{issue.id}")
-
-    def increment_attempts(
-        self, issue: Issue, response: IssueImplementerResponse, iteration: int
-    ) -> Issue:
-        del response, iteration
-        attempted = issue.model_copy(update={"attempts": issue.attempts + 1})
-        self.issues[issue.id] = attempted
-        self.calls.append(f"attempt:{issue.id}")
-        return attempted
-
-    def close_issue(self, issue: Issue, response: IssueJudgeResponse, iteration: int) -> None:
-        del response, iteration
-        self.issues[issue.id] = issue.model_copy(update={"status": IssueStatus.CLOSED})
-        self.calls.append(f"close:{issue.id}")
-
-    def reopen_issue(self, issue: Issue, response: IssueJudgeResponse, iteration: int) -> None:
-        del response, iteration
-        self.issues[issue.id] = issue.model_copy(update={"status": IssueStatus.OPEN})
-        self.calls.append(f"reopen:{issue.id}")
 
     def implement(self, issue: Issue) -> IssueImplementerResponse:
         self.calls.append(f"implement:{issue.id}")
@@ -146,7 +126,14 @@ class _FakePlainPort:
         self.calls.append(f"perf:{iteration}")
         new_ids = next(self.perf_issues)
         for issue_id in new_ids:
-            self.issues[issue_id] = _issue(issue_id)
+            issue = self.board.create(
+                type=IssueType.BUG,
+                title=f"Issue {issue_id}",
+                description="Improve the candidate",
+                created_by="perf_eval",
+                iteration=iteration,
+            )
+            assert issue.id == issue_id
         return IssuePerfEvalResponse(
             analysis="measured",
             metrics=PerfMetrics(load_levels=[]),
@@ -157,77 +144,74 @@ class _FakePlainPort:
         )
 
 
-def test_policy_runs_issue_handoffs_and_stops_after_clean_perf_eval() -> None:
-    port = _FakePlainPort([], [Verdict.PASS], [[]])
-
-    assert PlainPolicy(
-        port, state=PlainLoopCursor(), max_rounds=2, max_attempts_per_issue=3, resuming=False
-    ).run()
-
-    assert port.calls[:8] == [
-        "bootstrap",
-        "round:1/2",
-        "claim:1",
-        "implement:1",
-        "attempt:1",
-        "snapshot:1",
-        "judge:1",
-        "close:1",
-    ]
-    assert "perf:1" in port.calls
-    assert port.issues[1].status == IssueStatus.CLOSED
-    assert port.checkpoints[-1][1].round_idx == 1
-
-
-def test_policy_retries_failed_issue_then_blocks_without_perf_eval() -> None:
-    port = _FakePlainPort([], [Verdict.FAIL, Verdict.FAIL], [])
-
-    assert not PlainPolicy(
-        port, state=PlainLoopCursor(), max_rounds=1, max_attempts_per_issue=2, resuming=False
-    ).run()
-
-    assert port.calls.count("implement:1") == 2
-    assert port.calls.count("judge:1") == 2
-    assert port.calls[-1].startswith("[stop] all remaining issues are blocked")
-    assert "perf:1" not in port.calls
-    assert port.issues[1].status == IssueStatus.BLOCKED
-    assert port.checkpoints[-1][1].phase == "perf_eval"
-
-
-def test_policy_resumes_at_judge_without_repeating_implementation() -> None:
-    port = _FakePlainPort(
-        [_issue(1, status=IssueStatus.IN_PROGRESS, attempts=1)], [Verdict.PASS], [[]]
+def _run_policy(run: _PlainRun, *, max_rounds: int, max_attempts: int = 3) -> bool:
+    options = PlainOrchestrationOptions(
+        max_rounds=max_rounds,
+        max_attempts_per_issue=max_attempts,
+        max_issues_per_perf_eval=3,
     )
+    policy = PlainOrchestrator(descriptor_from_options(options))
+    with patch("vibesys.loops.plain.entrypoint.PlainRun.open", new=AsyncMock(return_value=run)):
+        return asyncio.run(policy.run(cast("RunContext", run.host)))
+
+
+def test_policy_runs_issue_handoffs_and_stops_after_clean_perf_eval(tmp_path: Path) -> None:
+    run = _PlainRun(tmp_path, [Verdict.PASS], [[]])
+    assert _run_policy(run, max_rounds=2)
+    assert run.calls[:4] == ["bootstrap", "round:1/2", "implement:1", "snapshot:1"]
+    assert "judge:1" in run.calls
+    assert "perf:1" in run.calls
+    issue = run.board.get(1)
+    assert issue is not None
+    assert issue.status == IssueStatus.CLOSED
+    assert run.checkpoints[-1][1].round_idx == 1
+
+
+def test_policy_retries_failed_issue_then_blocks_without_perf_eval(tmp_path: Path) -> None:
+    run = _PlainRun(tmp_path, [Verdict.FAIL, Verdict.FAIL], [])
+    assert not _run_policy(run, max_rounds=1, max_attempts=2)
+    assert run.calls.count("implement:1") == 2
+    assert run.calls.count("judge:1") == 2
+    assert "perf:1" not in run.calls
+    issue = run.board.get(1)
+    assert issue is not None
+    assert issue.status == IssueStatus.BLOCKED
+    assert run.checkpoints[-1][1].phase == "perf_eval"
+
+
+def test_policy_resumes_at_judge_without_repeating_implementation(tmp_path: Path) -> None:
     state = PlainLoopCursor(bootstrap_done=True, phase="judge", current_issue_id=1)
-
-    assert PlainPolicy(
-        port, state=state, max_rounds=1, max_attempts_per_issue=3, resuming=True
-    ).run()
-
-    assert "implement:1" not in port.calls
-    assert "judge:1" in port.calls
-    assert "perf:1" in port.calls
-
-
-def test_policy_runs_next_round_for_perf_filed_issue() -> None:
-    port = _FakePlainPort([], [Verdict.PASS, Verdict.PASS], [[2], []])
-
-    assert PlainPolicy(
-        port, state=PlainLoopCursor(), max_rounds=2, max_attempts_per_issue=3, resuming=False
-    ).run()
-
-    assert port.calls.index("perf:1") < port.calls.index("implement:2")
-    assert port.calls.count("perf:2") == 1
-    assert port.issues[2].status == IssueStatus.CLOSED
+    run = _PlainRun(tmp_path, [Verdict.PASS], [[]], state=state, resuming=True)
+    issue = run.board.create(
+        type=IssueType.FEATURE,
+        title="Issue 1",
+        description="Improve the candidate",
+        created_by="test",
+        iteration=1,
+    )
+    run.board.update_status(issue.id, IssueStatus.IN_PROGRESS, actor="loop", iteration=1)
+    run.board.increment_attempts(issue.id, actor="implementer", iteration=1)
+    assert _run_policy(run, max_rounds=1)
+    assert "implement:1" not in run.calls
+    assert "judge:1" in run.calls
+    assert "perf:1" in run.calls
 
 
-def test_policy_preserves_filed_issue_when_round_budget_expires() -> None:
-    port = _FakePlainPort([], [Verdict.PASS], [[2]])
+def test_policy_runs_next_round_for_perf_filed_issue(tmp_path: Path) -> None:
+    run = _PlainRun(tmp_path, [Verdict.PASS, Verdict.PASS], [[2], []])
+    assert _run_policy(run, max_rounds=2)
+    assert run.calls.index("perf:1") < run.calls.index("implement:2")
+    assert run.calls.count("perf:2") == 1
+    issue = run.board.get(2)
+    assert issue is not None
+    assert issue.status == IssueStatus.CLOSED
 
-    assert not PlainPolicy(
-        port, state=PlainLoopCursor(), max_rounds=1, max_attempts_per_issue=3, resuming=False
-    ).run()
 
-    assert port.issues[2].status == IssueStatus.OPEN
-    assert "implement:2" not in port.calls
-    assert port.checkpoints[-1][0] == "plain: complete round 1"
+def test_policy_preserves_filed_issue_when_round_budget_expires(tmp_path: Path) -> None:
+    run = _PlainRun(tmp_path, [Verdict.PASS], [[2]])
+    assert not _run_policy(run, max_rounds=1)
+    issue = run.board.get(2)
+    assert issue is not None
+    assert issue.status == IssueStatus.OPEN
+    assert "implement:2" not in run.calls
+    assert run.checkpoints[-1][0] == "plain: complete round 1"

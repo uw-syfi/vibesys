@@ -1,7 +1,8 @@
 """Tests for plain-loop resume decisions over typed state."""
 
-from vibesys.loops.plain.loop import PlainLoopState, _determine_resume_point
+from vibesys.loops.plain.policy import resume_point
 from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
+from vs_loop_state.api import PlainLoopCursor
 
 
 def _make_store(tmp_path) -> IssueBoard:  # noqa: ANN001  # tracked: #288
@@ -11,7 +12,7 @@ def _make_store(tmp_path) -> IssueBoard:  # noqa: ANN001  # tracked: #288
 class TestDetermineResumePoint:
     def test_none_state_starts_fresh(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
         store = _make_store(tmp_path)
-        i, phase, issue_id = _determine_resume_point(None, store)
+        i, phase, issue_id = resume_point(PlainLoopCursor(), store)
         assert i == 0
         assert phase == "implementer"
         assert issue_id is None
@@ -26,10 +27,10 @@ class TestDetermineResumePoint:
             iteration=1,
         )
         store.update_status(issue.id, IssueStatus.IN_PROGRESS, actor="loop", iteration=1)
-        state = PlainLoopState(
+        state = PlainLoopCursor(
             round_idx=0, phase="implementer", current_issue_id=issue.id, bootstrap_done=True
         )
-        i, phase, issue_id = _determine_resume_point(state, store)
+        i, phase, issue_id = resume_point(state, store)
         assert i == 0
         assert phase == "implementer"
         assert issue_id == issue.id
@@ -44,10 +45,10 @@ class TestDetermineResumePoint:
             iteration=1,
         )
         store.update_status(issue.id, IssueStatus.IN_PROGRESS, actor="loop", iteration=1)
-        state = PlainLoopState(
+        state = PlainLoopCursor(
             round_idx=0, phase="judge", current_issue_id=issue.id, bootstrap_done=True
         )
-        i, phase, issue_id = _determine_resume_point(state, store)
+        i, phase, issue_id = resume_point(state, store)
         assert i == 0
         assert phase == "judge"
         assert issue_id == issue.id
@@ -56,17 +57,17 @@ class TestDetermineResumePoint:
         store = _make_store(tmp_path)
         store.create(type=IssueType.BUG, title="t", description="d", created_by="x", iteration=1)
         # Loop was past judge, no current_issue_id
-        state = PlainLoopState(
+        state = PlainLoopCursor(
             round_idx=1, phase="implementer", current_issue_id=None, bootstrap_done=True
         )
-        i, phase, issue_id = _determine_resume_point(state, store)
+        i, phase, issue_id = resume_point(state, store)
         assert i == 1
         assert phase == "implementer"
         assert issue_id is None
 
     def test_resume_goes_to_implementer_when_no_open_issues(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        # When no open issues remain, _determine_resume_point returns
-        # phase="implementer" — the drain loop in run_plain_loop will
+        # When no open issues remain, resume_point returns
+        # phase="implementer" — the orchestrator drain loop will
         # immediately exit (next_open() is None) and fall through to
         # perf_eval naturally, so the function never needs to "request"
         # perf_eval explicitly.
@@ -75,16 +76,16 @@ class TestDetermineResumePoint:
             type=IssueType.BUG, title="t", description="d", created_by="x", iteration=1
         )
         store.update_status(issue.id, IssueStatus.CLOSED, actor="judge", iteration=1)
-        state = PlainLoopState(
+        state = PlainLoopCursor(
             round_idx=1, phase="implementer", current_issue_id=None, bootstrap_done=True
         )
-        _i, phase, issue_id = _determine_resume_point(state, store)
+        _i, phase, issue_id = resume_point(state, store)
         assert phase == "implementer"
         assert issue_id is None
 
     def test_resume_after_perf_eval_with_no_open_issues(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
         """If we crashed during/after perf_eval with no open issues left,
-        _determine_resume_point should return phase='implementer'. The
+        resume_point should return phase='implementer'. The
         drain loop will then immediately exit (next_open() is None) and
         fall through to a fresh perf_eval naturally."""
         store = _make_store(tmp_path)
@@ -92,10 +93,10 @@ class TestDetermineResumePoint:
             type=IssueType.BUG, title="t", description="d", created_by="x", iteration=1
         )
         store.update_status(closed.id, IssueStatus.CLOSED, actor="judge", iteration=1)
-        state = PlainLoopState(
+        state = PlainLoopCursor(
             round_idx=2, phase="perf_eval", current_issue_id=None, bootstrap_done=True
         )
-        i, phase, issue_id = _determine_resume_point(state, store)
+        i, phase, issue_id = resume_point(state, store)
         assert i == 2
         assert phase == "implementer"
         assert issue_id is None
@@ -110,10 +111,10 @@ class TestDetermineResumePoint:
         )
         store.update_status(closed.id, IssueStatus.CLOSED, actor="judge", iteration=1)
         store.create(type=IssueType.BUG, title="open", description="d", created_by="x", iteration=1)
-        state = PlainLoopState(
+        state = PlainLoopCursor(
             round_idx=0, phase="judge", current_issue_id=closed.id, bootstrap_done=True
         )
-        _i, phase, issue_id = _determine_resume_point(state, store)
+        _i, phase, issue_id = resume_point(state, store)
         # Should NOT try to re-run judge on the closed issue
         assert not (phase == "judge" and issue_id == closed.id)
         assert phase == "implementer"

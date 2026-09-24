@@ -1,4 +1,4 @@
-"""Tests for ``vibesys.loops.gates`` -- the framework gates shared by loops.
+"""Tests for ``vibesys.evaluators.gates`` -- the framework gates shared by loops.
 
 These exercise the benchmark gate through a real ``bash`` judge backend so the
 transport file it writes under ``/tmp`` genuinely exists. The gate's guarantee
@@ -17,7 +17,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from vibesys.evaluators.gates import (
+    _BENCHMARK_OUTPUT_PREFIX,
+    read_protocol_benchmark,
+    run_accuracy_gate,
+    run_benchmark_gate,
+)
 from vibesys.evaluators.input_manifest import BenchmarkResult
+from vibesys.evaluators.metrics import Objective
 from vibesys.events import (
     CoreEvent,
     CoreEventType,
@@ -26,13 +33,6 @@ from vibesys.events import (
     GateKind,
     GateStartedData,
 )
-from vibesys.loops.gates import (
-    _BENCHMARK_OUTPUT_PREFIX,
-    read_protocol_benchmark,
-    run_accuracy_gate,
-    run_benchmark_gate,
-)
-from vibesys.loops.metrics import Objective
 from vibesys.render.sink import output_sink
 from vs_sandbox.api import SandboxExecutionResult
 

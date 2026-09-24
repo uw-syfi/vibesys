@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vibesys.run.git_tracker import GitTracker
-    from vs_loop_state.api import RoundRecord
     from vs_project.api import Project, StateNamespace
 
 
@@ -47,7 +46,3 @@ class RunState:
     def commit(self, label: str, namespace: StateNamespace) -> None:
         """Commit the exact current contents of one portable namespace."""
         self.git.snapshot_framework_state(label, namespace.snapshot())
-
-    def completed_rounds(self) -> list[RoundRecord]:
-        """Compatibility hook for policies with legacy completed-round history."""
-        raise NotImplementedError

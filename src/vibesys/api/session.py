@@ -9,14 +9,15 @@ needs.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
-from vibesys.api._dispatch import dispatch_loop, resolved_run_id
 from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
+from vibesys.orchestration._common import resolved_run_id
+from vibesys.orchestration.contracts import project_run
+from vibesys.orchestration.runner import run_orchestration
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.skills import platform_skill_selection
 from vs_agent.api import MCPServerSpec, expose_as_tools
@@ -30,9 +31,9 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.api.contracts import AgentEnvironment, EventSink, RunView
-    from vibesys.api.run_request import RunRequestLike
     from vibesys.config import Config
     from vibesys.orchestration.contracts import OrchestrationRegistry
+    from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import RunResourceHandoff
     from vibesys.sandbox.run_environment import RunEnvironmentSession
     from vibesys.skills import SkillSelection
@@ -129,7 +130,7 @@ class RunSession(RunQuery, RunWorkspace, RunControl, RunAgentHost, Protocol):
 
 
 def create_session(
-    request: RunRequestLike,
+    request: RunRequest,
     *,
     sink: EventSink,
     registry: OrchestrationRegistry | None = None,
@@ -156,7 +157,7 @@ class _LocalRunSession:
 
     def __init__(
         self,
-        request: RunRequestLike,
+        request: RunRequest,
         *,
         sink: EventSink,
         registry: OrchestrationRegistry | None,
@@ -170,7 +171,9 @@ class _LocalRunSession:
 
             registry = built_in_orchestrations()
         self._registry = registry
-        self._policy = self._registry.resolve(request.orchestration_id)
+        self._registration = self._registry.resolve(request.orchestration.id)
+        # Constructor validation precedes integration and run resource setup.
+        self._policy = self._registration.orchestrator(request.orchestration)
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -199,7 +202,10 @@ class _LocalRunSession:
     ) -> None:
         if self._committed_view_listener is None:
             return
-        view = self._policy.project_committed(namespace, state, run_id=self._run_id())
+        projector = self._registration.projector
+        if projector is None:
+            return
+        view = projector.project_committed(namespace, state, run_id=self._run_id())
         if view is not None:
             self._committed_view_listener(view, changed_keys)
 
@@ -288,29 +294,28 @@ class _LocalRunSession:
         self._unsubscribe = self._integration.events.subscribe(self._sink)
 
     async def await_result(self) -> RunResult:
-        """Run the selected loop function on a worker thread and await its outcome."""
-        return await asyncio.to_thread(self._run_sync)
+        """Run the selected policy and return its terminal outcome."""
+        return await self._run()
 
-    def _run_sync(self) -> RunResult:
+    async def _run(self) -> RunResult:
         request = self._request
+        hints = self._policy.setup.start_hints
         try:
-            description = self._policy.describe(request)
             self._integration.events.emit(
                 CoreEventType.RUN_STARTED,
                 status=EventStatus.ACTIVE,
                 data=RunStartedData(
                     outer_loop=request.orchestration_id,
                     input=str(request.input_bundle.root),
-                    max_rounds=description.max_rounds,
-                    expected_roles=description.expected_roles,
+                    max_rounds=hints.max_rounds if hints is not None else None,
+                    expected_roles=hints.expected_roles if hints is not None else (),
                 ),
             )
-            succeeded = dispatch_loop(
+            succeeded = await run_orchestration(
                 request,
                 self._integration,
-                registry=self._registry,
+                self._policy,
                 open_agent_environment=self.open_agent_environment,
-                implementation=self._policy,
             )
         except BaseException as exc:
             self._status = RunStatus.FAILED
@@ -344,7 +349,8 @@ class _LocalRunSession:
         only go stale. `status` reflects `_run_sync`'s own progress
         (`ACTIVE` until it returns or raises), not a re-derivation from state.
         """
-        return self._policy.view(
+        return project_run(
+            self._registration,
             Project.open(self._request.project_root),
             run_id=self._run_id(),
             status=self._status,

@@ -1,24 +1,24 @@
-import json
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
 
 from vibesys import boot_trace
-from vibesys.api import LoopKind, is_agent_run_manifest, open_run_store
+from vibesys.api import open_run_store
+from vibesys.api.agent import is_agent_run_manifest
 from vibesys.backends.cuda import CudaBackend
 from vibesys.backends.cuda.gpu_monitor import GpuInfo
 from vibesys.config import Config
-from vibesys.constants import DomainName
 from vibesys.context import (
-    _resume_configuration_update,
+    RunSetup,
     _RunContext,
     create_candidate_context,
-    create_run_context,
+    open_run_context,
 )
 from vibesys.domains.environment import EnvironmentPatch, NoopEnvironmentHooks
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
@@ -28,13 +28,15 @@ from vibesys.evaluators import (
     resolve_evaluator_package,
     tool_install_root,
 )
-from vibesys.evaluators.input_manifest import WorkspaceSource
+from vibesys.evaluators.input_manifest import WorkspaceInput, WorkspaceSource, load_input_bundle
 from vibesys.events import CoreEventType
 from vibesys.loops.agent.model import AgentRunState
 from vibesys.loops.agent.orchestration import (
+    AgentOrchestrationOptions,
     compare_resume_descriptors,
-    descriptor_from_configuration,
+    descriptor_from_options,
 )
+from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.run import (
     DeviceLease,
@@ -43,8 +45,6 @@ from vibesys.run import (
     RunPaths,
     RunStateNamespace,
 )
-from vibesys.run.agent_round_transaction import agent_round_transaction_factory
-from vibesys.run.legacy_state import LegacyRunState
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vs_agent.api import (
     AgentCapabilities,
@@ -56,13 +56,7 @@ from vs_agent.api import (
 from vs_agent.api.testing import FakeAgentClient
 from vs_agent.contracts import AgentTurnRequest, AgentTurnResult
 from vs_loop_state.api import PlainLoopCursor
-from vs_project.api import (
-    AgentRunConfiguration,
-    OrchestrationRunManifest,
-    Project,
-    RunEnvironmentRecord,
-    RunManifest,
-)
+from vs_project.api import OrchestrationRunManifest, Project
 from vs_sandbox.api import HostResourceAccess, SandboxLifecycle
 
 
@@ -105,43 +99,6 @@ def context_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         "vibesys.context.preflight_profiler_kind",
         lambda kind: ProfilerPreflightResult(kind, True),  # noqa: FBT003
     )
-
-
-def _configuration(max_rounds: int = 1) -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        outer_loop="agent",
-        run_environment=RunEnvironmentRecord(name="local"),
-        inner_loop="multi-agent",
-        interface="inprocess",
-        model="gpt-test",
-        agent_backend="stub",
-        compute_backend="cpu",
-        profiler="none",
-        max_rounds=max_rounds,
-        max_retries_per_round=1,
-        judge_every=1,
-        official_eval_every=1,
-        memory_layout="files",
-    )
-
-
-def test_resume_adopts_objectives_omitted_by_legacy_agent_manifest() -> None:
-    requested = _configuration().model_copy(update={"objectives": ("throughput:max",)})
-    legacy_payload = requested.model_dump(exclude={"objectives"})
-    recorded = AgentRunConfiguration.model_validate(legacy_payload)
-
-    assert "objectives" not in recorded.model_fields_set
-    assert _resume_configuration_update(recorded, requested) == requested
-
-
-def test_resume_does_not_adopt_objectives_for_profile_guided_run() -> None:
-    requested = _configuration().model_copy(
-        update={"outer_loop": "profile-guided", "objectives": ("throughput:max",)}
-    )
-    recorded = AgentRunConfiguration.model_validate(requested.model_dump(exclude={"objectives"}))
-
-    with pytest.raises(ConfigurationError, match="objectives"):
-        _resume_configuration_update(recorded, requested)
 
 
 def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
@@ -198,6 +155,17 @@ command = ["python", "benchmark.py"]
     return task
 
 
+def _options(max_rounds: int = 1) -> AgentOrchestrationOptions:
+    return AgentOrchestrationOptions(
+        interface="inprocess",
+        max_rounds=max_rounds,
+        max_retries_per_round=1,
+        judge_every=1,
+        official_eval_every=1,
+        memory_layout="files",
+    )
+
+
 def _create_context(  # noqa: PLR0913
     project: Path,
     *,
@@ -206,50 +174,59 @@ def _create_context(  # noqa: PLR0913
     evaluator_package_root: Path | None = None,
     exp_name: str = "queue",
     existing: bool = False,
-    configuration: AgentRunConfiguration | None = None,
-    orchestration_v4: bool = False,
-    legacy_configuration_factory=None,  # noqa: ANN001
+    configuration: AgentOrchestrationOptions | None = None,
     objective: str = "Make the queue faster.\n",
     task_name: str | None = None,
     task_root: Path | None = None,
     remote_repo: str | None = None,
     hooks=None,  # noqa: ANN001
     integration: LocalRunIntegration | None = None,
+    config: Config | None = None,
+    profiler_kind: ProfilerKind = ProfilerKind.NONE,
+    workspace_sources: tuple[WorkspaceSource, ...] = (),
+    agent_backend: str | None = "stub",
 ) -> _RunContext:
-    selected_configuration = configuration or _configuration()
-    return create_run_context(
-        config=Config.model_validate({"model": {"name": "gpt-test"}}),
-        exp_name=exp_name,
-        runs_dir=runs_dir,
-        input_path=str(project),
-        accuracy_command="python _evaluator/checker/check.py",
-        benchmark_command="python _evaluator/checker/check.py",
-        task_name=task_name,
-        task_root=task_root,
-        evaluator_path=evaluator,
-        evaluator_package_root=evaluator_package_root,
-        objective=objective,
-        existing=existing,
-        project_configuration=selected_configuration,
-        legacy_configuration_factory=legacy_configuration_factory,
-        orchestration_descriptor=(
-            lambda profiler: descriptor_from_configuration(
-                selected_configuration.model_copy(update={"profiler": profiler.value})
-            )
+    bundle = load_input_bundle(project)
+    updates: dict[str, object] = {}
+    if evaluator is not None:
+        updates["evaluator_path"] = evaluator
+    if evaluator_package_root is not None:
+        updates["evaluator_package_root"] = evaluator_package_root
+    if task_root is not None:
+        updates["task_root"] = task_root
+        updates["task_name"] = task_name
+    if workspace_sources:
+        updates["manifest"] = bundle.manifest.model_copy(
+            update={"workspace": WorkspaceInput(sources=workspace_sources)}
         )
-        if orchestration_v4
-        else None,
-        orchestration_resume=compare_resume_descriptors if orchestration_v4 else None,
-        profiler_kind=ProfilerKind.NONE,
-        profiler_domain=DomainName.GENERIC,
+    bundle = bundle.model_copy(update=updates)
+    request = RunRequest(
+        project_root=project,
+        orchestration=descriptor_from_options(
+            configuration or _options(), orchestration_id="multi-agent"
+        ),
+        config=config or Config.model_validate({"model": {"name": "gpt-test"}}),
+        input_bundle=bundle,
+        objective=objective,
+        exp_name=exp_name,
+        resume=ResumeRef(run_id=exp_name) if existing else None,
+        runs_dir=runs_dir,
+        profiler_kind=profiler_kind,
         run_environment=RunEnvironmentSpec("local"),
-        agent_backend="stub",
-        environment_hooks=hooks or NoopEnvironmentHooks(),
+        agent_backend=agent_backend,
         remote_repo=remote_repo,
-        round_transaction_factory=agent_round_transaction_factory(AgentRunState),
-        run_state_factory=LegacyRunState,
-        integration=integration,
     )
+    setup = RunSetup(
+        state_namespace="agent",
+        state_model=AgentRunState,
+        resume_policy=compare_resume_descriptors,
+        use_default_agent=True,
+    )
+    with patch(
+        "vibesys.context.resolve_domain",
+        return_value=SimpleNamespace(environment_hooks=hooks or NoopEnvironmentHooks()),
+    ):
+        return open_run_context(request, setup, integration or LocalRunIntegration())
 
 
 def _git(project: Path, *args: str) -> str:
@@ -372,7 +349,7 @@ def test_context_assembly_logs_stage_timings(tmp_path):  # noqa: ANN001, ANN201
     """Every assembly span up to and past the experiments gate reaches the run log.
 
     This is a regression guard for the diagnostic used to find where
-    ``create_run_context`` spends time before the TUI's hypothesis screen
+    ``open_run_context`` spends time before the TUI's hypothesis screen
     can leave "loading experiments..." (the gate flips when the second
     ``LocalRunIntegration.attach`` records ``EXPERIMENTS_CHANGED``).
     """
@@ -403,7 +380,7 @@ def test_context_assembly_logs_stage_timings(tmp_path):  # noqa: ANN001, ANN201
 
 
 def test_dispatch_preamble_spans_reach_run_log(tmp_path):  # noqa: ANN001, ANN201
-    """Spans closed before ``create_run_context`` land in the run log, first.
+    """Spans closed before ``open_run_context`` land in the run log, first.
 
     ``_dispatch`` and ``_run_agent`` (main.py) do substantial work before a
     ``RunLogger`` exists and record ``boot_trace`` spans as they go.
@@ -557,49 +534,25 @@ def test_copied_run_provisions_self_contained_project_in_collection(tmp_path):  
     assert _git(project, "status", "--porcelain") == ""
 
 
-def test_resume_reuses_project_and_run_id_and_only_increases_limit(tmp_path):  # noqa: ANN001, ANN201
+def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path):  # noqa: ANN001, ANN201
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
         run_id = first.run_id
 
-    with _create_context(
-        project,
-        evaluator=evaluator,
-        exp_name=run_id,
-        existing=True,
-        configuration=_configuration(max_rounds=2),
-    ) as resumed:
-        assert resumed.project_root == project
-        assert resumed.run_id == run_id
-
-    stored = Project.open(project).state.load_run(run_id)
-    assert isinstance(stored, RunManifest)
-    assert isinstance(stored.configuration, AgentRunConfiguration)
-    assert stored.configuration.max_rounds == 2
-    assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
-
-
-def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path):  # noqa: ANN001, ANN201
-    project = tmp_path / "queue"
-    evaluator = _write_project(project)
-    with _create_context(project, evaluator=evaluator, orchestration_v4=True) as first:
-        run_id = first.run_id
-
     stored = Project.open(project).state.load_run(run_id)
     assert isinstance(stored, OrchestrationRunManifest)
-    assert stored.orchestration.id == "agent"
+    assert stored.orchestration.id == "multi-agent"
     assert stored.orchestration.options["max_rounds"] == 1
     assert is_agent_run_manifest(stored)
-    assert open_run_store(Project.open(project)).get_run(run_id).loop == LoopKind.AGENT
+    assert open_run_store(Project.open(project)).get_run(run_id).loop == "multi-agent"
 
     with _create_context(
         project,
         evaluator=evaluator,
         exp_name=run_id,
         existing=True,
-        configuration=_configuration(max_rounds=2),
-        orchestration_v4=True,
+        configuration=_options(max_rounds=2),
     ):
         pass
 
@@ -607,86 +560,6 @@ def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path):  # noqa: ANN00
     assert isinstance(resumed, OrchestrationRunManifest)
     assert resumed.orchestration.options["max_rounds"] == 2
     assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
-
-
-def test_legacy_configuration_factory_runs_only_for_v3_resume(tmp_path):  # noqa: ANN001, ANN201
-    project = tmp_path / "queue"
-    evaluator = _write_project(project)
-
-    def unexpected_legacy_configuration(profiler):  # noqa: ANN001, ANN202
-        pytest.fail(f"v4 requested legacy configuration for {profiler}")
-
-    with _create_context(
-        project,
-        evaluator=evaluator,
-        orchestration_v4=True,
-        legacy_configuration_factory=unexpected_legacy_configuration,
-    ) as first:
-        run_id = first.run_id
-    with _create_context(
-        project,
-        evaluator=evaluator,
-        exp_name=run_id,
-        existing=True,
-        orchestration_v4=True,
-        legacy_configuration_factory=unexpected_legacy_configuration,
-    ):
-        pass
-
-    legacy_project = tmp_path / "legacy"
-    legacy_evaluator = _write_project(legacy_project)
-    with _create_context(legacy_project, evaluator=legacy_evaluator) as first:
-        legacy_run_id = first.run_id
-    requested_profilers = []
-
-    def legacy_configuration(profiler):  # noqa: ANN001, ANN202
-        requested_profilers.append(profiler)
-        return _configuration(max_rounds=2)
-
-    with _create_context(
-        legacy_project,
-        evaluator=legacy_evaluator,
-        exp_name=legacy_run_id,
-        existing=True,
-        legacy_configuration_factory=legacy_configuration,
-    ):
-        pass
-    assert requested_profilers == [ProfilerKind.NONE]
-
-
-def test_resume_migrates_legacy_objectives_with_dirty_candidate(tmp_path):  # noqa: ANN001, ANN201
-    project = tmp_path / "queue"
-    evaluator = _write_project(project)
-    with _create_context(project, evaluator=evaluator) as first:
-        run_id = first.run_id
-
-    state = Project.open(project).state
-    manifest_path = state._run_manifest_path(run_id)  # noqa: SLF001  # migration fixture
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    payload["configuration"].pop("objectives")
-    manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    _git(project, "add", str(manifest_path.relative_to(project)))
-    _git(project, "commit", "-m", "simulate legacy run manifest")
-    candidate = project / "queue.py"
-    candidate.write_text(candidate.read_text() + "\n# interrupted edit\n")
-
-    requested = _configuration().model_copy(update={"objectives": ("total_ops_per_sec:max",)})
-    with _create_context(
-        project,
-        evaluator=evaluator,
-        exp_name=run_id,
-        existing=True,
-        configuration=requested,
-    ):
-        pass
-
-    stored = state.load_run(run_id)
-    assert isinstance(stored, RunManifest)
-    assert isinstance(stored.configuration, AgentRunConfiguration)
-    assert stored.configuration.objectives == ("total_ops_per_sec:max",)
-    assert "# interrupted edit" in candidate.read_text()
-    assert "queue.py" in _git(project, "status", "--porcelain")
-    assert "# interrupted edit" not in _git(project, "show", "HEAD:queue.py")
 
 
 def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path):  # noqa: ANN001, ANN201
@@ -829,27 +702,13 @@ def test_direct_run_rejects_unmaterialized_workspace_source(tmp_path):  # noqa: 
     )
 
     with pytest.raises(ConfigurationError, match="pass --runs-dir"):
-        create_run_context(
-            config=Config.model_validate({"model": {"name": "gpt-test"}}),
-            exp_name="queue",
-            runs_dir=None,
-            input_path=str(project),
-            accuracy_command="true",
-            benchmark_command="true",
-            workspace_sources=(source,),
-            evaluator_path=evaluator,
-            project_configuration=_configuration(),
-            profiler_kind=ProfilerKind.NONE,
-            profiler_domain=DomainName.GENERIC,
-            run_environment=RunEnvironmentSpec("local"),
-            agent_backend="stub",
-        )
+        _create_context(project, evaluator=evaluator, workspace_sources=(source,))
 
 
 def test_omnigent_accepts_active_profiler_configuration(tmp_path):  # noqa: ANN001, ANN201
     project = tmp_path / "queue"
     evaluator = _write_project(project)
-    configuration = _configuration().model_copy(
+    configuration = _options().model_copy(
         update={
             "agent_backend": "cli",
             "agent_driver": "omnigent",
@@ -858,25 +717,18 @@ def test_omnigent_accepts_active_profiler_configuration(tmp_path):  # noqa: ANN0
         }
     )
 
-    with create_run_context(
+    with _create_context(
+        project,
+        evaluator=evaluator,
+        configuration=configuration,
         config=Config.model_validate(
             {
                 "model": {"name": "gpt-test"},
                 "agent": {"backend": "cli", "driver": "omnigent", "cli_provider": "codex"},
             }
         ),
-        exp_name="queue",
-        runs_dir=None,
-        input_path=str(project),
-        accuracy_command="python _evaluator/checker/check.py",
-        benchmark_command="python _evaluator/checker/check.py",
-        evaluator_path=evaluator,
-        project_configuration=configuration,
         profiler_kind=ProfilerKind.MACOS_CPU,
-        profiler_domain=DomainName.GENERIC,
-        run_environment=RunEnvironmentSpec("local"),
-        round_transaction_factory=agent_round_transaction_factory(AgentRunState),
-        run_state_factory=LegacyRunState,
+        agent_backend=None,
     ) as context:
         assert context.profiler_kind is ProfilerKind.MACOS_CPU
 

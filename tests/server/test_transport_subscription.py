@@ -57,7 +57,7 @@ def _round_log(count: int, *, with_threads: bool = False) -> list[RunEvent]:
         _event(
             1,
             EventType.RUN_STARTED,
-            data=RunStartedData(outer_loop="agent", input="objective", max_rounds=24),
+            data=RunStartedData(outer_loop="single-agent", input="objective"),
         )
     ]
     if with_threads:

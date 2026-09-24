@@ -13,6 +13,11 @@ from server.execution import ExecutionTracker
 from server.integration import RunIntegrationAdapter
 from server.journal import EventJournal
 from server.read_model import RunInspector
+from vibesys.evaluators.metrics import MetricSpace
+from vibesys.loops.agent.orchestration import (
+    AgentOrchestrationOptions,
+    descriptor_from_options,
+)
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.run_control import RunControlChannel
 
@@ -23,7 +28,7 @@ if TYPE_CHECKING:
     from server.chat.factory import ChatAgentBuilder
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunView
-    from vs_project.api import Project
+    from vs_project.api import OrchestrationDescriptor, Project
 
 
 class _ControlBridge:
@@ -50,6 +55,23 @@ class _ControlBridge:
 
     def stop(self) -> None:
         self._channel.request_stop()
+
+
+def agent_descriptor(
+    *,
+    metric_space: MetricSpace | None = None,
+) -> OrchestrationDescriptor:
+    """Build the one active manifest descriptor for server agent fixtures."""
+    options = AgentOrchestrationOptions(
+        interface="inprocess",
+        max_rounds=3,
+        max_retries_per_round=1,
+        judge_every=1,
+        official_eval_every=1,
+        memory_layout="files",
+        metric_space=metric_space or MetricSpace(),
+    )
+    return descriptor_from_options(options, orchestration_id="single-agent")
 
 
 @dataclass(frozen=True)

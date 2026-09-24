@@ -194,15 +194,23 @@ class MultiAgentAttemptPolicy:
         state.official_reason = reason
         return AttemptDecision.OFFICIAL
 
-    def run_attempt(self, request: AttemptRequest, state: AttemptState) -> AttemptDecision:
-        """Run implementer, cadence review, judge, then validation."""
-        if not self._implement(request, state):
-            return AttemptDecision.RETRY
+    def implement(self, request: AttemptRequest, state: AttemptState) -> bool:
+        """Run one paid implementer turn and report whether it was parseable."""
+        return self._implement(request, state)
+
+    def review(self, request: AttemptRequest, state: AttemptState) -> AttemptDecision:
+        """Apply cadence, independent judge, and local validation."""
         if not self._needs_review(request, state):
             return AttemptDecision.FINISH
         if self._judge(request, state) is Verdict.PASS:
             return self._passed_review(request, state)
         return AttemptDecision.RETRY
+
+    def run_attempt(self, request: AttemptRequest, state: AttemptState) -> AttemptDecision:
+        """Compatibility for callers that still execute a whole attempt."""
+        if not self.implement(request, state):
+            return AttemptDecision.RETRY
+        return self.review(request, state)
 
     def project_performance(
         self, request: AttemptRequest, state: AttemptState

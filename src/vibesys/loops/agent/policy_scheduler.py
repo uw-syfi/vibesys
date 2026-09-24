@@ -6,8 +6,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.loops.agent.policy_ports import ProfileEffect
-from vibesys.loops.agent.policy_profile import ProfileOutcomeInput, ProfilePreparation
-from vibesys.loops.agent.policy_rounds import RoundPreparationRequest
+from vibesys.loops.agent.policy_profile import (
+    ProfileOutcomeInput,
+    ProfilePolicy,
+    ProfilePreparation,
+)
+from vibesys.loops.agent.policy_rounds import RoundPreparation, RoundPreparationRequest
 from vibesys.loops.agent.policy_support import (
     _FAILED_HYPOTHESIS_OUTCOMES,
     _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW,
@@ -23,11 +27,10 @@ from vibesys.loops.agent.policy_support import (
 if TYPE_CHECKING:
     from vibesys.loops.agent.hypothesis_controller import (
         HypothesisEngine,
-        ProfileGuidanceOutcome,
         ProfileGuidanceView,
     )
     from vibesys.loops.agent.model import AgentRunState, Hypothesis
-    from vibesys.loops.agent.policy_attempts import AttemptState
+    from vibesys.loops.agent.policy_attempts import AttemptPolicy, AttemptState
     from vibesys.schemas import OrchestratorPlan, ProfilerSummary, SingleAgentRoundResponse
     from vs_loop_state.api import RoundHistory, RoundRecord
 
@@ -80,42 +83,6 @@ class SchedulerEffects(ProfileEffect, Protocol):
         ...
 
 
-class RoundSelectionPolicy(Protocol):
-    """Flow decisions used before an attempt begins."""
-
-    def prepare_profile(
-        self, request: ProfilePreparation, /
-    ) -> tuple[HypothesisEngine, AgentRunState]:
-        """Prepare outer profile guidance before planning."""
-        ...
-
-    def profiler_summary(self, request: RoundPreparationRequest, /) -> ProfilerSummary | None:
-        """Return fresh or carried profiler evidence."""
-        ...
-
-    def official_reason(self, reason: str | None, engine: HypothesisEngine, /) -> str | None:
-        """Adjust the planned official evaluation reason."""
-        ...
-
-
-class TerminalPolicy(Protocol):
-    """Flow decisions used when a completed round advances its hypothesis."""
-
-    def keeps_hypothesis_active(self, state: AttemptState, continuation_rounds: int, /) -> bool:
-        """Decide whether the implementer keeps its current claim."""
-        ...
-
-    def terminal_success_needs_parent_choice(
-        self, state: AttemptState, continuation_rounds: int, /
-    ) -> bool:
-        """Decide whether the next designer must select a parent."""
-        ...
-
-    def profile_outcome(self, request: ProfileOutcomeInput, /) -> ProfileGuidanceOutcome | None:
-        """Return profile controller evidence for this completed round."""
-        ...
-
-
 @dataclass(frozen=True)
 class RoundSelection:
     """State and plan selected for one framework round."""
@@ -142,7 +109,8 @@ class RoundSelectionRequest:
 
 
 def select_round(
-    flow: RoundSelectionPolicy,
+    profile: ProfilePolicy,
+    preparation: RoundPreparation,
     effects: SchedulerEffects,
     request: RoundSelectionRequest,
 ) -> RoundSelection:
@@ -154,7 +122,7 @@ def select_round(
     round_number = request.round_number
     hypothesis = state.active_hypothesis
     if hypothesis is None:
-        engine, state = flow.prepare_profile(
+        engine, state = profile.prepare(
             ProfilePreparation(
                 effects=effects,
                 engine=engine,
@@ -162,7 +130,7 @@ def select_round(
                 round_number=round_number,
             )
         )
-        profiler_summary = flow.profiler_summary(
+        profiler_summary = preparation.profiler_summary(
             RoundPreparationRequest(
                 round_number=round_number,
                 records=records,
@@ -225,7 +193,7 @@ def select_round(
         state=state,
         hypothesis=hypothesis,
         plan=plan,
-        planned_official_reason=flow.official_reason(planned_official_reason, engine),
+        planned_official_reason=profile.official_reason(planned_official_reason, engine),
     )
 
 
@@ -285,14 +253,16 @@ class TerminalTransition:
     exhaustion_feedback: str | None
 
 
-def transition_round(flow: TerminalPolicy, request: TerminalRequest) -> TerminalTransition:
+def transition_round(
+    attempts: AttemptPolicy, profile: ProfilePolicy, request: TerminalRequest
+) -> TerminalTransition:
     """Advance the active claim and derive the next designer handoff."""
     attempt = request.attempt
     passed = attempt.passed
     feedback = attempt.feedback
     implementation = attempt.implementation
     next_active = request.hypothesis.clone()
-    if flow.keeps_hypothesis_active(attempt, next_active.continuation_rounds):
+    if attempts.keeps_hypothesis_active(attempt, next_active.continuation_rounds):
         next_active.feedback = feedback if request.reviewed and not passed else None
         assert implementation is not None  # noqa: S101  # policy retains implementer lease
         next_active.next_step = implementation.next_step
@@ -320,7 +290,7 @@ def transition_round(flow: TerminalPolicy, request: TerminalRequest) -> Terminal
     else:
         next_active.feedback = None
         next_active.next_step = implementation.next_step if implementation is not None else None
-    profile_outcome = flow.profile_outcome(
+    profile_outcome = profile.outcome(
         ProfileOutcomeInput(
             request.record.round_number,
             passed,
@@ -349,7 +319,7 @@ def transition_round(flow: TerminalPolicy, request: TerminalRequest) -> Terminal
         carry.regression_info = None
     elif passed:
         carry.exhaustion_info = None
-        if flow.terminal_success_needs_parent_choice(
+        if attempts.terminal_success_needs_parent_choice(
             attempt, request.hypothesis.continuation_rounds
         ):
             carry.regression_info = _terminal_workspace_notice(records)

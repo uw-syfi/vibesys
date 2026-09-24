@@ -8,17 +8,9 @@ from typing import Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.orchestration import (
-    OrchestrationResumeDecision,
-    ResumeConfigSnapshot,
-    ResumeProjection,
-)
-from vs_project.api import (
-    EvolveRunConfiguration,
-    OrchestrationDescriptor,
-    OrchestrationRunManifest,
-    RunEnvironmentRecord,
-)
+from vibesys.evaluators.metrics import MetricSpace
+from vibesys.orchestration import OrchestrationResumeDecision
+from vs_project.api import OrchestrationDescriptor
 
 PortableText = Annotated[str, Field(min_length=1, max_length=256)]
 
@@ -33,19 +25,7 @@ class EvolveOptions(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    model: PortableText | None = None
-    agent_backend: PortableText
-    agent_driver: PortableText | None = None
-    cli_provider: PortableText | None = None
-    cli_timeout: Annotated[int, Field(gt=0)] | None = None
-    compute_backend: PortableText
-    profiler: PortableText | None = None
     modality: PortableText | None = None
-    default_reasoning_effort: PortableText | None = None
-    outer_model: PortableText | None = None
-    outer_reasoning_effort: PortableText | None = None
-    inner_model: PortableText | None = None
-    inner_reasoning_effort: PortableText | None = None
     max_generations: Annotated[int, Field(gt=0)]
     children_per_generation: Annotated[int, Field(gt=0)]
     k_top_inspirations: Annotated[int, Field(ge=0)]
@@ -62,7 +42,7 @@ class EvolveOptions(BaseModel):
     bootstrap_max_attempts: Annotated[int, Field(gt=0)]
     keep_deployments: bool
     max_parallelism: Annotated[int, Field(gt=0)]
-    objectives: tuple[PortableText, ...] = ()
+    metric_space: MetricSpace = Field(default_factory=MetricSpace)
 
     @model_validator(mode="after")
     def _validate_search_policy_settings(self) -> Self:
@@ -80,41 +60,10 @@ class EvolveOptions(BaseModel):
         return self
 
 
-def descriptor_from_configuration(
-    configuration: EvolveRunConfiguration, *, profiler: str
-) -> OrchestrationDescriptor:
-    """Adapt a version 3 fixture to the owner-native descriptor builder."""
-    values = configuration.model_dump(exclude={"outer_loop", "run_environment"})
-    values["profiler"] = profiler
-    options = EvolveOptions.model_validate_json(
-        json.dumps(values),
-        strict=True,
-    )
-    return descriptor_from_options(options, profiler=profiler)
-
-
-def descriptor_from_options(options: EvolveOptions, *, profiler: str) -> OrchestrationDescriptor:
-    """Persist resolved evolve options without constructing version 3 settings."""
-    resolved = options.model_copy(update={"profiler": profiler})
+def descriptor_from_options(options: EvolveOptions) -> OrchestrationDescriptor:
+    """Persist the validated evolutionary-search settings."""
     return OrchestrationDescriptor(
-        id="evolve", config_version=1, options=resolved.model_dump(mode="json")
-    )
-
-
-def legacy_configuration_from_options(
-    options: EvolveOptions,
-    *,
-    run_environment: RunEnvironmentRecord,
-    profiler: str,
-) -> EvolveRunConfiguration:
-    """Construct version 3 settings only when resuming an old run."""
-    return EvolveRunConfiguration.model_validate(
-        {
-            **options.model_dump(),
-            "outer_loop": "evolve",
-            "run_environment": run_environment,
-            "profiler": profiler,
-        }
+        id="evolve", config_version=1, options=options.model_dump(mode="json")
     )
 
 
@@ -171,38 +120,3 @@ def compare_resume(
     if new.max_generations == old.max_generations:
         return OrchestrationResumeDecision(descriptor=None)
     return OrchestrationResumeDecision(descriptor=requested, requires_clean_workspace=True)
-
-
-def resume_projection(manifest: OrchestrationRunManifest) -> ResumeProjection:
-    """Project validated evolve options directly into CLI resume settings."""
-    options = options_from_descriptor(manifest.orchestration)
-    return ResumeProjection(
-        orchestration_id="evolve",
-        run_environment=manifest.run_environment,
-        config=ResumeConfigSnapshot.model_validate(options.model_dump()),
-        cli_values={
-            "agent_backend": options.agent_backend,
-            "cli_provider": options.cli_provider,
-            "backend": options.compute_backend,
-            "profiler": options.profiler,
-            "modality": options.modality,
-            "children_per_generation": options.children_per_generation,
-            "k_top_inspirations": options.k_top_inspirations,
-            "k_random_inspirations": options.k_random_inspirations,
-            "selection_temperature": options.selection_temperature,
-            "seed": options.seed,
-            "search_policy": options.search_policy,
-            "openevolve_population_size": options.openevolve_population_size,
-            "openevolve_archive_size": options.openevolve_archive_size,
-            "openevolve_num_islands": options.openevolve_num_islands,
-            "openevolve_migration_interval": options.openevolve_migration_interval,
-            "openevolve_migration_rate": options.openevolve_migration_rate,
-            "frontier_bias": options.frontier_bias,
-            "bootstrap_max_attempts": options.bootstrap_max_attempts,
-            "keep_deployments": options.keep_deployments,
-            "max_parallelism": options.max_parallelism,
-            "objective": options.objectives,
-        },
-        budget_destination="max_generations",
-        budget_value=options.max_generations,
-    )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.loops.agent.hypothesis_controller import HypothesisEngine
 from vibesys.loops.agent.model import AgentRunState
 from vibesys.loops.agent.policy_attempts import (
@@ -19,7 +20,6 @@ from vibesys.loops.agent.policy_profile import ProfileGuidedPolicy, ProfilePrepa
 from vibesys.loops.agent.policy_rounds import RoundPreparationRequest, RoundPreparationServices
 from vibesys.loops.agent.policy_single import SingleAgentAttemptPolicy
 from vibesys.loops.agent.policy_support import _CarryOver, _ImplementerAttempt
-from vibesys.loops.gates import FrameworkBenchmarkOutcome
 from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,

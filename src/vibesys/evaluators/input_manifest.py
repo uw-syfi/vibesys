@@ -19,6 +19,18 @@ if TYPE_CHECKING:
     from vs_project.api import Project, TaskDirectory
 
 MANIFEST_NAME = "vibesys.input.toml"
+PROTOCOL_OUTPUT_FLAG = "--vs-output"
+
+
+def benchmark_output_argument(
+    result: BenchmarkResult | None, result_protocol: Literal[2] | None
+) -> str | None:
+    """Return the evaluator-owned output flag for a declared benchmark contract."""
+    if result is not None:
+        return result.json_argument
+    if result_protocol is not None:
+        return PROTOCOL_OUTPUT_FLAG
+    return None
 
 
 class InputCommand(BaseModel):
@@ -496,6 +508,11 @@ class InputBundle(BaseModel):
     def benchmark_result_protocol(self) -> Literal[2] | None:
         """Return the evaluator result protocol version the benchmark speaks."""
         return self.manifest.benchmark.result_protocol
+
+    @property
+    def benchmark_output_argument(self) -> str | None:
+        """Return the output flag expected by this bundle's trusted benchmark."""
+        return benchmark_output_argument(self.benchmark_result, self.benchmark_result_protocol)
 
     @property
     def provisions_trace_telemetry(self) -> bool:

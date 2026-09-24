@@ -8,6 +8,7 @@ behaviour of the drain-and-perf-eval outer loop in
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,11 +19,17 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-from vibesys.constants import DomainName
+from vibesys.config import as_config
+from vibesys.constants import DEFAULT_COMPUTE_BACKEND
 from vibesys.errors import ConfigurationError
-from vibesys.loops.plain.loop import PlainLoopState
-from vibesys.loops.plain.loop import run_plain_loop as _run_plain_loop
+from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.loops.plain.entrypoint import PlainOrchestrator
+from vibesys.loops.plain.orchestration import PlainOrchestrationOptions, descriptor_from_options
 from vibesys.loops.plain.state import PlainStateStore
+from vibesys.orchestration.request import ResumeRef, RunRequest
+from vibesys.orchestration.runner import run_orchestration
+from vibesys.profilers import ProfilerKind
+from vibesys.run.integration import LocalRunIntegration
 from vibesys.schemas import (
     IssueImplementerResponse,
     IssueJudgeResponse,
@@ -41,9 +48,42 @@ from vs_project.api import OrchestrationRunManifest, Project, RunEnvironmentReco
 # ---------------------------------------------------------------------------
 
 
-def run_plain_loop(**kwargs):  # noqa: ANN003, ANN201  # tracked: #288
-    """Run the plain loop with this module's LLM-serving fixture domain."""
-    return _run_plain_loop(domain=DomainName.LLM_SERVING, **kwargs)
+def _run_plain_request(**kwargs) -> bool:  # noqa: ANN003  # tracked: #288
+    """Build the canonical descriptor request for an issue-loop fixture."""
+    config = as_config(kwargs["config"])
+    bundle = load_input_bundle(Path(kwargs["input_path"]))
+    profiler = kwargs.get("profiler_kind", ProfilerKind.AUTO)
+    backend = kwargs.get("backend", DEFAULT_COMPUTE_BACKEND)
+    options = PlainOrchestrationOptions(
+        max_rounds=kwargs.get("max_rounds", 5),
+        max_attempts_per_issue=kwargs.get("max_attempts_per_issue", 3),
+        max_issues_per_perf_eval=kwargs.get("max_issues_per_perf_eval", 3),
+    )
+    descriptor = descriptor_from_options(options)
+    request = RunRequest(
+        project_root=bundle.root,
+        orchestration=descriptor,
+        config=config,
+        input_bundle=bundle,
+        exp_name=kwargs["exp_name"],
+        runs_dir=kwargs.get("runs_dir"),
+        resume=ResumeRef(run_id=kwargs["exp_name"]) if kwargs.get("existing") else None,
+        debug=kwargs.get("debug", False),
+        profiler_kind=profiler,
+        run_environment=kwargs.get("run_environment"),
+        agent_backend=kwargs.get("agent_backend"),
+        cli_provider=kwargs.get("cli_provider"),
+        backend=backend,
+    )
+
+    async def execute() -> bool:
+        integration = LocalRunIntegration()
+        try:
+            return await run_orchestration(request, integration, PlainOrchestrator(descriptor))
+        finally:
+            integration.close()
+
+    return asyncio.run(execute())
 
 
 def _make_impl_resp(issue_id: int, summary: str = "Done.") -> IssueImplementerResponse:
@@ -111,7 +151,7 @@ def _plain_local_dir(project_dir: Path) -> Path:
 
 @pytest.fixture
 def ref_file(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    """Create a temporary reference file for run_plain_loop tests."""
+    """Create a temporary reference file for _run_plain_request tests."""
     project = tmp_path / "input"
     project.mkdir()
     f = project / "ref.py"
@@ -154,7 +194,7 @@ def test_bootstrap_creates_initial_feature_issue_on_first_run(  # noqa: ANN201  
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        result = run_plain_loop(
+        result = _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -201,7 +241,7 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
     mock_build_runner.return_value = fake
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -223,7 +263,7 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
     )  # only perf_eval — nothing open to drain
     mock_build_runner.return_value = fake2
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=exp_dir.name,
             runs_dir=tmp_path / "exp_env",
@@ -232,7 +272,6 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
             existing=True,
-            resume_state=PlainLoopState(bootstrap_done=True),
         )
 
     # Issue count must not increase — no second bootstrap.
@@ -256,7 +295,7 @@ def test_v4_plain_budget_increase_requires_clean_workspace(
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
     mock_build_runner.return_value = fake
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -279,13 +318,12 @@ def test_v4_plain_budget_increase_requires_clean_workspace(
         "benchmark_command": "uv run python benchmark/benchmark.py",
         "max_rounds": 2,
         "existing": True,
-        "resume_state": PlainLoopState(bootstrap_done=True),
     }
     with (
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
         pytest.raises(ConfigurationError, match="commit or discard pending project changes"),
     ):
-        run_plain_loop(**resume)
+        _run_plain_request(**resume)
     recorded = Project.open(exp_dir).state.load_run(run_id)
     assert isinstance(recorded, OrchestrationRunManifest)
     assert recorded.orchestration.options["max_rounds"] == 1
@@ -296,7 +334,7 @@ def test_v4_plain_budget_increase_requires_clean_workspace(
     resumed.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
     mock_build_runner.return_value = resumed
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(**resume)
+        _run_plain_request(**resume)
     updated = Project.open(exp_dir).state.load_run(run_id)
     assert isinstance(updated, OrchestrationRunManifest)
     assert updated.orchestration.options["max_rounds"] == 2
@@ -317,7 +355,7 @@ def test_judge_pass_closes_issue(mock_build_runner, mock_backend, ref_file, tmp_
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -355,7 +393,7 @@ def test_judge_fail_increments_attempts_and_keeps_open(  # noqa: ANN201  # track
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        result = run_plain_loop(
+        result = _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -394,7 +432,7 @@ def test_issue_blocks_after_max_attempts_exhausted(  # noqa: ANN201  # tracked: 
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        result = run_plain_loop(
+        result = _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -452,8 +490,7 @@ def test_judge_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
     """The judge phase must receive issue-tracker access scoped to
     creator='judge', cap=1, allowed_types={BUG}.
 
-    The PlainLoopAgentClient wrapper injects ``mcp_servers`` (an
-    MCPServerSpec) for the inner runner.
+    The plain turn helper passes an MCPServerSpec directly to AgentClient.
     """
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
@@ -462,7 +499,7 @@ def test_judge_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -500,7 +537,7 @@ def test_perf_eval_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #
     creator='perf_eval', cap=max_issues_per_perf_eval, and the
     BUG/FEATURE/PERF allowed-types set.
 
-    Injected as ``mcp_servers`` (see PlainLoopAgentClient).
+    Passed as ``mcp_servers`` by the plain turn helper.
     """
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
@@ -509,7 +546,7 @@ def test_perf_eval_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -569,7 +606,7 @@ def test_judge_phase_calls_store_reload_after_invoke(  # noqa: ANN201  # tracked
             tracking_reload,
         ),
     ):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -607,7 +644,7 @@ def test_implementer_invoke_has_no_tracker_kwargs(  # noqa: ANN201  # tracked: #
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -653,7 +690,7 @@ def test_perf_eval_runs_after_drain_complete(  # noqa: ANN201  # tracked: #288
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -702,7 +739,7 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
     mock_build_runner.return_value = fake
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -723,7 +760,7 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
     fake2.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
     mock_build_runner.return_value = fake2
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        result = run_plain_loop(
+        result = _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=exp_dir.name,
             runs_dir=tmp_path / "exp_env",
@@ -732,7 +769,6 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
             existing=True,
-            resume_state=PlainLoopState(bootstrap_done=True),
         )
 
     assert result is True
@@ -768,7 +804,7 @@ def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #2
     )
     mock_build_runner.return_value = fake
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        result1 = run_plain_loop(
+        result1 = _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -795,7 +831,7 @@ def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #2
     fake2.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
     mock_build_runner.return_value = fake2
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        result2 = run_plain_loop(
+        result2 = _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name=exp_dir.name,
             runs_dir=tmp_path / "exp_env",
@@ -805,7 +841,6 @@ def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #2
             max_rounds=1,
             max_attempts_per_issue=2,
             existing=True,
-            resume_state=PlainLoopState(bootstrap_done=True),
         )
     assert result2 is True
 
@@ -840,7 +875,7 @@ def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(  # n
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        result = run_plain_loop(
+        result = _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -875,7 +910,7 @@ def test_state_json_written_with_bootstrap_done_after_run(  # noqa: ANN201  # tr
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -921,7 +956,7 @@ def test_issue_loop_writes_per_issue_markdown_via_callback(  # noqa: ANN201  # t
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
@@ -991,7 +1026,7 @@ def test_implementer_retry_user_prompt_includes_prior_judge_feedback(  # noqa: A
     mock_build_runner.return_value = fake
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        run_plain_loop(
+        _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",

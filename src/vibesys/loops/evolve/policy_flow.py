@@ -10,36 +10,9 @@ from vibesys.loops.evolve.population import Individual
 if TYPE_CHECKING:
     import random
 
+    from vibesys.evaluators.metrics import MetricSpace
     from vibesys.loops.evolve.population import Population
     from vibesys.loops.evolve.search_policy import SearchPolicy, SearchSelection
-    from vibesys.loops.metrics import MetricSpace
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateIdentity:
-    """Search relationships retained with an evaluated candidate."""
-
-    parent_id: int
-    inspiration_ids: list[int]
-    policy_parent_id: str | None = None
-    target_island: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateJudgement:
-    """The judge's decision and feedback, before framework gates run."""
-
-    passed: bool
-    feedback: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateFitness:
-    """Fitness measured after all mandatory gates pass."""
-
-    metric: float | None
-    unit: str | None
-    metrics: dict[str, float]
 
 
 @dataclass
@@ -57,75 +30,6 @@ class CandidateOutcome:
     metrics: dict[str, float] = field(default_factory=dict)
     policy_parent_id: str | None = None
     target_island: int | None = None
-
-
-class CandidateEffects(Protocol):
-    """Side effects needed to evaluate one candidate in its own environment."""
-
-    def mutate(self) -> str:
-        """Run the mutator and return its summary."""
-        ...
-
-    def judge(self) -> CandidateJudgement:
-        """Review the current candidate."""
-        ...
-
-    def run_gates(self) -> str | None:
-        """Run mandatory gates and return failure feedback, if any."""
-        ...
-
-    def measure(self) -> CandidateFitness:
-        """Measure fitness after all gates pass."""
-        ...
-
-    def snapshot(self) -> str | None:
-        """Commit the passing candidate and return its revision."""
-        ...
-
-    def close(self) -> None:
-        """Release candidate resources on every exit path."""
-        ...
-
-
-def evaluate_candidate(effects: CandidateEffects, identity: CandidateIdentity) -> CandidateOutcome:
-    """Apply judge and framework gates before measuring or retaining a candidate."""
-    try:
-        summary = effects.mutate()
-        judgement = effects.judge()
-        if not judgement.passed:
-            return _failed(identity, summary, judgement.feedback)
-        feedback = effects.run_gates()
-        if feedback is not None:
-            return _failed(identity, summary, feedback)
-        fitness = effects.measure()
-        commit = effects.snapshot()
-        return CandidateOutcome(
-            passed=True,
-            parent_id=identity.parent_id,
-            inspiration_ids=identity.inspiration_ids,
-            summary=summary,
-            feedback=judgement.feedback,
-            commit=commit,
-            perf_metric=fitness.metric,
-            perf_unit=fitness.unit,
-            metrics=fitness.metrics,
-            policy_parent_id=identity.policy_parent_id,
-            target_island=identity.target_island,
-        )
-    finally:
-        effects.close()
-
-
-def _failed(identity: CandidateIdentity, summary: str, feedback: str | None) -> CandidateOutcome:
-    return CandidateOutcome(
-        passed=False,
-        parent_id=identity.parent_id,
-        inspiration_ids=identity.inspiration_ids,
-        summary=summary,
-        feedback=feedback,
-        policy_parent_id=identity.policy_parent_id,
-        target_island=identity.target_island,
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,11 +160,6 @@ class EvolveSearch:
         """Resume only when a passing seed already exists."""
         return not self.population.passed
 
-    def complete_generation(self, generation: int, effects: SearchEffects) -> None:
-        """Persist generation-level search state after all offspring are recorded."""
-        self.search_policy.finish_generation(generation)
-        effects.checkpoint(f"evolve: complete generation {generation}")
-
 
 def parallel_enabled(max_parallelism: int, *, supported: bool) -> bool:
     """Allow concurrent evaluation only when the environment supports it."""
@@ -273,119 +172,3 @@ class BootstrapAttemptResult:
 
     seed: Individual | None
     message: str
-
-
-class BootstrapEffects(Protocol):
-    """One bootstrap attempt and its run-scoped reporting effects."""
-
-    def begin(self, max_attempts: int) -> None:
-        """Open bootstrap logs before the first attempt."""
-        ...
-
-    def attempt(self, number: int, max_attempts: int) -> BootstrapAttemptResult:
-        """Evaluate and save one attempt without checkpointing it."""
-        ...
-
-    def checkpoint(self, label: str) -> None:
-        """Commit the just-recorded attempt's durable state."""
-        ...
-
-    def report(self, message: str) -> None:
-        """Report an attempt after its checkpoint succeeds."""
-        ...
-
-    def exhausted(self, max_attempts: int) -> None:
-        """Report that the budget produced no passing seed."""
-        ...
-
-
-def retry_bootstrap(max_attempts: int, effects: BootstrapEffects) -> Individual | None:
-    """Retry bootstrap until one recorded seed passes or the budget is exhausted."""
-    effects.begin(max_attempts)
-    for number in range(1, max_attempts + 1):
-        result = effects.attempt(number, max_attempts)
-        label = (
-            f"evolve: record bootstrap seed {result.seed.id}"
-            if result.seed is not None
-            else f"evolve: record failed bootstrap {number}"
-        )
-        effects.checkpoint(label)
-        effects.report(result.message)
-        if result.seed is not None:
-            return result.seed
-    effects.exhausted(max_attempts)
-    return None
-
-
-class EvolveRunEffects(Protocol):
-    """Concrete work and reporting required by the run-level scheduler."""
-
-    def bootstrap(self) -> Individual | None:
-        """Establish and record the first passing seed in the shared population."""
-        ...
-
-    def bootstrap_failed(self) -> None:
-        """Report exhausted bootstrap attempts."""
-        ...
-
-    def parallel_unsupported(self, max_parallelism: int) -> None:
-        """Report a requested concurrency level that cannot be used."""
-        ...
-
-    def begin_generation(
-        self, generation: int, max_generations: int, population_size: int, passed_count: int
-    ) -> None:
-        """Open generation-scoped logs and progress."""
-        ...
-
-    def run_serial(self, generation: int) -> None:
-        """Evaluate one generation on the shared context."""
-        ...
-
-    def run_parallel(self, generation: int) -> None:
-        """Evaluate one generation in isolated contexts."""
-        ...
-
-    def finalize(self, frontier: list[Individual] | None, best: Individual | None) -> None:
-        """Report the final frontier and materialize the selected candidate."""
-        ...
-
-
-@dataclass
-class EvolveRunScheduler:
-    """Schedule resume/bootstrap, generations, checkpoints, and final selection."""
-
-    search: EvolveSearch
-    search_effects: SearchEffects
-    effects: EvolveRunEffects
-    max_generations: int
-    max_parallelism: int
-    supports_parallel: bool
-
-    def run(self) -> bool:
-        """Complete the configured budget, or stop if bootstrap finds no seed."""
-        if self.search.needs_bootstrap() and self.effects.bootstrap() is None:
-            self.effects.bootstrap_failed()
-            return False
-        parallel = parallel_enabled(self.max_parallelism, supported=self.supports_parallel)
-        if self.max_parallelism > 1 and not parallel:
-            self.effects.parallel_unsupported(self.max_parallelism)
-        for generation in range(1, self.max_generations + 1):
-            self.effects.begin_generation(
-                generation,
-                self.max_generations,
-                len(self.search.population),
-                len(self.search.population.passed),
-            )
-            if parallel:
-                self.effects.run_parallel(generation)
-            else:
-                self.effects.run_serial(generation)
-            self.search.complete_generation(generation, self.search_effects)
-        frontier = (
-            self.search.population.frontier(self.search.space)
-            if self.search.space.objectives
-            else None
-        )
-        self.effects.finalize(frontier, self.search.final_choice())
-        return True

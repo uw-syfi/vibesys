@@ -316,7 +316,7 @@ export type SocketProtocol = "jsonl";
 export type Kind9 = "run_started";
 export type OuterLoop = string;
 export type Input = string;
-export type MaxRounds = number;
+export type MaxRounds = number | null;
 export type ExpectedRoles = string[];
 export type Kind10 = "run_interrupted";
 export type Reason = string;
@@ -968,7 +968,7 @@ export interface RunStartedData {
   kind?: Kind9;
   outer_loop: OuterLoop;
   input: Input;
-  max_rounds: MaxRounds;
+  max_rounds?: MaxRounds;
   expected_roles?: ExpectedRoles;
   [k: string]: unknown;
 }

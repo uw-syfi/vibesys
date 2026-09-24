@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.evolve.population import Individual, Population
-from vibesys.loops.metrics import MetricSpace, Objective
 
 
 def _space(*objectives: Objective, noise: float = 0.0) -> MetricSpace:

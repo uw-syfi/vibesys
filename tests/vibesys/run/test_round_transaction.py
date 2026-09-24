@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import BaseModel, ConfigDict
+from tests.support.run_execution import run_execution_record
 
 from vibesys.run import (
     GitTracker,
@@ -17,19 +15,12 @@ from vibesys.run import (
     RoundTransactionCoordinator,
     RoundTransactionError,
 )
-from vibesys.run.agent_round_compat import LegacyAgentRoundStore
 from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.run.round_transaction import (
-    RoundTransactionCoordinator as GenericRoundTransactionCoordinator,
-)
-from vs_loop_state.api import RoundRecord
 from vs_project.api import (
-    AgentRunConfiguration,
+    OrchestrationDescriptor,
     Project,
-    ProjectStateError,
     RunEnvironmentRecord,
     StateTransition,
-    serialize_round,
 )
 
 if TYPE_CHECKING:
@@ -45,26 +36,6 @@ class _AgentState(BaseModel):
     completed_rounds: tuple[int, ...] = ()
 
 
-class _LegacyFixture(BaseModel):
-    model_config = ConfigDict(extra="allow", frozen=True, strict=True)
-
-
-def _configuration() -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        outer_loop="agent",
-        run_environment=RunEnvironmentRecord(name="local"),
-        inner_loop="multi-agent",
-        interface="inprocess",
-        agent_backend="cli",
-        compute_backend="cpu",
-        max_rounds=5,
-        max_retries_per_round=2,
-        judge_every=1,
-        official_eval_every=1,
-        memory_layout="files",
-    )
-
-
 def _project(tmp_path: Path) -> tuple[Project, GitTracker, RoundTransactionCoordinator]:
     (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
     project = Project.open(tmp_path)
@@ -78,7 +49,9 @@ def _project(tmp_path: Path) -> tuple[Project, GitTracker, RoundTransactionCoord
         run_id=_RUN_ID,
         branch=tracker.project_branch,
         vibesys_version="0.1.0",
-        configuration=_configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(id="multi-agent", config_version=1, options={}),
         trusted_input_baseline=tracker.trusted_input_baseline,
         now=datetime(2026, 8, 11, 0, 1, tzinfo=UTC),
     )
@@ -94,7 +67,7 @@ def _project(tmp_path: Path) -> tuple[Project, GitTracker, RoundTransactionCoord
             project,
             tracker,
             _RUN_ID,
-            agent_state_model_type=_AgentState,
+            state_slot=_state_slot(project),
         ),
     )
 
@@ -129,7 +102,7 @@ def _restart(
         project,
         tracker,
         _RUN_ID,
-        agent_state_model_type=_AgentState,
+        state_slot=_state_slot(project),
     )
 
 
@@ -161,13 +134,11 @@ def test_complete_commits_candidate_and_exact_typed_agent_state(tmp_path: Path) 
 
 
 def test_generic_transaction_commits_a_policy_owned_state_slot(tmp_path: Path) -> None:
-    project, tracker, _legacy = _project(tmp_path)
+    project, tracker, _coordinator = _project(tmp_path)
     state_slot = project.state.portable_namespace(_RUN_ID, "team-search").slot(
         "state.json", _AgentState
     )
-    coordinator = GenericRoundTransactionCoordinator(
-        project, tracker, _RUN_ID, state_slot=state_slot
-    )
+    coordinator = RoundTransactionCoordinator(project, tracker, _RUN_ID, state_slot=state_slot)
     transition = state_slot.transition(_AgentState(active_hypothesis_id="candidate-1"))
 
     coordinator.begin(1, state_transition=transition).complete()
@@ -332,109 +303,7 @@ def test_coordinator_requires_matching_run_tracker(tmp_path: Path) -> None:
             project,
             wrong_run,
             _RUN_ID,
-            agent_state_model_type=_AgentState,
+            state_slot=_state_slot(project),
         )
 
     assert tracker.current_sha() is not None
-
-
-def test_recovery_accepts_v3_round_and_permissive_active_transition(tmp_path: Path) -> None:
-    project, tracker, coordinator = _project(tmp_path)
-    record = RoundRecord(
-        round_number=1,
-        commit=tracker.current_sha(),
-        perf_metric=12.5,
-        perf_unit="ns/op",
-        passed=True,
-        hypothesis_id="legacy-hypothesis",
-        hypothesis_outcome="proven",
-    )
-    round_payload = serialize_round(record)
-    legacy_active = project.state.local_namespace(_RUN_ID, "agent").transition(
-        "active.json",
-        _LegacyFixture.model_validate(
-            {
-                "hypothesis_id": "legacy-hypothesis",
-                "nested": {"unknown": [1, 2, 3]},
-            },
-            strict=True,
-        ),
-    )
-    legacy_slot = project.state.local_namespace(_RUN_ID, "agent").slot(
-        "active.json",
-        _LegacyFixture,
-    )
-    active_payload = legacy_slot.serialize_transition(legacy_active)
-    journal = {
-        "schema_version": 3,
-        "run_id": _RUN_ID,
-        "round_number": 1,
-        "pre_commit": tracker.current_sha(),
-        "active_transition_base64": base64.b64encode(active_payload).decode(),
-        "round_payload_base64": base64.b64encode(round_payload).decode(),
-        "round_payload_sha256": hashlib.sha256(round_payload).hexdigest(),
-    }
-    journal_path = (
-        project.state.local_namespace(
-            _RUN_ID,
-            "transaction",
-        ).external_directory()
-        / "round.json"
-    )
-    journal_path.write_text(json.dumps(journal), encoding="utf-8")
-
-    assert coordinator.recover() is RoundRecoveryOutcome.COMMITTED
-    assert project.state.load_rounds(_RUN_ID) == [record]
-    assert LegacyAgentRoundStore(project, _RUN_ID).load() == [record]
-    assert json.loads(
-        (
-            project.state.local_namespace(_RUN_ID, "agent").external_directory() / "active.json"
-        ).read_text(encoding="utf-8")
-    ) == {
-        "hypothesis_id": "legacy-hypothesis",
-        "nested": {"unknown": [1, 2, 3]},
-    }
-
-
-def test_legacy_round_store_preserves_bytes_and_repairs_missing_file(tmp_path: Path) -> None:
-    project, tracker, _coordinator = _project(tmp_path)
-    record = RoundRecord(
-        round_number=1,
-        commit=tracker.current_sha(),
-        perf_metric=12.5,
-        perf_unit="ns/op",
-        passed=True,
-    )
-    rounds = LegacyAgentRoundStore(project, _RUN_ID)
-    expected = rounds.prepare_snapshot(record)
-
-    assert rounds.save(record) == expected
-    assert rounds.save(record) == expected
-    assert rounds.load() == [record]
-    namespace = project.state.portable_namespace(_RUN_ID, "agent")
-    assert namespace.read_bytes("rounds/0001.json") == serialize_round(record)
-
-    namespace.delete("rounds/0001.json")
-    assert rounds.restore(record) == expected
-    assert rounds.load() == [record]
-
-
-def test_legacy_round_store_rejects_unexpected_directory(tmp_path: Path) -> None:
-    project, _tracker, _coordinator = _project(tmp_path)
-    project.state.portable_namespace(_RUN_ID, "agent").external_directory("rounds/extra")
-
-    with pytest.raises(ProjectStateError, match="Unexpected completed-round entry"):
-        LegacyAgentRoundStore(project, _RUN_ID).load()
-
-
-def test_legacy_round_store_rejects_symlinked_round_file(tmp_path: Path) -> None:
-    project, _tracker, _coordinator = _project(tmp_path)
-    outside = tmp_path / "outside.json"
-    outside.write_text('{"round":1}', encoding="utf-8")
-    rounds_directory = project.state.portable_namespace(_RUN_ID, "agent").external_directory(
-        "rounds"
-    )
-    (rounds_directory / "0001.json").symlink_to(outside)
-
-    with pytest.raises(ProjectStateError, match="symlinks"):
-        LegacyAgentRoundStore(project, _RUN_ID).load()

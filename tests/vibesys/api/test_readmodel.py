@@ -1,18 +1,17 @@
-"""`vibesys.api._readmodel.project_run_view` faithfully projects agent state.
+"""The agent-owned read model faithfully projects canonical agent state.
 
 Mirrors the hypothesis/round fixtures in ``tests/server/test_experiments.py``
 so these assertions can be checked directly against
 ``server.api.experiments``'s own projection, which the boundary DTOs must
-match field-for-field (see the module docstring in ``_readmodel.py``).
+match field-for-field.
 """
 
 from __future__ import annotations
 
 from typing import Literal, TypedDict, Unpack
 
-from vibesys.api import AgentRunProjection, agent_projection
-from vibesys.api._readmodel import project_run_view as _project_run_view
-from vibesys.api.contracts import LoopKind, RunStatus
+from vibesys.api.agent import AgentRunProjection, agent_projection
+from vibesys.api.contracts import RunStatus
 from vibesys.loops.agent.hypotheses import measurement_delta_reason
 from vibesys.loops.agent.model import (
     AgentRunState,
@@ -22,6 +21,7 @@ from vibesys.loops.agent.model import (
     HypothesisReview,
     HypothesisStrategy,
 )
+from vibesys.loops.agent.readmodel import project_run_view as _project_run_view
 from vibesys.schemas import CandidateDisposition, OrchestratorPlan, derive_hypothesis_title
 from vs_loop_state.api import RoundRecord
 
@@ -32,7 +32,7 @@ def _project_agent_view(
     run_id: str,
     status: RunStatus,
     experiment_revision: int,
-    loop: LoopKind | str = LoopKind.AGENT,
+    loop: str = "multi-agent",
 ) -> AgentRunProjection:
     view = _project_run_view(
         state,
@@ -299,7 +299,7 @@ def test_run_view_rounds_are_run_wide_and_chronological() -> None:
     )
 
     run_view = _project_agent_view(
-        state, run_id="run-1", status=RunStatus.UNKNOWN, experiment_revision=7, loop=LoopKind.AGENT
+        state, run_id="run-1", status=RunStatus.UNKNOWN, experiment_revision=7, loop="multi-agent"
     )
 
     assert [record.round_number for record in run_view.rounds] == [1, 2]
@@ -310,9 +310,9 @@ def test_run_view_rounds_are_run_wide_and_chronological() -> None:
     assert run_view.current_round == 2
     assert run_view.experiment_revision == 7
     envelope = _project_run_view(
-        state, run_id="run-1", status=RunStatus.UNKNOWN, experiment_revision=7
+        state, run_id="run-1", status=RunStatus.UNKNOWN, experiment_revision=7, loop="multi-agent"
     )
-    assert envelope.loop == LoopKind.AGENT
+    assert envelope.loop == "multi-agent"
     assert type(envelope.loop) is str
     assert envelope.run_id == "run-1"
     assert envelope.status is RunStatus.UNKNOWN

@@ -24,8 +24,8 @@ from openevolve.config import DatabaseConfig
 from openevolve.database import Program, ProgramDatabase
 from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.evolve.population import Individual, Population  # noqa: TC001  # tracked: #288
-from vibesys.loops.metrics import MetricSpace, Objective
 
 
 class SearchPolicyName(StrEnum):  # noqa: D101  # tracked: #288

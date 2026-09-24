@@ -7,11 +7,12 @@ import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.run_execution import run_execution_record
 
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vibesys.run.project_policy import trusted_project_input_paths
-from vs_project.api import PlainRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -65,15 +66,9 @@ def _project(root: Path, tracker: GitTracker, run_id: str = "test-run") -> Proje
             branch=tracker.project_branch,
             vibesys_version="test",
             trusted_input_baseline=tracker.trusted_input_baseline,
-            configuration=PlainRunConfiguration(
-                outer_loop="plain",
-                run_environment=RunEnvironmentRecord(name="local"),
-                agent_backend="stub",
-                compute_backend="cpu",
-                max_rounds=2,
-                max_attempts_per_issue=1,
-                max_issues_per_perf_eval=1,
-            ),
+            run_environment=RunEnvironmentRecord(name="local"),
+            execution=run_execution_record(),
+            orchestration=OrchestrationDescriptor(id="plain", config_version=1, options={}),
         )
     )
     tracker.snapshot_with_framework_metadata(
@@ -195,14 +190,13 @@ def test_run_branch_does_not_conflict_with_repository_vibesys_branch(tmp_path: P
     assert _git(tmp_path, "branch", "--show-current") == "vibesys-runs/test-run"
 
 
-def test_resume_accepts_legacy_vibesys_run_branch(tmp_path: Path) -> None:
+def test_resume_rejects_old_vibesys_run_branch(tmp_path: Path) -> None:
     baseline = _initialize_existing_repository(tmp_path)
     _git(tmp_path, "switch", "-q", "-c", "vibesys/test-run")
 
     tracker = _tracker(tmp_path)
-    tracker.init(existing=True, trusted_input_baseline=baseline)
-
-    assert tracker.project_branch == "vibesys/test-run"
+    with pytest.raises(ValueError, match="does not exist"):
+        tracker.init(existing=True, trusted_input_baseline=baseline)
 
 
 def test_resume_requires_repository_and_existing_run_branch(tmp_path: Path) -> None:

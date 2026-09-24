@@ -1,23 +1,4 @@
-"""Issue-tracker driven loop.
-
-Outer flow per iteration:
-  1. Drain all OPEN issues: pick next → fresh implementer → fresh judge → close on PASS
-     or leave open with feedback on FAIL. Issues exhausting their attempt budget are
-     marked BLOCKED and skipped.
-  2. Once the queue is drained, run the perf evaluator. The perf evaluator may file
-     up to ``max_issues_per_perf_eval`` new issues via the create_issue tool, capped
-     server-side.
-  3. Loop back to step 1 with the new issues.
-
-The very first iteration auto-creates one bootstrap FEATURE issue describing the
-LLM serving build task (rendered from ``prompts/loops/plain/bootstrap_issue.j2``), so the
-implementer phase always has something to chew on.
-
-State machine: ``PlainLoopState`` (in ``state.json``) tracks only the cursor —
-which iteration we're in, which issue is currently being processed, and what
-phase we're in. The store (in ``issues.json``) is the source of truth for which
-issues exist.
-"""
+"""Plain policy's issue-board setup and agent turn effects."""
 
 from __future__ import annotations
 
@@ -25,37 +6,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
-from vibesys.agent_spec_config import resolve_agent_driver
-from vibesys.config import Config, LoadLevelCfg, as_config
-from vibesys.constants import (
-    DEFAULT_COMPUTE_BACKEND,
-    ComputeBackend,
-    DomainName,
-)
-from vibesys.context import create_run_context
-from vibesys.domains.registry import resolve_domain
-from vibesys.evaluators.input_manifest import WorkspaceSource  # noqa: TC001  # tracked: #288
-from vibesys.loops.plain.orchestration import (
-    PlainOrchestrationOptions,
-    compare_resume,
-    descriptor_from_options,
-    legacy_configuration_from_options,
-)
-from vibesys.loops.plain.policy import PlainPolicy, _resume_point
+from vibesys.loops.plain.mcp_config import build_issue_mcp_spec
 from vibesys.loops.plain.render import render_all
-from vibesys.loops.plain.runner_ext import PlainLoopAgentClient
 from vibesys.loops.plain.state import PlainStateStore
-from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, Prompt
 from vibesys.render.sink import output_sink
-from vibesys.run import LocalRunIntegration, LoopContext, RepositoryVisibility, RunStateNamespace
-from vibesys.sandbox.run_environment import (
-    RunEnvironmentSpec,
-    make_run_environment_spec,
-    run_environment_record,
-)
+from vibesys.run import LoopContext, RunStateNamespace
 from vibesys.schemas import (
     IssueImplementerResponse,
     IssueJudgeResponse,
@@ -64,41 +22,22 @@ from vibesys.schemas import (
     PerfTrend,
     Verdict,
 )
-from vs_agent.api import AgentBackend, RoundProgress
+from vs_agent.api import MCPServerSpec, RoundProgress
 from vs_issue_board.api import (
     Issue,
     IssueBoard,
-    IssueStatus,
     IssueType,
 )
 from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "plain"
-PlainLoopState = PlainLoopCursor
-
+PlainPhase = Literal["implementer", "judge", "perf_eval"]
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-
-def _checkpoint_state(
-    ctx: LoopContext,
-    store: PlainStateStore,
-    state: PlainLoopState,
-    *,
-    label: str,
-) -> None:
-    """Write and commit a recoverable plain-loop checkpoint."""
-    store.save_cursor(state)
-    ctx.state.commit(label, store.namespace)
-
-
-def _determine_resume_point(
-    state: PlainLoopState | None, store: IssueBoard
-) -> tuple[int, str, int | None]:
-    """Compatibility helper for older callers of the plain-loop resume selector."""
-    if state is None:
-        return 0, "implementer", None
-    return _resume_point(state, store.get)
+    from vibesys.config import LoadLevelCfg
+    from vibesys.loops.plain.orchestration import PlainOrchestrationOptions
+    from vibesys.orchestration.runtime import RunContext
 
 
 # ---------------------------------------------------------------------------
@@ -214,47 +153,148 @@ def _latest_judge_review(issue: Issue) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
-def _ensure_bootstrap_issue(
-    store: IssueBoard,
-    *,
-    state: PlainLoopState,
-    state_store: PlainStateStore,
-    ctx: LoopContext,
-    prompt: Prompt,
-) -> None:
-    """Auto-create the initial feature issue on the first run.
+@dataclass
+class PlainRun:
+    """Plain-owned state and effects bound to the one shared run host."""
 
-    Idempotent on resume — checks state.bootstrap_done first.
-    """
-    if state.bootstrap_done:
-        return
-    description = prompt.render(
-        "bootstrap_issue.j2",
-        reference_path=ctx.ref_name,
-        accuracy_command=ctx.judge_accuracy_command,
-        benchmark_command=ctx.judge_benchmark_command,
-        runtime_notes=ctx.run_environment_view.prompt_notes,
-    )
-    issue = store.create(
-        type=IssueType.FEATURE,
-        title="Build FastAPI inference server for the reference model",
-        description=description,
-        created_by="loop:bootstrap",
-        iteration=max(state.round_idx + 1, 1),
-    )
-    state.bootstrap_done = True
-    _checkpoint_state(
-        ctx,
-        state_store,
-        state,
-        label="plain: initialize issue board",
-    )
-    ctx.lprint(f"[bootstrap] created initial issue #{issue.id}")
+    host: RunContext
+    core: LoopContext
+    board: IssueBoard
+    state_store: PlainStateStore
+    state: PlainLoopCursor
+    turns: _PlainTurns
+    resuming: bool
+    prompt: Prompt
+    options: PlainOrchestrationOptions
+
+    @classmethod
+    async def open(cls, host: RunContext, options: PlainOrchestrationOptions) -> PlainRun:
+        """Open issue memory in the host's workspace and load its durable cursor."""
+        core = host.run_context
+        output_sink().run_configured(
+            run_log_path=str(core.run_log_path),
+            project_root=str(core.project_root),
+            model=core.model_name,
+        )
+        prompt = Prompt(_TEMPLATE_DIR, core.backend)
+        portable = core.state.portable(RunStateNamespace.PLAIN)
+        state_store = PlainStateStore(portable)
+        local_dir = core.state.local(RunStateNamespace.PLAIN).external_directory()
+        progress_path = _init_progress(local_dir)
+        issues_dir = local_dir / "issues"
+        board: IssueBoard
+        board = IssueBoard(
+            core.workspace / "issues.json",
+            on_change=lambda: render_all(issues_dir, board),
+        )
+        render_all(issues_dir, board)
+        persisted = await host.state.load(PlainLoopCursor)
+        turns = _PlainTurns(
+            ctx=core,
+            board=board,
+            state_store=state_store,
+            prompt=prompt,
+            progress_path=progress_path,
+            issues_dir=issues_dir,
+            perf_metrics_location=portable.agent_visible_path("perf/metrics.json"),
+            max_issues_per_perf_eval=options.max_issues_per_perf_eval,
+            load_levels=host.request.config.perf_eval.load_levels,
+        )
+        return cls(
+            host=host,
+            core=core,
+            board=board,
+            state_store=state_store,
+            state=persisted or PlainLoopCursor(),
+            turns=turns,
+            resuming=host.request.resume is not None or persisted is not None,
+            prompt=prompt,
+            options=options,
+        )
+
+    async def bootstrap(self) -> None:
+        """Create the first candidate-facing issue and commit the cursor."""
+        if self.state.bootstrap_done:
+            return
+        description = self.prompt.render(
+            "bootstrap_issue.j2",
+            reference_path=self.core.ref_name,
+            accuracy_command=self.core.judge_accuracy_command,
+            benchmark_command=self.core.judge_benchmark_command,
+            runtime_notes=self.core.run_environment_view.prompt_notes,
+        )
+        issue = self.board.create(
+            type=IssueType.FEATURE,
+            title="Build FastAPI inference server for the reference model",
+            description=description,
+            created_by="loop:bootstrap",
+            iteration=max(self.state.round_idx + 1, 1),
+        )
+        self.state = self.state.model_copy(update={"bootstrap_done": True})
+        await self.checkpoint(
+            self.state.round_idx,
+            self.state.phase,
+            self.state.current_issue_id,
+            "plain: initialize issue board",
+        )
+        self.log(f"[bootstrap] created initial issue #{issue.id}")
+
+    async def prepare_resume(self) -> None:
+        """Restore the blocked queue only when a resumed run has budget."""
+        if not self.resuming:
+            return
+        iteration = max(self.state.round_idx + 1, 1)
+        if self.state.round_idx < self.options.max_rounds:
+            reopened = self.board.reopen_blocked(
+                actor="loop:resume", iteration=iteration, note="retried on resume"
+            )
+            if reopened:
+                ids = ", ".join(f"#{issue_id}" for issue_id in reopened)
+                self.log(f"[resume] reopened {len(reopened)} blocked issue(s): {ids}")
+        self.log(
+            f"Resuming at round {iteration} phase {self.state.phase!r}, "
+            f"total limit {self.options.max_rounds}"
+        )
+
+    async def checkpoint(
+        self, round_idx: int, phase: PlainPhase, issue_id: int | None, label: str
+    ) -> None:
+        """Commit the cursor and candidate worktree as one recoverable transition."""
+        self.state = self.state.transition(
+            round_idx=round_idx,
+            phase=phase,
+            current_issue_id=issue_id,
+        )
+        await self.host.state.checkpoint(self.state, sequence=round_idx + 1)
+        self.log(f"[checkpoint] {label}")
+
+    def performance_record(self, iteration: int) -> PlainPerformanceRecord | None:
+        """Return a completed evaluation so a resume does not repeat its paid turn."""
+        return next(
+            (
+                record
+                for record in self.state_store.load_performance().records
+                if record.iteration == iteration
+            ),
+            None,
+        )
+
+    @contextmanager
+    def progress(self, iteration: int, total: int) -> Iterator[None]:
+        """Scope one visible iteration without changing policy control flow."""
+        progress = RoundProgress(iteration, total)
+        self.log(f"\n{'=' * 60}\n  {progress.label()}\n{'=' * 60}\n")
+        with self.core.progress(progress):
+            yield
+
+    def log(self, message: str) -> None:
+        """Write a status line to the run log."""
+        self.core.lprint(message)
 
 
 @dataclass
-class _PlainEffects:
-    """Concrete turns, persistence, and workspace effects for PlainPolicy."""
+class _PlainTurns:
+    """Prompting, turns, and local artifacts for the plain policy."""
 
     ctx: LoopContext
     board: IssueBoard
@@ -266,88 +306,23 @@ class _PlainEffects:
     max_issues_per_perf_eval: int
     load_levels: list[LoadLevelCfg] | None
 
-    def bootstrap(self, state: PlainLoopState) -> None:
-        _ensure_bootstrap_issue(
-            self.board, state=state, state_store=self.state_store, ctx=self.ctx, prompt=self.prompt
-        )
-
-    def checkpoint(self, state: PlainLoopState, label: str) -> None:
-        _checkpoint_state(self.ctx, self.state_store, state, label=label)
-
-    @contextmanager
-    def progress(self, iteration: int, total: int) -> Iterator[None]:
-        progress = RoundProgress(iteration, total)
-        self.ctx.lprint(f"\n{'=' * 60}")
-        self.ctx.lprint(f"  {progress.label()}")
-        self.ctx.lprint(f"{'=' * 60}\n")
-        with self.ctx.progress(progress):
-            yield
-
-    def log(self, message: str) -> None:
-        self.ctx.lprint(message)
-
-    def get_issue(self, issue_id: int) -> Issue | None:
-        return self.board.get(issue_id)
-
-    def next_open_issue(self) -> Issue | None:
-        return self.board.next_open()
-
-    def list_issues(self, status: IssueStatus | None = None) -> list[Issue]:
-        return self.board.list(status=status)
-
-    def reopen_blocked(self, iteration: int) -> list[int]:
-        return self.board.reopen_blocked(
-            actor="loop:resume", iteration=iteration, note="retried on resume"
-        )
-
-    def claim(self, issue: Issue, iteration: int) -> Issue:
-        return self.board.update_status(
-            issue.id,
-            IssueStatus.IN_PROGRESS,
-            actor="loop",
-            iteration=iteration,
-            note="claimed for processing",
-        )
-
-    def block(self, issue: Issue, iteration: int, max_attempts: int) -> None:
-        self.board.update_status(
-            issue.id,
-            IssueStatus.BLOCKED,
-            actor="loop",
-            iteration=iteration,
-            note=f"exhausted {max_attempts} attempts",
-        )
-
-    def increment_attempts(
-        self, issue: Issue, response: IssueImplementerResponse, iteration: int
-    ) -> Issue:
-        return self.board.increment_attempts(
-            issue.id,
-            actor="implementer",
-            iteration=iteration,
-            note=response.summary[:200],
-            payload=response.model_dump(mode="json"),
-        )
-
-    def close_issue(self, issue: Issue, response: IssueJudgeResponse, iteration: int) -> None:
-        self.board.update_status(
-            issue.id,
-            IssueStatus.CLOSED,
-            actor="judge",
-            iteration=iteration,
-            note=f"closed by judge after attempt {issue.attempts}",
-            payload=response.model_dump(mode="json"),
-        )
-
-    def reopen_issue(self, issue: Issue, response: IssueJudgeResponse, iteration: int) -> None:
-        self.board.update_status(
-            issue.id,
-            IssueStatus.OPEN,
-            actor="judge",
-            iteration=iteration,
-            note=response.feedback[:500],
-            payload=response.model_dump(mode="json"),
-        )
+    def _issue_mcp_spec(
+        self, *, creator: str, iteration: int, cap: int, allowed_types: set[IssueType]
+    ) -> list[MCPServerSpec]:
+        client = self.ctx.agent_client
+        if not client.capabilities.mcp_servers:
+            raise RuntimeError(  # noqa: TRY003
+                f"agent backend {client.backend_name!r} cannot expose issue-board tools"
+            )
+        return [
+            build_issue_mcp_spec(
+                store_relpath="issues.json",
+                creator=creator,
+                iteration=iteration,
+                cap=cap,
+                allowed_types=allowed_types,
+            )
+        ]
 
     def implement(self, issue: Issue) -> IssueImplementerResponse:
         ctx = self.ctx
@@ -402,7 +377,12 @@ class _PlainEffects:
         issue_id = issue.id
         response = ctx.invoke(
             kind="judge",
-            iteration=iteration,
+            mcp_servers=self._issue_mcp_spec(
+                creator="judge",
+                iteration=iteration,
+                cap=1,
+                allowed_types={IssueType.BUG},
+            ),
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_cls=IssueJudgeResponse,
@@ -415,7 +395,6 @@ class _PlainEffects:
             ),
             round_label=f"judge issue #{issue.id} att{issue.attempts}",
         )
-        # Tracker tools write through a separate board instance.
         self.board.reload()
         render_all(self.issues_dir, self.board)
         _update_progress_from_judge(self.progress_path, iteration, issue, response)
@@ -440,7 +419,12 @@ class _PlainEffects:
         ctx.lprint("\n>>> Performance Evaluator benchmarking...")
         response = ctx.invoke(
             kind="perf_eval",
-            iteration=iteration,
+            mcp_servers=self._issue_mcp_spec(
+                creator="perf_eval",
+                iteration=iteration,
+                cap=self.max_issues_per_perf_eval,
+                allowed_types={IssueType.BUG, IssueType.FEATURE, IssueType.PERF},
+            ),
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_cls=IssuePerfEvalResponse,
@@ -473,168 +457,3 @@ class _PlainEffects:
             f"latency={response.latency_trend.value.upper()}"
         )
         return response
-
-
-# ---------------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------------
-
-
-def run_plain_loop(  # noqa: PLR0913  # tracked: #288
-    config: Config,
-    exp_name: str,
-    input_path: str,
-    accuracy_command: str,
-    benchmark_command: str,
-    *,
-    runs_dir: Path | None,
-    task_name: str | None = None,
-    task_root: Path | None = None,
-    workspace_sources: tuple[WorkspaceSource, ...] = (),
-    evaluator_path: Path | None = None,
-    evaluator_package_root: Path | None = None,
-    max_rounds: int = 5,
-    max_attempts_per_issue: int = 3,
-    max_issues_per_perf_eval: int = 3,
-    existing: bool = False,
-    resume_state: PlainLoopState | None = None,
-    debug: bool = False,
-    profiler_kind: ProfilerKind = ProfilerKind.AUTO,
-    skills_dirs: list[str] | None = None,
-    run_environment: RunEnvironmentSpec | None = None,
-    agent_backend: str | None = None,
-    cli_provider: str | None = None,
-    backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
-    domain: DomainName,
-    remote_repo: str | None = None,
-    repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
-    integration: LocalRunIntegration | None = None,
-) -> bool:
-    """Run the issue-tracker driven loop.
-
-    Returns ``True`` if the loop terminates with no remaining open issues
-    (everything resolved). Returns ``False`` if the iteration budget is
-    exhausted with open work remaining, or if the run gets stuck (every
-    remaining issue is BLOCKED).
-    """
-    config = as_config(config)
-    domain_definition = resolve_domain(domain)
-    run_environment = run_environment or make_run_environment_spec()
-    resolved_agent_backend = str(agent_backend or config.agent.backend or AgentBackend.CLI)
-    options = PlainOrchestrationOptions(
-        model=config.model.name,
-        agent_backend=resolved_agent_backend,
-        agent_driver=(
-            resolve_agent_driver(config).value if resolved_agent_backend == "cli" else None
-        ),
-        cli_provider=cli_provider or config.agent.cli_provider or "codex",
-        cli_timeout=config.agent.cli_timeout,
-        compute_backend=backend.value,
-        profiler=profiler_kind.value,
-        modality=None,
-        default_reasoning_effort=config.thinking.level,
-        outer_model=config.agent.outer.model,
-        outer_reasoning_effort=config.agent.outer.reasoning_effort,
-        inner_model=config.agent.inner.model,
-        inner_reasoning_effort=config.agent.inner.reasoning_effort,
-        max_rounds=max_rounds,
-        max_attempts_per_issue=max_attempts_per_issue,
-        max_issues_per_perf_eval=max_issues_per_perf_eval,
-    )
-
-    with create_run_context(
-        config=config,
-        exp_name=exp_name,
-        runs_dir=runs_dir,
-        input_path=input_path,
-        accuracy_command=accuracy_command,
-        benchmark_command=benchmark_command,
-        task_name=task_name,
-        task_root=task_root,
-        workspace_sources=workspace_sources,
-        evaluator_path=evaluator_path,
-        evaluator_package_root=evaluator_package_root,
-        existing=existing,
-        debug=debug,
-        profiler_kind=profiler_kind,
-        skills_dirs=skills_dirs,
-        run_environment=run_environment,
-        legacy_configuration_factory=lambda resolved_profiler: legacy_configuration_from_options(
-            options,
-            run_environment=run_environment_record(run_environment),
-            profiler=resolved_profiler.value,
-        ),
-        orchestration_descriptor=lambda resolved_profiler: descriptor_from_options(
-            options, profiler=resolved_profiler.value
-        ),
-        orchestration_resume=compare_resume,
-        agent_backend=agent_backend,
-        cli_provider=cli_provider,
-        backend=backend,
-        environment_hooks=domain_definition.environment_hooks,
-        remote_repo=remote_repo,
-        repo_visibility=repo_visibility,
-        integration=integration,
-    ) as ctx:
-        output_sink().run_configured(
-            run_log_path=str(ctx.run_log_path),
-            project_root=str(ctx.project_root),
-            model=ctx.model_name,
-        )
-        prompt = Prompt(_TEMPLATE_DIR, ctx.backend)
-        portable_namespace = ctx.state.portable(RunStateNamespace.PLAIN)
-        state_store = PlainStateStore(portable_namespace)
-        local_dir = ctx.state.local(RunStateNamespace.PLAIN).external_directory()
-
-        progress_path = _init_progress(local_dir)
-        perf_metrics_location = portable_namespace.agent_visible_path("perf/metrics.json")
-        issues_dir = local_dir / "issues"
-
-        # The issue board is deliberately agent-visible project memory. CLI
-        # tracker tools run inside the candidate sandbox, where framework state
-        # is read-only. The framework cursor and performance history remain in
-        # the run's portable state namespace.
-        store_path = ctx.workspace / "issues.json"
-
-        # Wire the per-issue markdown renderer as a store on_change hook
-        # so every successful save (including tool-created issues from
-        # judge/perf_eval) re-renders the human-readable mirror.
-        # Forward-declare `store` so the lambda's late binding resolves.
-        store: IssueBoard
-        store = IssueBoard(
-            store_path,
-            on_change=lambda: render_all(issues_dir, store),
-        )
-        # Render immediately so local diagnostics are complete even if the
-        # resumed run performs no issue-board mutation.
-        render_all(issues_dir, store)
-
-        # Wrap the runner so judge/perf_eval invokes auto-receive issue
-        # tracker access (an MCP server spec). The wrapper consumes an extra
-        # ``iteration=`` kwarg on invoke() that the loop passes per call.
-        # See vibesys/plain/runner_ext.py.
-        ctx.agent_client = PlainLoopAgentClient(
-            ctx.agent_client,
-            max_issues_per_perf_eval=max_issues_per_perf_eval,
-        )
-
-        persisted_state = state_store.load_cursor()
-        state = persisted_state or resume_state or PlainLoopState()
-        effects = _PlainEffects(
-            ctx=ctx,
-            board=store,
-            state_store=state_store,
-            prompt=prompt,
-            progress_path=progress_path,
-            issues_dir=issues_dir,
-            perf_metrics_location=perf_metrics_location,
-            max_issues_per_perf_eval=max_issues_per_perf_eval,
-            load_levels=config.perf_eval.load_levels,
-        )
-        return PlainPolicy(
-            effects,
-            state=state,
-            max_rounds=max_rounds,
-            max_attempts_per_issue=max_attempts_per_issue,
-            resuming=existing or persisted_state is not None or resume_state is not None,
-        ).run()

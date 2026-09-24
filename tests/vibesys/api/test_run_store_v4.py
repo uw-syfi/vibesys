@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tests.support.run_execution import run_execution_record
+
 from vibesys.api import OrchestrationRegistry
-from vibesys.api.contracts import LoopKind, RunStatus
+from vibesys.api.contracts import RunStatus
 from vibesys.api.store import open_run_store, portable_history_snapshots
+from vibesys.context import RunSetup
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
@@ -17,12 +20,13 @@ def test_plain_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     (tmp_path / "OBJECTIVE.md").write_text("Implement the service.\n")
     project = Project.open(tmp_path)
     project.state.create_project("plain project")
-    manifest = project.state.new_orchestration_run_manifest(
+    manifest = project.state.new_run_manifest(
         "plain run",
         run_id="plain-run",
         branch="vibesys-runs/plain-run",
         vibesys_version="test",
         run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(
             id="plain", config_version=1, options={"max_rounds": 3}
         ),
@@ -34,7 +38,7 @@ def test_plain_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     direct = store.get_run(manifest.run_id)
     listed = store.list_runs()
 
-    assert direct.loop == LoopKind.PLAIN
+    assert direct.loop == "plain"
     assert type(direct.loop) is str
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
@@ -47,12 +51,13 @@ def test_evolve_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     (tmp_path / "OBJECTIVE.md").write_text("Optimize the service.\n")
     project = Project.open(tmp_path)
     project.state.create_project("evolve project")
-    manifest = project.state.new_orchestration_run_manifest(
+    manifest = project.state.new_run_manifest(
         "evolve run",
         run_id="evolve-run",
         branch="vibesys-runs/evolve-run",
         vibesys_version="test",
         run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(
             id="evolve", config_version=1, options={"max_generations": 3}
         ),
@@ -63,7 +68,7 @@ def test_evolve_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     store = open_run_store(project)
     direct = store.get_run(manifest.run_id)
 
-    assert direct.loop == LoopKind.EVOLVE
+    assert direct.loop == "evolve"
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
     assert direct.projection is None
@@ -74,12 +79,13 @@ def test_unknown_v4_run_has_generic_history_view(tmp_path: Path) -> None:
     (tmp_path / "OBJECTIVE.md").write_text("Explore candidates.\n")
     project = Project.open(tmp_path)
     project.state.create_project("custom project")
-    manifest = project.state.new_orchestration_run_manifest(
+    manifest = project.state.new_run_manifest(
         "custom run",
         run_id="team-run",
         branch="vibesys-runs/team-run",
         vibesys_version="test",
         run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
         orchestration=OrchestrationDescriptor(
             id="team-search", config_version=2, options={"workers": 3}
         ),
@@ -100,15 +106,16 @@ def test_unknown_v4_run_has_generic_history_view(tmp_path: Path) -> None:
     assert portable_history_snapshots(project, manifest.run_id) == ()
 
     class EvidencePolicy:
-        def execute(self, request: object, runtime: object) -> bool:
-            del request, runtime
+        def __init__(self, descriptor: OrchestrationDescriptor) -> None:
+            del descriptor
+            self.setup = RunSetup()
+
+        async def run(self, ctx: object) -> bool:
+            del ctx
             return True
 
-        def history_namespaces(self) -> tuple[str, ...]:
-            return ("evidence",)
-
     registry = OrchestrationRegistry()
-    registry.register("team-search", EvidencePolicy())
+    registry.register("team-search", EvidencePolicy, portable_namespaces=("evidence",))
     snapshots = portable_history_snapshots(project, manifest.run_id, registry=registry)
     assert [file.relative_path.name for file in snapshots[0].files] == ["notes.txt"]
 
@@ -116,13 +123,16 @@ def test_unknown_v4_run_has_generic_history_view(tmp_path: Path) -> None:
 def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
     project = Project.open(tmp_path)
     project.state.create_project("profile project")
-    manifest = project.state.new_orchestration_run_manifest(
+    manifest = project.state.new_run_manifest(
         "profile run",
         run_id="profile-run",
         branch="vibesys-runs/profile-run",
         vibesys_version="test",
         run_environment=RunEnvironmentRecord(name="local"),
-        orchestration=OrchestrationDescriptor(id="profile-guided", config_version=1, options={}),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(
+            id="profile-guided-multi-agent", config_version=1, options={}
+        ),
         trusted_input_baseline="0" * 40,
     )
     project.state.create_run(manifest)

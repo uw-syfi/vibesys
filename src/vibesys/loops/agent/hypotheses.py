@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
+from vibesys.evaluators.metrics import Measurement, MetricComparison, MetricSpace
 from vibesys.loops.agent.model import (
     AgentRunState,
     Hypothesis,
@@ -13,7 +14,6 @@ from vibesys.loops.agent.model import (
     HypothesisReview,
     HypothesisStrategy,
 )
-from vibesys.loops.metrics import Measurement, MetricComparison, MetricSpace
 from vibesys.schemas import (
     HypothesisOutcome,
     HypothesisStrategyUpdate,

@@ -1,5 +1,6 @@
 """Tests for vibesys.loops.agent — orchestrator-driven build loop."""
 
+import asyncio
 import json
 import subprocess
 from collections.abc import Sequence
@@ -10,21 +11,27 @@ from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
-from vibesys.config import Config, as_config
+from vibesys.api import CoreEvent, OrchestrationRegistry, ResumeRef, RunRequest, create_session
+from vibesys.api.request import load_input_bundle
+from vibesys.config import as_config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationError
-from vibesys.evaluators.input_manifest import BenchmarkResult, WorkspaceSource
+from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
+from vibesys.evaluators.input_manifest import PROTOCOL_OUTPUT_FLAG, BenchmarkResult
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.agent import issue_board
-from vibesys.loops.agent.hypotheses import reproject_run_evidence
-from vibesys.loops.agent.loop import (
-    _backfill_revert_commit,
-    _finalize_agent_run,
-    _pareto_archive_dominators,
-    _pareto_archive_summary,
-    _terminal_workspace_notice,
-    run_agent_loop,
+from vibesys.loops.agent.entrypoint import (
+    AgentProjector,
+    MultiAgentOrchestrator,
+    SingleAgentOrchestrator,
 )
+from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.model import Hypothesis, HypothesisResolution, HypothesisReview
+from vibesys.loops.agent.orchestration import (
+    AgentOrchestrationOptions,
+    descriptor_from_options,
+    recorded_metric_space,
+)
 from vibesys.loops.agent.policy_gates import (
     _run_framework_accuracy_gate,
     _run_framework_benchmark,
@@ -34,24 +41,25 @@ from vibesys.loops.agent.policy_gates import (
 from vibesys.loops.agent.policy_support import (
     _candidate_evidence_is_fresh,
     _detect_plateau,
+    _finalize_agent_run,
     _invoke_read_only_role,
     _missing_implementer_response,
     _official_evaluation_reason,
     _pareto_archive_conflict,
+    _pareto_archive_dominators,
+    _pareto_archive_summary,
     _pareto_frontier_records,
     _provisional_candidates_since_official,
     _review_due,
     _select_final_candidate,
+    _terminal_workspace_notice,
     _trusted_candidate_records,
 )
 from vibesys.loops.agent.state import AgentRunStateStore
-from vibesys.loops.gates import FrameworkBenchmarkOutcome
-from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.prompts import PROMPTS_DIR
-from vibesys.run import GitTracker, RepositoryVisibility
+from vibesys.run import GitTracker
 from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.sandbox.run_environment import RunEnvironmentSpec, make_run_environment_spec
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -70,8 +78,8 @@ from vibesys.schemas import (
 from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_agent.stub_runner import StubAgentClient
-from vs_loop_state.api import RoundRecord
-from vs_project.api import AgentRunConfiguration, Project, serialize_round
+from vs_loop_state.api import RoundRecord, serialize_round_record
+from vs_project.api import Project
 from vs_sandbox.api import SandboxExecutionResult
 
 if TYPE_CHECKING:
@@ -94,36 +102,6 @@ def test_missing_implementer_response_fails_closed():  # noqa: ANN201  # tracked
     assert response.perf_metric is None
     assert response.evaluation_artifact is None
     assert "schema-valid" in response.next_step
-
-
-def test_legacy_active_hypothesis_backfills_framework_revert_commit():  # noqa: ANN201  # tracked: #288
-    plan = OrchestratorPlan(
-        hypothesis_id="restore-parent",
-        task="restore parent",
-        pass_criteria="review",  # noqa: S106  # tracked: #288
-        revert_to_round=28,
-        reasoning="resume an older run",
-    )
-    state = Hypothesis(
-        hypothesis_id=plan.hypothesis_id,
-        plan=plan,
-        started_round=34,
-        parent_round=28,
-        revert_applied=True,
-    )
-    records = [
-        RoundRecord(
-            round_number=28,
-            commit="a" * 40,
-            perf_metric=None,
-            perf_unit=None,
-            passed=False,
-        )
-    ]
-
-    assert _backfill_revert_commit(state, records) is True
-    assert state.revert_commit == "a" * 40
-    assert _backfill_revert_commit(state, records) is False
 
 
 # RoundRecord's persistence and rollback resolution (RoundHistory) live in
@@ -280,7 +258,7 @@ def _calls_for_response(
 def _new_orchestrate_fake() -> FakeAgentClient:
     """A FakeAgentClient with this loop's default response for each kind.
 
-    Round progression in :func:`run_agent_loop` depends on *which* default
+    Round progression in an agent orchestrator depends on *which* default
     fires when a queue empties: an implementer turn that isn't explicitly
     enqueued must still report ``HypothesisOutcome.NOMINATED`` (a terminal
     outcome that ends the hypothesis every round) rather than
@@ -318,48 +296,23 @@ def _orchestrator_turns(
     return turns
 
 
-class _AgentLoopArguments(TypedDict, total=False):
-    """The keyword surface of :func:`run_agent_loop`, mirrored for the harness."""
+class _AgentRequestOverrides(TypedDict, total=False):
+    """Overrides for the canonical run request built by the test harness."""
 
-    config: Config
-    exp_name: str
-    input_path: str
-    accuracy_command: str
-    benchmark_command: str
     objective: str
-    runs_dir: Path | None
-    task_name: str | None
-    task_root: Path | None
     metrics: MetricSpace
-    workspace_sources: tuple[WorkspaceSource, ...]
-    evaluator_path: Path | None
-    evaluator_package_root: Path | None
     benchmark_result: BenchmarkResult | None
     benchmark_result_protocol: Literal[2] | None
-    accuracy_timeout_seconds: int | None
-    benchmark_timeout_seconds: int | None
     max_rounds: int
     max_retries_per_round: int
     judge_every: int
     official_eval_every: int
     memory_layout: str
-    start_round: int | None
-    existing: bool
-    operator_constraints: tuple[str, ...]
-    trusted_input_baseline: str | None
-    debug: bool
+    resume_run_id: str | None
     profiler_kind: ProfilerKind
     skills_dirs: list[str] | None
-    run_environment: RunEnvironmentSpec | None
-    agent_backend: str | None
-    cli_provider: str | None
-    backend: ComputeBackend
-    modality: str | None
-    inner_loop: str
+    orchestration_id: str
     domain: DomainName | None
-    interface: str
-    remote_repo: str | None
-    repo_visibility: RepositoryVisibility
 
 
 _THROUGHPUT_LATENCY = MetricSpace(
@@ -376,16 +329,10 @@ def _invoke_orchestrate(
     runner: AgentClientProtocol,
     *,
     _accuracy_gate_results: Sequence[str | None] | None = None,
-    **kwargs: Unpack[_AgentLoopArguments],
+    **kwargs: Unpack[_AgentRequestOverrides],
 ) -> bool:
-    """Shared plumbing: patch context globals, run the loop, return result."""
-    defaults: _AgentLoopArguments = {
-        "config": as_config({"model": {"name": "claude-sonnet-4-6"}}),
-        "exp_name": "test-orch",
-        "runs_dir": tmp_path / "exp_env",
-        "input_path": str(Path(ref_file).parent),
-        "accuracy_command": "uv run python accuracy_checker/checker.py",
-        "benchmark_command": "uv run python benchmark/benchmark.py",
+    """Run one built-in policy through the canonical descriptor and session."""
+    defaults: _AgentRequestOverrides = {
         "objective": "Maximize tok/s throughput.",
         "max_rounds": 5,
         "max_retries_per_round": 2,
@@ -393,6 +340,65 @@ def _invoke_orchestrate(
         "metrics": MetricSpace(),
     }
     defaults.update(kwargs)
+    resume_run_id = defaults.get("resume_run_id")
+    project_root = _created_project(tmp_path) if resume_run_id else Path(ref_file).parent
+    bundle = load_input_bundle(project_root)
+    manifest_updates: dict[str, object] = {}
+    benchmark_updates = {}
+    if "benchmark_result" in defaults:
+        benchmark_updates["result"] = defaults["benchmark_result"]
+    if "benchmark_result_protocol" in defaults:
+        benchmark_updates["result_protocol"] = defaults["benchmark_result_protocol"]
+    if benchmark_updates:
+        manifest_updates["benchmark"] = bundle.manifest.benchmark.model_copy(
+            update=benchmark_updates
+        )
+    if "domain" in defaults:
+        manifest_updates["agent"] = bundle.manifest.agent.model_copy(
+            update={"domain": defaults["domain"]}
+        )
+    if manifest_updates:
+        bundle = bundle.model_copy(
+            update={"manifest": bundle.manifest.model_copy(update=manifest_updates)}
+        )
+
+    config = as_config({"model": {"name": "claude-sonnet-4-6"}})
+    options = AgentOrchestrationOptions(
+        interface="inprocess",
+        max_rounds=defaults["max_rounds"],
+        max_retries_per_round=defaults["max_retries_per_round"],
+        judge_every=defaults.get("judge_every", 3),
+        official_eval_every=defaults.get("official_eval_every", 3),
+        memory_layout=defaults.get("memory_layout", "files"),
+        metric_space=recorded_metric_space(defaults["metrics"], bundle.benchmark_result),
+    )
+    orchestration_id = defaults.get("orchestration_id", "multi-agent")
+    descriptor = descriptor_from_options(options, orchestration_id=orchestration_id)
+    request = RunRequest(
+        project_root=project_root,
+        orchestration=descriptor,
+        config=config,
+        input_bundle=bundle,
+        objective=defaults.get("objective"),
+        resume=ResumeRef(run_id=resume_run_id) if resume_run_id else None,
+        exp_name="test-orch",
+        runs_dir=tmp_path / "exp_env",
+        profiler_kind=defaults.get("profiler_kind", ProfilerKind.AUTO),
+        skills_dirs=defaults.get("skills_dirs"),
+        backend=ComputeBackend.CUDA,
+    )
+    registry = OrchestrationRegistry()
+    for policy in (MultiAgentOrchestrator, SingleAgentOrchestrator):
+        registry.register(
+            policy.orchestration_id,
+            policy,
+            projector=AgentProjector(policy.orchestration_id),
+            portable_namespaces=("agent",),
+        )
+
+    def discard(event: CoreEvent) -> None:
+        del event
+
     with (
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
         patch("vibesys.context.build_agent_client", return_value=runner),
@@ -403,7 +409,9 @@ def _invoke_orchestrate(
             return_value=None,
         ),
     ):
-        return run_agent_loop(**defaults)
+        session = create_session(request, sink=discard, registry=registry)
+        session.start()
+        return asyncio.run(session.await_result()).succeeded
 
 
 def _created_project(tmp_path: Path) -> Path:
@@ -426,7 +434,7 @@ def _round_payloads(tmp_path: Path) -> list[dict[str, object]]:
     state = Project.open(project).state
     records = AgentRunStateStore(state.portable_namespace(_run_id(project), "agent")).load().rounds
     assert records
-    return [json.loads(serialize_round(record)) for record in records]
+    return [serialize_round_record(record) for record in records]
 
 
 def _active_hypothesis(tmp_path: Path) -> Hypothesis | None:
@@ -444,87 +452,33 @@ def _active_hypothesis(tmp_path: Path) -> Hypothesis | None:
 # ---------------------------------------------------------------------------
 
 
-def test_orchestration_descriptor_captures_effective_agent_behavior(tmp_path: Path) -> None:
-    with (
-        patch(
-            "vibesys.loops.agent.loop.create_run_context",
-            side_effect=RuntimeError("captured orchestration descriptor"),
-        ) as create_context,
-        patch.object(AgentRunConfiguration, "model_validate") as legacy_validate,
-        pytest.raises(RuntimeError, match="captured orchestration descriptor"),
-    ):
-        run_agent_loop(
-            config=as_config(
-                {
-                    "model": {"name": "gpt-default"},
-                    "thinking": {"level": "high"},
-                    "agent": {
-                        "backend": "cli",
-                        "cli_provider": "codex",
-                        "cli_timeout": 900,
-                        "outer": {"model": "gpt-outer", "reasoning_effort": "xhigh"},
-                        "inner": {"model": "gpt-inner", "reasoning_effort": "medium"},
-                    },
-                }
-            ),
-            exp_name="queue",
-            input_path=str(tmp_path),
-            accuracy_command="check",
-            benchmark_command="benchmark",
-            objective="Optimize the queue",
-            runs_dir=tmp_path / "projects",
-            inner_loop="single-agent",
-            interface="service",
-            modality="messages",
-            max_rounds=7,
-            max_retries_per_round=4,
-            judge_every=2,
-            official_eval_every=5,
-            memory_layout="directories",
-            operator_constraints=("Preserve ordering",),
-            domain=DomainName.GENERIC,
-            metrics=MetricSpace(),
-            run_environment=make_run_environment_spec(
-                use_modal=True,
-                modal_gpu="A100-80GB",
-                modal_model_volume="weights",
-            ),
-        )
-
-    legacy_validate.assert_not_called()
-    context_kwargs = create_context.call_args.kwargs
-    descriptor = context_kwargs["orchestration_descriptor"](ProfilerKind.AUTO)
-    assert descriptor.id == "agent"
+def test_orchestration_descriptor_contains_only_policy_settings() -> None:
+    options = AgentOrchestrationOptions(
+        interface="service",
+        modality="messages",
+        max_rounds=7,
+        max_retries_per_round=4,
+        judge_every=2,
+        official_eval_every=5,
+        memory_layout="directories",
+        operator_constraints=("Preserve ordering",),
+        metric_space=MetricSpace(),
+    )
+    descriptor = descriptor_from_options(options, orchestration_id="single-agent")
+    assert descriptor.id == "single-agent"
     assert descriptor.config_version == 1
     assert descriptor.options == {
-        "model": "gpt-default",
-        "inner_loop": "single-agent",
         "interface": "service",
-        "agent_backend": "cli",
-        "agent_driver": "agentshim",
-        "cli_provider": "codex",
-        "cli_timeout": 900,
-        "compute_backend": "cuda",
-        "profiler": "auto",
         "max_rounds": 7,
         "max_retries_per_round": 4,
         "judge_every": 2,
         "official_eval_every": 5,
         "memory_layout": "directories",
         "modality": "messages",
-        "default_reasoning_effort": "high",
-        "outer_model": "gpt-outer",
-        "outer_reasoning_effort": "xhigh",
-        "inner_model": "gpt-inner",
-        "inner_reasoning_effort": "medium",
         "operator_constraints": ["Preserve ordering"],
-        "objectives": [],
+        "metric_space": MetricSpace().model_dump(mode="json"),
+        "profile_guided": None,
     }
-    legacy = context_kwargs["legacy_configuration_factory"](ProfilerKind.AUTO)
-    assert legacy.outer_loop == "agent"
-    assert legacy.run_environment.name == "modal"
-    assert legacy.run_environment.gpu == "A100-80GB"
-    assert legacy.run_environment.model_volume == "weights"
 
 
 def test_validation_recipe_rejects_non_workspace_inputs():  # noqa: ANN201  # tracked: #288
@@ -2274,11 +2228,11 @@ def test_framework_gates_reuse_accuracy_pass_after_later_gate_failure(tmp_path):
 
 
 def test_framework_benchmark_extracts_declared_metric(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.gates import (  # noqa: PLC0415  # tracked: #288
         FRAMEWORK_BENCHMARK_END_MARKER,
         FRAMEWORK_BENCHMARK_MARKER,
     )
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
 
     ctx = MagicMock()
     ctx.judge_benchmark_command = "trusted-benchmark --repetitions 3"
@@ -2318,11 +2272,11 @@ def test_framework_benchmark_extracts_declared_metric(tmp_path):  # noqa: ANN001
 
 
 def test_framework_benchmark_prefers_top_level_metric_over_trial_diagnostics(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.gates import (  # noqa: PLC0415  # tracked: #288
         FRAMEWORK_BENCHMARK_END_MARKER,
         FRAMEWORK_BENCHMARK_MARKER,
     )
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
 
     ctx = MagicMock()
     ctx.judge_benchmark_command = "trusted-benchmark"
@@ -2350,11 +2304,11 @@ def test_framework_benchmark_prefers_top_level_metric_over_trial_diagnostics(tmp
 
 
 def test_framework_benchmark_rejects_ambiguous_metric(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.gates import (  # noqa: PLC0415  # tracked: #288
         FRAMEWORK_BENCHMARK_END_MARKER,
         FRAMEWORK_BENCHMARK_MARKER,
     )
+    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
 
     ctx = MagicMock()
     ctx.judge_benchmark_command = "trusted-benchmark"
@@ -2395,7 +2349,7 @@ _RESULT = '{"kind":"result","values":{"total_ops_per_sec":41250.3,"p99_latency_n
 
 def _protocol_benchmark_ctx(stream: str) -> MagicMock:
     """A LoopContext whose benchmark recovers *stream* through stdout."""
-    from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.gates import (  # noqa: PLC0415  # tracked: #288
         FRAMEWORK_BENCHMARK_END_MARKER,
         FRAMEWORK_BENCHMARK_MARKER,
     )
@@ -2414,7 +2368,6 @@ def _protocol_benchmark_ctx(stream: str) -> MagicMock:
 
 
 def test_protocol_benchmark_reads_complete_row(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.gates import PROTOCOL_OUTPUT_FLAG  # noqa: PLC0415  # tracked: #288
 
     ctx = _protocol_benchmark_ctx(f"{_HELLO}\n{_RESULT}")
 
@@ -2497,7 +2450,7 @@ def test_protocol_benchmark_surfaces_reason_code_for_malformed_stream(tmp_path):
 
 
 def test_read_protocol_benchmark_uses_the_only_declared_metric_without_objectives():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.gates import read_protocol_benchmark  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.gates import read_protocol_benchmark  # noqa: PLC0415  # tracked: #288
 
     stream = (
         '{"kind":"hello","protocol":2,"metrics":{"total_ops_per_sec":{"unit":"ops/s"}}}\n'
@@ -2513,7 +2466,7 @@ def test_read_protocol_benchmark_uses_the_only_declared_metric_without_objective
 
 
 def test_read_protocol_benchmark_resolves_direction_from_hello_declaration():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.gates import read_protocol_benchmark  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.gates import read_protocol_benchmark  # noqa: PLC0415  # tracked: #288
 
     stream = (
         '{"kind":"hello","protocol":2,"metrics":{"p99_latency_ns":{"unit":"ns","direction":"min"}}}\n'
@@ -2528,7 +2481,7 @@ def test_read_protocol_benchmark_resolves_direction_from_hello_declaration():  #
 
 
 def test_read_protocol_benchmark_refuses_to_guess_a_headline_metric():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.gates import read_protocol_benchmark  # noqa: PLC0415  # tracked: #288
+    from vibesys.evaluators.gates import read_protocol_benchmark  # noqa: PLC0415  # tracked: #288
 
     outcome = read_protocol_benchmark(f"{_HELLO}\n{_RESULT}", objectives=[])
 
@@ -2618,9 +2571,7 @@ def test_resume_at_completed_limit_finalizes_without_replaying_agents(
             tmp_path,
             str(project_path / "resume-input"),
             resumed_fake,
-            exp_name=run_id,
-            existing=True,
-            start_round=2,
+            resume_run_id=run_id,
             max_rounds=1,
         )
         is True
@@ -2693,141 +2644,6 @@ def test_orchestrator_title_stays_empty_when_the_model_gives_none(tmp_path, ref_
     active = _active_hypothesis(tmp_path)
     assert active is not None
     assert active.plan.title == ""
-
-
-def test_resume_migrates_legacy_hypothesis_state_without_losing_continuation(
-    tmp_path: Path,
-    ref_file: str,
-) -> None:
-    first_fake = _new_orchestrate_fake()
-    first_fake.enqueue(
-        "orchestrator",
-        _default_pre_round_decision(),
-        OrchestratorPlan(
-            hypothesis_id="legacy-continuation",
-            task="finish the interrupted change",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
-            reasoning="exercise migration at the loop boundary",
-        ),
-    )
-    first_fake.enqueue("implementer", _implementer_response(HypothesisOutcome.CONTINUE))
-    assert _invoke_orchestrate(tmp_path, ref_file, first_fake, max_rounds=1) is True
-
-    project_path = _created_project(tmp_path)
-    project = Project.open(project_path)
-    run_id = _run_id(project_path)
-    portable = project.state.portable_namespace(run_id, "agent")
-    local = project.state.local_namespace(run_id, "agent")
-    unified = AgentRunStateStore(portable).load()
-    hypothesis = unified.active_hypothesis
-    assert hypothesis is not None
-    assert len(hypothesis.rounds) == 1
-
-    portable_root = portable.external_directory()
-    local_root = local.external_directory()
-    portable.apply(portable.transition("state.json", None))
-    (portable_root / "rounds").mkdir(parents=True, exist_ok=True)
-    (portable_root / "rounds" / "0001.json").write_bytes(serialize_round(hypothesis.rounds[0]))
-    (portable_root / "hypotheses.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "hypotheses": [
-                    {
-                        "hypothesis_id": hypothesis.hypothesis_id,
-                        "claim": hypothesis.plan.hypothesis,
-                        "task": hypothesis.plan.task,
-                        "started_round": hypothesis.started_round,
-                        "rounds": [1],
-                        "parent_round": hypothesis.parent_round,
-                        "parent_commit": hypothesis.parent_commit,
-                        "declared_outcome": hypothesis.declared_outcome,
-                        "review": hypothesis.review,
-                        "resolution": hypothesis.resolution,
-                        "measurement": hypothesis.measurement.model_dump(mode="json")
-                        if hypothesis.measurement is not None
-                        else None,
-                        "candidate_retained": hypothesis.candidate_retained,
-                        "strategy": "active",
-                        "strategy_reason": None,
-                    }
-                ],
-            },
-            default=str,
-        )
-    )
-    local_root.mkdir(parents=True, exist_ok=True)
-    active_payload = hypothesis.model_dump(
-        mode="json",
-        include={
-            "plan",
-            "started_round",
-            "parent_round",
-            "parent_commit",
-            "feedback",
-            "next_step",
-            "continuation_rounds",
-            "revert_applied",
-            "revert_commit",
-            "gate_revalidation_pending",
-            "gate_approved_perf_metric",
-            "gate_approved_perf_unit",
-            "gate_approved_metrics",
-            "gate_approved_evaluation_artifact",
-            "gate_approved_candidate_disposition",
-            "gate_approved_candidate_metrics",
-            "gate_approved_candidate_evaluation_artifact",
-            "gate_approved_candidate_operating_point",
-            "gate_approved_candidate_retention_reason",
-            "gate_candidate_commit",
-            "gate_accuracy_passed",
-        },
-    )
-    active_payload["schema_version"] = 1
-    (local_root / "active.json").write_text(json.dumps(active_payload))
-    subprocess.run(
-        ["git", "add", "-A", "--", ".vibesys"],  # noqa: S607  # test fixture
-        cwd=project_path,
-        check=True,
-    )
-    subprocess.run(
-        [  # noqa: S607  # test fixture
-            "git",
-            "-c",
-            "user.name=VibeSys Test",
-            "-c",
-            "user.email=test@vibesys.invalid",
-            "commit",
-            "-m",
-            "test: restore legacy hypothesis state",
-        ],
-        cwd=project_path,
-        check=True,
-        capture_output=True,
-    )
-
-    resumed_fake = _new_orchestrate_fake()
-    assert (
-        _invoke_orchestrate(
-            tmp_path,
-            str(project_path / "resume-input"),
-            resumed_fake,
-            exp_name=run_id,
-            existing=True,
-            start_round=2,
-            max_rounds=2,
-        )
-        is True
-    )
-
-    migrated = AgentRunStateStore(portable).load()
-    migrated_hypothesis = migrated.by_id("legacy-continuation")
-    assert migrated_hypothesis is not None
-    assert [record.round_number for record in migrated_hypothesis.rounds] == [1, 2]
-    assert len(_calls_for_response(resumed_fake, "orchestrator", OrchestratorPlan)) == 0
-    assert not (portable_root / "hypotheses.json").exists()
-    assert not (portable_root / "rounds").exists()
-    assert not (local_root / "active.json").exists()
 
 
 def test_agent_roles_reference_framework_owned_effective_objective(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
@@ -5169,7 +4985,7 @@ def test_single_agent_self_reported_metric_is_stamped_implementer(tmp_path, ref_
         ref_file,
         fake,
         max_rounds=1,
-        inner_loop="single-agent",
+        orchestration_id="single-agent",
     )
 
     rounds = _round_payloads(tmp_path)
@@ -5195,7 +5011,7 @@ def test_single_agent_framework_benchmark_overrides_and_stamps_framework(tmp_pat
             ref_file,
             fake,
             max_rounds=1,
-            inner_loop="single-agent",
+            orchestration_id="single-agent",
             benchmark_result_protocol=2,
         )
 
@@ -5214,7 +5030,7 @@ def test_single_agent_round_without_a_metric_carries_no_provenance(tmp_path, ref
         ref_file,
         fake,
         max_rounds=1,
-        inner_loop="single-agent",
+        orchestration_id="single-agent",
     )
 
     rounds = _round_payloads(tmp_path)

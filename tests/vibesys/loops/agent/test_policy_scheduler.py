@@ -25,6 +25,11 @@ if TYPE_CHECKING:
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent.hypothesis_controller import ProfileGuidanceOutcome
     from vibesys.loops.agent.model import Hypothesis
+    from vibesys.loops.agent.policy_attempts import (
+        AttemptDecision,
+        AttemptRequest,
+        PerformanceProjection,
+    )
     from vibesys.loops.agent.policy_profile import ProfileOutcomeInput, ProfilePreparation
     from vibesys.loops.agent.policy_rounds import RoundPreparationRequest
     from vibesys.schemas import ProfilerSummary
@@ -91,15 +96,29 @@ class _Effects:
 class _Flow:
     calls: list[str]
 
-    def prepare_profile(
-        self, request: ProfilePreparation
-    ) -> tuple[HypothesisEngine, AgentRunState]:
+    @property
+    def config(self) -> None:
+        return None
+
+    def prepare(self, request: ProfilePreparation) -> tuple[HypothesisEngine, AgentRunState]:
         self.calls.append("prepare-profile")
         return request.engine, request.state
 
-    def profiler_summary(self, _request: RoundPreparationRequest) -> ProfilerSummary | None:
+    def profiler_summary(self, request: RoundPreparationRequest) -> ProfilerSummary | None:
+        del request
         self.calls.append("prepass")
         return None
+
+    def run_attempt(self, _request: AttemptRequest, _state: AttemptState) -> AttemptDecision:
+        raise AssertionError
+
+    def project_performance(
+        self, _request: AttemptRequest, _state: AttemptState
+    ) -> PerformanceProjection:
+        raise AssertionError
+
+    def reviewed(self, _state: AttemptState) -> bool:
+        raise AssertionError
 
     def official_reason(self, reason: str | None, _engine: HypothesisEngine) -> str | None:
         self.calls.append("official-reason")
@@ -113,7 +132,7 @@ class _Flow:
     ) -> bool:
         return False
 
-    def profile_outcome(self, _request: ProfileOutcomeInput) -> ProfileGuidanceOutcome | None:
+    def outcome(self, _request: ProfileOutcomeInput) -> ProfileGuidanceOutcome | None:
         return None
 
 
@@ -122,6 +141,7 @@ def test_new_hypothesis_runs_designer_and_continuation_reuses_plan() -> None:
     flow = _Flow(effects.calls)
     engine = HypothesisEngine.create(AgentRunState(), config=None)
     first = select_round(
+        flow,
         flow,
         effects,
         RoundSelectionRequest(engine, engine.state, [], _CarryOver(), 1, 3, 2, None),
@@ -140,6 +160,7 @@ def test_new_hypothesis_runs_designer_and_continuation_reuses_plan() -> None:
 
     effects.calls.clear()
     second = select_round(
+        flow,
         flow,
         effects,
         RoundSelectionRequest(first.engine, first.state, [], _CarryOver(), 2, 3, 2, None),
@@ -173,6 +194,7 @@ def test_review_failure_retains_bounded_claim_and_sets_exhaustion_carry() -> Non
     )
 
     terminal = transition_round(
+        _Flow([]),
         _Flow([]),
         TerminalRequest(
             engine=engine,
@@ -213,6 +235,7 @@ def test_terminal_success_releases_claim_and_reports_discarded_official_candidat
     )
 
     terminal = transition_round(
+        _Flow([]),
         _Flow([]),
         TerminalRequest(
             engine=engine,

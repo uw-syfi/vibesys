@@ -6,7 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
-from tests.server.support import build_server_parts
+from tests.server.support import agent_descriptor, build_server_parts
+from tests.support.run_execution import run_execution_record
 
 from server.api.experiments import (
     ExperimentLoadToken,
@@ -16,8 +17,8 @@ from server.api.experiments import (
 )
 from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEntry, PerformanceQuery
 from server.events import EventType, ExperimentsChangedData
-from vibesys.api._readmodel import project_committed_run_view, project_run_view
 from vibesys.api.contracts import RunStatus
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.agent.model import (
     AgentRunState,
     Hypothesis,
@@ -26,8 +27,8 @@ from vibesys.loops.agent.model import (
     HypothesisReview,
     HypothesisStrategy,
 )
+from vibesys.loops.agent.readmodel import project_committed_run_view, project_run_view
 from vibesys.loops.agent.state import AgentRunStateStore
-from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -35,7 +36,7 @@ from vibesys.schemas import (
     PerfDeltaReason,
 )
 from vs_loop_state.api import MetricComparison, PerfProvenance, RoundRecord
-from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -160,6 +161,7 @@ def _view(state: AgentRunState, *, run_id: str = "run-1") -> RunView:
         run_id=run_id,
         status=RunStatus.ACTIVE,
         experiment_revision=state.experiment_revision,
+        loop="single-agent",
     )
 
 
@@ -619,26 +621,9 @@ def test_invalidation_during_a_cold_load_rejects_the_stale_snapshot() -> None:
     assert isinstance(projection.query("run", "projection", None), ExperimentLoadToken)
 
 
-def _configuration() -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        outer_loop="agent",
-        inner_loop="single-agent",
-        interface="inprocess",
-        agent_backend="stub",
-        compute_backend="cpu",
-        profiler="none",
-        max_rounds=3,
-        max_retries_per_round=1,
-        judge_every=1,
-        official_eval_every=1,
-        memory_layout="files",
-        run_environment=RunEnvironmentRecord(name="local"),
-    )
-
-
 def _project_run(
     project: Path,
-    configuration: AgentRunConfiguration | None = None,
+    configuration: OrchestrationDescriptor | None = None,
 ) -> tuple[Project, str]:
     project.mkdir()
     (project / "OBJECTIVE.md").write_text("Make the queue fast.\n", encoding="utf-8")
@@ -649,7 +634,9 @@ def _project_run(
         run_id="queue-run",
         branch="vibesys/queue-run",
         vibesys_version="0.2.0-test",
-        configuration=configuration or _configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=configuration or agent_descriptor(),
         trusted_input_baseline="0" * 40,
     )
     vibesys_project.state.create_run(manifest)
@@ -700,7 +687,8 @@ def test_service_projects_committed_live_state_without_reloading_history(
     changed.hypotheses[1].plan.task = "project this row only"
     store.save(changed)
     parts.publish_committed_view(
-        project_committed_run_view(changed, run_id=run_id), changed_keys=("H-02",)
+        project_committed_run_view(changed, run_id=run_id, loop="single-agent"),
+        changed_keys=("H-02",),
     )
     parts.journal.record(
         EventType.EXPERIMENTS_CHANGED,
@@ -763,7 +751,8 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
         changed.hypotheses[0].plan.task = "new committed contents"
         store.save(changed)
         parts.publish_committed_view(
-            project_committed_run_view(changed, run_id=run_id), changed_keys=("H-01",)
+            project_committed_run_view(changed, run_id=run_id, loop="single-agent"),
+            changed_keys=("H-01",),
         )
         parts.journal.record(
             EventType.EXPERIMENTS_CHANGED,
@@ -832,7 +821,9 @@ def test_committed_state_is_projected_synchronously_before_later_mutation(tmp_pa
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
     state = AgentRunState(hypotheses=[_hypothesis("H-01", 1)])
 
-    parts.publish_committed_view(project_committed_run_view(state, run_id=run_id))
+    parts.publish_committed_view(
+        project_committed_run_view(state, run_id=run_id, loop="single-agent")
+    )
     state.hypotheses[0].plan.task = "uncommitted mutation"
     response = parts.api.execute(ExperimentQuery())
 
@@ -867,82 +858,6 @@ def test_service_reads_performance_from_authoritative_agent_state(tmp_path: Path
     assert [(item.round, item.perf_metric) for item in response.performance] == [(1, 42.0)]
 
 
-def test_service_adapts_legacy_state_read_only(tmp_path: Path) -> None:
-    project, run_id = _project_run(tmp_path / "project")
-    project.state.save_round(
-        run_id,
-        _round(
-            1,
-            hypothesis_id="H-01",
-            hypothesis_claim="legacy claim",
-            hypothesis_task="legacy task",
-        ),
-    )
-    portable = project.state.portable_namespace(run_id, "agent")
-    store = AgentRunStateStore(portable)
-    parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    (entry,) = parts.api.execute(ExperimentQuery()).experiments
-
-    assert entry.hypothesis_id == "H-01"
-    assert entry.claim == "legacy claim"
-    assert store.load_optional() is None
-
-
-def test_service_rebuilds_legacy_measurement_and_resolution_from_round_evidence(
-    tmp_path: Path,
-) -> None:
-    """Legacy summaries may omit measurements, but nested evidence is complete."""
-    configuration = _configuration().model_copy(update={"objectives": ("ops_s:max",)})
-    project, run_id = _project_run(tmp_path / "project", configuration)
-    project.state.save_round(
-        run_id,
-        _round(
-            1,
-            commit="a" * 40,
-            hypothesis_id="H-parent",
-            hypothesis_outcome="proven",
-            passed=True,
-            reviewed=True,
-            official_evaluation=True,
-            perf_metric=100.0,
-            perf_unit="ops_s",
-        ),
-    )
-    project.state.save_round(
-        run_id,
-        _round(
-            2,
-            commit="b" * 40,
-            hypothesis_id="H-regression",
-            hypothesis_parent_round=1,
-            hypothesis_parent_commit="a" * 40,
-            hypothesis_outcome="proven",
-            passed=True,
-            reviewed=True,
-            official_evaluation=True,
-            perf_metric=90.0,
-            perf_unit="ops_s",
-        ),
-    )
-    parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
-    entries = parts.api.execute(ExperimentQuery()).experiments
-
-    regression = next(entry for entry in entries if entry.hypothesis_id == "H-regression")
-    assert regression.resolved_outcome == "disproven"
-    assert (regression.perf_metric, regression.perf_unit, regression.perf_delta_pct) == (
-        90.0,
-        "ops_s",
-        -10.0,
-    )
-    # The configured objective direction and the rebuilt causal baseline reach
-    # the wire, so the client can label the numbers above.
-    assert (
-        regression.perf_metric_name,
-        regression.perf_direction,
-        regression.perf_baseline_value,
-    ) == ("ops_s", "max", 100.0)
-
-
 def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -> None:
     """Regression for #507: the read path must use the run's stored tolerance.
 
@@ -951,7 +866,9 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
     run state; otherwise a 1% delta under a 5% noise model reaches the client
     as ``proven`` while the round record says the run learned nothing.
     """
-    configuration = _configuration().model_copy(update={"objectives": ("ops_s:max",)})
+    configuration = agent_descriptor(
+        metric_space=MetricSpace(objectives=(Objective("ops_s", "max"),))
+    )
     project, run_id = _project_run(tmp_path / "project", configuration)
     portable = project.state.portable_namespace(run_id, "agent")
     AgentRunStateStore(portable).save(

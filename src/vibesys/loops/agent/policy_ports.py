@@ -9,13 +9,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent.hypothesis_controller import HypothesisEngine
     from vibesys.loops.agent.model import AgentRunState
     from vibesys.loops.agent.policy_attempts import AttemptRequest, AttemptState
     from vibesys.loops.agent.policy_rounds import RoundPreparationRequest
     from vibesys.loops.agent.policy_support import _ImplementerAttempt
-    from vibesys.loops.gates import FrameworkBenchmarkOutcome
     from vibesys.schemas import (
         JudgeResponse,
         PreRoundDecision,

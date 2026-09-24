@@ -20,9 +20,7 @@ from vs_github.api import GitHubCLI, GitHubCLIError
 
 if TYPE_CHECKING:
     import argparse
-
-    from vibesys.api.request import ResumeConfigSnapshot
-    from vs_project.api import RunConfiguration
+    from types import SimpleNamespace
 
 
 def _explicit_config_value(raw: object, path: tuple[str, ...]) -> tuple[bool, object]:
@@ -37,7 +35,7 @@ def _explicit_config_value(raw: object, path: tuple[str, ...]) -> tuple[bool, ob
 def _restore_project_config(
     args: argparse.Namespace,
     config: Config,
-    recorded: RunConfiguration | ResumeConfigSnapshot,
+    recorded: SimpleNamespace,
 ) -> Config:
     """Restore persisted model settings, rejecting explicit config changes."""
     raw: object = {}
@@ -74,6 +72,7 @@ def _restore_project_config(
             frozenset(),
             "default_reasoning_effort",
         ),
+        (("thinking", "budget"), recorded.thinking_budget, frozenset(), "thinking_budget"),
         (("agent", "outer", "model"), recorded.outer_model, frozenset(), "outer_model"),
         (
             ("agent", "outer", "reasoning_effort"),
@@ -123,7 +122,10 @@ def _restore_project_config(
         update={
             "model": config.model.model_copy(update={"name": recorded.model or config.model.name}),
             "thinking": config.thinking.model_copy(
-                update={"level": recorded.default_reasoning_effort, "budget": None}
+                update={
+                    "level": recorded.default_reasoning_effort,
+                    "budget": recorded.thinking_budget,
+                }
             ),
             "backend": config.backend.model_copy(
                 update={"name": ComputeBackend(recorded.compute_backend)}

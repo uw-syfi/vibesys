@@ -7,6 +7,16 @@ from collections.abc import Sequence  # noqa: TC003  # tracked: #288
 from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING, Literal
 
+from vibesys.evaluators.gates import (
+    GATE_LOG_TAIL_CHARS,
+    GATE_RECORD_TAIL_CHARS,
+    FrameworkBenchmarkOutcome,
+    emit_gate_finished,
+    emit_gate_started,
+    framework_command_timeout,
+    run_accuracy_gate,
+    run_benchmark_gate,
+)
 from vibesys.evaluators.input_manifest import (  # noqa: TC001  # tracked: #288
     BenchmarkResult,
 )
@@ -19,22 +29,12 @@ from vibesys.loops.agent.policy_support import (
     _reusable_validation_result,
     _validation_input_digest,
 )
-from vibesys.loops.gates import (
-    GATE_LOG_TAIL_CHARS,
-    GATE_RECORD_TAIL_CHARS,
-    FrameworkBenchmarkOutcome,
-    emit_gate_finished,
-    emit_gate_started,
-    framework_command_timeout,
-    run_accuracy_gate,
-    run_benchmark_gate,
-)
 from vibesys.schemas import (
     FrameworkValidationResult,
 )
 
 if TYPE_CHECKING:
-    from vibesys.loops.metrics import (
+    from vibesys.evaluators.metrics import (
         Objective,
     )
     from vibesys.run import LoopContext
@@ -274,7 +274,7 @@ def _run_framework_benchmark(  # noqa: PLR0913  # tracked: #288
     """Run the shared benchmark gate and record its agent-loop bookkeeping.
 
     The gate itself (result recovery, parsing, the collision-proof result
-    path, and the typed gate events) lives in :mod:`vibesys.loops.gates`;
+    path, and the typed gate events) lives in :mod:`vibesys.evaluators.gates`;
     this wrapper owns what is agent-loop specific: progress notes and
     workspace snapshots.
     """

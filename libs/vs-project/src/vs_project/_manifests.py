@@ -1,4 +1,4 @@
-"""Portable project and run manifest schemas, including legacy version 3 records."""
+"""Portable project and orchestration run manifest schemas."""
 
 from __future__ import annotations
 
@@ -15,11 +15,6 @@ Identifier = Annotated[str, Field(pattern=_IDENTIFIER_PATTERN)]
 Sha256Digest = Annotated[str, Field(pattern=_DIGEST_PATTERN)]
 GitObjectId = Annotated[str, Field(pattern=_GIT_OBJECT_ID_PATTERN)]
 PortableText = Annotated[str, Field(min_length=1, max_length=256)]
-
-
-class _OpenEvolveSettingsError(ValueError):
-    def __init__(self) -> None:
-        super().__init__("OpenEvolve settings require search_policy='openevolve'")
 
 
 class _InvalidOrchestrationOptionsError(ValueError):
@@ -81,117 +76,6 @@ class RunEnvironmentRecord(BaseModel):
     resources: RunResourceRequest | None = None
 
 
-class _BaseRunConfiguration(BaseModel):
-    """Strict settings shared by every supported outer loop."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    run_environment: RunEnvironmentRecord
-    model: PortableText | None = None
-    agent_backend: PortableText
-    agent_driver: PortableText | None = None
-    cli_provider: PortableText | None = None
-    cli_timeout: Annotated[int, Field(gt=0)] | None = None
-    compute_backend: PortableText
-    profiler: PortableText | None = None
-    modality: PortableText | None = None
-    default_reasoning_effort: PortableText | None = None
-    outer_model: PortableText | None = None
-    outer_reasoning_effort: PortableText | None = None
-    inner_model: PortableText | None = None
-    inner_reasoning_effort: PortableText | None = None
-
-
-class AgentRunConfiguration(_BaseRunConfiguration):
-    """Deprecated for new code: v3 settings for an agent-loop run."""
-
-    outer_loop: Literal["agent", "profile-guided"]
-    inner_loop: PortableText
-    interface: PortableText
-    max_rounds: Annotated[int, Field(gt=0)]
-    max_retries_per_round: Annotated[int, Field(gt=0)]
-    judge_every: Annotated[int, Field(gt=0)]
-    official_eval_every: Annotated[int, Field(gt=0)]
-    memory_layout: PortableText
-    operator_constraints: tuple[str, ...] = ()
-    objectives: tuple[PortableText, ...] = ()
-
-
-class PlainRunConfiguration(_BaseRunConfiguration):
-    """Deprecated for new code: v3 settings for a plain-loop run."""
-
-    outer_loop: Literal["plain"]
-    max_rounds: Annotated[int, Field(gt=0)]
-    max_attempts_per_issue: Annotated[int, Field(gt=0)]
-    max_issues_per_perf_eval: Annotated[int, Field(gt=0)]
-
-
-class EvolveRunConfiguration(_BaseRunConfiguration):
-    """Deprecated for new code: v3 settings for an evolutionary-search run."""
-
-    outer_loop: Literal["evolve"]
-    max_generations: Annotated[int, Field(gt=0)]
-    children_per_generation: Annotated[int, Field(gt=0)]
-    k_top_inspirations: Annotated[int, Field(ge=0)]
-    k_random_inspirations: Annotated[int, Field(ge=0)]
-    selection_temperature: Annotated[float, Field(gt=0, allow_inf_nan=False)]
-    seed: int | None = None
-    search_policy: Literal["vibesys", "openevolve"] | None = None
-    openevolve_population_size: Annotated[int, Field(gt=0)] | None = None
-    openevolve_archive_size: Annotated[int, Field(gt=0)] | None = None
-    openevolve_num_islands: Annotated[int, Field(gt=0)] | None = None
-    openevolve_migration_interval: Annotated[int, Field(gt=0)] | None = None
-    openevolve_migration_rate: Annotated[float, Field(ge=0, le=1)] | None = None
-    frontier_bias: Annotated[float, Field(ge=0, le=1)]
-    bootstrap_max_attempts: Annotated[int, Field(gt=0)]
-    keep_deployments: bool
-    max_parallelism: Annotated[int, Field(gt=0)]
-    objectives: tuple[PortableText, ...] = ()
-
-    @model_validator(mode="after")
-    def _validate_search_policy_settings(self) -> Self:
-        openevolve_values = (
-            self.openevolve_population_size,
-            self.openevolve_archive_size,
-            self.openevolve_num_islands,
-            self.openevolve_migration_interval,
-            self.openevolve_migration_rate,
-        )
-        if self.search_policy == "vibesys" and any(
-            value is not None for value in openevolve_values
-        ):
-            raise _OpenEvolveSettingsError
-        return self
-
-
-RunConfiguration = Annotated[
-    AgentRunConfiguration | PlainRunConfiguration | EvolveRunConfiguration,
-    Field(discriminator="outer_loop"),
-]
-# Deprecated for new code: this closed union is retained for v3 compatibility.
-
-
-class _BaseRunManifest(_CommittedManifest):
-    """Identity and provenance shared by supported run-manifest versions."""
-
-    run_id: Identifier
-    project_id: Identifier
-    task_name: Identifier | None = None
-    display_name: PortableText
-    created_at: AwareDatetime
-    input_fingerprint: Sha256Digest
-    trusted_input_baseline: GitObjectId
-    branch: PortableText
-    vibesys_version: PortableText
-
-
-class RunManifest(_BaseRunManifest):
-    """Deprecated for new code: version 3 run manifest with loop-specific settings."""
-
-    schema_version: Literal[3]
-    configuration: RunConfiguration
-
-
 class OrchestrationDescriptor(_CommittedManifest):
     """Versioned, portable settings owned and validated by an orchestration."""
 
@@ -208,12 +92,41 @@ class OrchestrationDescriptor(_CommittedManifest):
         return self
 
 
-class OrchestrationRunManifest(_BaseRunManifest):
+class RunExecutionRecord(_CommittedManifest):
+    """Resolved host settings needed to resume the same execution environment."""
+
+    model: PortableText
+    agent_backend: PortableText
+    agent_driver: PortableText | None = None
+    cli_provider: PortableText | None = None
+    cli_timeout: Annotated[int, Field(gt=0)] | None = None
+    compute_backend: PortableText
+    requested_profiler: PortableText
+    resolved_profiler: PortableText
+    default_reasoning_effort: PortableText | None = None
+    thinking_budget: Annotated[int, Field(ge=-1)] | None = None
+    outer_model: PortableText | None = None
+    outer_reasoning_effort: PortableText | None = None
+    inner_model: PortableText | None = None
+    inner_reasoning_effort: PortableText | None = None
+    perf_eval_load_levels: list[dict[str, int]] | None = None
+    feature_flags: dict[str, bool] = Field(default_factory=dict)
+    skills_dirs: list[str] = Field(default_factory=list)
+
+
+class OrchestrationRunManifest(_CommittedManifest):
     """Version 4 run manifest independent of orchestration implementation."""
 
     schema_version: Literal[4]
+    run_id: Identifier
+    project_id: Identifier
+    task_name: Identifier | None = None
+    display_name: PortableText
+    created_at: AwareDatetime
+    input_fingerprint: Sha256Digest
+    trusted_input_baseline: GitObjectId
+    branch: PortableText
+    vibesys_version: PortableText
     run_environment: RunEnvironmentRecord
+    execution: RunExecutionRecord
     orchestration: OrchestrationDescriptor
-
-
-RunManifestRecord = RunManifest | OrchestrationRunManifest

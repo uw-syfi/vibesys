@@ -7,6 +7,8 @@ import pytest
 
 from entrypoints.cli import _build_plain_parser as build_parser
 from entrypoints.headless import main
+from vibesys.config import Config
+from vibesys.orchestration.view import RunResult
 
 TARGET_ARGS = [
     "--input",
@@ -77,8 +79,8 @@ class TestMain:
 
     def _patch_run(self, return_value: bool):  # noqa: ANN202, FBT001  # tracked: #288
         return patch(
-            "vibesys.loops.plain.loop.run_plain_loop",
-            return_value=return_value,
+            "entrypoints.cli.loops._execute_run_request",
+            return_value=RunResult(run_id="myexp", loop="plain", succeeded=return_value),
         )
 
     def _patch_config(self):  # noqa: ANN202  # tracked: #288
@@ -92,8 +94,8 @@ class TestMain:
             if getattr(args, "repo_visibility", None) is None:
                 args.repo_visibility = RepositoryVisibility.PRIVATE
             return (
-                {"model": {"name": "claude-sonnet-4-6"}},
-                None,
+                Config.model_validate({"model": {"name": "claude-sonnet-4-6"}}),
+                (),
                 DEFAULT_COMPUTE_BACKEND,
             )
 
@@ -130,16 +132,16 @@ class TestMain:
             ),
             self._patch_config(),
             patch(
-                "vibesys.loops.plain.loop.run_plain_loop",
-                return_value=True,
+                "entrypoints.cli.loops._execute_run_request",
+                return_value=RunResult(run_id="myexp", loop="plain", succeeded=True),
             ) as mock_run,
         ):
             main()
-            kwargs = mock_run.call_args.kwargs
-            assert kwargs["max_rounds"] == 7
-            assert kwargs["max_attempts_per_issue"] == 4
-            assert kwargs["max_issues_per_perf_eval"] == 2
-            assert kwargs["runs_dir"] == Path("/tmp/vibesys-test-runs").resolve()  # noqa: S108
+            request = mock_run.call_args.args[0]
+            assert request.orchestration.options["max_rounds"] == 7
+            assert request.orchestration.options["max_attempts_per_issue"] == 4
+            assert request.orchestration.options["max_issues_per_perf_eval"] == 2
+            assert request.runs_dir == Path("/tmp/vibesys-test-runs").resolve()  # noqa: S108
 
     def test_main_forwards_agent_backend_and_cli_provider(self):  # noqa: ANN201  # tracked: #288
         with (
@@ -155,32 +157,32 @@ class TestMain:
             ),
             self._patch_config(),
             patch(
-                "vibesys.loops.plain.loop.run_plain_loop",
-                return_value=True,
+                "entrypoints.cli.loops._execute_run_request",
+                return_value=RunResult(run_id="myexp", loop="plain", succeeded=True),
             ) as mock_run,
         ):
             main()
-            kwargs = mock_run.call_args.kwargs
-            assert kwargs["agent_backend"] == "cli"
-            assert kwargs["cli_provider"] == "claude"
+            request = mock_run.call_args.args[0]
+            assert request.agent_backend == "cli"
+            assert request.cli_provider == "claude"
 
     def test_main_defaults_agent_backend_and_cli_provider_to_none(self):  # noqa: ANN201  # tracked: #288
         with (
             patch("sys.argv", list(self._BASE_ARGV)),
             self._patch_config(),
             patch(
-                "vibesys.loops.plain.loop.run_plain_loop",
-                return_value=True,
+                "entrypoints.cli.loops._execute_run_request",
+                return_value=RunResult(run_id="myexp", loop="plain", succeeded=True),
             ) as mock_run,
         ):
             main()
-            kwargs = mock_run.call_args.kwargs
-            assert kwargs["agent_backend"] is None
-            assert kwargs["cli_provider"] is None
+            request = mock_run.call_args.args[0]
+            assert request.agent_backend is None
+            assert request.cli_provider is None
 
     @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
     def test_main_accepts_all_cli_providers(self, provider):  # noqa: ANN001, ANN201  # tracked: #288
-        """All four CLI providers must reach run_plain_loop without raising."""
+        """All four CLI providers must reach the canonical request."""
         with (
             patch(
                 "sys.argv",
@@ -194,11 +196,11 @@ class TestMain:
             ),
             self._patch_config(),
             patch(
-                "vibesys.loops.plain.loop.run_plain_loop",
-                return_value=True,
+                "entrypoints.cli.loops._execute_run_request",
+                return_value=RunResult(run_id="myexp", loop="plain", succeeded=True),
             ) as mock_run,
         ):
             main()
-            kwargs = mock_run.call_args.kwargs
-            assert kwargs["agent_backend"] == "cli"
-            assert kwargs["cli_provider"] == provider
+            request = mock_run.call_args.args[0]
+            assert request.agent_backend == "cli"
+            assert request.cli_provider == provider

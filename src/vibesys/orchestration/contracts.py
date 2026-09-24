@@ -1,9 +1,9 @@
-"""Execution contract and registry for orchestration implementations."""
+"""Execution and read projection contracts for registered orchestrations."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 
@@ -12,190 +12,103 @@ from vs_project.api import OrchestrationDescriptor
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration import ResumeProjection
-    from vibesys.orchestration.request import RunRequestLike
+    from vibesys.context import RunSetup
+    from vibesys.orchestration.runtime import RunContext
     from vibesys.orchestration.view import RunStatus, RunView
-    from vibesys.runtime import VibeSysRuntime
-    from vs_project.api import OrchestrationRunManifest, Project
+    from vs_project.api import Project
+
+
+class Orchestrator(Protocol):
+    """A descriptor-validated policy that controls one run."""
+
+    setup: RunSetup
+
+    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
+        """Validate the ID, config version, and typed options before setup."""
+        ...
+
+    async def run(self, ctx: RunContext) -> bool:
+        """Run policy control flow using the host capabilities."""
+        ...
+
+
+class OrchestrationProjector(Protocol):
+    """Read a policy's durable state for live and historical observation."""
+
+    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+        """Project the recorded state for one run."""
+        ...
+
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        """Project a state just committed by the host."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
-class RunDescription:
-    """Internal policy metadata; the old public import is deprecated."""
+class OrchestrationRegistration:
+    """The execution class and optional read projection for one stable ID."""
 
-    max_rounds: int = 1
-    expected_roles: tuple[str, ...] = ()
-
-
-class ExecutableOrchestration(Protocol):
-    """Internal policy hook: execute a run using the agent runtime."""
-
-    def execute(self, request: Any, runtime: VibeSysRuntime) -> bool:  # noqa: ANN401
-        """Run policy-defined control flow and return whether it succeeded."""
-        ...
+    orchestrator: type[Orchestrator]
+    projector: OrchestrationProjector | None = None
+    portable_namespaces: tuple[str, ...] = ()
 
 
-class OrchestrationExecution(Protocol):
-    """Internal setup and policy-controlled execution of one run."""
-
-    def prepare(self, request: RunRequestLike, runtime: VibeSysRuntime) -> None:
-        """Initialize policy state before execution."""
-        ...
-
-    def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool:
-        """Run policy-defined control flow and return whether it succeeded."""
-        ...
-
-
-class OrchestrationProjection(Protocol):
-    """Internal metadata, read-model, and resume projections."""
-
-    def describe(self, request: RunRequestLike) -> RunDescription:
-        """Provide metadata for the run-start event."""
-        ...
-
-    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
-        """Project a run's persisted state for observation."""
-        ...
-
-    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
-        """Project a just-committed state for live observation."""
-        ...
-
-    def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
-        """Restore policy-owned CLI settings from a run manifest."""
-        ...
-
-
-@runtime_checkable
-class Orchestration(OrchestrationExecution, OrchestrationProjection, Protocol):
-    """Registered internal contract combining execution and projections.
-
-    Internal policy authors can implement ``ExecutableOrchestration``. Imports
-    of this aggregate through ``vibesys.api`` remain compatible but deprecated.
-    """
-
-
-@runtime_checkable
-class HistoryNamespaces(Protocol):
-    """Optional policy-owned selection of portable history namespaces."""
-
-    def history_namespaces(self) -> tuple[str, ...]:
-        """Return the namespaces that history queries may inspect."""
-        ...
-
-
-def empty_run_view(
-    *,
-    run_id: str,
-    status: RunStatus,
-    loop: str,
-) -> RunView:
-    """Neutral view for policies without persisted read models."""
+def empty_run_view(*, run_id: str, status: RunStatus, loop: str) -> RunView:
+    """Identity and status view for a policy without a read projection."""
     from vibesys.orchestration.view import RunView  # noqa: PLC0415
 
-    return RunView(
-        run_id=run_id,
-        loop=loop,
-        status=status,
-    )
-
-
-class _ExecuteOnlyAdapter:
-    """Normalize prior execute-only implementations at registration."""
-
-    def __init__(self, implementation: ExecutableOrchestration) -> None:
-        self._implementation = implementation
-
-    def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool:
-        return self._implementation.execute(request, runtime)
-
-    def prepare(self, request: RunRequestLike, runtime: VibeSysRuntime) -> None:
-        prepare_policy = getattr(self._implementation, "prepare", None)
-        if callable(prepare_policy):
-            prepare_policy(request, runtime)
-
-    def describe(self, request: RunRequestLike) -> RunDescription:
-        describe = getattr(self._implementation, "describe", None)
-        if callable(describe):
-            return describe(request)
-        return RunDescription()
-
-    def view(
-        self,
-        project: Project,
-        run_id: str,
-        *,
-        status: RunStatus,
-        loop: str,
-    ) -> RunView:
-        view = getattr(self._implementation, "view", None)
-        if callable(view):
-            return view(project, run_id, status=status, loop=loop)
-        return empty_run_view(run_id=run_id, status=status, loop=loop)
-
-    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
-        projector = getattr(self._implementation, "project_committed", None)
-        if callable(projector):
-            return projector(namespace, state, run_id=run_id)
-        return None
-
-    def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
-        projector = getattr(self._implementation, "resume_projection", None)
-        if callable(projector):
-            return projector(manifest)
-        message = "execute-only orchestration has no resume projection"
-        raise ValueError(message)
-
-    def history_namespaces(self) -> tuple[str, ...]:
-        """Preserve an execute-only policy's optional history selection."""
-        implementation = self._implementation
-        if isinstance(implementation, HistoryNamespaces):
-            return implementation.history_namespaces()
-        return ()
+    return RunView(run_id=run_id, loop=loop, status=status)
 
 
 def project_run(
-    policy: Orchestration | None,
+    registration: OrchestrationRegistration | None,
     project: Project,
     *,
     run_id: str,
     status: RunStatus,
     loop: str,
 ) -> RunView:
-    """Project a known policy, or a neutral view for an unavailable plugin."""
-    if policy is None:
+    """Project a registered policy or return its neutral identity view."""
+    projector = registration.projector if registration is not None else None
+    if projector is None:
         return empty_run_view(run_id=run_id, status=status, loop=loop)
-    return policy.view(project, run_id, status=status, loop=loop)
+    return projector.view(project, run_id, status=status, loop=loop)
 
 
 class OrchestrationRegistry:
-    """Map stable orchestration IDs to implementations."""
+    """Map stable orchestration IDs to concrete policy classes."""
 
     def __init__(self) -> None:
-        """Start with no registered policies."""
-        self._implementations: dict[str, Orchestration] = {}
+        """Create an empty registration table."""
+        self._registrations: dict[str, OrchestrationRegistration] = {}
 
-    def register(self, kind: str, implementation: ExecutableOrchestration) -> None:
-        """Register a policy under its stable orchestration ID."""
+    def register(
+        self,
+        kind: str,
+        orchestrator: type[Orchestrator],
+        *,
+        projector: OrchestrationProjector | None = None,
+        portable_namespaces: tuple[str, ...] = (),
+    ) -> None:
+        """Register the policy constructor and its explicit read projection."""
         try:
             OrchestrationDescriptor(id=kind, config_version=1, options={})
         except ValidationError as exc:
             msg = f"invalid orchestration ID {kind!r}"
             raise ValueError(msg) from exc
-        if kind in self._implementations:
+        if kind in self._registrations:
             msg = f"orchestration {kind!r} is already registered"
             raise ValueError(msg)
-        self._implementations[kind] = (
-            implementation
-            if isinstance(implementation, Orchestration)
-            else _ExecuteOnlyAdapter(implementation)
+        self._registrations[kind] = OrchestrationRegistration(
+            orchestrator=orchestrator,
+            projector=projector,
+            portable_namespaces=portable_namespaces,
         )
 
-    def resolve(self, kind: str) -> Orchestration:
-        """Return the registered policy or reject an unknown ID."""
+    def resolve(self, kind: str) -> OrchestrationRegistration:
+        """Return the registration or reject an unknown orchestration ID."""
         try:
-            return self._implementations[kind]
+            return self._registrations[kind]
         except KeyError as exc:
             msg = f"orchestration {kind!r} is not registered"
             raise ValueError(msg) from exc

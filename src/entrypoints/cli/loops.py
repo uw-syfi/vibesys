@@ -1,20 +1,14 @@
-"""Per-outer-loop request builders, runners, and run-environment resolution.
-
-Also hosts the ``migrate-run-environment`` command's implementation.
-"""
+"""Resolve CLI inputs into one descriptor-backed orchestration request."""
 
 from __future__ import annotations
 
 import math
-import shlex
 import sys
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from entrypoints.cli.args import _build_migrate_run_environment_parser
 from entrypoints.cli.config import _prepare_experiment_repository, load_config_and_skills
-from entrypoints.cli.constants import _MIGRATE_RUN_ENVIRONMENT_COMMAND
 from entrypoints.cli.environment import (
     _validate_run_environment_profiler,
     run_environment_spec_from_args,
@@ -24,9 +18,10 @@ from entrypoints.cli.inputs import _standalone_input_dests_set, _validate_target
 from entrypoints.cli.remote import _clone_project, _is_remote_project
 from headless import run as headless_run
 from vibesys.api import (
-    LoopKind,
+    DomainName,
     MetricSpace,
     Objective,
+    OrchestrationDescriptor,
     ResumeRef,
     RunRequest,
     RunResult,
@@ -35,11 +30,10 @@ from vibesys.api import (
 from vibesys.api.request import (
     InputBundle,
     OpenEvolveSearchConfig,
-    make_run_environment_spec,
-    run_environment_record,
+    validate_descriptor,
     with_operator_constraints,
 )
-from vs_project.api import Project, ProjectLayoutError, ProjectStateError
+from vs_project.api import Project
 
 if TYPE_CHECKING:
     import argparse
@@ -123,137 +117,6 @@ def _resolve_project_root(project_arg: str, runs_dir: Path) -> Path:
     return projects[-1].resolve()
 
 
-def _migrate_run_environment_command(project_root: Path, run_id: str) -> str:
-    """Render the operator command that migrates one run's recorded metadata."""
-    return shlex.join(
-        [
-            "vibesys",
-            _MIGRATE_RUN_ENVIRONMENT_COMMAND,
-            "--project",
-            str(project_root),
-            "--run",
-            run_id,
-            "--run-environment",
-            "local|docker|modal",
-        ]
-    )
-
-
-def _run_migrate_run_environment(argv: list[str]) -> None:
-    """Migrate one version 1 or 2 run to the current execution schema."""
-    args = _build_migrate_run_environment_parser().parse_args(argv)
-    project_root = (args.project or Path.cwd()).expanduser().resolve()
-    # Build the record through the same producer a fresh run uses so a migrated
-    # recording matches what the CLI would have written for those flags.
-    spec = make_run_environment_spec(
-        use_docker=args.run_environment == "docker",
-        use_modal=args.run_environment == "modal",
-        docker_image=args.docker_image,
-        modal_gpu=args.modal_gpu,
-        modal_model_volume=args.modal_model_volume,
-        modal_app=args.modal_app,
-    )
-    try:
-        store = Project.open(project_root).state
-        run_id = args.run or store.current_run_id()
-        if run_id is None:
-            _configuration_error(
-                f"No current run in {project_root}; pass --run RUN_ID",
-                code="migration_failed",
-                stage="run_migration",
-                exit_code=1,
-            )
-        manifest = store.migrate_run_environment(run_id, run_environment_record(spec))
-    except (ProjectLayoutError, ProjectStateError, ValueError) as exc:
-        _configuration_error(
-            f"Migration failed for VibeSys run in {project_root}: {exc}",
-            code="migration_failed",
-            stage="run_migration",
-            exit_code=1,
-        )
-
-    print(  # noqa: T201  # tracked: #288
-        f"Migrated run {manifest.run_id} to run schema version "
-        f"{manifest.schema_version}: run environment "
-        f"{manifest.configuration.run_environment.name}"
-    )
-    print(f"  metadata: {project_root}")  # noqa: T201  # tracked: #288
-    print("  commit the updated run metadata to keep the run branch clean.")  # noqa: T201  # tracked: #288
-
-
-def _build_agent_request(args: argparse.Namespace) -> RunRequest:
-    """Run the agent-loop preamble and build its ``RunRequest``.
-
-    Split out of ``_run_agent`` so the server can build this request and own
-    the resulting ``create_session`` call itself, instead of going through
-    ``dispatch``. The enclosing span is this preamble's total; ``context.py``
-    times assembly from there.
-    """
-    with boot_trace.span("agent_preamble"):
-        bundle: InputBundle = args.input_bundle
-        with boot_trace.span("load_config_and_skills"):
-            config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
-        with boot_trace.span("prepare_experiment_repository"):
-            _prepare_experiment_repository(args, config)
-        with boot_trace.span("load_objective"):
-            objective = with_operator_constraints(bundle.objective, args.constraint)
-
-        if args.resume is not None:
-            print(f"Resuming VibeSys run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
-
-        with boot_trace.span("load_objectives_toml"):
-            metrics = _load_metric_space_toml(bundle.task_root)
-
-        with boot_trace.span("run_environment_spec"):
-            run_environment = run_environment_spec_from_args(
-                args,
-                build_task_docker_image=True,
-            )
-
-        return RunRequest(
-            project_root=bundle.root,
-            loop=LoopKind(getattr(args, "outer_loop", "agent")),
-            config=config,
-            input_bundle=bundle,
-            objective=objective,
-            resume=ResumeRef(run_id=args.resume) if args.resume is not None else None,
-            exp_name=args.exp_name,
-            runs_dir=args.runs_dir,
-            metrics=metrics,
-            operator_constraints=tuple(
-                constraint.strip() for constraint in args.constraint if constraint.strip()
-            ),
-            debug=args.debug,
-            profiler_kind=args.profiler,
-            skills_dirs=skills,
-            run_environment=run_environment,
-            agent_backend="stub" if args.stub_agent else args.agent_backend,
-            cli_provider=args.cli_provider,
-            backend=backend,
-            modality=args.modality,
-            interface=args.interface,
-            inner_loop=args.inner_loop,
-            remote_repo=args.repo,
-            repo_visibility=args.repo_visibility,
-            max_rounds=args.max_rounds,
-            max_retries_per_round=args.max_retries_per_round,
-            judge_every=args.judge_every,
-            official_eval_every=args.official_eval_every,
-            memory_layout=args.memory_layout,
-        )
-
-
-def _run_agent(args: argparse.Namespace) -> None:
-    request = _build_agent_request(args)
-    result = _execute_run_request(request)
-
-    if result.succeeded:
-        print(f"\nAgent loop completed {args.max_rounds} rounds.")  # noqa: T201  # tracked: #288
-    else:
-        print("\nAgent loop stopped early (exception or KeyboardInterrupt).")  # noqa: T201  # tracked: #288
-        sys.exit(1)
-
-
 def _load_metric_space_toml(input_path: Path) -> MetricSpace:
     """Read the run's metric space from the task's ``objectives.toml``.
 
@@ -302,7 +165,7 @@ def _resolve_metric_space(args: argparse.Namespace) -> MetricSpace:
     measurement variation, which a command-line axis list does not change.
     """
     space = _load_metric_space_toml(args.input_bundle.task_root)
-    if args.objective:
+    if getattr(args, "objective", None):
         return MetricSpace(
             objectives=tuple(args.objective),
             relative_noise=space.relative_noise,
@@ -381,129 +244,131 @@ def _resolve_openevolve_options(
     return search_policy, openevolve_config
 
 
-def _build_evolve_request(args: argparse.Namespace) -> RunRequest:
-    """Run the evolve-loop preamble and build its ``RunRequest``.
-
-    Split out of ``_run_evolve`` so the server can build this request and own
-    the resulting ``create_session`` call itself, instead of going through
-    ``dispatch``.
-    """
-    bundle: InputBundle = args.input_bundle
-    config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
-    _prepare_experiment_repository(args, config)
-
-    space = _resolve_metric_space(args)
-
-    if args.resume is not None:
-        print(f"Resuming evolve run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
-    if space.objectives:
-        spec = ", ".join(f"{o.name}({o.direction})" for o in space.objectives)
-        print(  # noqa: T201  # tracked: #288
-            f"Pareto mode active: [{spec}]; frontier_bias={args.frontier_bias}; "
-            f"tolerance={space.relative_noise:.0%}"
-        )
-
-    search_policy, openevolve_config = _resolve_openevolve_options(args)
-
-    return RunRequest(
-        project_root=bundle.root,
-        loop=LoopKind.EVOLVE,
-        config=config,
-        input_bundle=bundle,
-        objective=bundle.objective,
-        resume=ResumeRef(run_id=args.resume) if args.resume is not None else None,
-        exp_name=args.exp_name,
-        runs_dir=args.runs_dir,
-        space=space,
-        debug=args.debug,
-        profiler_kind=args.profiler,
-        skills_dirs=skills,
-        run_environment=run_environment_spec_from_args(args, build_task_docker_image=True),
-        agent_backend=args.agent_backend,
-        cli_provider=args.cli_provider,
-        backend=backend,
-        modality=args.modality,
-        remote_repo=args.repo,
-        repo_visibility=args.repo_visibility,
-        max_generations=args.max_generations,
-        children_per_generation=args.children_per_generation,
-        k_top_inspirations=args.k_top_inspirations,
-        k_random_inspirations=args.k_random_inspirations,
-        selection_temperature=args.selection_temperature,
-        seed=args.seed,
-        frontier_bias=args.frontier_bias,
-        bootstrap_max_attempts=args.bootstrap_max_attempts,
-        keep_deployments=args.keep_deployments,
-        max_parallelism=args.max_parallelism,
-        search_policy=search_policy,
-        openevolve_config=openevolve_config,
-    )
-
-
-def _run_evolve(args: argparse.Namespace) -> None:
-    request = _build_evolve_request(args)
-    result = _execute_run_request(request)
-
-    if result.succeeded:
-        print(  # noqa: T201  # tracked: #288
-            f"\nEvolve loop completed {args.max_generations} generations "
-            f"× {args.children_per_generation} cands."  # noqa: RUF001  # tracked: #288
-        )
-    else:
-        print("\nEvolve loop stopped early (exception or KeyboardInterrupt).")  # noqa: T201  # tracked: #288
-        sys.exit(1)
-
-
 def _validate_plain(args: argparse.Namespace) -> None:
     _validate_target_inputs(args)
     _validate_run_environment_profiler(args)
 
 
-def _build_plain_request(args: argparse.Namespace) -> RunRequest:
-    """Run the plain-loop preamble and build its ``RunRequest``.
-
-    Split out of ``_run_plain`` so the server can build this request and own
-    the resulting ``create_session`` call itself, instead of going through
-    ``dispatch``.
-    """
-    bundle: InputBundle = args.input_bundle
-    config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
-    _prepare_experiment_repository(args, config)
-
-    if args.resume is not None:
-        print(f"Resuming plain run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
-
-    return RunRequest(
-        project_root=bundle.root,
-        loop=LoopKind.PLAIN,
-        config=config,
-        input_bundle=bundle,
-        resume=ResumeRef(run_id=args.resume) if args.resume is not None else None,
-        exp_name=args.exp_name,
-        runs_dir=args.runs_dir,
-        debug=args.debug,
-        profiler_kind=args.profiler,
-        skills_dirs=skills,
-        run_environment=run_environment_spec_from_args(args, build_task_docker_image=True),
-        agent_backend=args.agent_backend,
-        cli_provider=args.cli_provider,
-        backend=backend,
-        remote_repo=args.repo,
-        repo_visibility=args.repo_visibility,
-        max_rounds=args.max_rounds,
-        max_attempts_per_issue=args.max_attempts_per_issue,
-        max_issues_per_perf_eval=args.max_issues_per_perf_eval,
+def _agent_policy_descriptor(
+    args: argparse.Namespace, bundle: InputBundle
+) -> OrchestrationDescriptor:
+    orchestration_id = (
+        args.inner_loop if args.outer_loop == "agent" else f"profile-guided-{args.inner_loop}"
     )
+    metrics = _resolve_metric_space(args)
+    benchmark = bundle.benchmark_result
+    if benchmark is not None and metrics.axis(benchmark.metric) is None:
+        metrics = metrics.model_copy(
+            update={
+                "objectives": (*metrics.objectives, Objective(benchmark.metric, "max")),
+            }
+        )
+    options = {
+        "interface": args.interface,
+        "modality": args.modality
+        or ("text_generation" if bundle.domain is DomainName.LLM_SERVING else None),
+        "max_rounds": args.max_rounds,
+        "max_retries_per_round": args.max_retries_per_round,
+        "judge_every": args.judge_every,
+        "official_eval_every": args.official_eval_every,
+        "memory_layout": args.memory_layout,
+        "operator_constraints": [item.strip() for item in args.constraint if item.strip()],
+        "metric_space": metrics.model_dump(mode="json"),
+        "profile_guided": bundle.manifest.profile_guided.model_dump(mode="json")
+        if args.outer_loop == "profile-guided" and bundle.manifest.profile_guided is not None
+        else None,
+    }
+    return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=options)
 
 
-def _run_plain(args: argparse.Namespace) -> None:
-    request = _build_plain_request(args)
+def _plain_policy_descriptor(args: argparse.Namespace) -> OrchestrationDescriptor:
+    options = {
+        "modality": None,
+        "max_rounds": args.max_rounds,
+        "max_attempts_per_issue": args.max_attempts_per_issue,
+        "max_issues_per_perf_eval": args.max_issues_per_perf_eval,
+    }
+    return OrchestrationDescriptor(id="plain", config_version=1, options=options)
+
+
+def _evolve_policy_descriptor(
+    args: argparse.Namespace, bundle: InputBundle
+) -> OrchestrationDescriptor:
+    search_policy, openevolve = _resolve_openevolve_options(args)
+    space = _resolve_metric_space(args)
+    modality = args.modality
+    if modality is None and bundle.domain is DomainName.LLM_SERVING:
+        modality = "text_generation"
+    options = {
+        "modality": modality,
+        "max_generations": args.max_generations,
+        "children_per_generation": args.children_per_generation,
+        "k_top_inspirations": args.k_top_inspirations,
+        "k_random_inspirations": args.k_random_inspirations,
+        "selection_temperature": args.selection_temperature,
+        "seed": args.seed,
+        "search_policy": search_policy,
+        "openevolve_population_size": openevolve.population_size if openevolve else None,
+        "openevolve_archive_size": openevolve.archive_size if openevolve else None,
+        "openevolve_num_islands": openevolve.num_islands if openevolve else None,
+        "openevolve_migration_interval": openevolve.migration_interval if openevolve else None,
+        "openevolve_migration_rate": openevolve.migration_rate if openevolve else None,
+        "frontier_bias": args.frontier_bias,
+        "bootstrap_max_attempts": args.bootstrap_max_attempts,
+        "keep_deployments": args.keep_deployments,
+        "max_parallelism": args.max_parallelism,
+        "metric_space": space.model_dump(mode="json"),
+    }
+    return OrchestrationDescriptor(id="evolve", config_version=1, options=options)
+
+
+def _build_run_request(args: argparse.Namespace) -> RunRequest:
+    """Build the one request format consumed by every registered policy."""
+    with boot_trace.span("run_preamble"):
+        bundle: InputBundle = args.input_bundle
+        config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
+        if args.outer_loop in {"agent", "profile-guided"}:
+            descriptor = _agent_policy_descriptor(args, bundle)
+            objective = with_operator_constraints(bundle.objective, args.constraint)
+        elif args.outer_loop == "plain":
+            descriptor = _plain_policy_descriptor(args)
+            objective = bundle.objective
+        else:
+            descriptor = _evolve_policy_descriptor(args, bundle)
+            objective = bundle.objective
+        validate_descriptor(descriptor)
+        _prepare_experiment_repository(args, config)
+        run_environment = run_environment_spec_from_args(args, build_task_docker_image=True)
+        if args.resume is not None:
+            print(f"Resuming VibeSys run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
+        return RunRequest(
+            project_root=bundle.root,
+            orchestration=descriptor,
+            config=config,
+            input_bundle=bundle,
+            objective=objective,
+            resume=ResumeRef(run_id=args.resume) if args.resume is not None else None,
+            exp_name=args.exp_name,
+            runs_dir=args.runs_dir,
+            debug=args.debug,
+            profiler_kind=args.profiler,
+            skills_dirs=skills,
+            run_environment=run_environment,
+            agent_backend="stub" if getattr(args, "stub_agent", False) else args.agent_backend,
+            cli_provider=args.cli_provider,
+            backend=backend,
+            remote_repo=args.repo,
+            repo_visibility=args.repo_visibility,
+        )
+
+
+def _run_request(args: argparse.Namespace) -> None:
+    request = _build_run_request(args)
     result = _execute_run_request(request)
-
     if result.succeeded:
-        print("\nPlain loop completed: no remaining open issues.")  # noqa: T201  # tracked: #288
+        print(f"\n{request.orchestration_id} run completed.")  # noqa: T201  # tracked: #288
     else:
-        print(f"\nPlain loop did not complete after {args.max_rounds} rounds.")  # noqa: T201  # tracked: #288
+        print(f"\n{request.orchestration_id} run stopped early.")  # noqa: T201  # tracked: #288
         sys.exit(1)
 
 

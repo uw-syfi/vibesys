@@ -21,16 +21,15 @@ from vibesys.api import (
     OrchestrationDescriptor,
     OrchestrationRegistry,
     ProfilerKind,
-    ResumeRef,
     RunRequest,
-    VibeSysRuntime,
     create_session,
     open_run_store,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.api.session import _OpenedAgentEnvironment
+from vibesys.context import RunSetup
 from vibesys.events import AgentExecutionFinishedData, CoreEventType
-from vibesys.orchestration.runtime import _LocalVibeSysRuntime
+from vibesys.orchestration.runtime import RunContext
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.sandbox.run_environment import LocalEnvironment
 from vs_agent.api import AgentExecutionPolicy, AgentSessionKey, SessionScope
@@ -44,26 +43,28 @@ if TYPE_CHECKING:
 
 
 class _ThreeAgentPolicy:
-    def __init__(self, resource: HostResource) -> None:
-        self.resource = resource
-        self.workspace: Path | None = None
+    resource: HostResource
+    workspace: Path | None = None
 
-    def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool:
-        assert request.orchestration is not None
-        rounds = request.orchestration.options["rounds"]
+    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
+        self.rounds = descriptor.options["rounds"]
+        self.setup = RunSetup()
+
+    async def run(self, ctx: RunContext) -> bool:
+        rounds = self.rounds
         assert isinstance(rounds, int)
-        self.workspace = runtime.workspace
-        planner = runtime.spawn_agent(
+        type(self).workspace = ctx.workspace
+        planner = await ctx.agents.spawn(
             AgentDefinition("planner", AgentSpec(backend=AgentBackend.STUB, model="planner-model"))
         )
-        worker = runtime.spawn_agent(
+        worker = await ctx.agents.spawn(
             AgentDefinition(
                 "worker",
                 AgentSpec(backend=AgentBackend.STUB, model="worker-model"),
-                resources=(self.resource,),
+                resources=(type(self).resource,),
             )
         )
-        reviewer = runtime.spawn_agent(
+        reviewer = await ctx.agents.spawn(
             AgentDefinition(
                 "reviewer", AgentSpec(backend=AgentBackend.STUB, model="reviewer-model")
             )
@@ -71,9 +72,9 @@ class _ThreeAgentPolicy:
         feedback = "begin"
         for round_number in range(1, rounds + 1):
             label = f"round{round_number:03d}"
-            plan = planner.turn(feedback, label=label)
-            implementation = worker.turn(plan, label=label)
-            feedback = reviewer.turn(implementation, label=label)
+            plan = await planner.turn(feedback, label=label)
+            implementation = await worker.turn(plan, label=label)
+            feedback = await reviewer.turn(implementation, label=label)
         return feedback == "review 2"
 
 
@@ -82,12 +83,15 @@ class _TypedPlan(BaseModel):
 
 
 class _TypedPolicy:
-    def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool:
-        del request
-        planner = runtime.spawn_agent(
+    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
+        assert descriptor.id == "three-agent-rounds"
+        self.setup = RunSetup()
+
+    async def run(self, ctx: RunContext) -> bool:
+        planner = await ctx.agents.spawn(
             AgentDefinition("planner", AgentSpec(backend=AgentBackend.STUB, model="typed"))
         )
-        plan = planner.turn_structured(
+        plan = await planner.turn_structured(
             "choose task",
             response_cls=_TypedPlan,
             fallback_factory=lambda: _TypedPlan(task="fallback"),
@@ -121,17 +125,26 @@ class _CloseProbe:
             raise _CleanupError
 
 
+class _AsyncCloseProbe:
+    def __init__(self, name: str, calls: list[str], *, fail: bool = False) -> None:
+        self._probe = _CloseProbe(name, calls, fail=fail)
+
+    async def close(self) -> None:
+        self._probe.close()
+
+
 class _UnsupportedExecutionPolicy:
-    def execute(self, request: RunRequest, runtime: VibeSysRuntime) -> bool:
-        del request
-        runtime.spawn_agent(
+    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
+        assert descriptor.id == "three-agent-rounds"
+        self.setup = RunSetup()
+
+    async def run(self, ctx: RunContext) -> bool:
+        await ctx.agents.spawn(
             AgentDefinition(
                 "worker",
                 AgentSpec(
                     backend=AgentBackend.STUB,
-                    execution=AgentExecutionPolicy(
-                        host_resources=(HostResource(runtime.workspace),)
-                    ),
+                    execution=AgentExecutionPolicy(host_resources=(HostResource(ctx.workspace),)),
                 ),
             )
         )
@@ -210,7 +223,8 @@ def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
     grant_path = tmp_path / "evidence.txt"
     grant_path.write_text("read only evidence\n")
     grant = HostResource(grant_path, HostResourceAccess.READ_ONLY, "worker evidence")
-    policy = _ThreeAgentPolicy(grant)
+    _ThreeAgentPolicy.resource = grant
+    _ThreeAgentPolicy.workspace = None
     clients = {
         "planner-model": FakeAgentClient().enqueue_text("planner", "plan 1", "plan 2"),
         "worker-model": FakeAgentClient().enqueue_text("worker", "impl 1", "impl 2"),
@@ -237,7 +251,7 @@ def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
 
     request = _request(project_root)
     registry = OrchestrationRegistry()
-    registry.register("three-agent-rounds", policy)
+    registry.register("three-agent-rounds", _ThreeAgentPolicy)
     events: list[CoreEvent] = []
 
     def record(event: CoreEvent) -> None:
@@ -250,7 +264,7 @@ def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
     assert result.succeeded
     assert result.loop == "three-agent-rounds"
     assert session.view().run_id == result.run_id
-    assert policy.workspace == project_root
+    assert _ThreeAgentPolicy.workspace == project_root
     _assert_message_handoffs(clients)
     assert grant in granted["worker-model"]
     assert grant not in granted["planner-model"]
@@ -290,7 +304,7 @@ def test_structured_turn_preserves_schema_session_and_event_payload(
     )
     request = _request(project_root)
     registry = OrchestrationRegistry()
-    registry.register("three-agent-rounds", _TypedPolicy())
+    registry.register("three-agent-rounds", _TypedPolicy)
     events: list[CoreEvent] = []
 
     def record(event: CoreEvent) -> None:
@@ -316,46 +330,27 @@ def test_structured_turn_preserves_schema_session_and_event_payload(
     assert finished.round_label == "round-1-plan"
 
 
-def test_custom_resume_requires_policy_checkpoint_contract(tmp_path: Path) -> None:
-    project_root = tmp_path / "project"
-    _write_project(project_root)
-    request = _request(project_root).model_copy(update={"resume": ResumeRef(run_id="prior-run")})
-    registry = OrchestrationRegistry()
-    registry.register("three-agent-rounds", _ThreeAgentPolicy(HostResource(tmp_path)))
-
-    def discard(event: CoreEvent) -> None:
-        del event
-
-    with pytest.raises(ConfigurationError, match="policy-owned checkpoint contract"):
-        asyncio.run(create_session(request, sink=discard, registry=registry).await_result())
-
-    active_profiler = _request(project_root).model_copy(update={"profiler_kind": ProfilerKind.NSYS})
-    with pytest.raises(ConfigurationError, match="does not yet provide a profiler capability"):
-        asyncio.run(create_session(active_profiler, sink=discard, registry=registry).await_result())
-
-
-def test_skypilot_custom_runtime_is_rejected_before_environment_open(tmp_path: Path) -> None:
+def test_skypilot_custom_agents_are_rejected_before_agent_open(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
     request = _request(project_root).model_copy(
         update={"run_environment": RunEnvironmentSpec("skypilot")}
     )
     registry = OrchestrationRegistry()
-    registry.register("three-agent-rounds", _ThreeAgentPolicy(HostResource(tmp_path)))
+    registry.register("three-agent-rounds", _ThreeAgentPolicy)
 
     def discard(event: CoreEvent) -> None:
         del event
 
     with pytest.raises(ConfigurationError, match="per-agent bridge ownership"):
         asyncio.run(create_session(request, sink=discard, registry=registry).await_result())
-    assert not (project_root / ".vibesys").exists()
 
 
 def test_agent_spec_execution_policy_is_rejected_explicitly(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
     registry = OrchestrationRegistry()
-    registry.register("three-agent-rounds", _UnsupportedExecutionPolicy())
+    registry.register("three-agent-rounds", _UnsupportedExecutionPolicy)
 
     def discard(event: CoreEvent) -> None:
         del event
@@ -368,20 +363,27 @@ def test_agent_spec_execution_policy_is_rejected_explicitly(tmp_path: Path) -> N
 
 def test_runtime_closes_all_agents_and_preserves_policy_failure() -> None:
     integration = LocalRunIntegration()
-    runtime = _LocalVibeSysRuntime(
-        RunRequest.model_construct(loop=None), integration, open_agent_environment=None
-    )
     closed: list[str] = []
-    vars(runtime)["_context"] = _CloseProbe("context", closed)
-    vars(runtime)["_agents"] = {
-        "first": _CloseProbe("first", closed),
-        "middle": _CloseProbe("middle", closed, fail=True),
-        "last": _CloseProbe("last", closed),
-    }
-    try:
-        with pytest.raises(_PolicyError) as caught, runtime:
+
+    class _ProbeRunContext(RunContext):
+        def prepare(self) -> None:
+            vars(self)["_context"] = _CloseProbe("context", closed)
+            vars(self)["_agents"] = {
+                "first": _AsyncCloseProbe("first", closed),
+                "middle": _AsyncCloseProbe("middle", closed, fail=True),
+                "last": _AsyncCloseProbe("last", closed),
+            }
+
+    async def fail_inside_runtime() -> None:
+        async with _ProbeRunContext.open(
+            RunRequest.model_construct(), integration, setup=RunSetup()
+        ):
             raise _PolicyError
+
+    try:
+        with pytest.raises(_PolicyError) as caught:
+            asyncio.run(fail_inside_runtime())
         assert closed == ["last", "middle", "first", "context"]
-        assert any("cleanup also failed" in note for note in caught.value.__notes__)
+        assert any("runtime cleanup also failed" in note for note in caught.value.__notes__)
     finally:
         integration.close()

@@ -7,7 +7,7 @@ import time
 import uuid
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
@@ -20,17 +20,18 @@ from vibesys.agent_spec_config import agent_spec_from_config, resolve_agent_driv
 from vibesys.backends.base import ComputeBackendImpl, ContentionMonitor
 from vibesys.config import Config, as_config
 from vibesys.constants import (
-    DEFAULT_COMPUTE_BACKEND,
     PROJECT_ROOT,
     ComputeBackend,
     DomainName,
 )
 from vibesys.domains.environment import (
+    EnvironmentBindMount,
     EnvironmentContext,
     EnvironmentHooks,
     EnvironmentPatch,
     NoopEnvironmentHooks,
 )
+from vibesys.domains.registry import resolve_domain
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators import load_evaluator_package, tool_install_root
 from vibesys.evaluators.input_manifest import WorkspaceSource
@@ -47,6 +48,7 @@ from vibesys.events import (
     json_value,
 )
 from vibesys.orchestration import OrchestrationResumeDecision
+from vibesys.orchestration.request import RunRequest
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     ProfilerKind,
@@ -63,7 +65,6 @@ from vibesys.run import (
     ExperimentRepository,
     GitTracker,
     ProjectProvisioningSpec,
-    RepositoryVisibility,
     RunCommands,
     RunLogger,
     RunPaths,
@@ -94,7 +95,7 @@ from vibesys.sandbox.run_environment import (
     make_run_environment_spec,
     run_environment_record,
 )
-from vibesys.skills import platform_skill_selection
+from vibesys.skills import SkillSelection, platform_skill_selection
 from vs_agent.api import (
     AgentBackend,
     AgentClientProtocol,
@@ -109,20 +110,43 @@ from vs_project.api import (
     OrchestrationDescriptor,
     OrchestrationRunManifest,
     Project,
-    RunConfiguration,
-    RunManifest,
+    RunExecutionRecord,
     StateTransition,
-    compare_resume_configurations,
     generate_run_id,
 )
-from vs_sandbox.api import HostResource
+from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy, Sandbox
 
 T = TypeVar("T", bound=BaseModel)
 
 
-class _MissingOrchestrationContractError(ValueError):
-    def __init__(self) -> None:
-        super().__init__("run requires configuration for its recorded manifest version")
+@dataclass(frozen=True, slots=True)
+class RunStartHints:
+    """Optional policy-owned budget and agent roles shown when a run starts."""
+
+    max_rounds: int | None = None
+    expected_roles: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RunSetup:
+    """Policy-owned facts needed before the shared run context can open."""
+
+    state_namespace: str | None = None
+    state_model: type[BaseModel] | None = None
+    resume_policy: (
+        Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
+        | None
+    ) = None
+    resume_recovery: Callable[[Project, GitTracker, str], None] | None = None
+    use_default_agent: bool = False
+    start_hints: RunStartHints | None = None
+
+    def __post_init__(self) -> None:
+        """Reject incomplete policy-owned state slot declarations."""
+        if (self.state_namespace is None) != (self.state_model is None):
+            raise ValueError("RunSetup requires state_namespace and state_model together")  # noqa: TRY003
+        if self.state_namespace == "":
+            raise ValueError("RunSetup.state_namespace must be nonempty")  # noqa: TRY003
 
 
 class _MissingDefaultAgentClientError(RuntimeError):
@@ -169,57 +193,11 @@ def _installed_vibesys_version() -> str:
         return "0+unknown"
 
 
-def _resume_configuration_update(
-    recorded: RunConfiguration,
-    requested: RunConfiguration,
-) -> RunConfiguration | None:
-    """Validate resume settings and return an increased total run limit, if any."""
-    if recorded.outer_loop != requested.outer_loop:
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="project_resume_configuration_mismatch",
-                stage="resume_resolution",
-                message=(
-                    f"run uses outer loop {recorded.outer_loop!r}, not {requested.outer_loop!r}"
-                ),
-            )
-        )
-    comparison = compare_resume_configurations(recorded, requested)
-    if comparison.changed_fields:
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="project_resume_configuration_mismatch",
-                stage="resume_resolution",
-                message=(
-                    "resuming a run cannot change its recorded configuration "
-                    f"fields: {', '.join(comparison.changed_fields)}"
-                ),
-            )
-        )
-    if comparison.requested_limit < comparison.recorded_limit:
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code="project_resume_configuration_mismatch",
-                stage="resume_resolution",
-                message=(
-                    f"{comparison.limit_field} is the run's total limit and cannot decrease when "
-                    "resuming "
-                    f"(recorded {comparison.recorded_limit}, "
-                    f"requested {comparison.requested_limit})"
-                ),
-            )
-        )
-    return (
-        requested
-        if comparison.requested_limit > comparison.recorded_limit or comparison.migration_required
-        else None
-    )
-
-
 def _resume_orchestration_decision(
     recorded: OrchestrationRunManifest,
     requested: OrchestrationDescriptor,
     environment: RunEnvironmentSpec,
+    execution: RunExecutionRecord,
     resume_policy: Callable[
         [OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision
     ],
@@ -231,6 +209,19 @@ def _resume_orchestration_decision(
                 code="project_resume_configuration_mismatch",
                 stage="resume_resolution",
                 message="resuming a run cannot change its recorded run_environment",
+            )
+        )
+    if recorded.execution != execution:
+        changed = ", ".join(
+            name
+            for name in RunExecutionRecord.model_fields
+            if getattr(recorded.execution, name) != getattr(execution, name)
+        )
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message=f"resuming a run cannot change its recorded execution fields: {changed}",
             )
         )
     if (recorded.orchestration.id, recorded.orchestration.config_version) != (
@@ -281,95 +272,48 @@ def _coerce_skills_dirs(raw_dirs: list[str] | None) -> list[Path]:
     return result
 
 
-def create_run_context(  # noqa: PLR0913  # tracked: #288
-    config: Config,
-    exp_name: str,
-    input_path: str,
-    accuracy_command: str,
-    benchmark_command: str,
-    *,
-    runs_dir: Path | None,
-    task_name: str | None = None,
-    task_root: Path | None = None,
-    workspace_sources: tuple[WorkspaceSource, ...] = (),
-    evaluator_path: Path | None = None,
-    evaluator_package_root: Path | None = None,
-    benchmark_output_argument: str | None = None,
-    objective: str | None = None,
-    existing: bool = False,
-    project_configuration: RunConfiguration | None = None,
-    legacy_configuration_factory: Callable[[ProfilerKind], RunConfiguration] | None = None,
-    orchestration_descriptor: Callable[[ProfilerKind], OrchestrationDescriptor] | None = None,
-    orchestration_resume: Callable[
-        [OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision
-    ]
-    | None = None,
-    trusted_input_baseline: str | None = None,
-    debug: bool = False,
-    profiler_kind: ProfilerKind = ProfilerKind.AUTO,
-    profiler_domain: DomainName = DomainName.LLM_SERVING,
-    skills_dirs: list[str] | None = None,
-    run_environment: RunEnvironmentSpec | None = None,
-    agent_backend: str | None = None,
-    cli_provider: str | None = None,
-    backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
-    environment_hooks: EnvironmentHooks | None = None,
-    remote_repo: str | None = None,
-    repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
-    round_transaction_factory: Callable[
-        [Project, GitTracker, str], RoundTransactionCoordinator[BaseModel]
-    ]
-    | None = None,
-    run_state_factory: Callable[[Project, GitTracker, str], RunState] = RunState,
-    integration: LocalRunIntegration | None = None,
-    build_default_agent_client: bool = True,
-) -> "_RunContext":
-    """Build a fully wired :class:`_RunContext`.
+def _exact_resume_descriptor(
+    recorded: OrchestrationDescriptor, requested: OrchestrationDescriptor
+) -> OrchestrationResumeDecision:
+    if recorded != requested:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message=f"resuming orchestration {recorded.id!r} cannot change its descriptor",
+            )
+        )
+    return OrchestrationResumeDecision(descriptor=None)
 
-    All construction side effects live here — run directory and log
-    bootstrap, workspace materialization, backend/model construction,
-    profiler resolution, git tracking init, run-environment session open,
-    and agent-runner build.  ``_RunContext.__init__`` itself only assigns
-    the assembled components.
-    """
+
+def _round_transaction_for_setup(
+    setup: RunSetup,
+) -> Callable[[Project, GitTracker, str], RoundTransactionCoordinator[BaseModel]] | None:
+    namespace = setup.state_namespace
+    model = setup.state_model
+    if namespace is None or model is None:
+        return None
+
+    def open_coordinator(
+        project: Project, git: GitTracker, run_id: str
+    ) -> RoundTransactionCoordinator[BaseModel]:
+        slot = project.state.portable_namespace(run_id, namespace).slot("state.json", model)
+        return RoundTransactionCoordinator(project, git, run_id, state_slot=slot)
+
+    return open_coordinator
+
+
+def open_run_context(
+    request: RunRequest, setup: RunSetup, integration: LocalRunIntegration
+) -> "_RunContext":
+    """Open the one project context from a canonical request and policy setup."""
     teardown_stack = ExitStack()
     try:
         return _assemble_run_context(
             teardown_stack=teardown_stack,
-            config=config,
-            exp_name=exp_name,
-            input_path=input_path,
-            accuracy_command=accuracy_command,
-            benchmark_command=benchmark_command,
-            runs_dir=runs_dir,
-            task_name=task_name,
-            task_root=task_root,
-            workspace_sources=workspace_sources,
-            evaluator_path=evaluator_path,
-            evaluator_package_root=evaluator_package_root,
-            benchmark_output_argument=benchmark_output_argument,
-            objective=objective,
-            existing=existing,
-            project_configuration=project_configuration,
-            legacy_configuration_factory=legacy_configuration_factory,
-            orchestration_descriptor=orchestration_descriptor,
-            orchestration_resume=orchestration_resume,
-            trusted_input_baseline=trusted_input_baseline,
-            debug=debug,
-            profiler_kind=profiler_kind,
-            profiler_domain=profiler_domain,
-            skills_dirs=skills_dirs,
-            run_environment=run_environment,
-            agent_backend=agent_backend,
-            cli_provider=cli_provider,
-            backend=backend,
-            environment_hooks=environment_hooks,
-            remote_repo=remote_repo,
-            repo_visibility=repo_visibility,
-            round_transaction_factory=round_transaction_factory,
-            run_state_factory=run_state_factory,
+            request=request,
+            setup=setup,
             integration=integration,
-            build_default_agent_client=build_default_agent_client,
         )
     except BaseException as construction_error:
         _close_after_construction_failure(teardown_stack, construction_error)
@@ -389,50 +333,46 @@ def _close_after_construction_failure(
         )
 
 
-def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
+def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
     *,
     teardown_stack: ExitStack,
-    config: Config,
-    exp_name: str,
-    input_path: str,
-    accuracy_command: str,
-    benchmark_command: str,
-    runs_dir: Path | None,
-    task_name: str | None,
-    task_root: Path | None,
-    workspace_sources: tuple[WorkspaceSource, ...],
-    evaluator_path: Path | None,
-    evaluator_package_root: Path | None,
-    benchmark_output_argument: str | None,
-    objective: str | None,
-    existing: bool,
-    project_configuration: RunConfiguration | None,
-    legacy_configuration_factory: Callable[[ProfilerKind], RunConfiguration] | None,
-    orchestration_descriptor: Callable[[ProfilerKind], OrchestrationDescriptor] | None,
-    orchestration_resume: Callable[
-        [OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision
-    ]
-    | None,
-    trusted_input_baseline: str | None,
-    debug: bool,
-    profiler_kind: ProfilerKind,
-    profiler_domain: DomainName,
-    skills_dirs: list[str] | None,
-    run_environment: RunEnvironmentSpec | None,
-    agent_backend: str | None,
-    cli_provider: str | None,
-    backend: ComputeBackend,
-    environment_hooks: EnvironmentHooks | None,
-    remote_repo: str | None,
-    repo_visibility: RepositoryVisibility,
-    round_transaction_factory: Callable[
-        [Project, GitTracker, str], RoundTransactionCoordinator[BaseModel]
-    ]
-    | None,
-    run_state_factory: Callable[[Project, GitTracker, str], RunState],
-    integration: LocalRunIntegration | None,
-    build_default_agent_client: bool,
+    request: RunRequest,
+    setup: RunSetup,
+    integration: LocalRunIntegration,
 ) -> "_RunContext":
+    bundle = request.input_bundle
+    exp_name = request.resume.run_id if request.resume is not None else request.exp_name
+    if exp_name is None:
+        raise ValueError("RunRequest.exp_name is required for a fresh run")  # noqa: TRY003
+    config = request.config
+    input_path = str(bundle.root)
+    accuracy_command = bundle.accuracy_command_display
+    benchmark_command = bundle.benchmark_command_display
+    runs_dir = request.runs_dir
+    task_name = bundle.task_name
+    task_root = bundle.task_root
+    workspace_sources = bundle.workspace_sources
+    evaluator_path = bundle.evaluator_path
+    evaluator_package_root = bundle.evaluator_package_root
+    benchmark_output_argument = bundle.benchmark_output_argument
+    objective = request.objective or bundle.objective
+    existing = request.resume is not None
+    orchestration_descriptor = request.orchestration
+    orchestration_resume = setup.resume_policy or _exact_resume_descriptor
+    trusted_input_baseline = None
+    debug = request.debug
+    profiler_kind = request.profiler_kind
+    profiler_domain = bundle.domain
+    skills_dirs = request.skills_dirs
+    run_environment = request.run_environment
+    agent_backend = request.agent_backend
+    cli_provider = request.cli_provider
+    backend = request.backend
+    environment_hooks = resolve_domain(bundle.domain).environment_hooks
+    remote_repo = request.remote_repo
+    repo_visibility = request.repo_visibility
+    round_transaction_factory = _round_transaction_for_setup(setup)
+    build_default_agent_client = setup.use_default_agent
     context_start = time.perf_counter()
     # Boot spans recorded before this function ran (the dispatch preamble)
     # come first, so the run log reads in the order the work happened once
@@ -440,10 +380,6 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
     # in ``boot_trace`` until the drain below, because the earliest of them
     # close before there is a logger to write to.
     buffered_logs: list[str] = boot_trace.drain_log_lines()
-    owns_integration = integration is None
-    integration = integration or LocalRunIntegration()
-    if owns_integration:
-        teardown_stack.callback(integration.close)
     with boot_trace.span("context"):
         with boot_trace.span("config_and_inputs"):
             config = as_config(config)
@@ -556,6 +492,34 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                         message=profiler_preflight.error_message(),
                     )
                 )
+            skill_source_paths = _coerce_skills_dirs(skills_dirs)
+            execution_record = RunExecutionRecord(
+                model=config.model.name,
+                agent_backend=resolved_backend,
+                agent_driver=(
+                    resolve_agent_driver(config).value if resolved_backend == "cli" else None
+                ),
+                cli_provider=resolved_cli_provider,
+                cli_timeout=config.agent.cli_timeout,
+                compute_backend=backend.value,
+                requested_profiler=profiler_kind.value,
+                resolved_profiler=resolved_profiler_kind.value,
+                default_reasoning_effort=config.thinking.level,
+                thinking_budget=config.thinking.budget,
+                outer_model=config.agent.outer.model,
+                outer_reasoning_effort=config.agent.outer.reasoning_effort,
+                inner_model=config.agent.inner.model,
+                inner_reasoning_effort=config.agent.inner.reasoning_effort,
+                perf_eval_load_levels=(
+                    [level.model_dump(mode="json") for level in config.perf_eval.load_levels]
+                    if config.perf_eval.load_levels is not None
+                    else None
+                ),
+                feature_flags={
+                    flag.value: enabled for flag, enabled in config.feature_flags.items()
+                },
+                skills_dirs=[str(path) for path in skill_source_paths],
+            )
 
         with boot_trace.span("workspace_materialize"):
             profiler_support_path: str | None = None
@@ -567,7 +531,6 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 if default_support is not None:
                     profiler_support_path = str(default_support)
 
-            skill_source_paths = _coerce_skills_dirs(skills_dirs)
             input_project_dir = input_dir if (input_dir / "pyproject.toml").is_file() else None
 
             hooks = environment_hooks or NoopEnvironmentHooks()
@@ -683,21 +646,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             )
             git.init(existing, trusted_input_baseline=trusted_input_baseline)
         with boot_trace.span("project_state_resume"):
-
-            def legacy_configuration() -> RunConfiguration | None:
-                if legacy_configuration_factory is not None:
-                    return legacy_configuration_factory(resolved_profiler_kind)
-                if project_configuration is not None:
-                    return project_configuration.model_copy(
-                        update={"profiler": resolved_profiler_kind.value}
-                    )
-                return None
-
-            effective_orchestration = (
-                orchestration_descriptor(resolved_profiler_kind)
-                if orchestration_descriptor is not None
-                else None
-            )
+            effective_orchestration = orchestration_descriptor
             round_transaction_coordinator: RoundTransactionCoordinator | None = None
             if existing:
                 project_state.load_project()
@@ -738,79 +687,39 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                             ),
                         )
                     )
-                if isinstance(run_manifest, RunManifest):
-                    effective_configuration = legacy_configuration()
-                    if effective_configuration is None:
-                        raise _MissingOrchestrationContractError
-                    configuration_update = _resume_configuration_update(
-                        run_manifest.configuration,
-                        effective_configuration,
-                    )
-                    if configuration_update is not None:
-                        limit_field = compare_resume_configurations(
-                            run_manifest.configuration, effective_configuration
-                        ).limit_field
-                        limit_increased = getattr(configuration_update, limit_field) > getattr(
-                            run_manifest.configuration, limit_field
+                decision = _resume_orchestration_decision(
+                    run_manifest,
+                    effective_orchestration,
+                    run_environment_spec,
+                    execution_record,
+                    orchestration_resume,
+                )
+                if setup.resume_recovery is not None:
+                    setup.resume_recovery(project, git, run_id)
+                if decision.descriptor is not None:
+                    if decision.requires_clean_workspace:
+                        pending = git.pending_changes()
+                        if pending:
+                            raise ConfigurationError(
+                                ConfigurationDiagnostic(
+                                    code="project_resume_configuration_dirty",
+                                    stage="resume_resolution",
+                                    message=(
+                                        "commit or discard pending project changes before increasing "
+                                        f"the run limit: {', '.join(pending)}"
+                                    ),
+                                )
+                            )
+                    project_state.update_run_orchestration(run_id, decision.descriptor)
+                    snapshot = project_state.run_manifest_snapshot(run_id)
+                    if decision.requires_clean_workspace:
+                        git.snapshot_with_framework_metadata(
+                            "vibesys: update run orchestration", snapshot
                         )
-                        if limit_increased:
-                            pending = git.pending_changes()
-                            if pending:
-                                raise ConfigurationError(
-                                    ConfigurationDiagnostic(
-                                        code="project_resume_configuration_dirty",
-                                        stage="resume_resolution",
-                                        message=(
-                                            "commit or discard pending project changes before increasing "
-                                            f"the run limit: {', '.join(pending)}"
-                                        ),
-                                    )
-                                )
-                        project_state.update_run_configuration(run_id, configuration_update)
-                        snapshot = project_state.run_manifest_snapshot(run_id)
-                        if limit_increased:
-                            git.snapshot_with_framework_metadata(
-                                "vibesys: update run configuration",
-                                snapshot,
-                            )
-                        else:
-                            git.snapshot_framework_metadata_only(
-                                "vibesys: migrate run configuration",
-                                snapshot,
-                            )
-                else:
-                    if effective_orchestration is None or orchestration_resume is None:
-                        raise _MissingOrchestrationContractError
-                    decision = _resume_orchestration_decision(
-                        run_manifest,
-                        effective_orchestration,
-                        run_environment_spec,
-                        orchestration_resume,
-                    )
-                    if decision.descriptor is not None:
-                        if decision.requires_clean_workspace:
-                            pending = git.pending_changes()
-                            if pending:
-                                raise ConfigurationError(
-                                    ConfigurationDiagnostic(
-                                        code="project_resume_configuration_dirty",
-                                        stage="resume_resolution",
-                                        message=(
-                                            "commit or discard pending project changes before increasing "
-                                            f"the run limit: {', '.join(pending)}"
-                                        ),
-                                    )
-                                )
-                        project_state.update_run_orchestration(run_id, decision.descriptor)
-                        snapshot = project_state.run_manifest_snapshot(run_id)
-                        if decision.requires_clean_workspace:
-                            git.snapshot_with_framework_metadata(
-                                "vibesys: update run orchestration", snapshot
-                            )
-                        else:
-                            git.snapshot_framework_metadata_only(
-                                "vibesys: migrate run orchestration", snapshot
-                            )
+                    else:
+                        git.snapshot_framework_metadata_only(
+                            "vibesys: migrate run orchestration", snapshot
+                        )
                 project_state.set_current_run(run_id)
             else:
                 project_state.create_project(project_root.name)
@@ -822,30 +731,17 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                             message="Git did not provide the project run branch-point commit",
                         )
                     )
-                if effective_orchestration is not None:
-                    run_manifest = project_state.new_orchestration_run_manifest(
-                        exp_name,
-                        task_name=task_name,
-                        run_id=run_id,
-                        branch=git.project_branch,
-                        vibesys_version=_installed_vibesys_version(),
-                        run_environment=run_environment_record(run_environment_spec),
-                        orchestration=effective_orchestration,
-                        trusted_input_baseline=git.trusted_input_baseline,
-                    )
-                else:
-                    effective_configuration = legacy_configuration()
-                    if effective_configuration is None:
-                        raise _MissingOrchestrationContractError
-                    run_manifest = project_state.new_run_manifest(
-                        exp_name,
-                        task_name=task_name,
-                        run_id=run_id,
-                        branch=git.project_branch,
-                        vibesys_version=_installed_vibesys_version(),
-                        configuration=effective_configuration,
-                        trusted_input_baseline=git.trusted_input_baseline,
-                    )
+                run_manifest = project_state.new_run_manifest(
+                    exp_name,
+                    task_name=task_name,
+                    run_id=run_id,
+                    branch=git.project_branch,
+                    vibesys_version=_installed_vibesys_version(),
+                    run_environment=run_environment_record(run_environment_spec),
+                    execution=execution_record,
+                    orchestration=effective_orchestration,
+                    trusted_input_baseline=git.trusted_input_baseline,
+                )
                 project_state.create_run(run_manifest)
                 git.snapshot_with_framework_metadata(
                     f"vibesys: initialize run {run_id}",
@@ -1037,7 +933,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             evaluator_tool_roots=evaluator_tool_roots,
         )
 
-        run_state = run_state_factory(project, git, run_id)
+        run_state = RunState(project, git, run_id)
 
         agent_client: AgentClientProtocol | None = None
         if build_default_agent_client:
@@ -1104,6 +1000,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             git=git,
             experiment_repository=tracked_experiment_repository,
             teardown_stack=teardown_stack,
+            environment_request=run_environment_request,
             run_environment_session=session,
             commands=commands,
             device=device,
@@ -1147,6 +1044,85 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
     return result
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceContextSpec:
+    """One isolated workspace's identity and environment settings."""
+
+    scope_id: str
+    revision: str
+    config: Config
+    log_namespace: str = RunStateNamespace.RUNTIME
+    log_directory: str = "workspaces"
+    agent_backend: str | None = None
+    cli_provider: str | None = None
+    use_default_agent: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ScopedAgentEnvironment:
+    """One agent sandbox opened over an isolated workspace context."""
+
+    session: RunEnvironmentSession
+    skill_source_dirs: tuple[Path, ...]
+    skill_selection: SkillSelection
+    project_path_policy: ProjectPathPolicy
+    host_resources: tuple[HostResource, ...]
+    backends: dict[str, Sandbox] | None
+    use_docker: bool
+
+    def close(self) -> None:
+        """Release this agent's environment session."""
+        self.session.close()
+
+
+def open_scoped_agent_environment(
+    context: "_RunContext",
+    *,
+    mounts: tuple[HostResource, ...] = (),
+    agent_backend: str | None = None,
+    cli_provider: str | None = None,
+) -> ScopedAgentEnvironment:
+    """Open an independently configured agent in this context's workspace."""
+    base = context.environment_request
+    request = replace(
+        base,
+        agent_backend=agent_backend if agent_backend is not None else base.agent_backend,
+        cli_provider=cli_provider if cli_provider is not None else base.cli_provider,
+        environment_bind_mounts=(
+            *base.environment_bind_mounts,
+            *(
+                EnvironmentBindMount(
+                    mount.path,
+                    mount.agent_path if mount.agent_path is not None else str(mount.path),
+                    read_only=mount.access is HostResourceAccess.READ_ONLY,
+                )
+                for mount in mounts
+            ),
+        ),
+    )
+    session = context.run_environment.open(request)
+    sandboxed = session.view.cli_sandboxed
+    return ScopedAgentEnvironment(
+        session=session,
+        skill_source_dirs=tuple(context.skill_source_paths),
+        skill_selection=platform_skill_selection(context.backend),
+        project_path_policy=request.project_path_policy,
+        host_resources=context.agent_host_resources,
+        backends={"chat": session.sandbox} if sandboxed else None,
+        use_docker=session.view.cli_sandboxed if sandboxed else False,
+    )
+
+
+def create_workspace_context(parent: "_RunContext", spec: WorkspaceContextSpec) -> "_RunContext":
+    """Open an isolated Git tree, run environment, and optional agent client."""
+    teardown_stack = ExitStack()
+    try:
+        return _assemble_workspace_context(teardown_stack=teardown_stack, parent=parent, spec=spec)
+    except BaseException as construction_error:
+        _close_after_construction_failure(teardown_stack, construction_error)
+        raise
+
+
 def create_candidate_context(  # noqa: PLR0913  # tracked: #288
     parent: "_RunContext",
     *,
@@ -1175,39 +1151,31 @@ def create_candidate_context(  # noqa: PLR0913  # tracked: #288
     capability. Close the returned context (or use it as a context manager) to
     stop environment-owned resources and remove the worktree.
     """
-    teardown_stack = ExitStack()
-    try:
-        return _assemble_candidate_context(
-            teardown_stack=teardown_stack,
-            parent=parent,
+    return create_workspace_context(
+        parent,
+        WorkspaceContextSpec(
+            scope_id=f"g{generation}c{child_idx}",
+            revision=parent_commit,
             config=config,
-            generation=generation,
-            child_idx=child_idx,
-            parent_commit=parent_commit,
+            log_namespace=RunStateNamespace.EVOLVE,
+            log_directory="candidates",
             agent_backend=agent_backend,
             cli_provider=cli_provider,
-        )
-    except BaseException as construction_error:
-        _close_after_construction_failure(teardown_stack, construction_error)
-        raise
+            use_default_agent=True,
+        ),
+    )
 
 
-def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
+def _assemble_workspace_context(
     *,
     teardown_stack: ExitStack,
     parent: "_RunContext",
-    config: Config,
-    generation: int,
-    child_idx: int,
-    parent_commit: str,
-    agent_backend: str | None,
-    cli_provider: str | None,
+    spec: WorkspaceContextSpec,
 ) -> "_RunContext":
-    config = as_config(config)
-    candidate_id = f"g{generation}c{child_idx}"
-    workspace = parent.project.state.candidate_worktree_directory(parent.run_id, candidate_id)
-    log_dir = parent.state.local(RunStateNamespace.EVOLVE).external_directory(
-        f"candidates/{candidate_id}/logs"
+    config = as_config(spec.config)
+    workspace = parent.project.state.candidate_worktree_directory(parent.run_id, spec.scope_id)
+    log_dir = parent.state.local(spec.log_namespace).external_directory(
+        f"{spec.log_directory}/{spec.scope_id}/logs"
     )
 
     # Materialize the parent's tree in an isolated worktree (shared object
@@ -1216,13 +1184,13 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
     # Remove the worktree only after it has been materialized, including when
     # git itself reports failure after partially materializing its admin state.
     teardown_stack.callback(lambda: parent.git.remove_worktree(workspace))
-    parent.git.add_worktree(workspace, parent_commit)
+    parent.git.add_worktree(workspace, spec.revision)
 
     logger = RunLogger(log_dir, tee_stderr=False, emit=log_and_print)
     teardown_stack.callback(logger.close)
 
-    resolved_backend = str(agent_backend or config.agent.backend or AgentBackend.CLI)
-    resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
+    resolved_backend = str(spec.agent_backend or config.agent.backend or AgentBackend.CLI)
+    resolved_cli_provider = spec.cli_provider or config.agent.cli_provider or "codex"
     effective_objective = getattr(parent, "effective_objective", None)
 
     git = GitTracker(
@@ -1235,6 +1203,8 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
             evaluator_source=None,
         ),
     )
+    if parent.git.trusted_input_baseline is not None:
+        git.configure_trusted_input_baseline(parent.git.trusted_input_baseline)
     workspace_files = Workspace(
         workspace,
         run_environment=parent.run_environment,
@@ -1252,33 +1222,33 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
 
     # Reuse adapter-owned resources provisioned when the parent environment was
     # opened. Candidate sessions do not need to rematerialize reference inputs.
+    workspace_environment_request = RunEnvironmentRequest(
+        log_dir=log_dir,
+        workspace=workspace,
+        workspace_sources=parent.workspace_sources,
+        ref_dir=None,
+        backend=parent.backend_impl,
+        agent_backend=resolved_backend,
+        cli_provider=resolved_cli_provider,
+        run_id=parent.run_id,
+        objective=effective_objective,
+        objective_document=objective_document,
+        accuracy_command=parent.accuracy_command,
+        benchmark_command=parent.benchmark_command,
+        benchmark_output_argument=parent.environment_request.benchmark_output_argument,
+        evaluator_package_root=parent.evaluator_package_root,
+        evaluator_tools_root=parent.evaluator_tools_root,
+        profiler_support_path=parent.profiler_support_path,
+        profiler_support_name=parent.profiler_support_name,
+        git_history_root=parent.git.history_root,
+        environment_bind_mounts=parent.environment_patch.bind_mounts,
+        log=logger.lprint,
+        framework_root=PROJECT_ROOT,
+        project_path_policy=project_path_policy,
+        state_namespace=parent.state.local(RunStateNamespace.SKYPILOT),
+    )
     session = teardown_stack.enter_context(
-        parent.run_environment.open(
-            RunEnvironmentRequest(
-                log_dir=log_dir,
-                workspace=workspace,
-                workspace_sources=parent.workspace_sources,
-                ref_dir=None,
-                backend=parent.backend_impl,
-                agent_backend=resolved_backend,
-                cli_provider=resolved_cli_provider,
-                run_id=parent.run_id,
-                objective=effective_objective,
-                objective_document=objective_document,
-                accuracy_command=parent.accuracy_command,
-                benchmark_command=parent.benchmark_command,
-                evaluator_package_root=parent.evaluator_package_root,
-                evaluator_tools_root=parent.evaluator_tools_root,
-                profiler_support_path=parent.profiler_support_path,
-                profiler_support_name=parent.profiler_support_name,
-                git_history_root=parent.git.history_root,
-                environment_bind_mounts=parent.environment_patch.bind_mounts,
-                log=logger.lprint,
-                framework_root=PROJECT_ROOT,
-                project_path_policy=project_path_policy,
-                state_namespace=parent.state.local(RunStateNamespace.SKYPILOT),
-            )
-        )
+        parent.run_environment.open(workspace_environment_request)
     )
     commands = RunCommands(
         judge_accuracy_command=session.view.paths.accuracy_command,
@@ -1292,35 +1262,34 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
     # role-scoped conversations are never checkpointed (they belong to one
     # process). Candidates also share the parent's run ID and local namespace
     # and run concurrently, so a single per-run map would alias them anyway.
-    agent_spec = agent_spec_from_config(
-        config,
-        backend=agent_backend,
-        provider=cli_provider,
-        model=parent.model_name,
-    )
-    agent_client = build_agent_client(
-        spec=agent_spec,
-        backends={
-            "implementer": session.sandbox,
-            "judge": session.sandbox,
-            "perf_eval": session.sandbox,
-            "profiler": session.sandbox,
-            "orchestrator": session.sandbox,
-        },
-        skill_source_dirs=parent.skill_source_paths,
-        skill_selection=platform_skill_selection(parent.backend),
-        run_log_file=logger.writer,
-        use_docker=session.view.cli_sandboxed,
-        log_dir=log_dir,
-        project_path_policy=project_path_policy,
-        require_host_sandbox=not session.view.cli_sandboxed,
-        # A candidate runs the same domain as its parent, so it needs the same
-        # container access; recomputing is impossible here because a candidate
-        # context carries neither the profiler domain nor the task name.
-        host_resources=parent.agent_host_resources,
-        events=output_sink(),
-    )
-    teardown_stack.callback(agent_client.close)
+    agent_client = None
+    if spec.use_default_agent:
+        agent_spec = agent_spec_from_config(
+            config,
+            backend=spec.agent_backend,
+            provider=spec.cli_provider,
+            model=parent.model_name,
+        )
+        agent_client = build_agent_client(
+            spec=agent_spec,
+            backends={
+                "implementer": session.sandbox,
+                "judge": session.sandbox,
+                "perf_eval": session.sandbox,
+                "profiler": session.sandbox,
+                "orchestrator": session.sandbox,
+            },
+            skill_source_dirs=parent.skill_source_paths,
+            skill_selection=platform_skill_selection(parent.backend),
+            run_log_file=logger.writer,
+            use_docker=session.view.cli_sandboxed,
+            log_dir=log_dir,
+            project_path_policy=project_path_policy,
+            require_host_sandbox=not session.view.cli_sandboxed,
+            host_resources=parent.agent_host_resources,
+            events=output_sink(),
+        )
+        teardown_stack.callback(agent_client.close)
 
     paths = RunPaths(
         project_root=workspace,
@@ -1360,6 +1329,7 @@ def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
         # parallel. Only the parent context owns remote synchronization.
         experiment_repository=None,
         teardown_stack=teardown_stack,
+        environment_request=workspace_environment_request,
         run_environment_session=session,
         commands=commands,
         device=parent.device,  # shared under the environment's parallel contract
@@ -1378,7 +1348,7 @@ class _RunContext:
 
         loop -> _RunContext -> RunEnvironment -> ComputeBackendImpl.make_sandbox -> Sandbox
 
-    Instances are assembled by :func:`create_run_context`, which owns every
+    Instances are assembled by :func:`open_run_context`, which owns every
     construction side effect (project state, log files, candidate worktree,
     model, compute backend, copied helper inputs, Git snapshot tracking,
     run-environment session, agent client, GPU monitor). Environment-specific
@@ -1419,6 +1389,7 @@ class _RunContext:
         git: GitTracker,
         experiment_repository: ExperimentRepository | None,
         teardown_stack: ExitStack,
+        environment_request: RunEnvironmentRequest,
         run_environment_session: RunEnvironmentSession,
         commands: RunCommands,
         device: DeviceLease,
@@ -1470,6 +1441,7 @@ class _RunContext:
         self._pending_round_transaction: RoundTransaction | None = None
         self._experiment_repository = experiment_repository
         self._teardown_stack = teardown_stack
+        self.environment_request = environment_request
         self.run_environment_session = run_environment_session
         self.run_environment_view = run_environment_session.view
         self.implementer_backend = run_environment_session.sandbox

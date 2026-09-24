@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.api.contracts import RunStatus
-from vibesys.orchestration.contracts import HistoryNamespaces, project_run
-from vibesys.orchestration.manifest_compat import orchestration_id
+from vibesys.orchestration.contracts import project_run
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -14,7 +13,7 @@ if TYPE_CHECKING:
 
     from vibesys.api.contracts import RunView
     from vibesys.orchestration.contracts import OrchestrationRegistry
-    from vs_project.api import Project, RunManifestRecord, StateSnapshot
+    from vs_project.api import OrchestrationRunManifest, Project, StateSnapshot
 
 
 class RunStore(Protocol):
@@ -51,17 +50,17 @@ def portable_history_snapshots(
 ) -> tuple[StateSnapshot, ...]:
     """Read the portable namespaces selected by the run's policy."""
     manifest = project.state.load_run(run_id)
-    policy_id = orchestration_id(manifest)
+    policy_id = manifest.orchestration.id
     if registry is None:
         from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
 
         registry = built_in_orchestrations()
     selected = registry
     try:
-        policy = selected.resolve(policy_id)
+        registration = selected.resolve(policy_id)
     except ValueError:
-        policy = None
-    names = policy.history_namespaces() if isinstance(policy, HistoryNamespaces) else ()
+        registration = None
+    names = registration.portable_namespaces if registration is not None else ()
     return tuple(project.state.portable_namespace(run_id, name).snapshot() for name in names)
 
 
@@ -101,14 +100,14 @@ class _LocalRunStore:
             purpose=f"recorded workspace for run {run_id!r}",
         )
 
-    def _view(self, manifest: RunManifestRecord) -> RunView:
-        loop = orchestration_id(manifest)
+    def _view(self, manifest: OrchestrationRunManifest) -> RunView:
+        loop = manifest.orchestration.id
         try:
-            policy = self._registry.resolve(loop)
+            registration = self._registry.resolve(loop)
         except ValueError:
-            policy = None
+            registration = None
         return project_run(
-            policy,
+            registration,
             self._project,
             run_id=manifest.run_id,
             status=RunStatus.UNKNOWN,

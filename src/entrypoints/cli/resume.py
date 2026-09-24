@@ -1,40 +1,59 @@
-"""Restoring a resumed run's recorded CLI configuration and selecting its branch."""
+"""Restore one v4 descriptor-backed run before building its request."""
 
 from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 from entrypoints.cli.args import _parse_cli_objective
-from entrypoints.cli.constants import (
-    _AGENT_RESUME_CLI_FIELDS,
-    _COMMON_RESUME_CLI_FIELDS,
-    _EVOLVE_RESUME_CLI_FIELDS,
-    _PLAIN_RESUME_CLI_FIELDS,
-    _RUN_ENVIRONMENT_OPTION_CLI_FIELDS,
-)
+from entrypoints.cli.constants import _RUN_ENVIRONMENT_OPTION_CLI_FIELDS
 from entrypoints.cli.errors import _configuration_error, _project_resume_mismatch
-from entrypoints.cli.loops import _migrate_run_environment_command, _resolve_project_root
+from entrypoints.cli.loops import _resolve_project_root
 from vibesys.api import ComputeBackend, Objective, ProfilerKind
-from vibesys.api.request import coerce_profiler_kind, resume_projection
+from vibesys.api.request import coerce_profiler_kind, validate_descriptor
 from vs_project.api import (
-    AgentRunConfiguration,
     GitTracker,
     NullGitTrackerEvents,
     OrchestrationRunManifest,
-    PlainRunConfiguration,
     Project,
     ProjectStateError,
-    RunConfiguration,
-    RunSchemaMigrationRequiredError,
 )
 
 if TYPE_CHECKING:
     import argparse
+    from collections.abc import Mapping
 
-    from vibesys.api.request import ResumeProjection
     from vs_project.api import RunEnvironmentRecord
+
+
+_POLICY_CLI_SELECTION = {
+    "multi-agent": ("agent", "multi-agent"),
+    "single-agent": ("agent", "single-agent"),
+    "profile-guided-multi-agent": ("profile-guided", "multi-agent"),
+    "profile-guided-single-agent": ("profile-guided", "single-agent"),
+    "plain": ("plain", None),
+    "evolve": ("evolve", None),
+}
+_OPTION_TO_CLI = {
+    "compute_backend": "backend",
+    "operator_constraints": "constraint",
+}
+_CONFIG_ONLY_OPTIONS = frozenset(
+    {
+        "model",
+        "agent_driver",
+        "cli_timeout",
+        "default_reasoning_effort",
+        "outer_model",
+        "outer_reasoning_effort",
+        "inner_model",
+        "inner_reasoning_effort",
+        "metric_space",
+        "profile_guided",
+    }
+)
 
 
 def _restore_resume_budget(
@@ -58,45 +77,12 @@ def _restore_resume_budget(
         )
 
 
-def _restore_resume_agent_backend(
-    args: argparse.Namespace,
-    recorded: AgentRunConfiguration,
-    explicit: frozenset[str],
-) -> bool:
-    """Restore the backend and return whether an explicit value mismatched."""
-    if not {"stub_agent", "agent_backend"}.intersection(explicit):
-        args.stub_agent = recorded.agent_backend == "stub"
-        args.agent_backend = None if args.stub_agent else recorded.agent_backend
-        return False
-    requested = "stub" if args.stub_agent else args.agent_backend
-    return requested != recorded.agent_backend
-
-
-def _restore_resume_constraints(
-    args: argparse.Namespace,
-    recorded: AgentRunConfiguration,
-    explicit: frozenset[str],
-) -> bool:
-    """Restore constraints and return whether an explicit value mismatched."""
-    if "constraint" not in explicit:
-        args.constraint = list(recorded.operator_constraints)
-        return False
-    requested = tuple(constraint.strip() for constraint in args.constraint if constraint.strip())
-    return requested != recorded.operator_constraints
-
-
-def _restore_resume_run_environment(  # noqa: C901
+def _restore_resume_run_environment(  # noqa: C901  # tracked: #288
     args: argparse.Namespace,
     record: RunEnvironmentRecord,
     explicit: frozenset[str],
 ) -> list[str]:
-    """Restore the recorded runtime environment and reject contradictions.
-
-    ``--docker`` and ``--modal`` are store-true flags, so an omitted flag is
-    indistinguishable from ``--flag false``. The recorded environment therefore
-    wins whenever the resume invocation says nothing about it, and only an
-    explicitly passed flag that contradicts the recording is an error.
-    """
+    """Restore the recorded runtime environment and reject contradictions."""
     changed: list[str] = []
     if not hasattr(args, "docker") or not hasattr(args, "modal"):
         return changed
@@ -146,23 +132,19 @@ def _normalized_resume_cli_value(destination: str, value: object) -> object:
         return value.value
     if destination == "profiler":
         assert isinstance(value, ProfilerKind)  # noqa: S101  # argparse contract
-        return ProfilerKind.NONE.value if value is ProfilerKind.AUTO else value.value
+        return value.value
     return value
 
 
-def _set_resume_cli_value(
-    args: argparse.Namespace,
-    destination: str,
-    value: object,
-) -> None:
+def _set_resume_cli_value(args: argparse.Namespace, destination: str, value: object) -> None:
     if destination == "agent_backend":
         is_stub = value == "stub"
         args.stub_agent = is_stub
         value = None if is_stub else value
     elif destination == "objective":
-        value = [_parse_cli_objective(item) for item in cast("tuple[str, ...]", value)]
+        value = [_parse_cli_objective(item) for item in cast("list[str]", value)]
     elif destination == "constraint":
-        value = list(cast("tuple[str, ...]", value))
+        value = list(cast("list[str]", value))
     elif destination == "backend":
         try:
             value = ComputeBackend(value)
@@ -173,14 +155,8 @@ def _set_resume_cli_value(
                 stage="resume_resolution",
             )
     elif destination == "profiler":
-        if value is not None and not isinstance(value, str):
-            _configuration_error(
-                f"Run metadata records unknown profiler {value!r}",
-                code="project_resume_configuration_invalid",
-                stage="resume_resolution",
-            )
         try:
-            value = coerce_profiler_kind(value or ProfilerKind.AUTO.value)
+            value = coerce_profiler_kind(cast("str", value) or ProfilerKind.AUTO.value)
         except ValueError:
             _configuration_error(
                 f"Run metadata records unknown profiler {value!r}",
@@ -190,106 +166,19 @@ def _set_resume_cli_value(
     setattr(args, destination, value)
 
 
-def _restore_project_resume_cli_args(
+def _restore_cli_fields(
     args: argparse.Namespace,
-    recorded: RunConfiguration,
+    options: Mapping[str, object],
     *,
-    loop_kind: str,
-) -> None:
-    """Restore omitted run flags and reject explicit changes on resume."""
-    if recorded.outer_loop != loop_kind:
-        _configuration_error(
-            f"Run uses --outer-loop {recorded.outer_loop}, not {loop_kind}",
-            code="project_resume_configuration_mismatch",
-            stage="resume_resolution",
-        )
-
-    explicit = getattr(args, "explicit_cli_dests", frozenset())
-    fields, changed = _restore_loop_resume_fields(args, recorded, explicit)
-
-    for destination, field in fields.items():
-        if not hasattr(args, destination):
-            continue
-        expected = getattr(recorded, field)
-        if destination in explicit:
-            requested = _normalized_resume_cli_value(destination, getattr(args, destination))
-            if requested != expected:
-                changed.append(field)
-            continue
-        _set_resume_cli_value(args, destination, expected)
-
-    if changed:
-        _project_resume_mismatch(changed)
-
-
-def _restore_loop_resume_fields(
-    args: argparse.Namespace,
-    recorded: RunConfiguration,
+    budget: str,
     explicit: frozenset[str],
-) -> tuple[dict[str, str], list[str]]:
-    """Restore a loop's budget and return its immutable CLI field map."""
-    fields = dict(_COMMON_RESUME_CLI_FIELDS)
-    changed: list[str] = _restore_resume_run_environment(args, recorded.run_environment, explicit)
-    if isinstance(recorded, AgentRunConfiguration):
-        _restore_resume_budget(
-            args,
-            destination="max_rounds",
-            recorded_value=recorded.max_rounds,
-            explicit=explicit,
-        )
-        fields.update(_AGENT_RESUME_CLI_FIELDS)
-        if _restore_resume_agent_backend(args, recorded, explicit):
-            changed.append("agent_backend")
-        if _restore_resume_constraints(args, recorded, explicit):
-            changed.append("operator_constraints")
-        fields.pop("agent_backend", None)
-    elif isinstance(recorded, PlainRunConfiguration):
-        _restore_resume_budget(
-            args,
-            destination="max_rounds",
-            recorded_value=recorded.max_rounds,
-            explicit=explicit,
-        )
-        fields.update(_PLAIN_RESUME_CLI_FIELDS)
-    else:
-        _restore_resume_budget(
-            args,
-            destination="max_generations",
-            recorded_value=recorded.max_generations,
-            explicit=explicit,
-        )
-        fields.update(_EVOLVE_RESUME_CLI_FIELDS)
-        if "objective" in explicit:
-            requested = tuple(f"{item.name}:{item.direction}" for item in args.objective)
-            if requested != recorded.objectives:
-                changed.append("objectives")
-        else:
-            args.objective = [_parse_cli_objective(item) for item in recorded.objectives]
-    return fields, changed
-
-
-def _restore_v4_resume_cli_args(
-    args: argparse.Namespace,
-    projection: ResumeProjection,
-    *,
-    loop_kind: str,
-) -> None:
-    """Restore v4 CLI values without constructing a version 3 configuration."""
-    if projection.orchestration_id != loop_kind:
-        _configuration_error(
-            f"Run uses --outer-loop {projection.orchestration_id}, not {loop_kind}",
-            code="project_resume_configuration_mismatch",
-            stage="resume_resolution",
-        )
-    explicit = getattr(args, "explicit_cli_dests", frozenset())
-    changed = _restore_resume_run_environment(args, projection.run_environment, explicit)
-    _restore_resume_budget(
-        args,
-        destination=projection.budget_destination,
-        recorded_value=projection.budget_value,
-        explicit=explicit,
-    )
-    for destination, expected in projection.cli_values.items():
+) -> list[str]:
+    """Apply descriptor options to present CLI fields and report conflicts."""
+    changed: list[str] = []
+    for field, expected in options.items():
+        if field in _CONFIG_ONLY_OPTIONS or field == budget:
+            continue
+        destination = _OPTION_TO_CLI.get(field, field)
         if not hasattr(args, destination):
             continue
         is_explicit = destination in explicit or (
@@ -298,30 +187,84 @@ def _restore_v4_resume_cli_args(
         if is_explicit:
             requested = (
                 "stub"
-                if destination == "agent_backend" and args.stub_agent
+                if destination == "agent_backend" and getattr(args, "stub_agent", False)
                 else _normalized_resume_cli_value(destination, getattr(args, destination))
             )
-            if requested != expected:
-                changed.append(
-                    "operator_constraints" if destination == "constraint" else destination
-                )
+            if requested != (tuple(expected) if isinstance(expected, list) else expected):
+                changed.append(field)
         else:
             _set_resume_cli_value(args, destination, expected)
+    return changed
+
+
+def _restore_evolve_objectives(
+    args: argparse.Namespace, options: Mapping[str, object], explicit: frozenset[str]
+) -> list[str]:
+    """Restore the recorded objective axes while preserving task tolerance."""
+    metric_space = cast("dict[str, object]", options["metric_space"])
+    axes = cast("list[dict[str, str]]", metric_space["objectives"])
+    recorded = [f"{axis['name']}:{axis['direction']}" for axis in axes]
+    if "objective" in explicit:
+        requested = _normalized_resume_cli_value("objective", args.objective)
+        return ["metric_space.objectives"] if requested != tuple(recorded) else []
+    args.objective = [_parse_cli_objective(spec) for spec in recorded]
+    return []
+
+
+def _restore_descriptor_options(
+    args: argparse.Namespace, manifest: OrchestrationRunManifest, *, loop_kind: str
+) -> None:
+    """Restore omitted flags from the single active descriptor format."""
+    descriptor = manifest.orchestration
+    try:
+        recorded_loop, inner_loop = _POLICY_CLI_SELECTION[descriptor.id]
+    except KeyError:
+        _configuration_error(
+            f"The CLI cannot resume orchestration {descriptor.id!r}",
+            code="project_resume_configuration_invalid",
+            stage="resume_resolution",
+        )
+    if recorded_loop != loop_kind:
+        _configuration_error(
+            f"Run uses --outer-loop {recorded_loop}, not {loop_kind}",
+            code="project_resume_configuration_mismatch",
+            stage="resume_resolution",
+        )
+    explicit = getattr(args, "explicit_cli_dests", frozenset())
+    changed = _restore_resume_run_environment(args, manifest.run_environment, explicit)
+    if inner_loop is not None:
+        if "inner_loop" in explicit and args.inner_loop != inner_loop:
+            changed.append("inner_loop")
+        else:
+            args.inner_loop = inner_loop
+    options = descriptor.options
+    budget = "max_generations" if recorded_loop == "evolve" else "max_rounds"
+    _restore_resume_budget(
+        args,
+        destination=budget,
+        recorded_value=cast("int", options[budget]),
+        explicit=explicit,
+    )
+    changed.extend(_restore_cli_fields(args, options, budget=budget, explicit=explicit))
+    execution_cli = {
+        "agent_backend": manifest.execution.agent_backend,
+        "cli_provider": manifest.execution.cli_provider,
+        "compute_backend": manifest.execution.compute_backend,
+        "profiler": manifest.execution.requested_profiler,
+    }
+    changed.extend(_restore_cli_fields(args, execution_cli, budget=budget, explicit=explicit))
+    if recorded_loop == "evolve":
+        changed.extend(_restore_evolve_objectives(args, options, explicit))
     if changed:
         _project_resume_mismatch(changed)
+    args.project_run_configuration = SimpleNamespace(**manifest.execution.model_dump())
 
 
 def _switch_project_resume_branch(project_root: Path, run_id: str) -> None:
     """Select the run branch before callers read committed project files."""
-    # Store-only fixtures and corrupt partial initializations are diagnosed by
-    # context creation. Real runs always have a repository here.
     if not (project_root / ".git").exists():
         return
-    tracker = GitTracker(
-        project_root,
-        events=NullGitTrackerEvents(),
-        run_id=run_id,
-    )
+    tracker = GitTracker(project_root, events=NullGitTrackerEvents(), run_id=run_id)
     try:
         tracker.init(existing=True)
     except (subprocess.SubprocessError, ValueError) as exc:
@@ -357,34 +300,34 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
             if run_id is None:
                 run_id = store.resolve_run().run_id
         _switch_project_resume_branch(project_root, run_id)
-        run_manifest = store.load_run(run_id)
-    except RunSchemaMigrationRequiredError as exc:
-        _configuration_error(
-            f"{exc} Run: {_migrate_run_environment_command(project_root, exc.run_id)}",
-            code="project_run_schema_migration_required",
-            stage="resume_resolution",
-        )
+        manifest = store.load_run(run_id)
     except ProjectStateError as exc:
+        message = str(exc)
         _configuration_error(
-            f"Cannot resume project run: {exc}",
-            code="resume_not_found",
+            f"Cannot resume project run: {message}",
+            code=(
+                "unsupported_run_schema"
+                if "unsupported run schema version" in message
+                else "resume_not_found"
+            ),
             stage="resume_resolution",
         )
+    if not isinstance(manifest, OrchestrationRunManifest):
+        _configuration_error(
+            f"Run {run_id!r} uses an unsupported run schema; only v4 runs can resume",
+            code="unsupported_run_schema",
+            stage="resume_resolution",
+        )
+    validate_descriptor(manifest.orchestration)
     args.resume = run_id
     args.exp_name = run_id
     args.input = project_root
-    if run_manifest.task_name is not None:
-        if args.task is not None and args.task != run_manifest.task_name:
+    if manifest.task_name is not None:
+        if args.task is not None and args.task != manifest.task_name:
             _configuration_error(
-                f"Run uses task {run_manifest.task_name!r}, not {args.task!r}",
+                f"Run uses task {manifest.task_name!r}, not {args.task!r}",
                 code="project_resume_configuration_mismatch",
                 stage="resume_resolution",
             )
-        args.task = run_manifest.task_name
-    if isinstance(run_manifest, OrchestrationRunManifest):
-        projection = resume_projection(run_manifest)
-        args.project_run_configuration = projection.config
-        _restore_v4_resume_cli_args(args, projection, loop_kind=loop_kind)
-    else:
-        args.project_run_configuration = run_manifest.configuration
-        _restore_project_resume_cli_args(args, run_manifest.configuration, loop_kind=loop_kind)
+        args.task = manifest.task_name
+    _restore_descriptor_options(args, manifest, loop_kind=loop_kind)
