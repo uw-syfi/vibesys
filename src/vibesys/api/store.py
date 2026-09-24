@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.api._orchestrations.contracts import HistoryNamespaces, project_run
-from vibesys.api._orchestrations.manifest_compat import orchestration_id
 from vibesys.api.contracts import RunStatus
+from vibesys.orchestration.contracts import HistoryNamespaces, project_run
+from vibesys.orchestration.manifest_compat import orchestration_id
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vibesys.api._orchestrations.contracts import OrchestrationRegistry
     from vibesys.api.contracts import RunView
+    from vibesys.orchestration.contracts import OrchestrationRegistry
     from vs_project.api import Project, RunManifestRecord, StateSnapshot
 
 
@@ -40,7 +40,7 @@ class RunStore(Protocol):
 def open_run_store(project: Project, *, registry: OrchestrationRegistry | None = None) -> RunStore:
     """Open a read-only run history store for *project*."""
     if registry is None:
-        from vibesys.api._orchestrations.builtins import built_in_orchestrations  # noqa: PLC0415
+        from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
 
         registry = built_in_orchestrations()
     return _LocalRunStore(project, registry=registry)
@@ -53,7 +53,7 @@ def portable_history_snapshots(
     manifest = project.state.load_run(run_id)
     policy_id = orchestration_id(manifest)
     if registry is None:
-        from vibesys.api._orchestrations.builtins import built_in_orchestrations  # noqa: PLC0415
+        from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
 
         registry = built_in_orchestrations()
     selected = registry

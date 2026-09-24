@@ -29,10 +29,10 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vibesys.api._orchestrations.contracts import OrchestrationRegistry
     from vibesys.api.contracts import AgentEnvironment, EventSink, RunView
     from vibesys.api.run_request import RunRequestLike
     from vibesys.config import Config
+    from vibesys.orchestration.contracts import OrchestrationRegistry
     from vibesys.run.integration import RunResourceHandoff
     from vibesys.sandbox.run_environment import RunEnvironmentSession
     from vibesys.skills import SkillSelection
@@ -164,7 +164,7 @@ class _LocalRunSession:
         self._request = request
         self._sink = sink
         if registry is None:
-            from vibesys.api._orchestrations.builtins import (  # noqa: PLC0415
+            from vibesys.loops.registry import (  # noqa: PLC0415
                 built_in_orchestrations,
             )
 

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from vibesys.api._orchestrations.contracts import empty_run_view
-from vibesys.api._orchestrations.legacy_request import RunRequest
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
+from vibesys.loops.legacy_request import RunRequest
+from vibesys.loops.roles import expected_agent_roles
+from vibesys.orchestration.contracts import RunDescription, empty_run_view
+from vibesys.profilers import ProfilerKind
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -71,3 +74,29 @@ class LegacyBuiltinDefaults:
     def history_namespaces(self) -> tuple[str, ...]:
         """Expose this policy's portable state to run history queries."""
         return (self.namespace,)
+
+
+def required_objective(request: RunRequest) -> str:
+    """Require the objective used by the agent and evolve built-ins."""
+    if request.objective is None:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="missing_objective",
+                stage="dispatch",
+                message=f"RunRequest for outer loop {request.orchestration_id!r} must set objective",
+            )
+        )
+    return request.objective
+
+
+def built_in_description(request: RunRequest, *, round_budget: bool) -> RunDescription:
+    """Preserve a built-in policy's existing run-start presentation."""
+    roles = expected_agent_roles(request.orchestration_id)
+    if request.profiler_kind is ProfilerKind.NONE:
+        roles = tuple(role for role in roles if role != "profiler")
+    return RunDescription(
+        max_rounds=(request.max_rounds if request.max_rounds is not None else 1)
+        if round_budget
+        else 1,
+        expected_roles=roles,
+    )

@@ -15,8 +15,8 @@ _DEFAULT_CONFIG_TEXT = '[model]\nname = "gpt-5.4"\n'
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.api._orchestrations.legacy_request import LoopKind, RunRequest
     from vibesys.api.contracts import Config, ConfigurationDiagnostic
+    from vibesys.loops.legacy_request import LoopKind, RunRequest
     from vs_project.api import Project
 
 
@@ -63,8 +63,8 @@ def default_request(project: Project, loop: LoopKind) -> RunRequest:
     its `agent.toml`, if any, else the built-in defaults. Loop-specific fields
     are left at their `RunRequest` defaults.
     """
-    from vibesys.api._orchestrations.legacy_request import RunRequest  # noqa: PLC0415
     from vibesys.api.contracts import Config  # noqa: PLC0415
+    from vibesys.loops.legacy_request import RunRequest  # noqa: PLC0415
 
     config_path = project.root / "agent.toml"
     config = (

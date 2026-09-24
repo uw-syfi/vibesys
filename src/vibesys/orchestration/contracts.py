@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import ValidationError
 
-from vibesys.api.contracts import OrchestrationDescriptor
+from vs_project.api import OrchestrationDescriptor
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -28,39 +28,51 @@ class RunDescription:
 
 
 class ExecutableOrchestration(Protocol):
-    """Public policy hook: execute a run using the agent runtime."""
+    """Internal policy hook: execute a run using the agent runtime."""
 
-    def execute(self, request: Any, runtime: VibeSysRuntime) -> bool: ...  # noqa: ANN401
+    def execute(self, request: Any, runtime: VibeSysRuntime) -> bool:  # noqa: ANN401
+        """Run policy-defined control flow and return whether it succeeded."""
+        ...
 
 
 class OrchestrationExecution(Protocol):
     """Internal setup and policy-controlled execution of one run."""
 
-    def prepare(self, request: RunRequestLike, runtime: VibeSysRuntime) -> None: ...
+    def prepare(self, request: RunRequestLike, runtime: VibeSysRuntime) -> None:
+        """Initialize policy state before execution."""
+        ...
 
-    def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool: ...
+    def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool:
+        """Run policy-defined control flow and return whether it succeeded."""
+        ...
 
 
 class OrchestrationProjection(Protocol):
     """Internal metadata, read-model, and resume projections."""
 
-    def describe(self, request: RunRequestLike) -> RunDescription: ...
+    def describe(self, request: RunRequestLike) -> RunDescription:
+        """Provide metadata for the run-start event."""
+        ...
 
-    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView: ...
+    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+        """Project a run's persisted state for observation."""
+        ...
 
-    def project_committed(
-        self, namespace: str, state: BaseModel, *, run_id: str
-    ) -> RunView | None: ...
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        """Project a just-committed state for live observation."""
+        ...
 
-    def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection: ...
+    def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
+        """Restore policy-owned CLI settings from a run manifest."""
+        ...
 
 
 @runtime_checkable
 class Orchestration(OrchestrationExecution, OrchestrationProjection, Protocol):
     """Registered internal contract combining execution and projections.
 
-    The public extension point is ``ExecutableOrchestration``. Explicit public
-    imports of this aggregate remain compatible but are deprecated.
+    Internal policy authors can implement ``ExecutableOrchestration``. Imports
+    of this aggregate through ``vibesys.api`` remain compatible but deprecated.
     """
 
 
@@ -161,9 +173,11 @@ class OrchestrationRegistry:
     """Map stable orchestration IDs to implementations."""
 
     def __init__(self) -> None:
+        """Start with no registered policies."""
         self._implementations: dict[str, Orchestration] = {}
 
     def register(self, kind: str, implementation: ExecutableOrchestration) -> None:
+        """Register a policy under its stable orchestration ID."""
         try:
             OrchestrationDescriptor(id=kind, config_version=1, options={})
         except ValidationError as exc:
@@ -179,6 +193,7 @@ class OrchestrationRegistry:
         )
 
     def resolve(self, kind: str) -> Orchestration:
+        """Return the registered policy or reject an unknown ID."""
         try:
             return self._implementations[kind]
         except KeyError as exc:

@@ -15,15 +15,14 @@ uv run python scripts/check_tach_graph.py --write
 Views: a package-level overview, the `vibesys` core modules, and the full
 module graph. The graph is acyclic and `tach.toml` forbids cycles.
 
-`vibesys.api._orchestrations` contains transitional request adapters. Each
-adapter calls only its corresponding implementation under `vibesys.loops`, and
-the `builtins` module alone registers all adapters. Tach declares the agent,
-plain, and evolve implementations as sibling modules with no imports between
-them. New orchestration-specific logic, including agent configuration and
+`vibesys.orchestration` owns the internal contract, runner, runtime, and generic
+run projections. Concrete implementations live under sibling `vibesys.loops`
+packages; `vibesys.loops.registry` alone registers them. Tach prevents sibling
+policy imports. Orchestration-specific logic, including agent configuration and
 resume policy, belongs in `vibesys`, not `vs_project`. `vs_project` owns generic
 project layout and persistence operations.
 
-The public custom-policy execution contract and example are in
+The internal custom-policy execution contract and example are in
 [orchestration-runtime.md](orchestration-runtime.md).
 
 [//]: # (tach-graph:start)
@@ -67,117 +66,32 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 ```mermaid
 graph TD
     vibesys.api --> vibesys
-    vibesys.api --> vibesys.api._orchestrations
-    vibesys.api --> vibesys.api._orchestrations._common
-    vibesys.api --> vibesys.api._orchestrations.builtins
-    vibesys.api --> vibesys.api._orchestrations.contracts
-    vibesys.api --> vibesys.api._orchestrations.legacy_request
-    vibesys.api --> vibesys.api._orchestrations.runner
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.api.run_request
     vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
-    vibesys.api --> vibesys.loops.agent
+    vibesys.api --> vibesys.loops.agent.projection
+    vibesys.api --> vibesys.loops.agent.read_state
+    vibesys.api --> vibesys.loops.agent.readmodel
     vibesys.api --> vibesys.loops.evolve
+    vibesys.api --> vibesys.loops.legacy_request
+    vibesys.api --> vibesys.loops.registry
     vibesys.api --> vibesys.orchestration
+    vibesys.api --> vibesys.orchestration._common
+    vibesys.api --> vibesys.orchestration.contracts
+    vibesys.api --> vibesys.orchestration.manifest_compat
+    vibesys.api --> vibesys.orchestration.runner
     vibesys.api --> vibesys.render
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.runtime
     vibesys.api --> vibesys.sandbox
-    vibesys.api._orchestrations --> vibesys
-    vibesys.api._orchestrations --> vibesys.api._orchestrations.legacy_request
-    vibesys.api._orchestrations --> vibesys.api.contracts
-    vibesys.api._orchestrations --> vibesys.loops
-    vibesys.api._orchestrations --> vibesys.loops.agent
-    vibesys.api._orchestrations --> vibesys.run
-    vibesys.api._orchestrations._common --> vibesys
-    vibesys.api._orchestrations._common --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations._common --> vibesys.api._orchestrations.legacy_request
-    vibesys.api._orchestrations._common --> vibesys.api.contracts
-    vibesys.api._orchestrations._common --> vibesys.api.run_request
-    vibesys.api._orchestrations._common --> vibesys.loops
-    vibesys.api._orchestrations.agent --> vibesys.api._orchestrations.agent_common
-    vibesys.api._orchestrations.agent --> vibesys.api._orchestrations.legacy_bridge
-    vibesys.api._orchestrations.agent --> vibesys.api.run_request
-    vibesys.api._orchestrations.agent --> vibesys.runtime
-    vibesys.api._orchestrations.agent_common --> vibesys.api._orchestrations
-    vibesys.api._orchestrations.agent_common --> vibesys.api._orchestrations._common
-    vibesys.api._orchestrations.agent_common --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.agent_common --> vibesys.api._orchestrations.legacy_bridge
-    vibesys.api._orchestrations.agent_common --> vibesys.api._orchestrations.legacy_request
-    vibesys.api._orchestrations.agent_common --> vibesys.api.contracts
-    vibesys.api._orchestrations.agent_common --> vibesys.api.run_request
-    vibesys.api._orchestrations.agent_common --> vibesys.loops.agent
-    vibesys.api._orchestrations.agent_common --> vibesys.loops.agent.loop
-    vibesys.api._orchestrations.agent_common --> vibesys.orchestration
-    vibesys.api._orchestrations.agent_common --> vibesys.runtime
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.agent
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.evolve
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.legacy_request
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.plain
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.profile_guided
-    vibesys.api._orchestrations.builtins --> vibesys.orchestration
-    vibesys.api._orchestrations.contracts --> vibesys.api.contracts
-    vibesys.api._orchestrations.contracts --> vibesys.api.run_request
-    vibesys.api._orchestrations.contracts --> vibesys.orchestration
-    vibesys.api._orchestrations.contracts --> vibesys.runtime
-    vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations._common
-    vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations.legacy_bridge
-    vibesys.api._orchestrations.evolve --> vibesys.api.contracts
-    vibesys.api._orchestrations.evolve --> vibesys.api.run_request
-    vibesys.api._orchestrations.evolve --> vibesys.loops.evolve
-    vibesys.api._orchestrations.evolve --> vibesys.orchestration
-    vibesys.api._orchestrations.evolve --> vibesys.runtime
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.api._orchestrations.legacy_request
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.api._orchestrations.runtime
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.api.contracts
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.api.run_request
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.run
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.runtime
-    vibesys.api._orchestrations.legacy_request --> vibesys
-    vibesys.api._orchestrations.legacy_request --> vibesys.api.run_request
-    vibesys.api._orchestrations.legacy_request --> vibesys.evaluators
-    vibesys.api._orchestrations.legacy_request --> vibesys.loops
-    vibesys.api._orchestrations.legacy_request --> vibesys.loops.evolve
-    vibesys.api._orchestrations.legacy_request --> vibesys.sandbox
-    vibesys.api._orchestrations.plain --> vibesys.api._orchestrations._common
-    vibesys.api._orchestrations.plain --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.plain --> vibesys.api._orchestrations.legacy_bridge
-    vibesys.api._orchestrations.plain --> vibesys.api.contracts
-    vibesys.api._orchestrations.plain --> vibesys.api.run_request
-    vibesys.api._orchestrations.plain --> vibesys.loops.plain
-    vibesys.api._orchestrations.plain --> vibesys.orchestration
-    vibesys.api._orchestrations.plain --> vibesys.runtime
-    vibesys.api._orchestrations.profile_guided --> vibesys.api._orchestrations.agent_common
-    vibesys.api._orchestrations.profile_guided --> vibesys.api._orchestrations.legacy_bridge
-    vibesys.api._orchestrations.profile_guided --> vibesys.api.run_request
-    vibesys.api._orchestrations.profile_guided --> vibesys.runtime
-    vibesys.api._orchestrations.runner --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.runner --> vibesys.api._orchestrations.runtime
-    vibesys.api._orchestrations.runner --> vibesys.api.contracts
-    vibesys.api._orchestrations.runner --> vibesys.api.run_request
-    vibesys.api._orchestrations.runner --> vibesys.run
-    vibesys.api._orchestrations.runtime --> vibesys
-    vibesys.api._orchestrations.runtime --> vibesys.api._orchestrations._common
-    vibesys.api._orchestrations.runtime --> vibesys.api.contracts
-    vibesys.api._orchestrations.runtime --> vibesys.api.run_request
-    vibesys.api._orchestrations.runtime --> vibesys.context
-    vibesys.api._orchestrations.runtime --> vibesys.render
-    vibesys.api._orchestrations.runtime --> vibesys.run
-    vibesys.api._orchestrations.runtime --> vibesys.runtime
     vibesys.api.agent --> vibesys.api
-    vibesys.api.agent --> vibesys.api._orchestrations
     vibesys.api.agent --> vibesys.loops.agent
+    vibesys.api.agent --> vibesys.loops.agent.projection
     vibesys.api.contracts --> vibesys
-    vibesys.api.contracts --> vibesys.api._orchestrations.legacy_request
     vibesys.api.contracts --> vibesys.api.run_request
-    vibesys.api.contracts --> vibesys.evaluators
     vibesys.api.contracts --> vibesys.loops
-    vibesys.api.contracts --> vibesys.loops.evolve
-    vibesys.api.contracts --> vibesys.sandbox
+    vibesys.api.contracts --> vibesys.loops.legacy_request
     vibesys.api.run_request --> vibesys
     vibesys.api.run_request --> vibesys.evaluators
     vibesys.api.run_request --> vibesys.sandbox
@@ -198,7 +112,6 @@ graph TD
     vibesys.loops --> vibesys.render
     vibesys.loops --> vibesys.run
     vibesys.loops.agent --> vibesys
-    vibesys.loops.agent --> vibesys.context
     vibesys.loops.agent --> vibesys.domains
     vibesys.loops.agent --> vibesys.evaluators
     vibesys.loops.agent --> vibesys.loops
@@ -207,6 +120,22 @@ graph TD
     vibesys.loops.agent --> vibesys.render
     vibesys.loops.agent --> vibesys.run
     vibesys.loops.agent --> vibesys.sandbox
+    vibesys.loops.agent.entrypoint --> vibesys.api.run_request
+    vibesys.loops.agent.entrypoint --> vibesys.loops.agent.entrypoint_common
+    vibesys.loops.agent.entrypoint --> vibesys.loops.legacy_bridge
+    vibesys.loops.agent.entrypoint --> vibesys.runtime
+    vibesys.loops.agent.entrypoint_common --> vibesys.api.contracts
+    vibesys.loops.agent.entrypoint_common --> vibesys.api.run_request
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.agent
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.agent.loop
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.agent.read_state
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.agent.readmodel
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.legacy_bridge
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.legacy_request
+    vibesys.loops.agent.entrypoint_common --> vibesys.orchestration
+    vibesys.loops.agent.entrypoint_common --> vibesys.orchestration._common
+    vibesys.loops.agent.entrypoint_common --> vibesys.orchestration.contracts
+    vibesys.loops.agent.entrypoint_common --> vibesys.runtime
     vibesys.loops.agent.loop --> vibesys
     vibesys.loops.agent.loop --> vibesys.context
     vibesys.loops.agent.loop --> vibesys.domains
@@ -215,7 +144,6 @@ graph TD
     vibesys.loops.agent.loop --> vibesys.loops.agent
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_flow
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_local
-    vibesys.loops.agent.loop --> vibesys.loops.agent.policy_profile
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_scheduler
     vibesys.loops.agent.loop --> vibesys.render
     vibesys.loops.agent.loop --> vibesys.run
@@ -239,11 +167,24 @@ graph TD
     vibesys.loops.agent.policy_profile --> vibesys.evaluators
     vibesys.loops.agent.policy_profile --> vibesys.loops.agent
     vibesys.loops.agent.policy_scheduler --> vibesys
-    vibesys.loops.agent.policy_scheduler --> vibesys.loops
     vibesys.loops.agent.policy_scheduler --> vibesys.loops.agent
     vibesys.loops.agent.policy_scheduler --> vibesys.loops.agent.policy_profile
     vibesys.loops.agent.policy_single --> vibesys
     vibesys.loops.agent.policy_single --> vibesys.loops.agent
+    vibesys.loops.agent.profile_entrypoint --> vibesys.api.run_request
+    vibesys.loops.agent.profile_entrypoint --> vibesys.loops.agent.entrypoint_common
+    vibesys.loops.agent.profile_entrypoint --> vibesys.loops.legacy_bridge
+    vibesys.loops.agent.profile_entrypoint --> vibesys.runtime
+    vibesys.loops.agent.projection --> vibesys
+    vibesys.loops.agent.projection --> vibesys.api.contracts
+    vibesys.loops.agent.read_state --> vibesys.loops
+    vibesys.loops.agent.read_state --> vibesys.loops.agent
+    vibesys.loops.agent.read_state --> vibesys.run
+    vibesys.loops.agent.readmodel --> vibesys
+    vibesys.loops.agent.readmodel --> vibesys.api.contracts
+    vibesys.loops.agent.readmodel --> vibesys.loops.agent
+    vibesys.loops.agent.readmodel --> vibesys.loops.agent.projection
+    vibesys.loops.agent.readmodel --> vibesys.loops.legacy_request
     vibesys.loops.evolve --> vibesys
     vibesys.loops.evolve --> vibesys.context
     vibesys.loops.evolve --> vibesys.domains
@@ -254,6 +195,27 @@ graph TD
     vibesys.loops.evolve --> vibesys.render
     vibesys.loops.evolve --> vibesys.run
     vibesys.loops.evolve --> vibesys.sandbox
+    vibesys.loops.evolve.entrypoint --> vibesys.api.run_request
+    vibesys.loops.evolve.entrypoint --> vibesys.loops.evolve
+    vibesys.loops.evolve.entrypoint --> vibesys.loops.legacy_bridge
+    vibesys.loops.evolve.entrypoint --> vibesys.orchestration
+    vibesys.loops.evolve.entrypoint --> vibesys.orchestration._common
+    vibesys.loops.evolve.entrypoint --> vibesys.orchestration.contracts
+    vibesys.loops.evolve.entrypoint --> vibesys.runtime
+    vibesys.loops.legacy_bridge --> vibesys
+    vibesys.loops.legacy_bridge --> vibesys.api.contracts
+    vibesys.loops.legacy_bridge --> vibesys.api.run_request
+    vibesys.loops.legacy_bridge --> vibesys.loops
+    vibesys.loops.legacy_bridge --> vibesys.loops.legacy_request
+    vibesys.loops.legacy_bridge --> vibesys.orchestration.contracts
+    vibesys.loops.legacy_bridge --> vibesys.run
+    vibesys.loops.legacy_bridge --> vibesys.runtime
+    vibesys.loops.legacy_request --> vibesys
+    vibesys.loops.legacy_request --> vibesys.api.run_request
+    vibesys.loops.legacy_request --> vibesys.evaluators
+    vibesys.loops.legacy_request --> vibesys.loops
+    vibesys.loops.legacy_request --> vibesys.loops.evolve
+    vibesys.loops.legacy_request --> vibesys.sandbox
     vibesys.loops.plain --> vibesys
     vibesys.loops.plain --> vibesys.context
     vibesys.loops.plain --> vibesys.domains
@@ -263,6 +225,39 @@ graph TD
     vibesys.loops.plain --> vibesys.render
     vibesys.loops.plain --> vibesys.run
     vibesys.loops.plain --> vibesys.sandbox
+    vibesys.loops.plain.entrypoint --> vibesys.api.run_request
+    vibesys.loops.plain.entrypoint --> vibesys.loops.legacy_bridge
+    vibesys.loops.plain.entrypoint --> vibesys.loops.plain
+    vibesys.loops.plain.entrypoint --> vibesys.orchestration
+    vibesys.loops.plain.entrypoint --> vibesys.orchestration._common
+    vibesys.loops.plain.entrypoint --> vibesys.orchestration.contracts
+    vibesys.loops.plain.entrypoint --> vibesys.runtime
+    vibesys.loops.registry --> vibesys.loops.agent.entrypoint
+    vibesys.loops.registry --> vibesys.loops.agent.profile_entrypoint
+    vibesys.loops.registry --> vibesys.loops.evolve.entrypoint
+    vibesys.loops.registry --> vibesys.loops.legacy_request
+    vibesys.loops.registry --> vibesys.loops.plain.entrypoint
+    vibesys.loops.registry --> vibesys.orchestration
+    vibesys.loops.registry --> vibesys.orchestration.contracts
+    vibesys.orchestration --> vibesys.orchestration.resume
+    vibesys.orchestration._common --> vibesys.api.run_request
+    vibesys.orchestration.contracts --> vibesys.api.contracts
+    vibesys.orchestration.contracts --> vibesys.api.run_request
+    vibesys.orchestration.contracts --> vibesys.orchestration
+    vibesys.orchestration.contracts --> vibesys.runtime
+    vibesys.orchestration.runner --> vibesys.api.contracts
+    vibesys.orchestration.runner --> vibesys.api.run_request
+    vibesys.orchestration.runner --> vibesys.orchestration.contracts
+    vibesys.orchestration.runner --> vibesys.orchestration.runtime
+    vibesys.orchestration.runner --> vibesys.run
+    vibesys.orchestration.runtime --> vibesys
+    vibesys.orchestration.runtime --> vibesys.api.contracts
+    vibesys.orchestration.runtime --> vibesys.api.run_request
+    vibesys.orchestration.runtime --> vibesys.context
+    vibesys.orchestration.runtime --> vibesys.orchestration._common
+    vibesys.orchestration.runtime --> vibesys.render
+    vibesys.orchestration.runtime --> vibesys.run
+    vibesys.orchestration.runtime --> vibesys.runtime
     vibesys.prompts --> vibesys
     vibesys.render --> vibesys
     vibesys.run --> vibesys
@@ -276,7 +271,6 @@ graph TD
     vibesys.sandbox --> vibesys.evaluators
     vibesys.sandbox --> vibesys.prompts
     vibesys.sandbox --> vibesys.skypilot
-    vibesys.skypilot --> vibesys
 ```
 
 ## Full module graph
@@ -293,7 +287,6 @@ graph TD
     headless --> vibesys.api
     server --> vs_agent
     server --> vs_project
-    server --> vs_sandbox
     server.api --> server.chat
     server.api --> server.controller
     server.api --> server.diagnostics
@@ -361,7 +354,6 @@ graph TD
     server.runtime --> server.transport
     server.runtime --> vibesys.api
     server.settings --> vibesys.api
-    server.tool_payloads --> server.events
     server.tool_payloads --> vs_agent
     server.transport --> server.api
     server.transport --> vs_project
@@ -369,19 +361,21 @@ graph TD
     vibesys --> vs_feature_flags
     vibesys --> vs_loop_state
     vibesys.api --> vibesys
-    vibesys.api --> vibesys.api._orchestrations
-    vibesys.api --> vibesys.api._orchestrations._common
-    vibesys.api --> vibesys.api._orchestrations.builtins
-    vibesys.api --> vibesys.api._orchestrations.contracts
-    vibesys.api --> vibesys.api._orchestrations.legacy_request
-    vibesys.api --> vibesys.api._orchestrations.runner
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.api.run_request
     vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
-    vibesys.api --> vibesys.loops.agent
+    vibesys.api --> vibesys.loops.agent.projection
+    vibesys.api --> vibesys.loops.agent.read_state
+    vibesys.api --> vibesys.loops.agent.readmodel
     vibesys.api --> vibesys.loops.evolve
+    vibesys.api --> vibesys.loops.legacy_request
+    vibesys.api --> vibesys.loops.registry
     vibesys.api --> vibesys.orchestration
+    vibesys.api --> vibesys.orchestration._common
+    vibesys.api --> vibesys.orchestration.contracts
+    vibesys.api --> vibesys.orchestration.manifest_compat
+    vibesys.api --> vibesys.orchestration.runner
     vibesys.api --> vibesys.render
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.runtime
@@ -389,110 +383,13 @@ graph TD
     vibesys.api --> vs_agent
     vibesys.api --> vs_project
     vibesys.api --> vs_sandbox
-    vibesys.api._orchestrations --> vibesys
-    vibesys.api._orchestrations --> vibesys.api._orchestrations.legacy_request
-    vibesys.api._orchestrations --> vibesys.api.contracts
-    vibesys.api._orchestrations --> vibesys.loops
-    vibesys.api._orchestrations --> vibesys.loops.agent
-    vibesys.api._orchestrations --> vibesys.run
-    vibesys.api._orchestrations --> vs_loop_state
-    vibesys.api._orchestrations --> vs_project
-    vibesys.api._orchestrations._common --> vibesys
-    vibesys.api._orchestrations._common --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations._common --> vibesys.api._orchestrations.legacy_request
-    vibesys.api._orchestrations._common --> vibesys.api.contracts
-    vibesys.api._orchestrations._common --> vibesys.api.run_request
-    vibesys.api._orchestrations._common --> vibesys.loops
-    vibesys.api._orchestrations.agent --> vibesys.api._orchestrations.agent_common
-    vibesys.api._orchestrations.agent --> vibesys.api._orchestrations.legacy_bridge
-    vibesys.api._orchestrations.agent --> vibesys.api.run_request
-    vibesys.api._orchestrations.agent --> vibesys.runtime
-    vibesys.api._orchestrations.agent_common --> vibesys.api._orchestrations
-    vibesys.api._orchestrations.agent_common --> vibesys.api._orchestrations._common
-    vibesys.api._orchestrations.agent_common --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.agent_common --> vibesys.api._orchestrations.legacy_bridge
-    vibesys.api._orchestrations.agent_common --> vibesys.api._orchestrations.legacy_request
-    vibesys.api._orchestrations.agent_common --> vibesys.api.contracts
-    vibesys.api._orchestrations.agent_common --> vibesys.api.run_request
-    vibesys.api._orchestrations.agent_common --> vibesys.loops.agent
-    vibesys.api._orchestrations.agent_common --> vibesys.loops.agent.loop
-    vibesys.api._orchestrations.agent_common --> vibesys.orchestration
-    vibesys.api._orchestrations.agent_common --> vibesys.runtime
-    vibesys.api._orchestrations.agent_common --> vs_project
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.agent
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.evolve
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.legacy_request
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.plain
-    vibesys.api._orchestrations.builtins --> vibesys.api._orchestrations.profile_guided
-    vibesys.api._orchestrations.builtins --> vibesys.orchestration
-    vibesys.api._orchestrations.builtins --> vs_project
-    vibesys.api._orchestrations.contracts --> vibesys.api.contracts
-    vibesys.api._orchestrations.contracts --> vibesys.api.run_request
-    vibesys.api._orchestrations.contracts --> vibesys.orchestration
-    vibesys.api._orchestrations.contracts --> vibesys.runtime
-    vibesys.api._orchestrations.contracts --> vs_project
-    vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations._common
-    vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.evolve --> vibesys.api._orchestrations.legacy_bridge
-    vibesys.api._orchestrations.evolve --> vibesys.api.contracts
-    vibesys.api._orchestrations.evolve --> vibesys.api.run_request
-    vibesys.api._orchestrations.evolve --> vibesys.loops.evolve
-    vibesys.api._orchestrations.evolve --> vibesys.orchestration
-    vibesys.api._orchestrations.evolve --> vibesys.runtime
-    vibesys.api._orchestrations.evolve --> vs_project
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.api._orchestrations.legacy_request
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.api._orchestrations.runtime
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.api.contracts
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.api.run_request
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.run
-    vibesys.api._orchestrations.legacy_bridge --> vibesys.runtime
-    vibesys.api._orchestrations.legacy_bridge --> vs_project
-    vibesys.api._orchestrations.legacy_request --> vibesys
-    vibesys.api._orchestrations.legacy_request --> vibesys.api.run_request
-    vibesys.api._orchestrations.legacy_request --> vibesys.evaluators
-    vibesys.api._orchestrations.legacy_request --> vibesys.loops
-    vibesys.api._orchestrations.legacy_request --> vibesys.loops.evolve
-    vibesys.api._orchestrations.legacy_request --> vibesys.sandbox
-    vibesys.api._orchestrations.legacy_request --> vs_project
-    vibesys.api._orchestrations.plain --> vibesys.api._orchestrations._common
-    vibesys.api._orchestrations.plain --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.plain --> vibesys.api._orchestrations.legacy_bridge
-    vibesys.api._orchestrations.plain --> vibesys.api.contracts
-    vibesys.api._orchestrations.plain --> vibesys.api.run_request
-    vibesys.api._orchestrations.plain --> vibesys.loops.plain
-    vibesys.api._orchestrations.plain --> vibesys.orchestration
-    vibesys.api._orchestrations.plain --> vibesys.runtime
-    vibesys.api._orchestrations.plain --> vs_project
-    vibesys.api._orchestrations.profile_guided --> vibesys.api._orchestrations.agent_common
-    vibesys.api._orchestrations.profile_guided --> vibesys.api._orchestrations.legacy_bridge
-    vibesys.api._orchestrations.profile_guided --> vibesys.api.run_request
-    vibesys.api._orchestrations.profile_guided --> vibesys.runtime
-    vibesys.api._orchestrations.runner --> vibesys.api._orchestrations.contracts
-    vibesys.api._orchestrations.runner --> vibesys.api._orchestrations.runtime
-    vibesys.api._orchestrations.runner --> vibesys.api.contracts
-    vibesys.api._orchestrations.runner --> vibesys.api.run_request
-    vibesys.api._orchestrations.runner --> vibesys.run
-    vibesys.api._orchestrations.runtime --> vibesys
-    vibesys.api._orchestrations.runtime --> vibesys.api._orchestrations._common
-    vibesys.api._orchestrations.runtime --> vibesys.api.contracts
-    vibesys.api._orchestrations.runtime --> vibesys.api.run_request
-    vibesys.api._orchestrations.runtime --> vibesys.context
-    vibesys.api._orchestrations.runtime --> vibesys.render
-    vibesys.api._orchestrations.runtime --> vibesys.run
-    vibesys.api._orchestrations.runtime --> vibesys.runtime
-    vibesys.api._orchestrations.runtime --> vs_agent
     vibesys.api.agent --> vibesys.api
-    vibesys.api.agent --> vibesys.api._orchestrations
     vibesys.api.agent --> vibesys.loops.agent
+    vibesys.api.agent --> vibesys.loops.agent.projection
     vibesys.api.contracts --> vibesys
-    vibesys.api.contracts --> vibesys.api._orchestrations.legacy_request
     vibesys.api.contracts --> vibesys.api.run_request
-    vibesys.api.contracts --> vibesys.evaluators
     vibesys.api.contracts --> vibesys.loops
-    vibesys.api.contracts --> vibesys.loops.evolve
-    vibesys.api.contracts --> vibesys.sandbox
+    vibesys.api.contracts --> vibesys.loops.legacy_request
     vibesys.api.contracts --> vs_agent
     vibesys.api.contracts --> vs_project
     vibesys.api.contracts --> vs_sandbox
@@ -527,7 +424,6 @@ graph TD
     vibesys.loops --> vs_loop_state
     vibesys.loops --> vs_sandbox
     vibesys.loops.agent --> vibesys
-    vibesys.loops.agent --> vibesys.context
     vibesys.loops.agent --> vibesys.domains
     vibesys.loops.agent --> vibesys.evaluators
     vibesys.loops.agent --> vibesys.loops
@@ -539,6 +435,23 @@ graph TD
     vibesys.loops.agent --> vs_agent
     vibesys.loops.agent --> vs_loop_state
     vibesys.loops.agent --> vs_project
+    vibesys.loops.agent.entrypoint --> vibesys.api.run_request
+    vibesys.loops.agent.entrypoint --> vibesys.loops.agent.entrypoint_common
+    vibesys.loops.agent.entrypoint --> vibesys.loops.legacy_bridge
+    vibesys.loops.agent.entrypoint --> vibesys.runtime
+    vibesys.loops.agent.entrypoint_common --> vibesys.api.contracts
+    vibesys.loops.agent.entrypoint_common --> vibesys.api.run_request
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.agent
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.agent.loop
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.agent.read_state
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.agent.readmodel
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.legacy_bridge
+    vibesys.loops.agent.entrypoint_common --> vibesys.loops.legacy_request
+    vibesys.loops.agent.entrypoint_common --> vibesys.orchestration
+    vibesys.loops.agent.entrypoint_common --> vibesys.orchestration._common
+    vibesys.loops.agent.entrypoint_common --> vibesys.orchestration.contracts
+    vibesys.loops.agent.entrypoint_common --> vibesys.runtime
+    vibesys.loops.agent.entrypoint_common --> vs_project
     vibesys.loops.agent.loop --> vibesys
     vibesys.loops.agent.loop --> vibesys.context
     vibesys.loops.agent.loop --> vibesys.domains
@@ -547,7 +460,6 @@ graph TD
     vibesys.loops.agent.loop --> vibesys.loops.agent
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_flow
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_local
-    vibesys.loops.agent.loop --> vibesys.loops.agent.policy_profile
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_scheduler
     vibesys.loops.agent.loop --> vibesys.render
     vibesys.loops.agent.loop --> vibesys.run
@@ -568,19 +480,33 @@ graph TD
     vibesys.loops.agent.policy_local --> vibesys.loops.agent.policy_scheduler
     vibesys.loops.agent.policy_local --> vibesys.render
     vibesys.loops.agent.policy_local --> vibesys.run
-    vibesys.loops.agent.policy_local --> vs_loop_state
     vibesys.loops.agent.policy_multi --> vibesys
     vibesys.loops.agent.policy_multi --> vibesys.loops.agent
     vibesys.loops.agent.policy_profile --> vibesys.evaluators
     vibesys.loops.agent.policy_profile --> vibesys.loops.agent
     vibesys.loops.agent.policy_scheduler --> vibesys
-    vibesys.loops.agent.policy_scheduler --> vibesys.loops
     vibesys.loops.agent.policy_scheduler --> vibesys.loops.agent
     vibesys.loops.agent.policy_scheduler --> vibesys.loops.agent.policy_profile
     vibesys.loops.agent.policy_scheduler --> vs_loop_state
     vibesys.loops.agent.policy_single --> vibesys
     vibesys.loops.agent.policy_single --> vibesys.loops.agent
     vibesys.loops.agent.policy_single --> vs_loop_state
+    vibesys.loops.agent.profile_entrypoint --> vibesys.api.run_request
+    vibesys.loops.agent.profile_entrypoint --> vibesys.loops.agent.entrypoint_common
+    vibesys.loops.agent.profile_entrypoint --> vibesys.loops.legacy_bridge
+    vibesys.loops.agent.profile_entrypoint --> vibesys.runtime
+    vibesys.loops.agent.projection --> vibesys
+    vibesys.loops.agent.projection --> vibesys.api.contracts
+    vibesys.loops.agent.read_state --> vibesys.loops
+    vibesys.loops.agent.read_state --> vibesys.loops.agent
+    vibesys.loops.agent.read_state --> vibesys.run
+    vibesys.loops.agent.read_state --> vs_project
+    vibesys.loops.agent.readmodel --> vibesys
+    vibesys.loops.agent.readmodel --> vibesys.api.contracts
+    vibesys.loops.agent.readmodel --> vibesys.loops.agent
+    vibesys.loops.agent.readmodel --> vibesys.loops.agent.projection
+    vibesys.loops.agent.readmodel --> vibesys.loops.legacy_request
+    vibesys.loops.agent.readmodel --> vs_loop_state
     vibesys.loops.evolve --> vibesys
     vibesys.loops.evolve --> vibesys.context
     vibesys.loops.evolve --> vibesys.domains
@@ -594,6 +520,30 @@ graph TD
     vibesys.loops.evolve --> vs_agent
     vibesys.loops.evolve --> vs_loop_state
     vibesys.loops.evolve --> vs_project
+    vibesys.loops.evolve.entrypoint --> vibesys.api.run_request
+    vibesys.loops.evolve.entrypoint --> vibesys.loops.evolve
+    vibesys.loops.evolve.entrypoint --> vibesys.loops.legacy_bridge
+    vibesys.loops.evolve.entrypoint --> vibesys.orchestration
+    vibesys.loops.evolve.entrypoint --> vibesys.orchestration._common
+    vibesys.loops.evolve.entrypoint --> vibesys.orchestration.contracts
+    vibesys.loops.evolve.entrypoint --> vibesys.runtime
+    vibesys.loops.evolve.entrypoint --> vs_project
+    vibesys.loops.legacy_bridge --> vibesys
+    vibesys.loops.legacy_bridge --> vibesys.api.contracts
+    vibesys.loops.legacy_bridge --> vibesys.api.run_request
+    vibesys.loops.legacy_bridge --> vibesys.loops
+    vibesys.loops.legacy_bridge --> vibesys.loops.legacy_request
+    vibesys.loops.legacy_bridge --> vibesys.orchestration.contracts
+    vibesys.loops.legacy_bridge --> vibesys.run
+    vibesys.loops.legacy_bridge --> vibesys.runtime
+    vibesys.loops.legacy_bridge --> vs_project
+    vibesys.loops.legacy_request --> vibesys
+    vibesys.loops.legacy_request --> vibesys.api.run_request
+    vibesys.loops.legacy_request --> vibesys.evaluators
+    vibesys.loops.legacy_request --> vibesys.loops
+    vibesys.loops.legacy_request --> vibesys.loops.evolve
+    vibesys.loops.legacy_request --> vibesys.sandbox
+    vibesys.loops.legacy_request --> vs_project
     vibesys.loops.plain --> vibesys
     vibesys.loops.plain --> vibesys.context
     vibesys.loops.plain --> vibesys.domains
@@ -607,7 +557,45 @@ graph TD
     vibesys.loops.plain --> vs_issue_board
     vibesys.loops.plain --> vs_loop_state
     vibesys.loops.plain --> vs_project
-    vibesys.orchestration --> vs_project
+    vibesys.loops.plain.entrypoint --> vibesys.api.run_request
+    vibesys.loops.plain.entrypoint --> vibesys.loops.legacy_bridge
+    vibesys.loops.plain.entrypoint --> vibesys.loops.plain
+    vibesys.loops.plain.entrypoint --> vibesys.orchestration
+    vibesys.loops.plain.entrypoint --> vibesys.orchestration._common
+    vibesys.loops.plain.entrypoint --> vibesys.orchestration.contracts
+    vibesys.loops.plain.entrypoint --> vibesys.runtime
+    vibesys.loops.plain.entrypoint --> vs_project
+    vibesys.loops.registry --> vibesys.loops.agent.entrypoint
+    vibesys.loops.registry --> vibesys.loops.agent.profile_entrypoint
+    vibesys.loops.registry --> vibesys.loops.evolve.entrypoint
+    vibesys.loops.registry --> vibesys.loops.legacy_request
+    vibesys.loops.registry --> vibesys.loops.plain.entrypoint
+    vibesys.loops.registry --> vibesys.orchestration
+    vibesys.loops.registry --> vibesys.orchestration.contracts
+    vibesys.loops.registry --> vs_project
+    vibesys.orchestration --> vibesys.orchestration.resume
+    vibesys.orchestration._common --> vibesys.api.run_request
+    vibesys.orchestration.contracts --> vibesys.api.contracts
+    vibesys.orchestration.contracts --> vibesys.api.run_request
+    vibesys.orchestration.contracts --> vibesys.orchestration
+    vibesys.orchestration.contracts --> vibesys.runtime
+    vibesys.orchestration.contracts --> vs_project
+    vibesys.orchestration.manifest_compat --> vs_project
+    vibesys.orchestration.resume --> vs_project
+    vibesys.orchestration.runner --> vibesys.api.contracts
+    vibesys.orchestration.runner --> vibesys.api.run_request
+    vibesys.orchestration.runner --> vibesys.orchestration.contracts
+    vibesys.orchestration.runner --> vibesys.orchestration.runtime
+    vibesys.orchestration.runner --> vibesys.run
+    vibesys.orchestration.runtime --> vibesys
+    vibesys.orchestration.runtime --> vibesys.api.contracts
+    vibesys.orchestration.runtime --> vibesys.api.run_request
+    vibesys.orchestration.runtime --> vibesys.context
+    vibesys.orchestration.runtime --> vibesys.orchestration._common
+    vibesys.orchestration.runtime --> vibesys.render
+    vibesys.orchestration.runtime --> vibesys.run
+    vibesys.orchestration.runtime --> vibesys.runtime
+    vibesys.orchestration.runtime --> vs_agent
     vibesys.prompts --> vibesys
     vibesys.prompts --> vs_prompts
     vibesys.render --> vibesys
@@ -632,7 +620,6 @@ graph TD
     vibesys.sandbox --> vs_agent
     vibesys.sandbox --> vs_project
     vibesys.sandbox --> vs_sandbox
-    vibesys.skypilot --> vibesys
     vibesys.skypilot --> vs_project
     vs_agent --> vs_loop_state
     vs_agent --> vs_project

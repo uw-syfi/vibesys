@@ -63,7 +63,7 @@ depends_on = ["vibesys.api"]
 
 [[modules]]
 path = "server"
-depends_on = ["vs_project", "vs_sandbox", "vs_agent"]
+depends_on = ["vs_project", "vs_agent"]
 
 [[modules]]
 path = "server.api"
@@ -123,7 +123,7 @@ depends_on = ["vibesys.api"]
 
 [[modules]]
 path = "server.tool_payloads"
-depends_on = ["server.events", "vs_agent"]
+depends_on = [ "vs_agent"]
 
 [[modules]]
 path = "vibesys"
@@ -135,75 +135,23 @@ depends_on = ["vs_feature_flags", "vs_loop_state", "vs_agent"]
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api._orchestrations._common", "vibesys.api._orchestrations.builtins", "vibesys.api._orchestrations.legacy_request", "vibesys.loops.agent", "vibesys.api.contracts", "vibesys.loops.evolve", "vibesys.api._orchestrations.contracts", "vibesys.api._orchestrations.runner", "vibesys.orchestration", "vibesys.runtime", "vibesys.api._orchestrations", "vibesys.api.run_request"]
+depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.loops.evolve", "vibesys.orchestration", "vibesys.runtime", "vibesys.api.run_request", "vibesys.orchestration._common", "vibesys.loops.agent.projection", "vibesys.loops.agent.readmodel", "vibesys.orchestration.runner", "vibesys.loops.registry", "vibesys.loops.agent.read_state", "vibesys.orchestration.manifest_compat", "vibesys.loops.legacy_request", "vibesys.orchestration.contracts"]
 
 [[modules]]
 path = "vibesys.api.agent"
-depends_on = ["vibesys.api", "vibesys.api._orchestrations", "vibesys.loops.agent"]
+depends_on = ["vibesys.api", "vibesys.loops.agent", "vibesys.loops.agent.projection"]
 
 [[modules]]
 path = "vibesys.api.contracts"
-depends_on = ["vs_agent", "vibesys", "vibesys.loops.evolve", "vibesys.evaluators", "vs_sandbox", "vibesys.loops", "vibesys.sandbox", "vs_project", "vibesys.api.run_request", "vibesys.api._orchestrations.legacy_request"]
+depends_on = ["vs_agent", "vibesys", "vs_sandbox", "vibesys.loops", "vs_project", "vibesys.api.run_request", "vibesys.loops.legacy_request"]
 
 [[modules]]
 path = "vibesys.api.run_request"
 depends_on = ["vibesys", "vibesys.evaluators", "vibesys.sandbox", "vs_project"]
 
 [[modules]]
-path = "vibesys.api._orchestrations.legacy_request"
-depends_on = ["vibesys.api.run_request", "vibesys", "vibesys.evaluators", "vibesys.loops.evolve", "vibesys.loops", "vibesys.sandbox", "vs_project"]
-
-[[modules]]
-path = "vibesys.api._orchestrations"
-depends_on = ["vs_loop_state", "vibesys.loops", "vibesys.run", "vibesys.api.contracts", "vs_project", "vibesys.loops.agent", "vibesys", "vibesys.api._orchestrations.legacy_request"]
-
-[[modules]]
-path = "vibesys.api._orchestrations.contracts"
-depends_on = ["vibesys.api.contracts", "vibesys.runtime", "vs_project", "vibesys.orchestration", "vibesys.api.run_request"]
-
-[[modules]]
-path = "vibesys.api._orchestrations.runtime"
-depends_on = ["vibesys", "vibesys.api._orchestrations._common", "vibesys.api.contracts", "vibesys.context", "vibesys.render", "vibesys.run", "vibesys.runtime", "vs_agent", "vibesys.api.run_request"]
-
-[[modules]]
-path = "vibesys.api._orchestrations._common"
-depends_on = ["vibesys.api.contracts", "vibesys", "vibesys.api._orchestrations.contracts", "vibesys.api._orchestrations.legacy_request", "vibesys.loops", "vibesys.api.run_request"]
-
-[[modules]]
-path = "vibesys.api._orchestrations.agent"
-depends_on = ["vibesys.api._orchestrations.agent_common", "vibesys.api._orchestrations.legacy_bridge", "vibesys.api.run_request", "vibesys.runtime"]
-
-[[modules]]
-path = "vibesys.api._orchestrations.profile_guided"
-depends_on = ["vibesys.api._orchestrations.agent_common", "vibesys.api._orchestrations.legacy_bridge", "vibesys.api.run_request", "vibesys.runtime"]
-
-[[modules]]
-path = "vibesys.api._orchestrations.legacy_bridge"
-depends_on = ["vibesys.api._orchestrations.contracts", "vibesys.api._orchestrations.legacy_request", "vibesys.api._orchestrations.runtime", "vibesys.api.contracts", "vibesys.api.run_request", "vibesys.run", "vibesys.runtime", "vs_project"]
-
-[[modules]]
-path = "vibesys.api._orchestrations.agent_common"
-depends_on = ["vibesys.api._orchestrations", "vibesys.api._orchestrations._common", "vibesys.api._orchestrations.contracts", "vibesys.api._orchestrations.legacy_bridge", "vibesys.api._orchestrations.legacy_request", "vibesys.api.contracts", "vibesys.api.run_request", "vibesys.loops.agent", "vibesys.loops.agent.loop", "vibesys.orchestration", "vibesys.runtime", "vs_project"]
-
-[[modules]]
-path = "vibesys.api._orchestrations.plain"
-depends_on = ["vibesys.api._orchestrations._common", "vibesys.api._orchestrations.legacy_bridge", "vibesys.api._orchestrations.contracts", "vibesys.api.contracts", "vibesys.api.run_request", "vibesys.loops.plain", "vibesys.orchestration", "vibesys.runtime", "vs_project"]
-
-[[modules]]
-path = "vibesys.api._orchestrations.evolve"
-depends_on = ["vibesys.api._orchestrations._common", "vibesys.api._orchestrations.legacy_bridge", "vibesys.api._orchestrations.contracts", "vibesys.api.contracts", "vibesys.api.run_request", "vibesys.loops.evolve", "vibesys.orchestration", "vibesys.runtime", "vs_project"]
-
-[[modules]]
-path = "vibesys.api._orchestrations.runner"
-depends_on = ["vibesys.run", "vibesys.api.contracts", "vibesys.api._orchestrations.contracts", "vibesys.api._orchestrations.runtime", "vibesys.api.run_request"]
-
-[[modules]]
-path = "vibesys.api._orchestrations.builtins"
-depends_on = ["vibesys.api._orchestrations.contracts", "vibesys.api._orchestrations.agent", "vibesys.api._orchestrations.evolve", "vibesys.api._orchestrations.plain", "vibesys.api._orchestrations.profile_guided", "vibesys.api._orchestrations.legacy_request", "vs_project", "vibesys.orchestration"]
-
-[[modules]]
 path = "vibesys.orchestration"
-depends_on = ["vs_project"]
+depends_on = ["vibesys.orchestration.resume"]
 
 [[modules]]
 path = "vibesys.runtime"
@@ -219,11 +167,11 @@ depends_on = ["vs_sandbox", "vibesys.evaluators", "vibesys.run", "vs_evaluator_p
 
 [[modules]]
 path = "vibesys.loops.agent"
-depends_on = ["vs_agent", "vibesys.loops", "vibesys.evaluators", "vibesys.run", "vibesys.sandbox", "vibesys.prompts", "vibesys.context", "vibesys.domains", "vibesys", "vibesys.render", "vs_project", "vs_loop_state", "vibesys.orchestration"]
+depends_on = ["vs_agent", "vibesys.loops", "vibesys.evaluators", "vibesys.run", "vibesys.sandbox", "vibesys.prompts", "vibesys.domains", "vibesys", "vibesys.render", "vs_project", "vs_loop_state", "vibesys.orchestration"]
 
 [[modules]]
 path = "vibesys.loops.agent.loop"
-depends_on = ["vibesys.loops.agent", "vibesys.loops.agent.policy_flow", "vibesys.loops.agent.policy_profile", "vibesys.loops.agent.policy_local", "vibesys.loops.agent.policy_scheduler", "vibesys", "vibesys.context", "vibesys.domains", "vibesys.evaluators", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_agent", "vs_loop_state"]
+depends_on = ["vibesys.loops.agent", "vibesys.loops.agent.policy_flow", "vibesys.loops.agent.policy_local", "vibesys.loops.agent.policy_scheduler", "vibesys", "vibesys.context", "vibesys.domains", "vibesys.evaluators", "vibesys.loops", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_agent", "vs_loop_state"]
 
 [[modules]]
 path = "vibesys.loops.agent.policy_flow"
@@ -243,11 +191,11 @@ depends_on = ["vibesys.loops.agent", "vibesys.evaluators"]
 
 [[modules]]
 path = "vibesys.loops.agent.policy_local"
-depends_on = ["vibesys.loops.agent", "vibesys.loops.agent.policy_scheduler", "vibesys.loops", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vibesys.render", "vibesys", "vs_loop_state"]
+depends_on = ["vibesys.loops.agent", "vibesys.loops.agent.policy_scheduler", "vibesys.loops", "vibesys.domains", "vibesys.evaluators", "vibesys.run", "vibesys.render", "vibesys"]
 
 [[modules]]
 path = "vibesys.loops.agent.policy_scheduler"
-depends_on = ["vibesys.loops.agent", "vibesys.loops.agent.policy_profile", "vibesys.loops", "vibesys", "vs_loop_state"]
+depends_on = ["vibesys.loops.agent", "vibesys.loops.agent.policy_profile", "vibesys", "vs_loop_state"]
 
 [[modules]]
 path = "vibesys.loops.plain"
@@ -275,7 +223,7 @@ depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vib
 
 [[modules]]
 path = "vibesys.skypilot"
-depends_on = ["vibesys", "vs_project"]
+depends_on = [ "vs_project"]
 
 [[modules]]
 path = "vibesys.render"
@@ -367,3 +315,71 @@ from = ["vs_prompts"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_sandbox"]
+
+[[modules]]
+path = "vibesys.orchestration.resume"
+depends_on = ["vs_project"]
+
+[[modules]]
+path = "vibesys.orchestration.contracts"
+depends_on = ["vibesys.orchestration", "vibesys.api.run_request", "vs_project", "vibesys.api.contracts", "vibesys.runtime"]
+
+[[modules]]
+path = "vibesys.orchestration.runner"
+depends_on = ["vibesys.orchestration.contracts", "vibesys.api.contracts", "vibesys.run", "vibesys.api.run_request", "vibesys.orchestration.runtime"]
+
+[[modules]]
+path = "vibesys.orchestration.runtime"
+depends_on = ["vibesys.api.contracts", "vibesys", "vs_agent", "vibesys.context", "vibesys.api.run_request", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.run", "vibesys.render"]
+
+[[modules]]
+path = "vibesys.orchestration._common"
+depends_on = ["vibesys.api.run_request"]
+
+[[modules]]
+path = "vibesys.orchestration.manifest_compat"
+depends_on = ["vs_project"]
+
+[[modules]]
+path = "vibesys.loops.legacy_request"
+depends_on = ["vibesys.api.run_request", "vibesys.loops", "vs_project", "vibesys.sandbox", "vibesys", "vibesys.evaluators", "vibesys.loops.evolve"]
+
+[[modules]]
+path = "vibesys.loops.legacy_bridge"
+depends_on = ["vibesys.runtime", "vibesys.api.contracts", "vs_project", "vibesys.loops", "vibesys.run", "vibesys.loops.legacy_request", "vibesys.api.run_request", "vibesys", "vibesys.orchestration.contracts"]
+
+[[modules]]
+path = "vibesys.loops.registry"
+depends_on = ["vibesys.orchestration", "vibesys.loops.agent.entrypoint", "vibesys.loops.plain.entrypoint", "vibesys.loops.evolve.entrypoint", "vibesys.loops.legacy_request", "vibesys.loops.agent.profile_entrypoint", "vs_project", "vibesys.orchestration.contracts"]
+
+[[modules]]
+path = "vibesys.loops.agent.entrypoint"
+depends_on = ["vibesys.runtime", "vibesys.loops.legacy_bridge", "vibesys.loops.agent.entrypoint_common", "vibesys.api.run_request"]
+
+[[modules]]
+path = "vibesys.loops.agent.profile_entrypoint"
+depends_on = ["vibesys.runtime", "vibesys.loops.legacy_bridge", "vibesys.loops.agent.entrypoint_common", "vibesys.api.run_request"]
+
+[[modules]]
+path = "vibesys.loops.agent.entrypoint_common"
+depends_on = ["vibesys.api.run_request", "vibesys.loops.agent.readmodel", "vibesys.loops.agent.read_state", "vibesys.api.contracts", "vs_project", "vibesys.loops.agent", "vibesys.loops.agent.loop", "vibesys.loops.legacy_bridge", "vibesys.loops.legacy_request", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.orchestration.contracts", "vibesys.orchestration"]
+
+[[modules]]
+path = "vibesys.loops.agent.read_state"
+depends_on = ["vibesys.loops", "vs_project", "vibesys.run", "vibesys.loops.agent"]
+
+[[modules]]
+path = "vibesys.loops.agent.readmodel"
+depends_on = ["vibesys", "vibesys.loops.legacy_request", "vibesys.loops.agent.projection", "vs_loop_state", "vibesys.loops.agent", "vibesys.api.contracts"]
+
+[[modules]]
+path = "vibesys.loops.agent.projection"
+depends_on = ["vibesys.api.contracts", "vibesys"]
+
+[[modules]]
+path = "vibesys.loops.plain.entrypoint"
+depends_on = ["vibesys.orchestration.contracts", "vibesys.orchestration", "vibesys.loops.plain", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.api.run_request", "vibesys.loops.legacy_bridge", "vs_project"]
+
+[[modules]]
+path = "vibesys.loops.evolve.entrypoint"
+depends_on = ["vibesys.loops.evolve", "vibesys.runtime", "vibesys.orchestration.contracts", "vs_project", "vibesys.api.run_request", "vibesys.loops.legacy_bridge", "vibesys.orchestration", "vibesys.orchestration._common"]

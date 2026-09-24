@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
-from vibesys.api._orchestrations._common import resolved_run_id
 from vibesys.context import _execution_status, create_run_context
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import (
@@ -21,6 +20,7 @@ from vibesys.events import (
     InvocationStartedData,
     json_value,
 )
+from vibesys.orchestration._common import resolved_run_id
 from vibesys.profilers import ProfilerKind
 from vibesys.render.sink import output_sink
 from vibesys.run.run_control import splice_steering

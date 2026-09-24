@@ -4,22 +4,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.api._orchestrations._common import (
-    _required_objective,
-    built_in_description,
-    resolved_run_id,
-)
-from vibesys.api._orchestrations.legacy_bridge import (
+from vibesys.loops.evolve.orchestration import resume_projection
+from vibesys.loops.legacy_bridge import (
     LegacyBuiltinDefaults,
+    built_in_description,
     legacy_integration,
     legacy_request,
+    required_objective,
 )
-from vibesys.loops.evolve.orchestration import resume_projection
+from vibesys.orchestration._common import resolved_run_id
 
 if TYPE_CHECKING:
-    from vibesys.api._orchestrations.contracts import RunDescription
     from vibesys.api.run_request import RunRequestLike
     from vibesys.orchestration import ResumeProjection
+    from vibesys.orchestration.contracts import RunDescription
     from vibesys.runtime import VibeSysRuntime
     from vs_project.api import OrchestrationRunManifest
 
@@ -30,6 +28,7 @@ class EvolveOrchestration(LegacyBuiltinDefaults):
     namespace = "evolve"
 
     def describe(self, request: RunRequestLike) -> RunDescription:
+        """Describe evolutionary search's start metadata."""
         return built_in_description(legacy_request(request), round_budget=False)
 
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
@@ -59,7 +58,7 @@ class EvolveOrchestration(LegacyBuiltinDefaults):
             benchmark_result=bundle.benchmark_result,
             benchmark_result_protocol=bundle.benchmark_result_protocol,
             benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
-            objective=_required_objective(request),
+            objective=required_objective(request),
             max_generations=request.max_generations,
             children_per_generation=request.children_per_generation,
             k_top_inspirations=request.k_top_inspirations,

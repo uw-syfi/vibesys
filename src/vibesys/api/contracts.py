@@ -25,7 +25,7 @@ from vs_project.api import OrchestrationDescriptor
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.api._orchestrations.legacy_request import LoopKind, RunRequest
+    from vibesys.loops.legacy_request import LoopKind, RunRequest
     from vibesys.skills import SkillSelection
     from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
 
@@ -68,7 +68,7 @@ def __getattr__(name: str) -> Any:  # noqa: ANN401
         DeprecationWarning,
         stacklevel=2,
     )
-    return getattr(import_module("vibesys.api._orchestrations.legacy_request"), name)
+    return getattr(import_module("vibesys.loops.legacy_request"), name)
 
 
 class RunResult(BaseModel):

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.api._orchestrations.runtime import _LocalVibeSysRuntime
+from vibesys.orchestration.runtime import _LocalVibeSysRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.api._orchestrations.contracts import Orchestration, OrchestrationRegistry
     from vibesys.api.contracts import AgentEnvironment
     from vibesys.api.run_request import RunRequestLike
+    from vibesys.orchestration.contracts import Orchestration, OrchestrationRegistry
     from vibesys.run.integration import LocalRunIntegration
 
 

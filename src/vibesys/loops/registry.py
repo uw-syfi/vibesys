@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.api._orchestrations.agent import AgentOrchestration
-from vibesys.api._orchestrations.contracts import OrchestrationRegistry
-from vibesys.api._orchestrations.evolve import EvolveOrchestration
-from vibesys.api._orchestrations.legacy_request import LoopKind
-from vibesys.api._orchestrations.plain import PlainOrchestration
-from vibesys.api._orchestrations.profile_guided import ProfileGuidedOrchestration
+from vibesys.loops.agent.entrypoint import AgentOrchestration
+from vibesys.loops.agent.profile_entrypoint import ProfileGuidedOrchestration
+from vibesys.loops.evolve.entrypoint import EvolveOrchestration
+from vibesys.loops.legacy_request import LoopKind
+from vibesys.loops.plain.entrypoint import PlainOrchestration
+from vibesys.orchestration.contracts import OrchestrationRegistry
 
 if TYPE_CHECKING:
     from vibesys.orchestration import ResumeProjection

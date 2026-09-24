@@ -27,10 +27,10 @@ from vibesys.api import (
     create_session,
     open_run_store,
 )
-from vibesys.api._orchestrations.runtime import _LocalVibeSysRuntime
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.api.session import _OpenedAgentEnvironment
 from vibesys.events import AgentExecutionFinishedData, CoreEventType
+from vibesys.orchestration.runtime import _LocalVibeSysRuntime
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.sandbox.run_environment import LocalEnvironment
 from vs_agent.api import AgentExecutionPolicy, AgentSessionKey, SessionScope
@@ -231,7 +231,7 @@ def test_public_runtime_runs_three_agent_rounds_with_grants_and_cleanup(
         raise AssertionError
 
     environment_requests, closed_environments = _capture_environments(monkeypatch)
-    monkeypatch.setattr("vibesys.api._orchestrations.runtime.build_agent_client", build_client)
+    monkeypatch.setattr("vibesys.orchestration.runtime.build_agent_client", build_client)
     monkeypatch.setattr("vibesys.context.build_agent_client", reject_default_client)
     monkeypatch.setattr("vibesys.context.agent_spec_from_config", reject_default_client)
 
@@ -286,7 +286,7 @@ def test_structured_turn_preserves_schema_session_and_event_payload(
     _write_project(project_root)
     client = FakeAgentClient().enqueue("planner", _TypedPlan(task="implement"))
     monkeypatch.setattr(
-        "vibesys.api._orchestrations.runtime.build_agent_client", lambda **_kwargs: client
+        "vibesys.orchestration.runtime.build_agent_client", lambda **_kwargs: client
     )
     request = _request(project_root)
     registry = OrchestrationRegistry()

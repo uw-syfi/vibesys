@@ -1,6 +1,7 @@
 # Custom orchestration runtime
 
-`ExecutableOrchestration` is the public policy hook. Its `execute(request,
+`vibesys.orchestration.contracts.ExecutableOrchestration` is the internal policy
+hook. Its `execute(request,
 runtime) -> bool` method decides which agents exist, when they take turns,
 what messages they receive, and when the run succeeds. `VibeSysRuntime`
 provisions agents and owns their sandbox and client lifetimes. The framework
@@ -12,6 +13,8 @@ The framework's internal registered contract has two parts:
 `OrchestrationProjection` derives metadata and views. Their aggregate,
 `Orchestration`, is used by the registry and runner. Only `execute` is required
 of a custom policy; the registry supplies defaults for the other hooks.
+`vibesys.api` retains compatibility re-exports of these internal types for
+existing callers.
 
 The built-in registry resolves four distinct implementations directly:
 `AgentOrchestration`, `ProfileGuidedOrchestration`, `PlainOrchestration`, and
@@ -19,7 +22,7 @@ The built-in registry resolves four distinct implementations directly:
 internal lifecycle contract. The legacy CLI still uses the `agent` ID with an
 `inner_loop` option; the agent implementations select `MultiAgentExecution` or
 `SingleAgentExecution` inside their own `execute` methods. Those inner classes
-also expose `execute(request, runtime)`. `legacy_bridge.py` confines conversion
+also expose `execute(request, runtime)`. `vibesys.loops.legacy_bridge` confines conversion
 to the older run integration to the built-in adapters. Generic framework
 dispatch contains no built-in policy branch.
 

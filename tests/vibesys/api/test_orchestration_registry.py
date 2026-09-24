@@ -23,16 +23,16 @@ from vibesys.api import (
     open_run_store,
 )
 from vibesys.api._dispatch import dispatch_loop
-from vibesys.api._orchestrations.agent import AgentOrchestration
-from vibesys.api._orchestrations.contracts import RunDescription
-from vibesys.api._orchestrations.evolve import EvolveOrchestration
-from vibesys.api._orchestrations.legacy_bridge import legacy_integration
-from vibesys.api._orchestrations.plain import PlainOrchestration
-from vibesys.api._orchestrations.profile_guided import ProfileGuidedOrchestration
 from vibesys.api.contracts import LoopKind, RunRequest, RunResult, RunStatus, RunView
 from vibesys.api.entry import default_request
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
+from vibesys.loops.agent.entrypoint import AgentOrchestration
+from vibesys.loops.agent.profile_entrypoint import ProfileGuidedOrchestration
+from vibesys.loops.evolve.entrypoint import EvolveOrchestration
+from vibesys.loops.legacy_bridge import legacy_integration
+from vibesys.loops.plain.entrypoint import PlainOrchestration
+from vibesys.orchestration.contracts import RunDescription
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 

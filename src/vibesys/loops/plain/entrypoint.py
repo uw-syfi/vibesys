@@ -4,17 +4,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.api._orchestrations._common import built_in_description, resolved_run_id
-from vibesys.api._orchestrations.legacy_bridge import (
+from vibesys.loops.legacy_bridge import (
     LegacyBuiltinDefaults,
+    built_in_description,
     legacy_integration,
     legacy_request,
 )
+from vibesys.orchestration._common import resolved_run_id
 
 if TYPE_CHECKING:
-    from vibesys.api._orchestrations.contracts import RunDescription
     from vibesys.api.run_request import RunRequestLike
     from vibesys.orchestration import ResumeProjection
+    from vibesys.orchestration.contracts import RunDescription
     from vibesys.runtime import VibeSysRuntime
     from vs_project.api import OrchestrationRunManifest
 
@@ -25,6 +26,7 @@ class PlainOrchestration(LegacyBuiltinDefaults):
     namespace = "plain"
 
     def describe(self, request: RunRequestLike) -> RunDescription:
+        """Describe the plain loop's round budget and expected roles."""
         return built_in_description(legacy_request(request), round_budget=True)
 
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:

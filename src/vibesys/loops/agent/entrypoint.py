@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.api._orchestrations.agent_common import AgentBuiltinDefaults, agent_execution_for
-from vibesys.api._orchestrations.legacy_bridge import legacy_request
+from vibesys.loops.agent.entrypoint_common import AgentBuiltinDefaults, agent_execution_for
+from vibesys.loops.legacy_bridge import legacy_request
 
 if TYPE_CHECKING:
     from vibesys.api.run_request import RunRequestLike

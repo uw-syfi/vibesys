@@ -13,16 +13,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, cast
 
-from vibesys.api._orchestrations.agent_projection import (
+from vibesys.api.contracts import RunStatus, RunView
+from vibesys.loops.agent.hypotheses import measurement_delta_reason
+from vibesys.loops.agent.model import HypothesisResolution
+from vibesys.loops.agent.projection import (
     AgentRunProjection,
     HypothesisRoundView,
     HypothesisView,
     RoundView,
 )
-from vibesys.api._orchestrations.legacy_request import LoopKind
-from vibesys.api.contracts import RunStatus, RunView
-from vibesys.loops.agent.hypotheses import measurement_delta_reason
-from vibesys.loops.agent.model import HypothesisResolution
+from vibesys.loops.legacy_request import LoopKind
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome, derive_hypothesis_title
 
 if TYPE_CHECKING:

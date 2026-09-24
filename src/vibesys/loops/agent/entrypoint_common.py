@@ -5,32 +5,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from vibesys.api._orchestrations._common import (
-    _required_objective,
-    built_in_description,
-    resolved_run_id,
-)
-from vibesys.api._orchestrations.agent_readmodel import (
+from vibesys.loops.agent.model import AgentRunState
+from vibesys.loops.agent.policy_rounds import validate_inner_policy
+from vibesys.loops.agent.read_state import load_agent_run_state
+from vibesys.loops.agent.readmodel import (
     project_committed_run_view,
     project_run_view,
 )
-from vibesys.api._orchestrations.agent_state import load_agent_run_state
-from vibesys.api._orchestrations.legacy_bridge import (
+from vibesys.loops.legacy_bridge import (
     LegacyBuiltinDefaults,
+    built_in_description,
     legacy_integration,
     legacy_request,
+    required_objective,
 )
-from vibesys.loops.agent.model import AgentRunState
-from vibesys.loops.agent.policy_rounds import validate_inner_policy
+from vibesys.orchestration._common import resolved_run_id
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.api._orchestrations.contracts import RunDescription
-    from vibesys.api._orchestrations.legacy_request import RunRequest
     from vibesys.api.contracts import RunStatus, RunView
     from vibesys.api.run_request import RunRequestLike
+    from vibesys.loops.legacy_request import RunRequest
     from vibesys.orchestration import ResumeProjection
+    from vibesys.orchestration.contracts import RunDescription
     from vibesys.runtime import VibeSysRuntime
     from vs_project.api import OrchestrationRunManifest, Project
 
@@ -42,9 +40,11 @@ class AgentBuiltinDefaults(LegacyBuiltinDefaults):
     include_agent_state: bool
 
     def describe(self, request: RunRequestLike) -> RunDescription:
+        """Describe the agent loop's round budget and expected roles."""
         return built_in_description(legacy_request(request), round_budget=True)
 
     def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+        """Project persisted agent state for the selected outer policy."""
         # The existing public read model exposes hypotheses only for `agent`.
         state = (
             load_agent_run_state(project, run_id) or AgentRunState()
@@ -60,11 +60,13 @@ class AgentBuiltinDefaults(LegacyBuiltinDefaults):
         )
 
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        """Project live agent commits from the agent namespace."""
         if namespace != "agent":
             return None
         return project_committed_run_view(state, run_id=run_id)
 
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
+        """Restore agent-owned settings from a run manifest."""
         from vibesys.loops.agent.orchestration import resume_projection  # noqa: PLC0415
 
         return resume_projection(manifest)
@@ -99,7 +101,7 @@ def run_agent_policy(
         benchmark_result_protocol=bundle.benchmark_result_protocol,
         accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
         benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
-        objective=_required_objective(legacy),
+        objective=required_objective(legacy),
         metrics=legacy.metrics,
         max_rounds=legacy.max_rounds if legacy.max_rounds is not None else 24,
         max_retries_per_round=legacy.max_retries_per_round,
@@ -135,6 +137,7 @@ class MultiAgentExecution:
     outer_loop: Literal["agent", "profile-guided"]
 
     def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool:
+        """Execute the multi-agent policy under the configured outer loop."""
         return run_agent_policy(
             request, runtime, outer_loop=self.outer_loop, inner_loop="multi-agent"
         )
@@ -147,6 +150,7 @@ class SingleAgentExecution:
     outer_loop: Literal["agent", "profile-guided"]
 
     def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool:
+        """Execute the single-agent policy under the configured outer loop."""
         return run_agent_policy(
             request, runtime, outer_loop=self.outer_loop, inner_loop="single-agent"
         )

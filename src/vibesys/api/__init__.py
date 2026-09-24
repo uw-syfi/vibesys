@@ -19,18 +19,6 @@ from typing import Any
 
 from vibesys import boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config
-
-# Deprecated public imports retained for existing callers; omitted from __all__.
-from vibesys.api._orchestrations.contracts import (
-    ExecutableOrchestration,
-    OrchestrationRegistry,
-)
-from vibesys.api._orchestrations.contracts import (
-    Orchestration as Orchestration,
-)
-from vibesys.api._orchestrations.contracts import (
-    RunDescription as RunDescription,
-)
 from vibesys.api.contracts import (
     Config,
     ConfigurationDiagnostic,
@@ -67,6 +55,18 @@ from vibesys.events import (
     ToolCallData,
     ToolResultData,
 )
+
+# Deprecated public imports retained for existing callers; omitted from __all__.
+from vibesys.orchestration.contracts import (
+    ExecutableOrchestration,
+    OrchestrationRegistry,
+)
+from vibesys.orchestration.contracts import (
+    Orchestration as Orchestration,
+)
+from vibesys.orchestration.contracts import (
+    RunDescription as RunDescription,
+)
 from vibesys.profilers import ProfilerKind
 from vibesys.render.format import format_status_prefix
 from vibesys.render.run_log import format_framework_event
@@ -81,7 +81,7 @@ from vs_sandbox.api import HostResource, HostResourceAccess
 
 def built_in_orchestrations() -> OrchestrationRegistry:
     """Construct the built-in registry only when a caller selects it."""
-    from vibesys.api._orchestrations.builtins import (  # noqa: PLC0415
+    from vibesys.loops.registry import (  # noqa: PLC0415
         built_in_orchestrations as create_builtin_registry,
     )
 
@@ -171,7 +171,7 @@ def __getattr__(name: str) -> Any:  # noqa: ANN401
             DeprecationWarning,
             stacklevel=2,
         )
-        return getattr(import_module("vibesys.api._orchestrations.legacy_request"), name)
+        return getattr(import_module("vibesys.loops.legacy_request"), name)
     if name not in _AGENT_COMPAT_EXPORTS:
         raise AttributeError(name)
     warnings.warn(

@@ -14,8 +14,8 @@ from vibesys.api import agent as agent_api
 def test_generic_api_import_does_not_load_builtin_policies() -> None:
     script = (
         "import sys, vibesys.api; "
-        "assert 'vibesys.api._orchestrations.legacy_request' not in sys.modules; "
-        "assert 'vibesys.api._orchestrations.builtins' not in sys.modules; "
+        "assert 'vibesys.loops.legacy_request' not in sys.modules; "
+        "assert 'vibesys.loops.registry' not in sys.modules; "
         "assert not any(name.startswith(('vibesys.loops.agent', "
         "'vibesys.loops.plain', 'vibesys.loops.evolve')) for name in sys.modules)"
     )
@@ -56,7 +56,7 @@ def test_deprecated_from_import_resolves_to_agent_facade() -> None:
 
 def test_deprecated_request_imports_preserve_identity() -> None:
     from vibesys.api import contracts  # noqa: PLC0415
-    from vibesys.api._orchestrations.legacy_request import LoopKind, RunRequest  # noqa: PLC0415
+    from vibesys.loops.legacy_request import LoopKind, RunRequest  # noqa: PLC0415
 
     for module in (generic_api, contracts):
         with pytest.warns(DeprecationWarning, match="deprecated for new policies"):
