@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Cut the checked-in session slices out of the full tracegen output.
-
 The full trace (6000 sessions, 3.4 MB; see ../README.md "Benchmark inputs")
 is not committed. The modes replay only a prefix of it, so the bundle commits
 contiguous session ranges instead:
-
   traces/coding_session_0000-0259.csv  quick (first 60) and full (all 260)
                                        sessions, measured only
   traces/coding_session_3000-3299.csv  a disjoint range held out from tuning;
@@ -13,11 +11,9 @@ contiguous session ranges instead:
                                        sessions, disjoint from both measured
                                        ranges above -- see run.py's
                                        `WARMUP_TRACE` and README.md "Warmup")
-
 Each slice keeps the source rows byte for byte except `arrival_time_ms`, which
 is shifted so the slice's first session arrives at 0 (session_runner requires
 a canonical trace to start at 0; replay is saturated, so arrivals are unused).
-
     python3 benchmark/slice_trace.py coding_session_synthetic.csv benchmark/traces
 """
 
@@ -59,7 +55,6 @@ def main() -> None:
     parser.add_argument("source", type=Path, help="full coding_session_synthetic.csv")
     parser.add_argument("out_dir", type=Path)
     args = parser.parse_args()
-
     lines = args.source.read_text().splitlines(keepends=True)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     for start, stop in SLICES:

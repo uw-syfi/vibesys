@@ -1,11 +1,9 @@
 """Static scan for disallowed serving-engine code in a candidate workspace.
-
 The bundle forbids importing, copying, vendoring, or pip-installing the
 sglang, vllm, and TensorRT-LLM engines (see OBJECTIVE.md, "Disallowed engine
 code"). This scan is the mechanical part of that rule: it flags engine imports,
 install commands, and vendored engine directories. It cannot prove a candidate
 clean (copied code can be renamed), so the judge still reviews the source.
-
 Usage: python3 engine_scan.py [--workspace DIR]   (exit 1 when findings exist)
 """
 
@@ -30,7 +28,7 @@ _HARNESS_DIRS = frozenset({"accuracy_checker", "benchmark", "reference"})
 _TEXT_SUFFIXES = frozenset({".sh", ".txt", ".toml", ".cfg", ".yaml", ".yml", ".sbatch"})
 
 
-def _files(root: Path):  # noqa: ANN202
+def _files(root: Path):
     for path in sorted(root.rglob("*")):
         parts = path.relative_to(root).parts
         if any(part in _SKIP_DIRS for part in parts) or parts[0] in _HARNESS_DIRS:

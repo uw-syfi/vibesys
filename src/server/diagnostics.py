@@ -103,7 +103,7 @@ def exception_summary(error: BaseException, operation: str = "Operation") -> str
     return f"{operation} failed"
 
 
-def exception_to_diagnostic(  # noqa: PLR0913  # independent contract dimensions
+def exception_to_diagnostic(  # independent contract dimensions
     error: BaseException,
     *,
     scope: DiagnosticScope

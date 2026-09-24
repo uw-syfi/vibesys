@@ -1,5 +1,7 @@
 """Profile-guided policy tests over the shared hypothesis engine."""
 
+from tests.support import make_orchestrator_plan
+
 from vibesys.loops.agent.hypothesis_controller import (
     HypothesisEngine,
     ProfileGuidanceOutcome,
@@ -22,11 +24,11 @@ def _ranking(*names: str) -> tuple[ProfileBottleneck, ...]:
 
 
 def _plan() -> OrchestratorPlan:
-    return OrchestratorPlan(
+    return make_orchestrator_plan(
         hypothesis_id="H-1",
         hypothesis="component-local work reduces measured cost",
         task="optimize the focused component",
-        pass_criteria="configured gates pass",  # noqa: S106
+        criteria="configured gates pass",
         reasoning="test the profile-guided claim",
     )
 

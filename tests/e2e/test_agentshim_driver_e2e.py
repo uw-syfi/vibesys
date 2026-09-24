@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
+import sys
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 import agentshim
 import pytest
 from pydantic import BaseModel
+from tests.support import run_test_command
 
 from vs_agent.api import (
     AgentEvent,
@@ -129,7 +130,7 @@ def workspace(tmp_path: Path) -> Path:
     """
     repo = tmp_path / "workspace"
     repo.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)  # noqa: S607
+    run_test_command(["git", "init", "-q"], cwd=repo, check=True)
     (repo / "README.md").write_text("e2e\n")
     return repo
 
@@ -185,8 +186,8 @@ def _session(
 
 def _report(label: str, **values: object) -> None:
     """Print what the real CLI answered, so ``-s`` runs are self-documenting."""
-    print(  # noqa: T201
-        f"[e2e {label}] " + " | ".join(f"{key}={value!r}" for key, value in values.items())
+    sys.stdout.write(
+        f"[e2e {label}] " + " | ".join(f"{key}={value!r}" for key, value in values.items()) + "\n"
     )
 
 
@@ -256,7 +257,7 @@ def test_a_second_turn_resumes_the_same_conversation(
         # than assumed, so raising the budget changes the expectation instead
         # of breaking the test. The answer above still stands either way; only
         # the next prompt would start cold.
-        codex_turn_budget = agentshim_driver._MAX_CODEX_SESSION_TURNS  # noqa: SLF001
+        codex_turn_budget = agentshim_driver._MAX_CODEX_SESSION_TURNS
         budget_spent = provider == "codex" and codex_turn_budget <= TURNS_HERE
         expected = (
             SessionDisposition.RESET_REQUIRED if budget_spent else SessionDisposition.REUSABLE
@@ -419,7 +420,7 @@ def test_watchdog_retire_signal_resumed_codex_turn_exits_on_its_own_in_a_contain
     executor = agentshim.TransformingExecutor(
         agentshim.HostCommandExecutor(),
         _docker_exec,
-        find_binary=lambda name, env: name,  # noqa: ARG005
+        find_binary=lambda name, *_args, **_kwargs: name,
     )
     agent = agentshim.CliAgent("codex", executor=executor)
     first = agent.start_session().turn(

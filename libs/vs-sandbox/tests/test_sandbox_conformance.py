@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import sys
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support import run_test_command
 
 from vs_sandbox import host_sandbox, landlock
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
@@ -43,7 +43,7 @@ _PROBE_ENV = {"HOME": "/home/conformance-probe", "PATH": "/usr/bin:/bin"}
 def _bwrap_path() -> str | None:
     """Return a working bubblewrap binary, or ``None`` if none is usable."""
     bwrap = shutil.which("bwrap")
-    if bwrap is None or not host_sandbox._bwrap_confines(bwrap):  # noqa: SLF001
+    if bwrap is None or not host_sandbox._bwrap_confines(bwrap):
         return None
     return bwrap
 
@@ -136,7 +136,7 @@ def _parse_probe_output(stdout: str) -> dict[str, str]:
 
 
 def _run_probe(sandbox: WorkspaceSandbox, script: str, *, cwd: Path) -> dict[str, str]:
-    result = subprocess.run(  # noqa: S603
+    result = run_test_command(
         sandbox.wrap(["/bin/sh", "-c", script]),
         capture_output=True,
         text=True,

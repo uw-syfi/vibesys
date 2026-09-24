@@ -58,11 +58,12 @@ class FakeCommandRunner:
         self,
         argv: Sequence[str],
         *,
-        timeout: float | None = None,  # noqa: ARG002
-        cwd: Path | None = None,  # noqa: ARG002
+        timeout: float | None = None,
+        cwd: Path | None = None,
         stdout_sink: Callable[[str], None] | None = None,
         stderr_sink: Callable[[str], None] | None = None,
     ) -> ProcessResult:
+        del timeout, cwd
         normalized = tuple(argv)
         self.calls.append(normalized)
         if normalized[-1].endswith("task.yaml"):

@@ -41,7 +41,7 @@ _RECENT_PROGRESS_ROUNDS = 4
 def resolve_paths(workspace: Path, layout: str) -> tuple[Path, Path]:
     """Resolve both memory locations, preserving the layout of resumed runs."""
     if layout not in MEMORY_LAYOUTS:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
+        raise ValueError(
             f"Unknown memory layout {layout!r}; choose from {', '.join(MEMORY_LAYOUTS)}"
         )
 
@@ -49,7 +49,7 @@ def resolve_paths(workspace: Path, layout: str) -> tuple[Path, Path]:
         legacy = workspace / f"{name}.md"
         directory = workspace / name
         if legacy.exists() and directory.exists():
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            raise ValueError(
                 f"Both {legacy.name} and {directory.name}/ exist; keep only one {name} layout"
             )
         if legacy.exists():
@@ -440,9 +440,10 @@ def _append(progress_path: Path, block: str, round_number: int) -> None:
     replacement.replace(document)
 
 
-def append_pre_round_decision(  # noqa: D103  # tracked: #288
+def append_pre_round_decision(
     progress_path: Path, round_number: int, decision: PreRoundDecision
 ) -> None:
+    """Append the orchestrator's pre-round decision to progress history."""
     block = (
         f"## Round {round_number} — Orchestrator (pre-round)\n"
         f"- **need_profile**: {decision.need_profile}\n"
@@ -452,9 +453,10 @@ def append_pre_round_decision(  # noqa: D103  # tracked: #288
     _append(progress_path, block, round_number)
 
 
-def append_profiler_summary(  # noqa: D103  # tracked: #288
+def append_profiler_summary(
     progress_path: Path, round_number: int, summary: ProfilerSummary
 ) -> None:
+    """Append a profiler summary for one round."""
     perf_line = ""
     if summary.perf_metric is not None:
         unit = summary.perf_unit or ""
@@ -469,9 +471,10 @@ def append_profiler_summary(  # noqa: D103  # tracked: #288
     _append(progress_path, block, round_number)
 
 
-def append_orchestrator_plan(  # noqa: D103  # tracked: #288
+def append_orchestrator_plan(
     progress_path: Path, round_number: int, plan: OrchestratorPlan
 ) -> None:
+    """Append the orchestrator plan and any requested round rollback."""
     revert_line = ""
     if plan.revert_to_round is not None:
         revert_line = f"- **revert_to_round**: {plan.revert_to_round}\n"
@@ -499,7 +502,7 @@ def append_orchestrator_plan(  # noqa: D103  # tracked: #288
     _append(progress_path, block, round_number)
 
 
-def append_hypothesis_continuation(  # noqa: D103  # tracked: #288
+def append_hypothesis_continuation(
     progress_path: Path,
     round_number: int,
     *,
@@ -507,6 +510,7 @@ def append_hypothesis_continuation(  # noqa: D103  # tracked: #288
     started_round: int,
     continuation_step: str,
 ) -> None:
+    """Append the continuation plan used to refine the active hypothesis."""
     block = (
         f"## Round {round_number} — Active hypothesis continuation\n"
         f"- **hypothesis_id**: {plan.hypothesis_id}\n"
@@ -518,9 +522,10 @@ def append_hypothesis_continuation(  # noqa: D103  # tracked: #288
     _append(progress_path, block, round_number)
 
 
-def append_implementer(  # noqa: D103  # tracked: #288
+def append_implementer(
     progress_path: Path, round_number: int, retry: int, response: ImplementerResponse
 ) -> None:
+    """Append one implementer attempt and its reported result."""
     perf_line = ""
     if response.perf_metric is not None:
         unit = response.perf_unit or ""
@@ -552,9 +557,10 @@ def append_implementer(  # noqa: D103  # tracked: #288
     _append(progress_path, block, round_number)
 
 
-def append_judge(  # noqa: D103  # tracked: #288
+def append_judge(
     progress_path: Path, round_number: int, retry: int, response: JudgeResponse
 ) -> None:
+    """Append one judge response to the round history."""
     block = (
         f"## Round {round_number} — Judge (attempt {retry})\n"
         f"- **verdict**: {response.verdict.value}\n\n"
@@ -564,13 +570,14 @@ def append_judge(  # noqa: D103  # tracked: #288
     _append(progress_path, block, round_number)
 
 
-def append_judge_skipped(  # noqa: D103  # tracked: #288
+def append_judge_skipped(
     progress_path: Path,
     round_number: int,
     *,
     outcome: str,
     judge_every: int,
 ) -> None:
+    """Append the reason the judge step was skipped."""
     block = (
         f"## Round {round_number} — Independent review deferred\n"
         f"- **implementer_outcome**: {outcome}\n"
@@ -580,7 +587,7 @@ def append_judge_skipped(  # noqa: D103  # tracked: #288
     _append(progress_path, block, round_number)
 
 
-def append_official_evaluation_decision(  # noqa: D103, PLR0913  # tracked: #288
+def append_official_evaluation_decision(
     progress_path: Path,
     round_number: int,
     retry: int,
@@ -590,6 +597,7 @@ def append_official_evaluation_decision(  # noqa: D103, PLR0913  # tracked: #288
     official_eval_every: int,
     provisional_candidates: int,
 ) -> None:
+    """Append the framework's official evaluation decision."""
     decision = "run" if run else "deferred"
     block = (
         f"## Round {round_number} — Official evaluation policy (attempt {retry})\n"
@@ -601,12 +609,13 @@ def append_official_evaluation_decision(  # noqa: D103, PLR0913  # tracked: #288
     _append(progress_path, block, round_number)
 
 
-def append_single_agent_round(  # noqa: D103  # tracked: #288
+def append_single_agent_round(
     progress_path: Path,
     round_number: int,
     retry: int,
     response: SingleAgentRoundResponse,
 ) -> None:
+    """Append the result of a single-agent round."""
     perf_line = ""
     if response.perf_metric is not None:
         unit = response.perf_unit or ""
@@ -636,7 +645,7 @@ def append_single_agent_round(  # noqa: D103  # tracked: #288
     _append(progress_path, block, round_number)
 
 
-def append_framework_accuracy_gate(  # noqa: D103, PLR0913  # tracked: #288
+def append_framework_accuracy_gate(
     progress_path: Path,
     round_number: int,
     retry: int,
@@ -645,6 +654,7 @@ def append_framework_accuracy_gate(  # noqa: D103, PLR0913  # tracked: #288
     passed: bool,
     output: str,
 ) -> None:
+    """Append the framework accuracy-gate result."""
     verdict = "pass" if passed else "fail"
     block = (
         f"## Round {round_number} — Framework accuracy gate (attempt {retry})\n"
@@ -679,7 +689,7 @@ def append_framework_validation_gate(
     _append(progress_path, "\n".join(lines) + "\n", round_number)
 
 
-def append_framework_benchmark(  # noqa: D103, PLR0913  # tracked: #288
+def append_framework_benchmark(
     progress_path: Path,
     round_number: int,
     retry: int,
@@ -690,6 +700,7 @@ def append_framework_benchmark(  # noqa: D103, PLR0913  # tracked: #288
     metric_value: float | None,
     output: str,
 ) -> None:
+    """Append framework benchmark metrics and diagnostics."""
     verdict = "pass" if passed else "fail"
     metric_line = (
         f"- **{metric_name}**: {metric_value}\n"
@@ -706,9 +717,10 @@ def append_framework_benchmark(  # noqa: D103, PLR0913  # tracked: #288
     _append(progress_path, block, round_number)
 
 
-def append_exhaustion_note(  # noqa: D103  # tracked: #288
+def append_exhaustion_note(
     progress_path: Path, round_number: int, attempts: int, last_feedback: str
 ) -> None:
+    """Append a note that judge retries were exhausted."""
     block = (
         f"## Round {round_number} — Judge loop exhausted\n"
         f"- **attempts**: {attempts}\n"

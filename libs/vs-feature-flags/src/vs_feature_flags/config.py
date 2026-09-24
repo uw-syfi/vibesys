@@ -1,4 +1,6 @@
-from __future__ import annotations  # noqa: D100  # tracked: #288
+"""Configuration helpers for typed feature-flag registries."""
+
+from __future__ import annotations
 
 from collections.abc import Mapping
 from enum import StrEnum
@@ -22,7 +24,7 @@ def parse_feature_flag_overrides(
         return {}
 
     if not isinstance(raw, Mapping):
-        raise ValueError(f"{section_name} must be a TOML table")  # noqa: TRY003, TRY004  # tracked: #288
+        raise ValueError(f"{section_name} must be a TOML table")
 
     parsed: dict[FlagT, bool] = {}
     for key, value in raw.items():
@@ -30,10 +32,10 @@ def parse_feature_flag_overrides(
             flag = flag_type(str(key))
         except (TypeError, ValueError):
             valid = _format_valid_flags(flag_type)
-            raise ValueError(f"Unknown feature flag {key!r}. Supported flags: {valid}") from None  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"Unknown feature flag {key!r}. Supported flags: {valid}") from None
 
         if not isinstance(value, bool):
-            raise ValueError(f"{section_name}.{key} must be true or false")  # noqa: TRY003, TRY004  # tracked: #288
+            raise ValueError(f"{section_name}.{key} must be true or false")
 
         parsed[flag] = value
 

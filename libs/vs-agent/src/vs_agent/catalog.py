@@ -45,10 +45,10 @@ def agent_catalog() -> Mapping[Driver, DriverInfo]:
     ``--docker`` (see ``OmnigentDriverError``'s remedy pointing at
     ``agent.driver='agentshim'``); AgentShim has never gated on it.
     """
-    from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # avoid import cycle
+    from vs_agent.drivers.agentshim import (  # avoid import cycle
         supported_providers as agentshim_providers,
     )
-    from vs_agent.omnigent.providers import (  # noqa: PLC0415  # avoid import cycle
+    from vs_agent.omnigent.providers import (  # avoid import cycle
         supported_providers as omnigent_providers,
     )
 

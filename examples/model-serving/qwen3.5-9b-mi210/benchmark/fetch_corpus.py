@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Download and build the benchmark token corpus (`corpus.txt`).
-
 session_runner draws prompt token ids from this text (`--text-file`). The
 corpus is eight Project Gutenberg ebooks concatenated byte for byte in
 filename order, followed by a second copy of 1342-0.txt (Pride and
@@ -8,9 +7,7 @@ Prejudice). The measured runs used exactly this file: it was built as
 `cat *.txt` in a directory that also held `corpus_raw.txt`, a copy of
 1342-0.txt that sorts last. Every download and the result are checked
 against pinned sha256 digests.
-
     python3 benchmark/fetch_corpus.py [--out PATH]
-
 Default output: $XDG_CACHE_HOME/vibesys/qwen3.5-9b-mi210/corpus.txt
 (~/.cache when XDG_CACHE_HOME is unset), which run.py reads when neither
 --text-file nor $QWEN35_BENCH_ASSETS is given.

@@ -57,7 +57,7 @@ def _agent_outer_loop(loop: LoopKind) -> Literal["agent", "profile-guided"]:
     """
     if loop is LoopKind.PROFILE_GUIDED:
         return "profile-guided"
-    assert loop is LoopKind.AGENT, (  # noqa: S101  # dispatch_loop only routes these two here
+    assert loop is LoopKind.AGENT, (  # dispatch_loop only routes these two here
         f"_dispatch_agent called with unsupported loop kind: {loop!r}"
     )
     return "agent"
@@ -83,7 +83,7 @@ def dispatch_loop(request: RunRequest, integration: LocalRunIntegration) -> bool
 
 
 def _dispatch_agent(request: RunRequest, integration: LocalRunIntegration) -> bool:
-    from vibesys.loops.agent.loop import run_agent_loop  # noqa: PLC0415  # tracked: #288
+    from vibesys.loops.agent.loop import run_agent_loop
 
     bundle = request.input_bundle
     resuming = request.resume is not None
@@ -133,7 +133,7 @@ def _dispatch_agent(request: RunRequest, integration: LocalRunIntegration) -> bo
 
 
 def _dispatch_evolve(request: RunRequest, integration: LocalRunIntegration) -> bool:
-    from vibesys.loops.evolve.loop import run_evolve_loop  # noqa: PLC0415  # tracked: #288
+    from vibesys.loops.evolve.loop import run_evolve_loop
 
     bundle = request.input_bundle
     resuming = request.resume is not None
@@ -184,7 +184,7 @@ def _dispatch_evolve(request: RunRequest, integration: LocalRunIntegration) -> b
 
 
 def _dispatch_plain(request: RunRequest, integration: LocalRunIntegration) -> bool:
-    from vibesys.loops.plain.loop import run_plain_loop  # noqa: PLC0415  # tracked: #288
+    from vibesys.loops.plain.loop import run_plain_loop
 
     bundle = request.input_bundle
     resuming = request.resume is not None

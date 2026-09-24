@@ -8,12 +8,14 @@ attach an experiment-chat surface to the run.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING
 
-from vs_agent.api import AgentSelection  # noqa: TC001  # tracked: #288
+# lint-waiver: LW-007010 [F401]; preserve the server resource import surface
+from vs_agent.api import AgentSelection  # noqa: F401
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vs_project.api import Project
 
 

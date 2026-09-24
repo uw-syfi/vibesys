@@ -32,11 +32,9 @@ from __future__ import annotations
 
 import random
 import threading
-from collections.abc import Sequence  # noqa: TC003  # tracked: #288
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -51,10 +49,6 @@ from vibesys.context import create_candidate_context, create_run_context
 from vibesys.domains.base import DomainDefinition, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.evaluators.input_manifest import (  # noqa: TC001  # tracked: #288
-    BenchmarkResult,
-    WorkspaceSource,
-)
 from vibesys.events import FrameworkSource
 from vibesys.loops.evolve.population import (
     Individual,
@@ -92,6 +86,15 @@ from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Ver
 from vs_agent.api import AgentBackend, CandidateProgress
 from vs_project.api import EvolveRunConfiguration
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
+    from vibesys.evaluators.input_manifest import (
+        BenchmarkResult,
+        WorkspaceSource,
+    )
+
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "evolve"
 _AGENT_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 _INTERFACE = "inprocess"
@@ -103,7 +106,7 @@ _NO_BENCHMARK_CONTRACT = BenchmarkContract()
 # Evolve owns its top-level mutator and judge prompts but reuses the agent
 # loop's modality fragments and profiler prompts. Domain role files are rendered
 # separately and injected into both sets of neutral templates.
-_jinja_env = Environment(  # noqa: S701  # tracked: #288
+_jinja_env = Environment(
     loader=FileSystemLoader([str(_TEMPLATE_DIR), str(_AGENT_TEMPLATE_DIR)]),
     keep_trailing_newline=True,
     trim_blocks=True,
@@ -125,10 +128,10 @@ def _persist_evolve_state(
 def _materialize_selected_candidate(ctx: LoopContext, individual: Individual) -> None:
     """Make one deterministic selected candidate the run branch's final tree."""
     if not individual.commit:
-        raise RuntimeError(f"selected individual {individual.id} has no Git commit")  # noqa: TRY003  # tracked: #288
+        raise RuntimeError(f"selected individual {individual.id} has no Git commit")
     ctx.git.retain_candidate(f"selected-{individual.id}", individual.commit)
     if not ctx.git.checkout_tree(individual.commit, clean=True):
-        raise RuntimeError(  # noqa: TRY003  # tracked: #288
+        raise RuntimeError(
             f"could not materialize selected individual {individual.id} at {individual.commit}"
         )
     ctx.snapshot_workspace(f"evolve: select individual {individual.id}")
@@ -165,7 +168,7 @@ def _discard_working_tree(ctx: LoopContext) -> None:
                 "discard working tree failed",
                 source=FrameworkSource.LOOP,
             )
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:
         output_sink().framework_warning(
             "discard working tree failed",
             detail=str(exc),
@@ -270,7 +273,7 @@ def _candidate_runtime_notes(
     return runtime.prompt_notes, runtime.deployment_name
 
 
-def _run_mutator(  # noqa: PLR0913  # tracked: #288
+def _run_mutator(
     ctx: LoopContext,
     *,
     generation: int,
@@ -331,7 +334,7 @@ def _run_mutator(  # noqa: PLR0913  # tracked: #288
     )
 
 
-def _run_judge(  # noqa: PLR0913  # tracked: #288
+def _run_judge(
     ctx: LoopContext,
     *,
     generation: int,
@@ -396,7 +399,7 @@ def _format_objectives_for_profiler(objectives: Sequence[Objective]) -> str:
     )
 
 
-def _run_profiler(  # noqa: PLR0913  # tracked: #288
+def _run_profiler(
     ctx: LoopContext,
     *,
     generation: int,
@@ -515,7 +518,7 @@ def _run_framework_benchmark_gate(
     )
 
 
-def _run_candidate_gates(  # noqa: PLR0913  # tracked: #288
+def _run_candidate_gates(
     ctx: LoopContext,
     *,
     generation: int,
@@ -591,7 +594,7 @@ def _candidate_fitness(
     )
 
 
-def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
+def _evaluate_candidate(
     ctx: LoopContext,
     *,
     generation: int,
@@ -737,7 +740,7 @@ def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
         _teardown_candidate_deployment(ctx, cand_deployment, keep=keep_deployments)
 
 
-def _record_outcome(  # noqa: PLR0913  # tracked: #288
+def _record_outcome(
     ctx: LoopContext,
     population: Population,
     state_store: EvolutionStateStore,
@@ -800,7 +803,7 @@ def _record_outcome(  # noqa: PLR0913  # tracked: #288
     return individual
 
 
-def _plan_candidate(  # noqa: PLR0913  # tracked: #288
+def _plan_candidate(
     ctx: LoopContext,
     population: Population,
     state_store: EvolutionStateStore,
@@ -846,7 +849,7 @@ def _plan_candidate(  # noqa: PLR0913  # tracked: #288
     return selection
 
 
-def _run_generation_serial(  # noqa: PLR0913  # tracked: #288
+def _run_generation_serial(
     ctx: LoopContext,
     *,
     generation: int,
@@ -937,7 +940,7 @@ def _run_generation_serial(  # noqa: PLR0913  # tracked: #288
             )
 
 
-def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
+def _evaluate_in_subcontext(
     parent_ctx: LoopContext,
     *,
     config: Config,
@@ -993,7 +996,7 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
                 agent_backend=agent_backend,
                 cli_provider=cli_provider,
             )
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:
         output_sink().framework_warning(
             f"candidate {label} setup failed",
             detail=str(exc),
@@ -1030,7 +1033,7 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
             # detached commit first so durable population state cannot name an
             # object that Git is then free to prune.
             parent_ctx.git.retain_candidate(label, outcome.commit)
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:
         output_sink().framework_warning(
             f"candidate {label} evaluation raised",
             detail=str(exc),
@@ -1048,7 +1051,7 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
     finally:
         try:
             subctx.close()
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
+        except Exception as exc:
             output_sink().framework_warning(
                 f"candidate {label} teardown failed",
                 detail=str(exc),
@@ -1056,7 +1059,7 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
             )
 
 
-def _run_generation_parallel(  # noqa: PLR0913  # tracked: #288
+def _run_generation_parallel(
     parent_ctx: LoopContext,
     *,
     config: Config,
@@ -1179,7 +1182,7 @@ def _run_generation_parallel(  # noqa: PLR0913  # tracked: #288
 # ---------------------------------------------------------------------------
 
 
-def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
+def _bootstrap_seed(
     ctx: LoopContext,
     *,
     objective: str,
@@ -1188,7 +1191,7 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
     domain_definition: DomainDefinition,
     pass_criteria: str,
     max_attempts: int,
-    rng: random.Random,  # noqa: ARG001  # tracked: #288
+    rng: random.Random,
     population: Population,
     state_store: EvolutionStateStore,
     search_policy: SearchPolicy,
@@ -1222,7 +1225,7 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
         # snapshotted; otherwise the workspace stays as the framework seeded it
         # (the bare reference tree).
         wip_seed = _latest_wip_seed(population)
-        if wip_seed is not None and wip_seed.commit:  # noqa: SIM102  # tracked: #288
+        if wip_seed is not None and wip_seed.commit:
             if not ctx.git.checkout_tree(wip_seed.commit, clean=True):
                 output_sink().framework_warning(
                     f"could not check out WIP seed {wip_seed.id} "
@@ -1301,7 +1304,7 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
                     sha_after = ctx.git.current_sha()
                     if sha_after and sha_after != sha_before:
                         wip_commit = sha_after
-                except Exception as exc:  # noqa: BLE001  # tracked: #288
+                except Exception as exc:
                     output_sink().framework_warning(
                         "wip-seed snapshot failed",
                         detail=str(exc),
@@ -1394,7 +1397,7 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
 # ---------------------------------------------------------------------------
 
 
-def _initialize_search_policy(  # noqa: PLR0913  # tracked: #288
+def _initialize_search_policy(
     ctx: LoopContext,
     population: Population,
     state_store: EvolutionStateStore,
@@ -1414,7 +1417,7 @@ def _initialize_search_policy(  # noqa: PLR0913  # tracked: #288
     else:
         policy_name = SearchPolicyName(requested)
         if policy_name is SearchPolicyName.VIBESYS and config is not None:
-            raise ValueError("OpenEvolve configuration requires the OpenEvolve search policy")  # noqa: TRY003  # tracked: #288
+            raise ValueError("OpenEvolve configuration requires the OpenEvolve search policy")
     if policy_name is not SearchPolicyName.OPENEVOLVE:
         return policy_name, VibeSysSearchPolicy()
 
@@ -1440,7 +1443,7 @@ def _initialize_search_policy(  # noqa: PLR0913  # tracked: #288
     return policy_name, policy
 
 
-def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
+def run_evolve_loop(
     config: Config,
     exp_name: str,
     input_path: str,
@@ -1465,7 +1468,7 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     selection_temperature: float = 0.5,
     seed: int | None = None,
     pass_criteria: str = (
-        "The candidate obeys the input bundle's contract, the accuracy "  # noqa: S107  # tracked: #288
+        "The candidate obeys the input bundle's contract, the accuracy "
         "command passes, and the benchmark sanity step completes without "
         "modifying evaluator-owned files."
     ),
@@ -1508,7 +1511,7 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     the legacy behavior, kept for back-compat.
     """
     if domain is None:
-        raise ValueError("domain is required; declare [agent].domain in vibesys.input.toml")  # noqa: TRY003  # tracked: #288
+        raise ValueError("domain is required; declare [agent].domain in vibesys.input.toml")
     domain_definition = resolve_domain(domain)
     if modality is None and domain_definition.name is DomainName.LLM_SERVING:
         modality = "text_generation"
@@ -1635,7 +1638,7 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         ctx.lprint("[evolutionary] interrupted during search-policy initialization.")
         ctx.close()
         return False
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:
         ctx.lprint(f"[evolutionary] search-policy initialization failed: {exc}")
         ctx.close()
         return False
@@ -1657,7 +1660,7 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         pareto_objectives=pareto_objectives,
     )
 
-    rng = random.Random(seed)  # noqa: S311  # tracked: #288
+    rng = random.Random(seed)
 
     try:
         # Bootstrap phase: guarantee a passing generation-0 seed before the
@@ -1798,11 +1801,11 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
             )
         else:
             ctx.lprint("\nNo passing individual produced. Inspect logs.")
-        return True  # noqa: TRY300  # tracked: #288
+        return True
     except KeyboardInterrupt:
         ctx.lprint("[evolutionary] interrupted; population preserved.")
         return False
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:
         ctx.lprint(f"[evolutionary] aborted with: {exc}")
         return False
     finally:

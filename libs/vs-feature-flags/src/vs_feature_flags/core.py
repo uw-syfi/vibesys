@@ -1,16 +1,22 @@
-from __future__ import annotations  # noqa: D100  # tracked: #288
+"""Typed feature-flag values and registries."""
 
-from collections.abc import Mapping  # noqa: TC003  # tracked: #288
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 FlagT = TypeVar("FlagT", bound=StrEnum)
 
 
 @dataclass(frozen=True)
-class FeatureDefinition:  # noqa: D101  # tracked: #288
+class FeatureDefinition:
+    """Description and default value for one typed feature flag."""
+
     description: str
     default: bool = False
 
@@ -18,31 +24,36 @@ class FeatureDefinition:  # noqa: D101  # tracked: #288
 class FeatureRegistry(Generic[FlagT]):
     """Registry for a project's typed feature flag manifest."""
 
-    def __init__(  # noqa: D107  # tracked: #288
+    def __init__(
         self,
         flag_type: type[FlagT],
         definitions: Mapping[FlagT, FeatureDefinition],
     ) -> None:
+        """Initialize the registry with definitions for one flag enum."""
         self._flag_type = flag_type
         self._definitions = dict(definitions)
         self._validate_definitions()
 
     @property
-    def flag_type(self) -> type[FlagT]:  # noqa: D102  # tracked: #288
+    def flag_type(self) -> type[FlagT]:
+        """Return the enum type governed by this registry."""
         return self._flag_type
 
     @property
-    def definitions(self) -> Mapping[FlagT, FeatureDefinition]:  # noqa: D102  # tracked: #288
+    def definitions(self) -> Mapping[FlagT, FeatureDefinition]:
+        """Return a read-only view of all flag definitions."""
         return MappingProxyType(self._definitions)
 
-    def default_for(self, flag: FlagT) -> bool:  # noqa: D102  # tracked: #288
+    def default_for(self, flag: FlagT) -> bool:
+        """Return the configured default for ``flag``."""
         return self._definitions[flag].default
 
-    def is_enabled(  # noqa: D102  # tracked: #288
+    def is_enabled(
         self,
         flag: FlagT,
         overrides: Mapping[FlagT, bool] | None = None,
     ) -> bool:
+        """Resolve a flag using an override when present, otherwise its default."""
         if overrides is not None and flag in overrides:
             return overrides[flag]
         return self.default_for(flag)
@@ -50,10 +61,10 @@ class FeatureRegistry(Generic[FlagT]):
     def _validate_definitions(self) -> None:
         for flag in self._definitions:
             if not isinstance(flag, self._flag_type):
-                raise TypeError(  # noqa: TRY003  # tracked: #288
+                raise TypeError(
                     f"Feature definition key {flag!r} is not a {self._flag_type.__name__}"
                 )
 
         missing = [flag.value for flag in self._flag_type if flag not in self._definitions]
         if missing:
-            raise ValueError(f"Missing feature definitions for: {', '.join(missing)}")  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"Missing feature definitions for: {', '.join(missing)}")

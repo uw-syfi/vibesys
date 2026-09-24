@@ -26,8 +26,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
-from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vs_issue_board.api import (
     Issue,
@@ -35,6 +34,9 @@ from vs_issue_board.api import (
     IssueEvent,
     IssueStatus,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _DEFAULT_SLUG = "untitled"
 _SLUG_MAX_LEN = 40
@@ -103,7 +105,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)  # noqa: PTH105  # tracked: #288
+    os.replace(tmp, path)
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +131,7 @@ def _render_implementer_payload(payload: dict[str, Any]) -> str:
     if files_touched:
         lines.append("**Files touched**:")
         for fp in files_touched:
-            lines.append(f"- `{fp}`")  # noqa: PERF401  # tracked: #288
+            lines.append(f"- `{fp}`")
         lines.append("")
     self_check = payload.get("self_check", "").strip()
     if self_check:
@@ -200,7 +202,7 @@ def render_issue_markdown(issue: Issue) -> str:
     parts.append("## Timeline\n")
     if issue.history:
         for evt in issue.history:
-            parts.append(_render_event_bullet(evt))  # noqa: PERF401  # tracked: #288
+            parts.append(_render_event_bullet(evt))
     else:
         parts.append("_(no events recorded)_")
     parts.append("")

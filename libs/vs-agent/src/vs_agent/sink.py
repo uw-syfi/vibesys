@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 class AgentEventSink(Protocol):
     """The subset of ``OutputSink`` that agent-package code may call."""
 
-    def agent_output(  # noqa: D102, PLR0913
+    def agent_output(
         self,
         content: str,
         *,
@@ -37,9 +37,11 @@ class AgentEventSink(Protocol):
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Publish one text chunk from an agent."""
+        ...
 
-    def tool_call(  # noqa: D102, PLR0913
+    def tool_call(
         self,
         tool: str,
         args: dict[str, Any],
@@ -49,9 +51,11 @@ class AgentEventSink(Protocol):
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Publish an agent tool call and its arguments."""
+        ...
 
-    def tool_result(  # noqa: D102, PLR0913
+    def tool_result(
         self,
         tool: str,
         content: str,
@@ -62,18 +66,22 @@ class AgentEventSink(Protocol):
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Publish a tool result, including error state when applicable."""
+        ...
 
-    def todo_update(  # noqa: D102
+    def todo_update(
         self,
         todos: list[TodoItemData],
         *,
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Publish the agent's current todo list."""
+        ...
 
-    def usage_update(  # noqa: D102, PLR0913
+    def usage_update(
         self,
         input_tokens: int,
         *,
@@ -82,7 +90,9 @@ class AgentEventSink(Protocol):
         agent_kind: str | None = None,
         round_label: str | None = None,
         invocation_id: str | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Publish token usage from the current model response."""
+        ...
 
 
 class NullAgentEventSink:
@@ -94,7 +104,7 @@ class NullAgentEventSink:
 
     __slots__ = ()
 
-    def agent_output(  # noqa: D102, PLR0913
+    def agent_output(
         self,
         content: str,
         *,
@@ -104,9 +114,10 @@ class NullAgentEventSink:
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
+        """Ignore agent output when no event sink was injected."""
         del content, channel, status, agent_kind, round_label, invocation_id
 
-    def tool_call(  # noqa: D102, PLR0913
+    def tool_call(
         self,
         tool: str,
         args: dict[str, Any],
@@ -117,9 +128,10 @@ class NullAgentEventSink:
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
+        """Ignore tool calls when no event sink was injected."""
         del tool, args, call_id, status, agent_kind, round_label, invocation_id
 
-    def tool_result(  # noqa: D102, PLR0913
+    def tool_result(
         self,
         tool: str,
         content: str,
@@ -131,9 +143,10 @@ class NullAgentEventSink:
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
+        """Ignore tool results when no event sink was injected."""
         del tool, content, call_id, is_error, payload, agent_kind, round_label, invocation_id
 
-    def todo_update(  # noqa: D102
+    def todo_update(
         self,
         todos: list[TodoItemData],
         *,
@@ -141,9 +154,10 @@ class NullAgentEventSink:
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
+        """Ignore todo updates when no event sink was injected."""
         del todos, agent_kind, round_label, invocation_id
 
-    def usage_update(  # noqa: D102, PLR0913
+    def usage_update(
         self,
         input_tokens: int,
         *,
@@ -153,6 +167,7 @@ class NullAgentEventSink:
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
+        """Ignore usage updates when no event sink was injected."""
         del input_tokens, context_window, model, agent_kind, round_label, invocation_id
 
 

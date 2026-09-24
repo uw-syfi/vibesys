@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
 _MIB = 1024 * 1024
 _DEFAULT_SIZES_MIB = (20, 100, 500)
 
@@ -72,7 +71,8 @@ def _generate_journal(path: Path, target_bytes: int) -> int:
 
 
 def _worker(path: Path) -> None:
-    from server.events import EventStore  # noqa: PLC0415  # implementation selected by PYTHONPATH
+    # lint-waiver: LW-008027 [PLC0415]; Keep EventStore import time outside the measured attach interval.
+    from server.events import EventStore  # noqa: PLC0415
 
     started = time.perf_counter()
     store = EventStore(path, run_id="benchmark")
@@ -100,7 +100,8 @@ def _measure(python: Path, module_root: Path, source: Path) -> Measurement:
     environment["PYTHONPATH"] = os.pathsep.join(
         [source_path, environment["PYTHONPATH"]] if environment.get("PYTHONPATH") else [source_path]
     )
-    result = subprocess.run(  # noqa: S603  # explicit benchmark interpreter and script
+    # lint-waiver: LW-008042 [S603]; The benchmark invokes the selected Python executable with this script and a fixed worker mode.
+    result = subprocess.run(  # noqa: S603
         [str(python), str(Path(__file__).resolve()), "--worker", str(source)],
         check=True,
         capture_output=True,
@@ -192,7 +193,6 @@ def main() -> None:
         return
     if args.repeats < 1 or any(size < 1 for size in args.sizes_mib):
         parser.error("sizes and repeats must be positive")
-
     results: dict[str, dict[str, dict[str, float | int]]] = {}
     for size_mib in args.sizes_mib:
         source = args.work_dir / f"events-{size_mib}mib.jsonl"
@@ -212,7 +212,6 @@ def main() -> None:
             )
             modes[mode] = _summary(measurements)
         results[str(size_mib)] = modes
-
     rendered = _render_markdown(results)
     print(rendered, end="")  # benchmark report
     if args.output is not None:

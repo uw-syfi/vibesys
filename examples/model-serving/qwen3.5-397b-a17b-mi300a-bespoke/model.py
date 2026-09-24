@@ -1,5 +1,4 @@
 """Deliberately slow, plain-PyTorch Qwen3.5-MoE (text only), written from the HF modeling code.
-
 Design (see reference/modeling_qwen3_5_moe.py for the semantics this mirrors):
 - batch size 1, one sequence at a time, static caches allocated once.
 - full-attention layers: static KV cache [1, kv_heads, max_seq, head_dim].
@@ -7,7 +6,6 @@ Design (see reference/modeling_qwen3_5_moe.py for the semantics this mirrors):
   [1, v_heads, k_dim, v_dim]; the delta rule runs as a per-token python loop.
 - layers are split contiguously over the given devices (one process, activations hop devices).
 - routed experts stay MXFP4 in memory and are dequantized per expert on use.
-
 Memory math for the real model (60 layers x 512 experts x 3 x 1024x4096 = 386.5 B params):
   bf16 experts = 773 GB > 4 x 128 GB = 512 GB, so they cannot be held dense.
   MXFP4 experts = 386.5 B x (4 + 8/32) bits = ~205 GB, plus ~20 GB bf16 for everything else.
@@ -80,8 +78,6 @@ def load_cfg(model_dir: str | Path) -> Cfg:
 
 
 # ---------------------------------------------------------------- small math helpers
-
-
 def rmsnorm(x: torch.Tensor, w: torch.Tensor, eps: float) -> torch.Tensor:
     """Qwen3.5 RMSNorm: normalize in fp32, scale by (1 + w)."""
     y = x.float() * torch.rsqrt(x.float().pow(2).mean(-1, keepdim=True) + eps)
@@ -118,8 +114,6 @@ def swiglu_mlp(
 
 
 # ---------------------------------------------------------------- weight loading
-
-
 def load_experts(ck: Checkpoint, p: str, cfg: Cfg, dev: torch.device, dtype: torch.dtype) -> dict:
     """Stack per-expert tensors into [E, ...] tensors. MXFP4 checkpoints keep uint8 + scale."""
     quant = ck.has(f"{p}.experts.0.gate_proj.weight_scale")
@@ -189,8 +183,6 @@ def load_layer(ck: Checkpoint, i: int, cfg: Cfg, dev: torch.device, dtype: torch
 
 
 # ---------------------------------------------------------------- the model
-
-
 class Model:
     def __init__(
         self, model_dir: str | Path, devices: list[str], dtype: torch.dtype, max_seq: int
@@ -298,7 +290,7 @@ class Model:
         return F.silu(F.conv1d(full, weight, groups=full.shape[1]))
 
     @staticmethod
-    def delta_rule(q, k, v, g, beta, rec) -> torch.Tensor:  # noqa: ANN001
+    def delta_rule(q, k, v, g, beta, rec) -> torch.Tensor:
         """Recurrent gated delta rule, one token at a time, fp32. q,k,v: [1,T,H,d]; g,beta: [1,T,H]."""
         q, k, v, beta = (
             (l2norm(q.float()) * q.shape[-1] ** -0.5),

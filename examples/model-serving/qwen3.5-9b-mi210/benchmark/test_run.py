@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """Unit tests for run.py's trace resolution: modes, digests, and warmup disjointness.
-
 No server, no GPU, no session_runner binary: these exercise pure path
 resolution and the checked-in trace files themselves. Run with:
-
     cd examples/model-serving/qwen3.5-9b-mi210 && python3 -m pytest benchmark/test_run.py -q
-
 or ``python3 benchmark/test_run.py``.
 """
 
@@ -61,7 +58,6 @@ class TraceDigestTests(unittest.TestCase):
 
 class SessionRangeDisjointnessTests(unittest.TestCase):
     """Every mode must warm up on sessions no mode ever measures.
-
     Regression coverage for the fix: before WARMUP_TRACE existed, quick/full
     warmed up on sessions 0-11 of their own measured trace (see README.md
     "Warmup"), so those 12 sessions started the measured sub-run pre-cached.

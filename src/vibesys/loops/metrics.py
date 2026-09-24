@@ -97,7 +97,7 @@ class MetricSpace(BaseModel):
     def _unique_axes(self) -> MetricSpace:
         names = [objective.name for objective in self.objectives]
         if len(set(names)) != len(names):
-            raise ValueError("objective names must be unique")  # noqa: TRY003  # tracked: #288
+            raise ValueError("objective names must be unique")
         return self
 
     # -- axes ---------------------------------------------------------------

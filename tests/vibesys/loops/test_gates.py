@@ -10,12 +10,13 @@ from __future__ import annotations
 import contextlib
 import os
 import re
-import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from tests.support import run_test_command
 
 from vibesys.evaluators.input_manifest import BenchmarkResult
 from vibesys.events import (
@@ -45,10 +46,10 @@ class _ShellJudgeBackend:
     def __init__(self) -> None:
         self.commands: list[str] = []
 
-    def execute(self, command, timeout=None):  # noqa: ANN001, ANN202  # tracked: #288
+    def execute(self, command: str, timeout: float | None = None) -> SandboxExecutionResult:
         self.commands.append(command)
-        proc = subprocess.run(  # noqa: S603  # tracked: #288
-            ["bash", "-c", command],  # noqa: S607  # tracked: #288
+        proc = run_test_command(
+            ["bash", "-c", command],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -197,7 +198,8 @@ def test_a_timed_out_benchmarks_late_result_cannot_be_read_by_the_next_run() -> 
         def __init__(self) -> None:
             self.commands: list[str] = []
 
-        def execute(self, command, timeout=None):  # noqa: ANN001, ANN202, ARG002  # tracked: #288
+        def execute(self, command: str, timeout: float | None = None) -> SandboxExecutionResult:
+            del timeout
             self.commands.append(command)
             if "cat " not in command:  # the cleanup rm
                 return SandboxExecutionResult(output="", exit_code=0)
@@ -296,7 +298,7 @@ def test_configured_objective_overrides_the_declared_direction() -> None:
 
 
 @contextlib.contextmanager
-def _captured_events():  # noqa: ANN202
+def _captured_events() -> Iterator[list[CoreEvent]]:
     """Collect every core event the gate publishes on the process sink."""
     seen: list[CoreEvent] = []
     unsubscribe = output_sink().subscribe(seen.append)

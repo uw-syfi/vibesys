@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
-from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
 from vs_agent.contracts import AgentCapabilities, MCPServerSpec
-from vs_agent.progress import AgentProgress  # noqa: TC001  # tracked: #288
 from vs_agent.scripted_rounds import round_number_from_label, scripted_round_payload
-from vs_agent.session_key import AgentSessionKey  # noqa: TC001  # tracked: #288
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from vs_agent.progress import AgentProgress
+    from vs_agent.session_key import AgentSessionKey
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -64,7 +67,7 @@ class StubAgentClient:
         """Accept log retargeting; the deterministic stub emits no file logs."""
         del stream
 
-    def invoke(  # noqa: D102, PLR0913  # tracked: #288
+    def invoke(
         self,
         *,
         kind: str,
@@ -77,6 +80,7 @@ class StubAgentClient:
         progress: AgentProgress | None = None,
         **kwargs: object,
     ) -> T:
+        """Emit a deterministic stub response for one requested agent turn."""
         del workspace, system_prompt, user_prompt, progress, kwargs
         self._sink.agent_output(
             f"[stub-agent] {round_label}: starting {kind}\n",
@@ -94,7 +98,7 @@ class StubAgentClient:
         )
         return response_cls.model_validate(response) if response is not None else fallback_factory()
 
-    def invoke_text(  # noqa: PLR0913  # tracked: #288
+    def invoke_text(
         self,
         *,
         kind: str,

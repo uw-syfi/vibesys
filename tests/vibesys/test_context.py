@@ -1,5 +1,4 @@
 import json
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -7,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import BaseModel
+from tests.support import run_test_command
 
 from vibesys import boot_trace
 from vibesys.backends.cuda import CudaBackend
@@ -19,7 +19,12 @@ from vibesys.context import (
     create_candidate_context,
     create_run_context,
 )
-from vibesys.domains.environment import EnvironmentPatch, NoopEnvironmentHooks
+from vibesys.domains.environment import (
+    EnvironmentContext,
+    EnvironmentHooks,
+    EnvironmentPatch,
+    NoopEnvironmentHooks,
+)
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.errors import ConfigurationError
 from vibesys.evaluators import (
@@ -27,6 +32,7 @@ from vibesys.evaluators import (
     resolve_evaluator_package,
     tool_install_root,
 )
+from vibesys.evaluators.tools import CargoGitToolSpec
 from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.events import CoreEventType
 from vibesys.loops.agent.model import AgentRunState
@@ -47,10 +53,17 @@ from vs_agent.api import (
     SessionScope,
 )
 from vs_agent.api.testing import FakeAgentClient
-from vs_agent.contracts import AgentTurnRequest, AgentTurnResult
+from vs_agent.contracts import (
+    AgentDriver,
+    AgentObserver,
+    AgentSession,
+    AgentSessionSpec,
+    AgentTurnRequest,
+    AgentTurnResult,
+)
 from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
-from vs_sandbox.api import HostResourceAccess, SandboxLifecycle
+from vs_sandbox.api import HostResourceAccess, SandboxLifecycle, SandboxLifecycleHooks
 
 
 class _FakeBackend:
@@ -61,11 +74,16 @@ class _FakeBackend:
         self.sandbox = MagicMock()
         self.sandbox.execute.return_value = MagicMock(exit_code=0, output="", truncated=False)
 
-    def make_sandbox(self, *_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
-        SandboxLifecycle(_kwargs.get("lifecycle_hooks")).before_ready(self.sandbox)
+    def make_sandbox(
+        self,
+        *_args: object,
+        lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
+        **_kwargs: object,
+    ) -> object:
+        SandboxLifecycle(lifecycle_hooks).before_ready(self.sandbox)
         return self.sandbox
 
-    def make_monitor(self, _log_dir):  # noqa: ANN001, ANN202
+    def make_monitor(self, _log_dir: object) -> None:
         return None
 
 
@@ -74,11 +92,13 @@ class _RecordingHooks:
         self.prepared = 0
         self.torn_down = 0
 
-    def prepare(self, _ctx):  # noqa: ANN001, ANN202
+    def prepare(self, ctx: EnvironmentContext) -> EnvironmentPatch:
+        del ctx
         self.prepared += 1
         return EnvironmentPatch()
 
-    def teardown(self, _ctx):  # noqa: ANN001, ANN202
+    def teardown(self, ctx: EnvironmentContext) -> None:
+        del ctx
         self.torn_down += 1
 
 
@@ -90,7 +110,7 @@ def context_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         "vibesys.context.preflight_profiler_kind",
-        lambda kind: ProfilerPreflightResult(kind, True),  # noqa: FBT003
+        lambda kind: ProfilerPreflightResult(kind, usable=True),
     )
 
 
@@ -185,7 +205,7 @@ command = ["python", "benchmark.py"]
     return task
 
 
-def _create_context(  # noqa: PLR0913
+def _create_context(
     project: Path,
     *,
     runs_dir: Path | None = None,
@@ -198,7 +218,7 @@ def _create_context(  # noqa: PLR0913
     task_name: str | None = None,
     task_root: Path | None = None,
     remote_repo: str | None = None,
-    hooks=None,  # noqa: ANN001
+    hooks: EnvironmentHooks | None = None,
     integration: LocalRunIntegration | None = None,
 ) -> _RunContext:
     return create_run_context(
@@ -227,8 +247,8 @@ def _create_context(  # noqa: PLR0913
 
 
 def _git(project: Path, *args: str) -> str:
-    return subprocess.run(  # noqa: S603
-        [  # noqa: S607
+    return run_test_command(
+        [
             "git",
             "-c",
             "user.name=VibeSys Test",
@@ -243,7 +263,7 @@ def _git(project: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path):  # noqa: ANN001, ANN201
+def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     runner = FakeAgentClient()
@@ -291,7 +311,7 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         )
     )
 
-    def install_command(tools, root):  # noqa: ANN001, ANN202
+    def install_command(tools: dict[str, CargoGitToolSpec], root: Path) -> str:
         root.mkdir(parents=True, exist_ok=True)
         for name, spec in tools.items():
             tool_install_root(root, name, spec).mkdir(parents=True)
@@ -320,7 +340,7 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         assert all(resources[root] is HostResourceAccess.READ_ONLY for root in expected_tool_roots)
 
 
-def test_run_context_announces_canonical_experiment_state(tmp_path):  # noqa: ANN001, ANN201
+def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     integration = LocalRunIntegration()
@@ -342,7 +362,7 @@ def test_run_context_announces_canonical_experiment_state(tmp_path):  # noqa: AN
         integration.close()
 
 
-def test_context_assembly_logs_stage_timings(tmp_path):  # noqa: ANN001, ANN201
+def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
     """Every assembly span up to and past the experiments gate reaches the run log.
 
     This is a regression guard for the diagnostic used to find where
@@ -376,7 +396,7 @@ def test_context_assembly_logs_stage_timings(tmp_path):  # noqa: ANN001, ANN201
     assert "experiments gate open after " in log_text
 
 
-def test_dispatch_preamble_spans_reach_run_log(tmp_path):  # noqa: ANN001, ANN201
+def test_dispatch_preamble_spans_reach_run_log(tmp_path: Path) -> None:
     """Spans closed before ``create_run_context`` land in the run log, first.
 
     ``_dispatch`` and ``_run_agent`` (main.py) do substantial work before a
@@ -401,7 +421,7 @@ def test_dispatch_preamble_spans_reach_run_log(tmp_path):  # noqa: ANN001, ANN20
     assert preamble_index < context_index
 
 
-def test_context_assembly_without_recorded_preamble_omits_preamble_lines(tmp_path):  # noqa: ANN001, ANN201
+def test_context_assembly_without_recorded_preamble_omits_preamble_lines(tmp_path: Path) -> None:
     """No preamble spans (e.g. a test-built context) means no stray lines."""
     project = tmp_path / "queue"
     evaluator = _write_project(project)
@@ -413,7 +433,9 @@ def test_context_assembly_without_recorded_preamble_omits_preamble_lines(tmp_pat
     assert "boot span dispatch" not in log_text
 
 
-def test_context_assembly_spans_stay_off_stderr_by_default(tmp_path, capfd):  # noqa: ANN001, ANN201
+def test_context_assembly_spans_stay_off_stderr_by_default(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Boot spans are forensics in the run log, not narration at the operator."""
     project = tmp_path / "queue"
     evaluator = _write_project(project)
@@ -425,7 +447,9 @@ def test_context_assembly_spans_stay_off_stderr_by_default(tmp_path, capfd):  # 
     assert "boot span" not in captured_err
 
 
-def test_boot_trace_env_puts_assembly_spans_on_stderr(tmp_path, capfd, monkeypatch):  # noqa: ANN001, ANN201
+def test_boot_trace_env_puts_assembly_spans_on_stderr(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     monkeypatch.setenv(boot_trace.BOOT_TRACE_ENV, "1")
@@ -510,7 +534,7 @@ def test_direct_repository_task_materializes_model_in_local_state(tmp_path: Path
         assert _git(project, "status", "--porcelain") == ""
 
 
-def test_copied_run_provisions_self_contained_project_in_collection(tmp_path):  # noqa: ANN001, ANN201
+def test_copied_run_provisions_self_contained_project_in_collection(tmp_path: Path) -> None:
     source = tmp_path / "input"
     evaluator = _write_project(source)
     runs_dir = tmp_path / "runs"
@@ -531,7 +555,7 @@ def test_copied_run_provisions_self_contained_project_in_collection(tmp_path):  
     assert _git(project, "status", "--porcelain") == ""
 
 
-def test_resume_reuses_project_and_run_id_and_only_increases_limit(tmp_path):  # noqa: ANN001, ANN201
+def test_resume_reuses_project_and_run_id_and_only_increases_limit(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
@@ -553,14 +577,14 @@ def test_resume_reuses_project_and_run_id_and_only_increases_limit(tmp_path):  #
     assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
 
 
-def test_resume_migrates_legacy_objectives_with_dirty_candidate(tmp_path):  # noqa: ANN001, ANN201
+def test_resume_migrates_legacy_objectives_with_dirty_candidate(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
         run_id = first.run_id
 
     state = Project.open(project).state
-    manifest_path = state._run_manifest_path(run_id)  # noqa: SLF001  # migration fixture
+    manifest_path = state._run_manifest_path(run_id)  # migration fixture
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     payload["configuration"].pop("objectives")
     manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -587,7 +611,7 @@ def test_resume_migrates_legacy_objectives_with_dirty_candidate(tmp_path):  # no
     assert "# interrupted edit" not in _git(project, "show", "HEAD:queue.py")
 
 
-def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path):  # noqa: ANN001, ANN201
+def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path: Path) -> None:
     source = tmp_path / "input"
     evaluator = _write_project(source)
     runs_dir = tmp_path / "runs"
@@ -596,12 +620,12 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path):  # noqa
         run_id = first.run_id
 
     remote = tmp_path / "remote.git"
-    subprocess.run(  # noqa: S603
-        ["git", "init", "--bare", "-q", str(remote)],  # noqa: S607
+    run_test_command(
+        ["git", "init", "--bare", "-q", str(remote)],
         check=True,
     )
-    subprocess.run(  # noqa: S603
-        ["git", "remote", "add", "origin", str(remote)],  # noqa: S607
+    run_test_command(
+        ["git", "remote", "add", "origin", str(remote)],
         cwd=project,
         check=True,
     )
@@ -615,8 +639,8 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path):  # noqa
     ):
         pass
 
-    branch = subprocess.run(  # noqa: S603
-        ["git", "--git-dir", str(remote), "branch", "--list", f"vibesys-runs/{run_id}"],  # noqa: S607
+    branch = run_test_command(
+        ["git", "--git-dir", str(remote), "branch", "--list", f"vibesys-runs/{run_id}"],
         check=True,
         capture_output=True,
         text=True,
@@ -624,24 +648,24 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path):  # noqa
     assert f"vibesys-runs/{run_id}" in branch
 
 
-def test_direct_resume_republishes_an_already_published_run(tmp_path):  # noqa: ANN001, ANN201
+def test_direct_resume_republishes_an_already_published_run(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
         run_id = first.run_id
 
     remote = tmp_path / "remote.git"
-    subprocess.run(  # noqa: S603
-        ["git", "init", "--bare", "-q", str(remote)],  # noqa: S607
+    run_test_command(
+        ["git", "init", "--bare", "-q", str(remote)],
         check=True,
     )
-    subprocess.run(  # noqa: S603
-        ["git", "remote", "add", "origin", str(remote)],  # noqa: S607
+    run_test_command(
+        ["git", "remote", "add", "origin", str(remote)],
         cwd=project,
         check=True,
     )
-    subprocess.run(  # noqa: S603
-        ["git", "push", "-q", "-u", "origin", f"vibesys-runs/{run_id}"],  # noqa: S607
+    run_test_command(
+        ["git", "push", "-q", "-u", "origin", f"vibesys-runs/{run_id}"],
         cwd=project,
         check=True,
     )
@@ -660,15 +684,15 @@ def test_direct_resume_republishes_an_already_published_run(tmp_path):  # noqa: 
     push.assert_called_once_with()
 
 
-def test_direct_resume_does_not_publish_an_untracked_source_origin(tmp_path):  # noqa: ANN001, ANN201
+def test_direct_resume_does_not_publish_an_untracked_source_origin(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
         run_id = first.run_id
 
     remote = tmp_path / "remote.git"
-    subprocess.run(  # noqa: S603
-        ["git", "init", "--bare", "-q", str(remote)],  # noqa: S607
+    run_test_command(
+        ["git", "init", "--bare", "-q", str(remote)],
         check=True,
     )
     _git(project, "remote", "add", "origin", str(remote))
@@ -687,7 +711,7 @@ def test_direct_resume_does_not_publish_an_untracked_source_origin(tmp_path):  #
     push.assert_not_called()
 
 
-def test_explicit_repository_rejects_a_different_existing_origin(tmp_path):  # noqa: ANN001, ANN201
+def test_explicit_repository_rejects_a_different_existing_origin(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     _git(project, "init", "-q", "-b", "main")
@@ -716,7 +740,7 @@ def test_explicit_repository_rejects_a_different_existing_origin(tmp_path):  # n
     assert "does not match" in caught.value.diagnostic.message
 
 
-def test_direct_run_rejects_unmaterialized_workspace_source(tmp_path):  # noqa: ANN001, ANN201
+def test_direct_run_rejects_unmaterialized_workspace_source(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     source = WorkspaceSource(
@@ -744,7 +768,7 @@ def test_direct_run_rejects_unmaterialized_workspace_source(tmp_path):  # noqa: 
         )
 
 
-def test_omnigent_accepts_active_profiler_configuration(tmp_path):  # noqa: ANN001, ANN201
+def test_omnigent_accepts_active_profiler_configuration(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     configuration = _configuration().model_copy(
@@ -778,7 +802,7 @@ def test_omnigent_accepts_active_profiler_configuration(tmp_path):  # noqa: ANN0
         assert context.profiler_kind is ProfilerKind.MACOS_CPU
 
 
-def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path):  # noqa: ANN001, ANN201
+def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
 
@@ -797,7 +821,7 @@ def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path):  # noqa: 
     assert portable.agent_visible_path("old.json") not in tree
 
 
-def test_candidate_context_uses_project_worktree_directory(tmp_path):  # noqa: ANN001, ANN201
+def test_candidate_context_uses_project_worktree_directory(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
 
@@ -825,7 +849,7 @@ def test_candidate_context_uses_project_worktree_directory(tmp_path):  # noqa: A
         assert not candidate_root.exists()
 
 
-def test_construction_failure_removes_new_copy_and_tears_down_hooks(tmp_path):  # noqa: ANN001, ANN201
+def test_construction_failure_removes_new_copy_and_tears_down_hooks(tmp_path: Path) -> None:
     source = tmp_path / "input"
     evaluator = _write_project(source)
     runs_dir = tmp_path / "runs"
@@ -842,7 +866,7 @@ def test_construction_failure_removes_new_copy_and_tears_down_hooks(tmp_path):  
     assert not runs_dir.exists() or not list(runs_dir.iterdir())
 
 
-def test_hook_teardown_runs_when_provisioning_fails(tmp_path):  # noqa: ANN001, ANN201
+def test_hook_teardown_runs_when_provisioning_fails(tmp_path: Path) -> None:
     source = tmp_path / "input"
     evaluator = _write_project(source)
     hooks = _RecordingHooks()
@@ -857,11 +881,11 @@ def test_hook_teardown_runs_when_provisioning_fails(tmp_path):  # noqa: ANN001, 
     assert hooks.torn_down == 1
 
 
-def test_log_switch_retargets_stderr_tee(tmp_path):  # noqa: ANN001, ANN201
+def test_log_switch_retargets_stderr_tee(tmp_path: Path) -> None:
     ctx = object.__new__(_RunContext)
     original_stderr = sys.stderr
     ctx.logger = RunLogger(tmp_path)
-    ctx._paths = RunPaths(  # noqa: SLF001
+    ctx._paths = RunPaths(
         project_root=tmp_path,
         log_dir=tmp_path,
         run_log_path=ctx.logger.path,
@@ -873,14 +897,14 @@ def test_log_switch_retargets_stderr_tee(tmp_path):  # noqa: ANN001, ANN201
 
     assert original_file.closed
     assert ctx.agent_client.log_files == [ctx.logger.writer]
-    print("\033[31mcolored diagnostic\033[0m", file=sys.stderr)  # noqa: T201
+    sys.stderr.write("\033[31mcolored diagnostic\033[0m\n")
     ctx.logger.close()
     assert sys.stderr is original_stderr
     assert "colored diagnostic" in ctx.run_log_path.read_text()
     assert "\033[31m" not in ctx.run_log_path.read_text()
 
 
-def test_agent_client_gets_a_machine_local_provider_session_store(tmp_path):  # noqa: ANN001, ANN201
+def test_agent_client_gets_a_machine_local_provider_session_store(tmp_path: Path) -> None:
     """The run's agent client checkpoints provider sessions outside the repo.
 
     Provider transcripts are host-local, so the map must live in the run's
@@ -909,7 +933,7 @@ def test_agent_client_gets_a_machine_local_provider_session_store(tmp_path):  # 
     assert not local_dir.is_relative_to(project)
 
 
-def test_evolve_candidate_clients_get_no_provider_session_store(tmp_path):  # noqa: ANN001, ANN201
+def test_evolve_candidate_clients_get_no_provider_session_store(tmp_path: Path) -> None:
     """Candidates never name a durable conversation, so they checkpoint nothing."""
     project = tmp_path / "queue"
     evaluator = _write_project(project)
@@ -947,7 +971,9 @@ class _PinSession:
 
     turns: list[AgentTurnRequest] = field(default_factory=list)
 
-    def run_turn(self, request, observer=None):  # noqa: ANN001, ANN202
+    def run_turn(
+        self, request: AgentTurnRequest, observer: AgentObserver | None = None
+    ) -> AgentTurnResult:
         del observer
         self.turns.append(request)
         return AgentTurnResult('{"answer":"ok"}')
@@ -962,17 +988,17 @@ class _PinSession:
 
 
 @dataclass
-class _PinDriver:
+class _PinDriver(AgentDriver):
     """Records the session specs the client builds, and its execution mode."""
 
     containerized: bool
-    specs: list = field(default_factory=list)
+    specs: list[AgentSessionSpec] = field(default_factory=list)
 
     @property
-    def capabilities(self):  # noqa: ANN202
+    def capabilities(self) -> AgentCapabilities:
         return AgentCapabilities(container_execution=self.containerized)
 
-    def create_session(self, spec):  # noqa: ANN001, ANN202
+    def create_session(self, spec: AgentSessionSpec) -> AgentSession:
         self.specs.append(spec)
         return _PinSession()
 
@@ -1004,8 +1030,8 @@ def _pin_context(
     ctx.integration = LocalRunIntegration()
     request.addfinalizer(ctx.integration.close)
     ctx.events = ctx.integration.events
-    ctx._progress_stack = []  # noqa: SLF001
-    ctx._paths = RunPaths(  # noqa: SLF001
+    ctx._progress_stack = []
+    ctx._paths = RunPaths(
         project_root=tmp_path,
         log_dir=log_dir,
         run_log_path=tmp_path / "run.log",

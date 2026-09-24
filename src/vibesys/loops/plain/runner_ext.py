@@ -16,8 +16,7 @@ tools are needed there.
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003
-from typing import Any, TextIO, TypeVar
+from typing import TYPE_CHECKING, Any, TextIO, TypeVar
 
 from pydantic import BaseModel
 
@@ -31,6 +30,9 @@ from vs_agent.api import (
     MCPServerSpec,
 )
 from vs_issue_board.api import IssueType
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -54,17 +56,19 @@ class PlainLoopAgentClient(AgentClient):
     determines the per-iteration cap scope) and does not forward.
     """
 
-    def __init__(  # noqa: ANN204, D107  # tracked: #288
+    def __init__(
         self,
         inner: AgentClientProtocol,
         *,
         max_issues_per_perf_eval: int,
-    ):
+    ) -> None:
+        """Initialize the wrapper and set the per-evaluation issue cap."""
         self._inner = inner
         self._perf_eval_cap = max_issues_per_perf_eval
 
     @property
-    def backend_name(self) -> str:  # noqa: D102  # tracked: #288
+    def backend_name(self) -> str:
+        """Expose the wrapped agent client's backend name."""
         return self._inner.backend_name
 
     @property
@@ -102,7 +106,7 @@ class PlainLoopAgentClient(AgentClient):
         """Report where the inner client's last turn on ``session_key`` ran."""
         return self._inner.last_turn_provider_session_id(session_key)
 
-    def invoke_text(  # noqa: PLR0913
+    def invoke_text(
         self,
         *,
         kind: str,
@@ -132,18 +136,19 @@ class PlainLoopAgentClient(AgentClient):
             session_key=session_key,
         )
 
-    def invoke(  # noqa: D102  # tracked: #288
+    def invoke(
         self,
         *,
         kind: str,
         response_cls: type[T],
         iteration: int | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
-        **kwargs: Any,  # noqa: ANN401  # tracked: #288
+        **kwargs: Any,
     ) -> T:
+        """Invoke the inner client with the wrapper's performance-eval limit."""
         if kind in ("judge", "perf_eval"):
             if iteration is None:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
+                raise ValueError(
                     f"PlainLoopAgentClient.invoke(kind={kind!r}) requires "
                     "iteration= so the cap can be scoped per-iteration"
                 )
@@ -186,7 +191,7 @@ class PlainLoopAgentClient(AgentClient):
         Cap and type-allowlist enforcement live in :mod:`vs_issue_board.policy`.
         """
         if not self._inner.capabilities.mcp_servers:
-            raise RuntimeError(  # noqa: TRY003
+            raise RuntimeError(
                 f"agent backend {self._inner.backend_name!r} cannot expose issue-board tools"
             )
         return build_issue_mcp_spec(

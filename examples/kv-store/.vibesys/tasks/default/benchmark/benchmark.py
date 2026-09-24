@@ -1,19 +1,15 @@
 """YCSB throughput benchmark against an already-running candidate server.
-
 Requires: Java 8+. Downloads the pinned YCSB 0.17.0 Redis binding to
 ~/.cache/vibesys/kv-store/ycsb/ (override: KV_STORE_YCSB_HOME; falls back to the
 temp dir if the home directory is not writable) on first run if it is not already present.
-
 Reports steady-state throughput so the number reflects the server, not JVM/JIT
 warmup: one discarded warmup run primes the JVM/JIT/connections, then several
 fixed-duration (`maxexecutiontime`) runs are taken and their median reported.
 A fixed window keeps the sample comparable as the server speeds up across rounds,
 and the reported coefficient of variation flags when a single run is noisy.
-
 Machine-readable outputs (no LLM eyeballing):
   - stdout ends with `PERF_METRIC: <median_throughput> ops/sec`
   - `--output-json PATH` writes the same metrics as JSON for the profiler
-
 Usage:
     python benchmark.py --port 6380
     python benchmark.py --port 6380 --threads 1          # single-client latency probe
@@ -53,12 +49,9 @@ def _default_ycsb_home() -> Path:
 
 
 YCSB_HOME = Path(os.environ.get("KV_STORE_YCSB_HOME") or _default_ycsb_home())
-
 WORKLOADS = {"a": "workloads/workloada", "b": "workloads/workloadb", "c": "workloads/workloadc"}
-
 # Metric key YCSB emits for overall throughput; the headline number.
 THROUGHPUT_KEY = "OVERALL.Throughput(ops/sec)"
-
 # Huge op-count cap so a run ends on maxexecutiontime, not on ops exhausted.
 _OP_CAP = 1_000_000_000
 
@@ -170,12 +163,9 @@ def main():
         help="Write the headline metrics to this path as JSON.",
     )
     args = parser.parse_args()
-
     _ensure_ycsb()
-
     workload_path = WORKLOADS[args.workload]
     _run_ycsb("load", workload_path, args.port, args.num_keys, args.threads)
-
     # Discarded warmup: primes JVM/JIT/connections/page-cache so measured runs
     # reflect steady state rather than a cold-start transient.
     if not args.no_warmup:
@@ -187,7 +177,6 @@ def main():
             args.threads,
             duration=min(args.duration, 3),
         )
-
     runs = [
         _parse_metrics(
             _run_ycsb(
@@ -196,7 +185,6 @@ def main():
         )
         for _ in range(max(1, args.repeats))
     ]
-
     throughputs = [run.get(THROUGHPUT_KEY, 0.0) for run in runs]
     median_throughput = statistics.median(throughputs)
     cov_pct = (
@@ -206,7 +194,6 @@ def main():
     )
     # Report latencies from the run whose throughput is closest to the median.
     median_run = min(runs, key=lambda run: abs(run.get(THROUGHPUT_KEY, 0.0) - median_throughput))
-
     print(f"\n{'=' * 56}")
     print(
         f"  YCSB Workload {args.workload.upper()} — {args.threads} client thread"
@@ -223,7 +210,6 @@ def main():
                 f"{op:7s} p99: {median_run.get(f'{op}.99thPercentileLatency(us)', 0) / 1000:.3f} ms   "
                 f"p95: {median_run.get(f'{op}.95thPercentileLatency(us)', 0) / 1000:.3f} ms"
             )
-
     if args.output_json:
         args.output_json.write_text(
             json.dumps(
@@ -239,7 +225,6 @@ def main():
                 indent=2,
             )
         )
-
     # Machine-readable headline (parse this line verbatim; do not eyeball the text above).
     print(f"\nPERF_METRIC: {median_throughput:.1f} ops/sec")
     print(f"PERF_COV: {cov_pct:.1f}%")

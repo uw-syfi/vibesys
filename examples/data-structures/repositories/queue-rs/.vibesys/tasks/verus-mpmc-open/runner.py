@@ -217,7 +217,6 @@ def _benchmark(args: argparse.Namespace) -> None:
     for name in ("capacity", "producers", "consumers"):
         if getattr(args, name) <= 0:
             raise RuntimeError(f"--{name} must be greater than zero")
-
     duration_ms = max(1, round(args.duration_seconds * 1000))
     completed = _run_task_crate(
         "benchmark",
@@ -240,7 +239,6 @@ def _benchmark(args: argparse.Namespace) -> None:
         throughput = float(metric_line.removeprefix(METRIC_PREFIX))
     except ValueError as exc:
         raise RuntimeError("benchmark harness reported an invalid throughput") from exc
-
     result = {
         "total_ops_per_sec": throughput,
         "duration_seconds": args.duration_seconds,

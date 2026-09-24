@@ -32,7 +32,7 @@ def validate(request: RunRequest) -> list[ConfigurationDiagnostic]:
     pydantic model, so field-shape errors already surface as a
     `pydantic.ValidationError` at construction time and never reach here.
     """
-    from vibesys.errors import ConfigurationDiagnostic  # noqa: PLC0415
+    from vibesys.errors import ConfigurationDiagnostic
 
     diagnostics: list[ConfigurationDiagnostic] = []
     bundle = request.input_bundle
@@ -62,7 +62,7 @@ def default_request(project: Project, loop: LoopKind) -> RunRequest:
     its `agent.toml`, if any, else the built-in defaults. Loop-specific fields
     are left at their `RunRequest` defaults.
     """
-    from vibesys.api.contracts import Config, RunRequest  # noqa: PLC0415
+    from vibesys.api.contracts import Config, RunRequest
 
     config_path = project.root / "agent.toml"
     config = (

@@ -400,7 +400,7 @@ class TestCodexRolloutReading:
             rollout_sessions_root=_ROLLOUT_SESSIONS_ROOT,
         )
         monkeypatch.setattr("vs_agent.docker_executor.subprocess.run", queries)
-        return executor._read_codex_rollout_completion("container-123", THREAD_ID)  # noqa: SLF001
+        return executor._read_codex_rollout_completion("container-123", THREAD_ID)
 
     def test_no_rollout_file_is_no_evidence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         queries = _FakeDockerQueries(rollout=None)
@@ -602,7 +602,7 @@ class TestCodexResumeArgvMatches:
     def test_the_termination_script_embeds_the_same_predicate(self) -> None:
         namespace: dict[str, object] = {}
         header = _CODEX_RESUME_TERMINATION_SCRIPT.split("\nthread_id = ")[0]
-        exec(header, namespace)  # noqa: S102
+        exec(header, namespace)
         embedded = cast("Callable[[list[str], str], bool]", namespace["_codex_resume_argv_matches"])
         argv = ["node", "/usr/local/bin/codex", "exec", "resume", THREAD_ID, "-", "--json"]
         assert embedded(argv, THREAD_ID) is True

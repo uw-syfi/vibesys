@@ -173,7 +173,7 @@ def build_chat_agent(
     except BaseException as construction_error:
         try:
             resources.close()
-        except BaseException as cleanup_error:  # noqa: BLE001
+        except BaseException as cleanup_error:
             construction_error.add_note(
                 "Additional error while cleaning up chat-agent construction: "
                 f"{type(cleanup_error).__name__}: {cleanup_error}"
@@ -184,7 +184,7 @@ def build_chat_agent(
 class ExperimentChatFactory:
     """Build and own chat sessions from an attached core run."""
 
-    def __init__(  # noqa: PLR0913  # Construction wires independent run resources.
+    def __init__(  # Construction wires independent run resources.
         self,
         *,
         manager: ChatManager,
@@ -259,7 +259,7 @@ class ExperimentChatFactory:
         for session in sessions:
             try:
                 session.close()
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:
                 first_error = first_error or exc
         if first_error is not None:
             raise first_error
@@ -345,7 +345,7 @@ class ExperimentChatFactory:
         except BaseException as construction_error:
             try:
                 resources.close()
-            except BaseException as cleanup_error:  # noqa: BLE001
+            except BaseException as cleanup_error:
                 construction_error.add_note(
                     "Additional error while cleaning up chat-session construction: "
                     f"{type(cleanup_error).__name__}: {cleanup_error}"

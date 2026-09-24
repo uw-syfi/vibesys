@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from vibesys.constants import DomainName
 from vibesys.domains import database, generic, llm_serving, microservices
-from vibesys.domains.base import DomainDefinition  # noqa: TC001  # tracked: #288
+
+if TYPE_CHECKING:
+    from vibesys.domains.base import DomainDefinition
 
 DOMAINS: dict[DomainName, DomainDefinition] = {
     generic.DEFINITION.name: generic.DEFINITION,
@@ -22,11 +26,11 @@ def registered_domains() -> list[str]:
 def resolve_domain(name: DomainName) -> DomainDefinition:
     """Resolve a registered domain enum to its definition."""
     if not isinstance(name, DomainName):
-        raise TypeError(f"domain must be a DomainName, got {type(name).__name__}.")  # noqa: TRY003  # tracked: #288
+        raise TypeError(f"domain must be a DomainName, got {type(name).__name__}.")
 
     domain = DOMAINS[name]
     if not domain.prompt_dir.is_dir():
-        raise ValueError(  # noqa: TRY003  # tracked: #288
+        raise ValueError(
             f"Registered domain {name.value!r} has no prompt directory: {domain.prompt_dir}"
         )
     return domain

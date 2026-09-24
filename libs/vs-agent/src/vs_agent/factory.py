@@ -35,16 +35,16 @@ def agent_driver_supports_mcp_servers(spec: AgentSpec) -> bool | None:
 
     driver_name = spec.driver
     if driver_name is Driver.OMNIGENT:
-        from vs_agent.drivers.omnigent import OMNIGENT_CAPABILITIES  # noqa: PLC0415
+        from vs_agent.drivers.omnigent import OMNIGENT_CAPABILITIES
 
         return OMNIGENT_CAPABILITIES.mcp_servers
 
-    from vs_agent.drivers.agentshim import AGENTSHIM_CAPABILITIES  # noqa: PLC0415
+    from vs_agent.drivers.agentshim import AGENTSHIM_CAPABILITIES
 
     return AGENTSHIM_CAPABILITIES.mcp_servers
 
 
-def build_agent_client(  # noqa: PLR0913
+def build_agent_client(
     *,
     spec: AgentSpec,
     backends: dict[str, Any] | None,
@@ -64,18 +64,18 @@ def build_agent_client(  # noqa: PLR0913
     backend = spec.backend
 
     if require_host_sandbox and backend not in {AgentBackend.CLI, AgentBackend.STUB}:
-        raise SystemExit(  # noqa: TRY003  # tracked: #288
+        raise SystemExit(  # noqa: TRY003  # lint-waiver: LW-008075 [TRY003]; this CLI policy failure must exit with SystemExit for the launcher to report configuration errors.
             "local project execution requires the CLI agent backend so VibeSys can "
             "enforce nested read-only and hidden paths"
         )
 
     if backend is AgentBackend.STUB:
-        from vs_agent.stub_runner import StubAgentClient  # noqa: PLC0415
+        from vs_agent.stub_runner import StubAgentClient
 
         return StubAgentClient(event_sink=events)
 
     if backend != AgentBackend.CLI:
-        raise SystemExit(f"unknown agent backend: {backend.value!r}")  # noqa: TRY003  # tracked: #288
+        raise SystemExit(f"unknown agent backend: {backend.value!r}")  # noqa: TRY003  # lint-waiver: LW-008076 [TRY003]; preserve the CLI SystemExit contract for an invalid backend.
 
     driver_name = spec.driver
     provider = spec.provider
@@ -83,36 +83,32 @@ def build_agent_client(  # noqa: PLR0913
     driver_log = AgentDiagnosticLog(run_log_file)
 
     if use_docker and not agent_catalog()[driver_name].supports_docker:
-        raise SystemExit(  # noqa: TRY003  # tracked: #288
-            f"agent.driver={driver_name.value!r} is not supported with --docker"
-        )
+        raise SystemExit(f"agent.driver={driver_name.value!r} is not supported with --docker")  # noqa: TRY003  # lint-waiver: LW-008077 [TRY003]; preserve the CLI SystemExit contract for an unsupported docker policy.
 
     if driver_name == Driver.OMNIGENT:
-        from vs_agent.drivers.omnigent import (  # noqa: PLC0415
+        from vs_agent.drivers.omnigent import (
             OmnigentDriver,
             OmnigentDriverError,
         )
 
         if host_resources:
-            raise OmnigentDriverError(  # noqa: TRY003
-                "Omnigent cannot enforce the requested VibeSys host-resource "
-                f"grants ({[str(resource.path) for resource in host_resources]}). Select "
-                "agent.driver='agentshim' for this policy."
+            raise OmnigentDriverError.host_resource_grants_require_agentshim(
+                [str(resource.path) for resource in host_resources]
             )
 
         driver = OmnigentDriver()
     else:
         docker_sandboxes = None
         if use_docker:
-            from vs_agent.cli_docker import DOCKER_PROVIDER_ENV  # noqa: PLC0415
+            from vs_agent.cli_docker import DOCKER_PROVIDER_ENV
 
             if provider not in DOCKER_PROVIDER_ENV:
-                raise SystemExit(  # noqa: TRY003  # tracked: #288
+                raise SystemExit(  # noqa: TRY003  # lint-waiver: LW-008078 [TRY003]; preserve the CLI SystemExit contract and list providers not yet supported by docker.
                     f"--cli-provider {provider!r} is not yet supported with --docker; "
                     f"supported: {sorted(DOCKER_PROVIDER_ENV)}"
                 )
             docker_sandboxes = backends
-        from vs_agent.drivers.agentshim import AgentShimDriver  # noqa: PLC0415
+        from vs_agent.drivers.agentshim import AgentShimDriver
 
         driver = AgentShimDriver(
             provider=provider,

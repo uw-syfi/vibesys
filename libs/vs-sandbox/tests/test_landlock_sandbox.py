@@ -15,22 +15,29 @@ import ctypes
 import errno
 import os
 import runpy
-import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Protocol, cast
 
 import pytest
+from tests.support import run_test_command
 
 import vs_sandbox.api as sandbox_api
 from vs_sandbox import host_sandbox, landlock
 from vs_sandbox.host_sandbox import LandlockSandbox, LinuxBackend
 from vs_sandbox.project_paths import ProjectPathPolicy
 
+if TYPE_CHECKING:
+    import subprocess
+
 requires_landlock = pytest.mark.skipif(
     landlock.abi_version() is None,
     reason="requires a kernel with Landlock support",
 )
+
+
+class _ByRefArgument(Protocol):
+    _obj: object
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -77,7 +84,7 @@ def _confined(
 
 
 def _run(sandbox: LandlockSandbox, script: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603
+    return run_test_command(
         sandbox.wrap(["/bin/sh", "-c", script]),
         capture_output=True,
         check=False,
@@ -200,7 +207,7 @@ class TestLandlockHelperFailsClosed:
     def test_unparsable_policy_does_not_launch_the_command(self, tmp_path: Path) -> None:
         marker = tmp_path / "ran.txt"
 
-        result = subprocess.run(  # noqa: S603
+        result = run_test_command(
             [
                 sys.executable,
                 "-m",
@@ -222,7 +229,7 @@ class TestLandlockHelperFailsClosed:
         assert not marker.exists()
 
     def test_missing_command_is_rejected(self) -> None:
-        result = subprocess.run(
+        result = run_test_command(
             [sys.executable, "-m", "vs_sandbox.landlock", "--policy", "{}", "--"],
             capture_output=True,
             check=False,
@@ -379,16 +386,16 @@ class _FakeLibc:
     def prctl(self, *_args: object) -> int:
         return self.prctl_result
 
-    def syscall(self, number: ctypes.c_long, *args: Any) -> int:  # noqa: ANN401
-        create, add_rule, restrict_self = landlock._syscall_numbers()  # noqa: SLF001
+    def syscall(self, number: ctypes.c_long, *args: object) -> int:
+        create, add_rule, restrict_self = landlock._syscall_numbers()
         if number.value == create:
             if self.create_result is not None:
                 return self.create_result
-            self.ruleset_attr = args[0]._obj  # noqa: SLF001
-            self.ruleset_size = args[1].value
+            self.ruleset_attr = cast("ctypes.Structure", cast(_ByRefArgument, args[0])._obj)
+            self.ruleset_size = cast("ctypes.c_size_t", args[1]).value
             return os.open(os.devnull, os.O_RDONLY | os.O_CLOEXEC)
         if number.value == add_rule:
-            attr = args[2]._obj  # noqa: SLF001
+            attr = cast("landlock._PathBeneathAttr", cast(_ByRefArgument, args[2])._obj)
             self.rules.append((int(attr.allowed_access), int(attr.parent_fd)))
             return self.add_rule_result
         assert number.value == restrict_self
@@ -401,7 +408,7 @@ def fake_libc(monkeypatch: pytest.MonkeyPatch) -> _FakeLibc:
     libc = _FakeLibc()
     monkeypatch.setattr(landlock, "_libc", lambda: libc)
     monkeypatch.setattr(landlock, "_syscall_numbers", lambda: (444, 445, 446))
-    monkeypatch.setattr(landlock, "abi_version", lambda: landlock._ABI_SCOPED)  # noqa: SLF001
+    monkeypatch.setattr(landlock, "abi_version", lambda: landlock._ABI_SCOPED)
     return libc
 
 
@@ -410,7 +417,7 @@ class TestLandlockAbiProbe:
         monkeypatch.setattr(landlock.platform, "machine", lambda: "mips")
 
         with pytest.raises(landlock.LandlockUnavailableError, match="mips"):
-            landlock._syscall_numbers()  # noqa: SLF001
+            landlock._syscall_numbers()
         assert landlock.abi_version() is None
 
     def test_non_linux_has_no_abi(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -445,10 +452,10 @@ class TestLandlockAbiProbe:
         abi: int,
         dropped: landlock.AccessFS,
     ) -> None:
-        handled = landlock._handled_access(abi)  # noqa: SLF001
+        handled = landlock._handled_access(abi)
 
         assert handled & dropped == 0
-        assert handled | dropped == landlock._ACCESS_BITS[landlock.RuleAccess.FULL]  # noqa: SLF001
+        assert handled | dropped == landlock._ACCESS_BITS[landlock.RuleAccess.FULL]
 
 
 class TestLandlockRestrictSyscalls:
@@ -461,21 +468,21 @@ class TestLandlockRestrictSyscalls:
 
         abi = landlock.restrict(policy)
 
-        assert abi == landlock._ABI_SCOPED  # noqa: SLF001
+        assert abi == landlock._ABI_SCOPED
         assert fake_libc.restricted
-        full = int(landlock._ACCESS_BITS[landlock.RuleAccess.READ])  # noqa: SLF001
+        full = int(landlock._ACCESS_BITS[landlock.RuleAccess.READ])
         assert [access for access, _fd in fake_libc.rules] == [
-            full & int(landlock._FILE_BITS),  # noqa: SLF001
-            int(landlock._ACCESS_BITS[landlock.RuleAccess.FULL]),  # noqa: SLF001
+            full & int(landlock._FILE_BITS),
+            int(landlock._ACCESS_BITS[landlock.RuleAccess.FULL]),
         ]
 
     def test_abi_six_scopes_signals_and_abstract_sockets(self, fake_libc: _FakeLibc) -> None:
         landlock.restrict(landlock.LandlockPolicy())
 
         attr = fake_libc.ruleset_attr
-        assert isinstance(attr, landlock._ScopedRulesetAttr)  # noqa: SLF001
+        assert isinstance(attr, landlock._ScopedRulesetAttr)
         assert attr.scoped == (
-            landlock._LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET | landlock._LANDLOCK_SCOPE_SIGNAL  # noqa: SLF001
+            landlock._LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET | landlock._LANDLOCK_SCOPE_SIGNAL
         )
         assert attr.handled_access_net == 0
         assert fake_libc.ruleset_size == ctypes.sizeof(attr)
@@ -490,7 +497,7 @@ class TestLandlockRestrictSyscalls:
         landlock.restrict(landlock.LandlockPolicy())
 
         attr = fake_libc.ruleset_attr
-        assert isinstance(attr, landlock._RulesetAttr)  # noqa: SLF001
+        assert isinstance(attr, landlock._RulesetAttr)
         assert attr.handled_access_fs & landlock.AccessFS.TRUNCATE == 0
         assert fake_libc.ruleset_size == ctypes.sizeof(ctypes.c_uint64)
 
@@ -613,7 +620,7 @@ class TestLinuxBackendProbes:
 
         monkeypatch.setattr(host_sandbox.subprocess, "run", explode)
 
-        assert host_sandbox._bwrap_confines("/opt/bwrap") is False  # noqa: SLF001
+        assert host_sandbox._bwrap_confines("/opt/bwrap") is False
 
     def test_landlock_opt_in_without_kernel_support_fails_closed(
         self,

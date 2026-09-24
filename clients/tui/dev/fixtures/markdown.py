@@ -157,7 +157,7 @@ EXECUTION_FINISHED = {
 }
 
 
-def event(  # noqa: PLR0913
+def event(
     sequence: int,
     offset_ms: int,
     kind: str,
@@ -322,7 +322,7 @@ def main() -> None:
     target = Path(__file__).with_name("markdown.jsonl")
     lines = [json.dumps(item, separators=(",", ":")) for item in build()]
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"wrote {len(lines)} events to {target}")  # noqa: T201
+    print(f"wrote {len(lines)} events to {target}")
 
 
 if __name__ == "__main__":

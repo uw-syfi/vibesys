@@ -5,6 +5,7 @@ from typing import Literal
 
 import pytest
 from pydantic import ValidationError
+from tests.support import make_orchestrator_plan
 
 from vibesys.loops.agent.hypotheses import (
     ResolutionEvidence,
@@ -37,18 +38,20 @@ from vibesys.schemas import (
 from vs_loop_state.api import PerfProvenance, RoundRecord
 
 
-def _plan(identifier: str, *, updates: list[HypothesisStrategyUpdate] | None = None):  # noqa: ANN202
-    return OrchestratorPlan(
+def _plan(
+    identifier: str, *, updates: list[HypothesisStrategyUpdate] | None = None
+) -> OrchestratorPlan:
+    return make_orchestrator_plan(
         hypothesis_id=identifier,
         hypothesis=f"claim {identifier}",
         hypothesis_updates=updates or [],
         task=f"implement {identifier}",
-        pass_criteria="tests pass",  # noqa: S106
+        criteria="tests pass",
         reasoning="test the claim",
     )
 
 
-def _round(  # noqa: PLR0913
+def _round(
     number: int,
     metric: float | None,
     *,
@@ -887,7 +890,7 @@ def test_an_unfindable_parent_commit_with_no_round_bound_fails_closed() -> None:
     )
 
 
-def _derived_round(  # noqa: PLR0913
+def _derived_round(
     number: int,
     metric: float,
     *,

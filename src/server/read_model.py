@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING, Any, Protocol
 
 from server.events import ConfigurationFailedData, EventStatus, EventType, RunEvent
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from server.controller import ProjectRunState
     from server.events import EventData
 
@@ -47,7 +48,7 @@ class RunInspectionSource(Protocol):
         text: str = "",
         *,
         data: EventData | None = None,
-        **fields: Any,  # noqa: ANN401
+        **fields: Any,
     ) -> RunEvent:
         """Record a server-only wire event."""
         ...
@@ -74,10 +75,12 @@ class _HistoryDocument:
 class RunInspector:
     """Answer operator questions without mutating agent behavior."""
 
-    def __init__(self, integration: RunInspectionSource):  # noqa: ANN204, D107  # tracked: #288
+    def __init__(self, integration: RunInspectionSource) -> None:
+        """Bind the read model to its run-inspection data source."""
         self.integration = integration
 
-    def answer(self, question: str) -> str:  # noqa: D102, PLR0911  # tracked: #288
+    def answer(self, question: str) -> str:
+        """Answer a question using current status and persisted run history."""
         configuration_failure = self._latest_configuration_failure()
         if configuration_failure is not None:
             return self._status_answer(question, configuration_failure)
@@ -125,7 +128,8 @@ class RunInspector:
             "questions about a round, a failure, the judge, or a benchmark."
         )
 
-    def round_detail(self, number: int) -> str:  # noqa: D102  # tracked: #288
+    def round_detail(self, number: int) -> str:
+        """Return persisted history excerpts matching one round number."""
         pattern = re.compile(rf"(?i)(round|iter(?:ation)?)\D*{number}\b")
         chunks = []
         for document in self._history_documents():
@@ -136,7 +140,8 @@ class RunInspector:
                 chunks.append(f"--- {document.name} ---\n" + "\n".join(lines[start : start + 80]))
         return "\n\n".join(chunks) or f"No persisted detail found for round {number}."
 
-    def latest_run_log(self) -> Path | None:  # noqa: D102  # tracked: #288
+    def latest_run_log(self) -> Path | None:
+        """Return the newest regular run log, if the integration has a log directory."""
         log_dir = self.integration.log_dir
         if log_dir is None:
             return None

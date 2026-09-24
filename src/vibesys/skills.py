@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Iterable, Sequence  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
-from vibesys.schemas import SkillResourceSelection  # noqa: TC001  # tracked: #288
-from vs_agent.api import NULL_SKILL_SELECTION, SkillSelection  # noqa: F401
+
+# lint-waiver: LW-007009 [F401]; retain the historical VibeSys import path
+from vs_agent.api import NULL_SKILL_SELECTION  # noqa: F401
+from vs_agent.api import SkillSelection
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
+    from vibesys.schemas import SkillResourceSelection
 
 SIDECAR_NAME = ".vibesys.toml"
 _FRONTMATTER_DELIMITER = "---"
@@ -88,7 +94,8 @@ class SkillRule:
         """Rule precedence: deeper target paths are more specific."""
         return len(self.target_path.parts)
 
-    def applies_to(self, skill_dir: Path) -> bool:  # noqa: D102  # tracked: #288
+    def applies_to(self, skill_dir: Path) -> bool:
+        """Return whether ``skill_dir`` is within this rule's target path."""
         try:
             skill_dir.resolve().relative_to(self.target_path)
         except ValueError:
@@ -328,17 +335,13 @@ def coerce_skill_root(raw: str | Path, *, project_root: Path = PROJECT_ROOT) -> 
         path = project_root / path
     path = path.resolve()
     if not path.exists():
-        raise ValueError(f"skill source path does not exist: {raw}")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"skill source path does not exist: {raw}")
     if path.is_file():
         if path.name != "SKILL.md":
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"skill source file must be a SKILL.md file: {raw}"
-            )
+            raise ValueError(f"skill source file must be a SKILL.md file: {raw}")
         return path.parent
     if not path.is_dir():
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"skill source path is not a directory or SKILL.md file: {raw}"
-        )
+        raise ValueError(f"skill source path is not a directory or SKILL.md file: {raw}")
     return path
 
 
@@ -371,7 +374,7 @@ def build_skill_catalog(skill_dirs: Iterable[str | Path]) -> dict[str, SkillCata
     return catalog
 
 
-def _resolve_skill_resource(  # noqa: PLR0911  # tracked: #288
+def _resolve_skill_resource(
     entry: SkillCatalogEntry,
     raw_resource: str,
 ) -> tuple[str | None, str | None]:
@@ -434,7 +437,7 @@ def resolve_skill_selections(
                     f"selection #{index} skill {skill!r} resource {raw_resource!r}: {error}"
                 )
                 continue
-            assert workspace_path is not None  # noqa: S101  # tracked: #288
+            assert workspace_path is not None
             if workspace_path == entry.router_path or workspace_path in resources:
                 continue
             resources.append(workspace_path)

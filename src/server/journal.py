@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING, Any
 
 from server.diagnostics import (
@@ -36,6 +35,7 @@ from server.events import (
 
 if TYPE_CHECKING:
     import threading
+    from pathlib import Path
 
 _MAX_EXCEPTION_CHAIN = 8
 DIAGNOSTIC_FAILURE_EVENTS = frozenset(
@@ -148,7 +148,7 @@ class EventJournal:
         text: str = "",
         *,
         data: EventData | None = None,
-        **fields: Any,  # noqa: ANN401
+        **fields: Any,
     ) -> RunEvent:
         """Construct and append one server wire event."""
         _require_failure_diagnostic(event_type, fields.get("status"), fields.get("diagnostic"))
@@ -174,7 +174,7 @@ class EventJournal:
                 return event
             return self._apply_recorded(store.append(event))
 
-    def record_failure(  # noqa: PLR0913
+    def record_failure(
         self,
         event_type: EventType,
         error: BaseException,
@@ -187,11 +187,11 @@ class EventJournal:
         severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
         status: EventStatus = EventStatus.FAILED,
         diagnostic: Diagnostic | None = None,
-        **fields: Any,  # noqa: ANN401
+        **fields: Any,
     ) -> RunEvent:
         """Record a nonterminal operation failure with stable diagnostics."""
         if event_type not in _NONTERMINAL_FAILURE_EVENTS:
-            raise ValueError(f"Cannot record {event_type.value} without owning run termination")  # noqa: TRY003
+            raise ValueError(f"Cannot record {event_type.value} without owning run termination")
         return self.record_terminal_failure(
             event_type,
             error,
@@ -206,7 +206,7 @@ class EventJournal:
             **fields,
         )
 
-    def record_terminal_failure(  # noqa: PLR0913
+    def record_terminal_failure(
         self,
         event_type: EventType,
         error: BaseException,
@@ -219,11 +219,11 @@ class EventJournal:
         severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
         status: EventStatus = EventStatus.FAILED,
         diagnostic: Diagnostic | None = None,
-        **fields: Any,  # noqa: ANN401
+        **fields: Any,
     ) -> RunEvent:
         """Record an allowed failure event with stable diagnostics."""
         if event_type not in DIAGNOSTIC_FAILURE_EVENTS:
-            raise ValueError(f"{event_type.value} is not an operational failure event")  # noqa: TRY003
+            raise ValueError(f"{event_type.value} is not an operational failure event")
         diagnostic = diagnostic or self.diagnostic_for(error, scope, operation=operation)
         if diagnostic.severity is not severity:
             diagnostic = diagnostic.model_copy(update={"severity": severity})
@@ -238,7 +238,7 @@ class EventJournal:
         )
 
     @contextmanager
-    def capture_failure(  # noqa: PLR0913
+    def capture_failure(
         self,
         *,
         event_type: EventType,
@@ -248,11 +248,11 @@ class EventJournal:
         data_factory: Callable[[Diagnostic], EventData] | None = None,
         text: str | None = None,
         severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
-        **fields: Any,  # noqa: ANN401
+        **fields: Any,
     ) -> Generator[None]:
         """Record and re-raise an exception from a nonterminal operation."""
         if event_type not in _NONTERMINAL_FAILURE_EVENTS:
-            raise ValueError(f"Cannot capture {event_type.value} without owning run termination")  # noqa: TRY003
+            raise ValueError(f"Cannot capture {event_type.value} without owning run termination")
         try:
             yield
         except BaseException as error:
@@ -424,7 +424,7 @@ def _require_failure_diagnostic(
         and status in {EventStatus.FAILED, EventStatus.FAILED.value}
         and diagnostic is None
     ):
-        raise ValueError(f"Failed {event_type.value} events must include a diagnostic")  # noqa: TRY003
+        raise ValueError(f"Failed {event_type.value} events must include a diagnostic")
 
 
 def _header_from_event(event: RunEvent) -> EventHeader:

@@ -40,7 +40,7 @@ def run_attribution(
     round_number: int,
 ) -> tuple[ProfileBottleneck, ...]:
     """Run the configured profiler and validate profile result protocol v1."""
-    output_path = f"/tmp/vibesys-attribution-{round_number}-{uuid.uuid4().hex[:12]}.json"  # noqa: S108
+    output_path = f"/tmp/vibesys-attribution-{round_number}-{uuid.uuid4().hex[:12]}.json"
     profiler_command = shlex.join((*config.command, "--vs-output", output_path))
     command = (
         f"rm -f -- {shlex.quote(output_path)}"
@@ -53,34 +53,32 @@ def run_attribution(
     try:
         result = ctx.judge_backend.execute(command, timeout=config.timeout_seconds)
     except Exception as exc:
-        raise ProfileGuidanceError(  # noqa: TRY003  # tracked: #288
+        raise ProfileGuidanceError(
             f"profile-guided attribution command could not be executed: {exc}"
         ) from exc
     finally:
         with contextlib.suppress(Exception):
             ctx.judge_backend.execute(f"rm -f -- {shlex.quote(output_path)}")
     if result.exit_code != 0:
-        raise ProfileGuidanceError(  # noqa: TRY003  # tracked: #288
+        raise ProfileGuidanceError(
             "profile-guided attribution command failed "
             f"with exit code {result.exit_code}; check its output above"
         )
     payload = _framed_payload(result.output)
     if payload is None:
-        raise ProfileGuidanceError(  # noqa: TRY003  # tracked: #288
+        raise ProfileGuidanceError(
             "profile-guided attribution produced no result artifact; "
             "the command must write protocol v1 JSON to the path passed by --vs-output"
         )
     try:
         result_v1 = _ProfileResultV1.model_validate_json(payload, strict=True)
     except ValueError as exc:
-        raise ProfileGuidanceError(  # noqa: TRY003  # tracked: #288
+        raise ProfileGuidanceError(
             f"profile-guided attribution returned invalid result protocol v1 JSON: {exc}"
         ) from exc
     names = [component.name for component in result_v1.components]
     if len(names) != len(set(names)):
-        raise ProfileGuidanceError(  # noqa: TRY003  # tracked: #288
-            "profile-guided attribution component names must be unique"
-        )
+        raise ProfileGuidanceError("profile-guided attribution component names must be unique")
     return tuple(sorted(result_v1.components, key=lambda item: (-item.cost, item.name)))
 
 

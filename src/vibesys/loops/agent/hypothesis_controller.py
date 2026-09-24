@@ -112,8 +112,8 @@ class ProfileGuidanceOutcome:
     def from_round(
         cls,
         round_number: int,
-        passed: bool,  # noqa: FBT001
-        official: bool,  # noqa: FBT001
+        passed: bool,
+        official: bool,
         delta_pct: float | None,
     ) -> ProfileGuidanceOutcome:
         """Normalize one completed round for profile policy advancement."""
@@ -134,9 +134,9 @@ class ProfileGuidedHypothesisController:
     def __post_init__(self) -> None:
         """Validate policy configuration independently of input manifests."""
         if self.plateau_min_rounds < 1:
-            raise ValueError("plateau_min_rounds must be positive")  # noqa: TRY003
+            raise ValueError("plateau_min_rounds must be positive")
         if self.min_relative_improvement < 0:
-            raise ValueError("min_relative_improvement must be non-negative")  # noqa: TRY003
+            raise ValueError("min_relative_improvement must be non-negative")
 
     @classmethod
     def create(
@@ -289,7 +289,7 @@ class HypothesisEngine:
         round_number: int,
     ) -> HypothesisEngine:
         """Run attribution and prepare deterministic guidance for one hypothesis."""
-        from vibesys.loops.agent.profile_guidance import run_attribution  # noqa: PLC0415
+        from vibesys.loops.agent.profile_guidance import run_attribution
 
         attribution = run_attribution(ctx, config, round_number=round_number)
         return HypothesisEngine(

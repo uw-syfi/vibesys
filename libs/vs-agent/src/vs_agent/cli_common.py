@@ -10,16 +10,17 @@ from __future__ import annotations
 
 import json
 import shutil
-from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING, TextIO
-
-from pydantic import BaseModel  # noqa: TC002  # tracked: #288
 
 from vs_agent.provider_policy import cli_skill_dirs
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    from pydantic import BaseModel
+
     from vs_agent.sink import AgentEventSink
     from vs_agent.skills import SkillSelection
 
@@ -54,7 +55,7 @@ def discover_skill_dirs(root: Path) -> list[Path]:
 _GENERIC_SKIP_NAMES = frozenset({".git", "repos", "__pycache__"})
 
 
-def materialize_skills(  # noqa: C901  # tracked: #288
+def materialize_skills(
     workspace: Path,
     skill_dirs: list[Path],
     *,

@@ -74,7 +74,7 @@ class AgentSessionState(BaseModel):
         for stored in sessions:
             key = AgentSessionKey.parse(stored)
             if not key.durable:
-                raise ValueError(f"session scope is not persistable: {stored!r}")  # noqa: TRY003  # tracked: #288
+                raise ValueError(f"session scope is not persistable: {stored!r}")  # noqa: TRY003  # lint-waiver: LW-008081 [TRY003]; Pydantic requires ValueError here to create a structured sessions field validation error.
         return sessions
 
 
@@ -91,7 +91,7 @@ class SessionStore(Protocol):
         """Return the checkpoint for ``key``, or ``None``."""
         ...
 
-    def record(  # noqa: PLR0913
+    def record(
         self,
         key: AgentSessionKey,
         *,
@@ -117,10 +117,11 @@ class NullSessionStore:
     dependency of :class:`~vs_agent.client.AgentClient`.
     """
 
-    def get(self, key: AgentSessionKey) -> ProviderSessionRecord | None:  # noqa: D102, ARG002
+    def get(self, key: AgentSessionKey) -> ProviderSessionRecord | None:
+        """Return no record because this store never persists sessions."""
         return None
 
-    def record(  # noqa: D102, PLR0913
+    def record(
         self,
         key: AgentSessionKey,
         *,
@@ -130,9 +131,11 @@ class NullSessionStore:
         session_id: str,
         role: str | None = None,
     ) -> None:
+        """Ignore session updates because this store is intentionally inert."""
         del key, spec_fingerprint, provider, model, session_id, role
 
-    def clear(self, key: AgentSessionKey) -> None:  # noqa: D102, ARG002
+    def clear(self, key: AgentSessionKey) -> None:
+        """Ignore clears because this store has no persisted records."""
         return
 
 
@@ -170,7 +173,7 @@ class DurableSessionStore:
             return None
         return self._load().sessions.get(str(key))
 
-    def record(  # noqa: PLR0913
+    def record(
         self,
         key: AgentSessionKey,
         *,

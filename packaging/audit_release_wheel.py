@@ -18,7 +18,6 @@ from typing import Never, cast
 from wheel_targets import TARGETS, WheelTarget, resolve_wheel_target
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 _POLICY_PATH = REPO_ROOT / "packaging" / "manylinux_2_28-policy.json"
 _VERSIONED_SYMBOL_PATTERN = re.compile(

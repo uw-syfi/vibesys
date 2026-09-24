@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     import pytest
 
 
-def profile(  # noqa: PLR0913
+def profile(
     name: str,
     *,
     supports_resume: bool = True,
@@ -77,6 +77,7 @@ def install(
         try:
             return profiles[provider]
         except KeyError:
-            raise ValueError(f"unknown provider {provider!r}") from None  # noqa: TRY003
+            _failure_message = f"unknown provider {provider!r}"
+            raise ValueError(_failure_message) from None
 
     monkeypatch.setattr(provider_profiles, "provider_profile", lookup)

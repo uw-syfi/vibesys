@@ -32,22 +32,24 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
+    # lint-waiver: LW-007001 [F401]; preserve the public schemas import path
     PerfDeltaReason,  # noqa: F401
 )
 
 # HypothesisOutcome, CandidateDisposition, and PerfDeltaReason live in
 # vs_loop_state so that server code can import them without deep-importing
 # vibesys internals. Re-exported here so existing core call sites keep
-# working unchanged. PerfDeltaReason needs the explicit re-export waiver
-# because nothing else in this module references it directly.
+# working unchanged.
 
 # ===========================================================================
 # Enums
 # ===========================================================================
 
 
-class Verdict(StrEnum):  # noqa: D101  # tracked: #288
-    PASS = "pass"  # noqa: S105  # tracked: #288
+class Verdict(StrEnum):
+    """Binary outcome returned by a judge or validation stage."""
+
+    PASS = "pass"
     FAIL = "fail"
 
 
@@ -67,11 +69,13 @@ class HypothesisStrategyUpdate(BaseModel):
     @classmethod
     def _strip_non_empty(cls, value: str) -> str:
         if not (stripped := value.strip()):
-            raise ValueError("must not be blank")  # noqa: TRY003  # tracked: #288
+            raise ValueError("must not be blank")
         return stripped
 
 
-class PerfTrend(StrEnum):  # noqa: D101  # tracked: #288
+class PerfTrend(StrEnum):
+    """Direction of observed performance change across rounds."""
+
     IMPROVED = "improved"
     REGRESSED = "regressed"
     MIXED = "mixed"
@@ -106,7 +110,7 @@ class SkillResourceSelection(BaseModel):
     def _strip_required_text(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("must contain non-whitespace text")  # noqa: TRY003  # tracked: #288
+            raise ValueError("must contain non-whitespace text")
         return value
 
 
@@ -161,7 +165,7 @@ class ValidationRecipe(BaseModel):
     def _strip_recipe_text(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("must contain non-whitespace text")  # noqa: TRY003  # tracked: #288
+            raise ValueError("must contain non-whitespace text")
         return value
 
     @field_validator("input_paths")
@@ -172,13 +176,13 @@ class ValidationRecipe(BaseModel):
             value = raw.strip()
             path = PurePosixPath(value)
             if not value or path.is_absolute() or value == "." or ".." in path.parts:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
+                raise ValueError(
                     "input_paths must contain non-empty workspace-relative paths "
                     "without parent traversal"
                 )
             normalized.append(path.as_posix())
         if len(set(normalized)) != len(normalized):
-            raise ValueError("input_paths must not contain duplicates")  # noqa: TRY003  # tracked: #288
+            raise ValueError("input_paths must not contain duplicates")
         return normalized
 
 

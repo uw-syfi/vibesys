@@ -278,7 +278,7 @@ class RunIntegrationAdapter:
             *, driver: str | None, provider: str | None, model: str | None
         ) -> AgentSelection:
             if attachment.agent_backend != "cli":
-                raise ValueError(  # noqa: TRY003
+                raise ValueError(
                     "experiment chat threads require the CLI agent backend, "
                     f"but this run uses agent backend {attachment.agent_backend!r}"
                 )
@@ -287,7 +287,7 @@ class RunIntegrationAdapter:
             resolved_model = model or defaults.model
             supported = agent_catalog()[Driver(resolved_driver)].providers
             if resolved_provider not in supported:
-                raise ValueError(  # noqa: TRY003
+                raise ValueError(
                     f"agent driver {resolved_driver!r} does not support provider "
                     f"{resolved_provider!r}; supported providers: {', '.join(supported)}"
                 )
@@ -317,7 +317,7 @@ class RunIntegrationAdapter:
         self._chat_factory = factory
         try:
             factory.start()
-        except Exception as exc:  # optional server feature  # noqa: BLE001
+        except Exception as exc:  # optional server feature
             self.journal.publish_output(
                 "stderr",
                 f"Experiment chat is unavailable: {type(exc).__name__}: {exc}\n",
@@ -348,7 +348,7 @@ class RunIntegrationAdapter:
         text: str = "",
         *,
         data: EventData | None = None,
-        **fields: Any,  # noqa: ANN401
+        **fields: Any,
     ) -> RunEvent:
         """Record a server-only wire event."""
         return self.journal.record(event_type, text, data=data, **fields)

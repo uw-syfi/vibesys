@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from vibesys.events import AgentOutputChannel
 
 
-def log_agent_config(agent: Any, label: str, log_file: TextIO | None) -> None:  # noqa: ANN401  # tracked: #288
+def log_agent_config(agent: Any, label: str, log_file: TextIO | None) -> None:
     """Write agent configuration (tools list) to log file."""
     if not log_file:
         return

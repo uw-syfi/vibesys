@@ -1,5 +1,4 @@
 """Hermetic tests for the disallowed-engine-code scan (no GPU, no server).
-
 uv run pytest examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/accuracy_checker/test_engine_scan.py -q --no-cov -p no:tach
 """
 
@@ -11,8 +10,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-import engine_scan  # noqa: E402
+import engine_scan
 
 
 def _scan(files: dict[str, str]) -> list[str]:

@@ -1,11 +1,9 @@
 """Candidate adapters the gate can evaluate.
-
 A target answers two questions for a token-id prompt:
 - `greedy(prompt, n)`: exactly n greedy tokens, EOS ignored.
 - `teacher_forced(prompt, cont)`: for each position of `cont`, the logprob the
   candidate assigns to that given token and the candidate's own argmax, when
   conditioned on `prompt + cont[:i]`.
-
 `HttpTarget` needs only the OpenAI completions surface plus the vLLM extensions
 `ignore_eos`, `return_token_ids`, and `echo` + `logprobs` with
 `return_tokens_as_token_ids` (vLLM itself satisfies it too). Its `complete`
@@ -40,7 +38,6 @@ class Target(Protocol):
     name: str
 
     def greedy(self, prompt: list[int], n: int) -> list[int]: ...
-
     def teacher_forced(self, prompt: list[int], cont: list[int]) -> list[ForcedStep]: ...
 
 
@@ -158,7 +155,6 @@ class HttpTarget:
 
 class HFTarget:
     """HF transformers `Qwen3_5ForCausalLM` in bf16: the golden source, also used to calibrate noise.
-
     Greedy decoding is a manual argmax loop over HF's own KV/state cache, which is
     what `generate(do_sample=False)` does, minus EOS stopping.
     `use_fla=False` hides flash-linear-attention so HF falls back to its torch GDN.

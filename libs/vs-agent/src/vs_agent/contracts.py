@@ -267,7 +267,7 @@ class AgentClientProtocol(Protocol):
         """Name the provider conversation ``session_key``'s last turn ran in."""
         ...
 
-    def invoke(  # noqa: PLR0913
+    def invoke(
         self,
         *,
         kind: str,
@@ -287,7 +287,7 @@ class AgentClientProtocol(Protocol):
         """Run one turn and parse its structured response."""
         ...
 
-    def invoke_text(  # noqa: PLR0913
+    def invoke_text(
         self,
         *,
         kind: str,

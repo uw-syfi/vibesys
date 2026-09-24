@@ -6,19 +6,25 @@ import json
 import shlex
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from vibesys.constants import DomainName
-from vibesys.evaluators.packages import EvaluatorPackageRequirement, resolve_evaluator_package
+from vibesys.evaluators.packages import (
+    EvaluatorPackageRequirement,
+    resolve_evaluator_package,
+)
 from vs_project.api import RunResourceRequest
 
 if TYPE_CHECKING:
+    from vibesys.evaluators.packages import ResolvedEvaluatorPackage
     from vs_project.api import Project, TaskDirectory
 
 MANIFEST_NAME = "vibesys.input.toml"
+_MIN_COMMIT_HASH_LENGTH = 7
+_MAX_COMMIT_HASH_LENGTH = 64
 
 
 class InputCommand(BaseModel):
@@ -35,15 +41,18 @@ class InputCommand(BaseModel):
     @classmethod
     def _non_empty_command(cls, value: tuple[str, ...] | None) -> tuple[str, ...] | None:
         if value is not None and not value:
-            raise ValueError("command must contain at least one argv element")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007012 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("command must contain at least one argv element")  # noqa: TRY003
         if value is not None and any(not part for part in value):
-            raise ValueError("command elements must be non-empty strings")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007013 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("command elements must be non-empty strings")  # noqa: TRY003
         return value
 
     @field_validator("entrypoint")
     @classmethod
     def _non_empty_entrypoint(cls, value: str | None) -> str | None:
         if value is not None and (not value or any(character.isspace() for character in value)):
+            # lint-waiver: LW-007014 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError("entrypoint must be a non-empty name without whitespace")  # noqa: TRY003
         return value
 
@@ -51,14 +60,17 @@ class InputCommand(BaseModel):
     @classmethod
     def _non_empty_arguments(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if any(not part for part in value):
+            # lint-waiver: LW-007015 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError("args elements must be non-empty strings")  # noqa: TRY003
         return value
 
     @model_validator(mode="after")
     def _one_command_source(self) -> InputCommand:
         if (self.command is None) == (self.entrypoint is None):
+            # lint-waiver: LW-007016 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError("declare exactly one of command or entrypoint")  # noqa: TRY003
         if self.command is not None and self.args:
+            # lint-waiver: LW-007017 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError("args may only be used with an evaluator entrypoint")  # noqa: TRY003
         return self
 
@@ -66,6 +78,7 @@ class InputCommand(BaseModel):
         """Render the resolved argv used by the evaluator."""
         command = resolved_command or self.command
         if command is None:
+            # lint-waiver: LW-007018 [TRY003]; `display()` is a public runtime guard, and callers rely on ValueError when an entrypoint has not been resolved.
             raise ValueError("entrypoint commands must be resolved before display")  # noqa: TRY003
         return " ".join(shlex.quote(part) for part in command)
 
@@ -93,40 +106,51 @@ class WorkspaceSource(BaseModel):
     @classmethod
     def _valid_name(cls, value: str) -> str:
         if not value:
-            raise ValueError("name must be non-empty")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007019 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("name must be non-empty")  # noqa: TRY003
         if any(character.isspace() for character in value):
-            raise ValueError("name must not contain whitespace")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007020 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("name must not contain whitespace")  # noqa: TRY003
         return value
 
     @field_validator("repo")
     @classmethod
     def _valid_repo(cls, value: str) -> str:
         if not value.strip():
-            raise ValueError("repo must be non-empty")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007021 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("repo must be non-empty")  # noqa: TRY003
         parsed = urlparse(value)
         if parsed.scheme and parsed.scheme not in {"file", "http", "https", "ssh", "git"}:
-            raise ValueError(f"unsupported repo URL scheme: {parsed.scheme}")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007022 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError(f"unsupported repo URL scheme: {parsed.scheme}")  # noqa: TRY003
         return value
 
     @field_validator("commit")
     @classmethod
     def _valid_commit(cls, value: str) -> str:
         if not value:
-            raise ValueError("commit must be non-empty")  # noqa: TRY003  # tracked: #288
-        if not (7 <= len(value) <= 64) or any(c not in "0123456789abcdefABCDEF" for c in value):  # noqa: PLR2004  # tracked: #288
-            raise ValueError("commit must be a 7-64 character hexadecimal hash")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007023 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("commit must be non-empty")  # noqa: TRY003
+        if not (_MIN_COMMIT_HASH_LENGTH <= len(value) <= _MAX_COMMIT_HASH_LENGTH) or any(
+            c not in "0123456789abcdefABCDEF" for c in value
+        ):
+            # lint-waiver: LW-007024 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("commit must be a 7-64 character hexadecimal hash")  # noqa: TRY003
         return value.lower()
 
     @field_validator("dest")
     @classmethod
     def _relative_dest(cls, value: str) -> str:
         if not value.strip():
-            raise ValueError("dest must be a non-empty path")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007025 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("dest must be a non-empty path")  # noqa: TRY003
         path = Path(value)
         if path.is_absolute():
-            raise ValueError("dest must be relative to the workspace")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007026 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("dest must be relative to the workspace")  # noqa: TRY003
         if any(part in {"", ".", ".."} for part in path.parts):
-            raise ValueError("dest must not contain empty, current, or parent path components")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007027 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("dest must not contain empty, current, or parent path components")  # noqa: TRY003
         return value
 
 
@@ -145,9 +169,11 @@ class EvaluatorInput(BaseModel):
         if value is None:
             return None
         if not value.strip():
-            raise ValueError("source must be a non-empty path")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007028 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("source must be a non-empty path")  # noqa: TRY003
         if Path(value).is_absolute():
-            raise ValueError("source must be relative to the input bundle")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007029 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("source must be relative to the input bundle")  # noqa: TRY003
         return value
 
     @model_validator(mode="after")
@@ -155,11 +181,13 @@ class EvaluatorInput(BaseModel):
         package_values = (self.name, self.version)
         if self.source is not None:
             if any(value is not None for value in package_values):
+                # lint-waiver: LW-007030 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
                 raise ValueError(  # noqa: TRY003
                     "evaluator source cannot be combined with name or version"
                 )
             return self
         if self.name is None or self.version is None:
+            # lint-waiver: LW-007031 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError("a packaged evaluator requires both name and version")  # noqa: TRY003
         EvaluatorPackageRequirement(name=self.name, version=self.version)
         return self
@@ -184,14 +212,16 @@ class BenchmarkResult(BaseModel):
     @classmethod
     def _single_option(cls, value: str) -> str:
         if not value.startswith("-") or any(character.isspace() for character in value):
-            raise ValueError("json_argument must be one option-style argv element")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007032 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("json_argument must be one option-style argv element")  # noqa: TRY003
         return value
 
     @field_validator("metric")
     @classmethod
     def _metric_name(cls, value: str) -> str:
         if not value or any(character.isspace() for character in value):
-            raise ValueError("metric must be a non-empty JSON field name without whitespace")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007033 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError("metric must be a non-empty JSON field name without whitespace")  # noqa: TRY003
         return value
 
 
@@ -210,7 +240,8 @@ class BenchmarkCommand(InputCommand):
     @model_validator(mode="after")
     def _one_result_contract(self) -> BenchmarkCommand:
         if self.result is not None and self.result_protocol is not None:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007034 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+            raise ValueError(  # noqa: TRY003
                 "benchmark.result and benchmark.result_protocol are mutually exclusive; "
                 "declare only one"
             )
@@ -240,8 +271,10 @@ class ProfileGuidedInput(BaseModel):
     @classmethod
     def _non_empty_command(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if not value:
+            # lint-waiver: LW-007035 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError("command must contain at least one argv element")  # noqa: TRY003
         if any(not part for part in value):
+            # lint-waiver: LW-007036 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError("command elements must be non-empty strings")  # noqa: TRY003
         return value
 
@@ -257,11 +290,14 @@ class ModalEnvironmentInput(BaseModel):
     @classmethod
     def _relative_entrypoint(cls, value: str) -> str:
         if not value.strip():
+            # lint-waiver: LW-007037 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError("entrypoint must be a non-empty path")  # noqa: TRY003
         path = Path(value)
         if path.is_absolute():
+            # lint-waiver: LW-007038 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError("entrypoint must be relative to the project root")  # noqa: TRY003
         if not path.parts or any(part in {"", ".", ".."} for part in path.parts):
+            # lint-waiver: LW-007039 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError(  # noqa: TRY003
                 "entrypoint must not contain empty, current, or parent path components"
             )
@@ -298,8 +334,10 @@ class InputManifest(BaseModel):
         )
         package = self.evaluator.package_requirement if self.evaluator is not None else None
         if uses_entrypoint and package is None:
+            # lint-waiver: LW-007040 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError("evaluator entrypoints require a packaged [evaluator]")  # noqa: TRY003
         if not uses_entrypoint and package is not None:
+            # lint-waiver: LW-007041 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
             raise ValueError(  # noqa: TRY003
                 "a packaged [evaluator] requires evaluator entrypoint commands"
             )
@@ -309,12 +347,16 @@ class InputManifest(BaseModel):
         seen_dests: set[str] = set()
         for source in self.workspace.sources:
             if source.name in seen_names:
-                raise ValueError(f"duplicate workspace source name: {source.name}")  # noqa: TRY003  # tracked: #288
+                # lint-waiver: LW-007042 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+                raise ValueError(f"duplicate workspace source name: {source.name}")  # noqa: TRY003
             if source.dest in seen_dests:
-                raise ValueError(f"duplicate workspace source destination: {source.dest}")  # noqa: TRY003  # tracked: #288
+                # lint-waiver: LW-007043 [TRY003]; Pydantic field validators must raise ValueError for structured validation errors
+                raise ValueError(f"duplicate workspace source destination: {source.dest}")  # noqa: TRY003
             seen_names.add(source.name)
             seen_dests.add(source.dest)
         return self
+
+    # lint-waiver: LW-007059 [C901, PLR0912]; ordered TOML serialization is clearer as one pass over the validated model
 
 
 def render_input_manifest(manifest: InputManifest) -> str:  # noqa: C901, PLR0912
@@ -348,10 +390,13 @@ def render_input_manifest(manifest: InputManifest) -> str:  # noqa: C901, PLR091
     if manifest.accuracy.command is not None:
         lines.append(f"command = {toml_array(manifest.accuracy.command)}")
     else:
-        assert manifest.accuracy.entrypoint is not None  # noqa: S101
+        accuracy_entrypoint = _required_manifest_text(
+            manifest.accuracy.entrypoint,
+            "accuracy.entrypoint",
+        )
         lines.extend(
             [
-                f"entrypoint = {toml_string(manifest.accuracy.entrypoint)}",
+                f"entrypoint = {toml_string(accuracy_entrypoint)}",
                 f"args = {toml_array(manifest.accuracy.args)}",
             ]
         )
@@ -389,10 +434,13 @@ def render_input_manifest(manifest: InputManifest) -> str:  # noqa: C901, PLR091
     if manifest.benchmark.command is not None:
         lines.append(f"command = {toml_array(manifest.benchmark.command)}")
     else:
-        assert manifest.benchmark.entrypoint is not None  # noqa: S101
+        benchmark_entrypoint = _required_manifest_text(
+            manifest.benchmark.entrypoint,
+            "benchmark.entrypoint",
+        )
         lines.extend(
             [
-                f"entrypoint = {toml_string(manifest.benchmark.entrypoint)}",
+                f"entrypoint = {toml_string(benchmark_entrypoint)}",
                 f"args = {toml_array(manifest.benchmark.args)}",
             ]
         )
@@ -431,18 +479,29 @@ def render_input_manifest(manifest: InputManifest) -> str:  # noqa: C901, PLR091
             ]
         )
     elif manifest.evaluator is not None:
-        assert manifest.evaluator.name is not None  # noqa: S101
-        assert manifest.evaluator.version is not None  # noqa: S101
+        evaluator_name = _required_manifest_text(manifest.evaluator.name, "evaluator.name")
+        evaluator_version = _required_manifest_text(
+            manifest.evaluator.version,
+            "evaluator.version",
+        )
         lines.extend(
             [
                 "",
                 "[evaluator]",
-                f"name = {toml_string(manifest.evaluator.name)}",
-                f"version = {toml_string(manifest.evaluator.version)}",
+                f"name = {toml_string(evaluator_name)}",
+                f"version = {toml_string(evaluator_version)}",
             ]
         )
 
     return "\n".join(lines) + "\n"
+
+
+def _required_manifest_text(value: str | None, field_name: str) -> str:
+    """Recheck a required field that may have changed after model validation."""
+    if not isinstance(value, str) or not value:
+        # lint-waiver: LW-007134 [TRY003]; rendering rejects mutated invalid models with ValueError
+        raise ValueError(f"{field_name} must be a non-empty string when rendering the manifest")  # noqa: TRY003
+    return value
 
 
 class InputBundle(BaseModel):
@@ -465,31 +524,38 @@ class InputBundle(BaseModel):
     manifest: InputManifest
 
     @property
-    def objective(self) -> str:  # noqa: D102  # tracked: #288
+    def objective(self) -> str:
+        """Read the objective text from its declared file."""
         return self.objective_path.read_text()
 
     @property
-    def accuracy_command(self) -> tuple[str, ...]:  # noqa: D102  # tracked: #288
+    def accuracy_command(self) -> tuple[str, ...]:
+        """Return the resolved accuracy evaluator argv."""
         return self.resolved_accuracy_command
 
     @property
-    def benchmark_command(self) -> tuple[str, ...]:  # noqa: D102  # tracked: #288
+    def benchmark_command(self) -> tuple[str, ...]:
+        """Return the resolved benchmark evaluator argv."""
         return self.resolved_benchmark_command
 
     @property
-    def domain(self) -> DomainName:  # noqa: D102  # tracked: #288
+    def domain(self) -> DomainName:
+        """Return the domain declared by the input manifest."""
         return self.manifest.agent.domain
 
     @property
-    def accuracy_command_display(self) -> str:  # noqa: D102  # tracked: #288
+    def accuracy_command_display(self) -> str:
+        """Render the configured accuracy command for user-facing output."""
         return self.manifest.accuracy.display(resolved_command=self.resolved_accuracy_command)
 
     @property
-    def benchmark_command_display(self) -> str:  # noqa: D102  # tracked: #288
+    def benchmark_command_display(self) -> str:
+        """Render the configured benchmark command for user-facing output."""
         return self.manifest.benchmark.display(resolved_command=self.resolved_benchmark_command)
 
     @property
-    def benchmark_result(self) -> BenchmarkResult | None:  # noqa: D102  # tracked: #288
+    def benchmark_result(self) -> BenchmarkResult | None:
+        """Return the benchmark's declared result contract, if any."""
         return self.manifest.benchmark.result
 
     @property
@@ -520,7 +586,8 @@ class InputBundle(BaseModel):
         return environment.modal.entrypoint
 
     @property
-    def workspace_sources(self) -> tuple[WorkspaceSource, ...]:  # noqa: D102  # tracked: #288
+    def workspace_sources(self) -> tuple[WorkspaceSource, ...]:
+        """Return the pinned workspace sources declared by the manifest."""
         if self.manifest.workspace is None:
             return ()
         return self.manifest.workspace.sources
@@ -547,8 +614,10 @@ def load_project_task(project: Project, task: TaskDirectory) -> InputBundle:
         task_directory=task,
     )
 
+    # lint-waiver: LW-007060 [C901, PLR0912, PLR0915]; input path resolution preserves validation order and path-specific diagnostics
 
-def _load_input_bundle(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
+
+def _load_input_bundle(  # noqa: C901, PLR0912, PLR0915
     *,
     project_root: Path,
     task_root: Path,
@@ -559,15 +628,18 @@ def _load_input_bundle(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
     root = project_root.expanduser().resolve()
     bundle_root = task_root.expanduser().resolve()
     if not root.exists():
-        raise FileNotFoundError(f"--input path does not exist: {root}")  # noqa: TRY003  # tracked: #288
+        # lint-waiver: LW-007044 [TRY003]; Keep FileNotFoundError for callers and preserve this path-specific missing-input message
+        raise FileNotFoundError(f"--input path does not exist: {root}")  # noqa: TRY003
     if not root.is_dir():
-        raise ValueError(f"--input path is not a directory: {root}")  # noqa: TRY003  # tracked: #288
+        # lint-waiver: LW-007045 [TRY003]; Keep ValueError for CLI invalid-input handling and preserve this path-specific message
+        raise ValueError(f"--input path is not a directory: {root}")  # noqa: TRY003
 
     manifest_path = (
         task_directory.manifest_path if task_directory is not None else bundle_root / MANIFEST_NAME
     )
     if not manifest_path.is_file():
-        raise FileNotFoundError(f"Input manifest not found: {manifest_path}")  # noqa: TRY003  # tracked: #288
+        # lint-waiver: LW-007046 [TRY003]; Keep FileNotFoundError for callers and preserve this path-specific missing-input message
+        raise FileNotFoundError(f"Input manifest not found: {manifest_path}")  # noqa: TRY003
 
     objective_path = (
         task_directory.objective_path
@@ -575,12 +647,14 @@ def _load_input_bundle(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
         else bundle_root / "OBJECTIVE.md"
     )
     if not objective_path.is_file():
-        raise FileNotFoundError(f"OBJECTIVE.md not found: {objective_path}")  # noqa: TRY003  # tracked: #288
+        # lint-waiver: LW-007047 [TRY003]; Keep FileNotFoundError for callers and preserve this path-specific missing-input message
+        raise FileNotFoundError(f"OBJECTIVE.md not found: {objective_path}")  # noqa: TRY003
 
     try:
         manifest = InputManifest.model_validate(tomllib.loads(manifest_path.read_text()))
     except ValidationError as exc:
-        raise ValueError(f"Invalid input manifest {manifest_path}: {exc}") from exc  # noqa: TRY003  # tracked: #288
+        # lint-waiver: LW-007048 [TRY003]; Keep ValueError for CLI invalid-input handling and preserve this path-specific message
+        raise ValueError(f"Invalid input manifest {manifest_path}: {exc}") from exc  # noqa: TRY003
 
     environment = manifest.environment
     modal = environment.modal if environment is not None else None
@@ -589,14 +663,17 @@ def _load_input_bundle(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
         try:
             modal_entrypoint.relative_to(root)
         except ValueError as exc:
+            # lint-waiver: LW-007049 [TRY003]; Keep ValueError for CLI invalid-input handling and preserve this path-specific message
             raise ValueError(  # noqa: TRY003
                 f"environment.modal.entrypoint escapes the project: {modal.entrypoint}"
             ) from exc
         if not modal_entrypoint.exists():
+            # lint-waiver: LW-007050 [TRY003]; Keep FileNotFoundError for callers and preserve this path-specific missing-input message
             raise FileNotFoundError(  # noqa: TRY003
                 f"environment.modal.entrypoint does not exist: {modal_entrypoint}"
             )
         if not modal_entrypoint.is_file():
+            # lint-waiver: LW-007051 [TRY003]; Keep ValueError for CLI invalid-input handling and preserve this path-specific message
             raise ValueError(  # noqa: TRY003
                 f"environment.modal.entrypoint is not a file: {modal_entrypoint}"
             )
@@ -612,7 +689,7 @@ def _load_input_bundle(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
         ("benchmark.command", manifest.benchmark),
     ):
         if command_spec.entrypoint is not None:
-            assert evaluator_package is not None  # noqa: S101
+            evaluator_package = cast("ResolvedEvaluatorPackage", evaluator_package)
             resolved_commands.append(
                 evaluator_package.command(
                     command_spec.entrypoint,
@@ -621,10 +698,11 @@ def _load_input_bundle(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
             )
             continue
         command = command_spec.command
-        assert command is not None  # noqa: S101
+        command = cast("tuple[str, ...]", command)
         executable = Path(command[0])
         if executable.is_absolute():
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007052 [TRY003]; Keep ValueError for CLI invalid-input handling and preserve this path-specific message
+            raise ValueError(  # noqa: TRY003
                 f"{label} executable must be relative to the project: {command[0]}"
             )
         if "/" not in command[0]:
@@ -634,11 +712,14 @@ def _load_input_bundle(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
         try:
             resolved.relative_to(root)
         except ValueError as exc:
-            raise ValueError(f"{label} executable escapes the project: {command[0]}") from exc  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007053 [TRY003]; Keep FileNotFoundError for callers and preserve this path-specific missing-input message
+            raise ValueError(f"{label} executable escapes the project: {command[0]}") from exc  # noqa: TRY003
         if not resolved.exists():
-            raise FileNotFoundError(f"{label} executable does not exist: {resolved}")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007054 [TRY003]; Keep FileNotFoundError for callers and preserve this path-specific missing-input message
+            raise FileNotFoundError(f"{label} executable does not exist: {resolved}")  # noqa: TRY003
         if not resolved.is_file():
-            raise ValueError(f"{label} executable is not a file: {resolved}")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007055 [TRY003]; Keep ValueError for CLI invalid-input handling and preserve this path-specific message
+            raise ValueError(f"{label} executable is not a file: {resolved}")  # noqa: TRY003
         resolved_commands.append(command)
 
     reference_path = bundle_root / "reference"
@@ -647,7 +728,8 @@ def _load_input_bundle(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
             task_directory.resolve("reference") if task_directory is not None else reference_path
         )
     if reference_path.exists() and not reference_path.is_dir():
-        raise ValueError(f"reference path is not a directory: {reference_path}")  # noqa: TRY003  # tracked: #288
+        # lint-waiver: LW-007056 [TRY003]; Keep ValueError for CLI invalid-input handling and preserve this path-specific message
+        raise ValueError(f"reference path is not a directory: {reference_path}")  # noqa: TRY003
     if not reference_path.exists():
         reference_path = None
 
@@ -659,9 +741,11 @@ def _load_input_bundle(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
             else (bundle_root / manifest.evaluator.source).resolve()
         )
         if not evaluator_path.exists():
-            raise FileNotFoundError(f"evaluator.source path does not exist: {evaluator_path}")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007057 [TRY003]; Keep FileNotFoundError for callers and preserve this path-specific missing-input message
+            raise FileNotFoundError(f"evaluator.source path does not exist: {evaluator_path}")  # noqa: TRY003
         if not evaluator_path.is_dir():
-            raise ValueError(f"evaluator.source path is not a directory: {evaluator_path}")  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-007058 [TRY003]; Keep ValueError for CLI invalid-input handling and preserve this path-specific message
+            raise ValueError(f"evaluator.source path is not a directory: {evaluator_path}")  # noqa: TRY003
 
     return InputBundle(
         root=root,

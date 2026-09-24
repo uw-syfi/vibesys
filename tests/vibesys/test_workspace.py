@@ -7,7 +7,7 @@ only the edge-case tests materialize files.
 
 from __future__ import annotations
 
-import os
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,6 +18,10 @@ from vibesys.run import CopySpec, InputProjectSpec, Workspace
 from vibesys.run.workspace import GitSourceSpec
 from vibesys.sandbox.run_environment import LocalEnvironment
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pathlib import Path
+
 
 class _StubRunEnvironment(LocalEnvironment):
     """LocalEnvironment with ``isolated`` under the test's control."""
@@ -26,7 +30,13 @@ class _StubRunEnvironment(LocalEnvironment):
         self.isolated = isolated
 
 
-def _make_workspace(root, *, isolated=False, excluded_dirs=None, compute_backend=None):  # noqa: ANN001, ANN202  # tracked: #288
+def _make_workspace(
+    root: Path,
+    *,
+    isolated: bool = False,
+    excluded_dirs: Iterable[str] | None = None,
+    compute_backend: ComputeBackend | None = None,
+) -> Workspace:
     return Workspace(
         root,
         run_environment=_StubRunEnvironment(isolated=isolated),
@@ -38,7 +48,7 @@ def _make_workspace(root, *, isolated=False, excluded_dirs=None, compute_backend
     )
 
 
-def _write_platform_skill(root):  # noqa: ANN001, ANN202  # tracked: #288
+def _write_platform_skill(root: Path) -> Path:
     """A skill carrying one references/platforms/<backend>/ dir per backend."""
     skill = root / "serving-systems"
     (skill / "references" / "algorithms").mkdir(parents=True)
@@ -58,7 +68,9 @@ def _write_platform_skill(root):  # noqa: ANN001, ANN202  # tracked: #288
 @pytest.mark.parametrize(
     "selected", [ComputeBackend.CUDA, ComputeBackend.TRAINIUM, ComputeBackend.METAL]
 )
-def test_skill_copy_into_workspace_root_prunes_foreign_platforms(tmp_path, selected):  # noqa: ANN001, ANN201  # tracked: #288
+def test_skill_copy_into_workspace_root_prunes_foreign_platforms(
+    tmp_path: Path, selected: ComputeBackend
+) -> None:
     """The workspace-root skill copy is what the implementer prompt points at.
 
     It must be pruned exactly like the per-CLI copies — otherwise the agent can
@@ -78,7 +90,7 @@ def test_skill_copy_into_workspace_root_prunes_foreign_platforms(tmp_path, selec
     assert (ws.root / skill.name / "references/models/cuda/note.md").is_file()
 
 
-def test_skill_copy_without_backend_keeps_every_platform(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_skill_copy_without_backend_keeps_every_platform(tmp_path: Path) -> None:
     skill = _write_platform_skill(tmp_path / "src")
     ws = _make_workspace(tmp_path / "ws", compute_backend=None)
     ws.create()
@@ -89,7 +101,7 @@ def test_skill_copy_without_backend_keeps_every_platform(tmp_path):  # noqa: ANN
     assert {p.name for p in platforms.iterdir()} == {b.value for b in ComputeBackend}
 
 
-def test_non_skill_copies_never_prune_platforms(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_non_skill_copies_never_prune_platforms(tmp_path: Path) -> None:
     """prune_platforms is opt-in; an input bundle that happens to contain a
     references/platforms tree is copied verbatim."""
     src = _write_platform_skill(tmp_path / "src")
@@ -102,7 +114,7 @@ def test_non_skill_copies_never_prune_platforms(tmp_path):  # noqa: ANN001, ANN2
     assert {p.name for p in platforms.iterdir()} == {b.value for b in ComputeBackend}
 
 
-def test_every_skill_copy_step_is_marked_for_pruning(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_every_skill_copy_step_is_marked_for_pruning(tmp_path: Path) -> None:
     """Each of the three skill CopySpecs (root, per-CLI refresh, fresh setup)
     must set prune_platforms; a new one added without it silently leaks."""
     ws = _make_workspace(tmp_path / "ws")
@@ -128,7 +140,7 @@ def test_every_skill_copy_step_is_marked_for_pruning(tmp_path):  # noqa: ANN001,
     ]
 
 
-def test_fresh_plan_with_git_source_rejects_input_collisions(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_fresh_plan_with_git_source_rejects_input_collisions(tmp_path: Path) -> None:
     ws = _make_workspace(tmp_path / "ws")
     input_dir = tmp_path / "input"
     evaluator = tmp_path / "evaluators" / "queue"
@@ -175,7 +187,7 @@ def test_fresh_plan_with_git_source_rejects_input_collisions(tmp_path):  # noqa:
     )
 
 
-def test_fresh_plan_without_sources_does_not_reject_collisions(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_fresh_plan_without_sources_does_not_reject_collisions(tmp_path: Path) -> None:
     ws = _make_workspace(tmp_path / "ws")
     input_dir = tmp_path / "input"
 
@@ -192,7 +204,7 @@ def test_fresh_plan_without_sources_does_not_reject_collisions(tmp_path):  # noq
     assert plan == (CopySpec(src=input_dir, dest=ws.root),)
 
 
-def test_resume_plan_only_refreshes_skills_and_missing_profiler(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_resume_plan_only_refreshes_skills_and_missing_profiler(tmp_path: Path) -> None:
     root = tmp_path / "ws"
     skill = tmp_path / "skills" / "serving-systems"
     # Skill targets that exist in the interrupted workspace get refreshed —
@@ -221,7 +233,7 @@ def test_resume_plan_only_refreshes_skills_and_missing_profiler(tmp_path):  # no
     )
 
 
-def test_resume_plan_skips_profiler_already_present(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_resume_plan_skips_profiler_already_present(tmp_path: Path) -> None:
     root = tmp_path / "ws"
     (root / "nsys_profiler").mkdir(parents=True)
 
@@ -239,7 +251,7 @@ def test_resume_plan_skips_profiler_already_present(tmp_path):  # noqa: ANN001, 
     assert plan == ()
 
 
-def test_setup_rejects_preexisting_evaluator_dir(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_setup_rejects_preexisting_evaluator_dir(tmp_path: Path) -> None:
     root = tmp_path / "ws"
     evaluator = tmp_path / "evaluator"
     evaluator.mkdir()
@@ -263,7 +275,7 @@ def test_setup_rejects_preexisting_evaluator_dir(tmp_path):  # noqa: ANN001, ANN
         ws.setup(evaluator_steps, existing=False)
 
 
-def test_setup_prunes_excluded_dirs_on_fresh_runs_only(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_setup_prunes_excluded_dirs_on_fresh_runs_only(tmp_path: Path) -> None:
     root = tmp_path / "ws"
     (root / "target").mkdir(parents=True)
     (root / "target" / "stale.o").write_text("stale")
@@ -276,12 +288,12 @@ def test_setup_prunes_excluded_dirs_on_fresh_runs_only(tmp_path):  # noqa: ANN00
     assert not (root / "target").exists()
 
 
-def test_copy_dir_replaces_external_symlinks_when_not_isolated(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_copy_dir_replaces_external_symlinks_when_not_isolated(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
     src = tmp_path / "src"
     src.mkdir()
-    os.symlink(outside, src / "model")  # noqa: PTH211  # tracked: #288
+    (src / "model").symlink_to(outside)
 
     dst = tmp_path / "ws"
     _make_workspace(dst, isolated=False).copy_dir(src, dst)
@@ -290,12 +302,12 @@ def test_copy_dir_replaces_external_symlinks_when_not_isolated(tmp_path):  # noq
     assert (dst / "model.symlink_target").read_text() == str(outside.resolve())
 
 
-def test_copy_dir_removes_external_symlinks_when_isolated(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_copy_dir_removes_external_symlinks_when_isolated(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
     src = tmp_path / "src"
     src.mkdir()
-    os.symlink(outside, src / "model")  # noqa: PTH211  # tracked: #288
+    (src / "model").symlink_to(outside)
     (src / "kept.py").write_text("pass\n")
 
     dst = tmp_path / "ws"

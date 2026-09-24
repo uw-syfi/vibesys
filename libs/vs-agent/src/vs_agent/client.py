@@ -178,7 +178,7 @@ class AgentClient:
 
     backend_name = "cli"
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         driver: AgentDriver,
         *,
@@ -258,7 +258,7 @@ class AgentClient:
         if self._driver_log is not None:
             self._driver_log.stream = stream
 
-    def invoke(  # noqa: PLR0913
+    def invoke(
         self,
         *,
         kind: str,
@@ -315,7 +315,7 @@ class AgentClient:
         _emit_and_log(self._sink, parsed.model_dump_json(indent=2), self._run_log_file)
         return parsed
 
-    def invoke_text(  # noqa: PLR0913
+    def invoke_text(
         self,
         *,
         kind: str,
@@ -364,7 +364,7 @@ class AgentClient:
             )
         return result.text
 
-    def _invoke_turn(  # noqa: PLR0913
+    def _invoke_turn(
         self,
         *,
         kind: str,
@@ -408,7 +408,7 @@ class AgentClient:
             invocation_id=invocation_id,
             label=round_label,
         )
-        from vs_agent.callbacks import AgentLogger  # noqa: PLC0415
+        from vs_agent.callbacks import AgentLogger
 
         logger = AgentLogger(
             log_file=self._run_log_file,
@@ -469,7 +469,7 @@ class AgentClient:
                 reasoning_effort=reasoning_effort,
                 usage=result.usage if result is not None else AgentUsage(),
             )
-        assert result is not None  # noqa: S101  # assigned or the exception propagated
+        assert result is not None  # assigned or the exception propagated
         return result, logger
 
     def _write_usage_record(
@@ -543,7 +543,7 @@ class AgentClient:
             # unusable reports RESET_REQUIRED instead of raising.
             try:
                 self._evict(session_key)
-            except Exception as cleanup_error:  # noqa: BLE001  # preserve the turn failure
+            except Exception as cleanup_error:  # preserve the turn failure
                 error.add_note(f"agent session cleanup also failed: {cleanup_error}")
             raise
 
@@ -640,12 +640,12 @@ class AgentClient:
         for key in tuple(self._sessions):
             try:
                 self._evict(key)
-            except Exception as error:  # noqa: BLE001  # cleanup must continue
+            except Exception as error:  # cleanup must continue
                 if first_error is None:
                     first_error = error
         try:
             self._driver.close()
-        except Exception as error:  # noqa: BLE001  # preserve earlier cleanup failures
+        except Exception as error:  # preserve earlier cleanup failures
             if first_error is None:
                 first_error = error
         if first_error is not None:

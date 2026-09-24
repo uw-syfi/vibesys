@@ -13,7 +13,6 @@ from .config import TextConfig
 from .model import Qwen35ForCausalLM
 
 log = logging.getLogger(__name__)
-
 _TEXT_PREFIX = "model.language_model."
 _LM_HEAD = "lm_head.weight"
 
@@ -31,7 +30,6 @@ def load_model(
     model_dir: Path, cfg: TextConfig, device: torch.device, dtype: torch.dtype
 ) -> Qwen35ForCausalLM:
     """Build the model on `meta`, then materialize every parameter straight from safetensors.
-
     All floating tensors are cast to `dtype` (bf16), matching HF
     `from_pretrained(dtype=torch.bfloat16)`. Loading is strict: a missing or
     unexpected text tensor is an error.

@@ -55,8 +55,7 @@ def _config() -> ProfileGuidedInput:
 
 def _framed(payload: str) -> str:
     return (
-        f"diagnostic\n{runner._ATTRIBUTION_MARKER}\n{payload}\n"  # noqa: SLF001
-        f"{runner._ATTRIBUTION_END_MARKER}\n"  # noqa: SLF001
+        f"diagnostic\n{runner._ATTRIBUTION_MARKER}\n{payload}\n{runner._ATTRIBUTION_END_MARKER}\n"
     )
 
 

@@ -34,7 +34,7 @@ def test_the_limit_matches_what_the_kernel_actually_accepts(socket_dir: Path) ->
 
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as accepted:
         accepted.bind(str(longest))
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as rejected:  # noqa: SIM117
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as rejected:
         with pytest.raises(OSError, match="too long"):
             rejected.bind(f"{longest}a")
 

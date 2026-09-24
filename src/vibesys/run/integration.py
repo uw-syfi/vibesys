@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING
 
 from vibesys.run.event_journal import EventJournal
@@ -11,6 +10,7 @@ from vibesys.run.run_control import RunControlChannel
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from pydantic import BaseModel
 
@@ -69,7 +69,7 @@ class LocalRunIntegration:
         """Compose a durable journal with direct invocation control."""
         self.events = EventJournal()
         self.control = RunControlChannel(self.events)
-        from vibesys.render import output_sink  # noqa: PLC0415
+        from vibesys.render import output_sink
 
         self._unsubscribe_output = output_sink().subscribe(self.events.record)
         self._closed = False
@@ -78,13 +78,14 @@ class LocalRunIntegration:
         ) = None
         self._resource_listener: Callable[[RunResourceHandoff], None] | None = None
 
-    def attach(  # noqa: D102
+    def attach(
         self,
         log_dir: Path,
         *,
         project: Project | None = None,
         run_id: str | None = None,
     ) -> None:
+        """Attach event persistence to the run's log directory."""
         del project
         self.events.attach(log_dir, run_id or log_dir.parent.name)
 

@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 from vibesys.domains.environment import (
     EnvironmentBindMount,
     EnvironmentContext,
     EnvironmentPatch,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 
 def _ensure_model_weights(
@@ -35,7 +38,7 @@ def _ensure_model_weights(
 
     meta_path = ref_dir / "meta.json"
     if not meta_path.exists():
-        raise FileNotFoundError(  # noqa: TRY003  # tracked: #288
+        raise FileNotFoundError(
             f"Model weights not found at {model_path} and no meta.json to download from. "
             f"Either create a model/ directory/symlink or add a meta.json with model_id."
         )
@@ -43,11 +46,11 @@ def _ensure_model_weights(
     meta = json.loads(meta_path.read_text())
     model_id = meta.get("model_id")
     if not model_id:
-        raise ValueError(f"meta.json at {meta_path} missing required 'model_id' field")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"meta.json at {meta_path} missing required 'model_id' field")
 
     revision = meta.get("revision")
     log(f"[model] Weights not found at {model_path}. Downloading {model_id} to {cache_dir}...")
-    from huggingface_hub import snapshot_download  # noqa: PLC0415  # tracked: #288
+    from huggingface_hub import snapshot_download
 
     downloaded_path = snapshot_download(model_id, revision=revision, cache_dir=str(cache_dir))
     model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,10 +59,13 @@ def _ensure_model_weights(
     return model_path
 
 
-class LLMServingEnvironmentHooks:  # noqa: D101  # tracked: #288
+class LLMServingEnvironmentHooks:
+    """Prepare model weights and paths for LLM serving tasks."""
+
     _MODEL_ARTIFACT_NAMES = frozenset({"model", "draft_model"})
 
-    def prepare(self, ctx: EnvironmentContext) -> EnvironmentPatch:  # noqa: D102  # tracked: #288
+    def prepare(self, ctx: EnvironmentContext) -> EnvironmentPatch:
+        """Mount model artifacts into the selected evaluation environment."""
         ref_path = ctx.reference_path
         if not ref_path.is_dir():
             return EnvironmentPatch()
@@ -76,11 +82,11 @@ class LLMServingEnvironmentHooks:  # noqa: D101  # tracked: #288
 
         bind_mounts: list[EnvironmentBindMount] = []
         if model_path.is_dir() or model_path.is_symlink():
-            bind_mounts.append(EnvironmentBindMount(model_path, "/model", True))  # noqa: FBT003  # tracked: #288
+            bind_mounts.append(EnvironmentBindMount(model_path, "/model", True))
 
         draft_model_path = ref_path / "draft_model"
         if draft_model_path.is_dir() or draft_model_path.is_symlink():
-            bind_mounts.append(EnvironmentBindMount(draft_model_path, "/draft_model", True))  # noqa: FBT003  # tracked: #288
+            bind_mounts.append(EnvironmentBindMount(draft_model_path, "/draft_model", True))
 
         return EnvironmentPatch(
             copy_excludes=self._MODEL_ARTIFACT_NAMES
@@ -89,5 +95,6 @@ class LLMServingEnvironmentHooks:  # noqa: D101  # tracked: #288
             bind_mounts=tuple(bind_mounts),
         )
 
-    def teardown(self, ctx: EnvironmentContext) -> None:  # noqa: ARG002, D102  # tracked: #288
+    def teardown(self, ctx: EnvironmentContext) -> None:
+        """Perform no cleanup because model preparation owns no live resources."""
         return None

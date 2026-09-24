@@ -6,6 +6,8 @@ import io
 
 from vibesys.events import (
     AgentOutputChunkData,
+    CoreEvent,
+    CoreEventData,
     CoreEventType,
     EventStatus,
     FrameworkWarningData,
@@ -19,12 +21,16 @@ from vibesys.events import (
 from vibesys.render.run_log import RunLogRenderer, format_framework_event
 
 
-def _event(event_type, data, status=None):  # noqa: ANN001, ANN202
+def _event(
+    event_type: CoreEventType,
+    data: CoreEventData,
+    status: EventStatus | None = None,
+) -> CoreEvent:
     return make_core_event(event_type, data=data, status=status)
 
 
 class TestFormatFrameworkEvent:
-    def test_gate_started_with_recipe_and_command(self):  # noqa: ANN201
+    def test_gate_started_with_recipe_and_command(self) -> None:
         line = format_framework_event(
             _event(
                 CoreEventType.GATE_STARTED,
@@ -38,7 +44,7 @@ class TestFormatFrameworkEvent:
         )
         assert line == "[framework-validation] running focused-tests: uv run pytest -q"
 
-    def test_gate_started_command_only(self):  # noqa: ANN201
+    def test_gate_started_command_only(self) -> None:
         line = format_framework_event(
             _event(
                 CoreEventType.GATE_STARTED,
@@ -47,7 +53,7 @@ class TestFormatFrameworkEvent:
         )
         assert line == "[framework-accuracy] running: trusted-check"
 
-    def test_gate_finished_pass_with_metric(self):  # noqa: ANN201
+    def test_gate_finished_pass_with_metric(self) -> None:
         line = format_framework_event(
             _event(
                 CoreEventType.GATE_FINISHED,
@@ -57,7 +63,7 @@ class TestFormatFrameworkEvent:
         )
         assert line == "[framework-benchmark] PASS: tok_per_sec=42.0"
 
-    def test_gate_finished_reused_pass(self):  # noqa: ANN201
+    def test_gate_finished_reused_pass(self) -> None:
         line = format_framework_event(
             _event(
                 CoreEventType.GATE_FINISHED,
@@ -67,7 +73,7 @@ class TestFormatFrameworkEvent:
         )
         assert line == "[framework-validation] reused PASS: focused-tests"
 
-    def test_gate_finished_failure_carries_the_output_tail(self):  # noqa: ANN201
+    def test_gate_finished_failure_carries_the_output_tail(self) -> None:
         line = format_framework_event(
             _event(
                 CoreEventType.GATE_FINISHED,
@@ -77,7 +83,7 @@ class TestFormatFrameworkEvent:
         )
         assert line == "[framework-accuracy] FAIL: assertion mismatch"
 
-    def test_workspace_snapshot_commit_and_no_change(self):  # noqa: ANN201
+    def test_workspace_snapshot_commit_and_no_change(self) -> None:
         committed = format_framework_event(
             _event(
                 CoreEventType.WORKSPACE_SNAPSHOT,
@@ -90,7 +96,7 @@ class TestFormatFrameworkEvent:
         )
         assert unchanged == "[git-tracking] no changes to commit for 'round-3'"
 
-    def test_workspace_snapshot_baseline_and_exclusions(self):  # noqa: ANN201
+    def test_workspace_snapshot_baseline_and_exclusions(self) -> None:
         baseline = format_framework_event(
             _event(CoreEventType.WORKSPACE_SNAPSHOT, WorkspaceSnapshotData(baseline="b" * 40))
         )
@@ -106,7 +112,7 @@ class TestFormatFrameworkEvent:
         assert "/p4" in excluded
         assert "/p5" not in excluded
 
-    def test_run_configured_renders_the_header_block(self):  # noqa: ANN201
+    def test_run_configured_renders_the_header_block(self) -> None:
         line = format_framework_event(
             _event(
                 CoreEventType.RUN_CONFIGURED,
@@ -127,7 +133,7 @@ class TestFormatFrameworkEvent:
             "[log] benchmark result contract declared; it owns candidate fitness"
         )
 
-    def test_framework_warning(self):  # noqa: ANN201
+    def test_framework_warning(self) -> None:
         with_detail = format_framework_event(
             _event(
                 CoreEventType.FRAMEWORK_WARNING,
@@ -140,7 +146,7 @@ class TestFormatFrameworkEvent:
         )
         assert bare == "[warn] odd state"
 
-    def test_non_framework_events_render_nothing(self):  # noqa: ANN201
+    def test_non_framework_events_render_nothing(self) -> None:
         line = format_framework_event(
             _event(
                 CoreEventType.AGENT_OUTPUT_CHUNK,
@@ -151,7 +157,7 @@ class TestFormatFrameworkEvent:
 
 
 class TestRunLogRenderer:
-    def test_writes_framework_lines_to_the_writer(self):  # noqa: ANN201
+    def test_writes_framework_lines_to_the_writer(self) -> None:
         buffer = io.StringIO()
         renderer = RunLogRenderer(buffer)
         renderer.handle(
@@ -168,7 +174,7 @@ class TestRunLogRenderer:
         )
         assert buffer.getvalue() == "[warn] profiler failed: boom\n"
 
-    def test_closed_writer_is_left_alone(self):  # noqa: ANN201
+    def test_closed_writer_is_left_alone(self) -> None:
         buffer = io.StringIO()
         renderer = RunLogRenderer(buffer)
         buffer.close()

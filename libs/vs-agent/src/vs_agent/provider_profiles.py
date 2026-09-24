@@ -29,6 +29,6 @@ def provider_profile(provider: str) -> ProviderProfile:
         ValueError: if agentshim does not register *provider*. The message
             names the provider and the registered alternatives.
     """
-    import agentshim  # noqa: PLC0415
+    import agentshim
 
     return agentshim.get_provider(provider).profile

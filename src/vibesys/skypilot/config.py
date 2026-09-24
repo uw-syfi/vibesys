@@ -23,6 +23,44 @@ _HOURS_PER_DAY = 24
 class ClusterProfileError(ValueError):
     """Raised when an operator profile document cannot be loaded or resolved."""
 
+    @classmethod
+    def load_failed(cls, path: Path, error: Exception) -> ClusterProfileError:
+        """Describe a cluster profile file that could not be parsed or validated."""
+        return cls(f"Could not load cluster profiles from {path}: {error}")
+
+    @classmethod
+    def unknown_profile(cls, name: str, available: str) -> ClusterProfileError:
+        """Describe a requested profile absent from the document."""
+        return cls(f"Unknown cluster profile {name!r}; available profiles: {available}")
+
+    @classmethod
+    def backend_mismatch(cls, name: str, available: str, requested: str) -> ClusterProfileError:
+        """Describe an accelerator backend mismatch between request and profile."""
+        return cls(f"Profile {name!r} provides {available}, but the run requests {requested}")
+
+    @classmethod
+    def nodes_exceeded(cls, name: str, maximum: int, requested: int) -> ClusterProfileError:
+        """Describe a node count above a profile's limit."""
+        return cls(
+            f"Profile {name!r} permits at most {maximum} nodes, but the run requests {requested}"
+        )
+
+    @classmethod
+    def accelerators_exceeded(cls, name: str, maximum: int, requested: int) -> ClusterProfileError:
+        """Describe an accelerator count above a profile's limit."""
+        return cls(
+            f"Profile {name!r} provides at most {maximum} accelerators per node, "
+            f"but the run requests {requested}"
+        )
+
+    @classmethod
+    def cpus_exceeded(cls, name: str, maximum: int, requested: int) -> ClusterProfileError:
+        """Describe a CPU count above a profile's limit."""
+        return cls(
+            f"Profile {name!r} provides at most {maximum} CPUs per node, "
+            f"but the run requests {requested}"
+        )
+
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -53,7 +91,7 @@ class SkyPilotProfile(_StrictModel):
             return None
         stripped = value.strip()
         if not stripped:
-            raise ValueError("must not be empty")  # noqa: TRY003
+            raise ValueError("must not be empty")  # noqa: TRY003  # lint-waiver: LW-007090 [TRY003]; Pydantic profile validation needs ValueError for field errors.
         return stripped
 
     @field_validator("allocation_time")
@@ -63,16 +101,16 @@ class SkyPilotProfile(_StrictModel):
             return None
         match = _ALLOCATION_TIME.fullmatch(value)
         if match is None:
-            raise ValueError("must use [days-]hours:minutes:seconds")  # noqa: TRY003
+            raise ValueError("must use [days-]hours:minutes:seconds")  # noqa: TRY003  # lint-waiver: LW-007091 [TRY003]; Pydantic profile validation needs ValueError for field errors.
         if (
             int(match.group("minutes")) >= _MINUTES_PER_HOUR
             or int(match.group("seconds")) >= _MINUTES_PER_HOUR
         ):
-            raise ValueError("minutes and seconds must be less than 60")  # noqa: TRY003
+            raise ValueError("minutes and seconds must be less than 60")  # noqa: TRY003  # lint-waiver: LW-007092 [TRY003]; Pydantic profile validation needs ValueError for field errors.
         if match.group("days") is not None and int(match.group("hours")) >= _HOURS_PER_DAY:
-            raise ValueError("hours must be less than 24 when days are present")  # noqa: TRY003
+            raise ValueError("hours must be less than 24 when days are present")  # noqa: TRY003  # lint-waiver: LW-007093 [TRY003]; Pydantic profile validation needs ValueError for field errors.
         if not any(int(match.group(part) or 0) for part in ("days", "hours", "minutes", "seconds")):
-            raise ValueError("must be greater than zero")  # noqa: TRY003
+            raise ValueError("must be greater than zero")  # noqa: TRY003  # lint-waiver: LW-007094 [TRY003]; Pydantic profile validation needs ValueError for field errors.
         return value
 
     @field_validator("remote_artifact_root")
@@ -80,7 +118,7 @@ class SkyPilotProfile(_StrictModel):
     def _absolute_remote_path(cls, value: str) -> str:
         path = PurePosixPath(value)
         if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts[1:]):
-            raise ValueError("must be an absolute normalized POSIX path")  # noqa: TRY003
+            raise ValueError("must be an absolute normalized POSIX path")  # noqa: TRY003  # lint-waiver: LW-007095 [TRY003]; Pydantic profile validation needs ValueError for field errors.
         return path.as_posix()
 
 
@@ -96,10 +134,10 @@ class ClusterProfilesFile(_StrictModel):
         cls, profiles: dict[str, SkyPilotProfile]
     ) -> dict[str, SkyPilotProfile]:
         if not profiles:
-            raise ValueError("must declare at least one profile")  # noqa: TRY003
+            raise ValueError("must declare at least one profile")  # noqa: TRY003  # lint-waiver: LW-007096 [TRY003]; Pydantic profile validation needs ValueError for field errors.
         invalid = sorted(name for name in profiles if _PROFILE_NAME.fullmatch(name) is None)
         if invalid:
-            raise ValueError(f"invalid profile name: {invalid[0]!r}")  # noqa: TRY003
+            raise ValueError(f"invalid profile name: {invalid[0]!r}")  # noqa: TRY003  # lint-waiver: LW-007097 [TRY003]; Pydantic profile validation needs ValueError for field errors.
         return profiles
 
 
@@ -128,9 +166,7 @@ def load_cluster_profiles(path: Path) -> ClusterProfilesFile:
             raw = tomllib.load(profile_file)
         return ClusterProfilesFile.model_validate(raw, strict=True)
     except (OSError, tomllib.TOMLDecodeError, ValidationError) as exc:
-        raise ClusterProfileError(  # noqa: TRY003
-            f"Could not load cluster profiles from {normalized}: {exc}"
-        ) from exc
+        raise ClusterProfileError.load_failed(normalized, exc) from exc
 
 
 def resolve_profile(
@@ -143,32 +179,24 @@ def resolve_profile(
         profile = document.profiles[profile_name]
     except KeyError as exc:
         available = ", ".join(sorted(document.profiles))
-        raise ClusterProfileError(  # noqa: TRY003
-            f"Unknown cluster profile {profile_name!r}; available profiles: {available}"
-        ) from exc
+        raise ClusterProfileError.unknown_profile(profile_name, available) from exc
     if request.accelerator_backend != profile.accelerator_backend:
-        raise ClusterProfileError(  # noqa: TRY003
-            f"Profile {profile_name!r} provides {profile.accelerator_backend}, "
-            f"but the run requests {request.accelerator_backend}"
+        raise ClusterProfileError.backend_mismatch(
+            profile_name, profile.accelerator_backend, request.accelerator_backend
         )
     if request.nodes > profile.max_nodes:
-        raise ClusterProfileError(  # noqa: TRY003
-            f"Profile {profile_name!r} permits at most {profile.max_nodes} nodes, "
-            f"but the run requests {request.nodes}"
-        )
+        raise ClusterProfileError.nodes_exceeded(profile_name, profile.max_nodes, request.nodes)
     if request.accelerators_per_node > profile.accelerators_per_node:
-        raise ClusterProfileError(  # noqa: TRY003
-            f"Profile {profile_name!r} provides at most {profile.accelerators_per_node} "
-            f"accelerators per node, but the run requests {request.accelerators_per_node}"
+        raise ClusterProfileError.accelerators_exceeded(
+            profile_name, profile.accelerators_per_node, request.accelerators_per_node
         )
     if (
         request.cpus_per_node is not None
         and profile.cpus_per_node is not None
         and request.cpus_per_node > profile.cpus_per_node
     ):
-        raise ClusterProfileError(  # noqa: TRY003
-            f"Profile {profile_name!r} provides at most {profile.cpus_per_node} CPUs per node, "
-            f"but the run requests {request.cpus_per_node}"
+        raise ClusterProfileError.cpus_exceeded(
+            profile_name, profile.cpus_per_node, request.cpus_per_node
         )
     return ResolvedSkyPilotResources(
         profile_name=profile_name,

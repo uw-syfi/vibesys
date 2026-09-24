@@ -105,7 +105,7 @@ def test_required_system_tools_reject_missing_git(
     monkeypatch.setattr(verifier.shutil, "which", lambda _executable: None)
 
     with pytest.raises(verifier.InstalledReleaseError, match="git"):
-        verifier._verify_required_system_tools()  # noqa: SLF001
+        verifier._verify_required_system_tools()
 
 
 def test_tui_verification_checks_controller_startup_and_completed_headless_run(
@@ -176,7 +176,7 @@ observed_path.write_text(json.dumps(observed))
     monkeypatch.setenv("VIBESYS_TEST_OBSERVED", str(observed))
     monkeypatch.setattr(verifier, "_verify_project_state", lambda _root: None)
 
-    verifier._verify_tui()  # noqa: SLF001
+    verifier._verify_tui()
 
     common_arguments = [
         "--stub-agent",
@@ -294,7 +294,7 @@ def test_project_smoke_requires_exactly_one_run(
 
     monkeypatch.setattr(verifier, "Project", _ProjectWithoutRuns)
     with pytest.raises(verifier.InstalledReleaseError, match="exactly one run"):
-        verifier._verify_project_state(tmp_path)  # noqa: SLF001
+        verifier._verify_project_state(tmp_path)
 
 
 def test_project_smoke_reads_rounds_from_authoritative_agent_state(
@@ -342,4 +342,4 @@ def test_project_smoke_reads_rounds_from_authoritative_agent_state(
     monkeypatch.setattr(verifier, "Project", _Project)
     monkeypatch.setattr(verifier, "AgentRunStateStore", _AgentStateStore)
 
-    verifier._verify_project_state(tmp_path)  # noqa: SLF001
+    verifier._verify_project_state(tmp_path)

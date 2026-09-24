@@ -4,13 +4,15 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 import tomllib
-from collections.abc import Iterator  # noqa: TC003  # tracked: #288
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
+from tests.support import run_test_command
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 QUEUE_TASKS = {
     "spsc": "spsc",
@@ -58,7 +60,7 @@ def _evaluator_command(
 
 
 @pytest.fixture(scope="session")
-def compiled_queue_candidate(tmp_path_factory) -> Path:  # noqa: ANN001  # tracked: #288
+def compiled_queue_candidate(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Build the repository's shared Rust candidate once for evaluator tests."""
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted queue evaluator")
@@ -67,7 +69,7 @@ def compiled_queue_candidate(tmp_path_factory) -> Path:  # noqa: ANN001  # track
     repository = _queue_repository(project_root)
     build_dir = tmp_path_factory.mktemp("queue-rs-build") / "repository"
     shutil.copytree(repository, build_dir)
-    subprocess.run(["make"], cwd=build_dir, check=True)  # noqa: S607  # tracked: #288
+    run_test_command(["make"], cwd=build_dir, check=True)
 
     candidate = build_dir / "queue-candidate.so"
     assert candidate.is_file()
@@ -75,7 +77,7 @@ def compiled_queue_candidate(tmp_path_factory) -> Path:  # noqa: ANN001  # track
 
 
 @pytest.fixture(scope="session")
-def queue_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN001  # tracked: #288
+def queue_native_runner(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """Build the trusted evaluator runner once and reuse it across subprocesses."""
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted queue evaluator")
@@ -83,8 +85,8 @@ def queue_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN001  # 
     project_root = Path(__file__).parents[2]
     source = _queue_evaluator(project_root) / "native_runner"
     target_dir = tmp_path_factory.mktemp("queue-native-runner") / "target"
-    subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    run_test_command(
+        [
             "cargo",
             "build",
             "--quiet",
@@ -109,7 +111,7 @@ def queue_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN001  # 
         environment.undo()
 
 
-def test_queue_task_manifests_use_versioned_evaluator_entrypoint():  # noqa: ANN201  # tracked: #288
+def test_queue_task_manifests_use_versioned_evaluator_entrypoint() -> None:
     project_root = Path(__file__).parents[2]
     repository = _queue_repository(project_root)
 
@@ -161,7 +163,7 @@ def test_queue_task_manifests_use_versioned_evaluator_entrypoint():  # noqa: ANN
     assert not any(old_core.glob("src/queue_input_core/*.py"))
 
 
-def test_queue_tasks_live_with_the_editable_repository():  # noqa: ANN201  # tracked: #288
+def test_queue_tasks_live_with_the_editable_repository() -> None:
     project_root = Path(__file__).parents[2]
     repository = _queue_repository(project_root)
     repository_files = [
@@ -206,7 +208,7 @@ def test_native_runner_build_ignores_candidate_cargo_config(
     cargo_config.write_text('[build]\nrustc-wrapper = "/candidate/missing-wrapper"\n')
     monkeypatch.delenv("VIBESYS_QUEUE_NATIVE_RUNNER", raising=False)
 
-    completed = subprocess.run(  # noqa: S603
+    completed = run_test_command(
         [
             go,
             "-C",
@@ -239,7 +241,7 @@ def test_native_runner_build_ignores_candidate_cargo_config(
 
 
 @pytest.mark.usefixtures("queue_native_runner")
-def test_spsc_rigtorp_baseline_builds_and_passes_accuracy(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_spsc_rigtorp_baseline_builds_and_passes_accuracy(tmp_path: Path) -> None:
     if shutil.which("go") is None or shutil.which("c++") is None:
         pytest.skip("Go and a C++ compiler are required by the SPSC baseline")
 
@@ -250,13 +252,13 @@ def test_spsc_rigtorp_baseline_builds_and_passes_accuracy(tmp_path):  # noqa: AN
     evaluator = _queue_evaluator(project_root)
     abi_header = evaluator / "include" / "vibesys_queue_abi.h"
 
-    subprocess.run(  # noqa: S603  # tracked: #288
-        ["make", "clean", "all", f"ABI_HEADER={abi_header}"],  # noqa: S607  # tracked: #288
+    run_test_command(
+        ["make", "clean", "all", f"ABI_HEADER={abi_header}"],
         cwd=baseline,
         check=True,
     )
-    completed = subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    completed = run_test_command(
+        [
             "go",
             "-C",
             str(evaluator),
@@ -283,7 +285,7 @@ def test_spsc_rigtorp_baseline_builds_and_passes_accuracy(tmp_path):  # noqa: AN
     assert "PASS - spsc linearizable" in completed.stdout
 
 
-def test_spsc_rigtorp_baseline_uses_pinned_upstream_header():  # noqa: ANN201  # tracked: #288
+def test_spsc_rigtorp_baseline_uses_pinned_upstream_header() -> None:
     project_root = Path(__file__).parents[2]
     baseline = project_root / "examples" / "baselines" / "queue-spsc-rigtorp"
     upstream_header = baseline / "include" / "rigtorp" / "SPSCQueue.h"
@@ -297,7 +299,7 @@ def test_spsc_rigtorp_baseline_uses_pinned_upstream_header():  # noqa: ANN201  #
 
 
 @pytest.mark.usefixtures("queue_native_runner")
-def test_mpmc_locked_ring_baseline_builds_and_passes_accuracy(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_mpmc_locked_ring_baseline_builds_and_passes_accuracy(tmp_path: Path) -> None:
     if shutil.which("go") is None or shutil.which("cc") is None:
         pytest.skip("Go and a C compiler are required by the MPMC baseline")
 
@@ -308,13 +310,13 @@ def test_mpmc_locked_ring_baseline_builds_and_passes_accuracy(tmp_path):  # noqa
     evaluator = _queue_evaluator(project_root)
     abi_header = evaluator / "include" / "vibesys_queue_abi.h"
 
-    subprocess.run(  # noqa: S603  # tracked: #288
-        ["make", "clean", "all", f"ABI_HEADER={abi_header}"],  # noqa: S607  # tracked: #288
+    run_test_command(
+        ["make", "clean", "all", f"ABI_HEADER={abi_header}"],
         cwd=baseline,
         check=True,
     )
-    completed = subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    completed = run_test_command(
+        [
             "go",
             "-C",
             str(evaluator),
@@ -341,7 +343,7 @@ def test_mpmc_locked_ring_baseline_builds_and_passes_accuracy(tmp_path):  # noqa
     assert "PASS - mpmc reservation-aware bounded FIFO" in completed.stdout
 
 
-def test_mpmc_locked_ring_baseline_has_atomic_publication_region():  # noqa: ANN201  # tracked: #288
+def test_mpmc_locked_ring_baseline_has_atomic_publication_region() -> None:
     project_root = Path(__file__).parents[2]
     baseline = project_root / "examples" / "baselines" / "queue-mpmc-locked-ring"
     adapter = (baseline / "locked_ring.c").read_text()
@@ -359,12 +361,12 @@ def test_mpmc_locked_ring_baseline_has_atomic_publication_region():  # noqa: ANN
 
 @pytest.mark.parametrize(("task_name", "scenario"), QUEUE_TASKS.items())
 @pytest.mark.usefixtures("queue_native_runner")
-def test_repository_candidate_passes_each_task_accuracy(  # noqa: ANN201  # tracked: #288
-    tmp_path,  # noqa: ANN001  # tracked: #288
-    task_name,  # noqa: ANN001  # tracked: #288
-    scenario,  # noqa: ANN001  # tracked: #288
-    compiled_queue_candidate,  # noqa: ANN001  # tracked: #288
-):
+def test_repository_candidate_passes_each_task_accuracy(
+    tmp_path: Path,
+    task_name: str,
+    scenario: str,
+    compiled_queue_candidate: Path,
+) -> None:
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted queue evaluator")
 
@@ -392,7 +394,7 @@ def test_repository_candidate_passes_each_task_accuracy(  # noqa: ANN201  # trac
         "--trials",
         "1",
     ]
-    completed = subprocess.run(  # noqa: S603  # tracked: #288
+    completed = run_test_command(
         accuracy,
         cwd=workspace,
         check=True,
@@ -410,7 +412,7 @@ def test_repository_candidate_passes_each_task_accuracy(  # noqa: ANN201  # trac
 
 
 @pytest.mark.usefixtures("queue_native_runner")
-def test_task_entrypoints_run_from_repository_root(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_task_entrypoints_run_from_repository_root(tmp_path: Path) -> None:
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted queue evaluator")
 
@@ -421,7 +423,7 @@ def test_task_entrypoints_run_from_repository_root(tmp_path):  # noqa: ANN001, A
         workspace,
         ignore=shutil.ignore_patterns("queue-candidate.so", "target"),
     )
-    subprocess.run(["make"], cwd=workspace, check=True)  # noqa: S607  # tracked: #288
+    run_test_command(["make"], cwd=workspace, check=True)
     manifest = _task_manifest(workspace, "spsc")
     evaluator = _queue_evaluator(project_root)
 
@@ -434,7 +436,7 @@ def test_task_entrypoints_run_from_repository_root(tmp_path):  # noqa: ANN001, A
         "--trials",
         "1",
     ]
-    subprocess.run(accuracy, cwd=workspace, check=True)  # noqa: S603  # tracked: #288
+    run_test_command(accuracy, cwd=workspace, check=True)
 
     output = workspace / "results.json"
     benchmark = [
@@ -448,7 +450,7 @@ def test_task_entrypoints_run_from_repository_root(tmp_path):  # noqa: ANN001, A
         "--output-json",
         str(output),
     ]
-    subprocess.run(benchmark, cwd=workspace, check=True)  # noqa: S603  # tracked: #288
+    run_test_command(benchmark, cwd=workspace, check=True)
     results = json.loads(output.read_text())
     assert [result["scenario"] for result in results] == ["spsc"]
     assert all(result["repetitions"] == 3 for result in results)
@@ -456,9 +458,9 @@ def test_task_entrypoints_run_from_repository_root(tmp_path):  # noqa: ANN001, A
 
 
 @pytest.mark.usefixtures("queue_native_runner")
-def test_queue_evaluator_rejects_adversarial_histories():  # noqa: ANN201  # tracked: #288
+def test_queue_evaluator_rejects_adversarial_histories() -> None:
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted queue evaluator")
 
     evaluator = _queue_evaluator(Path(__file__).parents[2])
-    subprocess.run(["go", "test", "./..."], cwd=evaluator, check=True)  # noqa: S607  # tracked: #288
+    run_test_command(["go", "test", "./..."], cwd=evaluator, check=True)

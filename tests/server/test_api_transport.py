@@ -2,8 +2,8 @@
 
 import json
 import socket
-import uuid
 from pathlib import Path
+from typing import Any, Never
 
 import pytest
 from tests.server.support import build_server_parts
@@ -11,6 +11,7 @@ from tests.server.support import build_server_parts
 from server.api.protocol import (
     ChatQuery,
     EventsQuery,
+    Request,
     SnapshotQuery,
     StopCommand,
     SubscribeRequest,
@@ -26,7 +27,7 @@ from vs_project.api import (
 )
 
 
-def _request(socket_path: Path, request) -> dict:  # noqa: ANN001
+def _request(socket_path: Path, request: Request) -> dict[str, Any]:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.connect(str(socket_path))
         stream = client.makefile("rwb")
@@ -35,7 +36,7 @@ def _request(socket_path: Path, request) -> dict:  # noqa: ANN001
         return json.loads(stream.readline())
 
 
-def test_api_routes_chat_to_configured_handler(tmp_path):  # noqa: ANN001, ANN201
+def test_api_routes_chat_to_configured_handler(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     questions: list[str] = []
     parts.chat.install_default_handler(
@@ -53,7 +54,7 @@ def test_api_routes_chat_to_configured_handler(tmp_path):  # noqa: ANN001, ANN20
     assert response.events[-1].agent_kind == "chat"
 
 
-def test_api_fallback_explains_agent_availability(tmp_path):  # noqa: ANN001, ANN201
+def test_api_fallback_explains_agent_availability(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     answer = parts.chat.chat("what happened in this experiment?")
     assert "chat agent is not available" in answer
@@ -64,10 +65,10 @@ def test_api_fallback_explains_agent_availability(tmp_path):  # noqa: ANN001, AN
     assert "the run has finished" in parts.chat.chat("what happened?")
 
 
-def test_transport_round_trips_the_stop_command(tmp_path):  # noqa: ANN001, ANN201
+def test_transport_round_trips_the_stop_command(socket_dir: Path) -> None:
     """`command.stop` parses off the wire, dispatches, and acks as pending."""
-    parts = build_server_parts(tmp_path / "logs")
-    socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
+    parts = build_server_parts(socket_dir / "logs")
+    socket_path = socket_dir / "server.sock"
 
     with UnixJsonlServer(socket_path, parts.api):
         response = _request(socket_path, StopCommand())
@@ -77,9 +78,9 @@ def test_transport_round_trips_the_stop_command(tmp_path):  # noqa: ANN001, ANN2
     assert parts.controller.run_status() is RunStatus.STOPPING
 
 
-def test_transport_supports_multiple_clients_and_replay(tmp_path):  # noqa: ANN001, ANN201
-    parts = build_server_parts(tmp_path / "logs")
-    socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
+def test_transport_supports_multiple_clients_and_replay(socket_dir: Path) -> None:
+    parts = build_server_parts(socket_dir / "logs")
+    socket_path = socket_dir / "server.sock"
 
     with UnixJsonlServer(socket_path, parts.api):
         status = _request(socket_path, SnapshotQuery())
@@ -93,16 +94,15 @@ def test_transport_supports_multiple_clients_and_replay(tmp_path):  # noqa: ANN0
     assert any(event["type"] == "server_started" for event in replay["events"])
 
 
-def test_transport_returns_sanitized_request_errors(tmp_path):  # noqa: ANN001, ANN201
-    parts = build_server_parts(tmp_path / "logs")
+def test_transport_returns_sanitized_request_errors(socket_dir: Path) -> None:
+    parts = build_server_parts(socket_dir / "logs")
 
     def fail_chat(question: str) -> ChatAnswer:
-        raise RuntimeError(  # noqa: TRY003
-            f"token=super-secret Chat agent failed while answering: {question}"
-        )
+        _failure_message = f"token=super-secret Chat agent failed while answering: {question}"
+        raise RuntimeError(_failure_message)
 
     parts.chat.install_default_handler(fail_chat)
-    socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
+    socket_path = socket_dir / "server.sock"
 
     with UnixJsonlServer(socket_path, parts.api):
         response = _request(socket_path, ChatQuery(text="what happened?"))
@@ -115,11 +115,11 @@ def test_transport_returns_sanitized_request_errors(tmp_path):  # noqa: ANN001, 
     )
 
 
-def test_subscription_streams_one_consistent_append_batch(tmp_path):  # noqa: ANN001, ANN201
-    parts = build_server_parts(tmp_path / "logs")
-    socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
+def test_subscription_streams_one_consistent_append_batch(socket_dir: Path) -> None:
+    parts = build_server_parts(socket_dir / "logs")
+    socket_path = socket_dir / "server.sock"
 
-    with UnixJsonlServer(socket_path, parts.api):  # noqa: SIM117
+    with UnixJsonlServer(socket_path, parts.api):
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(2)
             client.connect(str(socket_path))
@@ -141,19 +141,20 @@ def test_subscription_streams_one_consistent_append_batch(tmp_path):  # noqa: AN
 
 
 def test_subscription_reports_structured_stream_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     parts = build_server_parts(tmp_path / "logs")
-    socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
+    socket_path = socket_dir / "server.sock"
 
-    def fail_replay(  # noqa: ANN202
+    def fail_replay(
         after_sequence: int, *, store_id: str | None = None, bootstrap_spine: bool = False
-    ):
+    ) -> Never:
         del after_sequence, store_id, bootstrap_spine
-        raise RuntimeError("event store is unavailable")  # noqa: TRY003
+        _failure_message = "event store is unavailable"
+        raise RuntimeError(_failure_message)
 
     monkeypatch.setattr(parts.api, "subscription_checkpoint", fail_replay)
-    with UnixJsonlServer(socket_path, parts.api):  # noqa: SIM117
+    with UnixJsonlServer(socket_path, parts.api):
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(2)
             client.connect(str(socket_path))
@@ -180,7 +181,7 @@ def test_socket_path_limit_matches_kernel(socket_dir: Path) -> None:
     assert validate_socket_path(longest) is longest
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as accepted:
         accepted.bind(str(longest))
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as rejected:  # noqa: SIM117
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as rejected:
         with pytest.raises(OSError, match="too long"):
             rejected.bind(f"{longest}a")
 

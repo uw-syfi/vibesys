@@ -12,7 +12,9 @@ from server.api.protocol import ProtocolRequest, Response, RunSnapshot, ServerMe
 from server.events import RunEvent
 
 
-class ProtocolDocument(BaseModel):  # noqa: D101  # tracked: #288
+class ProtocolDocument(BaseModel):
+    """Root schema document for the public server protocol."""
+
     request: ProtocolRequest
     response: Response
     event: RunEvent
@@ -20,9 +22,10 @@ class ProtocolDocument(BaseModel):  # noqa: D101  # tracked: #288
     server_message: ServerMessage
 
 
-def main() -> None:  # noqa: D103  # tracked: #288
-    if len(sys.argv) != 2:  # noqa: PLR2004  # tracked: #288
-        raise SystemExit("usage: python -m server.api.schema OUTPUT.json")  # noqa: TRY003  # tracked: #288
+def main() -> None:
+    """Write the public protocol JSON schema to the requested path."""
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: python -m server.api.schema OUTPUT.json")
     output = Path(sys.argv[1])
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(ProtocolDocument.model_json_schema(), indent=2) + "\n")

@@ -13,13 +13,26 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
-
 _MAX_REQUEST_BYTES = 64 * 1024
 _REQUEST_TIMEOUT_SECONDS = 0.5
 _RESPONSE_TIMEOUT_SECONDS = 5.0
 _CONNECT_TIMEOUT_SECONDS = 5.0
 # Actions wrap kubectl waits that are individually bounded by the lifecycle timeout.
 _ACTION_TIMEOUT_SECONDS = 3600.0
+
+
+class KubernetesControlError(RuntimeError):
+    """Report local lifecycle-control transport failures."""
+
+    @classmethod
+    def connection_failed(cls, error: OSError) -> KubernetesControlError:
+        """Create an error for a failed local socket request."""
+        return cls(f"Kubernetes lifecycle control failed: {error}")
+
+    @classmethod
+    def invalid_response(cls) -> KubernetesControlError:
+        """Create an error for a malformed control response."""
+        return cls("Kubernetes lifecycle control returned no valid response")
 
 
 def _read_frame(connection: socket.socket, deadline: float) -> tuple[bytes | None, str | None]:
@@ -75,6 +88,7 @@ class _ControlHandler(socketserver.StreamRequestHandler):
                         "ok": False,
                         "error": f"unknown Kubernetes lifecycle action: {action!r}",
                     }
+        # lint-waiver: LW-008046 [BLE001]; callback failures must be serialized to the IPC caller regardless of their application exception type.
         except Exception as error:  # noqa: BLE001
             response = {"ok": False, "error": str(error)}
         self.connection.settimeout(_RESPONSE_TIMEOUT_SECONDS)
@@ -121,13 +135,11 @@ def request_action(
                     break
                 response_bytes += chunk
         except OSError as error:
-            raise RuntimeError(f"Kubernetes lifecycle control failed: {error}") from error  # noqa: TRY003
+            raise KubernetesControlError.connection_failed(error) from error
     try:
         response = json.loads(response_bytes)
     except json.JSONDecodeError as error:
-        raise RuntimeError(  # noqa: TRY003
-            "Kubernetes lifecycle control returned no valid response"
-        ) from error
+        raise KubernetesControlError.invalid_response() from error
     if not isinstance(response, dict) or not response.get("ok"):
         message = response.get("error") if isinstance(response, dict) else None
         raise RuntimeError(message or "Kubernetes lifecycle control failed")

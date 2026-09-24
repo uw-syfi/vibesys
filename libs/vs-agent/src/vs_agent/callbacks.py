@@ -1,8 +1,11 @@
-import json  # noqa: D100  # tracked: #288
+"""Agent callback implementation for logging and publishing provider output."""
+
+import json
 import time
 import uuid
 from collections import defaultdict, deque
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any, TextIO
 
 from vs_agent._format import format_status_prefix
@@ -68,7 +71,8 @@ class AgentLogger:
     ``AgentLogger`` itself never writes to the terminal.
     """
 
-    def __init__(  # noqa: ANN204, D107, PLR0913  # tracked: #288
+    # lint-waiver: LW-007007 [PLR0913]; explicit callback metadata keeps setup clear
+    def __init__(  # noqa: PLR0913
         self,
         log_file: TextIO | None = None,
         model_name: str | None = None,
@@ -79,7 +83,8 @@ class AgentLogger:
         round_label: str | None = None,
         invocation_id: str | None = None,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
-    ):
+    ) -> None:
+        """Initialize callback state and its output destinations."""
         self._external_text_streaming = False
         # Sticky for the logger's lifetime, which is one turn: whether any
         # assistant text reached the assistant channel from a driver's stream.
@@ -177,7 +182,7 @@ class AgentLogger:
                 full_parts.append(f'{k}="{s}"' if isinstance(v, str) else f"{k}={s}")
             self._log_line(f"\n→ {name}({', '.join(full_parts)})")
 
-    def _emit_thinking(self, text: str):  # noqa: ANN202  # tracked: #288
+    def _emit_thinking(self, text: str) -> None:
         self._publish(text, "analysis")
         self._log_line("\n[thinking]")
         for line in text.split("\n"):
@@ -202,10 +207,8 @@ class AgentLogger:
         if resolved_call_id is None and pending:
             resolved_call_id = pending.popleft()
         elif resolved_call_id is not None:
-            try:  # noqa: SIM105  # tracked: #288
+            with suppress(ValueError):
                 pending.remove(resolved_call_id)
-            except ValueError:
-                pass
         self._sink.tool_result(
             name,
             full_text,
@@ -276,7 +279,8 @@ class AgentLogger:
         """
         self._publish_channel(text, "diagnostic")
 
-    def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:  # noqa: D102  # tracked: #288
+    def on_tool_call(self, tool: str, args: dict[str, Any] | str | None = None) -> None:
+        """Record a provider tool call with normalized arguments."""
         if isinstance(args, dict):
             normalized = args
         elif args is None:
@@ -285,21 +289,25 @@ class AgentLogger:
             normalized = {"args": str(args)}
         self.log_tool_call(tool, normalized)
 
-    def on_tool_result(  # noqa: D102, PLR0913  # tracked: #288
+    # lint-waiver: LW-007008 [PLR0913]; preserve the provider callback's named result fields
+    def on_tool_result(  # noqa: PLR0913
         self,
         tool: str,
         stdout: str = "",
         stderr: str = "",
         exit_code: int | None = None,
-        duration: float | None = None,  # noqa: ARG002 - protocol parity
+        # lint-waiver: LW-007006 [ARG002]; the provider callback API requires this keyword
+        duration: float | None = None,  # noqa: ARG002
         *,
         payload: ToolResultPayload | None = None,
     ) -> None:
+        """Record a tool result; the text logger does not use duration."""
         is_error = bool(stderr) or (exit_code not in (None, 0))
         content = stdout or stderr
         self.log_tool_result(tool, content, is_error=is_error, payload=payload)
 
-    def on_usage(self, usage: dict[str, Any]) -> None:  # noqa: D102  # tracked: #288
+    def on_usage(self, usage: dict[str, Any]) -> None:
+        """Update token usage from the provider's current turn."""
         self.update_usage(usage)
 
     def update_usage(self, usage: dict[str, Any] | None) -> None:

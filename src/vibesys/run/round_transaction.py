@@ -12,7 +12,6 @@ handled only at this compatibility boundary.
 """
 
 # These boundary errors deliberately name the relevant path or transaction.
-# ruff: noqa: TRY003
 
 from __future__ import annotations
 
@@ -22,7 +21,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -49,6 +48,144 @@ _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 class RoundTransactionError(RuntimeError):
     """Raised when a completed-round transaction cannot proceed safely."""
 
+    @classmethod
+    def already_completed(cls, round_number: int) -> Self:
+        """Describe a transaction handle completed more than once."""
+        return cls(f"Round {round_number} transaction has already completed")
+
+    @classmethod
+    def different_project_root(cls) -> Self:
+        """Describe project and Git boundaries rooted in different directories."""
+        return cls("Round transaction project and Git tracker must use the same project root")
+
+    @classmethod
+    def run_id_mismatch(cls, run_id: str, git_run_id: str) -> Self:
+        """Describe a tracker bound to another run."""
+        return cls(
+            f"Round transaction run {run_id!r} does not match Git tracker run {git_run_id!r}"
+        )
+
+    @classmethod
+    def invalid_round_number(cls, round_number: int) -> Self:
+        """Describe a transaction requested for a non-positive round."""
+        return cls(f"Round number must be positive, got {round_number}")
+
+    @classmethod
+    def unfinished_transaction(cls) -> Self:
+        """Describe an existing transaction that must be recovered first."""
+        return cls(
+            "An unfinished round transaction already exists; recover it before starting another"
+        )
+
+    @classmethod
+    def already_active(cls) -> Self:
+        """Describe a context that already owns an active round transaction."""
+        return cls("a completed-round transaction is already active")
+
+    @classmethod
+    def begin_required(cls) -> Self:
+        """Describe persistence attempted without beginning its transaction."""
+        return cls("begin_completed_round must precede project round persistence")
+
+    @classmethod
+    def missing_head(cls) -> Self:
+        """Describe a repository without an accessible HEAD commit."""
+        return cls("Round transactions require an initialized Git HEAD")
+
+    @classmethod
+    def history_moved(cls, action: str, pre_commit: str) -> Self:
+        """Describe history that no longer contains the transaction's base."""
+        return cls(
+            f"Cannot {action} round transaction after Git history moved away from its starting commit {pre_commit}"
+        )
+
+    @classmethod
+    def journal_round_mismatch(cls, actual: int, expected: int) -> Self:
+        """Describe a journal belonging to another round."""
+        return cls(f"Journal is for round {actual}, not round {expected}")
+
+    @classmethod
+    def agent_state_conflict(cls) -> Self:
+        """Describe agent state that differs from the durable transaction."""
+        return cls("Committed agent state differs from the transaction journal")
+
+    @classmethod
+    def agent_state_snapshot_not_exact(cls) -> Self:
+        """Describe a Git snapshot that did not commit the agent state."""
+        return cls("Git snapshot did not commit the exact agent state")
+
+    @classmethod
+    def completed_round_snapshot_not_exact(cls) -> Self:
+        """Describe a Git snapshot that did not commit completed-round metadata."""
+        return cls("Git snapshot did not commit the exact completed-round metadata")
+
+    @classmethod
+    def inaccessible_head(cls) -> Self:
+        """Describe a snapshot operation that left no accessible HEAD."""
+        return cls("Git snapshot completed without an accessible HEAD")
+
+    @classmethod
+    def round_payload_number_mismatch(cls, actual: int, expected: int) -> Self:
+        """Describe legacy round metadata that names another round."""
+        return cls(f"Round transaction journal payload is for round {actual}, not round {expected}")
+
+    @classmethod
+    def round_metadata_conflict(cls) -> Self:
+        """Describe committed round metadata that differs from the journal."""
+        return cls("Committed round metadata differs from the transaction journal")
+
+    @classmethod
+    def journal_missing(cls) -> Self:
+        """Describe a transaction journal that is required but absent."""
+        return cls("Round transaction journal does not exist")
+
+    @classmethod
+    def invalid_journal(cls, details: str) -> Self:
+        """Describe a journal that could not be loaded as valid state."""
+        return cls(f"Invalid round transaction journal: {details}")
+
+    @classmethod
+    def journal_run_mismatch(cls, actual: str, expected: str) -> Self:
+        """Describe a journal belonging to another run."""
+        return cls(f"Round transaction journal belongs to run {actual!r}, not {expected!r}")
+
+    @classmethod
+    def payload_digest_mismatch(cls, payload: str) -> Self:
+        """Describe a journal payload whose digest does not match."""
+        return cls(f"Round transaction journal {payload} digest does not match")
+
+    @classmethod
+    def invalid_active_transition(cls, details: str) -> Self:
+        """Describe an invalid legacy active-state transition."""
+        return cls(f"Invalid active-state transition in round transaction journal: {details}")
+
+    @classmethod
+    def invalid_agent_state_transition(cls, details: str) -> Self:
+        """Describe an invalid portable agent-state transition."""
+        return cls(f"Invalid agent-state transition in round transaction journal: {details}")
+
+    @classmethod
+    def staged_index_changes(cls) -> Self:
+        """Describe staged user changes that make the transaction unsafe."""
+        return cls("Cannot begin round transaction while the Git index contains staged changes")
+
+    @classmethod
+    def invalid_transition(cls, details: str) -> Self:
+        """Describe a transition that cannot be applied to agent state."""
+        return cls(f"Invalid round transaction agent-state transition: {details}")
+
+    @classmethod
+    def invalid_round_payload(cls, source: str, details: str) -> Self:
+        """Describe malformed completed-round data from a journal source."""
+        return cls(f"Invalid completed-round payload in transaction journal {source}: {details}")
+
+    @classmethod
+    def round_payload_not_object(cls, source: str) -> Self:
+        """Describe a completed-round JSON payload with the wrong root shape."""
+        return cls(
+            f"Invalid completed-round payload in transaction journal {source}: payload must be a JSON object"
+        )
+
 
 class RoundRecoveryOutcome(StrEnum):
     """Observable result of checking for an interrupted round transaction."""
@@ -70,7 +207,8 @@ class _StrictJournal(BaseModel):
     @classmethod
     def _require_run_id(cls, value: str) -> str:
         if not value:
-            raise ValueError("run_id must not be empty")
+            # lint-waiver: LW-007065 [TRY003]; Pydantic validators need ValueError for structured field errors
+            raise ValueError("run_id must not be empty")  # noqa: TRY003
         return value
 
 
@@ -156,12 +294,9 @@ class RoundTransaction:
     def complete(self) -> CompletedRound:
         """Apply and commit the prepared state transition."""
         if self._closed:
-            raise RoundTransactionError(
-                f"Round {self.round_number} transaction has already completed"
-            )
-        result = self._coordinator._complete(  # noqa: SLF001
-            self.round_number
-        )
+            raise RoundTransactionError.already_completed(self.round_number)
+        # lint-waiver: LW-007067 [SLF001]; the transaction handle uses its coordinator's private commit seam
+        result = self._coordinator._complete(self.round_number)  # noqa: SLF001
         self._closed = True
         return result
 
@@ -186,13 +321,9 @@ class RoundTransactionCoordinator:
         """Validate and bind the project, Git tracker, and run identity."""
         project_root = project.root.resolve()
         if git.root.resolve() != project_root:
-            raise RoundTransactionError(
-                "Round transaction project and Git tracker must use the same project root"
-            )
+            raise RoundTransactionError.different_project_root()
         if git.run_id != run_id:
-            raise RoundTransactionError(
-                f"Round transaction run {run_id!r} does not match Git tracker run {git.run_id!r}"
-            )
+            raise RoundTransactionError.run_id_mismatch(run_id, git.run_id)
 
         project.state.load_run(run_id)
         self._project = project
@@ -219,15 +350,13 @@ class RoundTransactionCoordinator:
     ) -> RoundTransaction:
         """Durably prepare an exact agent-state transition."""
         if round_number < 1:
-            raise RoundTransactionError(f"Round number must be positive, got {round_number}")
+            raise RoundTransactionError.invalid_round_number(round_number)
         if self._load_optional_journal() is not None:
-            raise RoundTransactionError(
-                "An unfinished round transaction already exists; recover it before starting another"
-            )
+            raise RoundTransactionError.unfinished_transaction()
 
         pre_commit = self._git.current_sha()
         if pre_commit is None:
-            raise RoundTransactionError("Round transactions require an initialized Git HEAD")
+            raise RoundTransactionError.missing_head()
         self._require_clean_index()
         self._validate_state_transition(state_transition)
 
@@ -250,10 +379,7 @@ class RoundTransactionCoordinator:
             return RoundRecoveryOutcome.NO_TRANSACTION
 
         if not self._pre_commit_is_ancestor(journal.pre_commit):
-            raise RoundTransactionError(
-                "Cannot recover round transaction after Git history moved away from "
-                f"its starting commit {journal.pre_commit}"
-            )
+            raise RoundTransactionError.history_moved("recover", journal.pre_commit)
         self._commit_prepared(journal)
         self._clear_journal()
         return RoundRecoveryOutcome.COMMITTED
@@ -261,14 +387,9 @@ class RoundTransactionCoordinator:
     def _complete(self, round_number: int) -> CompletedRound:
         journal = self._load_journal()
         if journal.round_number != round_number:
-            raise RoundTransactionError(
-                f"Journal is for round {journal.round_number}, not round {round_number}"
-            )
+            raise RoundTransactionError.journal_round_mismatch(journal.round_number, round_number)
         if not self._pre_commit_is_ancestor(journal.pre_commit):
-            raise RoundTransactionError(
-                "Cannot complete round transaction after Git history moved away from "
-                f"its starting commit {journal.pre_commit}"
-            )
+            raise RoundTransactionError.history_moved("complete", journal.pre_commit)
 
         completed = self._commit_prepared(journal)
         self._clear_journal()
@@ -295,15 +416,13 @@ class RoundTransactionCoordinator:
                 snapshot,
             )
         else:
-            raise RoundTransactionError(
-                "Committed agent state differs from the transaction journal"
-            )
+            raise RoundTransactionError.agent_state_conflict()
 
         if self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
-            raise RoundTransactionError("Git snapshot did not commit the exact agent state")
+            raise RoundTransactionError.agent_state_snapshot_not_exact()
         checkpoint = self._git.current_sha()
         if checkpoint is None:
-            raise RoundTransactionError("Git snapshot completed without an accessible HEAD")
+            raise RoundTransactionError.inaccessible_head()
         return CompletedRound(checkpoint=checkpoint)
 
     def _commit_legacy_round(self, journal: _V3RoundJournal) -> CompletedRound:
@@ -311,9 +430,8 @@ class RoundTransactionCoordinator:
         round_payload = journal.round_payload()
         record = _parse_round_payload(round_payload, source="round transaction journal")
         if record.round_number != journal.round_number:
-            raise RoundTransactionError(
-                f"Round transaction journal payload is for round {record.round_number}, "
-                f"not round {journal.round_number}"
+            raise RoundTransactionError.round_payload_number_mismatch(
+                record.round_number, journal.round_number
             )
         expected_snapshot = self._project.state.prepare_completed_round_snapshot(
             self.run_id,
@@ -321,9 +439,7 @@ class RoundTransactionCoordinator:
         )
         status = self._git.framework_snapshot_status(expected_snapshot)
         if status is FrameworkSnapshotStatus.DIFFERENT:
-            raise RoundTransactionError(
-                "Committed round metadata differs from the transaction journal"
-            )
+            raise RoundTransactionError.round_metadata_conflict()
         if status is FrameworkSnapshotStatus.EXACT:
             snapshot = self._project.state.restore_completed_round(self.run_id, record)
         else:
@@ -333,19 +449,17 @@ class RoundTransactionCoordinator:
                 snapshot,
             )
         if self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
-            raise RoundTransactionError(
-                "Git snapshot did not commit the exact completed-round metadata"
-            )
+            raise RoundTransactionError.completed_round_snapshot_not_exact()
         self._legacy_active_slot.apply(journal.active_transition(self._legacy_active_slot))
         checkpoint = self._git.current_sha()
         if checkpoint is None:
-            raise RoundTransactionError("Git snapshot completed without an accessible HEAD")
+            raise RoundTransactionError.inaccessible_head()
         return CompletedRound(checkpoint=checkpoint)
 
     def _load_journal(self) -> _Journal:
         journal = self._load_optional_journal()
         if journal is None:
-            raise RoundTransactionError("Round transaction journal does not exist")
+            raise RoundTransactionError.journal_missing()
         return journal
 
     def _load_optional_journal(self) -> _Journal | None:
@@ -353,14 +467,12 @@ class RoundTransactionCoordinator:
         try:
             envelope = self._journal_slot.load_optional()
         except ProjectStateError as exc:
-            raise RoundTransactionError(f"Invalid round transaction journal: {exc}") from exc
+            raise RoundTransactionError.invalid_journal(str(exc)) from exc
         if envelope is None:
             return None
         journal = envelope.root
         if journal.run_id != self.run_id:
-            raise RoundTransactionError(
-                f"Round transaction journal belongs to run {journal.run_id!r}, not {self.run_id!r}"
-            )
+            raise RoundTransactionError.journal_run_mismatch(journal.run_id, self.run_id)
         if isinstance(journal, _V3RoundJournal):
             self._validate_v3_journal(journal)
         else:
@@ -369,29 +481,23 @@ class RoundTransactionCoordinator:
 
     def _validate_v3_journal(self, journal: _V3RoundJournal) -> None:
         if _sha256(journal.round_payload()) != journal.round_payload_sha256:
-            raise RoundTransactionError("Round transaction journal payload digest does not match")
+            raise RoundTransactionError.payload_digest_mismatch("payload")
         _parse_round_payload(journal.round_payload(), source="round transaction journal")
         try:
             self._legacy_active_slot.validate_transition(
                 journal.active_transition(self._legacy_active_slot)
             )
         except (TypeError, ValueError, ProjectStateError) as exc:
-            raise RoundTransactionError(
-                f"Invalid active-state transition in round transaction journal: {exc}"
-            ) from exc
+            raise RoundTransactionError.invalid_active_transition(str(exc)) from exc
 
     def _validate_v4_journal(self, journal: _V4RoundJournal) -> None:
         payload = journal.transition_payload()
         if _sha256(payload) != journal.state_transition_sha256:
-            raise RoundTransactionError(
-                "Round transaction journal state-transition digest does not match"
-            )
+            raise RoundTransactionError.payload_digest_mismatch("state-transition")
         try:
             self._validate_state_transition(journal.state_transition(self._agent_state_slot))
         except (TypeError, ValueError, ProjectStateError, RoundTransactionError) as exc:
-            raise RoundTransactionError(
-                f"Invalid agent-state transition in round transaction journal: {exc}"
-            ) from exc
+            raise RoundTransactionError.invalid_agent_state_transition(str(exc)) from exc
 
     def _pre_commit_is_ancestor(self, pre_commit: str) -> bool:
         result = self._git.run(
@@ -403,18 +509,14 @@ class RoundTransactionCoordinator:
     def _require_clean_index(self) -> None:
         result = self._git.run(["git", "diff", "--cached", "--quiet"], check=False)
         if result.returncode != 0:
-            raise RoundTransactionError(
-                "Cannot begin round transaction while the Git index contains staged changes"
-            )
+            raise RoundTransactionError.staged_index_changes()
 
     def _validate_state_transition(self, transition: StateTransition) -> None:
         try:
             self._agent_state_slot.validate_transition(transition)
             self._agent_state_slot.snapshot_transition(transition)
         except ProjectStateError as exc:
-            raise RoundTransactionError(
-                f"Invalid round transaction agent-state transition: {exc}"
-            ) from exc
+            raise RoundTransactionError.invalid_transition(str(exc)) from exc
 
     def _clear_journal(self) -> None:
         self._journal_slot.save(None)
@@ -424,7 +526,8 @@ def _decode_base64(value: str) -> bytes:
     try:
         return base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise ValueError("must contain canonical base64-encoded bytes") from exc
+        # lint-waiver: LW-007066 [TRY003]; invalid base64 must reach Pydantic as a ValueError
+        raise ValueError("must contain canonical base64-encoded bytes") from exc  # noqa: TRY003
 
 
 def _sha256(contents: bytes) -> str:
@@ -435,17 +538,10 @@ def _parse_round_payload(contents: bytes, *, source: str) -> RoundRecord:
     try:
         payload = json.loads(contents)
     except (TypeError, ValueError) as exc:
-        raise RoundTransactionError(
-            f"Invalid completed-round payload in transaction journal {source}: {exc}"
-        ) from exc
+        raise RoundTransactionError.invalid_round_payload(source, str(exc)) from exc
     if not isinstance(payload, dict):
-        raise RoundTransactionError(
-            f"Invalid completed-round payload in transaction journal {source}: "
-            "payload must be a JSON object"
-        )
+        raise RoundTransactionError.round_payload_not_object(source)
     try:
         return parse_round_record(payload)
     except (TypeError, ValueError, ValidationError) as exc:
-        raise RoundTransactionError(
-            f"Invalid completed-round payload in transaction journal {source}: {exc}"
-        ) from exc
+        raise RoundTransactionError.invalid_round_payload(source, str(exc)) from exc

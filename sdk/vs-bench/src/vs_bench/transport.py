@@ -71,7 +71,7 @@ async def stream_sse(
     url: str,
     body: dict[str, object],
     *,
-    timeout: float = 180.0,  # noqa: ASYNC109
+    timeout: float = 180.0,
 ) -> StreamResult:
     """POST a streaming request and parse SSE lines with token-level timing.
 
@@ -111,7 +111,7 @@ async def stream_sse(
                 u = _extract_usage(chunk)
                 if u is not None:
                     usage = u
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return StreamResult(
             text="".join(text_parts),
             token_count=token_count,

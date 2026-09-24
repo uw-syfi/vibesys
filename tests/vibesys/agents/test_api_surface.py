@@ -9,8 +9,9 @@ cannot silently drift from production behavior.
 
 from __future__ import annotations
 
-import subprocess
 import sys
+
+from tests.support import run_test_command
 
 import vs_agent.api
 import vs_agent.api.testing
@@ -59,7 +60,7 @@ def test_importing_api_does_not_load_agent_backends() -> None:
         "assert not leaked, leaked\n"
         "print('clean')\n"
     )
-    result = subprocess.run(  # noqa: S603  # trusted: our interpreter, literal code
+    result = run_test_command(  # trusted: our interpreter, literal code
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,

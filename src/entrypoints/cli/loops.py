@@ -172,13 +172,13 @@ def _run_migrate_run_environment(argv: list[str]) -> None:
             exit_code=1,
         )
 
-    print(  # noqa: T201  # tracked: #288
+    print(
         f"Migrated run {manifest.run_id} to run schema version "
         f"{manifest.schema_version}: run environment "
         f"{manifest.configuration.run_environment.name}"
     )
-    print(f"  metadata: {project_root}")  # noqa: T201  # tracked: #288
-    print("  commit the updated run metadata to keep the run branch clean.")  # noqa: T201  # tracked: #288
+    print(f"  metadata: {project_root}")
+    print("  commit the updated run metadata to keep the run branch clean.")
 
 
 def _build_agent_request(args: argparse.Namespace) -> RunRequest:
@@ -199,7 +199,7 @@ def _build_agent_request(args: argparse.Namespace) -> RunRequest:
             objective = with_operator_constraints(bundle.objective, args.constraint)
 
         if args.resume is not None:
-            print(f"Resuming VibeSys run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
+            print(f"Resuming VibeSys run {args.resume} in {bundle.root}/")
 
         with boot_trace.span("load_objectives_toml"):
             metrics = _load_metric_space_toml(bundle.task_root)
@@ -248,9 +248,9 @@ def _run_agent(args: argparse.Namespace) -> None:
     result = _execute_run_request(request)
 
     if result.succeeded:
-        print(f"\nAgent loop completed {args.max_rounds} rounds.")  # noqa: T201  # tracked: #288
+        print(f"\nAgent loop completed {args.max_rounds} rounds.")
     else:
-        print("\nAgent loop stopped early (exception or KeyboardInterrupt).")  # noqa: T201  # tracked: #288
+        print("\nAgent loop stopped early (exception or KeyboardInterrupt).")
         sys.exit(1)
 
 
@@ -275,20 +275,20 @@ def _load_metric_space_toml(input_path: Path) -> MetricSpace:
         name = entry.get("name")
         direction = entry.get("direction")
         if not name or direction not in ("max", "min"):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            raise ValueError(
                 f"Malformed entry in {path}: {entry!r}. Each [[objective]] "
                 f"must set name and direction (max|min)."
             )
         objectives.append(Objective(name=name, direction=direction))
     raw_value = (data.get("pareto") or {}).get("relative_noise", 0.0)
     if isinstance(raw_value, bool):
-        raise ValueError(f"Malformed pareto.relative_noise in {path}: {raw_value!r}")  # noqa: TRY003, TRY004  # tracked: #288
+        raise ValueError(f"Malformed pareto.relative_noise in {path}: {raw_value!r}")
     try:
         value = float(raw_value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"Malformed pareto.relative_noise in {path}: {raw_value!r}") from exc  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"Malformed pareto.relative_noise in {path}: {raw_value!r}") from exc
     if not math.isfinite(value) or not 0 <= value < 1:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
+        raise ValueError(
             f"Malformed pareto.relative_noise in {path}: expected a finite value "
             f"in [0, 1), got {raw_value!r}"
         )
@@ -310,7 +310,7 @@ def _resolve_metric_space(args: argparse.Namespace) -> MetricSpace:
     return space
 
 
-def _validate_evolve(args: argparse.Namespace) -> None:  # noqa: C901  # tracked: #288
+def _validate_evolve(args: argparse.Namespace) -> None:
     _validate_target_inputs(args)
     _validate_run_environment_profiler(args)
     if args.children_per_generation < 1:
@@ -395,10 +395,10 @@ def _build_evolve_request(args: argparse.Namespace) -> RunRequest:
     space = _resolve_metric_space(args)
 
     if args.resume is not None:
-        print(f"Resuming evolve run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
+        print(f"Resuming evolve run {args.resume} in {bundle.root}/")
     if space.objectives:
         spec = ", ".join(f"{o.name}({o.direction})" for o in space.objectives)
-        print(  # noqa: T201  # tracked: #288
+        print(
             f"Pareto mode active: [{spec}]; frontier_bias={args.frontier_bias}; "
             f"tolerance={space.relative_noise:.0%}"
         )
@@ -445,12 +445,12 @@ def _run_evolve(args: argparse.Namespace) -> None:
     result = _execute_run_request(request)
 
     if result.succeeded:
-        print(  # noqa: T201  # tracked: #288
+        print(
             f"\nEvolve loop completed {args.max_generations} generations "
-            f"× {args.children_per_generation} cands."  # noqa: RUF001  # tracked: #288
+            f"× {args.children_per_generation} cands."
         )
     else:
-        print("\nEvolve loop stopped early (exception or KeyboardInterrupt).")  # noqa: T201  # tracked: #288
+        print("\nEvolve loop stopped early (exception or KeyboardInterrupt).")
         sys.exit(1)
 
 
@@ -471,7 +471,7 @@ def _build_plain_request(args: argparse.Namespace) -> RunRequest:
     _prepare_experiment_repository(args, config)
 
     if args.resume is not None:
-        print(f"Resuming plain run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
+        print(f"Resuming plain run {args.resume} in {bundle.root}/")
 
     return RunRequest(
         project_root=bundle.root,
@@ -501,9 +501,9 @@ def _run_plain(args: argparse.Namespace) -> None:
     result = _execute_run_request(request)
 
     if result.succeeded:
-        print("\nPlain loop completed: no remaining open issues.")  # noqa: T201  # tracked: #288
+        print("\nPlain loop completed: no remaining open issues.")
     else:
-        print(f"\nPlain loop did not complete after {args.max_rounds} rounds.")  # noqa: T201  # tracked: #288
+        print(f"\nPlain loop did not complete after {args.max_rounds} rounds.")
         sys.exit(1)
 
 

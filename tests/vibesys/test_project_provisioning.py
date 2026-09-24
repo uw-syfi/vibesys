@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import subprocess
 import tomllib
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
+from tests.support import run_test_command
 
 from vibesys.evaluators.input_manifest import InputManifest, WorkspaceSource, load_input_bundle
 from vibesys.run.project import (
@@ -62,8 +62,8 @@ metric = "throughput"
 
 
 def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(  # noqa: S603
-        ["git", *args],  # noqa: S607
+    return run_test_command(
+        ["git", *args],
         cwd=cwd,
         check=True,
         capture_output=True,

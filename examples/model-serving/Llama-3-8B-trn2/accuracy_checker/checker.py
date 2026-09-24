@@ -2,13 +2,10 @@
 Accuracy checker: verify that the custom LLaMA model implementation
 produces identical output to the HuggingFace transformers
 AutoModelForCausalLM reference.
-
 Both paths use greedy decoding (temperature=0) so outputs must match exactly.
-
 Device is auto-detected: cuda:0 if available, else cpu (AWS Trainium boxes
 have no CUDA, so the HF reference and the custom model both run on CPU in
 BF16 here — this checks correctness, not speed).
-
 Usage:
     python checker.py                      # auto device
     python checker.py --model-dir ../model
@@ -26,7 +23,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 def _resolve_device(requested: str | None) -> str:
     """Pick a runnable device. Trainium boxes have no CUDA, so fall back to CPU.
-
     The HF *reference* model has no Neuron build, so it runs on CPU here; the
     custom implementation is also exercised on the same device for an
     apples-to-apples greedy token-ID comparison (correctness, not speed —
@@ -63,7 +59,6 @@ def _load_custom_model_class():
 # ---------------------------------------------------------------------------
 # Test samples — diverse prompts covering various scenarios
 # ---------------------------------------------------------------------------
-
 RAW_COMPLETION_SAMPLES: list[tuple[str, int, str]] = [
     ("The capital of France is", 15, "short factual completion"),
     ("Once upon a time, in a land far away,", 50, "story continuation"),
@@ -85,7 +80,6 @@ RAW_COMPLETION_SAMPLES: list[tuple[str, int, str]] = [
     ("Hello", 15, "single word prompt"),
     ('{"name": "Alice", "age":', 10, "JSON completion"),
 ]
-
 CHAT_SAMPLES: list[tuple[list[dict[str, str]], int, str]] = [
     (
         [{"role": "user", "content": "What is 2+2? Answer in one word."}],
@@ -117,8 +111,6 @@ CHAT_SAMPLES: list[tuple[list[dict[str, str]], int, str]] = [
 # ---------------------------------------------------------------------------
 # Reference: HuggingFace model.generate()
 # ---------------------------------------------------------------------------
-
-
 @torch.inference_mode()
 def generate_reference(model, tokenizer, prompt_text, max_new_tokens, device):
     inputs = tokenizer(prompt_text, return_tensors="pt").to(device)
@@ -130,8 +122,6 @@ def generate_reference(model, tokenizer, prompt_text, max_new_tokens, device):
 # ---------------------------------------------------------------------------
 # Custom model: uses VibeServeModel.generate()
 # ---------------------------------------------------------------------------
-
-
 @torch.inference_mode()
 def generate_custom(model, tokenizer, prompt_text, max_new_tokens, device):
     """Generate using the custom model's .generate() method."""
@@ -144,22 +134,17 @@ def generate_custom(model, tokenizer, prompt_text, max_new_tokens, device):
 # ---------------------------------------------------------------------------
 # Comparison logic
 # ---------------------------------------------------------------------------
-
-
 def compare_outputs(ref_ids, custom_ids, tokenizer):
     ref_text = tokenizer.decode(ref_ids, skip_special_tokens=True)
     custom_text = tokenizer.decode(custom_ids, skip_special_tokens=True)
-
     if ref_ids == custom_ids:
         return True, f"EXACT match ({len(ref_ids)} tokens): {ref_text!r}"
-
     min_len = min(len(ref_ids), len(custom_ids))
     first_diff = min_len
     for i in range(min_len):
         if ref_ids[i] != custom_ids[i]:
             first_diff = i
             break
-
     detail = (
         f"MISMATCH at token {first_diff}.\n"
         f"  Reference ({len(ref_ids):3d} tokens): {ref_text!r}\n"
@@ -173,8 +158,6 @@ def compare_outputs(ref_ids, custom_ids, tokenizer):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-
-
 def main():
     parser = argparse.ArgumentParser(description="Accuracy checker: custom model vs HF reference")
     parser.add_argument(
@@ -191,21 +174,17 @@ def main():
         "uses cuda:0 if available, else cpu (Trainium boxes have no CUDA).",
     )
     args = parser.parse_args()
-
     device = _resolve_device(args.device)
     model_dir = str(Path(args.model_dir).resolve())
     dtype = _dtype_for(device)
     print(f"Accuracy check device={device} dtype={dtype}")
-
     # --- Load tokenizer (from local path) ---
     print(f"Loading tokenizer from: {model_dir}")
     tokenizer = AutoTokenizer.from_pretrained(model_dir)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-
     # --- Build test suite (before loading models to save GPU time) ---
     test_cases: list[tuple[str, int, str]] = list(RAW_COMPLETION_SAMPLES)
-
     has_chat_template = hasattr(tokenizer, "apply_chat_template") and tokenizer.chat_template
     for messages, max_tokens, desc in CHAT_SAMPLES:
         if has_chat_template:
@@ -215,7 +194,6 @@ def main():
         else:
             prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages) + "\nassistant:"
         test_cases.append((prompt, max_tokens, f"[chat] {desc}"))
-
     # --- Generate reference outputs with HF model, then unload ---
     # Load on CPU first, then move with .to(device) — avoids device_map, which
     # requires `accelerate` and assumes CUDA.
@@ -228,44 +206,36 @@ def main():
     )
     ref_model.to(device).eval()
     print(f"  HF model loaded in {time.perf_counter() - t0:.1f}s")
-
     print("Generating reference outputs ...")
     ref_outputs: list[list[int]] = []
     for prompt, max_tokens, _desc in test_cases:
         ref_outputs.append(generate_reference(ref_model, tokenizer, prompt, max_tokens, device))
-
     # Unload reference model to free memory.
     del ref_model
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     print("  HF reference model unloaded.\n")
-
     # --- Load custom model ---
     print(f"Loading custom model (VibeServeModel from main.py) on {device} ...")
     t0 = time.perf_counter()
     VibeServeModel = _load_custom_model_class()
     custom_model = VibeServeModel.from_pretrained(model_dir, device, dtype)
     print(f"  Custom model loaded in {time.perf_counter() - t0:.1f}s\n")
-
     # --- Run all tests ---
     passed = 0
     failed = 0
     total = len(test_cases)
-
     print("=" * 70)
     print(f"Running {total} test cases (greedy decoding)")
     print("=" * 70)
-
     for i, (prompt, max_tokens, desc) in enumerate(test_cases, 1):
         print(f"\n[{i}/{total}] {desc}  (max_tokens={max_tokens})")
         prompt_preview = prompt[:80].replace("\n", "\\n")
         if len(prompt) > 80:
             prompt_preview += "..."
         print(f"  Prompt: {prompt_preview!r}")
-
         ref_ids = ref_outputs[i - 1]
         custom_ids = generate_custom(custom_model, tokenizer, prompt, max_tokens, device)
-
         match, detail = compare_outputs(ref_ids, custom_ids, tokenizer)
         if match:
             print(f"  PASS - {detail}")
@@ -273,12 +243,10 @@ def main():
         else:
             print(f"  FAIL - {detail}")
             failed += 1
-
     # --- Summary ---
     print("\n" + "=" * 70)
     print(f"Results: {passed}/{total} passed, {failed}/{total} failed")
     print("=" * 70)
-
     if failed > 0:
         print("\nACCURACY CHECK FAILED")
         sys.exit(1)

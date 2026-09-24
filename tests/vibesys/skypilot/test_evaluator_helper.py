@@ -5,7 +5,9 @@ import hashlib
 import io
 import json
 import socket
+import tempfile
 import threading
+import uuid
 from pathlib import Path
 from typing import Literal
 
@@ -126,7 +128,9 @@ def test_helper_rejects_incomplete_terminal_result(socket_dir: Path) -> None:
 
 def test_helper_materializes_narrow_framework_result_artifact(socket_dir: Path) -> None:
     socket_path = socket_dir / "bridge.sock"
-    output_path = Path("/tmp/vibesys-framework-benchmark-helper-test.json")  # noqa: S108
+    output_path = (
+        Path(tempfile.gettempdir()) / f"vibesys-framework-benchmark-{uuid.uuid4().hex}.json"
+    )
     output_path.unlink(missing_ok=True)
     thread = _serve_frames(
         socket_path,
@@ -162,8 +166,8 @@ def test_pending_invocation_identity_survives_helper_process_state_reload(
 ) -> None:
     monkeypatch.setenv("VIBESYS_SKYPILOT_CALLER_STATE", str(tmp_path))
 
-    first, path = helper_module._pending_invocation("accuracy", ())  # noqa: SLF001
-    second, same_path = helper_module._pending_invocation("accuracy", ())  # noqa: SLF001
+    first, path = helper_module._pending_invocation("accuracy", ())
+    second, same_path = helper_module._pending_invocation("accuracy", ())
 
     assert first == second
     assert path == same_path
@@ -174,7 +178,7 @@ def test_acknowledged_pending_invocation_removal_is_directory_durable(
     tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VIBESYS_SKYPILOT_CALLER_STATE", str(tmp_path))
-    _, pending_path = helper_module._pending_invocation("accuracy", ())  # noqa: SLF001
+    _, pending_path = helper_module._pending_invocation("accuracy", ())
     fsynced: list[Path] = []
     monkeypatch.setattr(helper_module, "_fsync_directory", fsynced.append)
     socket_path = socket_dir / "bridge.sock"
@@ -194,10 +198,10 @@ def test_pending_invocation_recovers_an_incomplete_token_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VIBESYS_SKYPILOT_CALLER_STATE", str(tmp_path))
-    _, path = helper_module._pending_invocation("accuracy", ())  # noqa: SLF001
+    _, path = helper_module._pending_invocation("accuracy", ())
     path.write_text("partial", encoding="utf-8")
 
-    recovered, same_path = helper_module._pending_invocation("accuracy", ())  # noqa: SLF001
+    recovered, same_path = helper_module._pending_invocation("accuracy", ())
 
     assert len(recovered) == 32
     assert same_path == path

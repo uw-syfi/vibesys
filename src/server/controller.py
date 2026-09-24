@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING, Any
 
 from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
@@ -12,6 +11,7 @@ from server.run_lifecycle import RunStatus, RunTrigger, transition
 
 if TYPE_CHECKING:
     import threading
+    from pathlib import Path
 
     from server.execution import ExecutionHandle, ExecutionTracker
     from server.journal import EventJournal
@@ -69,7 +69,7 @@ class RunController:
     ) -> None:
         """Attach durable run storage and optional canonical project state."""
         if project is not None and run_id is None:
-            raise ValueError("run_id is required when project is provided")  # noqa: TRY003
+            raise ValueError("run_id is required when project is provided")
         with self._condition:
             if project is not None and run_id is not None:
                 self._project_run = ProjectRunState(project, run_id)
@@ -130,7 +130,7 @@ class RunController:
         with self._condition:
             self._journal.record(EventType.CONTROL, f"/steer: {text}", status=EventStatus.PENDING)
 
-    def start_agent_execution(  # noqa: PLR0913
+    def start_agent_execution(
         self,
         kind: str,
         round_label: str,
@@ -183,7 +183,7 @@ class RunController:
         kind: str,
         round_label: str,
         *,
-        result: Any = None,  # noqa: ANN401
+        result: Any = None,
         error: BaseException | None = None,
         execution_id: str | None = None,
     ) -> None:

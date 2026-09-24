@@ -1,5 +1,7 @@
 """Tests for the per-issue markdown renderer (vibesys/plain/render.py)."""
 
+from pathlib import Path
+
 from vibesys.loops.plain.render import (
     issue_md_filename,
     issue_md_path,
@@ -18,12 +20,12 @@ from vs_issue_board.api import (
 )
 
 
-def _make_issue(  # noqa: PLR0913  # tracked: #288
+def _make_issue(
     *,
-    id: int = 1,  # noqa: A002  # tracked: #288
+    id: int = 1,
     title: str = "Test issue",
     description: str = "A test issue.",
-    type: IssueType = IssueType.FEATURE,  # noqa: A002  # tracked: #288
+    type: IssueType = IssueType.FEATURE,
     status: IssueStatus = IssueStatus.OPEN,
     attempts: int = 0,
     created_by: str = "loop:bootstrap",
@@ -53,7 +55,7 @@ def _make_issue(  # noqa: PLR0913  # tracked: #288
     )
 
 
-def _make_event(  # noqa: PLR0913  # tracked: #288
+def _make_event(
     *,
     actor: str,
     action: str,
@@ -78,42 +80,42 @@ def _make_event(  # noqa: PLR0913  # tracked: #288
 
 
 class TestSlugify:
-    def test_basic_lowercases_and_dashes(self):  # noqa: ANN201  # tracked: #288
+    def test_basic_lowercases_and_dashes(self) -> None:
         assert slugify("Add Paged KV cache") == "add-paged-kv-cache"
 
-    def test_empty_title_falls_back_to_untitled(self):  # noqa: ANN201  # tracked: #288
+    def test_empty_title_falls_back_to_untitled(self) -> None:
         assert slugify("") == "untitled"
 
-    def test_punctuation_only_falls_back_to_untitled(self):  # noqa: ANN201  # tracked: #288
+    def test_punctuation_only_falls_back_to_untitled(self) -> None:
         assert slugify("!!!") == "untitled"
         assert slugify("---") == "untitled"
 
-    def test_whitespace_only_falls_back_to_untitled(self):  # noqa: ANN201  # tracked: #288
+    def test_whitespace_only_falls_back_to_untitled(self) -> None:
         assert slugify("   ") == "untitled"
 
-    def test_collapses_multiple_separators(self):  # noqa: ANN201  # tracked: #288
+    def test_collapses_multiple_separators(self) -> None:
         assert slugify("foo  BAR___baz") == "foo-bar-baz"
 
-    def test_strips_leading_and_trailing_dashes(self):  # noqa: ANN201  # tracked: #288
+    def test_strips_leading_and_trailing_dashes(self) -> None:
         assert slugify("--foo-bar--") == "foo-bar"
 
-    def test_handles_unicode_via_normalisation(self):  # noqa: ANN201  # tracked: #288
+    def test_handles_unicode_via_normalisation(self) -> None:
         # em-dash and accented chars should not blow up
         assert slugify("foo  BAR—baz") == "foo-bar-baz"
         assert slugify("café au lait") == "cafe-au-lait"
 
-    def test_truncation_to_max_len(self):  # noqa: ANN201  # tracked: #288
+    def test_truncation_to_max_len(self) -> None:
         long_title = "a" * 200
         slug = slugify(long_title)
         assert len(slug) <= 40
 
-    def test_truncation_strips_trailing_dash(self):  # noqa: ANN201  # tracked: #288
+    def test_truncation_strips_trailing_dash(self) -> None:
         # 39 letters then a separator, truncated to 40 → "...x-" → strip → "...x"
         title = "abcdefghij" * 4 + "-end"  # 44 chars; truncates inside the dash
         slug = slugify(title)
         assert not slug.endswith("-")
 
-    def test_custom_max_len(self):  # noqa: ANN201  # tracked: #288
+    def test_custom_max_len(self) -> None:
         assert slugify("abcdefghij", max_len=5) == "abcde"
 
 
@@ -123,15 +125,15 @@ class TestSlugify:
 
 
 class TestIssueMdFilename:
-    def test_filename_format_uses_zero_padded_id_and_slug(self):  # noqa: ANN201  # tracked: #288
+    def test_filename_format_uses_zero_padded_id_and_slug(self) -> None:
         issue = _make_issue(id=7, title="Add streaming completions")
         assert issue_md_filename(issue) == "0007-add-streaming-completions.md"
 
-    def test_filename_for_high_id(self):  # noqa: ANN201  # tracked: #288
+    def test_filename_for_high_id(self) -> None:
         issue = _make_issue(id=12345, title="x")
         assert issue_md_filename(issue) == "12345-x.md"
 
-    def test_path_lives_under_issues_dir(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_path_lives_under_issues_dir(self, tmp_path: Path) -> None:
         issue = _make_issue(id=3, title="hello world")
         path = issue_md_path(tmp_path / "issues", issue)
         assert path == tmp_path / "issues" / "0003-hello-world.md"
@@ -143,7 +145,7 @@ class TestIssueMdFilename:
 
 
 class TestRenderIssueMarkdown:
-    def test_writes_header_with_id_title_type_status(self):  # noqa: ANN201  # tracked: #288
+    def test_writes_header_with_id_title_type_status(self) -> None:
         issue = _make_issue(
             id=42,
             title="Build server",
@@ -156,13 +158,13 @@ class TestRenderIssueMarkdown:
         assert "**Status**: open" in md
         assert "**Attempts**: 0" in md
 
-    def test_includes_description(self):  # noqa: ANN201  # tracked: #288
+    def test_includes_description(self) -> None:
         issue = _make_issue(description="Run a FastAPI server on port 8000.")
         md = render_issue_markdown(issue)
         assert "## Description" in md
         assert "Run a FastAPI server on port 8000." in md
 
-    def test_includes_timeline_with_events(self):  # noqa: ANN201  # tracked: #288
+    def test_includes_timeline_with_events(self) -> None:
         issue = _make_issue(
             history=[
                 _make_event(
@@ -185,7 +187,7 @@ class TestRenderIssueMarkdown:
         assert "open->in_progress" in md
         assert "claimed" in md
 
-    def test_renders_implementer_payload_section(self):  # noqa: ANN201  # tracked: #288
+    def test_renders_implementer_payload_section(self) -> None:
         issue = _make_issue(
             attempts=1,
             history=[
@@ -211,7 +213,7 @@ class TestRenderIssueMarkdown:
         assert "`tests/test_x.py`" in md
         assert "all green" in md
 
-    def test_renders_judge_payload_section(self):  # noqa: ANN201  # tracked: #288
+    def test_renders_judge_payload_section(self) -> None:
         issue = _make_issue(
             history=[
                 _make_event(actor="loop:bootstrap", action="create"),
@@ -236,7 +238,7 @@ class TestRenderIssueMarkdown:
         assert "the endpoint is missing" in md
         assert "add /v1/completions" in md
 
-    def test_judge_event_disambiguated_from_loop_status_change(self):  # noqa: ANN201  # tracked: #288
+    def test_judge_event_disambiguated_from_loop_status_change(self) -> None:
         """A loop-actor open->in_progress (claim) must NOT be rendered as a judge review."""
         issue = _make_issue(
             history=[
@@ -256,7 +258,7 @@ class TestRenderIssueMarkdown:
         # And no Attempt detail section if there are no payloads
         assert "## Attempt detail" not in md
 
-    def test_handles_events_without_payload(self):  # noqa: ANN201  # tracked: #288
+    def test_handles_events_without_payload(self) -> None:
         """Events with payload=None must render plain timeline rows without raising."""
         issue = _make_issue(
             history=[
@@ -270,7 +272,7 @@ class TestRenderIssueMarkdown:
         # Timeline still mentions it
         assert "attempt" in md
 
-    def test_idempotent_no_duplicate_sections(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_idempotent_no_duplicate_sections(self, tmp_path: Path) -> None:
         issue = _make_issue(
             attempts=1,
             history=[
@@ -291,13 +293,13 @@ class TestRenderIssueMarkdown:
         # Only one occurrence of the heading
         assert second.count("### Implementer attempt 1") == 1
 
-    def test_closed_iter_appears_when_set(self):  # noqa: ANN201  # tracked: #288
+    def test_closed_iter_appears_when_set(self) -> None:
         issue = _make_issue(status=IssueStatus.CLOSED)
         issue.closed_iter = 3
         md = render_issue_markdown(issue)
         assert "**Closed at iter**: 3" in md
 
-    def test_long_description_is_not_escaped(self):  # noqa: ANN201  # tracked: #288
+    def test_long_description_is_not_escaped(self) -> None:
         """Markdown special chars in the description pass through unmodified
         (matches the existing progress.md behaviour at vibesys/plain/loop.py:147)."""
         issue = _make_issue(description="# A markdown heading\n\n- a list")
@@ -312,12 +314,12 @@ class TestRenderIssueMarkdown:
 
 
 class TestRenderIndexMarkdown:
-    def test_empty_store_renders_placeholder(self):  # noqa: ANN201  # tracked: #288
+    def test_empty_store_renders_placeholder(self) -> None:
         md = render_index_markdown([])
         assert "# Issue Index" in md
         assert "no issues yet" in md
 
-    def test_groups_issues_by_status_in_display_order(self):  # noqa: ANN201  # tracked: #288
+    def test_groups_issues_by_status_in_display_order(self) -> None:
         issues = [
             _make_issue(id=1, title="open one", status=IssueStatus.OPEN),
             _make_issue(id=2, title="closed one", status=IssueStatus.CLOSED),
@@ -332,12 +334,12 @@ class TestRenderIndexMarkdown:
         cl = md.find("## closed")
         assert -1 < ip < op < bl < cl
 
-    def test_index_links_to_per_issue_files(self):  # noqa: ANN201  # tracked: #288
+    def test_index_links_to_per_issue_files(self) -> None:
         issues = [_make_issue(id=7, title="Add streaming")]
         md = render_index_markdown(issues)
         assert "[Add streaming](0007-add-streaming.md)" in md
 
-    def test_within_status_sorted_by_id(self):  # noqa: ANN201  # tracked: #288
+    def test_within_status_sorted_by_id(self) -> None:
         issues = [
             _make_issue(id=3, title="three", status=IssueStatus.OPEN),
             _make_issue(id=1, title="one", status=IssueStatus.OPEN),
@@ -350,13 +352,13 @@ class TestRenderIndexMarkdown:
         p3 = md.find("[three]")
         assert -1 < p1 < p2 < p3
 
-    def test_table_columns_present(self):  # noqa: ANN201  # tracked: #288
+    def test_table_columns_present(self) -> None:
         issues = [_make_issue(id=1, title="x", attempts=2)]
         md = render_index_markdown(issues)
         assert "| ID | Type | Title | Attempts | Created iter | Updated |" in md
         assert "| 1 |" in md
 
-    def test_pipe_in_title_is_escaped(self):  # noqa: ANN201  # tracked: #288
+    def test_pipe_in_title_is_escaped(self) -> None:
         issues = [_make_issue(id=1, title="foo | bar")]
         md = render_index_markdown(issues)
         # Escaped pipe so the markdown table cell still parses as one cell
@@ -369,7 +371,7 @@ class TestRenderIndexMarkdown:
 
 
 class TestRenderAll:
-    def test_render_all_writes_index_and_per_issue_files(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_render_all_writes_index_and_per_issue_files(self, tmp_path: Path) -> None:
         store = IssueBoard(tmp_path / "issues.json")
         a = store.create(
             type=IssueType.FEATURE,
@@ -408,7 +410,7 @@ class TestRenderAll:
         assert "did stuff" in per_a
         assert "`s.py`" in per_a
 
-    def test_render_all_creates_issues_dir(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_render_all_creates_issues_dir(self, tmp_path: Path) -> None:
         store = IssueBoard(tmp_path / "issues.json")
         store.create(
             type=IssueType.BUG,
@@ -423,7 +425,7 @@ class TestRenderAll:
         assert issues_dir.is_dir()
         assert (issues_dir / "INDEX.md").is_file()
 
-    def test_render_all_idempotent(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_render_all_idempotent(self, tmp_path: Path) -> None:
         store = IssueBoard(tmp_path / "issues.json")
         store.create(
             type=IssueType.BUG,

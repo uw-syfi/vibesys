@@ -1,18 +1,14 @@
 """
 Prefix-caching workload benchmark for an OpenAI-compatible /v1/completions
 server.
-
 Workload (per request):
   - 32 768 tokens of shared prefix (identical across every request).
   - 128 tokens of unique tail.
   - 128 tokens of generation, temperature 0, ignore_eos.
-
 The 20 requests are dispatched concurrently. The headline metric is the
 **aggregate output throughput** (sum of all output tokens / wall clock).
-
 This benchmark synthesises prompts as raw token IDs and sends them via
 ``prompt: list[int]`` (vLLM-compatible).
-
 Usage:
     python benchmark.py --url http://localhost:8000
 """
@@ -92,12 +88,10 @@ async def stream_one_request(
         "stream_options": {"include_usage": True},
     }
     r = await stream_sse(client, url, body, timeout=600.0)
-
     if r.error:
         return RequestResult(
             idx=idx, ttft_s=None, total_s=r.latency, output_tokens=0, decode_tps=0.0, error=r.error
         )
-
     gen = (
         r.usage["completion_tokens"]
         if r.usage and "completion_tokens" in r.usage
@@ -119,10 +113,8 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     n_requests = args.num_requests if args.num_requests is not None else args.requests
     if n_requests <= 0:
         raise SystemExit("--num-requests must be > 0")
-
     print(f"[bench] loading tokenizer for vocab size: {args.model}", file=sys.stderr)
     vocab_size = _load_tokenizer_vocab(args.model)
-
     print(
         f"[bench] building synthetic prompts: shared={args.shared_len} "
         f"unique={args.unique_len} requests={n_requests}",
@@ -139,11 +131,9 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     prompts = [shared_ids + u for u in unique_ids]
     prompt_len = len(prompts[0])
     print(f"[bench] prompt length per request: {prompt_len} tokens", file=sys.stderr)
-
     base_url = args.url.rstrip("/")
     max_conn_cap = max(n_requests * 2, 64)
     limits = httpx.Limits(max_connections=max_conn_cap, max_keepalive_connections=max_conn_cap)
-
     async with httpx.AsyncClient(limits=limits) as client:
         # Warmup
         if args.warmup > 0:
@@ -172,7 +162,6 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                     f"ttft={(warm.ttft_s or 0):.2f}s err={warm.error}",
                     file=sys.stderr,
                 )
-
         # Measured run: all requests concurrent
         print(
             f"[bench] dispatching {n_requests} concurrent requests",
@@ -186,16 +175,13 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
             ]
         )
         t_run = time.perf_counter() - t_run0
-
     successes = [r for r in results if r.error is None]
     errors = [r for r in results if r.error is not None]
     output_tokens_total = sum(r.output_tokens for r in successes)
     aggregate_throughput = output_tokens_total / t_run if t_run > 0 else 0.0
-
     ttfts = [r.ttft_s for r in successes if r.ttft_s is not None]
     totals = [r.total_s for r in successes]
     decodes = [r.decode_tps for r in successes if r.decode_tps > 0]
-
     print()
     print("=" * 60)
     print("  Prefix-caching benchmark (shared 32k + unique tail)")
@@ -208,7 +194,6 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     print(f"Wall clock:            {t_run:.2f}s")
     print(f"Total output tokens:   {output_tokens_total}")
     print()
-
     if ttfts:
         print(
             f"TTFT (s)   mean / p50 / p95 / max: "
@@ -227,16 +212,13 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
             f"{statistics.mean(decodes):.2f} / {pct_block(decodes)['p50']:.2f} / "
             f"{pct_block(decodes)['p95']:.2f} / {min(decodes):.2f}"
         )
-
     print()
     print(f"Primary metric: aggregate_throughput_tok_per_sec = {aggregate_throughput:.2f}")
     print(f"Completed: {len(successes)}/{n_requests} requests")
-
     if errors:
         print("\nErrors:")
         for i, r in enumerate(errors[:5]):
             print(f"  [{i}] req={r.idx} {r.error[:140]}")
-
     result_dict = {
         "config": {
             "url": f"{base_url}/v1/completions",
@@ -260,11 +242,9 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         "decode_tps_per_request": pct_block(decodes),
         "per_request": [asdict(r) for r in results],
     }
-
     if args.output_json:
         Path(args.output_json).write_text(json.dumps(result_dict, indent=2))
         print(f"\nResults written to {args.output_json}")
-
     return result_dict
 
 

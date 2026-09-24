@@ -1,5 +1,4 @@
 """Typed text-model config for Qwen3.5 dense checkpoints (`model_type: qwen3_5`).
-
 The checkpoint is a VLM wrapper: the language model lives under `text_config`.
 Only the text path is served; the vision tower and the MTP head are ignored.
 """

@@ -207,7 +207,7 @@ class _LocalRunSession:
         """
         handoff = self._resource_handoff
         if handoff is None:
-            raise RuntimeError(  # noqa: TRY003
+            raise RuntimeError(
                 "open_agent_environment() called before this run published its resources "
                 "(register a listener via on_run_resources first)"
             )

@@ -7,7 +7,8 @@ from mcp.server.fastmcp import FastMCP
 from vibesys.linux_cpu_profiler import collect, detect_capability, parse_command, summarize
 
 
-def build_server() -> FastMCP:  # noqa: D103  # tracked: #288
+def build_server() -> FastMCP:
+    """Build the profiler MCP server."""
     mcp = FastMCP("vibesys-linux-cpu-profiler")
 
     @mcp.tool()

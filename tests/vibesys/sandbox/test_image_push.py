@@ -39,7 +39,7 @@ _REPO_DIGESTS = f'["vibesys-agent-build@sha256:{"c" * 64}", "{_DIGEST}"]'
 class _FakeRegistryRunner:
     """Programmable fake for the docker tag/push/inspect/manifest sequence."""
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         *,
         tag_returncode: int = 0,
@@ -71,9 +71,10 @@ class _FakeRegistryRunner:
         self,
         argv: Sequence[str],
         *,
-        cwd: Path,  # noqa: ARG002
-        timeout: float,  # noqa: ARG002
+        cwd: Path,
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
+        del cwd, timeout
         normalized = tuple(argv)
         self.calls.append(normalized)
         for marker, exc in self.raise_on.items():
@@ -102,7 +103,8 @@ class _FakeRegistryRunner:
             return subprocess.CompletedProcess(
                 normalized, self.inspect_returncode, self.inspect_stdout, ""
             )
-        raise AssertionError(f"unexpected command: {normalized}")  # noqa: TRY003
+        _failure_message = f"unexpected command: {normalized}"
+        raise AssertionError(_failure_message)
 
 
 class TestPushAgentImage:

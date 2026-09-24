@@ -19,8 +19,10 @@ import subprocess
 import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -39,7 +41,8 @@ class GpuInfo:
     utilization_pct: int
 
     @property
-    def memory_free_mib(self) -> int:  # noqa: D102  # tracked: #288
+    def memory_free_mib(self) -> int:
+        """Return free device memory in mebibytes."""
         return self.memory_total_mib - self.memory_used_mib
 
 
@@ -63,8 +66,8 @@ class ContentionStatus:
 def query_gpu_info() -> list[GpuInfo]:
     """Query ``nvidia-smi`` for per-GPU memory and utilisation."""
     try:
-        result = subprocess.run(  # noqa: PLW1510  # tracked: #288
-            [  # noqa: S607  # tracked: #288
+        result = subprocess.run(
+            [
                 "nvidia-smi",
                 "--query-gpu=index,uuid,name,memory.used,memory.total,utilization.gpu",
                 "--format=csv,noheader,nounits",
@@ -80,7 +83,7 @@ def query_gpu_info() -> list[GpuInfo]:
     gpus: list[GpuInfo] = []
     for line in result.stdout.strip().splitlines():
         parts = [p.strip() for p in line.split(",")]
-        if len(parts) < 6:  # noqa: PLR2004  # tracked: #288
+        if len(parts) < 6:
             continue
         try:
             gpus.append(
@@ -114,8 +117,8 @@ def pick_gpu(gpus: list[GpuInfo] | None = None) -> GpuInfo | None:
 
 def _query_gpu_procs() -> str:
     """Run ``nvidia-smi`` and return CSV of GPU compute processes."""
-    result = subprocess.run(  # noqa: PLW1510  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    result = subprocess.run(
+        [
             "nvidia-smi",
             "--query-compute-apps=pid,process_name,used_gpu_memory,gpu_uuid",
             "--format=csv,noheader,nounits",
@@ -136,7 +139,7 @@ def _parse_proc_output(raw: str) -> list[dict[str, Any]]:
         if not line.strip() or ("pid" in line.lower() and "process" in line.lower()):
             continue
         parts = [p.strip() for p in line.split(",")]
-        if len(parts) < 4:  # noqa: PLR2004  # tracked: #288
+        if len(parts) < 4:
             continue
         try:
             pid = int(parts[0])
@@ -180,12 +183,13 @@ class GpuContentionMonitor:
         Seconds between checks (default 30).
     """
 
-    def __init__(  # noqa: D107  # tracked: #288
+    def __init__(
         self,
         log_dir: Path,
         gpu_uuid: str,
         interval: float = 30.0,
     ) -> None:
+        """Configure monitoring for one GPU UUID and polling interval."""
         self._log_dir = log_dir
         self._gpu_uuid = gpu_uuid
         self._interval = interval
@@ -228,7 +232,7 @@ class GpuContentionMonitor:
         try:
             raw = _query_gpu_procs()
             procs = _parse_proc_output(raw)
-        except Exception:  # noqa: BLE001  # tracked: #288
+        except Exception:
             return set()
         return {p["pid"] for p in procs if p["gpu_uuid"] == self._gpu_uuid}
 
@@ -268,7 +272,7 @@ class GpuContentionMonitor:
                             "memory_total_mib": gpu_info.memory_total_mib,
                             "utilization_pct": gpu_info.utilization_pct,
                         }
-                    with open(log_path, "a") as f:  # noqa: PTH123  # tracked: #288
+                    with open(log_path, "a") as f:
                         f.write(
                             json.dumps(
                                 {
@@ -281,6 +285,6 @@ class GpuContentionMonitor:
                             )
                             + "\n"
                         )
-            except Exception:  # noqa: BLE001, S110  # tracked: #288
+            except Exception:
                 pass
             self._stop_event.wait(self._interval)

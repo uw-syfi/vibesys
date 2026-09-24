@@ -75,7 +75,6 @@ def _run_porcupine_checker(history):
 def _collect_history(store, clients, ops, key_space, read_ratio, seed):
     if clients <= 0:
         raise ValueError("clients must be > 0")
-
     ops_per_client = max(1, ops // clients)
     history = []
     history_lock = threading.Lock()
@@ -113,10 +112,8 @@ def _collect_history(store, clients, ops, key_space, read_ratio, seed):
         t.start()
     for t in threads:
         t.join(timeout=10)
-
     if any(t.is_alive() for t in threads):
         raise RuntimeError("timed out while collecting operation history")
-
     return history
 
 
@@ -129,16 +126,13 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--use-reference", action="store_true")
     args = parser.parse_args()
-
     if args.read_ratio < 0 or args.read_ratio > 1:
         raise ValueError("--read-ratio must be in [0, 1]")
-
     if args.use_reference:
         store = KVStoreFactory()
     else:
         cls = _load_candidate()
         store = cls()
-
     print("Collecting concurrent history ...")
     history = _collect_history(
         store,
@@ -149,7 +143,6 @@ def main():
         seed=args.seed,
     )
     print(f"  Collected {len(history)} operations")
-
     print("Running Porcupine linearizability check ...")
     _run_porcupine_checker(history)
     print("  PASS - history is linearizable")

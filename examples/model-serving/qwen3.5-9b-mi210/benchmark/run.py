@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Benchmark harness for the Qwen3.5-9B / 1x MI210 throughput objective.
-
 Wraps Request Factory's `session_runner` (see ../../../resources/evaluators/
 request-factory/) to replay an agentic multi-turn coding-session trace
 (`text-generation-session-execution-v2`) against an OpenAI-compatible
 completions server, and reports a single headline throughput number plus
 supporting percentiles.
-
 Modes:
   smoke   -- seconds. Validates plumbing only: a `session_runner --dry-run`
              static trace check (no server contact, so it cannot trip the
@@ -22,7 +20,6 @@ Modes:
              quick/full never touch. NEVER use holdout to tune a knob or
              choose between candidates -- see ../README.md "Held-out
              evaluation" and ../OBJECTIVE.md for the binding rule.
-
 Warmup (kernel compile, HIP/CUDA graph capture, allocator warm-up) runs
 against its own checked-in pool, `traces/coding_session_5000-5011.csv` --
 12 sessions disjoint from every mode's measured range (0-259, 3000-3259),
@@ -30,7 +27,6 @@ for every mode. Before this, quick/full warmed up on sessions 0-11 of their
 own measured trace, so those 12 sessions started pre-cached during
 measurement; see ../README.md "Warmup" for what that means for numbers
 recorded before this change.
-
 Prefix-cache preflight (see ../README.md "Prefix-cache preflight" section):
 session_runner runs a hard, unconditional prefix-cache preflight before any
 `text-generation-session-execution-v2` replay (source-verified: there is no
@@ -39,7 +35,6 @@ reports a genuine cache hit, `quick`/`full`/`holdout` will fail loudly at
 that gate -- this is the tool working as intended, not a bug in this
 harness. `smoke` mode exists precisely so plumbing can still be validated
 against such a server.
-
 Inputs: --trace/--text-file win; else $QWEN35_BENCH_ASSETS names a directory
 holding `coding_session_synthetic.csv` and `corpus.txt`; else the checked-in
 trace slice for the mode (digest-checked: coding_session_0000-0259.csv for
@@ -54,7 +49,6 @@ to start at session 3000 instead. The warmup pool
 overridable, regardless of --trace/$QWEN35_BENCH_ASSETS. The tokenizer comes
 from --tokenizer or the Hugging Face cache ($HF_HOME, default
 ~/.cache/huggingface).
-
 See ../OBJECTIVE.md and ../config/platforms/mi210.toml for the hardware facts
 referenced by the defaults below.
 """
@@ -80,10 +74,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fetch_corpus
 
 Mode = Literal["smoke", "quick", "full", "holdout"]
-
 DEFAULT_MODEL = "Qwen/Qwen3.5-9B"
 DEFAULT_BASE_URL = "http://127.0.0.1:8000/v1"
-
 # Session-count knobs for each mode. Calibrated against the tuned vLLM
 # baseline on 1x MI210 (see ../README.md "Modes"): quick lands at ~2-3
 # minutes, full/holdout at ~10 minutes, at --max-concurrency 128. A slower
@@ -102,13 +94,11 @@ ASSETS_ENV = "QWEN35_BENCH_ASSETS"
 TRACE_FILENAME = "coding_session_synthetic.csv"
 CORPUS_FILENAME = "corpus.txt"
 TRACES_DIR = Path(__file__).resolve().parent / "traces"
-
 # Sessions 0-259 of the full trace (see slice_trace.py): every session
 # smoke/quick/full ever measure.
 DEFAULT_TRACE = TRACES_DIR / "coding_session_0000-0259.csv"
 DEFAULT_TRACE_SHA256 = "2bca5f7911816ee758b46a626b60e8518888e9464fc4533b627052eac8180d11"
 DEFAULT_TRACE_ROWS = 1513
-
 # Sessions 3000-3299 of the full trace: disjoint from anything smoke/quick/full
 # ever measure. holdout measures the first 260 of these (3000-3259), matching
 # full's session count -- see run_replay/resolve_trace and README.md "Held-out
@@ -116,7 +106,6 @@ DEFAULT_TRACE_ROWS = 1513
 HOLDOUT_TRACE = TRACES_DIR / "coding_session_3000-3299.csv"
 HOLDOUT_TRACE_SHA256 = "d6a21a06a83459df25099babc5814d662ec674e83e9c61a3f0dfd758542c7290"
 HOLDOUT_TRACE_ROWS = 1818
-
 # Sessions 5000-5011 of the full trace: disjoint from every mode's measured
 # range (0-259 and 3000-3259). Every mode's warmup sub-run replays this fixed
 # pool instead of a prefix of its own measured trace, so warmup's purpose
@@ -170,7 +159,6 @@ def run_session_runner(
     timeout_s: float,
 ) -> SessionRunnerResult:
     """Invoke `session_runner` with `argv` and parse its `--summary-path` output.
-
     Translates a missing binary, a timeout, and a nonzero exit into
     `HarnessError` at the call site (the caller decides which are fatal, since
     a preflight failure and a genuine request failure warrant different
@@ -179,7 +167,6 @@ def run_session_runner(
     summary_path: Path | None = None
     if "--summary-path" in argv:
         summary_path = Path(argv[argv.index("--summary-path") + 1])
-
     command = [str(engine), *argv]
     try:
         completed = subprocess.run(
@@ -195,11 +182,9 @@ def run_session_runner(
         raise HarnessError(
             f"session_runner timed out after {timeout_s:.0f}s: {' '.join(command)}"
         ) from exc
-
     summary: dict[str, Any] | None = None
     if summary_path is not None and summary_path.exists():
         summary = json.loads(summary_path.read_text())
-
     return SessionRunnerResult(
         returncode=completed.returncode,
         stdout_tail=completed.stdout[-4000:],
@@ -268,7 +253,6 @@ def _base_replay_argv(
 
 def verify_model_identity(base_url: str, model: str, timeout_s: float = 10.0) -> None:
     """Confirm `base_url` is actually serving `model`, not some other process.
-
     On a shared compute node a stale or unrelated process can already hold
     the port, and an HTTP status check alone cannot tell that apart from
     the intended server (observed directly: a foreign process answered
@@ -284,7 +268,6 @@ def verify_model_identity(base_url: str, model: str, timeout_s: float = 10.0) ->
                 raise HarnessError(f"GET {health_url} returned HTTP {response.status}")
     except urllib.error.URLError as exc:
         raise HarnessError(f"GET {health_url} failed: {exc}") from exc
-
     models_url = f"{base_url}/models"
     try:
         with urllib.request.urlopen(models_url, timeout=timeout_s) as response:
@@ -301,13 +284,11 @@ def verify_model_identity(base_url: str, model: str, timeout_s: float = 10.0) ->
 
 def check_liveness(base_url: str, model: str, timeout_s: float = 10.0) -> None:
     """Direct HTTP checks that do not go through session_runner's preflight.
-
     Confirms the server is up, advertises the expected model, and answers one
     real completion -- the "correctness of plumbing" smoke checks that must
     work even against a server with no prefix-cache reporting yet.
     """
     verify_model_identity(base_url, model, timeout_s)
-
     payload = json.dumps(
         {"model": model, "prompt": "The capital of France is", "max_tokens": 1, "temperature": 0}
     ).encode()
@@ -328,7 +309,6 @@ def check_liveness(base_url: str, model: str, timeout_s: float = 10.0) -> None:
 
 def run_smoke(args: argparse.Namespace, trace: Path) -> dict[str, Any]:
     check_liveness(args.base_url, args.model)
-
     work_dir = Path(args.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     result = run_session_runner(
@@ -398,10 +378,8 @@ def measured_metrics(summary: dict[str, Any]) -> dict[str, Any]:
 
 def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> dict[str, Any]:
     verify_model_identity(args.base_url, args.model)
-
     work_dir = Path(args.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
-
     warmup_argv = _base_replay_argv(
         trace=paths.warmup_trace,
         text_file=paths.text_file,
@@ -422,7 +400,6 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
             f'failure surfaces -- see ../README.md "Prefix-cache preflight"):\n'
             f"{warmup.stderr_tail}"
         )
-
     session_count = MODE_SESSIONS[mode]
     measured_summary_path = work_dir / f"{mode}_summary.json"
     measured_argv = _base_replay_argv(
@@ -452,7 +429,6 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         )
     if measured.summary is None:
         raise HarnessError(f"{mode}: measured sub-run wrote no summary at {measured_summary_path}")
-
     metrics = measured_metrics(measured.summary)
     if metrics["failed_steps"]:
         raise HarnessError(
@@ -461,7 +437,6 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
             "(request_log). A benchmark harness must fail loudly on request failures rather "
             "than silently discount them from throughput."
         )
-
     return {
         "mode": mode,
         "headline_metric": "output_tokens_per_s",
@@ -526,7 +501,6 @@ def verify_warmup_trace(path: Path = WARMUP_TRACE) -> Path:
 
 def resolve_trace(args: argparse.Namespace, mode: Mode) -> Path:
     """Resolve the *measured* trace for `mode` (see module docstring "Inputs").
-
     An explicit --trace/$QWEN35_BENCH_ASSETS override is returned as-is,
     including for `holdout` -- it is the caller's responsibility to hand
     holdout a trace already cut to start at session 3000 (or wherever the
@@ -556,11 +530,9 @@ def resolve_corpus(args: argparse.Namespace) -> Path:
 def resolve_paths(args: argparse.Namespace, mode: Mode) -> _ResolvedPaths:
     """Full resolution (trace, corpus, tokenizer, warmup trace), needed by
     quick/full/holdout.
-
     `smoke` mode's dry-run needs only the trace (see `resolve_trace`): it
     validates schema and static shape without loading a corpus or tokenizer,
     which is what lets it run in seconds with no server or GPU dependency.
-
     The warmup trace is always the checked-in, digest-verified pool
     (`WARMUP_TRACE`), never overridable via --trace/$QWEN35_BENCH_ASSETS:
     its whole purpose is being a fixed session range no mode ever measures,
@@ -622,7 +594,6 @@ def main(argv: list[str] | None = None) -> int:
     except HarnessError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-
     text = json.dumps(result, indent=2)
     print(text)
     if result.get("headline_metric"):

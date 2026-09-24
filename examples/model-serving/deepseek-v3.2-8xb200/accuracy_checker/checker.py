@@ -1,36 +1,28 @@
 """
 Accuracy checker for the DeepSeek-V3.2 serving system (service-style).
-
 This checker drives a *running* OpenAI-compatible server over HTTP — it does
 NOT import the candidate's model or load any weights locally. That makes it
 work identically whether the server runs on the local host, in Docker, or on a
 remote Modal GPU: the checker only needs the server URL.
-
 Because there is no local GPU reference to diff against, correctness is
 established with three reference-free gates that a real DeepSeek-V3.2 forward pass
 passes and reward-hacking shortcuts (canned text, prompt echoers, schema
 synthesizers) fail:
-
   1. Sentinel-echo rate  — each request embeds a random sentinel token the
      prompt instructs the model to reproduce. A server that ignores the prompt
      and returns canned/templated text cannot reproduce a fresh random token.
      (This is the framework's canonical anti-reward-hack gate.)
-
   2. Known-answer rate   — near-deterministic factual prompts at temperature 0
      whose answer is fixed (capital of France -> Paris, 1+1 -> 2, ...). A
      prompt echoer passes the sentinel gate but fails this one; a canned
      "Paris" server fails the sentinel gate. Only a model that actually runs
      inference passes both.
-
   3. Greedy determinism  — the same prompt sent twice at temperature 0 must
      yield identical output. Catches nondeterministic / sampling-when-it-should-
      not decoders.
-
 Exit code 0 iff there are no transport errors AND all three gates clear their
 thresholds; exit 1 otherwise.
-
 Usage (server must already be running):
-
     python checker.py --url http://localhost:8000
     python checker.py --url https://<app>.modal.run --seed 0
 """
@@ -73,7 +65,7 @@ async def _stream_text(
                     text = (choice.get("delta") or {}).get("content")
                 if text:
                     parts.append(text)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return "".join(parts), f"{type(exc).__name__}: {exc}"
     return "".join(parts), None
 
@@ -251,19 +243,15 @@ async def run(args: argparse.Namespace) -> int:
         f"known-answer (n={len(KNOWN_ANSWERS)}, min {args.min_known_rate:.0%}), "
         f"determinism (n={len(DETERMINISM_PROMPTS)}, min {args.min_determinism_rate:.0%})"
     )
-
     async with httpx.AsyncClient() as client:
         sentinel = await gate_sentinel_echo(client, args, rng)
         known = await gate_known_answers(client, args)
         determinism = await gate_determinism(client, args)
-
     all_results = sentinel + known + determinism
     transport_errors = [r for r in all_results if r["error"] is not None]
-
     s_ok, s_n, s_rate = _rate(sentinel)
     k_ok, k_n, k_rate = _rate(known)
     d_ok, d_n, d_rate = _rate(determinism)
-
     for label, rows in (
         ("SENTINEL", sentinel),
         ("KNOWN-ANSWER", known),
@@ -277,7 +265,6 @@ async def run(args: argparse.Namespace) -> int:
             extra = str(extra).replace("\n", " ")[:50]
             err = f" err={r['error']}" if r["error"] else ""
             print(f"  {status} [{extra!r}] -> {preview!r}{err}")
-
     print("\n" + "=" * 60)
     print("  DeepSeek-V3.2 service accuracy check")
     print("=" * 60)
@@ -285,14 +272,12 @@ async def run(args: argparse.Namespace) -> int:
     print(f"Known-answer:    {k_ok}/{k_n} ({k_rate:.0%})   [min {args.min_known_rate:.0%}]")
     print(f"Determinism:     {d_ok}/{d_n} ({d_rate:.0%})   [min {args.min_determinism_rate:.0%}]")
     print(f"Transport errors: {len(transport_errors)}")
-
     passed = (
         not transport_errors
         and s_rate >= args.min_sentinel_rate
         and k_rate >= args.min_known_rate
         and d_rate >= args.min_determinism_rate
     )
-
     if args.output_json:
         from pathlib import Path
 
@@ -313,7 +298,6 @@ async def run(args: argparse.Namespace) -> int:
         }
         Path(args.output_json).write_text(json.dumps(summary, indent=2))
         print(f"\nWrote detailed results to {args.output_json}")
-
     print("\n" + ("ACCURACY CHECK PASSED" if passed else "ACCURACY CHECK FAILED"))
     return 0 if passed else 1
 
@@ -342,7 +326,6 @@ def main() -> None:
     parser.add_argument("--request-timeout", type=float, default=120.0)
     parser.add_argument("--output-json", type=str, default=None)
     args = parser.parse_args()
-
     rc = asyncio.run(run(args))
     sys.exit(rc)
 

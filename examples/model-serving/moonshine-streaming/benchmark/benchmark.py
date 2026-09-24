@@ -1,8 +1,6 @@
 """
 Serving benchmark for moonshine-streaming-medium.
-
 Two modes:
-
 * `streaming`: N concurrent WebSocket clients, each pushing 16 kHz PCM
   audio in `--chunk-s` second chunks at *real-time* pacing.  Measures
   TTFT (send→first partial), TPOT (per chunk after first), and
@@ -10,9 +8,7 @@ Two modes:
 * `offline`: Poisson-arrival HTTP `/v1/audio/transcriptions` clients.
   Same shape as the whisper-large benchmark; used for vLLM-comparable
   numbers.
-
 Audio is loaded from `test_audio/` (or `--audio-dir`).
-
 Usage:
     python benchmark.py --mode streaming --concurrency 4 --chunk-s 2 --duration 30
     python benchmark.py --mode offline   --rate 2 --duration 30
@@ -42,8 +38,6 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Audio loading
 # ---------------------------------------------------------------------------
-
-
 def load_audio_pool(audio_dir: Path):
     """Load WAV files from a directory.  Returns
     list of (wav_bytes, pcm16_bytes, sample_rate, duration_s, filename, ref_text)."""
@@ -54,7 +48,6 @@ def load_audio_pool(audio_dir: Path):
         with open(manifest_path) as f:
             for entry in json.load(f):
                 manifest_entries[entry["file"]] = entry
-
     for p in sorted(audio_dir.glob("*.wav")):
         with wave.open(str(p), "rb") as wf:
             sr = wf.getframerate()
@@ -85,8 +78,6 @@ def load_audio_pool(audio_dir: Path):
 # ---------------------------------------------------------------------------
 # Streaming-mode client
 # ---------------------------------------------------------------------------
-
-
 async def streaming_client(
     name: str,
     url: str,
@@ -102,13 +93,11 @@ async def streaming_client(
     samples_per_chunk = int(chunk_s * sample_rate)
     bytes_per_chunk = samples_per_chunk * 2
     total_chunks = math.ceil(len(pcm) / bytes_per_chunk)
-
     sent_times: list[float] = []
     partial_times: list[float] = []
     finalized_at: float | None = None
     final_text = ""
     error: str | None = None
-
     t_start = time.perf_counter()
     try:
         async with websockets.connect(url, max_size=None) as ws:
@@ -131,7 +120,6 @@ async def streaming_client(
                         return
 
             rd = asyncio.create_task(reader())
-
             for i in range(total_chunks):
                 target = t_start + (i + 1) * chunk_s
                 now = time.perf_counter()
@@ -146,7 +134,6 @@ async def streaming_client(
     except Exception as exc:
         error = str(exc)
     t_end = time.perf_counter()
-
     # latencies
     chunk_latencies: list[float] = []
     for _i, ts in enumerate(sent_times):
@@ -179,7 +166,6 @@ async def run_streaming(args, audio_pool):
         f"Streaming benchmark: concurrency={args.concurrency} chunk_s={args.chunk_s}s "
         f"duration_budget={args.duration}s url={url}"
     )
-
     log: list[dict] = []
     tasks: list[asyncio.Task] = []
     for i in range(args.concurrency):
@@ -195,14 +181,12 @@ async def run_streaming(args, audio_pool):
     t0 = time.perf_counter()
     results = await asyncio.gather(*tasks)
     wall = time.perf_counter() - t0
-
     succ = [r for r in results if r["error"] is None]
     fail = [r for r in results if r["error"] is not None]
     audio_total = sum(r["duration_s"] for r in succ)
     aud_per_s = audio_total / wall if wall else 0.0
     ttfts = [r["ttft"] for r in succ if r["ttft"] is not None]
     tpots = [r["tpot"] for r in succ if r["tpot"] is not None]
-
     print()
     print("=" * 40)
     print("  Streaming Benchmark Results")
@@ -226,7 +210,6 @@ async def run_streaming(args, audio_pool):
         print("Errors:")
         for r in fail[:5]:
             print(f"  - {r['error'][:100]}")
-
     return {
         "mode": "streaming",
         "concurrency": args.concurrency,
@@ -244,14 +227,11 @@ async def run_streaming(args, audio_pool):
 # ---------------------------------------------------------------------------
 # Offline-mode client (HTTP)
 # ---------------------------------------------------------------------------
-
-
 async def offline_request(client: httpx.AsyncClient, url: str, wav_bytes: bytes, stream: bool):
     files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
     data = {"model": "moonshine"}
     if stream:
         data["stream"] = "true"
-
     t_send = time.perf_counter()
     t_first = None
     t_done = None
@@ -287,7 +267,6 @@ async def offline_request(client: httpx.AsyncClient, url: str, wav_bytes: bytes,
     except Exception as exc:
         err = str(exc)
         t_done = time.perf_counter()
-
     if t_done is None:
         t_done = time.perf_counter()
     res = {
@@ -312,7 +291,6 @@ async def run_offline(args, audio_pool):
     server's saturation throughput at the chosen concurrency level."""
     url = args.url.rstrip("/") + args.endpoint
     print(f"Offline benchmark: concurrency={args.concurrency} duration={args.duration}s url={url}")
-
     stop_at: float | None = None
     results: list[dict] = []
 
@@ -330,14 +308,12 @@ async def run_offline(args, audio_pool):
         stop_at = t0 + args.duration
         await asyncio.gather(*(worker(i, client) for i in range(args.concurrency)))
         wall = time.perf_counter() - t0
-
     succ = [r for r in results if r["error"] is None]
     fail = [r for r in results if r["error"] is not None]
     ttfts = [r["ttft"] for r in succ if r["ttft"] is not None]
     tpots = [r["tpot"] for r in succ if r["tpot"] is not None]
     lats = [r["total_latency"] for r in succ]
     n_tokens = sum(r["n_tokens"] for r in succ)
-
     print()
     print("=" * 40)
     print("  Offline Benchmark Results")
@@ -373,8 +349,6 @@ async def run_offline(args, audio_pool):
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
-
-
 def _percentile(s, p):
     if not s:
         return float("nan")
@@ -411,8 +385,6 @@ def _pct_block(s):
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
-
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--mode", choices=["streaming", "offline"], default="streaming")
@@ -447,22 +419,18 @@ def main():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--output-json", type=str, default=None)
     args = p.parse_args()
-
     if args.audio_dir:
         audio_dir = Path(args.audio_dir).resolve()
     else:
         audio_dir = (Path(__file__).parent / "test_audio").resolve()
         if not audio_dir.is_dir():
             audio_dir = (Path(__file__).parent.parent / "test_audio").resolve()
-
     pool = load_audio_pool(audio_dir)
     print(f"Audio pool: {len(pool)} clips, total {sum(p[3] for p in pool):.1f}s")
-
     if args.mode == "streaming":
         result = asyncio.run(run_streaming(args, pool))
     else:
         result = asyncio.run(run_offline(args, pool))
-
     if args.output_json:
         with open(args.output_json, "w") as f:
             json.dump(result, f, indent=2)

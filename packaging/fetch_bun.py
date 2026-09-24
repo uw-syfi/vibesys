@@ -85,7 +85,10 @@ def fetch_bun(
 
 
 def _download(url: str) -> bytes:
-    with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310
+    opener = urllib.request.OpenerDirector()
+    opener.add_handler(urllib.request.HTTPHandler())
+    opener.add_handler(urllib.request.HTTPSHandler())
+    with opener.open(url, timeout=120) as response:
         return response.read()
 
 

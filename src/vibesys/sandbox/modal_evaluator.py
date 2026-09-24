@@ -38,10 +38,13 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Generator, Sequence  # noqa: TC003  # tracked: #288
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Sequence
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _MODAL_WEB_URL = re.compile(r"https://[a-zA-Z0-9.-]+\.modal\.run")
@@ -104,11 +107,11 @@ def _ensure_runtime_dir(path: Path) -> None:
         runtime_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         metadata = runtime_dir.lstat()
     except OSError as exc:
-        raise RuntimeError(  # noqa: TRY003
+        raise RuntimeError(
             f"cannot use {runtime_dir} as the evaluator runtime directory: {exc}"
         ) from exc
     if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
-        raise RuntimeError(  # noqa: TRY003
+        raise RuntimeError(
             f"refusing to use {runtime_dir} as the evaluator runtime directory: "
             f"expected a directory owned by uid {os.getuid()}"
         )
@@ -119,7 +122,7 @@ def _ensure_runtime_dir(path: Path) -> None:
     # all of ``0o077``, because write permission is the planting vector while a
     # readable ``0o755`` directory is both safe and common.
     if metadata.st_mode & 0o022:
-        raise RuntimeError(  # noqa: TRY003
+        raise RuntimeError(
             f"refusing to use {runtime_dir} as the evaluator runtime directory: "
             "it is group- or world-writable, so another user may already have "
             "planted files in it"
@@ -137,12 +140,12 @@ class _DeploymentLease:
 def _normalized_setup_command(command: Sequence[str]) -> tuple[str, ...]:
     """Snapshot one opaque executable argv or reject malformed input."""
     if isinstance(command, str) or any(not isinstance(item, str) for item in command):
-        raise TypeError("trusted setup command must contain only argv strings")  # noqa: TRY003
+        raise TypeError("trusted setup command must contain only argv strings")
     if not command:
-        raise ValueError("trusted setup command must be a non-empty string argv")  # noqa: TRY003
+        raise ValueError("trusted setup command must be a non-empty string argv")
     normalized = tuple(command)
     if not normalized[0]:
-        raise ValueError("trusted setup command executable must not be empty")  # noqa: TRY003
+        raise ValueError("trusted setup command executable must not be empty")
     return normalized
 
 
@@ -152,21 +155,21 @@ def encode_setup_command(command: Sequence[str]) -> str:
     document = json.dumps(normalized, separators=(",", ":")).encode()
     encoded = base64.urlsafe_b64encode(document).decode("ascii")
     if len(encoded) > _MAX_ENCODED_SETUP_COMMAND_CHARS:
-        raise ValueError("trusted setup command exceeds the encoded size limit")  # noqa: TRY003
+        raise ValueError("trusted setup command exceeds the encoded size limit")
     return encoded
 
 
 def _decode_setup_command(encoded: str) -> tuple[str, ...]:
     """Decode and structurally validate framework-owned setup argv."""
     if len(encoded) > _MAX_ENCODED_SETUP_COMMAND_CHARS:
-        raise ValueError("trusted setup command exceeds the encoded size limit")  # noqa: TRY003
+        raise ValueError("trusted setup command exceeds the encoded size limit")
     try:
         payload = base64.b64decode(encoded, altchars=b"-_", validate=True)
         document = json.loads(payload.decode("utf-8"))
     except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise ValueError("trusted setup command is not valid base64-encoded JSON argv") from exc  # noqa: TRY003
+        raise ValueError("trusted setup command is not valid base64-encoded JSON argv") from exc
     if not isinstance(document, list):
-        raise TypeError("trusted setup command must decode to a JSON argv array")  # noqa: TRY003
+        raise TypeError("trusted setup command must decode to a JSON argv array")
     return _normalized_setup_command(document)
 
 
@@ -211,7 +214,7 @@ def extract_modal_web_url(output: str) -> str:
     compact = _compact_rich_output(output)
     matches = _MODAL_WEB_URL.findall(compact)
     if not matches:
-        raise ValueError("modal deploy did not print a *.modal.run web endpoint")  # noqa: TRY003  # tracked: #288
+        raise ValueError("modal deploy did not print a *.modal.run web endpoint")
     return matches[-1]
 
 
@@ -220,15 +223,15 @@ def extract_modal_app_identifier(output: str) -> str:
     compact = _compact_rich_output(output)
     matches = _MODAL_DEPLOYMENT.findall(compact)
     if not matches:
-        raise ValueError("modal deploy did not print a deployment URL")  # noqa: TRY003  # tracked: #288
+        raise ValueError("modal deploy did not print a deployment URL")
     return matches[-1]
 
 
 def recent_modal_logs(app_identifier: str, *, workspace: str) -> str:
     """Fetch a bounded recent-log excerpt for a failed readiness check."""
     try:
-        result = subprocess.run(  # noqa: S603  # tracked: #288
-            [  # noqa: S607  # tracked: #288
+        result = subprocess.run(
+            [
                 "uv",
                 "run",
                 "modal",
@@ -265,21 +268,21 @@ def wait_for_health(base_url: str, *, timeout_seconds: float) -> None:
     last_error = "no response"
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(health_url, timeout=10) as response:  # noqa: S310  # tracked: #288
-                if response.status == 200:  # noqa: PLR2004  # tracked: #288
+            with urllib.request.urlopen(health_url, timeout=10) as response:
+                if response.status == 200:
                     return
                 last_error = f"HTTP {response.status}"
         except (OSError, urllib.error.URLError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
         time.sleep(2)
-    raise TimeoutError(f"{health_url} did not become ready: {last_error}")  # noqa: TRY003  # tracked: #288
+    raise TimeoutError(f"{health_url} did not become ready: {last_error}")
 
 
 def _healthy_now(base_url: str) -> bool:
     """Return whether an existing deployment is immediately reusable."""
     try:
-        with urllib.request.urlopen(f"{base_url.rstrip('/')}/health", timeout=5) as response:  # noqa: S310  # tracked: #288
-            return response.status == 200  # noqa: PLR2004  # tracked: #288
+        with urllib.request.urlopen(f"{base_url.rstrip('/')}/health", timeout=5) as response:
+            return response.status == 200
     except (OSError, urllib.error.URLError):
         return False
 
@@ -332,8 +335,8 @@ def _release_requested() -> bool:
 def _stop_modal_app(app_identifier: str, *, workspace: str) -> bool:
     """Stop a deployed app without prompting, returning whether it succeeded."""
     try:
-        result = subprocess.run(  # noqa: S603  # tracked: #288
-            ["uv", "run", "modal", "app", "stop", app_identifier, "--yes"],  # noqa: S607  # tracked: #288
+        result = subprocess.run(
+            ["uv", "run", "modal", "app", "stop", app_identifier, "--yes"],
             cwd=workspace,
             capture_output=True,
             text=True,
@@ -341,16 +344,16 @@ def _stop_modal_app(app_identifier: str, *, workspace: str) -> bool:
             timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        print(  # noqa: T201  # tracked: #288
+        print(
             f"Could not stop Modal app {app_identifier}: {type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
         return False
     if result.returncode == 0:
-        print(f"Stopped Modal app {app_identifier}.", file=sys.stderr)  # noqa: T201  # tracked: #288
+        print(f"Stopped Modal app {app_identifier}.", file=sys.stderr)
         return True
     output = f"{result.stdout}\n{result.stderr}".strip()
-    print(  # noqa: T201  # tracked: #288
+    print(
         f"Could not stop Modal app {app_identifier} (exit {result.returncode}): {output[-2000:]}",
         file=sys.stderr,
     )
@@ -372,15 +375,15 @@ def _deployment_path(workspace: str, entrypoint: str) -> Path:
         or not relative.parts
         or any(part in {"", ".", ".."} for part in relative.parts)
     ):
-        raise ValueError("Modal entrypoint must be a project-relative path")  # noqa: TRY003
+        raise ValueError("Modal entrypoint must be a project-relative path")
     workspace_root = Path(workspace).resolve(strict=True)
     candidate = (workspace_root / relative).resolve(strict=True)
     try:
         candidate.relative_to(workspace_root)
     except ValueError as exc:
-        raise ValueError(f"Modal entrypoint escapes the project: {entrypoint}") from exc  # noqa: TRY003
+        raise ValueError(f"Modal entrypoint escapes the project: {entrypoint}") from exc
     if not candidate.is_file():
-        raise ValueError(f"Modal entrypoint is not a file: {candidate}")  # noqa: TRY003
+        raise ValueError(f"Modal entrypoint is not a file: {candidate}")
     return candidate
 
 
@@ -426,7 +429,7 @@ def _plan_command_transfer(command: Sequence[str], workspace: str) -> _CommandTr
             if not path.exists() and path.parent.is_dir() and token not in outputs:
                 outputs.append(token)
             continue
-        if framework_go_cwd and token == ".":  # noqa: S105
+        if framework_go_cwd and token == ".":
             # ``go -C <trusted-package> run .`` resolves the dot below the
             # separately staged evaluator package, not the candidate root.
             continue
@@ -463,9 +466,7 @@ def _build_stage_archive(
     if evaluator_package_root is not None:
         package_root = Path(evaluator_package_root).resolve(strict=True)
         if not package_root.is_dir():
-            raise ValueError(  # noqa: TRY003
-                f"evaluator package root is not a directory: {package_root}"
-            )
+            raise ValueError(f"evaluator package root is not a directory: {package_root}")
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
         for relative in stage_paths:
@@ -496,7 +497,7 @@ def _build_stage_archive(
                 or reserved.is_relative_to(relative_path)
                 for reserved in reserved_paths
             ):
-                raise ValueError(  # noqa: TRY003
+                raise ValueError(
                     "workspace evaluator input collides with a reserved framework path"
                 )
             archive.add(str(workspace_root / relative), arcname=relative)
@@ -504,7 +505,7 @@ def _build_stage_archive(
             archive.add(str(package_root), arcname=_EVALUATOR_PACKAGE_STAGE_PATH)
     payload = buffer.getvalue()
     if len(payload) > _MAX_STAGE_ARCHIVE_BYTES:
-        raise ValueError(  # noqa: TRY003
+        raise ValueError(
             f"evaluator inputs too large to stage into the serving container "
             f"({len(payload)} bytes compressed, cap {_MAX_STAGE_ARCHIVE_BYTES})"
         )
@@ -527,8 +528,8 @@ def _find_app_container(
     last_error = "no container listed"
     while True:
         try:
-            result = subprocess.run(  # tracked: #288
-                ["uv", "run", "modal", "container", "list", "--json"],  # noqa: S607  # tracked: #288
+            result = subprocess.run(
+                ["uv", "run", "modal", "container", "list", "--json"],
                 cwd=workspace,
                 capture_output=True,
                 text=True,
@@ -553,7 +554,7 @@ def _find_app_container(
             if name == app_identifier and container_id:
                 return str(container_id)
         if time.monotonic() >= deadline:
-            raise TimeoutError(  # noqa: TRY003
+            raise TimeoutError(
                 f"no running container found for Modal app {app_identifier}: {last_error}"
             )
         _healthy_now(base_url)
@@ -695,7 +696,7 @@ class _DeploymentKeepWarm:
             _healthy_now(self._base_url)
 
 
-def _execute_colocated(  # noqa: PLR0913
+def _execute_colocated(
     command: Sequence[str],
     *,
     workspace: str,
@@ -727,8 +728,8 @@ def _execute_colocated(  # noqa: PLR0913
         setup_command=setup_command,
     )
     with _DeploymentKeepWarm(base_url):
-        result = subprocess.run(  # noqa: S603  # tracked: #288
-            [  # noqa: S607  # tracked: #288
+        result = subprocess.run(
+            [
                 "uv",
                 "run",
                 "modal",
@@ -749,14 +750,14 @@ def _execute_colocated(  # noqa: PLR0913
         )
     exit_code, files, passthrough = _parse_exec_output(result.stdout)
     if passthrough:
-        print(passthrough)  # noqa: T201  # tracked: #288
+        print(passthrough)
     if result.stderr:
-        print(result.stderr, file=sys.stderr, end="")  # noqa: T201  # tracked: #288
+        print(result.stderr, file=sys.stderr, end="")
     for path, payload in files.items():
         Path(path).write_bytes(payload)
     if exit_code is None:
         tail = result.stdout[-_MAX_DIAGNOSTIC_CHARS:]
-        print(  # noqa: T201  # tracked: #288
+        print(
             "Modal evaluator exec did not report an exit code "
             f"(modal exit {result.returncode}); output tail:\n{tail}",
             file=sys.stderr,
@@ -765,7 +766,7 @@ def _execute_colocated(  # noqa: PLR0913
     return exit_code
 
 
-def run_evaluator(  # noqa: PLR0913
+def run_evaluator(
     command: Sequence[str],
     *,
     workspace: str = "/workspace",
@@ -776,7 +777,7 @@ def run_evaluator(  # noqa: PLR0913
 ) -> int:
     """Deploy the candidate and run ``command`` inside its serving container."""
     if not command:
-        raise ValueError("missing evaluator command after '--'")  # noqa: TRY003  # tracked: #288
+        raise ValueError("missing evaluator command after '--'")
     normalized_setup = (
         _normalized_setup_command(setup_command) if setup_command is not None else None
     )
@@ -786,9 +787,7 @@ def run_evaluator(  # noqa: PLR0913
         else None
     )
     if normalized_package_root is not None and not Path(normalized_package_root).is_dir():
-        raise ValueError(  # noqa: TRY003
-            f"evaluator package root is not a directory: {normalized_package_root}"
-        )
+        raise ValueError(f"evaluator package root is not a directory: {normalized_package_root}")
 
     with _exclusive_evaluation():
         return _run_evaluator_unlocked(
@@ -801,7 +800,7 @@ def run_evaluator(  # noqa: PLR0913
         )
 
 
-def _run_evaluator_unlocked(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # tracked: #288
+def _run_evaluator_unlocked(
     command: Sequence[str],
     *,
     workspace: str,
@@ -819,7 +818,7 @@ def _run_evaluator_unlocked(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  
                 and lease.app_identifier is not None
                 and _healthy_now(lease.base_url)
             ):
-                print(  # noqa: T201  # tracked: #288
+                print(
                     "Reusing healthy Modal deployment for candidate revision "
                     f"{candidate_revision}.",
                     file=sys.stderr,
@@ -834,7 +833,7 @@ def _run_evaluator_unlocked(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  
                         evaluator_package_root=evaluator_package_root,
                     )
                 except (TimeoutError, ValueError) as exc:
-                    print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201
+                    print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)
                     return 1
                 finally:
                     if _release_requested():
@@ -844,11 +843,11 @@ def _run_evaluator_unlocked(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  
     try:
         deployment_path = _deployment_path(workspace, entrypoint)
     except (FileNotFoundError, ValueError) as exc:
-        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201
+        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)
         return 1
 
-    deploy = subprocess.run(  # noqa: S603  # tracked: #288
-        ["uv", "run", "modal", "deploy", str(deployment_path)],  # noqa: S607  # tracked: #288
+    deploy = subprocess.run(
+        ["uv", "run", "modal", "deploy", str(deployment_path)],
         cwd=workspace,
         capture_output=True,
         text=True,
@@ -856,7 +855,7 @@ def _run_evaluator_unlocked(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  
     )
     deploy_output = f"{deploy.stdout}\n{deploy.stderr}".strip()
     if deploy_output:
-        print(deploy_output, file=sys.stderr)  # noqa: T201  # tracked: #288
+        print(deploy_output, file=sys.stderr)
     if deploy.returncode != 0:
         return deploy.returncode
 
@@ -866,14 +865,14 @@ def _run_evaluator_unlocked(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  
         app_identifier = extract_modal_app_identifier(deploy_output)
         wait_for_health(base_url, timeout_seconds=readiness_timeout_seconds)
     except (TimeoutError, ValueError) as exc:
-        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # tracked: #288
+        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)
         if app_identifier is None:
-            try:  # noqa: SIM105  # tracked: #288
+            try:
                 app_identifier = extract_modal_app_identifier(deploy_output)
             except ValueError:
                 pass
         if app_identifier is not None:
-            print(  # noqa: T201  # tracked: #288
+            print(
                 f"Recent Modal logs:\n{recent_modal_logs(app_identifier, workspace=workspace)}",
                 file=sys.stderr,
             )
@@ -893,7 +892,7 @@ def _run_evaluator_unlocked(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  
             evaluator_package_root=evaluator_package_root,
         )
     except (TimeoutError, ValueError) as exc:
-        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # tracked: #288
+        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)
         return 1
     finally:
         if _release_requested():
@@ -919,7 +918,8 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:  # noqa: D103  # tracked: #288
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the Modal evaluator with arguments from the command line."""
     args = _parser().parse_args(argv)
     command = list(args.command)
     if command[:1] == ["--"]:

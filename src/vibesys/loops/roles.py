@@ -35,4 +35,4 @@ def expected_agent_roles(outer_loop: str) -> tuple[str, ...]:
     try:
         return EXPECTED_AGENT_ROLES[outer_loop]
     except KeyError as exc:
-        raise ValueError(f"Unknown outer loop {outer_loop!r}.") from exc  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"Unknown outer loop {outer_loop!r}.") from exc

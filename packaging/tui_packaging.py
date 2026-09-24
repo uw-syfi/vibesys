@@ -19,7 +19,6 @@ from wheel_targets import TARGETS
 
 if TYPE_CHECKING:
     from pathlib import Path
-
 BUN_VERSION = "1.3.9"
 _REQUIRED_FILES = (
     "bin/bun",
@@ -53,7 +52,6 @@ def stage_prebuilt_tui(
         if required:
             _fail("Required TUI payload directory is missing")
         return False
-
     validate_tui_payload(
         source,
         expected_target=expected_target,
@@ -165,7 +163,6 @@ def _validate_required_files(root: Path) -> None:
     for relative in _REQUIRED_FILES:
         if not (root / relative).is_file():
             _fail(f"TUI payload is missing {relative}")
-
     runtime_mode = (root / "bin" / "bun").stat().st_mode
     if not runtime_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
         _fail("Bundled Bun runtime is not executable")

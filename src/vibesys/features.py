@@ -12,7 +12,9 @@ from enum import StrEnum
 from vs_feature_flags.api import FeatureDefinition, FeatureRegistry
 
 
-class FeatureFlag(StrEnum):  # noqa: D101  # tracked: #288
+class FeatureFlag(StrEnum):
+    """VibeSys-specific feature switches."""
+
     EXAMPLE_FEATURE = "example_feature"
 
 
@@ -27,10 +29,11 @@ FEATURES = FeatureRegistry(
 )
 
 
-def is_feature_enabled(  # noqa: D103  # tracked: #288
+def is_feature_enabled(
     flag: FeatureFlag,
     config: object | None = None,
 ) -> bool:
+    """Resolve whether ``flag`` is enabled by the optional configuration."""
     overrides = _feature_flag_overrides(config)
     return FEATURES.is_enabled(flag, overrides)
 
@@ -45,6 +48,6 @@ def _feature_flag_overrides(config: object | None) -> Mapping[FeatureFlag, bool]
     if raw_overrides is None:
         raw_overrides = {}
     if not isinstance(raw_overrides, Mapping):
-        raise ValueError("config.feature_flags must be a mapping")  # noqa: TRY003, TRY004  # tracked: #288
+        raise ValueError("config.feature_flags must be a mapping")
 
     return raw_overrides

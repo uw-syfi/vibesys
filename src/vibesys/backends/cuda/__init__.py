@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from collections.abc import Callable, Sequence  # noqa: TC003  # tracked: #288
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -26,6 +25,8 @@ from vibesys.profilers import ProfilerKind
 from vs_sandbox.api import LocalShellSandbox
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
@@ -43,13 +44,14 @@ class CudaBackend:
     name = ComputeBackend.CUDA
     profiler_kind = ProfilerKind.NSYS
 
-    def __init__(  # noqa: D107  # tracked: #288
+    def __init__(
         self,
         log_dir: Path,
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
     ) -> None:
+        """Configure CUDA execution with its log directory and image override."""
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image or _DEFAULT_IMAGE
@@ -64,7 +66,7 @@ class CudaBackend:
 
     # -- ComputeBackendImpl protocol ---------------------------------------------
 
-    def make_sandbox(  # noqa: PLR0913  # tracked: #288
+    def make_sandbox(
         self,
         kind: SandboxKind,
         *,
@@ -83,7 +85,7 @@ class CudaBackend:
         """Construct a sandbox configured for CUDA execution."""
         # Deferred: importing DockerSandbox registers process-wide signal and
         # atexit handlers. Registration must stay side-effect free.
-        from vs_sandbox.api import DockerSandbox  # noqa: PLC0415  # tracked: #288
+        from vs_sandbox.api import DockerSandbox
 
         bind_mounts = bind_mounts or []
         extra_env = extra_env or {}
@@ -122,13 +124,14 @@ class CudaBackend:
                 lifecycle_hooks=lifecycle_hooks,
             )
         else:
-            raise ValueError(f"Unknown sandbox kind: {kind!r}")  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"Unknown sandbox kind: {kind!r}")
 
         if not ephemeral:
             self._sandboxes.append((kind, sandbox))
         return sandbox
 
-    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:  # noqa: D102  # tracked: #288
+    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
+        """Create a contention monitor when a CUDA device is selected."""
         if self.selected_device is None:
             return None
         self._monitor = GpuContentionMonitor(
@@ -162,7 +165,7 @@ class CudaBackend:
 
         # Deferred for the same reason as in make_sandbox; by the time a
         # rebalance happens the module is already imported.
-        from vs_sandbox.api import DockerSandbox  # noqa: PLC0415  # tracked: #288
+        from vs_sandbox.api import DockerSandbox
 
         # Kind-dispatched pokes at sandbox internals: DOCKER entries are
         # always DockerSandbox (stop/start/_gpus), LOCAL entries are always
@@ -171,12 +174,12 @@ class CudaBackend:
         # the concrete attributes resolve.
         for kind, sb in self._sandboxes:
             if kind is SandboxKind.DOCKER:
-                assert isinstance(sb, DockerSandbox)  # noqa: S101  # registration invariant
+                assert isinstance(sb, DockerSandbox)  # registration invariant
                 sb.stop()
-                sb._gpus = self._docker_gpu_spec()  # noqa: SLF001  # tracked: #288
+                sb._gpus = self._docker_gpu_spec()
                 sb.start()  # re-runs lifecycle hooks
             elif kind is SandboxKind.LOCAL:
-                assert isinstance(sb, LocalShellSandbox)  # noqa: S101  # registration invariant
+                assert isinstance(sb, LocalShellSandbox)  # registration invariant
                 sb.env["CUDA_VISIBLE_DEVICES"] = str(new_gpu.index)
 
         # Restart the contention monitor on the new device.
@@ -247,8 +250,8 @@ class CudaBackend:
         Empty dict if nvidia-smi is missing or the driver version is unknown.
         """
         try:
-            result = subprocess.run(  # noqa: PLW1510  # tracked: #288
-                ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],  # noqa: S607  # tracked: #288
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -281,7 +284,7 @@ class CudaBackend:
         data = {
             "selected_gpu": _gpu_to_dict(gpu),
             "all_gpus_at_selection": [_gpu_to_dict(g) for g in all_gpus],
-            "selected_at": datetime.now().isoformat(),  # noqa: DTZ005  # tracked: #288
+            "selected_at": datetime.now().isoformat(),
             "contention_detected": False,
             "contention_events": 0,
         }

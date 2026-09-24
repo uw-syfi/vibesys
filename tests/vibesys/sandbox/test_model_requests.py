@@ -110,12 +110,12 @@ def test_allow_prefix_match_and_miss() -> None:
 
 def test_allow_prefixes_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VIBESYS_MODEL_REQUEST_ALLOW", " org/ , trusted/ ")
-    assert model_requests._allow_prefixes() == ("org/", "trusted/")  # noqa: SLF001
+    assert model_requests._allow_prefixes() == ("org/", "trusted/")
 
 
 def test_allow_prefixes_unset_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("VIBESYS_MODEL_REQUEST_ALLOW", raising=False)
-    assert model_requests._allow_prefixes() is None  # noqa: SLF001
+    assert model_requests._allow_prefixes() is None
 
 
 # -- reconcile_model_requests ----------------------------------------------

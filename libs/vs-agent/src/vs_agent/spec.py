@@ -58,11 +58,11 @@ class AgentSpec:
 
     def __post_init__(self) -> None:
         """Reject a provider the resolved driver does not support."""
-        from vs_agent.catalog import agent_catalog  # noqa: PLC0415  # avoid import cycle
+        from vs_agent.catalog import agent_catalog  # avoid import cycle
 
         supported = agent_catalog()[self.driver].providers
         if self.provider not in supported:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            raise ValueError(  # noqa: TRY003  # lint-waiver: LW-008082 [TRY003]; AgentSpec uses ValueError for invalid provider configuration and callers depend on that validation contract.
                 f"agent driver {self.driver.value!r} does not support provider "
                 f"{self.provider!r}; supported providers: {', '.join(supported)}"
             )

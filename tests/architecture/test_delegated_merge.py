@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from collections.abc import Mapping  # noqa: TC003  # runtime Protocol conformance
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import yaml
@@ -46,6 +46,10 @@ from scripts.delegated_merge import (
     run,
     select_workflow_run,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from hypothesis.strategies import DrawFn
 
 REPO_ROOT = Path(__file__).parents[2]
 
@@ -99,7 +103,7 @@ class _FileAuthorizationCase:
 
 
 @st.composite
-def _file_authorization_cases(draw) -> _FileAuthorizationCase:  # noqa: ANN001
+def _file_authorization_cases(draw: DrawFn) -> _FileAuthorizationCase:
     capability_count = draw(st.integers(min_value=1, max_value=5))
     capability_names = [f"cap{index}" for index in range(capability_count)]
     check_ids = [f"extra{index}" for index in range(capability_count)]
@@ -202,7 +206,7 @@ def _expected_file_authorization(
 
 @st.composite
 def _membership_cases(
-    draw,  # noqa: ANN001
+    draw: DrawFn,
 ) -> tuple[Policy, str, RepositoryRole, frozenset[str]]:
     capability_count = draw(st.integers(min_value=1, max_value=6))
     names = [f"cap{index}" for index in range(capability_count)]
@@ -548,7 +552,7 @@ def test_check_authorization_uses_latest_exact_head_run_and_exact_job() -> None:
 class FakeGitHubAPI:
     """Record the state transitions made by one complete merge attempt."""
 
-    def __init__(  # noqa: PLR0913  # keyword-only scenario knobs
+    def __init__(  # keyword-only scenario knobs
         self,
         *,
         refreshed_sha: str = "abc123",
@@ -928,7 +932,7 @@ def test_async_strategy_reports_already_queued_and_refuses_unconfirmed_answers()
 def test_async_failure_names_the_step_and_never_leaks_the_response_body(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    secret = "ghs_SECRETTOKEN0123"  # noqa: S105
+    secret = "ghs_SECRETTOKEN0123"
     body = json.dumps({"message": f"This pull request is part of a stack {secret}"})
 
     def failing(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -991,7 +995,7 @@ class _FailingAPI(FakeGitHubAPI):
         ("enqueuePullRequest", "enqueue request", {"id": "Q"}),
     ],
 )
-def test_api_failure_names_the_failing_step_and_still_refuses(  # noqa: PLR0913
+def test_api_failure_names_the_failing_step_and_still_refuses(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1043,7 +1047,7 @@ def test_pull_request_refresh_failure_is_named(
 
 
 def test_gh_failures_expose_only_http_status_and_graphql_error_types() -> None:
-    secret = "ghs_SECRETTOKEN0123"  # noqa: S105
+    secret = "ghs_SECRETTOKEN0123"
     body = json.dumps(
         {
             "data": None,
@@ -1248,9 +1252,10 @@ def test_landing_client_authenticates_only_its_own_calls(
         return subprocess.CompletedProcess(["gh"], 0, stdout="{}", stderr="")
 
     GitHubAPI(_runner=runner).get("repos/x/y")
-    GitHubAPI(_runner=runner, _token="app-token").write("repos/x/y", method="PUT", payload={})  # noqa: S106
-    assert seen == [None, "app-token"]
-    assert "app-token" not in repr(GitHubAPI(_token="app-token"))  # noqa: S106
+    token = "app-token"
+    GitHubAPI(_runner=runner, _token=token).write("repos/x/y", method="PUT", payload={})
+    assert seen == [None, token]
+    assert token not in repr(GitHubAPI(_token=token))
 
 
 def test_missing_landing_token_message_and_logs_carry_no_token(

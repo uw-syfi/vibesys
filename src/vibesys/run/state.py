@@ -37,12 +37,12 @@ class RunState:
     def __post_init__(self) -> None:
         """Require state persistence and Git history to identify the same run."""
         if self.project.root != self.git.history_root:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            raise ValueError(
                 "run state project root does not match Git history root: "
                 f"{self.project.root} != {self.git.history_root}"
             )
         if self.run_id != self.git.run_id:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            raise ValueError(
                 f"run state ID does not match Git history run ID: {self.run_id!r} != "
                 f"{self.git.run_id!r}"
             )

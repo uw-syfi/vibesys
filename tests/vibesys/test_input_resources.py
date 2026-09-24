@@ -23,6 +23,19 @@ def _manifest(resources: object) -> InputManifest:
     )
 
 
+def _entrypoint_manifest() -> InputManifest:
+    return InputManifest.model_validate(
+        {
+            "version": 1,
+            "agent": {"domain": DomainName.GENERIC},
+            "accuracy": {"entrypoint": "accuracy.py"},
+            "benchmark": {"entrypoint": "benchmark.py"},
+            "evaluator": {"name": "sample-evaluator", "version": "1.0"},
+        },
+        strict=True,
+    )
+
+
 def test_resource_request_round_trips_through_manifest_toml() -> None:
     resources = {
         "nodes": 2,
@@ -36,6 +49,40 @@ def test_resource_request_round_trips_through_manifest_toml() -> None:
 
     assert reparsed.resources == RunResourceRequest.model_validate(resources, strict=True)
     assert "[resources]" in rendered
+
+
+def test_render_rechecks_mutated_accuracy_entrypoint() -> None:
+    manifest = _entrypoint_manifest()
+    manifest.accuracy.entrypoint = None
+
+    with pytest.raises(ValueError, match="accuracy.entrypoint"):
+        render_input_manifest(manifest)
+
+
+def test_render_rechecks_mutated_benchmark_entrypoint() -> None:
+    manifest = _entrypoint_manifest()
+    manifest.benchmark.entrypoint = ""
+
+    with pytest.raises(ValueError, match="benchmark.entrypoint"):
+        render_input_manifest(manifest)
+
+
+def test_render_rechecks_mutated_evaluator_name() -> None:
+    manifest = _entrypoint_manifest()
+    assert manifest.evaluator is not None
+    manifest.evaluator.name = None
+
+    with pytest.raises(ValueError, match="evaluator.name"):
+        render_input_manifest(manifest)
+
+
+def test_render_rechecks_mutated_evaluator_version() -> None:
+    manifest = _entrypoint_manifest()
+    assert manifest.evaluator is not None
+    manifest.evaluator.version = ""
+
+    with pytest.raises(ValueError, match="evaluator.version"):
+        render_input_manifest(manifest)
 
 
 @pytest.mark.parametrize(

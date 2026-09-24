@@ -9,26 +9,48 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, cast
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
+from tests.support import make_orchestrator_plan, run_test_command
 
+from entrypoints.cli import (
+    _build_agent_parser,
+    _load_objective,
+    _validate_agent,
+)
 from vibesys.config import Config, as_config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationError
-from vibesys.evaluators.input_manifest import BenchmarkResult, WorkspaceSource
+from vibesys.evaluators.input_manifest import (
+    BenchmarkResult,
+    WorkspaceSource,
+    load_input_bundle,
+)
+from vibesys.events import (
+    CoreEventType,
+    EventStatus,
+    GateFinishedData,
+    GateKind,
+    GateStartedData,
+)
 from vibesys.loops.agent import issue_board
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.loop import (
     FrameworkBenchmarkOutcome,
     _backfill_revert_commit,
     _candidate_evidence_is_fresh,
+    _detect_plateau,
     _finalize_agent_run,
     _invoke_read_only_role,
     _missing_implementer_response,
     _official_evaluation_reason,
+    _pareto_archive_conflict,
     _pareto_archive_dominators,
     _pareto_archive_summary,
     _pareto_frontier_records,
     _provisional_candidates_since_official,
     _review_due,
+    _run_framework_accuracy_gate,
+    _run_framework_benchmark,
+    _run_framework_gates,
     _run_framework_validation_gate,
     _select_final_candidate,
     _terminal_workspace_notice,
@@ -37,9 +59,16 @@ from vibesys.loops.agent.loop import (
 )
 from vibesys.loops.agent.model import Hypothesis, HypothesisResolution, HypothesisReview
 from vibesys.loops.agent.state import AgentRunStateStore
+from vibesys.loops.gates import (
+    FRAMEWORK_BENCHMARK_END_MARKER,
+    FRAMEWORK_BENCHMARK_MARKER,
+    PROTOCOL_OUTPUT_FLAG,
+    read_protocol_benchmark,
+)
 from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.prompts import PROMPTS_DIR
+from vibesys.render.sink import output_sink
 from vibesys.run import GitTracker, RepositoryVisibility
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.sandbox.run_environment import RunEnvironmentSpec, make_run_environment_spec
@@ -78,7 +107,7 @@ def _exec_result(*, exit_code: int, output: str) -> SandboxExecutionResult:
     return SandboxExecutionResult(output=output, exit_code=exit_code, stdout=output)
 
 
-def test_missing_implementer_response_fails_closed():  # noqa: ANN201  # tracked: #288
+def test_missing_implementer_response_fails_closed() -> None:
     response = _missing_implementer_response()
 
     assert response.hypothesis_outcome is HypothesisOutcome.INCONCLUSIVE
@@ -87,11 +116,11 @@ def test_missing_implementer_response_fails_closed():  # noqa: ANN201  # tracked
     assert "schema-valid" in response.next_step
 
 
-def test_legacy_active_hypothesis_backfills_framework_revert_commit():  # noqa: ANN201  # tracked: #288
-    plan = OrchestratorPlan(
+def test_legacy_active_hypothesis_backfills_framework_revert_commit() -> None:
+    plan = make_orchestrator_plan(
         hypothesis_id="restore-parent",
         task="restore parent",
-        pass_criteria="review",  # noqa: S106  # tracked: #288
+        criteria="review",
         revert_to_round=28,
         reasoning="resume an older run",
     )
@@ -124,7 +153,7 @@ def test_legacy_active_hypothesis_backfills_framework_revert_commit():  # noqa: 
 
 
 @pytest.fixture
-def ref_file(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def ref_file(tmp_path: Path) -> Path:
     """Create a reference *file* (not dir) + an OBJECTIVE.md sibling.
 
     Using a single file avoids the model-weight lookup that a reference
@@ -150,7 +179,7 @@ command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 command = ["uv", "run", "python", "benchmark/benchmark.py"]
 """.lstrip()
     )
-    return str(ref)
+    return ref
 
 
 def _single_agent_round(perf_metric: float | None) -> SingleAgentRoundResponse:
@@ -185,9 +214,9 @@ def _default_orchestrator_plan() -> OrchestratorPlan:
     Tests that only care about a few rounds enqueue those and let this default
     fill the rest; the loop's ``max_rounds`` bounds how many of those run.
     """
-    return OrchestratorPlan(
+    return make_orchestrator_plan(
         task="noop (harness default)",
-        pass_criteria="no criteria",  # noqa: S106  # tracked: #288
+        criteria="no criteria",
         reasoning="default noop plan — the loop's max_rounds bounds the test",
     )
 
@@ -363,7 +392,7 @@ _THROUGHPUT_LATENCY = MetricSpace(
 
 def _invoke_orchestrate(
     tmp_path: Path,
-    ref_file: str,
+    ref_file: Path,
     runner: AgentClientProtocol,
     *,
     _accuracy_gate_results: Sequence[str | None] | None = None,
@@ -517,7 +546,7 @@ def test_project_configuration_captures_effective_agent_behavior(tmp_path: Path)
     }
 
 
-def test_validation_recipe_rejects_non_workspace_inputs():  # noqa: ANN201  # tracked: #288
+def test_validation_recipe_rejects_non_workspace_inputs() -> None:
     with pytest.raises(ValueError, match="workspace-relative"):
         ValidationRecipe(
             name="focused-tests",
@@ -527,7 +556,7 @@ def test_validation_recipe_rejects_non_workspace_inputs():  # noqa: ANN201  # tr
         )
 
 
-def test_validation_recipe_artifact_rejects_invented_top_level_shape():  # noqa: ANN201  # tracked: #288
+def test_validation_recipe_artifact_rejects_invented_top_level_shape() -> None:
     with pytest.raises(ValueError, match="recipes"):
         ValidationRecipeArtifact.model_validate(
             {
@@ -542,7 +571,7 @@ def test_validation_recipe_artifact_rejects_invented_top_level_shape():  # noqa:
         )
 
 
-def test_issue_board_publishes_authoritative_validation_recipe_schema(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_issue_board_publishes_authoritative_validation_recipe_schema(tmp_path: Path) -> None:
     progress = tmp_path / "progress"
 
     path = issue_board.write_validation_recipe_schema(progress)
@@ -555,15 +584,15 @@ def test_issue_board_publishes_authoritative_validation_recipe_schema(tmp_path):
     assert schema["examples"][0]["recipes"][0]["name"] == "focused-tests"
 
 
-def test_read_only_role_reverts_workspace_mutations_and_keeps_response():  # noqa: ANN201  # tracked: #288
+def test_read_only_role_reverts_workspace_mutations_and_keeps_response() -> None:
     ctx = MagicMock()
     ctx.git.current_sha.return_value = "a" * 40
     ctx.git.pending_changes.side_effect = [["roadmap/index.md", "scratch.txt"], []]
     ctx.git.checkout_tree.return_value = True
-    expected = OrchestratorPlan(
+    expected = make_orchestrator_plan(
         task="next",
-        pass_criteria="passes",  # noqa: S106  # tracked: #288
-        reasoning="evidence supports next",  # noqa: RUF100, S106  # tracked: #288
+        criteria="passes",
+        reasoning="evidence supports next",
     )
     ctx.invoke.return_value = expected
 
@@ -584,7 +613,7 @@ def test_read_only_role_reverts_workspace_mutations_and_keeps_response():  # noq
     ctx.lprint.assert_called_once()
 
 
-def test_read_only_role_does_not_restore_clean_turn():  # noqa: ANN201  # tracked: #288
+def test_read_only_role_does_not_restore_clean_turn() -> None:
     ctx = MagicMock()
     ctx.git.current_sha.return_value = "b" * 40
     ctx.git.pending_changes.return_value = []
@@ -607,7 +636,7 @@ def test_read_only_role_does_not_restore_clean_turn():  # noqa: ANN201  # tracke
     ctx.lprint.assert_not_called()
 
 
-def test_read_only_role_preserves_allowed_roadmap_and_reverts_other_writes(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_read_only_role_preserves_allowed_roadmap_and_reverts_other_writes(tmp_path: Path) -> None:
     workspace = tmp_path / "project"
     roadmap = workspace / "roadmap" / "index.md"
     roadmap.parent.mkdir(parents=True)
@@ -615,13 +644,13 @@ def test_read_only_role_preserves_allowed_roadmap_and_reverts_other_writes(tmp_p
     tracker = GitTracker(workspace, run_id="test-run", events=NullGitTrackerEvents())
     tracker.init(existing=False)
 
-    expected = OrchestratorPlan(
+    expected = make_orchestrator_plan(
         task="next",
-        pass_criteria="passes",  # noqa: S106  # tracked: #288
-        reasoning="evidence supports next",  # noqa: RUF100, S106  # tracked: #288
+        criteria="passes",
+        reasoning="evidence supports next",
     )
 
-    def invoke(**_kwargs):  # noqa: ANN003, ANN202  # tracked: #288
+    def invoke(**_kwargs: object) -> object:
         roadmap.write_text("updated roadmap\n")
         (workspace / "main.py").write_text("unauthorized candidate edit\n")
         return expected
@@ -657,7 +686,9 @@ def test_read_only_role_preserves_allowed_roadmap_and_reverts_other_writes(tmp_p
     assert any("main.py" in line for line in logs)
 
 
-def test_read_only_role_preserves_allowed_directory_and_reverts_candidate_edits(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_read_only_role_preserves_allowed_directory_and_reverts_candidate_edits(
+    tmp_path: Path,
+) -> None:
     workspace = tmp_path / "project"
     workspace.mkdir(parents=True)
     main = workspace / "main.py"
@@ -667,7 +698,7 @@ def test_read_only_role_preserves_allowed_directory_and_reverts_candidate_edits(
 
     expected = ProfilerSummary(analysis="done", bottlenecks="b", suggestions="s")
 
-    def invoke(**_kwargs):  # noqa: ANN003, ANN202  # tracked: #288
+    def invoke(**_kwargs: object) -> object:
         main.write_text("profiler instrumentation\n")
         artifact = workspace / "progress" / "profiles" / "round-0002" / "summary.json"
         artifact.parent.mkdir(parents=True)
@@ -703,28 +734,30 @@ def test_read_only_role_preserves_allowed_directory_and_reverts_candidate_edits(
     assert any("main.py" in line for line in logs)
 
 
-def test_pre_round_decision_accepts_booleans():  # noqa: ANN201  # tracked: #288
+def test_pre_round_decision_accepts_booleans() -> None:
     d = PreRoundDecision(need_profile=True, profile_focus="decode kernels", reasoning="ok")
     assert d.need_profile is True
     assert d.profile_focus == "decode kernels"
 
 
-def test_orchestrator_plan_revert_round_optional():  # noqa: ANN201  # tracked: #288
-    p = OrchestratorPlan(
+def test_orchestrator_plan_revert_round_optional() -> None:
+    p = make_orchestrator_plan(
         task="redo",
-        pass_criteria="passes tests",  # noqa: S106  # tracked: #288
+        criteria="passes tests",
         revert_to_round=3,
         reasoning="step back",
     )
     assert p.revert_to_round == 3
 
 
-def test_official_evaluation_cadence_counts_candidate_checkpoints_not_rounds():  # noqa: ANN201  # tracked: #288
+def test_official_evaluation_cadence_counts_candidate_checkpoints_not_rounds() -> None:
     records = [
-        RoundRecord(1, "a", None, None, False, reviewed=False, hypothesis_outcome="continue"),  # noqa: FBT003  # tracked: #288
-        RoundRecord(2, "b", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
-        RoundRecord(3, "c", None, None, False, reviewed=True, hypothesis_outcome="rejected"),  # noqa: FBT003  # tracked: #288
-        RoundRecord(4, "d", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
+        RoundRecord(
+            1, "a", None, None, passed=False, reviewed=False, hypothesis_outcome="continue"
+        ),
+        RoundRecord(2, "b", None, None, passed=True, reviewed=True, hypothesis_outcome="proven"),
+        RoundRecord(3, "c", None, None, passed=False, reviewed=True, hypothesis_outcome="rejected"),
+        RoundRecord(4, "d", None, None, passed=True, reviewed=True, hypothesis_outcome="proven"),
     ]
 
     assert _provisional_candidates_since_official(records) == 2
@@ -741,7 +774,7 @@ def test_official_evaluation_cadence_counts_candidate_checkpoints_not_rounds(): 
     )
 
 
-def test_frontier_candidate_forces_review_outside_sparse_cadence():  # noqa: ANN201  # tracked: #288
+def test_frontier_candidate_forces_review_outside_sparse_cadence() -> None:
     assert _review_due(
         round_number=5,
         max_rounds=20,
@@ -751,7 +784,7 @@ def test_frontier_candidate_forces_review_outside_sparse_cadence():  # noqa: ANN
     )
 
 
-def test_measured_candidate_forces_review_even_when_disposition_is_downgraded():  # noqa: ANN201  # tracked: #288
+def test_measured_candidate_forces_review_even_when_disposition_is_downgraded() -> None:
     assert _review_due(
         round_number=5,
         max_rounds=20,
@@ -761,7 +794,7 @@ def test_measured_candidate_forces_review_even_when_disposition_is_downgraded():
     )
 
 
-def test_reused_candidate_evidence_does_not_bypass_sparse_review():  # noqa: ANN201  # tracked: #288
+def test_reused_candidate_evidence_does_not_bypass_sparse_review() -> None:
     metrics = {"throughput": 6205.0, "latency": 10660.0}
     record = RoundRecord(
         round_number=75,
@@ -794,7 +827,7 @@ def test_reused_candidate_evidence_does_not_bypass_sparse_review():  # noqa: ANN
     )
 
 
-def test_changed_candidate_row_is_fresh_even_when_artifact_name_is_reused():  # noqa: ANN201  # tracked: #288
+def test_changed_candidate_row_is_fresh_even_when_artifact_name_is_reused() -> None:
     record = RoundRecord(
         round_number=4,
         commit="a" * 40,
@@ -816,14 +849,14 @@ def test_changed_candidate_row_is_fresh_even_when_artifact_name_is_reused():  # 
     assert _candidate_evidence_is_fresh(implementation, [record])
 
 
-def test_official_evaluation_cadence_counts_reviewed_frontier_tradeoff():  # noqa: ANN201  # tracked: #288
+def test_official_evaluation_cadence_counts_reviewed_frontier_tradeoff() -> None:
     records = [
         RoundRecord(
             2,
             "b",
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_outcome="disproven",
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
@@ -834,7 +867,7 @@ def test_official_evaluation_cadence_counts_reviewed_frontier_tradeoff():  # noq
     assert _provisional_candidates_since_official(records) == 1
 
 
-def test_typed_unknown_retention_is_not_trusted_as_pareto_state():  # noqa: ANN201  # tracked: #288
+def test_typed_unknown_retention_is_not_trusted_as_pareto_state() -> None:
     record = RoundRecord(
         round_number=2,
         commit="b" * 40,
@@ -854,7 +887,7 @@ def test_typed_unknown_retention_is_not_trusted_as_pareto_state():  # noqa: ANN2
     assert _pareto_frontier_records([record], _THROUGHPUT_LATENCY) == []
 
 
-def test_noise_aware_dominance_preserves_sub_noise_alternatives():  # noqa: ANN201  # tracked: #288
+def test_noise_aware_dominance_preserves_sub_noise_alternatives() -> None:
     space = MetricSpace(objectives=_THROUGHPUT_LATENCY.objectives, relative_noise=0.03)
 
     assert not space.dominates(
@@ -867,7 +900,7 @@ def test_noise_aware_dominance_preserves_sub_noise_alternatives():  # noqa: ANN2
     )
 
 
-def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_point():  # noqa: ANN201  # tracked: #288
+def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_point() -> None:
 
     def candidate(round_number: int, throughput: float, latency: float) -> RoundRecord:
         return RoundRecord(
@@ -875,7 +908,7 @@ def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_p
             str(round_number) * 40,
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
             candidate_metrics={"throughput": throughput, "latency": latency},
@@ -895,15 +928,14 @@ def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_p
     assert [record.round_number for record in frontier] == [1, 2]
 
 
-def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _pareto_archive_conflict  # noqa: PLC0415  # tracked: #288
+def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate() -> None:
 
     trusted = RoundRecord(
         61,
         "a" * 40,
         None,
         None,
-        True,  # noqa: FBT003  # tracked: #288
+        passed=True,
         reviewed=True,
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics={"throughput": 8795.8, "latency": 7724.0},
@@ -921,15 +953,14 @@ def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate():  #
     assert "frozen into the hypothesis plan" in conflict
 
 
-def test_live_archive_preserves_real_throughput_latency_tradeoff():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _pareto_archive_conflict  # noqa: PLC0415  # tracked: #288
+def test_live_archive_preserves_real_throughput_latency_tradeoff() -> None:
 
     trusted = RoundRecord(
         6,
         "a" * 40,
         None,
         None,
-        True,  # noqa: FBT003  # tracked: #288
+        passed=True,
         reviewed=True,
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics={"throughput": 100.0, "latency": 80.0},
@@ -946,13 +977,13 @@ def test_live_archive_preserves_real_throughput_latency_tradeoff():  # noqa: ANN
     )
 
 
-def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa: ANN201  # tracked: #288
+def test_pareto_archive_distinguishes_trusted_and_pending_candidates() -> None:
     trusted = RoundRecord(
         49,
         "a" * 40,
         None,
         None,
-        True,  # noqa: FBT003  # tracked: #288
+        passed=True,
         reviewed=True,
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics={"throughput": 5307.2, "latency": 3289.7},
@@ -964,7 +995,7 @@ def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa:
         "b" * 40,
         None,
         None,
-        False,  # noqa: FBT003  # tracked: #288
+        passed=False,
         reviewed=False,
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics={"throughput": 6827.7, "latency": 3628.7},
@@ -986,7 +1017,7 @@ def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa:
     assert "round 51" in summary
 
 
-def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice():  # noqa: ANN201  # tracked: #288
+def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice() -> None:
     """The newest pending claims remain visible and older ones are disclosed."""
     pending_records = [
         RoundRecord(
@@ -994,7 +1025,7 @@ def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice():
             chr(ord("a") + round_number) * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
             candidate_metrics={
@@ -1020,7 +1051,7 @@ def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice():
     assert "do not treat any omitted claim as a trusted parent" in summary
 
 
-def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count():  # noqa: ANN201  # tracked: #288
+def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count() -> None:
     """One omitted claim reads as singular, and one omitted round is not a range.
 
     The notice goes into prompt context a model reads, so "1 older untrusted
@@ -1033,7 +1064,7 @@ def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count():  # 
             chr(ord("a") + round_number) * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
             candidate_metrics={
@@ -1054,7 +1085,7 @@ def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count():  # 
     assert "rounds 1-1" not in summary
 
 
-def test_pareto_archive_summary_lists_all_pending_claims_within_the_limit():  # noqa: ANN201  # tracked: #288
+def test_pareto_archive_summary_lists_all_pending_claims_within_the_limit() -> None:
     """A short pending list needs no omission notice."""
     pending_records = [
         RoundRecord(
@@ -1062,7 +1093,7 @@ def test_pareto_archive_summary_lists_all_pending_claims_within_the_limit():  # 
             chr(ord("a") + round_number) * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
             candidate_metrics={
@@ -1099,7 +1130,7 @@ def _accuracy_row(
         str(round_number) * 40,
         accuracy,
         "accuracy",
-        True,  # noqa: FBT003  # tracked: #288
+        passed=True,
         reviewed=True,
         hypothesis_id="H-acc",
         judge_verdict="pass",
@@ -1112,7 +1143,7 @@ def _accuracy_row(
     )
 
 
-def test_implementer_report_cannot_seed_archive_or_dominate_candidates():  # noqa: ANN201  # tracked: #288
+def test_implementer_report_cannot_seed_archive_or_dominate_candidates() -> None:
     """Regression for #535: implementer provenance never becomes a trusted parent.
 
     A reviewed, accuracy-passing implementer self-report that persisted
@@ -1134,17 +1165,24 @@ def test_implementer_report_cannot_seed_archive_or_dominate_candidates():  # noq
     assert _pareto_archive_dominators(weaker, [framework], space) == [framework]
 
 
-def _official_record(  # noqa: PLR0913  # test record builder
+class _OfficialRecordOptions(TypedDict, total=False):
+    retained: bool
+    passed: bool
+    provenance: Literal["framework", "implementer"]
+    metrics: dict[str, float] | None
+
+
+def _official_record(
     round_number: int,
     commit: str,
     perf: float,
-    *,
-    retained: bool = True,
-    passed: bool = True,
-    provenance: Literal["framework", "implementer"] = "framework",
-    metrics: dict[str, float] | None = None,
+    **options: Unpack[_OfficialRecordOptions],
 ) -> RoundRecord:
     """Build one reviewed record eligible for final selection when trusted."""
+    retained = options.get("retained", True)
+    passed = options.get("passed", True)
+    provenance = options.get("provenance", "framework")
+    metrics = options.get("metrics")
     return RoundRecord(
         round_number,
         commit,
@@ -1161,7 +1199,7 @@ def _official_record(  # noqa: PLR0913  # test record builder
     )
 
 
-def test_final_candidate_is_noise_aware_and_rejects_untrusted_records():  # noqa: ANN201  # tracked: #288
+def test_final_candidate_is_noise_aware_and_rejects_untrusted_records() -> None:
     space = MetricSpace(relative_noise=0.05)
     older = _official_record(1, "a" * 40, 100.0)
     newer_within_noise = _official_record(2, "b" * 40, 103.0)
@@ -1175,7 +1213,7 @@ def test_final_candidate_is_noise_aware_and_rejects_untrusted_records():  # noqa
     )
 
 
-def test_final_pareto_candidate_requires_canonical_official_metrics():  # noqa: ANN201  # tracked: #288
+def test_final_pareto_candidate_requires_canonical_official_metrics() -> None:
     official = _official_record(
         1,
         "a" * 40,
@@ -1187,7 +1225,7 @@ def test_final_pareto_candidate_requires_canonical_official_metrics():  # noqa: 
         "b" * 40,
         None,
         None,
-        True,  # noqa: FBT003  # tracked: #288
+        passed=True,
         reviewed=True,
         judge_verdict="pass",
         candidate_metrics={"throughput": 200.0, "latency": 5.0},
@@ -1311,20 +1349,20 @@ def test_finalize_fails_when_neither_winner_nor_baseline_exists(tmp_path: Path) 
     ctx.snapshot_workspace.assert_not_called()
 
 
-def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: ANN201  # tracked: #288
+def test_official_evaluation_cadence_resets_at_verified_checkpoint() -> None:
     records = [
         RoundRecord(
             1,
             "a",
             10.0,
             "tok/s",
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_outcome="proven",
             official_evaluation=True,
             official_evaluation_reason="orchestrator_request",
         ),
-        RoundRecord(2, "b", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
+        RoundRecord(2, "b", None, None, passed=True, reviewed=True, hypothesis_outcome="proven"),
     ]
 
     assert _provisional_candidates_since_official(records) == 1
@@ -1341,15 +1379,15 @@ def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: A
     )
 
 
-def test_terminal_workspace_notice_points_designer_to_hypothesis_parent():  # noqa: ANN201  # tracked: #288
+def test_terminal_workspace_notice_points_designer_to_hypothesis_parent() -> None:
     records = [
-        RoundRecord(28, "a" * 40, None, None, False),  # noqa: FBT003  # tracked: #288
+        RoundRecord(28, "a" * 40, None, None, passed=False),
         RoundRecord(
             29,
             "b" * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=True,
             hypothesis_id="bad-scheduler",
             hypothesis_outcome="rejected",
@@ -1359,7 +1397,7 @@ def test_terminal_workspace_notice_points_designer_to_hypothesis_parent():  # no
             "c" * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             hypothesis_id="bad-scheduler",
             hypothesis_outcome="disproven",
@@ -1375,13 +1413,13 @@ def test_terminal_workspace_notice_points_designer_to_hypothesis_parent():  # no
     assert "revert_to_round=28" in notice
 
 
-def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit():  # noqa: ANN201  # tracked: #288
+def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit() -> None:
     record = RoundRecord(
         51,
         "b" * 40,
         None,
         None,
-        False,  # noqa: FBT003  # tracked: #288
+        passed=False,
         reviewed=False,
         hypothesis_id="capacity-192",
         hypothesis_outcome="disproven",
@@ -1397,15 +1435,15 @@ def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit():  # noqa: 
     assert "do not erase a credible throughput/latency tradeoff" in notice
 
 
-def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():  # noqa: ANN201  # tracked: #288
+def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint() -> None:
     records = [
-        RoundRecord(28, "a" * 40, None, None, False),  # noqa: FBT003  # tracked: #288
+        RoundRecord(28, "a" * 40, None, None, passed=False),
         RoundRecord(
             34,
             "b" * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             hypothesis_id="host-autopsy",
             hypothesis_outcome="continue",
@@ -1416,7 +1454,7 @@ def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():
             "c" * 40,
             None,
             None,
-            False,  # noqa: FBT003  # tracked: #288
+            passed=False,
             reviewed=False,
             hypothesis_id="host-autopsy",
             hypothesis_outcome="continue",
@@ -1427,7 +1465,7 @@ def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():
             "d" * 40,
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_id="host-autopsy",
             hypothesis_outcome="disproven",
@@ -1444,15 +1482,15 @@ def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():
     assert "An older implementation cannot be required to reproduce" in notice
 
 
-def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposal():  # noqa: ANN201  # tracked: #288
+def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposal() -> None:
     records = [
-        RoundRecord(60, "a" * 40, None, None, True),  # noqa: FBT003  # tracked: #288
+        RoundRecord(60, "a" * 40, None, None, passed=True),
         RoundRecord(
             61,
             "b" * 40,
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_id="quantum-decode",
             hypothesis_outcome="implementation_failed",
@@ -1463,7 +1501,7 @@ def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposa
             "c" * 40,
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_id="quantum-decode",
             hypothesis_outcome="blocked",
@@ -1474,7 +1512,7 @@ def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposa
             "d" * 40,
             None,
             None,
-            True,  # noqa: FBT003  # tracked: #288
+            passed=True,
             reviewed=True,
             hypothesis_id="quantum-decode",
             hypothesis_outcome="inconclusive",
@@ -1490,7 +1528,7 @@ def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposa
     assert "recorded pre-hypothesis parent is round 62" not in notice
 
 
-def test_profiler_summary_perf_metric_optional():  # noqa: ANN201  # tracked: #288
+def test_profiler_summary_perf_metric_optional() -> None:
     p = ProfilerSummary(analysis="a", bottlenecks="b", suggestions="s")
     assert p.perf_metric is None
     p2 = ProfilerSummary(
@@ -1509,11 +1547,11 @@ def test_profiler_summary_perf_metric_optional():  # noqa: ANN201  # tracked: #2
 # ---------------------------------------------------------------------------
 
 
-def test_progress_writes_orchestrator_plan(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_writes_orchestrator_plan(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
-    plan = OrchestratorPlan(
+    plan = make_orchestrator_plan(
         task="Build FastAPI server",
-        pass_criteria="/health returns 200",  # noqa: S106  # tracked: #288
+        criteria="/health returns 200",
         reasoning="Round 1 cold start",
         expected_effect="Forecast 1.3x to 1.6x throughput",
         minimum_acceptance_criteria="Retain at >=1.15x with no latency regression",
@@ -1527,8 +1565,10 @@ def test_progress_writes_orchestrator_plan(tmp_path):  # noqa: ANN001, ANN201  #
     assert "Retain at >=1.15x with no latency regression" in text
 
 
-def test_invalid_hypothesis_update_is_not_written_to_progress(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    invalid_plan = OrchestratorPlan(
+def test_invalid_hypothesis_update_is_not_written_to_progress(
+    tmp_path: Path, ref_file: Path
+) -> None:
+    invalid_plan = make_orchestrator_plan(
         hypothesis_id="new-hypothesis",
         hypothesis_updates=[
             HypothesisStrategyUpdate(
@@ -1538,7 +1578,7 @@ def test_invalid_hypothesis_update_is_not_written_to_progress(tmp_path, ref_file
             )
         ],
         task="attempt an invalid transition",
-        pass_criteria="review",  # noqa: S106  # tracked: #288
+        criteria="review",
         reasoning="exercise fail-closed validation",
     )
     # The first rejection triggers one corrective reprompt; a second invalid
@@ -1563,7 +1603,9 @@ def test_invalid_hypothesis_update_is_not_written_to_progress(tmp_path, ref_file
     )
 
 
-def test_reused_hypothesis_id_is_reprompted_once_and_recovers(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_reused_hypothesis_id_is_reprompted_once_and_recovers(
+    tmp_path: Path, ref_file: Path
+) -> None:
     # Round one's plan is accepted; round two's first attempt collides and is
     # reprompted within the same round, so only two pre-round decisions
     # precede the three plan attempts.
@@ -1571,23 +1613,23 @@ def test_reused_hypothesis_id_is_reprompted_once_and_recovers(tmp_path, ref_file
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="already-used",
             task="complete the first investigation",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="create the identifier",
         ),
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="already-used",
             task="incorrectly reuse the identifier",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="exercise unique identity validation",
         ),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="corrected-id",
             task="proceed with a fresh identifier",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="corrected after the reprompt",
         ),
     )
@@ -1605,30 +1647,32 @@ def test_reused_hypothesis_id_is_reprompted_once_and_recovers(tmp_path, ref_file
     )
 
 
-def test_reused_hypothesis_id_after_failed_reprompt_is_not_written(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_reused_hypothesis_id_after_failed_reprompt_is_not_written(
+    tmp_path: Path, ref_file: Path
+) -> None:
     # Round two's rejected attempt and its single corrective retry both land
     # in round two, so only two pre-round decisions precede the three plans.
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="already-used",
             task="complete the first investigation",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="create the identifier",
         ),
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="already-used",
             task="incorrectly reuse the identifier",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="exercise unique identity validation",
         ),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="already-used",
             task="reuse the identifier again after correction",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="ignore the corrective feedback",
         ),
     )
@@ -1651,12 +1695,14 @@ def test_reused_hypothesis_id_after_failed_reprompt_is_not_written(tmp_path, ref
     ("progress_name", "artifact_root"),
     [("progress", "progress"), ("progress.md", "progress-artifacts")],
 )
-def test_progress_writes_typed_role_handoffs_atomically(tmp_path, progress_name, artifact_root):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_writes_typed_role_handoffs_atomically(
+    tmp_path: Path, progress_name: str, artifact_root: str
+) -> None:
     progress = tmp_path / progress_name
-    plan = OrchestratorPlan(
+    plan = make_orchestrator_plan(
         hypothesis_id="transport-boundary",
         task="Replace the request-local queue.",
-        pass_criteria="The direct path activates.",  # noqa: S106  # tracked: #288
+        criteria="The direct path activates.",
         reasoning="The retained profile leaves a service residual.",
     )
     implementation = ImplementerResponse(
@@ -1677,7 +1723,7 @@ def test_progress_writes_typed_role_handoffs_atomically(tmp_path, progress_name,
     assert not list((tmp_path / artifact_root).rglob(".*.tmp*"))
 
 
-def test_persisted_implementer_attempts_define_resume_boundary(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_persisted_implementer_attempts_define_resume_boundary(tmp_path: Path) -> None:
     progress = tmp_path / "progress"
     implementation = ImplementerResponse(
         summary="Retained the first target run.",
@@ -1691,7 +1737,7 @@ def test_persisted_implementer_attempts_define_resume_boundary(tmp_path):  # noq
     assert issue_board.next_implementer_attempt(progress, 9) == 1
 
 
-def test_implementer_start_marker_advances_the_resume_boundary(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_implementer_start_marker_advances_the_resume_boundary(tmp_path: Path) -> None:
     progress = tmp_path / "progress"
     implementation = ImplementerResponse(
         summary="Recorded after the marker.",
@@ -1719,7 +1765,7 @@ def test_implementer_start_marker_advances_the_resume_boundary(tmp_path):  # noq
     assert issue_board.next_implementer_attempt(progress, 9) == 2
 
 
-def test_agent_memory_paths_distinguish_files_from_directories(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_agent_memory_paths_distinguish_files_from_directories(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     directory = workspace / "progress"
     artifact = directory / "plans" / "round-0012.json"
@@ -1730,7 +1776,7 @@ def test_agent_memory_paths_distinguish_files_from_directories(tmp_path):  # noq
     assert issue_board.display_path(artifact, workspace) == "progress/plans/round-0012.json"
 
 
-def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path: Path) -> None:
     progress = tmp_path / "progress"
     issue_board.append_pre_round_decision(
         progress,
@@ -1744,9 +1790,9 @@ def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path)
     issue_board.append_orchestrator_plan(
         progress,
         7,
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Keep this plan",
-            pass_criteria="plan remains",  # noqa: S106  # tracked: #288
+            criteria="plan remains",
             reasoning="retained plan",
         ),
     )
@@ -1769,16 +1815,16 @@ def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path)
     assert "Keep this plan" in text
 
 
-def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_replacement_preserves_operator_recovery_section(tmp_path: Path) -> None:
     progress = tmp_path / "progress"
     issue_board.append_hypothesis_continuation(
         progress,
         7,
-        plan=OrchestratorPlan(
+        plan=make_orchestrator_plan(
             hypothesis_id="transport",
             hypothesis="remove queue fanout",
             task="stale initial implementation task",
-            pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
+            criteria="source is recoverable",
             reasoning="continue interrupted work",
         ),
         started_round=6,
@@ -1794,11 +1840,11 @@ def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # 
     issue_board.append_hypothesis_continuation(
         progress,
         7,
-        plan=OrchestratorPlan(
+        plan=make_orchestrator_plan(
             hypothesis_id="transport",
             hypothesis="remove queue fanout",
             task="stale initial implementation task",
-            pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
+            criteria="source is recoverable",
             reasoning="resume interrupted work",
         ),
         started_round=6,
@@ -1815,7 +1861,7 @@ def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # 
     assert "Exact measured bytes are retained" in text
 
 
-def test_progress_preserves_distinct_attempts_but_replaces_same_attempt(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_preserves_distinct_attempts_but_replaces_same_attempt(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
     issue_board.append_implementer(
         progress,
@@ -1844,7 +1890,7 @@ def test_progress_preserves_distinct_attempts_but_replaces_same_attempt(tmp_path
     assert "retry" in text
 
 
-def test_progress_writes_profiler_summary_with_perf(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_writes_profiler_summary_with_perf(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
     summary = ProfilerSummary(
         analysis="launch-bound",
@@ -1860,7 +1906,7 @@ def test_progress_writes_profiler_summary_with_perf(tmp_path):  # noqa: ANN001, 
     assert "flashinfer" in text
 
 
-def test_progress_append_implementer_and_judge(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_progress_append_implementer_and_judge(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
     issue_board.append_implementer(
         progress,
@@ -1880,7 +1926,7 @@ def test_progress_append_implementer_and_judge(tmp_path):  # noqa: ANN001, ANN20
     assert "verdict**: pass" in text
 
 
-def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path: Path) -> None:
     roadmap, progress = issue_board.resolve_paths(tmp_path, "directories")
     issue_board.ensure_roadmap_file(roadmap)
     for round_number in range(1, 16):
@@ -1903,10 +1949,7 @@ def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path):  # no
     assert "## Round 15 —" in recent
 
 
-def test_framework_accuracy_gate_runs_manifest_command_and_records_pass(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
+def test_framework_accuracy_gate_runs_manifest_command_and_records_pass(tmp_path: Path) -> None:
 
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
@@ -1930,7 +1973,7 @@ def test_framework_accuracy_gate_runs_manifest_command_and_records_pass(tmp_path
     ctx.snapshot_workspace.assert_called_once_with("round-2-retry-1-framework-accuracy")
 
 
-def test_framework_local_validation_executes_and_reuses_exact_inputs(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_framework_local_validation_executes_and_reuses_exact_inputs(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "server.py").write_text("READY = True\n")
@@ -1982,15 +2025,7 @@ def test_framework_local_validation_executes_and_reuses_exact_inputs(tmp_path): 
     assert '"reused": true' in second.read_text()
 
 
-def test_framework_local_validation_emits_balanced_gate_pairs(tmp_path):  # noqa: ANN001, ANN201
-    from vibesys.events import (  # noqa: PLC0415  # tracked: #288
-        CoreEventType,
-        EventStatus,
-        GateFinishedData,
-        GateKind,
-        GateStartedData,
-    )
-    from vibesys.render.sink import output_sink  # noqa: PLC0415  # tracked: #288
+def test_framework_local_validation_emits_balanced_gate_pairs(tmp_path: Path) -> None:
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -2046,7 +2081,7 @@ def test_framework_local_validation_emits_balanced_gate_pairs(tmp_path):  # noqa
     assert reuse_finish.round_label == "round-2"
 
 
-def test_framework_local_validation_fails_and_restores_mutation(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_framework_local_validation_fails_and_restores_mutation(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "server.py").write_text("READY = True\n")
@@ -2083,7 +2118,7 @@ def test_framework_local_validation_fails_and_restores_mutation(tmp_path):  # no
     assert '"passed": false' in artifact.read_text()
 
 
-def test_loop_runs_local_validation_only_after_judge_pass(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_runs_local_validation_only_after_judge_pass(tmp_path: Path, ref_file: Path) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "implementer",
@@ -2111,10 +2146,7 @@ def test_loop_runs_local_validation_only_after_judge_pass(tmp_path, ref_file):  
     assert len(fake.calls_for("judge")) == 1
 
 
-def test_framework_accuracy_gate_rejects_checker_failure(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
+def test_framework_accuracy_gate_rejects_checker_failure(tmp_path: Path) -> None:
 
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
@@ -2133,10 +2165,7 @@ def test_framework_accuracy_gate_rejects_checker_failure(tmp_path):  # noqa: ANN
     assert "bad history" in feedback
 
 
-def test_framework_accuracy_gate_uses_manifest_timeout(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
+def test_framework_accuracy_gate_uses_manifest_timeout(tmp_path: Path) -> None:
 
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
@@ -2154,10 +2183,7 @@ def test_framework_accuracy_gate_uses_manifest_timeout(tmp_path):  # noqa: ANN00
     ctx.judge_backend.execute.assert_called_once_with("trusted-check", timeout=300)
 
 
-def test_framework_accuracy_gate_passes_candidate_revision_to_environment(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
+def test_framework_accuracy_gate_passes_candidate_revision_to_environment(tmp_path: Path) -> None:
 
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
@@ -2178,10 +2204,7 @@ def test_framework_accuracy_gate_passes_candidate_revision_to_environment(tmp_pa
     )
 
 
-def test_framework_accuracy_gate_can_release_final_deployment(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
+def test_framework_accuracy_gate_can_release_final_deployment(tmp_path: Path) -> None:
 
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = []
@@ -2204,10 +2227,9 @@ def test_framework_accuracy_gate_can_release_final_deployment(tmp_path):  # noqa
     )
 
 
-def test_framework_accuracy_gate_rejects_evaluator_changes_without_execution(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
+def test_framework_accuracy_gate_rejects_evaluator_changes_without_execution(
+    tmp_path: Path,
+) -> None:
 
     ctx = MagicMock()
     ctx.trusted_input_changes.return_value = ["_input_libs/checker.go"]
@@ -2225,10 +2247,7 @@ def test_framework_accuracy_gate_rejects_evaluator_changes_without_execution(tmp
     ctx.judge_backend.execute.assert_not_called()
 
 
-def test_framework_accuracy_gate_rejects_changes_during_execution(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import (  # noqa: PLC0415  # tracked: #288
-        _run_framework_accuracy_gate,
-    )
+def test_framework_accuracy_gate_rejects_changes_during_execution(tmp_path: Path) -> None:
 
     ctx = MagicMock()
     ctx.trusted_input_changes.side_effect = [[], ["_input_libs/checker.go"]]
@@ -2246,8 +2265,7 @@ def test_framework_accuracy_gate_rejects_changes_during_execution(tmp_path):  # 
     assert "changed during accuracy execution" in feedback
 
 
-def test_framework_gates_reuse_accuracy_pass_after_later_gate_failure(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_gates  # noqa: PLC0415  # tracked: #288
+def test_framework_gates_reuse_accuracy_pass_after_later_gate_failure(tmp_path: Path) -> None:
 
     ctx = MagicMock()
     ctx.agent_client.backend_name = "cli"
@@ -2297,13 +2315,7 @@ def test_framework_gates_reuse_accuracy_pass_after_later_gate_failure(tmp_path):
     assert "Reused the prior framework-owned PASS" in progress.read_text()
 
 
-def test_framework_benchmark_extracts_declared_metric(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
-        FRAMEWORK_BENCHMARK_END_MARKER,
-        FRAMEWORK_BENCHMARK_MARKER,
-    )
+def test_framework_benchmark_extracts_declared_metric(tmp_path: Path) -> None:
 
     ctx = MagicMock()
     ctx.judge_benchmark_command = "trusted-benchmark --repetitions 3"
@@ -2342,13 +2354,9 @@ def test_framework_benchmark_extracts_declared_metric(tmp_path):  # noqa: ANN001
     assert "total_ops_per_sec**: 42.5" in (tmp_path / "progress.md").read_text()
 
 
-def test_framework_benchmark_prefers_top_level_metric_over_trial_diagnostics(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
-        FRAMEWORK_BENCHMARK_END_MARKER,
-        FRAMEWORK_BENCHMARK_MARKER,
-    )
+def test_framework_benchmark_prefers_top_level_metric_over_trial_diagnostics(
+    tmp_path: Path,
+) -> None:
 
     ctx = MagicMock()
     ctx.judge_benchmark_command = "trusted-benchmark"
@@ -2375,13 +2383,7 @@ def test_framework_benchmark_prefers_top_level_metric_over_trial_diagnostics(tmp
     assert outcome.metric_value == 42.5
 
 
-def test_framework_benchmark_rejects_ambiguous_metric(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
-        FRAMEWORK_BENCHMARK_END_MARKER,
-        FRAMEWORK_BENCHMARK_MARKER,
-    )
+def test_framework_benchmark_rejects_ambiguous_metric(tmp_path: Path) -> None:
 
     ctx = MagicMock()
     ctx.judge_benchmark_command = "trusted-benchmark"
@@ -2422,10 +2424,6 @@ _RESULT = '{"kind":"result","values":{"total_ops_per_sec":41250.3,"p99_latency_n
 
 def _protocol_benchmark_ctx(stream: str) -> MagicMock:
     """A LoopContext whose benchmark recovers *stream* through stdout."""
-    from vibesys.loops.gates import (  # noqa: PLC0415  # tracked: #288
-        FRAMEWORK_BENCHMARK_END_MARKER,
-        FRAMEWORK_BENCHMARK_MARKER,
-    )
 
     ctx = MagicMock()
     ctx.judge_benchmark_command = "trusted-benchmark"
@@ -2440,9 +2438,7 @@ def _protocol_benchmark_ctx(stream: str) -> MagicMock:
     return ctx
 
 
-def test_protocol_benchmark_reads_complete_row(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
-    from vibesys.loops.gates import PROTOCOL_OUTPUT_FLAG  # noqa: PLC0415  # tracked: #288
+def test_protocol_benchmark_reads_complete_row(tmp_path: Path) -> None:
 
     ctx = _protocol_benchmark_ctx(f"{_HELLO}\n{_RESULT}")
 
@@ -2468,8 +2464,9 @@ def test_protocol_benchmark_reads_complete_row(tmp_path):  # noqa: ANN001, ANN20
     assert "total_ops_per_sec**: 41250.3" in (tmp_path / "progress.md").read_text()
 
 
-def test_protocol_benchmark_rejects_objective_the_evaluator_does_not_declare(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
+def test_protocol_benchmark_rejects_objective_the_evaluator_does_not_declare(
+    tmp_path: Path,
+) -> None:
 
     ctx = _protocol_benchmark_ctx(f"{_HELLO}\n{_RESULT}")
 
@@ -2491,8 +2488,7 @@ def test_protocol_benchmark_rejects_objective_the_evaluator_does_not_declare(tmp
     assert "total_ops_per_sec" in feedback
 
 
-def test_protocol_benchmark_reports_evaluator_error_record(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
+def test_protocol_benchmark_reports_evaluator_error_record(tmp_path: Path) -> None:
 
     stream = f'{_HELLO}\n{{"kind":"error","message":"queue never reached steady state"}}'
     ctx = _protocol_benchmark_ctx(stream)
@@ -2511,8 +2507,7 @@ def test_protocol_benchmark_reports_evaluator_error_record(tmp_path):  # noqa: A
     assert "queue never reached steady state" in (outcome.feedback or "")
 
 
-def test_protocol_benchmark_surfaces_reason_code_for_malformed_stream(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _run_framework_benchmark  # noqa: PLC0415  # tracked: #288
+def test_protocol_benchmark_surfaces_reason_code_for_malformed_stream(tmp_path: Path) -> None:
 
     ctx = _protocol_benchmark_ctx("not a record")
 
@@ -2530,8 +2525,7 @@ def test_protocol_benchmark_surfaces_reason_code_for_malformed_stream(tmp_path):
     assert "MALFORMED_LINE" in (outcome.feedback or "")
 
 
-def test_read_protocol_benchmark_uses_the_only_declared_metric_without_objectives():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.gates import read_protocol_benchmark  # noqa: PLC0415  # tracked: #288
+def test_read_protocol_benchmark_uses_the_only_declared_metric_without_objectives() -> None:
 
     stream = (
         '{"kind":"hello","protocol":2,"metrics":{"total_ops_per_sec":{"unit":"ops/s"}}}\n'
@@ -2546,8 +2540,7 @@ def test_read_protocol_benchmark_uses_the_only_declared_metric_without_objective
     assert outcome.row == {"total_ops_per_sec": 7.5}
 
 
-def test_read_protocol_benchmark_resolves_direction_from_hello_declaration():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.gates import read_protocol_benchmark  # noqa: PLC0415  # tracked: #288
+def test_read_protocol_benchmark_resolves_direction_from_hello_declaration() -> None:
 
     stream = (
         '{"kind":"hello","protocol":2,"metrics":{"p99_latency_ns":{"unit":"ns","direction":"min"}}}\n'
@@ -2561,8 +2554,7 @@ def test_read_protocol_benchmark_resolves_direction_from_hello_declaration():  #
     assert outcome.metric_direction == "min"
 
 
-def test_read_protocol_benchmark_refuses_to_guess_a_headline_metric():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.gates import read_protocol_benchmark  # noqa: PLC0415  # tracked: #288
+def test_read_protocol_benchmark_refuses_to_guess_a_headline_metric() -> None:
 
     outcome = read_protocol_benchmark(f"{_HELLO}\n{_RESULT}", objectives=[])
 
@@ -2573,7 +2565,9 @@ def test_read_protocol_benchmark_refuses_to_guess_a_headline_metric():  # noqa: 
     assert "objectives.toml" in feedback
 
 
-def test_official_protocol_benchmark_row_becomes_the_round_metrics(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_official_protocol_benchmark_row_becomes_the_round_metrics(
+    tmp_path: Path, ref_file: Path
+) -> None:
     # A protocol bundle declares no [benchmark.result] table, so the round
     # record must still mark the official evaluation and take its objective
     # row from the benchmark's complete measurement.
@@ -2617,16 +2611,16 @@ def test_official_protocol_benchmark_row_becomes_the_round_metrics(tmp_path, ref
 # ---------------------------------------------------------------------------
 
 
-def test_loop_round_one_no_profile_runs_one_round(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_round_one_no_profile_runs_one_round(tmp_path: Path, ref_file: Path) -> None:
     """Round 1 proposes one task, implementer+judge both pass. With
     max_rounds=1 the loop stops there."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Build FastAPI server",
-            pass_criteria="/health returns 200",  # noqa: S106  # tracked: #288
+            criteria="/health returns 200",
             reasoning="cold start",
         ),
     )
@@ -2639,7 +2633,7 @@ def test_loop_round_one_no_profile_runs_one_round(tmp_path, ref_file):  # noqa: 
 
 def test_resume_at_completed_limit_finalizes_without_replaying_agents(
     tmp_path: Path,
-    ref_file: str,
+    ref_file: Path,
 ) -> None:
     first_fake = _new_orchestrate_fake()
     assert _invoke_orchestrate(tmp_path, ref_file, first_fake, max_rounds=1) is True
@@ -2650,7 +2644,7 @@ def test_resume_at_completed_limit_finalizes_without_replaying_agents(
     assert (
         _invoke_orchestrate(
             tmp_path,
-            str(project_path / "resume-input"),
+            project_path / "resume-input",
             resumed_fake,
             exp_name=run_id,
             existing=True,
@@ -2663,15 +2657,15 @@ def test_resume_at_completed_limit_finalizes_without_replaying_agents(
     assert resumed_fake.calls == []
 
 
-def test_continuing_hypothesis_uses_unified_run_state(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_continuing_hypothesis_uses_unified_run_state(tmp_path: Path, ref_file: Path) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="continue-canonical",
             task="continue the bounded experiment",
-            pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+            criteria="retain causal evidence",
             reasoning="one more implementation step is required",
         ),
     )
@@ -2685,17 +2679,19 @@ def test_continuing_hypothesis_uses_unified_run_state(tmp_path, ref_file):  # no
     assert [round_data["round"] for round_data in _round_payloads(tmp_path)] == [1]
 
 
-def test_orchestrator_title_is_normalized_after_the_structured_call(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_orchestrator_title_is_normalized_after_the_structured_call(
+    tmp_path: Path, ref_file: Path
+) -> None:
     raw_title = "  " + ("A" * 50 + " " + "B" * 20) + "  "
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="normalize-title",
             title=raw_title,
             task="normalize the title",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="exercise title normalization",
         ),
     )
@@ -2708,15 +2704,17 @@ def test_orchestrator_title_is_normalized_after_the_structured_call(tmp_path, re
     assert active.plan.title == "A" * 50 + "…"
 
 
-def test_orchestrator_title_stays_empty_when_the_model_gives_none(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_orchestrator_title_stays_empty_when_the_model_gives_none(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="no-title",
             task="proceed without a title",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="exercise the empty-title passthrough",
         ),
     )
@@ -2731,16 +2729,16 @@ def test_orchestrator_title_stays_empty_when_the_model_gives_none(tmp_path, ref_
 
 def test_resume_migrates_legacy_hypothesis_state_without_losing_continuation(
     tmp_path: Path,
-    ref_file: str,
+    ref_file: Path,
 ) -> None:
     first_fake = _new_orchestrate_fake()
     first_fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="legacy-continuation",
             task="finish the interrupted change",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="exercise migration at the loop boundary",
         ),
     )
@@ -2819,13 +2817,13 @@ def test_resume_migrates_legacy_hypothesis_state_without_losing_continuation(
     )
     active_payload["schema_version"] = 1
     (local_root / "active.json").write_text(json.dumps(active_payload))
-    subprocess.run(
-        ["git", "add", "-A", "--", ".vibesys"],  # noqa: S607  # test fixture
+    run_test_command(
+        ["git", "add", "-A", "--", ".vibesys"],  # test fixture
         cwd=project_path,
         check=True,
     )
-    subprocess.run(
-        [  # noqa: S607  # test fixture
+    run_test_command(
+        [  # test fixture
             "git",
             "-c",
             "user.name=VibeSys Test",
@@ -2844,7 +2842,7 @@ def test_resume_migrates_legacy_hypothesis_state_without_losing_continuation(
     assert (
         _invoke_orchestrate(
             tmp_path,
-            str(project_path / "resume-input"),
+            project_path / "resume-input",
             resumed_fake,
             exp_name=run_id,
             existing=True,
@@ -2864,7 +2862,9 @@ def test_resume_migrates_legacy_hypothesis_state_without_losing_continuation(
     assert not (local_root / "active.json").exists()
 
 
-def test_agent_roles_reference_framework_owned_effective_objective(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_agent_roles_reference_framework_owned_effective_objective(
+    tmp_path: Path, ref_file: Path
+) -> None:
     effective = (
         "Optimize the service.\n\n## Operator constraints\n\n- simultaneous exact H100/BF16\n"
     )
@@ -2872,9 +2872,9 @@ def test_agent_roles_reference_framework_owned_effective_objective(tmp_path, ref
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Optimize the BF16 path",
-            pass_criteria="BF16 remains active",  # noqa: S106  # tracked: #288
+            criteria="BF16 remains active",
             reasoning="respect the hard precision constraint",
         ),
     )
@@ -2903,7 +2903,9 @@ def test_agent_roles_reference_framework_owned_effective_objective(tmp_path, ref
         assert "simultaneous exact H100/BF16" not in prompt
 
 
-def test_implementer_skill_updates_survive_a_renewed_continuation_prompt(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_implementer_skill_updates_survive_a_renewed_continuation_prompt(
+    tmp_path: Path, ref_file: Path
+) -> None:
     skill = tmp_path / "skills" / "portable"
     reference = skill / "references" / "transport.md"
     reference.parent.mkdir(parents=True)
@@ -2920,10 +2922,10 @@ def test_implementer_skill_updates_survive_a_renewed_continuation_prompt(tmp_pat
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="transport-boundary",
             task="Replace request-local fanout.",
-            pass_criteria="The direct path activates.",  # noqa: S106  # tracked: #288
+            criteria="The direct path activates.",
             reasoning="The residual is host-side.",
         ),
     )
@@ -2958,15 +2960,15 @@ def test_implementer_skill_updates_survive_a_renewed_continuation_prompt(tmp_pat
     assert len(fake.calls_for("profiler")) == 0
 
 
-def test_loop_judge_retry_then_pass(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_judge_retry_then_pass(tmp_path: Path, ref_file: Path) -> None:
     """Judge fails once, implementer retries, judge passes. Loop bounded by max_rounds=1."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Build server",
-            pass_criteria="tests pass",  # noqa: S106  # tracked: #288
+            criteria="tests pass",
             reasoning="cold start",
         ),
     )
@@ -2983,7 +2985,7 @@ def test_loop_judge_retry_then_pass(tmp_path, ref_file):  # noqa: ANN001, ANN201
     assert "remains consumed" in retry_prompt
 
 
-def test_unparseable_implementer_response_consumes_a_retry(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_unparseable_implementer_response_consumes_a_retry(tmp_path: Path, ref_file: Path) -> None:
     """A framework-synthesized response re-invokes the implementer in the same round.
 
     Sparse-review cadence would otherwise defer the judge and let the round
@@ -2994,9 +2996,9 @@ def test_unparseable_implementer_response_consumes_a_retry(tmp_path, ref_file): 
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Build server",
-            pass_criteria="tests pass",  # noqa: S106  # tracked: #288
+            criteria="tests pass",
             reasoning="cold start",
         ),
     )
@@ -3020,16 +3022,16 @@ def test_unparseable_implementer_response_consumes_a_retry(tmp_path, ref_file): 
 
 def test_timed_out_implementer_persists_fail_closed_attempt_and_retries(
     tmp_path: Path,
-    ref_file: str,
+    ref_file: Path,
 ) -> None:
     """A CLI timeout is durable attempt evidence, not a campaign-level failure."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Build server",
-            pass_criteria="tests pass",  # noqa: S106  # tracked: #288
+            criteria="tests pass",
             reasoning="cold start",
         ),
     )
@@ -3064,16 +3066,16 @@ def test_timed_out_implementer_persists_fail_closed_attempt_and_retries(
 
 def test_implementer_start_marker_precedes_the_invocation(
     tmp_path: Path,
-    ref_file: str,
+    ref_file: Path,
 ) -> None:
     """A process killed mid-invoke must not resume under the killed label."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Build server",
-            pass_criteria="tests pass",  # noqa: S106  # tracked: #288
+            criteria="tests pass",
             reasoning="cold start",
         ),
     )
@@ -3092,15 +3094,17 @@ def test_implementer_start_marker_precedes_the_invocation(
     assert issue_board.next_implementer_attempt(workspace / "progress.md", 1) == 2
 
 
-def test_unparseable_implementer_responses_commit_fail_closed_once_exhausted(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_unparseable_implementer_responses_commit_fail_closed_once_exhausted(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """Only genuine retry exhaustion may commit the synthesized response."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Build server",
-            pass_criteria="tests pass",  # noqa: S106  # tracked: #288
+            criteria="tests pass",
             reasoning="cold start",
         ),
     )
@@ -3118,7 +3122,7 @@ def test_unparseable_implementer_responses_commit_fail_closed_once_exhausted(tmp
     assert rounds[0]["hypothesis_outcome"] == HypothesisOutcome.INCONCLUSIVE.value
 
 
-def test_agent_authored_inconclusive_completes_the_round(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_agent_authored_inconclusive_completes_the_round(tmp_path: Path, ref_file: Path) -> None:
     """A parsed ``inconclusive`` turn is real evidence and keeps sparse review."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
@@ -3143,18 +3147,20 @@ def test_agent_authored_inconclusive_completes_the_round(tmp_path, ref_file):  #
     assert [round_data["reviewed"] for round_data in rounds] == [False, True]
 
 
-def test_loop_defers_judge_until_cadence_and_always_reviews_final_round(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_defers_judge_until_cadence_and_always_reviews_final_round(
+    tmp_path: Path, ref_file: Path
+) -> None:
     # CONTINUE keeps the same hypothesis (and its round-1 plan) active for up
     # to two more rounds, so only round 1's orchestrator call ever happens.
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="graph-decode",
             hypothesis="graph replay removes launch overhead",
             task="continue graph work 1",
-            pass_criteria="activation evidence is real",  # noqa: S106  # tracked: #288
+            criteria="activation evidence is real",
             reasoning="continue one causal experiment",
         ),
     )
@@ -3181,7 +3187,7 @@ def test_loop_defers_judge_until_cadence_and_always_reviews_final_round(tmp_path
     assert "Independent review deferred" in (_created_project(tmp_path) / "progress.md").read_text()
 
 
-def test_nominated_candidate_gets_early_review(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_nominated_candidate_gets_early_review(tmp_path: Path, ref_file: Path) -> None:
     # NOMINATED is the harness's own implementer default, so an unconfigured
     # fake already reproduces it every round.
     fake = _new_orchestrate_fake()
@@ -3197,7 +3203,9 @@ def test_nominated_candidate_gets_early_review(tmp_path, ref_file):  # noqa: ANN
     assert len(fake.calls_for("judge")) >= 1
 
 
-def test_official_gates_run_on_candidate_cadence_and_final_round(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_official_gates_run_on_candidate_cadence_and_final_round(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "implementer",
@@ -3233,7 +3241,9 @@ def test_official_gates_run_on_candidate_cadence_and_final_round(tmp_path, ref_f
     assert [record["perf_metric"] for record in rounds] == [None, None, 30.0, 40.0]
 
 
-def test_orchestrator_can_request_official_evaluation_before_cadence(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_orchestrator_can_request_official_evaluation_before_cadence(
+    tmp_path: Path, ref_file: Path
+) -> None:
     # NOMINATED is terminal, so each round starts a fresh hypothesis and
     # consumes the next plan.
     fake = _new_orchestrate_fake()
@@ -3241,17 +3251,17 @@ def test_orchestrator_can_request_official_evaluation_before_cadence(tmp_path, r
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="checkpoint-now",
                     task="finish a likely new best",
-                    pass_criteria="targeted comparison passes",  # noqa: S106  # tracked: #288
+                    criteria="targeted comparison passes",
                     request_official_evaluation=True,
                     reasoning="the next branch needs a verified parent",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="continue-after-checkpoint",
                     task="make another improvement",
-                    pass_criteria="targeted comparison passes",  # noqa: S106  # tracked: #288
+                    criteria="targeted comparison passes",
                     reasoning="continue from verified evidence",
                 ),
             ]
@@ -3274,25 +3284,27 @@ def test_orchestrator_can_request_official_evaluation_before_cadence(tmp_path, r
     ]
 
 
-def test_supported_hypothesis_is_reviewed_without_global_gates_and_closes(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_supported_hypothesis_is_reviewed_without_global_gates_and_closes(
+    tmp_path: Path, ref_file: Path
+) -> None:
     # SUPPORTED is terminal, so each round starts a fresh hypothesis.
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="diagnostic-one",
                     hypothesis="the diagnostic identifies the bottleneck",
                     task="collect the scoped evidence",
-                    pass_criteria="retain the diagnostic artifact",  # noqa: S106  # tracked: #288
+                    criteria="retain the diagnostic artifact",
                     reasoning="finish one bounded diagnostic",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="mechanism-two",
                     hypothesis="a new mechanism can use that evidence",
                     task="start the next experiment",
-                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    criteria="retain causal evidence",
                     reasoning="the prior diagnostic is complete",
                 ),
             ]
@@ -3327,16 +3339,16 @@ def test_supported_hypothesis_is_reviewed_without_global_gates_and_closes(tmp_pa
     assert rounds[-1]["official_evaluation_reason"] == "final_round"
 
 
-def test_cadence_pass_keeps_a_continuing_hypothesis_active(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cadence_pass_keeps_a_continuing_hypothesis_active(tmp_path: Path, ref_file: Path) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="multi-round-experiment",
             hypothesis="one causal claim needs multiple rounds",
             task="run the experiment",
-            pass_criteria="retain auditable evidence",  # noqa: S106  # tracked: #288
+            criteria="retain auditable evidence",
             reasoning="start one bounded experiment",
         ),
     )
@@ -3369,16 +3381,18 @@ def test_cadence_pass_keeps_a_continuing_hypothesis_active(tmp_path, ref_file): 
     ]
 
 
-def test_implementation_failure_with_repair_keeps_hypothesis_active(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_implementation_failure_with_repair_keeps_hypothesis_active(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="repairable-mechanism",
             hypothesis="the mechanism helps after its runtime defect is repaired",
             task="implement and test the mechanism",
-            pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+            criteria="retain causal evidence",
             reasoning="one persistent hypothesis",
         ),
     )
@@ -3409,24 +3423,26 @@ def test_implementation_failure_with_repair_keeps_hypothesis_active(tmp_path, re
     ]
 
 
-def test_repeated_implementation_failures_return_control_to_designer(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_repeated_implementation_failures_return_control_to_designer(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="repair-lease",
                     hypothesis="the mechanism helps after target-only repairs",
                     task="implement and repair the mechanism",
-                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    criteria="retain causal evidence",
                     reasoning="start one persistent implementation lease",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="designer-review",
                     hypothesis="compare the stalled repair against alternatives",
                     task="choose the next bounded experiment",
-                    pass_criteria="retain a reviewed direction",  # noqa: S106  # tracked: #288
+                    criteria="retain a reviewed direction",
                     reasoning="the repair lease expired",
                 ),
             ]
@@ -3458,24 +3474,26 @@ def test_repeated_implementation_failures_return_control_to_designer(tmp_path, r
     ]
 
 
-def test_repeated_continue_outcomes_return_control_to_designer(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_repeated_continue_outcomes_return_control_to_designer(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="self-renewing-lease",
                     hypothesis="the mechanism needs several implementation steps",
                     task="implement and test the mechanism",
-                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    criteria="retain causal evidence",
                     reasoning="start one bounded implementation lease",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="review-after-continue",
                     hypothesis="compare the unfinished mechanism against alternatives",
                     task="choose the next bounded experiment",
-                    pass_criteria="retain a reviewed direction",  # noqa: S106  # tracked: #288
+                    criteria="retain a reviewed direction",
                     reasoning="the continuation lease expired",
                 ),
             ]
@@ -3507,24 +3525,26 @@ def test_repeated_continue_outcomes_return_control_to_designer(tmp_path, ref_fil
     ]
 
 
-def test_repeated_rejected_reviews_return_control_to_designer(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_repeated_rejected_reviews_return_control_to_designer(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="rejected-review-lease",
                     hypothesis="the candidate needs bounded evidence repair",
                     task="repair and present the evidence",
-                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    criteria="retain causal evidence",
                     reasoning="start one bounded review-repair lease",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="review-after-rejections",
                     hypothesis="compare the repeatedly rejected work against alternatives",
                     task="choose the next bounded experiment",
-                    pass_criteria="retain a reviewed direction",  # noqa: S106  # tracked: #288
+                    criteria="retain a reviewed direction",
                     reasoning="the review-repair lease expired",
                 ),
             ]
@@ -3561,16 +3581,18 @@ def test_repeated_rejected_reviews_return_control_to_designer(tmp_path, ref_file
     ]
 
 
-def test_resolvable_inconclusive_result_keeps_hypothesis_active(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_resolvable_inconclusive_result_keeps_hypothesis_active(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="variance-boundary",
             hypothesis="one repeat resolves the causal classification",
             task="measure and repeat only if ambiguous",
-            pass_criteria="retain a variance-aware classification",  # noqa: S106  # tracked: #288
+            criteria="retain a variance-aware classification",
             reasoning="one persistent hypothesis",
         ),
     )
@@ -3601,24 +3623,26 @@ def test_resolvable_inconclusive_result_keeps_hypothesis_active(tmp_path, ref_fi
     ]
 
 
-def test_cadence_review_is_not_duplicated_for_provisional_retry(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cadence_review_is_not_duplicated_for_provisional_retry(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="stable-hypothesis",
                     hypothesis="same causal claim",
                     task="continue the experiment",
-                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    criteria="retain causal evidence",
                     reasoning="one hypothesis across rounds",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="replacement-hypothesis",
                     hypothesis="next causal claim",
                     task="finish the replacement experiment",
-                    pass_criteria="retain causal evidence",  # noqa: S106  # tracked: #288
+                    criteria="retain causal evidence",
                     reasoning="the prior claim passed review",
                 ),
             ]
@@ -3671,7 +3695,9 @@ def test_cadence_review_is_not_duplicated_for_provisional_retry(tmp_path, ref_fi
     assert stable.resolution is None
 
 
-def test_gate_retry_does_not_persist_the_previous_attempts_pass(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_gate_retry_does_not_persist_the_previous_attempts_pass(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """A judged attempt's ``pass`` must not describe a later unjudged attempt.
 
     Attempt 1 is judged, passes, and then fails the framework accuracy gate,
@@ -3684,11 +3710,11 @@ def test_gate_retry_does_not_persist_the_previous_attempts_pass(tmp_path, ref_fi
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="gate-retry",
             hypothesis="the gate rejects a stale checkpoint",
             task="Build",
-            pass_criteria="tests",  # noqa: S106  # tracked: #288
+            criteria="tests",
             reasoning="start",
         ),
     )
@@ -3723,24 +3749,26 @@ def test_gate_retry_does_not_persist_the_previous_attempts_pass(tmp_path, ref_fi
     assert hypothesis.resolution is not HypothesisResolution.REJECTED
 
 
-def test_unreviewed_terminal_outcome_returns_control_to_designer(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_unreviewed_terminal_outcome_returns_control_to_designer(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="falsified-path",
                     hypothesis="first claim",
                     task="test first claim",
-                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    criteria="collect evidence",
                     reasoning="first experiment",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="replacement-path",
                     hypothesis="second claim",
                     task="test second claim",
-                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    criteria="collect evidence",
                     reasoning="replacement experiment",
                 ),
             ]
@@ -3777,7 +3805,7 @@ def test_unreviewed_terminal_outcome_returns_control_to_designer(tmp_path, ref_f
     )
 
 
-def test_reviewed_disproof_skips_framework_gates(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_reviewed_disproof_skips_framework_gates(tmp_path: Path, ref_file: Path) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue("implementer", _implementer_response(HypothesisOutcome.DISPROVEN))
     fake.enqueue("judge", _judge_response("pass"))
@@ -3799,24 +3827,26 @@ def test_reviewed_disproof_skips_framework_gates(tmp_path, ref_file):  # noqa: A
     assert rounds[0]["official_evaluation_reason"] == "final_round"
 
 
-def test_disproven_retry_after_failed_review_returns_control_to_designer(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_disproven_retry_after_failed_review_returns_control_to_designer(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="falsified-after-review",
                     hypothesis="first claim",
                     task="test first claim",
-                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    criteria="collect evidence",
                     reasoning="first experiment",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="replacement-after-review",
                     hypothesis="second claim",
                     task="test second claim",
-                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    criteria="collect evidence",
                     reasoning="replacement experiment",
                 ),
             ]
@@ -3854,24 +3884,26 @@ def test_disproven_retry_after_failed_review_returns_control_to_designer(tmp_pat
     ]
 
 
-def test_role_session_policy_is_explicit_and_hypothesis_scoped(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_role_session_policy_is_explicit_and_hypothesis_scoped(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="stable-hypothesis",
                     hypothesis="same claim",
                     task="continue",
-                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    criteria="review",
                     reasoning="same experiment",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="stable-hypothesis",
                     hypothesis="same claim",
                     task="finish",
-                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    criteria="review",
                     reasoning="same experiment",
                 ),
             ]
@@ -3919,20 +3951,20 @@ def test_role_session_policy_is_explicit_and_hypothesis_scoped(tmp_path, ref_fil
     ]
 
 
-def test_rejected_terminal_submission_cannot_schedule_framework_gate_as_next_step(  # noqa: ANN201  # tracked: #288
-    tmp_path,  # noqa: ANN001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-):
+def test_rejected_terminal_submission_cannot_schedule_framework_gate_as_next_step(
+    tmp_path: Path,
+    ref_file: Path,
+) -> None:
     forbidden_step = "Run the framework-owned accuracy evaluation."
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="gate-ownership",
             hypothesis="candidate is ready",
             task="prepare candidate evidence",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="framework owns official gates",
         ),
     )
@@ -3961,19 +3993,21 @@ def test_rejected_terminal_submission_cannot_schedule_framework_gate_as_next_ste
     assert "do not duplicate framework-owned commands" in retry_prompt
 
 
-def test_hypothesis_revert_is_applied_once_across_continuation_rounds(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_hypothesis_revert_is_applied_once_across_continuation_rounds(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="seed",
                     task="establish parent",
-                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    criteria="review",
                     reasoning="seed checkpoint",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="continued-repair",
                     hypothesis_updates=[
                         HypothesisStrategyUpdate(
@@ -3983,7 +4017,7 @@ def test_hypothesis_revert_is_applied_once_across_continuation_rounds(tmp_path, 
                         )
                     ],
                     task="start from parent and continue",
-                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    criteria="review",
                     revert_to_round=1,
                     reasoning="discard a later branch once",
                 ),
@@ -4064,22 +4098,24 @@ def test_hypothesis_revert_is_applied_once_across_continuation_rounds(tmp_path, 
     assert seed.strategy_reason == "The later evidence invalidated this direction."
 
 
-def test_failed_hypothesis_revert_is_retried_and_not_claimed_as_applied(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_failed_hypothesis_revert_is_retried_and_not_claimed_as_applied(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="seed",
                     task="establish parent",
-                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    criteria="review",
                     reasoning="seed checkpoint",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="retry-rollback",
                     task="start from parent",
-                    pass_criteria="review",  # noqa: S106  # tracked: #288
+                    criteria="review",
                     revert_to_round=1,
                     reasoning="restore parent",
                 ),
@@ -4116,7 +4152,7 @@ def test_failed_hypothesis_revert_is_retried_and_not_claimed_as_applied(tmp_path
     assert "framework already materialized" in retry_calls[1].system_prompt.lower()
 
 
-def test_judge_audited_implementer_metrics_are_recorded(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_judge_audited_implementer_metrics_are_recorded(tmp_path: Path, ref_file: Path) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "implementer", _implementer_response(HypothesisOutcome.NOMINATED, perf_metric=321.5)
@@ -4158,8 +4194,9 @@ def test_judge_audited_implementer_metrics_are_recorded(tmp_path, ref_file):  # 
     )
 
 
-def test_official_framework_benchmark_scalar_populates_round_metrics(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+def test_official_framework_benchmark_scalar_populates_round_metrics(
+    tmp_path: Path, ref_file: Path
+) -> None:
 
     # No implementer-reported perf: accepted_metrics stays empty, so the only
     # objective row can come from the official framework benchmark's scalar.
@@ -4189,26 +4226,27 @@ def test_official_framework_benchmark_scalar_populates_round_metrics(tmp_path, r
     assert rounds[0]["metrics"] == {"tok/s": 512.0}
 
 
-def test_official_regression_disproves_and_drops_queue_candidate(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
+def test_official_regression_disproves_and_drops_queue_candidate(
+    tmp_path: Path, ref_file: Path
+) -> None:
 
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="m2-preallocated-spsc-ring",
                     hypothesis="preallocation improves queue throughput",
                     task="establish the measured parent",
-                    pass_criteria="queue remains correct",  # noqa: S106  # tracked: #288
+                    criteria="queue remains correct",
                     reasoning="establish the parent",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="m3-pow2-mask-addressing",
                     hypothesis="mask addressing improves queue throughput",
                     task="replace modulo with mask addressing",
-                    pass_criteria="queue remains correct",  # noqa: S106  # tracked: #288
+                    criteria="queue remains correct",
                     reasoning="test the next mechanism",
                 ),
             ]
@@ -4261,12 +4299,12 @@ def test_official_regression_disproves_and_drops_queue_candidate(tmp_path, ref_f
     assert m3.candidate_retained is False
 
 
-def test_loop_retries_when_framework_accuracy_gate_fails(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_retries_when_framework_accuracy_gate_fails(tmp_path: Path, ref_file: Path) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(task="Build", pass_criteria="tests", reasoning="start"),  # noqa: S106  # tracked: #288
+        make_orchestrator_plan(task="Build", criteria="tests", reasoning="start"),
     )
     fake.enqueue("judge", _judge_response("pass"), _judge_response("pass"))
 
@@ -4284,12 +4322,14 @@ def test_loop_retries_when_framework_accuracy_gate_fails(tmp_path, ref_file):  #
     assert len(fake.calls_for("judge")) == 2
 
 
-def test_framework_gate_retry_preserves_judge_approved_metrics(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_framework_gate_retry_preserves_judge_approved_metrics(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(task="Build", pass_criteria="tests", reasoning="start"),  # noqa: S106  # tracked: #288
+        make_orchestrator_plan(task="Build", criteria="tests", reasoning="start"),
     )
     fake.enqueue("judge", _judge_response("pass"), _judge_response("pass"))
     fake.enqueue(
@@ -4327,21 +4367,21 @@ def test_framework_gate_retry_preserves_judge_approved_metrics(tmp_path, ref_fil
     assert "do not duplicate the canonical run" in retry_prompt
 
 
-def test_loop_exhaustion_carries_to_next_round(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_exhaustion_carries_to_next_round(tmp_path: Path, ref_file: Path) -> None:
     """Review exhaustion returns to the same implementer, not the designer."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     task="Build the whole server with every optimization",
-                    pass_criteria="impossibly strict",  # noqa: S106  # tracked: #288
+                    criteria="impossibly strict",
                     reasoning="ambitious",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     task="Just get /health working",
-                    pass_criteria="/health returns 200",  # noqa: S106  # tracked: #288
+                    criteria="/health returns 200",
                     reasoning="backed off after exhaustion",
                 ),
             ]
@@ -4369,23 +4409,23 @@ def test_loop_exhaustion_carries_to_next_round(tmp_path, ref_file):  # noqa: ANN
     assert "needs work" in seen_implementer_prompts[2]
 
 
-def test_loop_orchestrator_requests_profile_before_plan(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_orchestrator_requests_profile_before_plan(tmp_path: Path, ref_file: Path) -> None:
     """If PreRoundDecision.need_profile is True, profiler runs before the plan call."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         PreRoundDecision(need_profile=False, profile_focus="", reasoning="read the source"),
         # Round 1 plan: its own decision declined, so no profile precedes it.
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Build server",
-            pass_criteria="ok",  # noqa: S106  # tracked: #288
+            criteria="ok",
             reasoning="start",
         ),
         PreRoundDecision(need_profile=True, profile_focus="kernels", reasoning="need data"),
         # Round 2 plan — uses profiler summary.
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Optimize decode",
-            pass_criteria="graph replay",  # noqa: S106  # tracked: #288
+            criteria="graph replay",
             reasoning="profile showed launch overhead",
         ),
     )
@@ -4423,16 +4463,18 @@ def test_loop_orchestrator_requests_profile_before_plan(tmp_path, ref_file):  # 
     assert "Do not launch a duplicate expensive evaluation" in profiler_prompts[0]
 
 
-def test_loop_skips_profiler_when_pre_round_decision_says_no(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_skips_profiler_when_pre_round_decision_says_no(
+    tmp_path: Path, ref_file: Path
+) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(task="Build server", pass_criteria="ok", reasoning="start"),  # noqa: S106  # tracked: #288
-                OrchestratorPlan(
+                make_orchestrator_plan(task="Build server", criteria="ok", reasoning="start"),
+                make_orchestrator_plan(
                     task="Use benchmark evidence",
-                    pass_criteria="ok",  # noqa: S106  # tracked: #288
+                    criteria="ok",
                     reasoning="skip",
                 ),
             ],
@@ -4452,17 +4494,17 @@ def test_loop_skips_profiler_when_pre_round_decision_says_no(tmp_path, ref_file)
     assert len(fake.calls_for("profiler")) == 0
 
 
-def test_loop_skips_profiler_when_profiler_kind_is_none(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_skips_profiler_when_profiler_kind_is_none(tmp_path: Path, ref_file: Path) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(task="Build server", pass_criteria="ok", reasoning="start"),  # noqa: S106  # tracked: #288
-                OrchestratorPlan(
+                make_orchestrator_plan(task="Build server", criteria="ok", reasoning="start"),
+                make_orchestrator_plan(
                     task="Use benchmark evidence",
-                    pass_criteria="ok",  # noqa: S106  # tracked: #288
-                    reasoning="disabled",  # noqa: RUF100, S106  # tracked: #288
+                    criteria="ok",
+                    reasoning="disabled",
                 ),
             ],
             [
@@ -4487,17 +4529,17 @@ def test_loop_skips_profiler_when_profiler_kind_is_none(tmp_path, ref_file):  # 
     assert len(fake.calls_for("profiler")) == 0
 
 
-def test_loop_generic_auto_profiler_resolves_to_macos_cpu(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_generic_auto_profiler_resolves_to_macos_cpu(tmp_path: Path, ref_file: Path) -> None:
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(task="Build queue", pass_criteria="ok", reasoning="start"),  # noqa: S106  # tracked: #288
-                OrchestratorPlan(
+                make_orchestrator_plan(task="Build queue", criteria="ok", reasoning="start"),
+                make_orchestrator_plan(
                     task="Use benchmark evidence",
-                    pass_criteria="ok",  # noqa: S106  # tracked: #288
-                    reasoning="generic",  # noqa: RUF100, S106  # tracked: #288
+                    criteria="ok",
+                    reasoning="generic",
                 ),
             ],
             [
@@ -4512,7 +4554,7 @@ def test_loop_generic_auto_profiler_resolves_to_macos_cpu(tmp_path, ref_file):  
         patch("vibesys.profilers.platform.system", return_value="Darwin"),
         patch(
             "vibesys.context.preflight_profiler_kind",
-            lambda kind: ProfilerPreflightResult(kind, True),  # noqa: FBT003  # tracked: #288
+            lambda kind: ProfilerPreflightResult(kind, usable=True),
         ),
     ):
         result = _invoke_orchestrate(
@@ -4528,7 +4570,7 @@ def test_loop_generic_auto_profiler_resolves_to_macos_cpu(tmp_path, ref_file):  
     assert len(fake.calls_for("profiler")) == 1
 
 
-def test_loop_asks_whether_to_profile_before_the_first_plan(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_asks_whether_to_profile_before_the_first_plan(tmp_path: Path, ref_file: Path) -> None:
     """Round 1 routes through the same profiling decision as every other round,
     so it can still request a profiler measurement even though it has the
     least history to go on.
@@ -4537,9 +4579,9 @@ def test_loop_asks_whether_to_profile_before_the_first_plan(tmp_path, ref_file):
     fake.enqueue(
         "orchestrator",
         PreRoundDecision(need_profile=True, profile_focus="decode", reasoning="it runs"),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Cut the measured hotspot",
-            pass_criteria="ok",  # noqa: S106  # tracked: #288
+            criteria="ok",
             reasoning="the profile named it",
         ),
     )
@@ -4582,7 +4624,9 @@ def test_loop_asks_whether_to_profile_before_the_first_plan(tmp_path, ref_file):
     assert "The fresh profiler result is recorded" in plan_prompts[0]
 
 
-def test_loop_first_round_profiles_only_when_its_decision_asks(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_first_round_profiles_only_when_its_decision_asks(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """A round-1 decline costs no profiler turn.
 
     A campaign that builds from scratch has nothing to profile yet. The
@@ -4597,9 +4641,9 @@ def test_loop_first_round_profiles_only_when_its_decision_asks(tmp_path, ref_fil
             profile_focus="",
             reasoning="nothing runs yet; round 1 must make it build",
         ),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Make the service build",
-            pass_criteria="compiles",  # noqa: S106  # tracked: #288
+            criteria="compiles",
             reasoning="no measurable system yet",
         ),
     )
@@ -4611,7 +4655,9 @@ def test_loop_first_round_profiles_only_when_its_decision_asks(tmp_path, ref_fil
     assert len(fake.calls_for("profiler")) == 0
 
 
-def test_loop_records_the_first_round_decision_in_the_progress_artifact(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_records_the_first_round_decision_in_the_progress_artifact(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """Round 1's reasoning is auditable rather than an unrecorded skip."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
@@ -4621,7 +4667,7 @@ def test_loop_records_the_first_round_decision_in_the_progress_artifact(tmp_path
             profile_focus="",
             reasoning="the candidate does not build yet",
         ),
-        OrchestratorPlan(task="Make it build", pass_criteria="ok", reasoning="broken"),  # noqa: S106  # tracked: #288
+        make_orchestrator_plan(task="Make it build", criteria="ok", reasoning="broken"),
     )
 
     _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1)
@@ -4631,16 +4677,16 @@ def test_loop_records_the_first_round_decision_in_the_progress_artifact(tmp_path
     assert "the candidate does not build yet" in progress
 
 
-def test_loop_runs_full_max_rounds_budget(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_runs_full_max_rounds_budget(tmp_path: Path, ref_file: Path) -> None:
     """With the ``done`` field removed, the loop always exhausts max_rounds.
     A single-round budget yields one implementer + judge call, no more."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Build server",
-            pass_criteria="ok",  # noqa: S106  # tracked: #288
+            criteria="ok",
             reasoning="round 1",
         ),
     )
@@ -4650,10 +4696,10 @@ def test_loop_runs_full_max_rounds_budget(tmp_path, ref_file):  # noqa: ANN001, 
     assert len(fake.calls_for("judge")) == 1
 
 
-def test_loop_max_rounds_terminates(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_max_rounds_terminates(tmp_path: Path, ref_file: Path) -> None:
     """Loop exits after max_rounds and reports success (the loop always runs
     to budget; there is no early-stop signal)."""
-    plans = [OrchestratorPlan(task=f"t{i}", pass_criteria="p", reasoning="r") for i in range(10)]  # noqa: S106  # tracked: #288
+    plans = [make_orchestrator_plan(task=f"t{i}", criteria="p", reasoning="r") for i in range(10)]
     fake = _new_orchestrate_fake()
     fake.enqueue("orchestrator", *_orchestrator_turns(plans))
     result = _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=3)
@@ -4667,11 +4713,7 @@ def test_loop_max_rounds_terminates(tmp_path, ref_file):  # noqa: ANN001, ANN201
 # ---------------------------------------------------------------------------
 
 
-def test_cli_loads_objective_md_from_ref_parent(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from entrypoints.cli import _load_objective  # noqa: PLC0415  # tracked: #288
-    from vibesys.evaluators.input_manifest import (  # noqa: PLC0415  # tracked: #288
-        load_input_bundle,
-    )
+def test_cli_loads_objective_md_from_ref_parent(tmp_path: Path) -> None:
 
     bundle = tmp_path / "modelA"
     bundle.mkdir()
@@ -4687,10 +4729,7 @@ def test_cli_loads_objective_md_from_ref_parent(tmp_path):  # noqa: ANN001, ANN2
     assert "Maximize throughput" in objective
 
 
-def test_cli_missing_objective_md_errors(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.evaluators.input_manifest import (  # noqa: PLC0415  # tracked: #288
-        load_input_bundle,
-    )
+def test_cli_missing_objective_md_errors(tmp_path: Path) -> None:
 
     bundle = tmp_path / "modelB"
     bundle.mkdir()
@@ -4701,16 +4740,12 @@ def test_cli_missing_objective_md_errors(tmp_path):  # noqa: ANN001, ANN201  # t
         "[benchmark]\ncommand = ['uv', 'run', 'python', 'benchmark/benchmark.py']\n"
     )
 
-    with pytest.raises(FileNotFoundError, match="OBJECTIVE.md"):  # noqa: RUF043  # tracked: #288
+    with pytest.raises(FileNotFoundError, match=r"OBJECTIVE\.md"):
         load_input_bundle(bundle)
 
 
-def test_cli_rejects_modal_with_nsys_profiler(tmp_path, ref_file):  # noqa: ANN001, ANN201, ARG001  # tracked: #288
+def test_cli_rejects_modal_with_nsys_profiler(ref_file: Path) -> None:
     """--modal only supports torch profiler."""
-    from entrypoints.cli import (  # noqa: PLC0415  # tracked: #288
-        _build_agent_parser,
-        _validate_agent,
-    )
 
     parser = _build_agent_parser()
     validate_args = _validate_agent
@@ -4739,8 +4774,7 @@ def test_cli_rejects_modal_with_nsys_profiler(tmp_path, ref_file):  # noqa: ANN0
 # ---------------------------------------------------------------------------
 
 
-def test_ensure_roadmap_seeds_header_when_missing(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent import issue_board  # noqa: PLC0415  # tracked: #288
+def test_ensure_roadmap_seeds_header_when_missing(tmp_path: Path) -> None:
 
     p = tmp_path / "roadmap.md"
     assert not p.exists()
@@ -4755,8 +4789,7 @@ def test_ensure_roadmap_seeds_header_when_missing(tmp_path):  # noqa: ANN001, AN
     assert "## Abandoned" in text
 
 
-def test_ensure_roadmap_does_not_overwrite_existing(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent import issue_board  # noqa: PLC0415  # tracked: #288
+def test_ensure_roadmap_does_not_overwrite_existing(tmp_path: Path) -> None:
 
     p = tmp_path / "roadmap.md"
     p.write_text("# my custom plan\n")
@@ -4764,22 +4797,20 @@ def test_ensure_roadmap_does_not_overwrite_existing(tmp_path):  # noqa: ANN001, 
     assert p.read_text() == "# my custom plan\n"
 
 
-def test_read_roadmap_returns_text(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent import issue_board  # noqa: PLC0415  # tracked: #288
+def test_read_roadmap_returns_text(tmp_path: Path) -> None:
 
     p = tmp_path / "roadmap.md"
     p.write_text("hello\n")
     assert issue_board.read_roadmap(p) == "hello\n"
 
 
-def test_read_roadmap_missing_returns_empty(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.loops.agent import issue_board  # noqa: PLC0415  # tracked: #288
+def test_read_roadmap_missing_returns_empty(tmp_path: Path) -> None:
 
     p = tmp_path / "nope.md"
     assert issue_board.read_roadmap(p) == ""
 
 
-def test_outer_prompts_reference_memory_paths_without_embedding_contents():  # noqa: ANN201  # tracked: #288
+def test_outer_prompts_reference_memory_paths_without_embedding_contents() -> None:
     template_dir = PROMPTS_DIR / "loops" / "agent"
     plan_prompt = (template_dir / "orchestrator_plan_prompt.j2").read_text()
     pre_prompt = (template_dir / "orchestrator_pre_round_prompt.j2").read_text()
@@ -4805,9 +4836,11 @@ def test_outer_prompts_reference_memory_paths_without_embedding_contents():  # n
 
 @pytest.mark.parametrize(
     ("progress_name", "expected"),
-    (("progress.md", "pareto-frontier.md"), ("progress", "progress/pareto-frontier.md")),  # noqa: PT007  # tracked: #288
+    [("progress.md", "pareto-frontier.md"), ("progress", "progress/pareto-frontier.md")],
 )
-def test_pareto_archive_is_materialized_beside_progress(tmp_path, progress_name, expected):  # noqa: ANN001, ANN201  # tracked: #288
+def test_pareto_archive_is_materialized_beside_progress(
+    tmp_path: Path, progress_name: str, expected: str
+) -> None:
     progress_path = tmp_path / progress_name
 
     document = issue_board.write_pareto_archive(progress_path, "Trusted frontier: round 4")
@@ -4816,7 +4849,7 @@ def test_pareto_archive_is_materialized_beside_progress(tmp_path, progress_name,
     assert document.read_text() == "# Pareto frontier\n\nTrusted frontier: round 4\n"
 
 
-def _record(round_number: int, perf: float | None, unit: str = "tok/s"):  # noqa: ANN202  # tracked: #288
+def _record(round_number: int, perf: float | None, unit: str = "tok/s") -> RoundRecord:
     """Build a RoundRecord shorthand for plateau tests."""
     return RoundRecord(
         round_number=round_number,
@@ -4829,37 +4862,33 @@ def _record(round_number: int, perf: float | None, unit: str = "tok/s"):  # noqa
     )
 
 
-def test_detect_plateau_returns_none_when_too_few_rounds():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
+def test_detect_plateau_returns_none_when_too_few_rounds() -> None:
 
     # Two rounds is below the 3-round minimum streak.
     records = [_record(1, 40.0), _record(2, 41.0)]
     assert _detect_plateau(records) is None
 
 
-def test_detect_plateau_fires_on_flat_perf_streak():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
+def test_detect_plateau_fires_on_flat_perf_streak() -> None:
 
     # 41.0 vs 41.5 is ~1.2% spread — well under the 5% threshold.
     records = [_record(1, 41.0), _record(2, 41.5), _record(3, 41.2)]
     warning = _detect_plateau(records)
     assert warning is not None
-    assert "rounds 1–3" in warning  # noqa: RUF001  # tracked: #288
+    assert "rounds 1\N{EN DASH}3" in warning
     assert "tok/s" in warning
 
 
-def test_detect_plateau_skips_when_perf_diverges():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
+def test_detect_plateau_skips_when_perf_diverges() -> None:
 
     # 41.0 vs 116.0 is ~64% spread — clearly off-plateau.
     records = [_record(1, 41.0), _record(2, 116.0), _record(3, 114.5)]
     assert _detect_plateau(records) is None
 
 
-def test_detect_plateau_ignores_rounds_without_perf():  # noqa: ANN201  # tracked: #288
+def test_detect_plateau_ignores_rounds_without_perf() -> None:
     """Rounds where the profiler skipped or the round failed (perf=None) must
     not interrupt the streak — only valid measurements count."""
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
 
     records = [
         _record(1, 41.0),
@@ -4869,13 +4898,12 @@ def test_detect_plateau_ignores_rounds_without_perf():  # noqa: ANN201  # tracke
     ]
     warning = _detect_plateau(records)
     assert warning is not None
-    assert "rounds 1–4" in warning  # noqa: RUF001  # tracked: #288
+    assert "rounds 1\N{EN DASH}4" in warning
 
 
-def test_detect_plateau_ignores_failed_official_measurements():  # noqa: ANN201  # tracked: #288
+def test_detect_plateau_ignores_failed_official_measurements() -> None:
     """A measured row rejected by the judge or another round gate is not
     trusted trajectory evidence, even when the framework evaluator ran."""
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
 
     failed = _record(2, 100.0)
     failed.passed = False
@@ -4887,21 +4915,19 @@ def test_detect_plateau_ignores_failed_official_measurements():  # noqa: ANN201 
     ]
     warning = _detect_plateau(records)
     assert warning is not None
-    assert "rounds 1–4" in warning  # noqa: RUF001  # tracked: #288
+    assert "rounds 1\N{EN DASH}4" in warning
 
 
-def test_failed_official_measurement_cannot_complete_plateau_streak():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
+def test_failed_official_measurement_cannot_complete_plateau_streak() -> None:
 
     failed = _record(3, 41.1)
     failed.passed = False
     assert _detect_plateau([_record(1, 41.0), _record(2, 41.2), failed]) is None
 
 
-def test_detect_plateau_streak_must_be_recent():  # noqa: ANN201  # tracked: #288
+def test_detect_plateau_streak_must_be_recent() -> None:
     """A plateau early in the run that's followed by a clear win must NOT
     fire a warning on the next round — only the *last N* matter."""
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
 
     records = [
         _record(1, 41.0),  # plateau
@@ -4913,15 +4939,15 @@ def test_detect_plateau_streak_must_be_recent():  # noqa: ANN201  # tracked: #28
     assert _detect_plateau(records) is None
 
 
-def test_loop_creates_roadmap_md_in_project(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_creates_roadmap_md_in_project(tmp_path: Path, ref_file: Path) -> None:
     """The first round of a fresh run seeds roadmap.md at the project root."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             task="Build server",
-            pass_criteria="/health 200",  # noqa: S106  # tracked: #288
+            criteria="/health 200",
             reasoning="cold start",
         ),
     )
@@ -4931,7 +4957,7 @@ def test_loop_creates_roadmap_md_in_project(tmp_path, ref_file):  # noqa: ANN001
     assert "## Major" in text
 
 
-def test_loop_can_create_scannable_directory_memory(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_can_create_scannable_directory_memory(tmp_path: Path, ref_file: Path) -> None:
     fake = _new_orchestrate_fake()
 
     result = _invoke_orchestrate(
@@ -4950,14 +4976,14 @@ def test_loop_can_create_scannable_directory_memory(tmp_path, ref_file):  # noqa
     assert "Framework" not in round_log.read_text()  # stub skips official commands
 
 
-def test_loop_threads_roadmap_into_orchestrator_prompt(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_threads_roadmap_into_orchestrator_prompt(tmp_path: Path, ref_file: Path) -> None:
     """The orchestrator's plan prompt must include the current roadmap.md
     contents so the orchestrator can update them."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(task="t", pass_criteria="p", reasoning="r"),  # noqa: S106  # tracked: #288
+        make_orchestrator_plan(task="t", criteria="p", reasoning="r"),
     )
 
     _invoke_orchestrate(tmp_path, ref_file, fake, max_rounds=1)
@@ -4972,15 +4998,14 @@ def test_loop_threads_roadmap_into_orchestrator_prompt(tmp_path, ref_file):  # n
     assert "roadmap.md" in prompt
 
 
-def test_loop_threads_plateau_warning_into_prompt(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_loop_threads_plateau_warning_into_prompt(tmp_path: Path, ref_file: Path) -> None:
     """When the prior rounds plateau on framework-measured perf, the
     orchestrator's next prompt must include the plateau warning."""
     # Five rounds: round 1 is cold-start (no profiler), rounds 2-4 produce
     # flat perf metrics, and round 5 is the round under test (its plan call
     # should see the plateau warning).
     plans = [
-        OrchestratorPlan(task=f"r{i}", pass_criteria="p", reasoning=f"r{i}")  # noqa: S106  # tracked: #288
-        for i in range(1, 6)  # noqa: RUF100, S106  # tracked: #288
+        make_orchestrator_plan(task=f"r{i}", criteria="p", reasoning=f"r{i}") for i in range(1, 6)
     ]
     fake = _new_orchestrate_fake()
     fake.enqueue(
@@ -5046,7 +5071,9 @@ def test_loop_threads_plateau_warning_into_prompt(tmp_path, ref_file):  # noqa: 
     assert "unexplained residual" in seen_prompts[4]
 
 
-def test_self_reported_numbers_do_not_raise_a_plateau_warning(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_self_reported_numbers_do_not_raise_a_plateau_warning(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """The same flat trajectory, self-reported, is not evidence of a plateau.
 
     Telling the orchestrator it has stopped making progress on the strength of
@@ -5056,8 +5083,7 @@ def test_self_reported_numbers_do_not_raise_a_plateau_warning(tmp_path, ref_file
     because the framework has measured nothing to detect a plateau in.
     """
     plans = [
-        OrchestratorPlan(task=f"r{i}", pass_criteria="p", reasoning=f"r{i}")  # noqa: S106  # tracked: #288
-        for i in range(1, 6)  # noqa: RUF100, S106  # tracked: #288
+        make_orchestrator_plan(task=f"r{i}", criteria="p", reasoning=f"r{i}") for i in range(1, 6)
     ]
     fake = _new_orchestrate_fake()
     fake.enqueue(
@@ -5096,7 +5122,9 @@ def test_self_reported_numbers_do_not_raise_a_plateau_warning(tmp_path, ref_file
     assert all("Plateau detected" not in prompt for prompt in seen_prompts)
 
 
-def test_completed_round_records_which_implementer_produced_it(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_completed_round_records_which_implementer_produced_it(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """A round names the driver, provider, and model of its implementer.
 
     The provider session ID itself stays machine-local in the session store;
@@ -5116,7 +5144,7 @@ def test_completed_round_records_which_implementer_produced_it(tmp_path, ref_fil
     assert not [key for key in round_one if "session" in key]
 
 
-def test_stub_agent_round_records_its_own_attribution(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_stub_agent_round_records_its_own_attribution(tmp_path: Path, ref_file: Path) -> None:
     """The real stub client, not a mock, carries the attribution a round stores.
 
     The `--stub-agent` smoke run in the release-wheel job exercises this path
@@ -5133,7 +5161,9 @@ def test_stub_agent_round_records_its_own_attribution(tmp_path, ref_file):  # no
     assert round_one["implementer_model"] is None
 
 
-def test_round_records_stamp_who_produced_the_headline_metric(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_round_records_stamp_who_produced_the_headline_metric(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """A round's `perf_provenance` names the source of its `perf_metric`.
 
     `official_evaluation` only says the framework's gates ran; it is true for
@@ -5154,7 +5184,7 @@ def test_round_records_stamp_who_produced_the_headline_metric(tmp_path, ref_file
     assert rounds[0]["perf_provenance"] == "implementer"
 
 
-def test_framework_measured_round_is_stamped_framework(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_framework_measured_round_is_stamped_framework(tmp_path: Path, ref_file: Path) -> None:
     """The framework benchmark's number overrides the agent's, stamp included."""
     fake = _new_orchestrate_fake()
     fake.enqueue(
@@ -5184,7 +5214,9 @@ def test_framework_measured_round_is_stamped_framework(tmp_path, ref_file):  # n
     assert rounds[0]["perf_provenance"] == "framework"
 
 
-def test_a_round_with_no_headline_metric_carries_no_provenance(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_a_round_with_no_headline_metric_carries_no_provenance(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """The invariant: provenance is set exactly when a metric is recorded."""
     fake = _new_orchestrate_fake()
 
@@ -5195,7 +5227,9 @@ def test_a_round_with_no_headline_metric_carries_no_provenance(tmp_path, ref_fil
     assert rounds[0]["perf_provenance"] is None
 
 
-def test_single_agent_self_reported_metric_is_stamped_implementer(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_single_agent_self_reported_metric_is_stamped_implementer(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """The `--inner-loop=single-agent` ablation stamps provenance too.
 
     One agent implements, self-judges, and profiles, so its `perf_metric` is
@@ -5218,7 +5252,9 @@ def test_single_agent_self_reported_metric_is_stamped_implementer(tmp_path, ref_
     assert rounds[0]["perf_provenance"] == "implementer"
 
 
-def test_single_agent_framework_benchmark_overrides_and_stamps_framework(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_single_agent_framework_benchmark_overrides_and_stamps_framework(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """A framework benchmark replaces the single agent's number and its stamp."""
     fake = _new_orchestrate_fake()
     fake.enqueue("implementer", _single_agent_round(123.5))
@@ -5245,7 +5281,9 @@ def test_single_agent_framework_benchmark_overrides_and_stamps_framework(tmp_pat
     assert rounds[0]["perf_provenance"] == "framework"
 
 
-def test_single_agent_round_without_a_metric_carries_no_provenance(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_single_agent_round_without_a_metric_carries_no_provenance(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """The invariant holds on the single-agent path as well."""
     fake = _new_orchestrate_fake()
     fake.enqueue("implementer", _single_agent_round(None))
@@ -5263,7 +5301,7 @@ def test_single_agent_round_without_a_metric_carries_no_provenance(tmp_path, ref
     assert rounds[0]["perf_provenance"] is None
 
 
-def test_framework_measured_improvement_resolves_proven(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_framework_measured_improvement_resolves_proven(tmp_path: Path, ref_file: Path) -> None:
     """The positive case: a trusted measurement can still prove a hypothesis.
 
     Every other end-to-end expectation in this file reads `unmeasured`,
@@ -5277,18 +5315,18 @@ def test_framework_measured_improvement_resolves_proven(tmp_path, ref_file):  # 
         "orchestrator",
         *_orchestrator_turns(
             [
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="baseline-claim",
                     hypothesis="first causal claim",
                     task="establish the baseline",
-                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    criteria="collect evidence",
                     reasoning="first experiment",
                 ),
-                OrchestratorPlan(
+                make_orchestrator_plan(
                     hypothesis_id="improvement-claim",
                     hypothesis="second causal claim",
                     task="beat the baseline",
-                    pass_criteria="collect evidence",  # noqa: S106  # tracked: #288
+                    criteria="collect evidence",
                     reasoning="second experiment",
                 ),
             ]
@@ -5336,7 +5374,9 @@ def test_framework_measured_improvement_resolves_proven(tmp_path, ref_file):  # 
     ]
 
 
-def test_reprompted_plan_is_labelled_as_a_retry_of_the_same_round(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_reprompted_plan_is_labelled_as_a_retry_of_the_same_round(
+    tmp_path: Path, ref_file: Path
+) -> None:
     """The retry's label must stay parseable by both consumers.
 
     `_attempt_from_label` in `vibesys.context` reads `retry-(\\d+)` to report
@@ -5351,14 +5391,14 @@ def test_reprompted_plan_is_labelled_as_a_retry_of_the_same_round(tmp_path, ref_
     fake.enqueue(
         "orchestrator",
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="already-used",
             task="complete the first investigation",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="create the identifier",
         ),
         _default_pre_round_decision(),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="already-used",
             hypothesis_updates=[
                 HypothesisStrategyUpdate(
@@ -5368,13 +5408,13 @@ def test_reprompted_plan_is_labelled_as_a_retry_of_the_same_round(tmp_path, ref_
                 )
             ],
             task="incorrectly reuse the identifier",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="exercise unique identity validation",
         ),
-        OrchestratorPlan(
+        make_orchestrator_plan(
             hypothesis_id="corrected-id",
             task="proceed with a fresh identifier",
-            pass_criteria="review",  # noqa: S106  # tracked: #288
+            criteria="review",
             reasoning="corrected after the reprompt",
         ),
     )
@@ -5395,7 +5435,7 @@ def test_reprompted_plan_is_labelled_as_a_retry_of_the_same_round(tmp_path, ref_
     assert "never reuse an identifier used earlier in this run" in corrective.lower()
 
 
-def test_round_finished_events_carry_profile_skipped(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_round_finished_events_carry_profile_skipped(tmp_path: Path, ref_file: Path) -> None:
     """The emitted event mirrors the round record's profile_skipped flag."""
     # Round 1 reports no metric: no fresh profile ran, so the round is marked
     # skipped with no perf reading. Round 2 is the final round, whose forced

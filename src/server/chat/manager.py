@@ -223,7 +223,7 @@ class ChatManager:
             if factory is not None:
                 self._active_thread_calls += 1
         if factory is None:
-            raise RuntimeError(  # noqa: TRY003  # Report current run availability.
+            raise RuntimeError(  # Report current run availability.
                 "Experiment chat threads are not available for this run "
                 f"({self._unavailable_reason()})"
             )
@@ -312,7 +312,7 @@ class ChatManager:
             if not self._retain_terminal:
                 return False
             if self._terminal_resource is not None:
-                raise RuntimeError(  # noqa: TRY003  # This invariant has no input value.
+                raise RuntimeError(  # This invariant has no input value.
                     "Terminal chat resources are already retained"
                 )
             self._terminal_resource = resource
@@ -384,8 +384,8 @@ class ChatManager:
                 self._active_thread_calls += 1
         if route is not None:
             return self._lease_thread_route(route)
-        assert spec is not None  # noqa: S101  # Narrowed above.
-        assert factory is not None  # noqa: S101  # Narrowed above.
+        assert spec is not None  # Narrowed above.
+        assert factory is not None  # Narrowed above.
         if restore:
             self._restore_thread(thread_id, spec, factory, restoration)
         try:
@@ -393,7 +393,7 @@ class ChatManager:
         except _ThreadsDrainingError:
             self._release_thread_call()
             return self._thread_unavailable_message(thread_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._release_thread_call()
             return (
                 f"Could not restore experiment chat thread {thread_id!r}: "
@@ -420,10 +420,10 @@ class ChatManager:
         restoration: _ThreadRestoration,
     ) -> None:
         with self._condition:
-            assert self._thread_restorations.get(thread_id) is restoration  # noqa: S101
+            assert self._thread_restorations.get(thread_id) is restoration
         try:
             handle = factory(thread_id, spec.driver, spec.provider, spec.model)
-        except BaseException as exc:  # noqa: BLE001  # Wake waiters on cancellation too.
+        except BaseException as exc:  # Wake waiters on cancellation too.
             self._finish_thread_restoration(thread_id, restoration, error=exc)
             return
 
@@ -439,7 +439,7 @@ class ChatManager:
         error = _ThreadsDrainingError(self._thread_unavailable_message(thread_id))
         try:
             handle.close()
-        except BaseException as cleanup_error:  # noqa: BLE001
+        except BaseException as cleanup_error:
             error.add_note(
                 "Additional error while cleaning up chat-thread restoration: "
                 f"{type(cleanup_error).__name__}: {cleanup_error}"
@@ -495,7 +495,7 @@ class ChatManager:
             return
         try:
             retired.close()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._journal.publish_output(
                 "stderr",
                 f"Terminal experiment chat cleanup failed: {type(exc).__name__}: {exc}\n",

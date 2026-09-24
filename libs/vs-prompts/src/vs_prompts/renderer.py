@@ -17,12 +17,15 @@ directory layout, and what context they pass.
 
 from __future__ import annotations
 
-from collections.abc import Sequence  # noqa: TC003  # tracked: #288
-from pathlib import Path  # tracked: #288
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from vs_prompts.contract import resolve_free_variables
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 class TemplateRenderer:
@@ -38,7 +41,7 @@ class TemplateRenderer:
         self.root = root
         self.fallback_roots = tuple(fallback_roots)
         self._loader = FileSystemLoader([str(root), *(str(p) for p in self.fallback_roots)])
-        self._env = Environment(  # noqa: S701  # tracked: #288
+        self._env = Environment(
             loader=self._loader,
             keep_trailing_newline=True,
             trim_blocks=True,

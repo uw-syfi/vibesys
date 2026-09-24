@@ -11,10 +11,10 @@ import hashlib
 import json
 import shlex
 import subprocess
-from collections.abc import Sequence  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Generic, Literal, NotRequired, TypedDict, TypeVar, Unpack
+
+from pydantic import BaseModel
 
 from vibesys import constants
 from vibesys.agent_spec_config import resolve_agent_driver
@@ -24,11 +24,6 @@ from vibesys.context import create_run_context
 from vibesys.domains.base import DomainDefinition, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.evaluators.input_manifest import (  # noqa: TC001  # tracked: #288
-    BenchmarkResult,
-    ProfileGuidedInput,
-    WorkspaceSource,
-)
 from vibesys.events import (
     CoreEventType,
     EventStatus,
@@ -90,6 +85,7 @@ from vibesys.loops.metrics import (
 )
 from vibesys.loops.profiler import mcp_spec as profiler_mcp_spec
 from vibesys.profilers import (
+    ProfilerDefinition,
     ProfilerKind,
     profiler_definition,
     require_profiler_kind,
@@ -126,12 +122,39 @@ from vibesys.skills import (
 from vs_agent.api import (
     AgentBackend,
     AgentSessionKey,
+    MCPServerSpec,
     ResponseFallback,
     RoundProgress,
     SessionScope,
 )
 from vs_loop_state.api import PerfProvenance, RoundHistory, RoundRecord
 from vs_project.api import AgentRunConfiguration
+
+_ReadOnlyResponseT = TypeVar("_ReadOnlyResponseT", bound=BaseModel)
+
+
+class _ReadOnlyRoleInvokeOptions(TypedDict, Generic[_ReadOnlyResponseT]):
+    """Typed options forwarded to the run context's structured invoke API."""
+
+    kind: str
+    system_prompt: str
+    user_prompt: str
+    response_cls: type[_ReadOnlyResponseT]
+    fallback_factory: Callable[[], _ReadOnlyResponseT]
+    round_label: NotRequired[str]
+    reuse_session: NotRequired[bool]
+    mcp_servers: NotRequired[list[MCPServerSpec] | None]
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+    from pathlib import Path
+
+    from vibesys.evaluators.input_manifest import (
+        BenchmarkResult,
+        ProfileGuidedInput,
+        WorkspaceSource,
+    )
 
 # Candidate process boundaries selected by ``--interface``. Language, tooling,
 # and artifact requirements belong to the selected domain and input bundle.
@@ -189,6 +212,9 @@ _FAILED_HYPOTHESIS_OUTCOMES = (
 ) | {"rejected"}
 _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW = 2
 _PARETO_ARCHIVE_PENDING_CLAIM_LIMIT = 8
+_ROLE_CHANGE_DISPLAY_LIMIT = 8
+_MAX_VALIDATION_INPUT_FILES = 4096
+_MAX_VALIDATION_INPUT_BYTES = 256 * 1024 * 1024
 
 
 def _implementation_requests_continuation(
@@ -387,7 +413,8 @@ def _pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> s
     if frontier:
         lines.append("Trusted frontier parents:")
         for record in frontier:
-            assert record.commit is not None  # noqa: S101  # tracked: #288
+            if record.commit is None:
+                continue
             evidence = "official" if record.official_evaluation else "reviewed provisional"
             operating_point = record.candidate_operating_point or "canonical workload row"
             artifact = record.candidate_evaluation_artifact or record.evaluation_artifact
@@ -431,7 +458,8 @@ def _pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> s
                 f"({rounds}); do not treat any omitted claim as a trusted parent."
             )
         for record in pending[-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT:]:
-            assert record.commit is not None  # noqa: S101  # tracked: #288
+            if record.commit is None:
+                continue
             lines.append(
                 f"- round {record.round_number}, commit {record.commit[:12]}: "
                 f"{_format_metric_row(record.candidate_metrics, objectives)}; "
@@ -524,23 +552,25 @@ def _finalize_agent_run(
     if winner is None:
         baseline = ctx.git.trusted_input_baseline
         if baseline is None:
-            raise RuntimeError(  # noqa: TRY003
+            raise RuntimeError(
                 "no trusted retained candidate or trusted input baseline is available"
             )
         if not ctx.git.checkout_tree(baseline, clean=True, preserve_paths=relative_memory):
-            raise RuntimeError(  # noqa: TRY003
-                f"could not restore trusted input baseline at {baseline}"
-            )
+            raise RuntimeError(f"could not restore trusted input baseline at {baseline}")
         ctx.snapshot_workspace("agent: restore trusted input baseline")
         ctx.lprint(
             f"\nNo evaluated winner was retained. Restored trusted input baseline {baseline[:12]}."
         )
         return
-    assert winner.commit is not None  # noqa: S101  # selected records require a commit
-    ctx.git.retain_candidate(f"selected-round-{winner.round_number:04d}", winner.commit)
-    if not ctx.git.checkout_tree(winner.commit, clean=True, preserve_paths=relative_memory):
-        raise RuntimeError(  # noqa: TRY003
-            f"could not materialize selected round {winner.round_number} at {winner.commit}"
+    winner_commit = winner.commit
+    if winner_commit is None:
+        raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-008238 [TRY003]; final selection must identify its trusted candidate commit before changing workspace state.
+            "selected final candidate is missing its commit"
+        )
+    ctx.git.retain_candidate(f"selected-round-{winner.round_number:04d}", winner_commit)
+    if not ctx.git.checkout_tree(winner_commit, clean=True, preserve_paths=relative_memory):
+        raise RuntimeError(
+            f"could not materialize selected round {winner.round_number} at {winner_commit}"
         )
     ctx.snapshot_workspace(f"agent: select round {winner.round_number}")
     metrics = (
@@ -550,7 +580,7 @@ def _finalize_agent_run(
     )
     ctx.lprint(
         f"\nFinal selected candidate: round {winner.round_number}, "
-        f"commit {winner.commit[:12]}, official metrics: {metrics.strip()}"
+        f"commit {winner_commit[:12]}, official metrics: {metrics.strip()}"
     )
 
 
@@ -596,7 +626,9 @@ def _detect_plateau(
     threshold_pct: float = _PLATEAU_THRESHOLD_PCT,
     min_streak: int = _PLATEAU_MIN_STREAK,
 ) -> str | None:
-    """Return a warning string if the most recent ``min_streak`` rounds
+    """Return a warning string if recent same-unit rounds stayed steady.
+
+    Check whether the most recent ``min_streak`` rounds
     with **fresh, same-unit** perf metrics stayed within ``threshold_pct``
     of each other; else None.
 
@@ -614,7 +646,7 @@ def _detect_plateau(
 
     The orchestrator gets this verbatim in its prompt; phrasing is
     user-facing.
-    """  # noqa: D205  # tracked: #288
+    """
     fresh = [
         r
         for r in records
@@ -643,7 +675,7 @@ def _detect_plateau(
     rounds = [r.round_number for r in tail]
     return (
         f"The last {min_streak} rounds with a fresh perf measurement (rounds "
-        f"{rounds[0]}–{rounds[-1]}) all landed in {lo:.2f}–{hi:.2f}{unit_suffix} "  # noqa: RUF001  # tracked: #288
+        f"{rounds[0]}–{rounds[-1]}) all landed in {lo:.2f}–{hi:.2f}{unit_suffix} "  # noqa: RUF001  # lint-waiver: LW-008241 [RUF001]; this user-facing measurement range keeps the established en-dash wording.
         f"— a {spread_pct:.2f}% spread, well within bench noise. Whatever you've "
         f"been working on for those rounds is not actually moving the headline "
         f"metric."
@@ -732,7 +764,7 @@ def _provisional_candidates_since_official(records: list[RoundRecord]) -> int:
     return count
 
 
-def _official_evaluation_reason(  # noqa: PLR0913  # tracked: #288
+def _official_evaluation_reason(
     *,
     records: list[RoundRecord],
     round_number: int,
@@ -862,8 +894,8 @@ def _invoke_read_only_role(
     role: str,
     checkpoint_label: str,
     allowed_workspace_paths: tuple[str, ...] = (),
-    **invoke_kwargs: Any,  # noqa: ANN401  # tracked: #288
-) -> Any:  # noqa: ANN401  # tracked: #288
+    **invoke_kwargs: Unpack[_ReadOnlyRoleInvokeOptions[_ReadOnlyResponseT]],
+) -> _ReadOnlyResponseT:
     """Invoke an evidence-reading role and undo unauthorized mutations.
 
     Prompt-level role boundaries are useful guidance, but they are not an
@@ -876,7 +908,7 @@ def _invoke_read_only_role(
     ctx.snapshot_workspace(checkpoint_label)
     checkpoint = ctx.git.current_sha()
     if checkpoint is None:
-        raise RuntimeError(f"Cannot isolate {role}: workspace checkpoint is unavailable")  # noqa: TRY003  # tracked: #288
+        raise RuntimeError(f"Cannot isolate {role}: workspace checkpoint is unavailable")
 
     try:
         return ctx.invoke(**invoke_kwargs)
@@ -895,18 +927,22 @@ def _invoke_read_only_role(
             if allowed_workspace_paths:
                 checkout_kwargs["preserve_paths"] = allowed_workspace_paths
             if not ctx.git.checkout_tree(checkpoint, **checkout_kwargs):
-                raise RuntimeError(  # noqa: TRY003  # tracked: #288
+                raise RuntimeError(
                     f"Cannot isolate {role}: failed to restore workspace checkpoint "
                     f"{checkpoint[:12]}"
                 )
             remaining = [path for path in ctx.git.pending_changes() if not is_allowed(path)]
             if remaining:
-                raise RuntimeError(  # noqa: TRY003  # tracked: #288
+                raise RuntimeError(
                     f"Cannot isolate {role}: workspace is still modified after restore: "
-                    f"{', '.join(remaining[:8])}"
+                    f"{', '.join(remaining[:_ROLE_CHANGE_DISPLAY_LIMIT])}"
                 )
-            shown = ", ".join(unauthorized[:8])
-            suffix = "" if len(unauthorized) <= 8 else f", ... (+{len(unauthorized) - 8} more)"  # noqa: PLR2004  # tracked: #288
+            shown = ", ".join(unauthorized[:_ROLE_CHANGE_DISPLAY_LIMIT])
+            suffix = (
+                ""
+                if len(unauthorized) <= _ROLE_CHANGE_DISPLAY_LIMIT
+                else f", ... (+{len(unauthorized) - _ROLE_CHANGE_DISPLAY_LIMIT} more)"
+            )
             ctx.lprint(
                 f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
                 f"attempted by {role}: {shown}{suffix}"
@@ -918,7 +954,7 @@ def _is_fresh_cold_start(round_number: int, records: list[RoundRecord]) -> bool:
     return round_number == 1 and not records
 
 
-def _run_pre_round_decision(  # noqa: PLR0913  # tracked: #288
+def _run_pre_round_decision(
     ctx: LoopContext,
     *,
     round_number: int,
@@ -975,11 +1011,11 @@ def _profiler_prompt_template(
     ).prompt_template
 
 
-def _effective_profiler_definition(  # noqa: ANN202  # tracked: #288
+def _effective_profiler_definition(
     profiler_kind: ProfilerKind,
     *,
     supports_torch_profiler: bool = False,
-):
+) -> ProfilerDefinition:
     """Return the already-resolved profiler declaration.
 
     Context creation resolves the requested profiler against both the domain
@@ -989,14 +1025,14 @@ def _effective_profiler_definition(  # noqa: ANN202  # tracked: #288
     """
     kind = require_profiler_kind(profiler_kind)
     if kind is ProfilerKind.NONE:
-        raise ValueError("No profiler prompt exists when profiling is disabled.")  # noqa: TRY003  # tracked: #288
+        raise ValueError("No profiler prompt exists when profiling is disabled.")
     definition = profiler_definition(kind)
     if definition.requires_domain_torch_support and not supports_torch_profiler:
-        raise ValueError("The selected domain does not provide Torch profiler support.")  # noqa: TRY003  # tracked: #288
+        raise ValueError("The selected domain does not provide Torch profiler support.")
     return definition
 
 
-def _run_profiler(  # noqa: PLR0913  # tracked: #288
+def _run_profiler(
     ctx: LoopContext,
     *,
     round_number: int,
@@ -1082,7 +1118,7 @@ Write bounded durable profile evidence only below
             round_label=f"round-{round_number}-profiler",
             mcp_servers=[spec] if spec is not None else None,
         )
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:
         output_sink().framework_warning(
             "profiler failed",
             detail=str(exc),
@@ -1122,7 +1158,7 @@ def _domain_render_context(
     }
 
 
-def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
+def _run_orchestrator_plan(
     ctx: LoopContext,
     *,
     agent_run_state: AgentRunState,
@@ -1210,7 +1246,7 @@ def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
             response_cls=OrchestratorPlan,
             fallback_factory=lambda: OrchestratorPlan(
                 task="Re-check minimal server boots and /health returns 200.",
-                pass_criteria="/health returns 200.",  # noqa: S106  # tracked: #288
+                pass_criteria="/health returns 200.",
                 reasoning="fallback: orchestrator produced no structured response",
             ),
             round_label=label,
@@ -1253,17 +1289,11 @@ def _validate_orchestrator_plan_state(
     if len({update.hypothesis_id for update in plan.hypothesis_updates}) != len(
         plan.hypothesis_updates
     ):
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            "Orchestrator hypothesis_updates must name each hypothesis once"
-        )
+        raise ValueError("Orchestrator hypothesis_updates must name each hypothesis once")
     if any(update.hypothesis_id == plan.hypothesis_id for update in plan.hypothesis_updates):
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            "Orchestrator hypothesis_updates must refer to prior hypotheses"
-        )
+        raise ValueError("Orchestrator hypothesis_updates must refer to prior hypotheses")
     if state.by_id(plan.hypothesis_id) is not None:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"hypothesis ID {plan.hypothesis_id!r} was already used"
-        )
+        raise ValueError(f"hypothesis ID {plan.hypothesis_id!r} was already used")
     # Apply to a copy before any plan artifact is written. The real transition
     # is persisted after the operational active checkpoint is assembled.
     apply_strategy_updates(state, plan.hypothesis_updates)
@@ -1367,7 +1397,7 @@ def _validate_skill_selections(
     return validated, resolved
 
 
-def _run_implementer(  # noqa: PLR0913  # tracked: #288
+def _run_implementer(
     ctx: LoopContext,
     *,
     round_number: int,
@@ -1500,7 +1530,7 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
     )
 
 
-def _run_judge(  # noqa: PLR0913  # tracked: #288
+def _run_judge(
     ctx: LoopContext,
     *,
     round_number: int,
@@ -1650,7 +1680,7 @@ def _run_judge(  # noqa: PLR0913  # tracked: #288
     return response
 
 
-def _run_single_agent_round(  # noqa: PLR0913  # tracked: #288
+def _run_single_agent_round(
     ctx: LoopContext,
     *,
     round_number: int,
@@ -1815,12 +1845,12 @@ def _validation_input_digest(workspace: Path, recipe: ValidationRecipe) -> str:
     for relative in sorted(recipe.input_paths):
         unresolved = workspace / relative
         if unresolved.is_symlink():
-            raise ValueError(f"validation input must not be a symlink: {relative}")  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"validation input must not be a symlink: {relative}")
         path = unresolved.resolve()
         if not path.is_relative_to(workspace_root):
-            raise ValueError(f"validation input escapes workspace: {relative}")  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"validation input escapes workspace: {relative}")
         if not path.exists():
-            raise ValueError(f"validation input does not exist: {relative}")  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"validation input does not exist: {relative}")
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0dir\0" if path.is_dir() else b"\0file\0")
         entries = [path]
@@ -1828,11 +1858,14 @@ def _validation_input_digest(workspace: Path, recipe: ValidationRecipe) -> str:
             entries = sorted(candidate for candidate in path.rglob("*") if candidate.is_file())
         for entry in entries:
             if entry.is_symlink():
-                raise ValueError(f"validation input must not be a symlink: {relative}")  # noqa: TRY003  # tracked: #288
+                raise ValueError(f"validation input must not be a symlink: {relative}")
             total_files += 1
             total_bytes += entry.stat().st_size
-            if total_files > 4096 or total_bytes > 256 * 1024 * 1024:  # noqa: PLR2004  # tracked: #288
-                raise ValueError("validation inputs exceed the 4096-file/256-MiB reuse-hash limit")  # noqa: TRY003  # tracked: #288
+            if (
+                total_files > _MAX_VALIDATION_INPUT_FILES
+                or total_bytes > _MAX_VALIDATION_INPUT_BYTES
+            ):
+                raise ValueError("validation inputs exceed the 4096-file/256-MiB reuse-hash limit")
             entry_relative = entry.relative_to(workspace_root).as_posix()
             digest.update(entry_relative.encode("utf-8"))
             digest.update(b"\0")
@@ -1871,20 +1904,20 @@ def _load_validation_recipes(workspace: Path, artifact: str) -> list[ValidationR
     workspace_root = workspace.resolve()
     path = (workspace / artifact).resolve()
     if not path.is_relative_to(workspace_root):
-        raise ValueError("validation recipe artifact escapes the workspace")  # noqa: TRY003  # tracked: #288
+        raise ValueError("validation recipe artifact escapes the workspace")
     if not path.is_file():
-        raise ValueError(f"validation recipe artifact does not exist: {artifact}")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"validation recipe artifact does not exist: {artifact}")
     try:
         payload = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"validation recipe artifact is not valid JSON: {exc}") from exc  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"validation recipe artifact is not valid JSON: {exc}") from exc
     try:
         return ValidationRecipeArtifact.model_validate(payload).recipes
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"validation recipe artifact does not match version 1: {exc}") from exc  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"validation recipe artifact does not match version 1: {exc}") from exc
 
 
-def _run_framework_validation_gate(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
+def _run_framework_validation_gate(
     ctx: LoopContext,
     *,
     recipe_artifact: str | None,
@@ -1971,7 +2004,7 @@ def _run_framework_validation_gate(  # noqa: C901, PLR0912, PLR0915  # tracked: 
                 output=output[-GATE_RECORD_TAIL_CHARS:],
                 error=None if passed else "command exited nonzero",
             )
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
+        except Exception as exc:
             result = FrameworkValidationResult(
                 recipe=recipe,
                 input_digest=input_digest,
@@ -1982,8 +2015,12 @@ def _run_framework_validation_gate(  # noqa: C901, PLR0912, PLR0915  # tracked: 
         changes = ctx.git.pending_changes()
         if changes:
             restore_required = True
-            shown = ", ".join(changes[:8])
-            suffix = "" if len(changes) <= 8 else f", ... (+{len(changes) - 8} more)"  # noqa: PLR2004  # tracked: #288
+            shown = ", ".join(changes[:_ROLE_CHANGE_DISPLAY_LIMIT])
+            suffix = (
+                ""
+                if len(changes) <= _ROLE_CHANGE_DISPLAY_LIMIT
+                else f", ... (+{len(changes) - _ROLE_CHANGE_DISPLAY_LIMIT} more)"
+            )
             result = result.model_copy(
                 update={
                     "passed": False,
@@ -2004,14 +2041,13 @@ def _run_framework_validation_gate(  # noqa: C901, PLR0912, PLR0915  # tracked: 
         if not result.passed:
             break
 
-    if restore_required:  # noqa: SIM102  # tracked: #288
-        if not ctx.git.checkout_tree(checkpoint, clean=True):
-            results[-1] = results[-1].model_copy(
-                update={
-                    "passed": False,
-                    "error": "validation mutation could not be restored",
-                }
-            )
+    if restore_required and not ctx.git.checkout_tree(checkpoint, clean=True):
+        results[-1] = results[-1].model_copy(
+            update={
+                "passed": False,
+                "error": "validation mutation could not be restored",
+            }
+        )
 
     artifact = issue_board.write_validation_result_artifact(
         progress_path,
@@ -2060,7 +2096,7 @@ def _with_candidate_revision(
     return f"env {' '.join(environment)} {command}"
 
 
-def _run_framework_accuracy_gate(  # noqa: PLR0913  # tracked: #288
+def _run_framework_accuracy_gate(
     ctx: LoopContext,
     *,
     round_number: int,
@@ -2103,7 +2139,7 @@ def _run_framework_accuracy_gate(  # noqa: PLR0913  # tracked: #288
     return result.feedback
 
 
-def _run_framework_benchmark(  # noqa: PLR0913  # tracked: #288
+def _run_framework_benchmark(
     ctx: LoopContext,
     *,
     result_spec: BenchmarkResult | None,
@@ -2171,7 +2207,7 @@ def _reconcile_model_requests(ctx: LoopContext) -> str | None:
     """
     if getattr(ctx.run_environment_view, "env_kind", "local") != "modal":
         return None
-    from vibesys.sandbox.model_requests import (  # noqa: PLC0415  # tracked: #288
+    from vibesys.sandbox.model_requests import (
         ModelRequestError,
         reconcile_model_requests,
     )
@@ -2186,7 +2222,7 @@ def _reconcile_model_requests(ctx: LoopContext) -> str | None:
     return None
 
 
-def _run_framework_gates(  # noqa: PLR0913  # tracked: #288
+def _run_framework_gates(
     ctx: LoopContext,
     *,
     benchmark_result: BenchmarkResult | None,
@@ -2269,7 +2305,7 @@ def _run_framework_gates(  # noqa: PLR0913  # tracked: #288
 # ---------------------------------------------------------------------------
 
 
-def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
+def run_agent_loop(
     config: Config,
     exp_name: str,
     input_path: str,
@@ -2340,28 +2376,28 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     bundle rather than the process-boundary mode.
     """
     if inner_loop not in _INNER_LOOPS:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
+        raise ValueError(
             f"Unknown inner_loop {inner_loop!r}; choose from {', '.join(_INNER_LOOPS)}"
         )
     if max_retries_per_round < 1:
         # Guard against a zero-iteration retry loop: with no attempts the
         # round bookkeeping below would reference an unbound loop variable.
-        raise ValueError(f"max_retries_per_round must be >= 1, got {max_retries_per_round}")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"max_retries_per_round must be >= 1, got {max_retries_per_round}")
     if judge_every < 1:
-        raise ValueError(f"judge_every must be >= 1, got {judge_every}")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"judge_every must be >= 1, got {judge_every}")
     if official_eval_every < 1:
-        raise ValueError(f"official_eval_every must be >= 1, got {official_eval_every}")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"official_eval_every must be >= 1, got {official_eval_every}")
     if memory_layout not in issue_board.MEMORY_LAYOUTS:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
+        raise ValueError(
             f"Unknown memory_layout {memory_layout!r}; "
             f"choose from {', '.join(issue_board.MEMORY_LAYOUTS)}"
         )
     if interface not in _INTERFACES:
-        raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")
     if domain is None:
-        raise ValueError("domain is required; declare [agent].domain in vibesys.input.toml")  # noqa: TRY003  # tracked: #288
+        raise ValueError("domain is required; declare [agent].domain in vibesys.input.toml")
     if outer_loop == "profile-guided" and profile_guided is None:
-        raise ValueError("profile-guided runs require profile guidance settings")  # noqa: TRY003
+        raise ValueError("profile-guided runs require profile guidance settings")
     # Resolve the registered domain once (fail fast on an unknown name). The
     # per-role files carry language, tooling, and use-case-specific contracts.
     domain_definition = resolve_domain(domain)
@@ -2515,7 +2551,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                     progress_path=progress_path,
                 )
                 return True
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            raise ValueError(
                 f"This run has completed {round_number - 1} rounds; max_rounds={max_rounds} "
                 "is a total limit. Increase --max-rounds to continue."
             )
@@ -2644,7 +2680,10 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                     )
                     agent_run_state = engine.state
                     active_hypothesis = agent_run_state.active_hypothesis
-                    assert active_hypothesis is not None  # noqa: S101  # started above
+                    if active_hypothesis is None:
+                        raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-008239 [TRY003]; starting a hypothesis must populate active state before planning its task.
+                            "hypothesis engine did not retain the started hypothesis"
+                        )
                     plan = active_hypothesis.plan
                     persist_agent_run_state(
                         ctx,
@@ -2693,7 +2732,10 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                         rollback_commit, failed_child_round = round_history.resolve_rollback_commit(
                             target, _FAILED_HYPOTHESIS_OUTCOMES
                         )
-                        assert rollback_commit is not None  # noqa: S101  # tracked: #288
+                        if rollback_commit is None:
+                            raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-008240 [TRY003]; rollback resolution must preserve the validated target commit.
+                                f"rollback target round {target.round_number} has no commit"
+                            )
                         # Restore the tree without moving HEAD so subsequent
                         # commits land on the current branch as new commits
                         # after the reverted state.
@@ -2768,7 +2810,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 retry = 0
                 first_retry = issue_board.next_implementer_attempt(progress_path, round_number)
                 if first_retry > max_retries_per_round:
-                    raise RuntimeError(  # noqa: TRY003  # tracked: #288
+                    raise RuntimeError(
                         f"Round {round_number} already persisted "
                         f"{first_retry - 1} implementer attempts, exhausting "
                         f"max_retries_per_round={max_retries_per_round}; refusing "
@@ -3555,12 +3597,15 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 # exact representation can enter the write-ahead journal before
                 # progress notes or durable state are mutated.
                 next_active_hypothesis = active_hypothesis.clone()
-                if inner_loop == "multi-agent" and _implementation_keeps_hypothesis_active(
-                    implementation,
-                    continuation_rounds=next_active_hypothesis.continuation_rounds,
+                if (
+                    inner_loop == "multi-agent"
+                    and implementation is not None
+                    and _implementation_keeps_hypothesis_active(
+                        implementation,
+                        continuation_rounds=next_active_hypothesis.continuation_rounds,
+                    )
                 ):
                     next_active_hypothesis.feedback = feedback if reviewed and not passed else None
-                    assert implementation is not None  # noqa: S101  # tracked: #288
                     next_active_hypothesis.next_step = implementation.next_step
                     next_active_hypothesis.continuation_rounds += 1
                 elif passed:

@@ -9,7 +9,6 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError, model_validator
@@ -30,7 +29,9 @@ from server.run_lifecycle import RunStatus
 from vs_agent.api import (
     AgentOutputChannel,
     AgentStatusData,
+    # lint-waiver: LW-007004 [F401]; keep the command result import public
     CommandResultPayload,  # noqa: F401
+    # lint-waiver: LW-007005 [F401]; keep the JSON result import public
     JsonResultPayload,  # noqa: F401
     TodoItemData,
     ToolResultPayload,
@@ -38,12 +39,15 @@ from vs_agent.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from pathlib import Path
     from typing import BinaryIO
 
     from server.event_index import SourceStat
 
 
-class EventType(StrEnum):  # noqa: D101  # tracked: #288
+class EventType(StrEnum):
+    """Wire event kinds persisted in the event log."""
+
     SERVER_STARTED = "server_started"
     SERVER_READY = "server_ready"
     CONFIGURATION_FAILED = "configuration_failed"
@@ -81,7 +85,9 @@ class EventType(StrEnum):  # noqa: D101  # tracked: #288
     FRAMEWORK_WARNING = "framework_warning"
 
 
-class EventStatus(StrEnum):  # noqa: D101  # tracked: #288
+class EventStatus(StrEnum):
+    """Lifecycle and command states reported in events."""
+
     ACTIVE = "active"
     ANSWERED = "answered"
     PENDING = "pending"
@@ -126,7 +132,9 @@ class EventPayload(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
-class ChatData(EventPayload):  # noqa: D101  # tracked: #288
+class ChatData(EventPayload):
+    """Completed answer and optional thread-turn identity."""
+
     kind: Literal["chat"] = "chat"
     answer: str
     # The authoritative thread title, set by the server on the turn that
@@ -155,13 +163,17 @@ class ChatThreadCreatedData(EventPayload):
     created_at: datetime
 
 
-class InvocationStartedData(EventPayload):  # noqa: D101  # tracked: #288
+class InvocationStartedData(EventPayload):
+    """Prompts submitted at the start of a model invocation."""
+
     kind: Literal["invocation_started"] = "invocation_started"
     system_prompt: str
     user_prompt: str
 
 
-class InvocationFinishedData(EventPayload):  # noqa: D101  # tracked: #288
+class InvocationFinishedData(EventPayload):
+    """Result or error recorded when a model invocation ends."""
+
     kind: Literal["invocation_finished"] = "invocation_finished"
     result: Any = None
     error: str | None = None
@@ -201,19 +213,25 @@ class AgentExecutionFinishedData(EventPayload):
     error: str | None = None
 
 
-class OutputData(EventPayload):  # noqa: D101  # tracked: #288
+class OutputData(EventPayload):
+    """Captured line of server output and its stream."""
+
     kind: Literal["output"] = "output"
     stream: OutputStream
     source: str = "backend"
     content: str
 
 
-class ServerReadyData(EventPayload):  # noqa: D101  # tracked: #288
+class ServerReadyData(EventPayload):
+    """Transport details emitted once the server is ready."""
+
     kind: Literal["server_ready"] = "server_ready"
     socket_protocol: Literal["jsonl"] = "jsonl"
 
 
-class RunStartedData(EventPayload):  # noqa: D101  # tracked: #288
+class RunStartedData(EventPayload):
+    """Initial input and loop settings for a run."""
+
     kind: Literal["run_started"] = "run_started"
     outer_loop: str
     input: str
@@ -224,7 +242,9 @@ class RunStartedData(EventPayload):  # noqa: D101  # tracked: #288
     expected_roles: tuple[str, ...] = ()
 
 
-class RunInterruptedData(EventPayload):  # noqa: D101  # tracked: #288
+class RunInterruptedData(EventPayload):
+    """Reason and optional signal for an interrupted run."""
+
     kind: Literal["run_interrupted"] = "run_interrupted"
     reason: str
     signal: str | None = None
@@ -245,13 +265,17 @@ class RunStatusChangedData(EventPayload):
     previous: RunStatus
 
 
-class ExperimentsChangedData(EventPayload):  # noqa: D101  # tracked: #288
+class ExperimentsChangedData(EventPayload):
+    """Reason and revision for a changed experiment projection."""
+
     kind: Literal["experiments_changed"] = "experiments_changed"
     reason: Literal["project_attached", "active_hypothesis_changed", "round_persisted"]
     revision: int | None = Field(default=None, ge=0)
 
 
-class ConfigurationFailedData(EventPayload):  # noqa: D101  # tracked: #288
+class ConfigurationFailedData(EventPayload):
+    """Diagnostic details for configuration-stage failure."""
+
     kind: Literal["configuration_failed"] = "configuration_failed"
     code: str
     stage: str
@@ -260,20 +284,26 @@ class ConfigurationFailedData(EventPayload):  # noqa: D101  # tracked: #288
     exit_code: int
 
 
-class PhaseData(EventPayload):  # noqa: D101  # tracked: #288
+class PhaseData(EventPayload):
+    """Name and optional attempt number for a loop phase."""
+
     kind: Literal["phase"] = "phase"
     phase: str
     attempt: int | None = None
 
 
-class AgentOutputChunkData(EventPayload):  # noqa: D101  # tracked: #288
+class AgentOutputChunkData(EventPayload):
+    """Incremental output produced during agent execution."""
+
     kind: Literal["agent_output_chunk"] = "agent_output_chunk"
     channel: AgentOutputChannel
     content: str
     status: AgentStatusData | None = None
 
 
-class ToolCallData(EventPayload):  # noqa: D101  # tracked: #288
+class ToolCallData(EventPayload):
+    """Tool name, call identity, and arguments emitted by an agent."""
+
     kind: Literal["tool_call"] = "tool_call"
     tool: str
     call_id: str | None = None
@@ -281,7 +311,9 @@ class ToolCallData(EventPayload):  # noqa: D101  # tracked: #288
     status: AgentStatusData | None = None
 
 
-class ToolResultData(EventPayload):  # noqa: D101  # tracked: #288
+class ToolResultData(EventPayload):
+    """Raw tool result and optional structured rendering payload."""
+
     kind: Literal["tool_result"] = "tool_result"
     tool: str
     call_id: str | None = None
@@ -292,19 +324,25 @@ class ToolResultData(EventPayload):  # noqa: D101  # tracked: #288
     payload: ToolResultPayload | None = None
 
 
-class TodoUpdateData(EventPayload):  # noqa: D101  # tracked: #288
+class TodoUpdateData(EventPayload):
+    """Current todo list reported by an agent."""
+
     kind: Literal["todo_update"] = "todo_update"
     todos: list[TodoItemData] = Field(default_factory=list)
 
 
-class UsageUpdateData(EventPayload):  # noqa: D101  # tracked: #288
+class UsageUpdateData(EventPayload):
+    """Token usage reported by the active model."""
+
     kind: Literal["usage_update"] = "usage_update"
     input_tokens: int
     context_window: int | None = None
     model: str | None = None
 
 
-class SubprocessOutputData(EventPayload):  # noqa: D101  # tracked: #288
+class SubprocessOutputData(EventPayload):
+    """Captured output from a managed subprocess."""
+
     kind: Literal["subprocess_output"] = "subprocess_output"
     process_id: str
     process_kind: str
@@ -312,21 +350,27 @@ class SubprocessOutputData(EventPayload):  # noqa: D101  # tracked: #288
     content: str
 
 
-class JudgeResultData(EventPayload):  # noqa: D101  # tracked: #288
+class JudgeResultData(EventPayload):
+    """Verdict and feedback returned by the judge."""
+
     kind: Literal["judge_result"] = "judge_result"
     verdict: Literal["pass", "fail"]
     feedback: str
     attempt: int
 
 
-class BenchmarkResultData(EventPayload):  # noqa: D101  # tracked: #288
+class BenchmarkResultData(EventPayload):
+    """Metric result emitted by a benchmark stage."""
+
     kind: Literal["benchmark_result"] = "benchmark_result"
     metric: str
     value: FiniteFloat
     unit: str
 
 
-class RoundFinishedData(EventPayload):  # noqa: D101  # tracked: #288
+class RoundFinishedData(EventPayload):
+    """Summary of attempt, judge, and performance outcomes for a round."""
+
     kind: Literal["round_finished"] = "round_finished"
     attempts: int
     judge_verdict: Literal["pass", "fail", "skipped"]
@@ -483,7 +527,7 @@ class RunEvent(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _execution_identity_compatibility(cls, value: Any) -> Any:  # noqa: ANN401
+    def _execution_identity_compatibility(cls, value: Any) -> Any:
         """Expose legacy invocation identity through the canonical field."""
         if not isinstance(value, dict):
             return value
@@ -561,7 +605,8 @@ class EventStore:
     state.
     """
 
-    def __init__(self, path: Path, run_id: str):  # noqa: ANN204, D107  # tracked: #288
+    def __init__(self, path: Path, run_id: str) -> None:
+        """Open the JSONL event log and index its existing records."""
         self.path = path
         self.run_id = run_id
         # Names this store's sequence space. Sequences are only comparable
@@ -583,7 +628,8 @@ class EventStore:
         self._sequences = [record.header.sequence for record in self._records]
         self._next_sequence = self._sequences[-1] + 1 if self._sequences else 1
 
-    def append(self, event: RunEvent) -> RunEvent:  # noqa: D102  # tracked: #288
+    def append(self, event: RunEvent) -> RunEvent:
+        """Append an event with this store's next sequence and run identity."""
         with self._changed:
             if self._malformed_tail_offset is not None:
                 with self.path.open("r+b") as stream:
@@ -619,7 +665,8 @@ class EventStore:
             return event
 
     @property
-    def last_sequence(self) -> int:  # noqa: D102  # tracked: #288
+    def last_sequence(self) -> int:
+        """Return the most recently appended sequence, or zero for an empty log."""
         with self._lock:
             return self._next_sequence - 1
 
@@ -643,9 +690,8 @@ class EventStore:
         with self._lock:
             return [record.header for record in self._records]
 
-    def read(  # noqa: D102  # tracked: #288
-        self, after_sequence: int = 0, before_sequence: int | None = None
-    ) -> list[RunEvent]:
+    def read(self, after_sequence: int = 0, before_sequence: int | None = None) -> list[RunEvent]:
+        """Read events in the exclusive sequence interval provided."""
         with self._lock:
             return self._events_after_unlocked(after_sequence, before_sequence)
 
@@ -994,7 +1040,7 @@ def _scan_header_fields(line: bytes) -> tuple[int, EventType, str | None, str | 
     return sequence, event_type, execution_id, chat_thread_id
 
 
-def _is_optional_str(value: Any) -> bool:  # noqa: ANN401  # scanning untyped JSON
+def _is_optional_str(value: Any) -> bool:  # scanning untyped JSON
     return value is None or isinstance(value, str)
 
 
@@ -1078,15 +1124,17 @@ def _repair_legacy_sequences(events: list[RunEvent]) -> list[RunEvent]:
     return repaired
 
 
-def make_event(event_type: EventType, text: str = "", **fields: Any) -> RunEvent:  # noqa: ANN401, D103  # tracked: #288
+def make_event(event_type: EventType, text: str = "", **fields: Any) -> RunEvent:
+    """Build a timestamped event from its type, text, and payload fields."""
     return RunEvent(timestamp=datetime.now(UTC), type=event_type, text=text, **fields)
 
 
-def json_value(value: Any) -> Any:  # noqa: ANN401, D103  # tracked: #288
+def json_value(value: Any) -> Any:
+    """Return a JSON-compatible representation, falling back to ``repr``."""
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     try:
         json.dumps(value)
-        return value  # noqa: TRY300  # tracked: #288
+        return value
     except TypeError:
         return repr(value)

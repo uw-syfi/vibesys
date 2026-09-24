@@ -10,7 +10,10 @@ import pytest
 from tests.server.support import build_server_parts
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
     from pathlib import Path
+
+    from tests.server.support import ServerParts
 
 from server.events import (
     AgentExecutionActivityData,
@@ -28,7 +31,7 @@ from server.events import (
 )
 
 
-def test_explicit_executions_are_independent_and_finish_idempotently(tmp_path):  # noqa: ANN001, ANN201
+def test_explicit_executions_are_independent_and_finish_idempotently(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     first = parts.controller.start_agent_execution("implementer", "round-1", "first")
     second = parts.controller.start_agent_execution("implementer", "round-1-retry-2", "second")
@@ -96,7 +99,7 @@ def test_execution_identity_is_recorded_in_events_and_checkpoints(
     assert (checkpointed[0].driver, checkpointed[0].provider, checkpointed[0].model) == expected
 
 
-def test_activity_tracks_todos_and_parallel_tools(tmp_path):  # noqa: ANN001, ANN201
+def test_activity_tracks_todos_and_parallel_tools(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
     publish = parts.executions.publish_presentation
@@ -133,7 +136,7 @@ def test_activity_tracks_todos_and_parallel_tools(tmp_path):  # noqa: ANN001, AN
 
 
 @pytest.mark.parametrize("terminal_todo_status", ["pending", "completed"])
-def test_terminal_todo_clears_stale_summary(tmp_path, terminal_todo_status):  # noqa: ANN001, ANN201
+def test_terminal_todo_clears_stale_summary(tmp_path: Path, terminal_todo_status: str) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
     parts.executions.publish_presentation(
@@ -151,7 +154,7 @@ def test_terminal_todo_clears_stale_summary(tmp_path, terminal_todo_status):  # 
     )
 
 
-def test_terminal_todo_preserves_active_tool(tmp_path):  # noqa: ANN001, ANN201
+def test_terminal_todo_preserves_active_tool(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
     parts.executions.publish_presentation(
@@ -169,7 +172,7 @@ def test_terminal_todo_preserves_active_tool(tmp_path):  # noqa: ANN001, ANN201
     )
 
 
-def test_checkpoint_watermark_and_active_state_are_consistent(tmp_path):  # noqa: ANN001, ANN201
+def test_checkpoint_watermark_and_active_state_are_consistent(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("judge", "round-2", "review")
 
@@ -190,7 +193,7 @@ def test_checkpoint_watermark_and_active_state_are_consistent(tmp_path):  # noqa
     assert checkpoint.active_executions == []
 
 
-def test_attach_merges_bootstrap_and_durable_execution_history(tmp_path):  # noqa: ANN001, ANN201
+def test_attach_merges_bootstrap_and_durable_execution_history(tmp_path: Path) -> None:
     durable_dir = tmp_path / "durable"
     durable_dir.mkdir()
     execution_id = "a" * 32
@@ -230,7 +233,7 @@ def test_attach_merges_bootstrap_and_durable_execution_history(tmp_path):  # noq
     ] == ["bootstrap work", "current work"]
 
 
-def test_streamed_text_does_not_override_active_tool(tmp_path):  # noqa: ANN001, ANN201
+def test_streamed_text_does_not_override_active_tool(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
     parts.executions.publish_presentation(
@@ -244,7 +247,7 @@ def test_streamed_text_does_not_override_active_tool(tmp_path):  # noqa: ANN001,
     )
 
 
-def test_chat_execution_is_isolated_from_run_control(tmp_path):  # noqa: ANN001, ANN201
+def test_chat_execution_is_isolated_from_run_control(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     main = parts.controller.start_agent_execution("implementer", "round-1", "work")
     parts.controller.pause_after_call()
@@ -273,7 +276,7 @@ def test_chat_execution_is_isolated_from_run_control(tmp_path):  # noqa: ANN001,
     assert parts.api.snapshot().status == "paused"
 
 
-def _chat_execution(parts, thread_id):  # noqa: ANN001, ANN202
+def _chat_execution(parts: ServerParts, thread_id: str | None) -> AbstractContextManager[None]:
     execution = parts.controller.start_agent_execution(
         "chat",
         "experiment-chat",
@@ -288,7 +291,7 @@ def _chat_execution(parts, thread_id):  # noqa: ANN001, ANN202
     )
 
 
-def _presentation_threads(parts) -> list[tuple[EventType, str | None]]:  # noqa: ANN001
+def _presentation_threads(parts: ServerParts) -> list[tuple[EventType, str | None]]:
     return [
         (event.type, event.chat_thread_id)
         for event in parts.journal.read()
@@ -376,7 +379,7 @@ def test_presentation_scope_restores_the_enclosing_scope(tmp_path: Path) -> None
     ]
 
 
-def test_cancellation_and_run_finish_terminalize_activity(tmp_path):  # noqa: ANN001, ANN201
+def test_cancellation_and_run_finish_terminalize_activity(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     cancelled = parts.controller.start_agent_execution("implementer", "round-1", "work")
     parts.controller.after_agent(
@@ -398,7 +401,7 @@ def test_cancellation_and_run_finish_terminalize_activity(tmp_path):  # noqa: AN
     assert parts.api.snapshot().active_executions == []
 
 
-def test_legacy_invocations_project_without_becoming_live(tmp_path):  # noqa: ANN001, ANN201
+def test_legacy_invocations_project_without_becoming_live(tmp_path: Path) -> None:
     execution_id = "a" * 32
     store = EventStore(tmp_path / "run-events.jsonl", "legacy")
     store.append(
@@ -420,8 +423,7 @@ def test_legacy_invocations_project_without_becoming_live(tmp_path):  # noqa: AN
     assert event.execution_id == execution_id
     assert parts.api.snapshot().active_executions == []
 
-    assert parts.journal._store is not None  # noqa: SLF001
-    parts.journal._store.append(  # noqa: SLF001
+    parts.journal.append(
         RunEvent(
             timestamp=datetime.now(UTC),
             type=EventType.INVOCATION_FINISHED,
@@ -439,29 +441,30 @@ def test_failed_lifecycle_append_does_not_advance_active_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     parts = build_server_parts(tmp_path)
-    store = parts.journal._store  # noqa: SLF001
-    assert store is not None
-    append = store.append
+    journal_path = tmp_path / "run-events.jsonl"
+    append = EventStore.append
 
-    def fail_start(event):  # noqa: ANN001, ANN202
-        if event.type is EventType.AGENT_EXECUTION_STARTED:
-            raise OSError("disk full")  # noqa: TRY003
-        return append(event)
+    def fail_start(store: EventStore, event: RunEvent) -> RunEvent:
+        if store.path == journal_path and event.type is EventType.AGENT_EXECUTION_STARTED:
+            _failure_message = "disk full"
+            raise OSError(_failure_message)
+        return append(store, event)
 
-    monkeypatch.setattr(store, "append", fail_start)
+    monkeypatch.setattr(EventStore, "append", fail_start)
     with pytest.raises(OSError, match="disk full"):
         parts.controller.start_agent_execution("implementer", "round-1", "work")
     assert parts.api.snapshot().active_executions == []
 
-    monkeypatch.setattr(store, "append", append)
+    monkeypatch.setattr(EventStore, "append", append)
     execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
 
-    def fail_finish(event):  # noqa: ANN001, ANN202
-        if event.type is EventType.AGENT_EXECUTION_FINISHED:
-            raise OSError("disk full")  # noqa: TRY003
-        return append(event)
+    def fail_finish(store: EventStore, event: RunEvent) -> RunEvent:
+        if store.path == journal_path and event.type is EventType.AGENT_EXECUTION_FINISHED:
+            _failure_message = "disk full"
+            raise OSError(_failure_message)
+        return append(store, event)
 
-    monkeypatch.setattr(store, "append", fail_finish)
+    monkeypatch.setattr(EventStore, "append", fail_finish)
     with pytest.raises(OSError, match="disk full"):
         parts.controller.after_agent("implementer", "round-1", execution_id=execution.execution_id)
     assert [item.execution_id for item in parts.api.snapshot().active_executions] == [

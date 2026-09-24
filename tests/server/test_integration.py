@@ -4,16 +4,23 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.server.support import build_server_parts
+from tests.server.support import ServerParts, build_server_parts
 
 from server.api.protocol import ChatQuery, ChatThreadCreateQuery
 from server.chat.factory import ChatAgentResources
 from server.diagnostics import DiagnosticScope, DiagnosticSeverity
-from server.events import EventStatus, EventType
-from server.integration import _CORE_FAILURE_CONTEXTS
+from server.events import (
+    EventStatus,
+    EventType,
+    RunStartedData,
+)
+from server.integration import (
+    _CORE_FAILURE_CONTEXTS,
+    _EVENT_DATA_ADAPTER,
+)
 from server.journal import DIAGNOSTIC_FAILURE_EVENTS
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.events import (
@@ -33,12 +40,14 @@ from vibesys.events import (
 from vibesys.events import (
     EventStatus as CoreEventStatus,
 )
+from vibesys.events import RunStartedData as CoreRunStartedData
 from vibesys.render import output_sink
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from vibesys.api import RunSession
@@ -74,40 +83,60 @@ def _project_run(root: Path) -> tuple[Project, str]:
     return project, manifest.run_id
 
 
-def _emit_execution_started(  # noqa: PLR0913
-    parts: Any,  # noqa: ANN401
+def _execution_started_data(
     kind: str,
-    round_label: str,
     user_prompt: str,
     *,
     driver: str | None = None,
     provider: str | None = None,
     model: str | None = None,
+) -> AgentExecutionStartedData:
+    """Build the payload a real invocation boundary produces."""
+    return AgentExecutionStartedData(
+        stage=kind,
+        user_prompt=user_prompt,
+        activity=AgentExecutionActivityData(mode="thinking", summary="Working"),
+        driver=driver,
+        provider=provider,
+        model=model,
+    )
+
+
+def _emit_execution_started(
+    parts: ServerParts,
+    round_label: str,
+    data: AgentExecutionStartedData,
 ) -> str:
     """Emit the core start event a real invocation boundary would produce."""
     execution_id = uuid.uuid4().hex
     parts.core_events.emit(
         CoreEventType.AGENT_EXECUTION_STARTED,
         status=CoreEventStatus.ACTIVE,
-        agent_kind=kind,
+        agent_kind=data.stage,
         round_label=round_label,
         execution_id=execution_id,
-        data=AgentExecutionStartedData(
-            stage=kind,
-            user_prompt=user_prompt,
-            activity=AgentExecutionActivityData(mode="thinking", summary="Working"),
-            driver=driver,
-            provider=provider,
-            model=model,
-        ),
+        data=data,
     )
     return execution_id
 
 
-def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path):  # noqa: ANN001, ANN201
+def _attach_test_run(
+    parts: ServerParts,
+    attachment: RunAttachment,
+) -> Callable[[], None] | None:
+    """Install chat resources without opening the server transport."""
+    return parts.integration._attach_run(  # noqa: SLF001  # lint-waiver: LW-008500 [SLF001]; isolate chat-factory behavior without launching the server runtime and transport.
+        attachment,
+        cast("RunSession", object()),
+    )
+
+
+def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution_id = _emit_execution_started(
-        parts, "implementer", "round-1", "work", driver="agentshim", provider="codex"
+        parts,
+        "round-1",
+        _execution_started_data("implementer", "work", driver="agentshim", provider="codex"),
     )
 
     output_sink().emit(
@@ -136,9 +165,9 @@ def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path):  
     assert (tmp_path / "core-events.jsonl").is_file()
 
 
-def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path):  # noqa: ANN001, ANN201
+def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    _emit_execution_started(parts, "implementer", "round-1", "work")
+    _emit_execution_started(parts, "round-1", _execution_started_data("implementer", "work"))
 
     # All three events arrive without an agent_kind while an implementer
     # execution is active. Only the presentation event may inherit it.
@@ -179,9 +208,11 @@ def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path):
     assert warning.diagnostic.source == "loop"
 
 
-def test_failed_core_events_project_with_synthesized_diagnostics(tmp_path):  # noqa: ANN001, ANN201
+def test_failed_core_events_project_with_synthesized_diagnostics(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    execution_id = _emit_execution_started(parts, "implementer", "round-1", "work")
+    execution_id = _emit_execution_started(
+        parts, "round-1", _execution_started_data("implementer", "work")
+    )
 
     parts.core_events.emit(
         CoreEventType.AGENT_EXECUTION_FINISHED,
@@ -232,9 +263,11 @@ def test_failed_core_events_project_with_synthesized_diagnostics(tmp_path):  # n
     assert terminal.diagnostic.severity is DiagnosticSeverity.FATAL
 
 
-def test_execution_failure_cascade_folds_to_one_diagnostic_per_execution(tmp_path):  # noqa: ANN001, ANN201
+def test_execution_failure_cascade_folds_to_one_diagnostic_per_execution(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    first_id = _emit_execution_started(parts, "implementer", "round-1", "work")
+    first_id = _emit_execution_started(
+        parts, "round-1", _execution_started_data("implementer", "work")
+    )
     for event_type, data in (
         (
             CoreEventType.AGENT_EXECUTION_FINISHED,
@@ -253,7 +286,9 @@ def test_execution_failure_cascade_folds_to_one_diagnostic_per_execution(tmp_pat
         )
 
     # A second execution failing must not inherit the first's cached diagnostic.
-    second_id = _emit_execution_started(parts, "judge", "round-1", "review")
+    second_id = _emit_execution_started(
+        parts, "round-1", _execution_started_data("judge", "review")
+    )
     parts.core_events.emit(
         CoreEventType.AGENT_EXECUTION_FINISHED,
         status=CoreEventStatus.FAILED,
@@ -304,7 +339,9 @@ def test_track_started_does_not_double_track_a_repeated_start_event(
     """
     parts = build_server_parts(tmp_path)
 
-    execution_id = _emit_execution_started(parts, "implementer", "round-1", "work")
+    execution_id = _emit_execution_started(
+        parts, "round-1", _execution_started_data("implementer", "work")
+    )
 
     assert len(parts.api.snapshot().active_executions) == 1
     assert (
@@ -337,7 +374,7 @@ def test_track_started_does_not_double_track_a_repeated_start_event(
     assert parts.api.snapshot().active_executions == []
 
 
-def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa: ANN001, ANN201
+def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
     client = FakeAgentClient().set_text("chat", "It improved in round 2.")
     closed: list[str] = []
@@ -363,7 +400,8 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa
         )
 
     parts = build_server_parts(chat_agent_builder=build_agent)
-    detach = parts.integration._attach_run(  # noqa: SLF001
+    detach = _attach_test_run(
+        parts,
         RunAttachment(
             project=project,
             run_id=run_id,
@@ -372,7 +410,6 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa
             agent_backend="cli",
             agent_defaults=AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
         ),
-        cast("Any", object()),
     )
     assert detach is not None
 
@@ -395,7 +432,7 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path):  # noqa
     assert closed == ["closed"]
 
 
-def test_non_cli_run_rejects_new_chat_threads(tmp_path):  # noqa: ANN001, ANN201
+def test_non_cli_run_rejects_new_chat_threads(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
     client = FakeAgentClient()
 
@@ -418,7 +455,8 @@ def test_non_cli_run_rejects_new_chat_threads(tmp_path):  # noqa: ANN001, ANN201
         )
 
     parts = build_server_parts(chat_agent_builder=build_agent)
-    parts.integration._attach_run(  # noqa: SLF001
+    _attach_test_run(
+        parts,
         RunAttachment(
             project=project,
             run_id=run_id,
@@ -427,14 +465,13 @@ def test_non_cli_run_rejects_new_chat_threads(tmp_path):  # noqa: ANN001, ANN201
             agent_backend="stub",
             agent_defaults=AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
         ),
-        cast("Any", object()),
     )
 
     with pytest.raises(ValueError, match="require the CLI agent backend"):
         parts.api.execute(ChatThreadCreateQuery(provider="codex", model="gpt-test"))
 
 
-def test_close_is_idempotent_and_stops_event_projection(tmp_path):  # noqa: ANN001, ANN201
+def test_close_is_idempotent_and_stops_event_projection(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.integration.close()
     parts.integration.close()
@@ -449,9 +486,6 @@ def test_close_is_idempotent_and_stops_event_projection(tmp_path):  # noqa: ANN0
 
 def test_run_started_expected_roles_round_trip_through_the_wire_bridge() -> None:
     """The core payload bridges to the wire model with and without the field."""
-    from server.events import RunStartedData  # noqa: PLC0415
-    from server.integration import _EVENT_DATA_ADAPTER  # noqa: PLC0415
-    from vibesys.events import RunStartedData as CoreRunStartedData  # noqa: PLC0415
 
     advertised = CoreRunStartedData(
         outer_loop="plain",

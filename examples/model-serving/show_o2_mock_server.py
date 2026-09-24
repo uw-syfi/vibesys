@@ -65,7 +65,6 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
-
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"show-o2 mock listening on http://{args.host}:{args.port}", flush=True)
     server.serve_forever()

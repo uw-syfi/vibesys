@@ -132,7 +132,7 @@ def test_manifest_resolves_modal_entrypoint_from_project_root(tmp_path: Path) ->
         ("", "non-empty path"),
         (".", "current, or parent"),
         ("../service.py", "current, or parent"),
-        ("/tmp/service.py", "relative to the project root"),  # noqa: S108
+        ("/absolute/service.py", "relative to the project root"),
         ("missing.py", "does not exist"),
     ],
 )
@@ -327,7 +327,7 @@ def test_manifest_rejects_removed_workspace_seed(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("source_value", "error"),
     [
-        ("/tmp/evaluator", "source must be relative"),  # noqa: S108
+        ("/absolute/evaluator", "source must be relative"),
         ("../../../outside", "path does not exist"),
         ("../../evaluators/missing", "path does not exist"),
     ],

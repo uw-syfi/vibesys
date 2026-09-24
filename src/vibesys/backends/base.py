@@ -16,16 +16,16 @@ compute backend supplies the right values for its platform inside
 from __future__ import annotations
 
 from enum import StrEnum
-from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from vibesys.constants import ComputeBackend  # noqa: TC001  # tracked: #288
-from vibesys.profilers import ProfilerKind  # noqa: TC001  # tracked: #288
 from vs_sandbox.api import LocalShellSandbox, SandboxLifecycle
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence  # tracked: #288
+    from collections.abc import Sequence
+    from pathlib import Path
 
+    from vibesys.constants import ComputeBackend
+    from vibesys.profilers import ProfilerKind
     from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
 
 
@@ -46,8 +46,13 @@ class Device(Protocol):
 class ContentionMonitor(Protocol):
     """Background thread that reports platform contention (e.g. shared-GPU use)."""
 
-    def start(self) -> None: ...  # noqa: D102  # tracked: #288
-    def stop(self) -> None: ...  # noqa: D102  # tracked: #288
+    def start(self) -> None:
+        """Begin reporting contention samples in the background."""
+        ...
+
+    def stop(self) -> None:
+        """Stop monitoring and release background resources."""
+        ...
 
 
 @runtime_checkable
@@ -57,7 +62,7 @@ class ComputeBackendImpl(Protocol):
     name: ComputeBackend
     profiler_kind: ProfilerKind  # picks profiler support, MCP, and prompt template
 
-    def make_sandbox(  # noqa: PLR0913  # tracked: #288
+    def make_sandbox(
         self,
         kind: SandboxKind,
         *,
@@ -107,15 +112,19 @@ class ComputeBackendImpl(Protocol):
         """
         ...
 
-    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None: ...  # noqa: D102  # tracked: #288
+    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
+        """Create a contention monitor when the backend supports one."""
+        ...
 
     def reselect_device(self) -> None:
-        """Re-pick the optimal device for this backend (e.g. migrate to a
-        less-loaded GPU) and restart affected sandboxes in place.
+        """Re-pick the optimal device for this backend and restart sandboxes.
+
+        For example, migrate from a less-loaded GPU and restart affected
+        sandboxes in place.
 
         Each restarted sandbox re-runs its lifecycle hooks automatically as
         part of ``start()``.  No-op for backends without rebalancing.
-        """  # noqa: D205  # tracked: #288
+        """
         ...
 
 

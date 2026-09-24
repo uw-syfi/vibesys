@@ -13,11 +13,11 @@ _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
-def test_kv_store_is_a_registered_modality():  # noqa: ANN201  # tracked: #288
+def test_kv_store_is_a_registered_modality() -> None:
     assert "kv_store" in _MODALITIES
 
 
-def test_kv_store_input_bundle_loads():  # noqa: ANN201  # tracked: #288
+def test_kv_store_input_bundle_loads() -> None:
     project = Project.open(_PROJECT_ROOT / "examples" / "kv-store")
     bundle = load_project_task(project, project.select_task("default"))
     assert bundle.domain.value == "generic"
@@ -25,7 +25,8 @@ def test_kv_store_input_bundle_loads():  # noqa: ANN201  # tracked: #288
     assert bundle.benchmark_result.metric == "throughput_ops_per_sec"
 
 
-def test_kv_store_judge_prompt_mentions_resp2_not_http():  # noqa: ANN201  # tracked: #288
+def test_kv_store_judge_prompt_mentions_resp2_not_http() -> None:
+    pass_criteria = "PC"
     output = render_template(
         "judge_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -34,7 +35,7 @@ def test_kv_store_judge_prompt_mentions_resp2_not_http():  # noqa: ANN201  # tra
         domain_judge="",
         accuracy_command="uv run python accuracy_checker/checker.py",
         benchmark_command="uv run python benchmark/benchmark.py",
-        pass_criteria="PC",  # noqa: S106  # tracked: #288
+        pass_criteria=pass_criteria,
         retry=1,
         runtime_notes="",
         profile_execution="local",
@@ -47,7 +48,7 @@ def test_kv_store_judge_prompt_mentions_resp2_not_http():  # noqa: ANN201  # tra
     assert "p99" in output
 
 
-def test_kv_store_linux_cpu_profiler_gets_resp2_specific_guidance():  # noqa: ANN201  # tracked: #288
+def test_kv_store_linux_cpu_profiler_gets_resp2_specific_guidance() -> None:
     """Regression test: linux_cpu.j2 used to omit the {% include %} that pulls
     in _modality/kv_store/profiler.j2, so a kv_store profiling round silently
     lost the RESP2-specific py-spy/perf/strace guidance even though it's the
@@ -70,7 +71,7 @@ def test_kv_store_linux_cpu_profiler_gets_resp2_specific_guidance():  # noqa: AN
     assert "uv run python .vibesys/tasks/default/benchmark/benchmark.py --port 6380" in output
 
 
-def test_kv_store_implementer_prompt_points_at_workspace_reference():  # noqa: ANN201  # tracked: #288
+def test_kv_store_implementer_prompt_points_at_workspace_reference() -> None:
     output = render_template(
         "_modality/kv_store/implementer.j2",
         template_dir=_TEMPLATE_DIR,

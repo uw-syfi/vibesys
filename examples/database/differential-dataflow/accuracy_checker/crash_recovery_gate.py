@@ -1,7 +1,6 @@
 """Crash-recovery gate (differential-dataflow `bfs`) — oracle C, a **fault-injection**
 oracle: killing the engine mid-computation and restarting it must converge to the
 **same output as a clean, uninterrupted run**.
-
 Where the determinism gate proves the engine is consistent across worker counts and
 the sanitizer gate proves it is race-free, this proves the engine is consistent
 across a *crash*: a `SIGKILL` at an arbitrary point followed by a restart in the
@@ -9,7 +8,6 @@ same working directory must reproduce the clean-run output byte-for-byte. It is 
 "exactly-once under restart" guarantee — the one a diff-discipline gate implied for
 free (a stateless recompute engine can't corrupt itself) and that must be checked
 explicitly once agents are free to rearchitect.
-
 Today's `bfs` does no filesystem I/O and regenerates its whole input from a fixed
 RNG seed, so it passes trivially: a restart just recomputes the identical answer.
 The gate is the forward-looking backstop for when a candidate introduces persistent
@@ -18,16 +16,13 @@ memoization cache. Then a crash mid-write can leave corrupt residue in the worki
 directory that a naive restart trusts, silently producing a wrong result. Because
 the crash run and its restart share one working directory, any such residue is
 exercised, and any divergence from the clean output is caught here.
-
 This is a self-consistency (metamorphic) property of the candidate alone — it
 compares crash+restart output to the candidate's *own* clean output, not to the
 pristine engine (equivalence_gate.py already covers candidate-vs-pristine), so it
 keeps working after the architecture gate is relaxed.
-
 Exit 0 = PASS (every crash+restart reproduced the clean output);
 1 = a recovery divergence (a real crash-consistency defect);
 2 = a build/setup error, including "could not induce a real mid-run crash".
-
 Usage (the Judge runs this alongside the other behavioral gates):
   python3 accuracy_checker/crash_recovery_gate.py \
       --engine-cmd 'engine/target/release/examples/bfs' \
@@ -51,7 +46,8 @@ import time
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _WORKSPACE = os.path.normpath(os.path.join(_HERE, ".."))
 sys.path.insert(0, os.path.join(_WORKSPACE, "reference"))
-import workload  # noqa: E402  (reference/workload.py — the single source of truth)
+# lint-waiver: LW-008001 [E402]; This standalone evaluator adds its sibling reference directory to sys.path before importing workload.
+import workload  # noqa: E402
 
 _RUN_TIMEOUT_S = 600
 _CRASH_INJECTION_TIMEOUT_S = 30
@@ -129,11 +125,9 @@ def _crash_then_restart(binary, args, cwd, kill_after_lines):
         except Exception:
             pass
         proc.wait()
-
     if not crashed:
         # The process completed before we could inject a crash at this point.
         return False, True, injection_error
-
     # Restart in the SAME working directory so any crash-time residue is exercised.
     ok, out = _clean_run(binary, args, cwd)
     return True, ok, out
@@ -153,7 +147,6 @@ def main():
         help="shell command that rebuilds the candidate engine before grading",
     )
     args = ap.parse_args()
-
     candidate_bin = shlex.split(args.engine_cmd)
     if len(candidate_bin) != 1:
         print(
@@ -165,23 +158,19 @@ def main():
     # Runs happen in temp working dirs, so the binary path must be absolute.
     candidate_bin = os.path.abspath(candidate_bin[0])
     wl = _with_w1(workload.METRIC_WORKLOAD)
-
     print("crash-recovery gate — kill mid-run, restart, require the clean-run output")
     print(f"  candidate  : {candidate_bin}")
     print(f"  workload   : bfs {' '.join(wl)}")
     print(f"  crashes    : SIGKILL after {list(_KILL_AFTER_LINES)} stdout line(s)")
     print("-" * 72)
-
     if args.rebuild_cmd:
         rb = subprocess.run(args.rebuild_cmd, shell=True, capture_output=True, text=True)
         if rb.returncode != 0:
             print(f"candidate REBUILD FAILED: {(rb.stderr or rb.stdout).strip()[:400]}")
             return 2
-
     if not os.path.exists(candidate_bin):
         print(f"CRASH-RECOVERY: SETUP-ERROR — binary not found: {candidate_bin}")
         return 2
-
     # Golden = a clean, uninterrupted run in its own fresh working dir.
     gold_dir = tempfile.mkdtemp(prefix="crashrec-gold-")
     try:
@@ -192,7 +181,6 @@ def main():
         print(f"CRASH-RECOVERY: SETUP-ERROR — clean golden run failed: {golden}")
         return 2
     golden_lines = golden.count("\n") + 1 if golden else 0
-
     any_real_crash = False
     all_recovered = True
     for k in _KILL_AFTER_LINES:
@@ -201,7 +189,6 @@ def main():
             crashed, ok, out = _crash_then_restart(candidate_bin, wl, work, k)
         finally:
             shutil.rmtree(work, ignore_errors=True)
-
         if not crashed:
             print(f"  kill@{k} line(s)   SKIP  ({out})")
             continue
@@ -220,7 +207,6 @@ def main():
                 f"lines, recovered={len(cl)} lines, ~{ndiff} differing)"
             )
             all_recovered = False
-
     print("-" * 72)
     if not any_real_crash:
         print(

@@ -35,7 +35,7 @@ class _Namespace:
         self.root = root
         self.slots: dict[str, _Slot] = {}
 
-    def slot(self, path: str, model: object) -> _Slot:  # noqa: ARG002
+    def slot(self, path: str, _model: object) -> _Slot:
         return self.slots.setdefault(path, _Slot())
 
 
@@ -49,11 +49,11 @@ def _attempt_resources() -> AttemptResourcesRecord:
     )
 
 
-def _result() -> InvocationResultRecord:
+def _result(artifact_path: Path) -> InvocationResultRecord:
     return InvocationResultRecord(
         status="COMPLETED",
         sky_exit_code=0,
-        artifact=ArtifactRecord.create("/tmp/result.json", b"{}"),  # noqa: S108
+        artifact=ArtifactRecord.create(str(artifact_path), b"{}"),
         provenance=InvocationProvenance(
             profile_name="test",
             infra="slurm/example/gpu",
@@ -73,9 +73,10 @@ def test_journal_writes_prepared_before_crash_and_restores_exact_request(
 ) -> None:
     namespace = _Namespace(tmp_path)
 
-    def crash(phase: InvocationPhase, record: object) -> None:  # noqa: ARG001
+    def crash(phase: InvocationPhase, _record: object) -> None:
         if phase is InvocationPhase.PREPARED:
-            raise RuntimeError("injected crash")  # noqa: TRY003
+            _failure_message = "injected crash"
+            raise RuntimeError(_failure_message)
 
     journal = InvocationJournal(cast("StateNamespace", namespace), crash_hook=crash)
     invocation_id = "a" * 32
@@ -107,7 +108,7 @@ def test_completed_unacknowledged_payload_is_self_verifying_and_replayable(
     record = journal.prepare("d" * 32, "e" * 64, "f" * 64)
     record = journal.submitting(record, "lease", _attempt_resources())
     record = journal.submitted(record, 7, "lease")
-    completed = journal.completed(record, _result())
+    completed = journal.completed(record, _result(tmp_path / "result.json"))
 
     assert completed.phase is InvocationPhase.COMPLETED
     assert completed.result is not None

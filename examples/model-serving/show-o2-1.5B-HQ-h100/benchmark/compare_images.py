@@ -47,22 +47,18 @@ def local_ssim(a: np.ndarray, b: np.ndarray, window_size: int = 11) -> float | N
             window_size -= 1
     if window_size <= 1:
         return 1.0 if np.array_equal(a, b) else None
-
     x = rgb_to_luma(a)
     y = rgb_to_luma(b)
     c1 = (0.01 * 255.0) ** 2
     c2 = (0.03 * 255.0) ** 2
-
     mu_x = box_filter(x, window_size)
     mu_y = box_filter(y, window_size)
     mu_x2 = mu_x * mu_x
     mu_y2 = mu_y * mu_y
     mu_xy = mu_x * mu_y
-
     sigma_x2 = box_filter(x * x, window_size) - mu_x2
     sigma_y2 = box_filter(y * y, window_size) - mu_y2
     sigma_xy = box_filter(x * y, window_size) - mu_xy
-
     numerator = (2.0 * mu_xy + c1) * (2.0 * sigma_xy + c2)
     denominator = (mu_x2 + mu_y2 + c1) * (sigma_x2 + sigma_y2 + c2)
     return float(np.mean(numerator / denominator))
@@ -75,7 +71,6 @@ def pixel_metrics(a: np.ndarray, b: np.ndarray) -> dict[str, Any]:
             "baseline_shape": list(a.shape),
             "candidate_shape": list(b.shape),
         }
-
     diff = a - b
     abs_diff = np.abs(diff)
     mse = float(np.mean(diff * diff))
@@ -112,20 +107,17 @@ def clip_metrics(
         from transformers import CLIPModel, CLIPProcessor
     except Exception as exc:  # pragma: no cover - depends on optional deps
         return {"enabled": False, "error": f"CLIP dependencies unavailable: {exc}"}
-
     try:
         processor = CLIPProcessor.from_pretrained(model_name, local_files_only=not allow_download)
         model = CLIPModel.from_pretrained(model_name, local_files_only=not allow_download)
     except Exception as exc:  # pragma: no cover - depends on local model cache
         return {"enabled": False, "error": f"CLIP model unavailable: {exc}"}
-
     images = [Image.open(baseline).convert("RGB"), Image.open(candidate).convert("RGB")]
     with torch.inference_mode():
         image_inputs = processor(images=images, return_tensors="pt")
         image_features = model.get_image_features(**image_inputs)
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
         image_cosine = float((image_features[0] * image_features[1]).sum().item())
-
         result: dict[str, Any] = {
             "enabled": True,
             "model": model_name,
@@ -187,7 +179,6 @@ def main() -> None:
     )
     parser.add_argument("--output-json", default=None, help="Write structured comparison JSON")
     args = parser.parse_args()
-
     result = compare(args)
     print(json.dumps(result, indent=2))
     if args.output_json:

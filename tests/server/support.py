@@ -96,7 +96,7 @@ class ServerParts:
         (`session.on_committed_view(self.api._observe_committed_state)`); this
         harness has no session, so it calls the same method directly.
         """
-        self.api._observe_committed_state(view, changed_keys)  # noqa: SLF001
+        self.api._observe_committed_state(view, changed_keys)
 
 
 def build_server_parts(

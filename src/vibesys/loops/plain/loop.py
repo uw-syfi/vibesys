@@ -22,8 +22,7 @@ issues exist.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vibesys.agent_spec_config import resolve_agent_driver
 from vibesys.config import Config, as_config
@@ -34,7 +33,6 @@ from vibesys.constants import (
 )
 from vibesys.context import create_run_context
 from vibesys.domains.registry import resolve_domain
-from vibesys.evaluators.input_manifest import WorkspaceSource  # noqa: TC001  # tracked: #288
 from vibesys.loops.plain.render import render_all
 from vibesys.loops.plain.runner_ext import PlainLoopAgentClient
 from vibesys.loops.plain.state import PlainStateStore
@@ -64,6 +62,11 @@ from vs_issue_board.api import (
 )
 from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
 from vs_project.api import PlainRunConfiguration
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from vibesys.evaluators.input_manifest import WorkspaceSource
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "plain"
 PlainLoopState = PlainLoopCursor
@@ -266,7 +269,7 @@ def _ensure_bootstrap_issue(
 # ---------------------------------------------------------------------------
 
 
-def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
+def run_plain_loop(
     config: Config,
     exp_name: str,
     input_path: str,
@@ -649,7 +652,7 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 # PERF_EVAL phase (after drain complete)
                 # ---------------------------------------------------------------
                 # Bail-out check: if every remaining issue is BLOCKED, we're stuck.
-                remaining = [iss for iss in store.list() if iss.status not in (IssueStatus.CLOSED,)]  # noqa: FURB171  # tracked: #288
+                remaining = [iss for iss in store.list() if iss.status not in (IssueStatus.CLOSED,)]
                 blocked_only = remaining and all(
                     iss.status == IssueStatus.BLOCKED for iss in remaining
                 )

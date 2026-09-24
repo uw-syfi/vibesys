@@ -74,7 +74,7 @@ async def send_request(
                     output_tokens += 1
                     if first_token is None:
                         first_token = time.perf_counter()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {
             "error": str(exc),
             "total_latency": time.perf_counter() - started,
@@ -101,7 +101,6 @@ async def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     url = args.url.rstrip("/") + args.endpoint
     results: list[dict[str, Any]] = []
     started = time.perf_counter()
-
     async with httpx.AsyncClient() as client:
 
         async def worker() -> None:
@@ -119,7 +118,6 @@ async def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                 )
 
         await asyncio.gather(*(worker() for _ in range(args.concurrency)))
-
     wall = time.perf_counter() - started
     successes = [r for r in results if r["error"] is None]
     errors = [r for r in results if r["error"] is not None]
@@ -153,7 +151,6 @@ async def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         "p99_latency_ms": None if latency is None else latency["p99"],
         "errors": errors[:5],
     }
-
     print(f"Completed {len(successes)}/{len(results)} requests")
     print(f"Aggregate throughput: {output['aggregate_throughput']:.2f} tok/s")
     if output["p99_latency_ms"] is not None:

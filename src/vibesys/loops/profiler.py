@@ -79,7 +79,7 @@ def invoke_profiler(
             round_label=round_label,
             mcp_servers=[spec] if spec is not None else None,
         )
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:
         output_sink().framework_warning(
             "profiler failed",
             detail=str(exc),

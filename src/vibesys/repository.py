@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from enum import StrEnum
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class RepositoryVisibility(StrEnum):
@@ -42,7 +45,7 @@ def validate_experiment_name(experiment_name: str) -> str:
         or "/" in experiment_name
         or "\\" in experiment_name
     ):
-        raise ValueError(  # noqa: TRY003  # tracked: #288
+        raise ValueError(
             "--exp-name must be a non-empty single path component other than '.' or '..': "
             f"{experiment_name!r}"
         )

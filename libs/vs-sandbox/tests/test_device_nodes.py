@@ -27,10 +27,10 @@ class TestAcceleratorDeviceNodes:
         if not devices:
             pytest.skip(f"host has no /dev/{pattern} devices")
 
-        nodes = host_sandbox._gpu_device_nodes()  # noqa: SLF001
+        nodes = host_sandbox._gpu_device_nodes()
 
         assert set(devices).issubset(set(nodes))
 
     def test_returns_paths_that_exist(self) -> None:
-        nodes = host_sandbox._gpu_device_nodes()  # noqa: SLF001
+        nodes = host_sandbox._gpu_device_nodes()
         assert all(node.exists() for node in nodes)

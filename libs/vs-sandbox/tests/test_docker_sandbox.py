@@ -1,19 +1,32 @@
 """Tests for DockerSandbox — all mock subprocess.run, no Docker required."""
 
 import json
+import os
 import subprocess
+from collections.abc import Generator
 from pathlib import Path
+from types import FrameType
+from typing import Literal, Never
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vs_sandbox.api import BeforeReadyContext, SandboxLifecycleError, SandboxLifecycleHooks
-from vs_sandbox.docker_sandbox import AGENT_HOME, DockerSandbox, _first_component_below
+from vs_sandbox import (
+    docker_sandbox,
+)
+from vs_sandbox.api import BeforeReadyContext, Sandbox, SandboxLifecycleError, SandboxLifecycleHooks
+from vs_sandbox.docker_sandbox import (
+    AGENT_HOME,
+    DockerSandbox,
+    _cleanup_containers,
+    _first_component_below,
+    _live_containers,
+)
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
 
 
 class _RecordingHooks(SandboxLifecycleHooks):
-    def __init__(self, invocations: list[object]) -> None:
+    def __init__(self, invocations: list[Sandbox]) -> None:
         self._invocations = invocations
 
     def before_ready(self, context: BeforeReadyContext) -> None:
@@ -21,12 +34,14 @@ class _RecordingHooks(SandboxLifecycleHooks):
 
 
 class _FailingHooks(SandboxLifecycleHooks):
-    def before_ready(self, context: BeforeReadyContext) -> None:  # noqa: ARG002
-        raise ValueError("setup exploded")  # noqa: TRY003
+    def before_ready(self, context: BeforeReadyContext) -> None:
+        del context
+        _failure_message = "setup exploded"
+        raise ValueError(_failure_message)
 
 
 @pytest.fixture
-def sandbox(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def sandbox(tmp_path: Path) -> DockerSandbox:
     return DockerSandbox(
         host_workspace=str(tmp_path / "workspace"),
         image="nvcr.io/nvidia/pytorch:25.04-py3",
@@ -35,7 +50,7 @@ def sandbox(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
 
 
 @pytest.fixture
-def sandbox_with_mounts(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def sandbox_with_mounts(tmp_path: Path) -> DockerSandbox:
     return DockerSandbox(
         host_workspace=str(tmp_path / "workspace"),
         image="nvcr.io/nvidia/pytorch:25.04-py3",
@@ -47,13 +62,36 @@ def sandbox_with_mounts(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     )
 
 
+def _start_test_container(
+    sandbox: DockerSandbox,
+    mock_run: MagicMock,
+    container_id: str = "abc123",
+) -> None:
+    """Start *sandbox* with a fake Docker id, then clear setup calls."""
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout=f"{container_id}\n", stderr=""
+    )
+    sandbox.start()
+    mock_run.reset_mock()
+
+
+def _assert_container_stopped(sandbox: DockerSandbox) -> None:
+    with pytest.raises(RuntimeError, match="no running container"):
+        _ = sandbox.container_id
+
+
+def _read_sandbox_metadata(workspace: Path) -> dict[str, object]:
+    metadata_path = workspace / ".docker_metadata.json"
+    return json.loads(metadata_path.read_text())
+
+
 class TestStart:
     @patch.dict("os.environ", {}, clear=False)
     @patch("subprocess.run")
-    def test_start_runs_docker_run_with_correct_args(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_start_runs_docker_run_with_correct_args(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
         # Remove CUDA_VISIBLE_DEVICES so fallback to "all" is tested
-        import os  # noqa: PLC0415  # tracked: #288
-
         os.environ.pop("CUDA_VISIBLE_DEVICES", None)
 
         mock_run.return_value = subprocess.CompletedProcess(
@@ -84,7 +122,9 @@ class TestStart:
         assert docker_run_call.kwargs["timeout"] == 120
 
     @patch("subprocess.run")
-    def test_start_docker_run_timeout_raises_clear_error(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_start_docker_run_timeout_raises_clear_error(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
         mock_run.side_effect = subprocess.TimeoutExpired(
             cmd=["docker", "run"],
             timeout=120,
@@ -94,8 +134,9 @@ class TestStart:
             sandbox.start()
 
     @patch("subprocess.run")
-    def test_start_failure_removes_created_container(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
+    def test_start_failure_removes_created_container(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
 
         mock_run.side_effect = [
             subprocess.CompletedProcess(
@@ -116,12 +157,13 @@ class TestStart:
         assert stop_call.kwargs["timeout"] == 30
         assert rm_call.args[0] == ["docker", "rm", "-f", "abc123container"]
         assert rm_call.kwargs["timeout"] == 10
-        assert sandbox._container_id is None  # noqa: SLF001  # tracked: #288
+        _assert_container_stopped(sandbox)
         assert "abc123container" not in _live_containers
 
     @patch("subprocess.run")
-    def test_start_failure_retains_created_container_when_removal_fails(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
+    def test_start_failure_retains_created_container_when_removal_fails(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
 
         mock_run.side_effect = [
             subprocess.CompletedProcess(
@@ -140,15 +182,16 @@ class TestStart:
             with pytest.raises(RuntimeError, match="Failed to start Docker container"):
                 sandbox.start()
 
-            assert sandbox._container_id == "abc123container"  # noqa: SLF001  # tracked: #288
+            assert sandbox.container_id == "abc123container"
             assert "abc123container" in _live_containers
         finally:
             _live_containers.pop("abc123container", None)
-            sandbox._container_id = None  # noqa: SLF001  # tracked: #288
 
     @patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "3,5,7"})
     @patch("subprocess.run")
-    def test_start_uses_first_cuda_visible_device(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_start_uses_first_cuda_visible_device(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123container\n", stderr=""
         )
@@ -162,7 +205,9 @@ class TestStart:
         # backend supplies it via env=. The shape was tested above.
 
     @patch("subprocess.run")
-    def test_start_bind_mounts_workspace(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_start_bind_mounts_workspace(
+        self, mock_run: MagicMock, sandbox: DockerSandbox, tmp_path: Path
+    ) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
@@ -172,10 +217,12 @@ class TestStart:
         cmd = mock_run.call_args_list[0][0][0]
         # Should have -v for workspace mount
         cmd_str = " ".join(cmd)
-        assert f"{sandbox._host_workspace}:/workspace" in cmd_str  # noqa: SLF001  # tracked: #288
+        assert f"{tmp_path / 'workspace'}:/workspace" in cmd_str
 
     @patch("subprocess.run")
-    def test_start_bind_mounts_extra(self, mock_run, sandbox_with_mounts):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_start_bind_mounts_extra(
+        self, mock_run: MagicMock, sandbox_with_mounts: DockerSandbox
+    ) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
@@ -189,7 +236,9 @@ class TestStart:
         assert "/workspace/accuracy_checker:ro" in cmd_str
 
     @patch("subprocess.run")
-    def test_no_install_step_runs_at_start(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_no_install_step_runs_at_start(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
         """The agent image ships every tool baked in; start() installs nothing."""
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
@@ -202,10 +251,11 @@ class TestStart:
         assert not any("apt-get" in cmd for cmd in cmd_strs)
 
     @patch("subprocess.run")
-    def test_init_failure_stops_and_removes_created_container(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
+    def test_init_failure_stops_and_removes_created_container(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
 
-        invocations: list[object] = []
+        invocations: list[Sandbox] = []
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
@@ -228,7 +278,7 @@ class TestStart:
             with pytest.raises(RuntimeError, match="agent user id remap failed"):
                 sandbox.start()
 
-            assert sandbox._container_id is None  # noqa: SLF001  # tracked: #288
+            _assert_container_stopped(sandbox)
             assert "abc123" not in _live_containers
             assert invocations == []
             assert mock_run.call_args_list[-2][0][0] == ["docker", "stop", "abc123"]
@@ -239,7 +289,7 @@ class TestStart:
 
 class TestAgentUserRemap:
     @patch("subprocess.run")
-    def test_remaps_agent_user_when_ids_differ(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_remaps_agent_user_when_ids_differ(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
@@ -264,7 +314,7 @@ class TestAgentUserRemap:
         assert "chown -R agent:agent /home/agent" in cmd_str
 
     @patch("subprocess.run")
-    def test_skips_remap_when_ids_already_match(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_skips_remap_when_ids_already_match(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
@@ -283,7 +333,9 @@ class TestAgentUserRemap:
         assert not any("usermod" in " ".join(c[0][0]) for c in mock_run.call_args_list)
 
     @patch("subprocess.run")
-    def test_remap_runs_as_root_but_agent_commands_do_not(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_remap_runs_as_root_but_agent_commands_do_not(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
@@ -310,7 +362,9 @@ class TestAgentUserRemap:
 
 class TestAuthFileCopy:
     @patch("subprocess.run")
-    def test_copies_staged_files_into_agent_home_and_chowns_them(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_copies_staged_files_into_agent_home_and_chowns_them(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
@@ -334,7 +388,7 @@ class TestAuthFileCopy:
         assert "chown -R agent:agent /home/agent/.claude.json" in cmd_str
 
     @patch("subprocess.run")
-    def test_no_auth_files_by_default(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_no_auth_files_by_default(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
@@ -346,7 +400,7 @@ class TestAuthFileCopy:
 
 class TestExecute:
     @patch("subprocess.run")
-    def test_execute_runs_docker_exec(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_execute_runs_docker_exec(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
         # Start first
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123container\n", stderr=""
@@ -370,7 +424,7 @@ class TestExecute:
         assert result.exit_code == 0
 
     @patch("subprocess.run")
-    def test_execute_timeout(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_execute_timeout(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
@@ -385,15 +439,19 @@ class TestExecute:
         assert "timed out" in result.output.lower()
 
     @patch("subprocess.run")
-    def test_execute_output_truncation(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_execute_output_truncation(self, mock_run: MagicMock, tmp_path: Path) -> None:
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="nvcr.io/nvidia/pytorch:25.04-py3",
+            gpus="all",
+            max_output_bytes=50,
+        )
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
         sandbox.start()
         mock_run.reset_mock()
 
-        # Set small max_output_bytes
-        sandbox._max_output_bytes = 50  # noqa: SLF001  # tracked: #288
         big_output = "x" * 200
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout=big_output, stderr=""
@@ -406,14 +464,19 @@ class TestExecute:
 
     @patch("subprocess.run")
     def test_failed_execute_preserves_stderr_tail_with_bounded_output(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, mock_run: MagicMock, tmp_path: Path
     ) -> None:
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="nvcr.io/nvidia/pytorch:25.04-py3",
+            gpus="all",
+            max_output_bytes=80,
+        )
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
         sandbox.start()
         mock_run.reset_mock()
-        sandbox._max_output_bytes = 80  # noqa: SLF001
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=1, stdout="x" * 200, stderr="fatal compiler error\n"
         )
@@ -428,14 +491,19 @@ class TestExecute:
 
     @patch("subprocess.run")
     def test_failed_stderr_only_execute_bounds_and_keeps_tail(
-        self, mock_run: MagicMock, sandbox: DockerSandbox
+        self, mock_run: MagicMock, tmp_path: Path
     ) -> None:
+        sandbox = DockerSandbox(
+            host_workspace=str(tmp_path / "workspace"),
+            image="nvcr.io/nvidia/pytorch:25.04-py3",
+            gpus="all",
+            max_output_bytes=60,
+        )
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
         sandbox.start()
         mock_run.reset_mock()
-        sandbox._max_output_bytes = 60  # noqa: SLF001
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=1, stdout="", stderr="old\n" * 100 + "fatal tail\n"
         )
@@ -448,7 +516,9 @@ class TestExecute:
         assert result.truncated
 
     @patch("subprocess.run")
-    def test_execute_combines_stdout_stderr(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_execute_combines_stdout_stderr(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
@@ -466,21 +536,24 @@ class TestExecute:
         assert result.exit_code == 1
 
     @patch("subprocess.run")
-    def test_execute_without_start_raises(self, mock_run, sandbox):  # noqa: ANN001, ANN201, ARG002  # tracked: #288
+    def test_execute_without_start_raises(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
+        del mock_run
         with pytest.raises(RuntimeError, match="not started"):
             sandbox.execute("echo hello")
 
 
 class TestLifecycleHooks:
     @patch("subprocess.run")
-    def test_hooks_run_before_ready(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_hooks_run_before_ready(self, mock_run: MagicMock, tmp_path: Path) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout="abc123container\n",
             stderr="",
         )
-        invocations: list[object] = []
+        invocations: list[Sandbox] = []
 
         s = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
@@ -491,7 +564,7 @@ class TestLifecycleHooks:
         assert invocations == [s]
 
     @patch("subprocess.run")
-    def test_hooks_re_run_on_restart(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_hooks_re_run_on_restart(self, mock_run: MagicMock, tmp_path: Path) -> None:
         """A second start, such as device reselection, reruns the hooks."""
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
@@ -499,7 +572,7 @@ class TestLifecycleHooks:
             stdout="abc123container\n",
             stderr="",
         )
-        invocations: list[object] = []
+        invocations: list[Sandbox] = []
 
         s = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
@@ -511,16 +584,18 @@ class TestLifecycleHooks:
         assert invocations == [s, s]
 
     @patch("subprocess.run")
-    def test_setup_failure_preserves_error_when_stop_fails(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
+    def test_setup_failure_preserves_error_when_stop_fails(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
 
-        def run(cmd, **_kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
+        def run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
             if cmd[:2] == ["docker", "run"]:
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=0, stdout="abc123\n", stderr=""
                 )
             if cmd[:2] == ["docker", "stop"]:
-                raise OSError("Docker daemon disconnected")  # noqa: TRY003  # tracked: #288
+                _failure_message = "Docker daemon disconnected"
+                raise OSError(_failure_message)
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run
@@ -535,7 +610,7 @@ class TestLifecycleHooks:
                 sandbox.start()
 
             assert isinstance(error.value.__cause__, ValueError)
-            assert sandbox._container_id is None  # noqa: SLF001  # tracked: #288
+            _assert_container_stopped(sandbox)
             assert "abc123" not in _live_containers
             commands = [call.args[0] for call in mock_run.call_args_list]
             assert ["docker", "stop", "abc123"] in commands
@@ -545,22 +620,22 @@ class TestLifecycleHooks:
 
     @pytest.mark.parametrize("cleanup_mode", ["raises", "nonzero"])
     @patch("subprocess.run")
-    def test_setup_failure_retains_container_for_retry_when_removal_fails(  # noqa: ANN201  # tracked: #288
+    def test_setup_failure_retains_container_for_retry_when_removal_fails(
         self,
-        mock_run,  # noqa: ANN001  # tracked: #288
-        cleanup_mode,  # noqa: ANN001  # tracked: #288
-        tmp_path,  # noqa: ANN001  # tracked: #288
-    ):
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
+        mock_run: MagicMock,
+        cleanup_mode: Literal["raises", "nonzero"],
+        tmp_path: Path,
+    ) -> None:
 
-        def run(cmd, **_kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
+        def run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
             if cmd[:2] == ["docker", "run"]:
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=0, stdout="abc123\n", stderr=""
                 )
             if cmd[:2] in (["docker", "stop"], ["docker", "rm"]):
                 if cleanup_mode == "raises":
-                    raise OSError("Docker daemon disconnected")  # noqa: TRY003  # tracked: #288
+                    _failure_message = "Docker daemon disconnected"
+                    raise OSError(_failure_message)
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=1, stdout="", stderr="daemon unavailable"
                 )
@@ -577,16 +652,15 @@ class TestLifecycleHooks:
             with pytest.raises(SandboxLifecycleError, match="_FailingHooks failed"):
                 sandbox.start()
 
-            assert sandbox._container_id == "abc123"  # noqa: SLF001  # tracked: #288
+            assert sandbox.container_id == "abc123"
             assert "abc123" in _live_containers
         finally:
             _live_containers.pop("abc123", None)
-            sandbox._container_id = None  # noqa: SLF001  # tracked: #288
 
 
 class TestStop:
     @patch("subprocess.run")
-    def test_stop_removes_container(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_stop_removes_container(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123container\n", stderr=""
         )
@@ -602,11 +676,13 @@ class TestStop:
         assert mock_run.call_count == 2
         stop_cmd = mock_run.call_args_list[0][0][0]
         rm_cmd = mock_run.call_args_list[1][0][0]
-        assert stop_cmd[0] == "docker" and "stop" in stop_cmd  # noqa: PT018  # tracked: #288
-        assert rm_cmd[0] == "docker" and "rm" in rm_cmd  # noqa: PT018  # tracked: #288
+        assert stop_cmd[0] == "docker"
+        assert "stop" in stop_cmd
+        assert rm_cmd[0] == "docker"
+        assert "rm" in rm_cmd
 
     @patch("subprocess.run")
-    def test_stop_idempotent(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_stop_idempotent(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
@@ -625,21 +701,20 @@ class TestStop:
 
     @pytest.mark.parametrize("cleanup_mode", ["raises", "nonzero"])
     @patch("subprocess.run")
-    def test_failed_removal_retains_ownership_and_can_be_retried(  # noqa: ANN201  # tracked: #288
+    def test_failed_removal_retains_ownership_and_can_be_retried(
         self,
-        mock_run,  # noqa: ANN001  # tracked: #288
-        cleanup_mode,  # noqa: ANN001  # tracked: #288
-        sandbox,  # noqa: ANN001  # tracked: #288
-    ):
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
+        mock_run: MagicMock,
+        cleanup_mode: Literal["raises", "nonzero"],
+        sandbox: DockerSandbox,
+    ) -> None:
 
-        sandbox._container_id = "abc123"  # noqa: SLF001  # tracked: #288
-        _live_containers["abc123"] = "vibesys-test"
+        _start_test_container(sandbox, mock_run)
 
-        def fail_removal(cmd, **_kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
+        def fail_removal(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
             if cmd[1] == "rm":
                 if cleanup_mode == "raises":
-                    raise OSError("Docker daemon disconnected")  # noqa: TRY003  # tracked: #288
+                    _failure_message = "Docker daemon disconnected"
+                    raise OSError(_failure_message)
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=1, stdout="", stderr="daemon unavailable"
                 )
@@ -651,7 +726,7 @@ class TestStop:
             with pytest.raises(expected_error):
                 sandbox.stop()
 
-            assert sandbox._container_id == "abc123"  # noqa: SLF001  # tracked: #288
+            assert sandbox.container_id == "abc123"
             assert "abc123" in _live_containers
 
             mock_run.side_effect = None
@@ -660,18 +735,17 @@ class TestStop:
             )
             sandbox.stop()
 
-            assert sandbox._container_id is None  # noqa: SLF001  # tracked: #288
+            _assert_container_stopped(sandbox)
             assert "abc123" not in _live_containers
         finally:
             _live_containers.pop("abc123", None)
-            sandbox._container_id = None  # noqa: SLF001  # tracked: #288
 
     @patch("subprocess.run")
-    def test_stop_failure_does_not_prevent_forced_removal(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
+    def test_stop_failure_does_not_prevent_forced_removal(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
 
-        sandbox._container_id = "abc123"  # noqa: SLF001  # tracked: #288
-        _live_containers["abc123"] = "vibesys-test"
+        _start_test_container(sandbox, mock_run)
         mock_run.side_effect = [
             OSError("Docker daemon disconnected"),
             subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
@@ -680,30 +754,30 @@ class TestStop:
         sandbox.stop()
 
         assert mock_run.call_args_list[1].args[0] == ["docker", "rm", "-f", "abc123"]
-        assert sandbox._container_id is None  # noqa: SLF001  # tracked: #288
+        _assert_container_stopped(sandbox)
         assert "abc123" not in _live_containers
 
     @patch("subprocess.run")
-    def test_already_absent_container_clears_ownership(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
+    def test_already_absent_container_clears_ownership(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
 
-        sandbox._container_id = "abc123"  # noqa: SLF001  # tracked: #288
-        _live_containers["abc123"] = "vibesys-test"
+        _start_test_container(sandbox, mock_run)
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=1, stdout="", stderr="Error: No such container: abc123"
         )
 
         sandbox.stop()
 
-        assert sandbox._container_id is None  # noqa: SLF001  # tracked: #288
+        _assert_container_stopped(sandbox)
         assert "abc123" not in _live_containers
 
     @patch("subprocess.run")
-    def test_removal_already_in_progress_clears_ownership(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
+    def test_removal_already_in_progress_clears_ownership(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
 
-        sandbox._container_id = "abc123"  # noqa: SLF001  # tracked: #288
-        _live_containers["abc123"] = "vibesys-test"
+        _start_test_container(sandbox, mock_run)
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=1,
@@ -715,15 +789,15 @@ class TestStop:
 
         sandbox.stop()
 
-        assert sandbox._container_id is None  # noqa: SLF001  # tracked: #288
+        _assert_container_stopped(sandbox)
         assert "abc123" not in _live_containers
 
     @patch("subprocess.run")
-    def test_keyboard_interrupt_is_not_swallowed(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
+    def test_keyboard_interrupt_is_not_swallowed(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
 
-        sandbox._container_id = "abc123"  # noqa: SLF001  # tracked: #288
-        _live_containers["abc123"] = "vibesys-test"
+        _start_test_container(sandbox, mock_run)
         mock_run.side_effect = KeyboardInterrupt()
 
         try:
@@ -731,16 +805,15 @@ class TestStop:
                 sandbox.stop()
 
             assert mock_run.call_count == 1
-            assert sandbox._container_id == "abc123"  # noqa: SLF001  # tracked: #288
+            assert sandbox.container_id == "abc123"
             assert "abc123" in _live_containers
         finally:
             _live_containers.pop("abc123", None)
-            sandbox._container_id = None  # noqa: SLF001  # tracked: #288
 
 
 class TestIdProperty:
     @patch("subprocess.run")
-    def test_id_property(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_id_property(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123def456ghi789\n", stderr=""
         )
@@ -752,7 +825,9 @@ class TestIdProperty:
 
 class TestContainerIdProperty:
     @patch("subprocess.run")
-    def test_container_id_returns_running_container(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_container_id_returns_running_container(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123def456ghi789\n", stderr=""
         )
@@ -760,12 +835,14 @@ class TestContainerIdProperty:
 
         assert sandbox.container_id == "abc123def456ghi789"
 
-    def test_container_id_before_start_raises(self, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_container_id_before_start_raises(self, sandbox: DockerSandbox) -> None:
         with pytest.raises(RuntimeError, match="no running container"):
             _ = sandbox.container_id
 
     @patch("subprocess.run")
-    def test_container_id_after_stop_raises(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_container_id_after_stop_raises(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123def456ghi789\n", stderr=""
         )
@@ -778,48 +855,44 @@ class TestContainerIdProperty:
 
 class TestContextManager:
     @patch("subprocess.run")
-    def test_context_manager(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_context_manager(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
 
         with sandbox:
-            assert sandbox._container_id is not None  # noqa: SLF001  # tracked: #288
+            assert sandbox.container_id
 
         # After exit, container should be stopped
-        assert sandbox._container_id is None  # noqa: SLF001  # tracked: #288
+        _assert_container_stopped(sandbox)
 
 
 class TestCleanupOnExit:
     @pytest.fixture(autouse=True)
-    def _clear_live_containers(self):  # noqa: ANN202  # tracked: #288
+    def _clear_live_containers(self) -> Generator[None, None, None]:
         """Isolate the global _live_containers registry between tests."""
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
 
         _live_containers.clear()
         yield
         _live_containers.clear()
 
     @patch("subprocess.run")
-    def test_live_containers_tracked(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import _live_containers  # noqa: PLC0415  # tracked: #288
+    def test_live_containers_tracked(self, mock_run: MagicMock, sandbox: DockerSandbox) -> None:
 
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
         sandbox.start()
 
-        assert sandbox._container_id in _live_containers  # noqa: SLF001  # tracked: #288
+        assert sandbox.container_id in _live_containers
 
         sandbox.stop()
         assert "abc123" not in _live_containers
 
     @patch("subprocess.run")
-    def test_cleanup_containers_stops_all(self, mock_run, sandbox):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import (  # noqa: PLC0415  # tracked: #288
-            _cleanup_containers,
-            _live_containers,
-        )
+    def test_cleanup_containers_stops_all(
+        self, mock_run: MagicMock, sandbox: DockerSandbox
+    ) -> None:
 
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="container_xyz\n", stderr=""
@@ -843,18 +916,17 @@ class TestCleanupOnExit:
 
     @pytest.mark.parametrize("cleanup_mode", ["raises", "nonzero"])
     @patch("subprocess.run")
-    def test_cleanup_retains_failed_removal_for_retry(self, mock_run, cleanup_mode):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import (  # noqa: PLC0415  # tracked: #288
-            _cleanup_containers,
-            _live_containers,
-        )
+    def test_cleanup_retains_failed_removal_for_retry(
+        self, mock_run: MagicMock, cleanup_mode: Literal["raises", "nonzero"]
+    ) -> None:
 
         _live_containers["abc123"] = "vibesys-test"
 
-        def fail_removal(cmd, **_kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
+        def fail_removal(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
             if cmd[1] == "rm":
                 if cleanup_mode == "raises":
-                    raise OSError("Docker daemon disconnected")  # noqa: TRY003  # tracked: #288
+                    _failure_message = "Docker daemon disconnected"
+                    raise OSError(_failure_message)
                 return subprocess.CompletedProcess(
                     args=cmd, returncode=1, stdout="", stderr="daemon unavailable"
                 )
@@ -870,11 +942,7 @@ class TestCleanupOnExit:
         assert rm_call.kwargs["timeout"] == 10
 
     @patch("subprocess.run")
-    def test_cleanup_forces_removal_after_stop_exception(self, mock_run):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox.docker_sandbox import (  # noqa: PLC0415  # tracked: #288
-            _cleanup_containers,
-            _live_containers,
-        )
+    def test_cleanup_forces_removal_after_stop_exception(self, mock_run: MagicMock) -> None:
 
         _live_containers["abc123"] = "vibesys-test"
         mock_run.side_effect = [
@@ -887,13 +955,14 @@ class TestCleanupOnExit:
         assert mock_run.call_args_list[1].args[0] == ["docker", "rm", "-f", "abc123"]
         assert "abc123" not in _live_containers
 
-    def test_sigint_defers_container_cleanup_until_stack_unwinds(self, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
-        from vs_sandbox import docker_sandbox  # noqa: PLC0415  # tracked: #288
+    def test_sigint_defers_container_cleanup_until_stack_unwinds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
 
         cleanup_calls: list[bool] = []
-        original_calls: list[tuple[int, object]] = []
+        original_calls: list[tuple[int, FrameType | None]] = []
 
-        def original_handler(signum, frame):  # noqa: ANN001, ANN202  # tracked: #288
+        def original_handler(signum: int, frame: FrameType | None) -> Never:
             original_calls.append((signum, frame))
             raise KeyboardInterrupt
 
@@ -904,9 +973,11 @@ class TestCleanupOnExit:
         )
         monkeypatch.setattr(docker_sandbox, "_original_sigint", original_handler)
 
-        with patch.object(docker_sandbox.signal, "signal") as restore_handler:  # noqa: SIM117  # tracked: #288
-            with pytest.raises(KeyboardInterrupt):
-                docker_sandbox._sigint_handler(2, None)  # noqa: SLF001  # tracked: #288
+        with (
+            patch.object(docker_sandbox.signal, "signal") as restore_handler,
+            pytest.raises(KeyboardInterrupt),
+        ):
+            docker_sandbox._sigint_handler(2, None)  # noqa: SLF001  # lint-waiver: LW-008502 [SLF001]; direct invocation isolates signal-unwind ordering without sending SIGINT to pytest's process.
 
         restore_handler.assert_called_once_with(
             docker_sandbox.signal.SIGINT,
@@ -918,7 +989,7 @@ class TestCleanupOnExit:
 
 class TestEnvVars:
     @patch("subprocess.run")
-    def test_env_vars_passed_to_docker_run(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_env_vars_passed_to_docker_run(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="pytorch:latest",
@@ -938,7 +1009,9 @@ class TestEnvVars:
         assert "OTHER=thing" in cmd_str
 
     @patch("subprocess.run")
-    def test_credential_values_reach_the_container_but_not_the_log(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_credential_values_reach_the_container_but_not_the_log(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         log_path = tmp_path / "docker.log"
@@ -970,7 +1043,9 @@ class TestEnvVars:
         assert "PYTHONPATH=/opt/vibesys" in log_text
 
     @patch("subprocess.run")
-    def test_credential_values_are_omitted_from_workspace_metadata(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_credential_values_are_omitted_from_workspace_metadata(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         sandbox = DockerSandbox(
@@ -990,7 +1065,9 @@ class TestEnvVars:
         assert json.loads(metadata_text)["env"] == {"PYTHONPATH": "/opt/vibesys"}
 
     @patch("subprocess.run")
-    def test_start_failure_error_does_not_expose_credentials(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_start_failure_error_does_not_expose_credentials(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="pytorch:latest",
@@ -1010,9 +1087,13 @@ class TestEnvVars:
 
 class TestDevicePassthrough:
     @patch("subprocess.run")
-    def test_devices_emit_device_flags_and_no_gpus(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_devices_emit_device_flags_and_no_gpus(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
         sandbox = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"),
+            host_workspace=str(workspace),
             image="public.ecr.aws/neuron/pytorch-inference-neuronx:latest",
             gpus=None,  # Neuron uses --device, not --gpus
             devices=["/dev/neuron0", "/dev/neuron1"],
@@ -1030,14 +1111,16 @@ class TestDevicePassthrough:
         for dev in ("/dev/neuron0", "/dev/neuron1"):
             i = cmd.index(dev)
             assert cmd[i - 1] == "--device"
-        assert sandbox._metadata["devices"] == ["/dev/neuron0", "/dev/neuron1"]  # noqa: SLF001  # tracked: #288
+        assert _read_sandbox_metadata(workspace)["devices"] == ["/dev/neuron0", "/dev/neuron1"]
 
     @patch("subprocess.run")
-    def test_group_add_emits_group_add_flags(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_group_add_emits_group_add_flags(self, mock_run: MagicMock, tmp_path: Path) -> None:
         """AMD /dev/kfd and /dev/dri/* are group-owned; without --group-add the
         container user cannot open them and every HIP call fails at runtime."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
         sandbox = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"),
+            host_workspace=str(workspace),
             image="rocm/pytorch:latest",
             gpus=None,
             devices=["/dev/kfd", "/dev/dri/renderD128"],
@@ -1057,10 +1140,10 @@ class TestDevicePassthrough:
         # Recorded so a reattaching shell reconstructs the same device access;
         # without it the container user cannot open /dev/kfd and every HIP call
         # fails — the exact failure --group-add exists to prevent.
-        assert sandbox._metadata["group_add"] == ["video", "render"]  # noqa: SLF001  # tracked: #288
+        assert _read_sandbox_metadata(workspace)["group_add"] == ["video", "render"]
 
     @patch("subprocess.run")
-    def test_no_group_add_by_default(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_no_group_add_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="img",
@@ -1073,7 +1156,7 @@ class TestDevicePassthrough:
         assert "--group-add" not in cmd
 
     @patch("subprocess.run")
-    def test_no_devices_by_default(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_no_devices_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="img",
@@ -1088,10 +1171,15 @@ class TestDevicePassthrough:
 
 class TestEntrypointOverride:
     @patch("subprocess.run")
-    def test_entrypoint_override_emitted_before_image(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_entrypoint_override_emitted_before_image(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        image = "public.ecr.aws/neuron/pytorch-inference-neuronx:latest"
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
         sandbox = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"),
-            image="public.ecr.aws/neuron/pytorch-inference-neuronx:latest",
+            host_workspace=str(workspace),
+            image=image,
             gpus=None,
             entrypoint="",  # clear the DLC's baked-in model-server entrypoint
         )
@@ -1104,13 +1192,13 @@ class TestEntrypointOverride:
         ep_idx = cmd.index("--entrypoint")
         assert cmd[ep_idx + 1] == ""
         # Override must precede the image positional, which precedes the command.
-        img_idx = cmd.index(sandbox._image)  # noqa: SLF001  # tracked: #288
+        img_idx = cmd.index(image)
         assert ep_idx < img_idx
         assert cmd[-2:] == ["sleep", "infinity"]
-        assert sandbox._metadata["entrypoint"] == ""  # noqa: SLF001  # tracked: #288
+        assert _read_sandbox_metadata(workspace)["entrypoint"] == ""
 
     @patch("subprocess.run")
-    def test_no_entrypoint_flag_by_default(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_no_entrypoint_flag_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="img",
@@ -1125,9 +1213,11 @@ class TestEntrypointOverride:
 
 class TestShmSize:
     @patch("subprocess.run")
-    def test_shm_size_emitted(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_shm_size_emitted(self, mock_run: MagicMock, tmp_path: Path) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
         sandbox = DockerSandbox(
-            host_workspace=str(tmp_path / "workspace"),
+            host_workspace=str(workspace),
             image="img",
             shm_size="16g",
         )
@@ -1138,10 +1228,10 @@ class TestShmSize:
         cmd = mock_run.call_args_list[0][0][0]
         assert "--shm-size" in cmd
         assert cmd[cmd.index("--shm-size") + 1] == "16g"
-        assert sandbox._metadata["shm_size"] == "16g"  # noqa: SLF001  # tracked: #288
+        assert _read_sandbox_metadata(workspace)["shm_size"] == "16g"
 
     @patch("subprocess.run")
-    def test_no_shm_size_by_default(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_no_shm_size_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc\n", stderr=""
@@ -1152,7 +1242,7 @@ class TestShmSize:
 
 class TestAutoRemove:
     @patch("subprocess.run")
-    def test_auto_remove_emits_rm_flag(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_auto_remove_emits_rm_flag(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"), image="img", auto_remove=True
         )
@@ -1163,7 +1253,7 @@ class TestAutoRemove:
         assert "--rm" in mock_run.call_args_list[0][0][0]
 
     @patch("subprocess.run")
-    def test_no_rm_by_default(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_no_rm_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="abc\n", stderr=""
@@ -1190,7 +1280,7 @@ class TestResources:
     """Constructing from a ``HostResource`` list, as ``WorkspaceSandbox`` does."""
 
     @patch("subprocess.run")
-    def test_read_only_resource_mounts_ro(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_read_only_resource_mounts_ro(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="img",
@@ -1206,7 +1296,9 @@ class TestResources:
         assert f"{tmp_path / 'toolchain'}:{tmp_path / 'toolchain'}:ro" in cmd_str
 
     @patch("subprocess.run")
-    def test_read_write_resource_mounts_without_ro_suffix(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_read_write_resource_mounts_without_ro_suffix(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="img",
@@ -1223,7 +1315,9 @@ class TestResources:
         assert f"{mount}:ro" not in cmd_str
 
     @patch("subprocess.run")
-    def test_agent_path_becomes_the_mount_destination(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_agent_path_becomes_the_mount_destination(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
         resource_path = tmp_path / "toolchain"
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
@@ -1245,7 +1339,7 @@ class TestResources:
         assert f"{resource_path}:/opt/vibesys-toolchain:ro" in cmd_str
 
     @patch("subprocess.run")
-    def test_unlisted_path_is_never_mounted(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_unlisted_path_is_never_mounted(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="img",
@@ -1259,7 +1353,9 @@ class TestResources:
         assert str(tmp_path / "unlisted") not in cmd_str
 
     @patch("subprocess.run")
-    def test_resources_combine_with_explicit_bind_mounts(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_resources_combine_with_explicit_bind_mounts(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
         """Existing callers that pass bind_mounts directly keep working unchanged."""
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
@@ -1277,22 +1373,32 @@ class TestResources:
         assert f"{tmp_path / 'explicit'}:/explicit:ro" in cmd_str
         assert f"{tmp_path / 'declared'}:{tmp_path / 'declared'}:ro" in cmd_str
 
-    def test_no_resources_by_default(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    @patch("subprocess.run")
+    def test_no_resources_by_default(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
-        assert sandbox._bind_mounts == []  # noqa: SLF001  # tracked: #288
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc123\n", stderr=""
+        )
+        sandbox.start()
+
+        command = mock_run.call_args_list[0].args[0]
+        mount_arguments = [
+            command[index + 1] for index, argument in enumerate(command[:-1]) if argument == "-v"
+        ]
+        assert mount_arguments == [f"{tmp_path / 'workspace'}:/workspace"]
 
 
 class TestAgentPath:
     """``agent_path`` maps a host path to what the agent sees inside the container."""
 
-    def test_workspace_path_maps_under_the_container_root(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_workspace_path_maps_under_the_container_root(self, tmp_path: Path) -> None:
         workspace = tmp_path / "workspace"
         sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
 
         assert sandbox.agent_path(workspace) == "/workspace"
         assert sandbox.agent_path(workspace / "sub" / "file.py") == "/workspace/sub/file.py"
 
-    def test_unset_agent_path_resource_maps_to_its_own_host_path(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_unset_agent_path_resource_maps_to_its_own_host_path(self, tmp_path: Path) -> None:
         resource_path = tmp_path / "toolchain"
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
@@ -1304,7 +1410,7 @@ class TestAgentPath:
             resource_path / "bin" / "rustc"
         )
 
-    def test_declared_agent_path_remaps_a_nested_path(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_declared_agent_path_remaps_a_nested_path(self, tmp_path: Path) -> None:
         resource_path = tmp_path / "toolchain"
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
@@ -1324,7 +1430,9 @@ class TestAgentPath:
             == "/opt/vibesys-toolchain/bin/rustc"
         )
 
-    def test_longest_prefix_wins_for_a_resource_nested_in_the_workspace(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_longest_prefix_wins_for_a_resource_nested_in_the_workspace(
+        self, tmp_path: Path
+    ) -> None:
         workspace = tmp_path / "workspace"
         nested_resource = workspace / "vendor"
         sandbox = DockerSandbox(
@@ -1343,12 +1451,12 @@ class TestAgentPath:
         assert sandbox.agent_path(nested_resource / "lib.so") == "/opt/vibesys-vendor/lib.so"
         assert sandbox.agent_path(workspace / "src" / "main.py") == "/workspace/src/main.py"
 
-    def test_unrelated_path_is_identity(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_unrelated_path_is_identity(self, tmp_path: Path) -> None:
         sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
 
         assert sandbox.agent_path("/etc/passwd") == "/etc/passwd"
 
-    def test_normalizes_like_the_host_default(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_normalizes_like_the_host_default(self, tmp_path: Path) -> None:
         sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
 
         assert sandbox.agent_path("/foo//bar/") == "/foo/bar"
@@ -1359,13 +1467,14 @@ class TestWrap:
     """``wrap`` builds the ``docker exec`` prefix a driver's command executor needs."""
 
     @patch("subprocess.run")
-    def test_wrap_before_start_raises(self, mock_run, tmp_path):  # noqa: ANN001, ANN201, ARG002  # tracked: #288
+    def test_wrap_before_start_raises(self, mock_run: MagicMock, tmp_path: Path) -> None:
+        del mock_run
         sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
         with pytest.raises(RuntimeError, match="not started"):
             sandbox.wrap(["echo", "hi"], str(tmp_path / "workspace"))
 
     @patch("subprocess.run")
-    def test_wrap_shape(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_wrap_shape(self, mock_run: MagicMock, tmp_path: Path) -> None:
         workspace = tmp_path / "workspace"
         sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
         mock_run.return_value = subprocess.CompletedProcess(
@@ -1378,7 +1487,9 @@ class TestWrap:
         assert argv == ["docker", "exec", "-i", "-w", "/workspace", "abc123", "echo", "hi"]
 
     @patch("subprocess.run")
-    def test_wrap_defaults_cwd_to_the_workspace_root(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_wrap_defaults_cwd_to_the_workspace_root(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
         """Omitting cwd matches the base ``WorkspaceSandbox.wrap(argv)`` shape."""
         workspace = tmp_path / "workspace"
         sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
@@ -1392,7 +1503,7 @@ class TestWrap:
         assert argv == ["docker", "exec", "-i", "-w", "/workspace", "abc123", "echo", "hi"]
 
     @patch("subprocess.run")
-    def test_wrap_uses_agent_path_of_cwd(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_wrap_uses_agent_path_of_cwd(self, mock_run: MagicMock, tmp_path: Path) -> None:
         workspace = tmp_path / "workspace"
         sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
         mock_run.return_value = subprocess.CompletedProcess(
@@ -1405,7 +1516,9 @@ class TestWrap:
         assert argv[4] == "/workspace/sub"
 
     @patch("subprocess.run")
-    def test_wrap_forwards_extra_env_as_dash_e_flags(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_wrap_forwards_extra_env_as_dash_e_flags(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
         workspace = tmp_path / "workspace"
         sandbox = DockerSandbox(
             host_workspace=str(workspace),
@@ -1424,7 +1537,7 @@ class TestWrap:
         assert argv.index("-e") + 1 == argv.index("FOO=bar")
 
     @patch("subprocess.run")
-    def test_wrap_runs_as_the_image_default_user(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_wrap_runs_as_the_image_default_user(self, mock_run: MagicMock, tmp_path: Path) -> None:
         """No ``-u`` flag: the container already runs as the remapped agent user."""
         workspace = tmp_path / "workspace"
         sandbox = DockerSandbox(host_workspace=str(workspace), image="img")
@@ -1442,13 +1555,16 @@ class TestEnv:
     """``env`` reports HOME, the image's own PATH, and any extra env."""
 
     @patch("subprocess.run")
-    def test_env_before_start_raises(self, mock_run, tmp_path):  # noqa: ANN001, ANN201, ARG002  # tracked: #288
+    def test_env_before_start_raises(self, mock_run: MagicMock, tmp_path: Path) -> None:
+        del mock_run
         sandbox = DockerSandbox(host_workspace=str(tmp_path / "workspace"), image="img")
         with pytest.raises(RuntimeError, match="not started"):
             _ = sandbox.env
 
     @patch("subprocess.run")
-    def test_env_reads_path_from_the_running_container(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_env_reads_path_from_the_running_container(
+        self, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"), image="img", agent_uid=1000, agent_gid=1000
         )
@@ -1471,7 +1587,7 @@ class TestEnv:
         assert exec_cmd == ["docker", "exec", "abc123", "sh", "-c", "echo $PATH"]
 
     @patch("subprocess.run")
-    def test_env_caches_path_across_calls(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_env_caches_path_across_calls(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"), image="img", agent_uid=1000, agent_gid=1000
         )
@@ -1491,7 +1607,7 @@ class TestEnv:
         assert len(path_reads) == 1
 
     @patch("subprocess.run")
-    def test_extra_env_overrides_home_and_path(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_extra_env_overrides_home_and_path(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="img",
@@ -1513,7 +1629,7 @@ class TestEnv:
         assert env["PATH"] == "/usr/bin"
 
     @patch("subprocess.run")
-    def test_env_raises_when_path_cannot_be_read(self, mock_run, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_env_raises_when_path_cannot_be_read(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"), image="img", agent_uid=1000, agent_gid=1000
         )

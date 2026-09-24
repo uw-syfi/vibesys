@@ -160,14 +160,14 @@ def sandbox_builds(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Record every host-sandbox build and leave the fake executor unconfined."""
     builds: list[dict[str, Any]] = []
 
-    def build(workspace: Path, **kwargs: Any) -> None:  # noqa: ANN401
+    def build(workspace: Path, **kwargs: object) -> None:
         builds.append({"workspace": workspace, **kwargs})
 
     monkeypatch.setattr(subject, "build_host_sandbox", build)
     return builds
 
 
-def _spec(tmp_path: Path, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
+def _spec(tmp_path: Path, **changes: object) -> AgentSessionSpec:
     values: dict[str, Any] = {
         "role": "implementer",
         "provider": "claude",
@@ -181,7 +181,7 @@ def _spec(tmp_path: Path, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
     return AgentSessionSpec(**values)
 
 
-def _driver(  # noqa: PLR0913
+def _driver(
     provider: str,
     runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
     *,
@@ -214,9 +214,20 @@ def _session(
     tmp_path: Path,
     provider: str,
     runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
-    **kwargs: Any,  # noqa: ANN401
+    *,
+    timeout: int | None = None,
+    log: Callable[[str], None] | None = None,
+    docker_sandboxes: dict[str, Any] | None = None,
+    check_timeout: float | None = None,
 ) -> tuple[AgentSession, FakeExecutor]:
-    driver, fake = _driver(provider, runs, **kwargs)
+    driver, fake = _driver(
+        provider,
+        runs,
+        timeout=timeout,
+        log=log,
+        docker_sandboxes=docker_sandboxes,
+        check_timeout=check_timeout,
+    )
     return driver.create_session(_spec(tmp_path, provider=provider)), fake
 
 
@@ -656,7 +667,7 @@ def _workspace_files(root: Path) -> dict[str, str]:
     }
 
 
-def _container_spec(tmp_path: Path, provider: str, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
+def _container_spec(tmp_path: Path, provider: str, **changes: object) -> AgentSessionSpec:
     return _spec(
         tmp_path,
         provider=provider,
@@ -715,7 +726,7 @@ def test_a_container_binary_check_gets_the_container_budget(
 
     check = fake.requests[0]
     assert "--help" in check.argv
-    assert check.timeout == subject._CONTAINER_BINARY_CHECK_TIMEOUT_S  # noqa: SLF001
+    assert check.timeout == subject._CONTAINER_BINARY_CHECK_TIMEOUT_S
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -788,9 +799,20 @@ def test_the_watchdog_rollout_root_comes_from_the_sandbox_home(
     captured: dict[str, str] = {}
     real = docker_executor.CodexRolloutWatchdogExecutor
 
-    def _spy(*args: Any, rollout_sessions_root: str, **kwargs: Any) -> Any:  # noqa: ANN401
+    def _spy(
+        inner: agentshim.CommandExecutor,
+        container_id_resolver: Callable[[], str],
+        *,
+        rollout_sessions_root: str,
+        log: Callable[[str], None],
+    ) -> Any:
         captured["rollout_sessions_root"] = rollout_sessions_root
-        return real(*args, rollout_sessions_root=rollout_sessions_root, **kwargs)
+        return real(
+            inner,
+            container_id_resolver,
+            rollout_sessions_root=rollout_sessions_root,
+            log=log,
+        )
 
     monkeypatch.setattr(docker_executor, "CodexRolloutWatchdogExecutor", _spy)
     sandbox = _FakeDockerSandbox(workspace=tmp_path, home="/home/somebody-else")
@@ -1062,7 +1084,7 @@ def test_a_schema_no_dialect_accepts_falls_back_to_the_prompt_contract(
 
     class UnsupportedResponse(JudgeResponse):
         @classmethod
-        def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN401, ARG003
+        def model_json_schema(cls, *args: object, **kwargs: object) -> dict[str, Any]:
             return {
                 "type": "object",
                 "properties": {"analysis": {"type": "string"}},

@@ -1,18 +1,14 @@
 """Accuracy checker for the whisper-large-v3 offline ASR serving candidate.
-
 Verifies the custom serving implementation transcribes consistently with the
 HuggingFace `WhisperForConditionalGeneration` reference. The candidate must
 expose, importable from `main.py` on `sys.path`:
-
     class VibeServeModel:
         @classmethod
         def from_pretrained(cls, model_dir, device, dtype) -> "VibeServeModel": ...
         def transcribe(self, audio: np.ndarray, sampling_rate: int = 16000) -> str: ...
-
 Gate: for every test clip, the candidate transcript must either match the
 reference exactly (after normalization) or reach a minimum word-overlap ratio
 against it. Exit 0 iff every clip passes.
-
 Usage:
     uv run python accuracy_checker/checker.py [--model-dir <dir>] [--threshold 0.9]
 """
@@ -31,7 +27,7 @@ import torch
 
 # The read-only reference lives in the sibling reference/ directory.
 sys.path.insert(0, str((Path(__file__).parent.parent / "reference").resolve()))
-from reference import load_reference, reference_transcribe  # noqa: E402
+from reference import load_reference, reference_transcribe
 
 
 def _load_custom_model_class():
@@ -96,13 +92,11 @@ def main():
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--threshold", type=float, default=0.9)
     args = parser.parse_args()
-
     model_dir = str(Path(args.model_dir).resolve())
     dtype = torch.float16
     device = args.device if torch.cuda.is_available() else "cpu"
     if device == "cpu":
         dtype = torch.float32
-
     audio_dir = (
         Path(args.audio_dir).resolve()
         if args.audio_dir
@@ -111,7 +105,6 @@ def main():
     print(f"Loading test audio from: {audio_dir}")
     test_samples = load_test_samples(audio_dir)
     print(f"  Loaded {len(test_samples)} samples\n")
-
     print(f"Loading HF reference (WhisperForConditionalGeneration) on {device} ...")
     t0 = time.perf_counter()
     ref_model, ref_proc = load_reference(model_dir, device, dtype)
@@ -124,12 +117,10 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     print("  HF model unloaded.\n")
-
     print(f"Loading custom model (VibeServeModel) on {device} ...")
     t0 = time.perf_counter()
     custom_model = _load_custom_model_class().from_pretrained(model_dir, device, dtype)
     print(f"  Custom model loaded in {time.perf_counter() - t0:.1f}s\n")
-
     total, passed = len(test_samples), 0
     print("=" * 70)
     print(f"Running {total} test cases (threshold={args.threshold:.0%} word overlap)")
@@ -140,7 +131,6 @@ def main():
         ok, detail = compare_outputs(ref_outputs[i - 1], custom_text, args.threshold)
         print(("  PASS - " if ok else "  FAIL - ") + detail)
         passed += int(ok)
-
     print("\n" + "=" * 70)
     print(f"Results: {passed}/{total} passed, {total - passed}/{total} failed")
     print("=" * 70)

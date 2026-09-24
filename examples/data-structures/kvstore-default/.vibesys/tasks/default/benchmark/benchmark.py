@@ -52,7 +52,6 @@ def _run(store, clients, duration, warmup, key_space, read_ratio, seed):
         )
         for i in range(clients)
     ]
-
     if warmup > 0:
         for t in threads:
             t.start()
@@ -70,22 +69,18 @@ def _run(store, clients, duration, warmup, key_space, read_ratio, seed):
             )
             for i in range(clients)
         ]
-
     for t in threads:
         t.start()
-
     t0 = time.perf_counter()
     time.sleep(duration)
     stop.set()
     for t in threads:
         t.join(timeout=5)
     elapsed = time.perf_counter() - t0
-
     total = counters["put"] + counters["get"] + counters["delete"]
     print(f"Duration: {elapsed:.1f}s  Clients: {clients}")
     print(f"  Ops: put={counters['put']:,} get={counters['get']:,} delete={counters['delete']:,}")
     print(f"  Total: {total:,} ({total / elapsed:,.0f} ops/s)")
-
     return {
         "duration": elapsed,
         "clients": clients,
@@ -107,13 +102,11 @@ def main():
     parser.add_argument("--use-reference", action="store_true")
     parser.add_argument("--output-json", type=str, default=None)
     args = parser.parse_args()
-
     if args.use_reference:
         store = KVStoreFactory()
     else:
         cls = _load_candidate()
         store = cls() if cls else KVStoreFactory()
-
     result = _run(
         store,
         args.clients,
@@ -123,7 +116,6 @@ def main():
         args.read_ratio,
         args.seed,
     )
-
     if args.output_json:
         with open(args.output_json, "w") as f:
             json.dump(result, f, indent=2)

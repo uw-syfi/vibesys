@@ -15,7 +15,6 @@ run inside Docker because it needs no accelerator passthrough. Per-platform
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence  # noqa: TC003  # tracked: #288
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,6 +27,8 @@ from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
@@ -36,7 +37,7 @@ _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 class LocalBackend:
     """No-device backend (Metal / CPU) — hardware hooks are no-ops."""
 
-    def __init__(  # noqa: D107, PLR0913  # tracked: #288
+    def __init__(
         self,
         name: ComputeBackend,
         log_dir: Path,
@@ -47,6 +48,7 @@ class LocalBackend:
         profiler_kind: ProfilerKind = ProfilerKind.TORCH,
         supports_docker: bool = False,
     ) -> None:
+        """Configure a host backend and its unavailable-device explanation."""
         self.name = name
         self.profiler_kind = profiler_kind
         self.log_dir = Path(log_dir)
@@ -60,7 +62,7 @@ class LocalBackend:
 
     # -- ComputeBackendImpl protocol -----------------------------------------
 
-    def make_sandbox(  # noqa: D102, PLR0913  # tracked: #288
+    def make_sandbox(
         self,
         kind: SandboxKind,
         *,
@@ -76,9 +78,10 @@ class LocalBackend:
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
     ) -> Sandbox:
+        """Create a local or supported Docker sandbox for this backend."""
         # Deferred: importing DockerSandbox registers process-wide signal and
         # atexit handlers. Registration must stay side-effect free.
-        from vs_sandbox.api import DockerSandbox  # noqa: PLC0415  # tracked: #288
+        from vs_sandbox.api import DockerSandbox
 
         # extra_init_commands is accepted for ComputeBackendImpl protocol
         # parity (LocalEnvironment.open() passes it unconditionally) but never
@@ -97,7 +100,7 @@ class LocalBackend:
             )
         if kind is SandboxKind.DOCKER and self._supports_docker:
             if self.image is None:
-                raise ValueError(f"{self.name.value} backend requires a Docker image")  # noqa: TRY003  # tracked: #288
+                raise ValueError(f"{self.name.value} backend requires a Docker image")
             return DockerSandbox(
                 host_workspace=host_workspace,
                 # ``DockerEnvironment.open()`` (the plain --docker path)
@@ -117,17 +120,19 @@ class LocalBackend:
                 lifecycle_hooks=lifecycle_hooks,
             )
         if kind is SandboxKind.DOCKER:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            raise ValueError(
                 f"{self.name.value} backend only supports local execution; "
                 f"SandboxKind.{kind.name} is unavailable ({self._unavailable_reason})."
             )
-        raise ValueError(f"Unknown sandbox kind: {kind!r}")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"Unknown sandbox kind: {kind!r}")
 
-    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:  # noqa: ARG002, D102  # tracked: #288
+    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
+        """Return no monitor because host-only backends have no device contention."""
         return None
 
-    def reselect_device(self) -> None:  # noqa: D102  # tracked: #288
-        return None
+    def reselect_device(self) -> None:
+        """Do nothing because the host backend does not select an accelerator."""
+        return
 
 
 # Platform-bound constructors — one per local-only backend, registered in

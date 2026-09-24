@@ -16,8 +16,12 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 _REPO = Path(__file__).resolve().parents[4]
 _ATTR_PY = (
@@ -26,7 +30,7 @@ _ATTR_PY = (
 _SAMPLE = Path(__file__).with_name("fixtures") / "callgrind_annotate_sample.txt"
 
 
-def _load_module(name: str, path: Path):  # noqa: ANN202  # tracked: #288
+def _load_module(name: str, path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, str(path))
     assert spec is not None
     assert spec.loader is not None
@@ -47,16 +51,16 @@ def _load_module(name: str, path: Path):  # noqa: ANN202  # tracked: #288
 
 
 @pytest.fixture(scope="module")
-def attr():  # noqa: ANN201  # tracked: #288
+def attr() -> ModuleType:
     return _load_module("attribute_cpu_under_test", _ATTR_PY)
 
 
 @pytest.fixture(scope="module")
-def sample_text():  # noqa: ANN201  # tracked: #288
+def sample_text() -> str:
     return _SAMPLE.read_text()
 
 
-def test_parse_annotate_skips_totals_and_headers(attr, sample_text):  # noqa: ANN001, ANN201  # tracked: #288
+def test_parse_annotate_skips_totals_and_headers(attr: ModuleType, sample_text: str) -> None:
     rows = attr.parse_annotate(sample_text)
     assert rows, "expected some parsed rows"
     assert all("PROGRAM TOTALS" not in func for _, _, func in rows)
@@ -66,7 +70,7 @@ def test_parse_annotate_skips_totals_and_headers(attr, sample_text):  # noqa: AN
         assert func
 
 
-def test_object_annotation_is_stripped(attr, sample_text):  # noqa: ANN001, ANN201  # tracked: #288
+def test_object_annotation_is_stripped(attr: ModuleType, sample_text: str) -> None:
     rows = attr.parse_annotate(sample_text)
     assert any("[" not in file and "[" not in func for _, file, func in rows)
     for _, file, func in rows:
@@ -74,7 +78,7 @@ def test_object_annotation_is_stripped(attr, sample_text):  # noqa: ANN001, ANN2
         assert "]" not in func
 
 
-def test_classify_covers_the_fixed_vocabulary(attr):  # noqa: ANN001, ANN201  # tracked: #288
+def test_classify_covers_the_fixed_vocabulary(attr: ModuleType) -> None:
     assert (
         attr.classify("engine/differential-dataflow/src/trace/cursor/cursor_list.rs", "foo")
         == "trace/cursor"
@@ -102,7 +106,7 @@ def test_classify_covers_the_fixed_vocabulary(attr):  # noqa: ANN001, ANN201  # 
     assert attr.classify("/home/x/.cargo/registry/rand-0.4.6/src/prng/isaac64.rs", "f") == "other"
 
 
-def test_aggregate_ranks_by_ir_and_computes_pct(attr, sample_text):  # noqa: ANN001, ANN201  # tracked: #288
+def test_aggregate_ranks_by_ir_and_computes_pct(attr: ModuleType, sample_text: str) -> None:
     rows = attr.parse_annotate(sample_text)
     total = sum(ir for ir, _, _ in rows)
     components = attr.aggregate(rows)
@@ -119,7 +123,7 @@ def test_aggregate_ranks_by_ir_and_computes_pct(attr, sample_text):  # noqa: ANN
     assert {"trace/implementations", "consolidation", "libc/malloc", "libc/mem"} <= names
 
 
-def test_ranking_is_deterministic(attr, sample_text):  # noqa: ANN001, ANN201  # tracked: #288
+def test_ranking_is_deterministic(attr: ModuleType, sample_text: str) -> None:
     rows = attr.parse_annotate(sample_text)
     a = attr.aggregate(rows)
     b = attr.aggregate(rows)

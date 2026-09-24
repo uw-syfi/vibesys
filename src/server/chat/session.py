@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 class ChatAgentClient(Protocol):
     """Minimal text invocation interface required by an experiment chat."""
 
-    def invoke_text(self, **kwargs: Any) -> str:  # noqa: ANN401  # Mirrors agent clients.
+    def invoke_text(self, **kwargs: Any) -> str:  # Mirrors agent clients.
         """Invoke the agent with the driver-specific keyword contract."""
         ...
 
@@ -184,7 +184,7 @@ class ExperimentChatSession:
             except BaseException as exc:
                 error = exc
                 if isinstance(exc, Exception):
-                    raise RuntimeError(  # noqa: TRY003, TRY004  # Normalize agent errors.
+                    raise RuntimeError(  # Normalize agent errors.
                         f"Chat agent failed: {type(exc).__name__}: {exc}"
                     ) from exc
                 raise
@@ -196,7 +196,7 @@ class ExperimentChatSession:
                     error=error,
                     execution_id=execution.execution_id,
                 )
-        assert answer is not None  # noqa: S101
+        assert answer is not None
         return ChatAnswer(text=answer, invocation_id=execution.execution_id)
 
     def close(self) -> None:

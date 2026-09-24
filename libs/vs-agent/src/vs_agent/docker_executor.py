@@ -62,9 +62,9 @@ def _codex_resume_argv_matches(argv: list[str], thread_id: str) -> bool:
     the process argv reads ``node /usr/local/bin/codex exec resume ...`` while
     its native child reads ``.../codex exec resume ...``; both must match.
     """
-    if len(argv) > 1 and os.path.basename(argv[0]) != "codex":  # noqa: PTH119  # tracked: #288
+    if len(argv) > 1 and os.path.basename(argv[0]) != "codex":
         argv = argv[1:]
-    if not argv or os.path.basename(argv[0]) != "codex":  # noqa: PTH119  # tracked: #288
+    if not argv or os.path.basename(argv[0]) != "codex":
         return False
     if "exec" not in argv or "--json" not in argv:
         return False
@@ -199,7 +199,7 @@ class CodexRolloutWatchdogExecutor:
     # Each keyword argument is an independent documented timing knob; folding
     # them into a config object would break the constructors already calling
     # this with the current keyword spellings.
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         inner: CommandExecutor,
         container_id_resolver: Callable[[], str],
@@ -323,7 +323,7 @@ class CodexRolloutWatchdogExecutor:
         """Poll the container until the run ends or the watchdog stops it."""
         try:
             self._poll(argv, handle, state, stopped)
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
+        except Exception as exc:
             # This runs on a helper thread: an escaping exception would vanish
             # and leave the turn to burn its whole budget with no explanation.
             self._log(f"codex rollout watchdog stopped after an unexpected error: {exc}")
@@ -336,7 +336,7 @@ class CodexRolloutWatchdogExecutor:
         stopped: threading.Event,
     ) -> None:
         container_id = self._container_id_resolver()
-        child_binary = os.path.basename(argv[0]) if argv else ""  # noqa: PTH119  # tracked: #288
+        child_binary = os.path.basename(argv[0]) if argv else ""
         thread_id = _codex_resume_thread_id(argv)
         next_poll = time.monotonic()
         fingerprint: str | None = None
@@ -384,8 +384,8 @@ class CodexRolloutWatchdogExecutor:
         process would not be.
         """
         try:
-            check = subprocess.run(  # noqa: S603  # tracked: #288
-                ["docker", "exec", container_id, "pgrep", "-f", child_binary],  # noqa: S607  # tracked: #288
+            check = subprocess.run(  # noqa: S603  # lint-waiver: LW-007098 [S603]; fixed docker argv probes this container without a shell.
+                ["docker", "exec", container_id, "pgrep", "-f", child_binary],  # noqa: S607  # lint-waiver: LW-007102 [S607]; Docker is a PATH-resolved runtime dependency.
                 capture_output=True,
                 timeout=_DOCKER_QUERY_TIMEOUT_S,
                 check=False,
@@ -415,8 +415,8 @@ class CodexRolloutWatchdogExecutor:
         cached = self._codex_rollout_paths.get(thread_id)
         if cached is not None:
             return cached
-        located = subprocess.run(  # noqa: S603  # tracked: #288
-            [  # noqa: S607  # tracked: #288
+        located = subprocess.run(  # noqa: S603  # lint-waiver: LW-007099 [S603]; fixed docker argv reads only the selected container's rollout filenames.
+            [  # noqa: S607  # lint-waiver: LW-007103 [S607]; Docker is a PATH-resolved runtime dependency.
                 "docker",
                 "exec",
                 container_id,
@@ -446,8 +446,8 @@ class CodexRolloutWatchdogExecutor:
         rollout_path: str,
     ) -> list[dict[str, Any]] | None:
         """Read the tail of one rollout file and parse its JSON lines."""
-        result = subprocess.run(  # noqa: S603  # tracked: #288
-            ["docker", "exec", container_id, "tail", "-n", "512", rollout_path],  # noqa: S607  # tracked: #288
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007100 [S603]; fixed docker argv reads only the selected container's rollout tail.
+            ["docker", "exec", container_id, "tail", "-n", "512", rollout_path],  # noqa: S607  # lint-waiver: LW-007104 [S607]; Docker is a PATH-resolved runtime dependency.
             capture_output=True,
             text=True,
             timeout=_DOCKER_QUERY_TIMEOUT_S,
@@ -525,7 +525,7 @@ def _last_codex_agent_message(events: Sequence[dict[str, Any]]) -> str | None:
 
 def _is_codex_json_command(cmd: Sequence[str]) -> bool:
     """Return whether *cmd* is a machine-readable Codex exec invocation."""
-    if not cmd or os.path.basename(cmd[0]) != "codex" or "--json" not in cmd:  # noqa: PTH119  # tracked: #288
+    if not cmd or os.path.basename(cmd[0]) != "codex" or "--json" not in cmd:
         return False
     return "exec" in cmd
 
@@ -587,8 +587,8 @@ def _forward_codex_completion(
 
 def _terminate_codex_resume(container_id: str, thread_id: str) -> None:
     """Stop only the completed resumed Codex process inside this container."""
-    subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    subprocess.run(  # noqa: S603  # lint-waiver: LW-007101 [S603]; fixed docker argv targets one container and Codex thread without a shell.
+        [  # noqa: S607  # lint-waiver: LW-007105 [S607]; Docker is a PATH-resolved runtime dependency.
             "docker",
             "exec",
             container_id,

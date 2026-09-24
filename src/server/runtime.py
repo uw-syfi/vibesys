@@ -108,9 +108,9 @@ class ServerRuntime:
         environment through `session.open_agent_environment(...)`.
         """
         session = create_session(request, sink=self.integration.project_event)
-        session.on_committed_view(self.api._observe_committed_state)  # noqa: SLF001
+        session.on_committed_view(self.api._observe_committed_state)
         session.on_run_resources(
-            lambda handoff: self.integration._handle_run_resources(session, handoff)  # noqa: SLF001
+            lambda handoff: self.integration._handle_run_resources(session, handoff)
         )
         with self.condition:
             self.session = session
@@ -121,7 +121,7 @@ class ServerRuntime:
             with self.condition:
                 self.session = None
 
-    def run(self, run: Callable[[], Any]) -> Any:  # noqa: ANN401, PLR0915
+    def run(self, run: Callable[[], Any]) -> Any:
         """Serve requests while executing ``run`` in the calling thread."""
         previous_sigterm = signal.getsignal(signal.SIGTERM)
 
@@ -140,7 +140,7 @@ class ServerRuntime:
         try:
             with UnixJsonlServer(self.socket_path, self.api) as transport:
                 if not transport.wait_for_subscriber(timeout=30.0):
-                    raise RuntimeError("Timed out waiting for a server client")  # noqa: TRY003, TRY301
+                    raise RuntimeError("Timed out waiting for a server client")
                 terminal_cursor = self.journal.latest_sequence
                 try:
                     value = run()
@@ -210,7 +210,7 @@ class ServerRuntime:
         finally:
             try:
                 self.integration.close()
-            except BaseException as cleanup_error:  # optional presentation cleanup  # noqa: BLE001
+            except BaseException as cleanup_error:  # optional presentation cleanup
                 message = (
                     "Experiment chat cleanup also failed: "
                     f"{type(cleanup_error).__name__}: {cleanup_error}"

@@ -238,7 +238,7 @@ def write_event_index(
         # already known to be unusable.
         if _source_identity(source, boundary) != identity:
             return False
-        os.replace(temporary, path)  # noqa: PTH105  # atomic publication
+        os.replace(temporary, path)  # atomic publication
         _fsync_directory(path.parent)
         temporary = None
     except OSError:

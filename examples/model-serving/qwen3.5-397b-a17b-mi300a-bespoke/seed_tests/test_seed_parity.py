@@ -1,5 +1,4 @@
 """Hermetic CPU tests for the seed: HF parity on a tiny random model, MXFP4 dequant, HTTP smoke.
-
 Run with a python that has torch, transformers, safetensors, aiohttp, pytest:
     /tmp/torchenv/bin/python -m pytest examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/seed_tests -p no:cacheprovider --no-cov
 """
@@ -19,8 +18,10 @@ from transformers import Qwen3_5MoeForCausalLM, Qwen3_5MoeTextConfig
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-
+# lint-waiver: LW-008012 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 import model as seed_model  # noqa: E402
+
+# lint-waiver: LW-008013 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from mxfp4 import dequant_mxfp4  # noqa: E402
 
 FP4 = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
@@ -55,7 +56,7 @@ def quantize_mxfp4(w: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.T
 def build_hf(seed: int = 0) -> Qwen3_5MoeForCausalLM:
     torch.manual_seed(seed)
     cfg = tiny_config()
-    cfg._attn_implementation = "eager"  # noqa: SLF001
+    cfg._attn_implementation = "eager"
     m = Qwen3_5MoeForCausalLM(cfg).eval()
     with torch.no_grad():
         for name, p in m.named_parameters():
@@ -110,8 +111,6 @@ def quantize_hf_in_place(m: Qwen3_5MoeForCausalLM) -> None:
 
 
 # ---------------------------------------------------------------- tests
-
-
 def test_mxfp4_dequant_hand_vector() -> None:
     packed = torch.zeros(16, dtype=torch.uint8)
     packed[0], packed[1] = 0x21, 0x73  # low nibble first: 1,2 then 3,7 -> 0.5, 1.0, 1.5, 6.0
@@ -147,12 +146,10 @@ def test_prefill_and_greedy_decode_match_hf(
     )  # exercise chunked prefill over static state
     mine = seed_model.Model(tmp_path, ["cpu"], torch.float32, max_seq=64)
     ids = torch.randint(2, VOCAB, (1, 11))
-
     with torch.no_grad():
         ref = hf(input_ids=ids).logits
     mine.reset()
     assert torch.allclose(mine.forward(ids, 0, all_logits=True), ref[0], atol=1e-4, rtol=1e-4)
-
     mine.reset()  # incremental: prefill in chunks, then 8 greedy steps against HF full recompute
     for s in range(0, ids.shape[1], 4):
         got = mine.forward(ids[:, s : s + 4], s)
@@ -165,13 +162,12 @@ def test_prefill_and_greedy_decode_match_hf(
         assert int(got[-1].argmax()) == int(nxt)
         got = mine.forward(nxt, seq.shape[1])
         seq = torch.cat([seq, nxt], dim=1)
-
     assert list(mine.generate(ids[0].tolist(), 8, 0.0, frozenset())) == seq[0, 11:].tolist()
 
 
 def test_http_smoke(tmp_path: Path) -> None:
-    from tokenizers import Tokenizer, models, pre_tokenizers  # noqa: PLC0415
-    from transformers import PreTrainedTokenizerFast  # noqa: PLC0415
+    from tokenizers import Tokenizer, models, pre_tokenizers
+    from transformers import PreTrainedTokenizerFast
 
     write_checkpoint(build_hf(), tmp_path, mxfp4=False)
     words = [
@@ -186,7 +182,7 @@ def test_http_smoke(tmp_path: Path) -> None:
         "think",
     ]
     vocab = {w: i for i, w in enumerate(words + [f"w{i}" for i in range(VOCAB - len(words))])}
-    core = Tokenizer(models.WordLevel(vocab, unk_token="<unk>"))  # noqa: S106
+    core = Tokenizer(models.WordLevel(vocab, unk_token="<unk>"))
     core.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
     template = (
         "{% for m in messages %}<|im_start|> {{ m.role }} {{ m.content }} <|im_end|> {% endfor %}"
@@ -194,15 +190,14 @@ def test_http_smoke(tmp_path: Path) -> None:
     )
     tok = PreTrainedTokenizerFast(
         tokenizer_object=core, unk_token="<unk>", eos_token="<|im_end|>", chat_template=template
-    )  # noqa: S106
+    )
     tok.save_pretrained(tmp_path)
-
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
     cmd = [sys.executable, str(ROOT / "server.py"), "--model-path", str(tmp_path), "--host", "127.0.0.1", "--port", str(port),
            "--devices", "cpu", "--dtype", "float32", "--max-seq-len", "64"]  # fmt: skip
-    proc = subprocess.Popen(cmd, cwd=ROOT)  # noqa: S603
+    proc = subprocess.Popen(cmd, cwd=ROOT)
     try:
         wait_healthy(port)
         body = {"messages": [{"role": "user", "content": "hello world"}], "max_tokens": 6, "temperature": 0, "ignore_eos": True,
@@ -215,7 +210,6 @@ def test_http_smoke(tmp_path: Path) -> None:
         assert (
             reply["usage"]["prompt_tokens"] == 8
         )  # <|im_start|> user hello world <|im_end|> <|im_start|> assistant think
-
         status, data = post(
             port, body | {"stream": True, "stream_options": {"include_usage": True}}
         )

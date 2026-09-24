@@ -1,6 +1,5 @@
 """Determinism gate (differential-dataflow `bfs`) — a **metamorphic** oracle: the
 candidate must compute the **same BFS result regardless of worker count**.
-
 This is the first behavioral-consistency check that does *not* depend on a diff
 against pristine source. Where `equivalence_gate.py` proves *what* the engine
 computes (byte-identical to round-0), this proves the engine computes it
@@ -8,25 +7,20 @@ computes (byte-identical to round-0), this proves the engine computes it
 re-parallelized engine is most likely to silently break (data races, unordered
 reductions, nondeterministic merge). It lets the harness relax the diff-discipline
 gate while still catching the class of regression that gate implicitly guarded.
-
 The metamorphic relation, validated against `bfs.rs`:
-
   * The graph is generated ONLY by worker 0 from a fixed seed (`&[1,2,3,4]`), so
     the *input* is identical no matter how many workers run.
   * The result is `.consolidate()`'d — a canonical multiset — before printing.
   * Therefore `normalize(bfs @ -w N)` must be **byte-identical for every N**; only
     the inter-worker print *order* may differ, and `normalize()` sorts that away.
-
 So for each fixed workload we run the candidate at several worker counts (and
 repeat the multi-worker runs, since a race is often flaky) and require every
 normalized output to equal the single-worker golden. Any divergence = the engine
 is nondeterministic across workers = FAIL. No pristine engine is needed: this is a
 self-consistency (metamorphic) property of the candidate alone.
-
 Exit 0 = PASS (deterministic across all worker counts on all workloads);
 1 = nondeterminism detected (a real behavioral defect);
 2 = a build/setup error (the gate could not render a verdict).
-
 Usage (the Judge runs this alongside the equivalence gate):
   python3 accuracy_checker/determinism_gate.py \
       --engine-cmd 'engine/target/release/examples/bfs' \
@@ -45,10 +39,10 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _WORKSPACE = os.path.normpath(os.path.join(_HERE, ".."))
 sys.path.insert(0, os.path.join(_WORKSPACE, "reference"))
-import workload  # noqa: E402  (reference/workload.py — the single source of truth)
+# lint-waiver: LW-008002 [E402]; This standalone evaluator adds its sibling reference directory to sys.path before importing workload.
+import workload  # noqa: E402
 
 _RUN_TIMEOUT_S = 600
-
 # Worker counts to cross-check. 1 is the order-deterministic golden; >1 exercises
 # the parallel merge/reduce paths where a race would surface. Repeats catch flaky
 # races that only fire on some schedules. Kept small so the gate stays cheap.
@@ -62,7 +56,6 @@ def _run(argv, *, cwd=None):
 
 def _with_workers(wl, n):
     """Return a copy of workload argv with the `-w` value forced to `n`.
-
     The workload shape is `... inspect -w <workers>` (`reference/workload.py`); if
     `-w` is absent for some reason we append it so the override is always applied.
     """
@@ -93,7 +86,6 @@ def _run_engine(binary, args):
 
 def _plan(wl):
     """(worker_count, repeat_index) pairs to run for one workload.
-
     -w 1 runs once (it is the golden and is order-deterministic); each higher
     worker count runs `_REPEATS_PER_MULTIWORKER` times to expose flaky races.
     """
@@ -120,7 +112,6 @@ def main():
         "(recommended, so the graded binary matches the current source)",
     )
     args = ap.parse_args()
-
     candidate_bin = shlex.split(args.engine_cmd)
     if len(candidate_bin) != 1:
         print(
@@ -130,7 +121,6 @@ def main():
         )
         return 2
     candidate_bin = candidate_bin[0]
-
     print("determinism gate — candidate bfs output must be identical across worker counts")
     print(f"  candidate     : {candidate_bin}")
     print(
@@ -138,13 +128,11 @@ def main():
     )
     print(f"  workloads     : {len(workload.WORKLOADS)} (canonical + perturbation)")
     print("-" * 72)
-
     if args.rebuild_cmd:
         rb = subprocess.run(args.rebuild_cmd, shell=True, capture_output=True, text=True)
         if rb.returncode != 0:
             print(f"candidate REBUILD FAILED: {(rb.stderr or rb.stdout).strip()[:400]}")
             return 2
-
     all_deterministic = True
     for wl in workload.WORKLOADS:
         label = " ".join(wl)
@@ -174,7 +162,6 @@ def main():
                 break  # one divergence is enough to condemn this workload
         if wl_ok:
             print(f"  {label:<40}  PASS  ({golden_lines} data lines identical across all -w)")
-
     print("-" * 72)
     if all_deterministic:
         print(

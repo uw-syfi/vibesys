@@ -1,5 +1,4 @@
 """Hermetic tests for the pin gate and the probes (in-process fake server, no GPU).
-
 uv run pytest examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/accuracy_checker/test_checker.py -q --no-cov -p no:tach
 """
 
@@ -13,15 +12,13 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-
 try:
     import checker
-except Exception as exc:  # noqa: BLE001 -- env-dependent import; skip, don't fail.
+except Exception as exc:
     checker = None
     _IMPORT_ERROR = exc
 else:
     _IMPORT_ERROR = None
-
 N = 32
 
 
@@ -125,7 +122,7 @@ class LoadPinsTests(unittest.TestCase):
 class _FakeTokenizer:
     """Maps chr(65 + id) text back to ids, so the fake server can emit text."""
 
-    def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:  # noqa: FBT001, FBT002
+    def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
         return [ord(c) - 65 for c in text]
 
 
@@ -151,7 +148,7 @@ class _FakeClient:
         self._text = text
         self.bodies: list[dict] = []
 
-    def post(self, url: str, json: dict, timeout: object) -> _FakePost:  # noqa: A002
+    def post(self, url: str, json: dict, timeout: object) -> _FakePost:
         self.bodies.append(json)
         return _FakePost(
             {"choices": [{"message": {"content": self._text}, "finish_reason": "length"}]}

@@ -1,5 +1,4 @@
 """Fixed prompt set for the accuracy gate.
-
 Covers short raw completions, chat-templated prompts (thinking disabled), code,
 arithmetic, structured output, and long prompts whose lengths straddle the
 64-token GDN chunk boundary and exercise RoPE at larger positions. Prompt token

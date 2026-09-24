@@ -1,5 +1,4 @@
 """Start and stop the candidate's ``python3 server.py`` for the benchmark and checker.
-
 The candidate contract (see ``OBJECTIVE.md``): ``server.py`` at the workspace
 root, started as ``python3 server.py --model-path <dir> --host <h> --port <p>``,
 serving ``GET /health`` (200 only when ready) and ``POST /v1/chat/completions``.
@@ -57,7 +56,7 @@ def start_server(
         raise RuntimeError(f"{workspace}/server.py not found; the candidate entrypoint is missing.")
     env = dict(os.environ, MODEL_PATH=model_path, PYTHONUNBUFFERED="1")
     log_file = log_path.open("w")
-    return subprocess.Popen(  # noqa: S603
+    return subprocess.Popen(
         build_launch_argv(model_path=model_path, host=host, port=port),
         cwd=str(workspace),
         env=env,
@@ -118,7 +117,7 @@ async def wait_until_ready(
                     if resp.status == 200:
                         return
                     last_error = f"/health returned status {resp.status}"
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
     raise RuntimeError(

@@ -14,12 +14,16 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from vibesys.constants import DomainName  # noqa: TC001  # tracked: #288
 from vibesys.evaluators.input_manifest import MANIFEST_NAME, InputManifest
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from vibesys.constants import DomainName
 
 #: Bundle-relative directory name used to stage trusted evaluator source
 #: supplied by standalone flags. It lives inside the synthesized bundle so the
@@ -41,6 +45,39 @@ _RESERVED_ROOT_ENTRIES = frozenset(
 
 class InputSynthesisError(ValueError):
     """Raised when standalone input flags cannot be synthesized into a bundle."""
+
+    @classmethod
+    def source_missing(cls, label: str, path: Path) -> InputSynthesisError:
+        """Describe a source directory that does not exist."""
+        return cls(f"{label} path does not exist: {path}")
+
+    @classmethod
+    def source_not_directory(cls, label: str, path: Path) -> InputSynthesisError:
+        """Describe a source path that is not a directory."""
+        return cls(f"{label} path is not a directory: {path}")
+
+    @classmethod
+    def incomplete_benchmark_result(cls) -> InputSynthesisError:
+        """Describe benchmark result flags missing one of their paired values."""
+        return cls(
+            "benchmark result requires both --input-benchmark-metric and "
+            "--input-benchmark-result-arg."
+        )
+
+    @classmethod
+    def reserved_entry_collision(cls, name: str) -> InputSynthesisError:
+        """Describe evaluator contents that collide with a bundle-owned entry."""
+        return cls(f"--input-evaluator-dir entry collides with a reserved bundle name: {name}")
+
+    @classmethod
+    def invalid_manifest(cls, error: Exception) -> InputSynthesisError:
+        """Describe an internally generated manifest that fails validation."""
+        return cls(f"Invalid synthesized manifest: {error}")
+
+    @classmethod
+    def destination_exists(cls, path: Path) -> InputSynthesisError:
+        """Describe a synthesized bundle destination that already exists."""
+        return cls(f"synthesized bundle directory already exists: {path}")
 
 
 @dataclass(frozen=True)
@@ -83,9 +120,9 @@ def _toml_string_array(values: tuple[str, ...]) -> str:
 def _require_source_dir(path: Path, label: str) -> Path:
     resolved = path.expanduser().resolve()
     if not resolved.exists():
-        raise InputSynthesisError(f"{label} path does not exist: {path}")  # noqa: TRY003
+        raise InputSynthesisError.source_missing(label, path)
     if not resolved.is_dir():
-        raise InputSynthesisError(f"{label} path is not a directory: {path}")  # noqa: TRY003
+        raise InputSynthesisError.source_not_directory(label, path)
     return resolved
 
 
@@ -100,10 +137,7 @@ def _build_manifest_dict(spec: SynthesizedInputSpec) -> dict[str, object]:
         benchmark["timeout_seconds"] = spec.benchmark_timeout_seconds
     if spec.benchmark_metric is not None or spec.benchmark_result_arg is not None:
         if spec.benchmark_metric is None or spec.benchmark_result_arg is None:
-            raise InputSynthesisError(  # noqa: TRY003
-                "benchmark result requires both --input-benchmark-metric and "
-                "--input-benchmark-result-arg."
-            )
+            raise InputSynthesisError.incomplete_benchmark_result()
         benchmark["result"] = {
             "json_argument": spec.benchmark_result_arg,
             "metric": spec.benchmark_metric,
@@ -168,9 +202,7 @@ def _copy_evaluator_dir_contents(evaluator_dir: Path, bundle_root: Path) -> None
     """Copy each top-level entry of ``evaluator_dir`` into the bundle root."""
     for child in sorted(evaluator_dir.iterdir()):
         if child.name in _RESERVED_ROOT_ENTRIES:
-            raise InputSynthesisError(  # noqa: TRY003
-                f"--input-evaluator-dir entry collides with a reserved bundle name: {child.name}"
-            )
+            raise InputSynthesisError.reserved_entry_collision(child.name)
         target = bundle_root / child.name
         if child.is_dir():
             _copy_tree_into(child, target)
@@ -188,7 +220,7 @@ def synthesize_input_bundle(spec: SynthesizedInputSpec, destination: Path) -> Pa
     try:
         InputManifest.model_validate(manifest)
     except ValidationError as exc:  # pragma: no cover - defensive, flags validated upstream
-        raise InputSynthesisError(f"Invalid synthesized manifest: {exc}") from exc  # noqa: TRY003
+        raise InputSynthesisError.invalid_manifest(exc) from exc
 
     reference_dir = (
         _require_source_dir(spec.reference_dir, "--input-reference")
@@ -207,7 +239,7 @@ def synthesize_input_bundle(spec: SynthesizedInputSpec, destination: Path) -> Pa
     )
     root = destination.expanduser().resolve()
     if root.exists():
-        raise InputSynthesisError(f"synthesized bundle directory already exists: {root}")  # noqa: TRY003
+        raise InputSynthesisError.destination_exists(root)
     root.mkdir(parents=True)
 
     # Evaluator-dir contents go in first so a later reserved-name write always

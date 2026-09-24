@@ -162,7 +162,7 @@ class ExecutionTracker:
             )
             self._active[execution_id] = active.model_copy(update={"activity": activity})
 
-    def start_locked(  # noqa: PLR0913
+    def start_locked(
         self,
         kind: str,
         round_label: str,
@@ -251,7 +251,7 @@ class ExecutionTracker:
         self,
         execution_id: str,
         *,
-        result: Any = None,  # noqa: ANN401
+        result: Any = None,
         error: BaseException | None = None,
     ) -> tuple[ActiveAgentExecution | None, bool]:
         """Finish a tracked execution while the shared lock is held."""
@@ -475,7 +475,7 @@ class ExecutionTracker:
         self._todo_summaries.pop(execution_id, None)
         self._active_tools.pop(execution_id, None)
 
-    def _activity_for_presentation(  # noqa: C901, PLR0911
+    def _activity_for_presentation(
         self, event_type: EventType, data: EventData, execution_id: str
     ) -> AgentExecutionActivityData | None:
         if event_type is EventType.AGENT_OUTPUT_CHUNK and isinstance(data, AgentOutputChunkData):

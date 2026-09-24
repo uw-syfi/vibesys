@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import http.client
 import json
 import signal
 import socket
 import subprocess
 import sys
 import threading
+from contextlib import nullcontext
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, cast
@@ -23,14 +25,21 @@ SOCIAL_CONFIG = EXAMPLES_ROOT / "social-network-kubernetes/.vibesys/tasks/kubern
 TRAIN_CONFIG = EXAMPLES_ROOT / "train-ticket-kubernetes/.vibesys/tasks/kubernetes/runtime.yaml"
 sys.path.insert(0, str(EVALUATOR_ROOT))
 
-from kubernetes_runtime import (  # noqa: E402
+from kubernetes_runtime import (  # noqa: E402  # lint-waiver: LW-006003; import the fixture module after adding its resource directory to sys.path.
     HTTPProbe,
     KubernetesConfig,
     KubernetesLifecycle,
     ServiceForward,
 )
-from kubernetes_runtime import cli as runtime_cli  # noqa: E402
-from kubernetes_runtime.control import LifecycleControlServer, request_action  # noqa: E402
+
+# lint-waiver: LW-006004 [E402]; import the fixture module after adding its resource directory to sys.path.
+from kubernetes_runtime import (  # noqa: E402
+    cli as runtime_cli,
+)
+from kubernetes_runtime.control import (  # noqa: E402  # lint-waiver: LW-006005; import the fixture module after adding its resource directory to sys.path.
+    LifecycleControlServer,
+    request_action,
+)
 
 
 class _Process:
@@ -54,8 +63,9 @@ class _Process:
 class _Runner:
     def __init__(self, *, fail_rollout: bool = False, malformed_create: bool = False) -> None:
         self.calls: list[list[str]] = []
+        self.inputs: list[str | None] = []
         self.timeouts: list[float] = []
-        self.token = ""
+        self.ownership_label = ""
         self.fail_rollout = fail_rollout
         self.malformed_create = malformed_create
         self.fail_delete_once = False
@@ -70,14 +80,15 @@ class _Runner:
     ) -> subprocess.CompletedProcess[str]:
         del cwd
         self.calls.append(command)
+        self.inputs.append(input_text)
         self.timeouts.append(timeout_seconds)
         if "create" in command:
             namespace = yaml.safe_load(input_text or "")
-            self.token = namespace["metadata"]["labels"]["vibesys.dev/evaluator-owned"]
+            self.ownership_label = namespace["metadata"]["labels"]["vibesys.dev/evaluator-owned"]
             output = "not-json" if self.malformed_create else '{"metadata":{"uid":"uid-1"}}'
             return subprocess.CompletedProcess(command, 0, output, "")
         if "get" in command and "namespace" in command:
-            output = f'{{"metadata":{{"uid":"uid-1","labels":{{"vibesys.dev/evaluator-owned":"{self.token}"}}}}}}'
+            output = f'{{"metadata":{{"uid":"uid-1","labels":{{"vibesys.dev/evaluator-owned":"{self.ownership_label}"}}}}}}'
             return subprocess.CompletedProcess(command, 0, output, "")
         if "get" in command and any(part.startswith("deployment/") for part in command):
             return subprocess.CompletedProcess(command, 0, "2", "")
@@ -85,10 +96,12 @@ class _Runner:
             return subprocess.CompletedProcess(command, 0, '{"items":[]}', "")
         if "rollout" in command and self.fail_rollout:
             self.fail_rollout = False
-            raise RuntimeError("rollout failed")  # noqa: TRY003
+            _failure_message = "rollout failed"
+            raise RuntimeError(_failure_message)
         if "delete" in command and "namespace" in command and self.fail_delete_once:
             self.fail_delete_once = False
-            raise RuntimeError("transient delete")  # noqa: TRY003
+            _failure_message = "transient delete"
+            raise RuntimeError(_failure_message)
         return subprocess.CompletedProcess(command, 0, "", "")
 
 
@@ -111,6 +124,35 @@ def _config(manifest: Path) -> KubernetesConfig:
     )
 
 
+def _service_manifest(directory: Path) -> Path:
+    manifest = directory / "manifest.yaml"
+    manifest.write_text(
+        "apiVersion: v1\nkind: Service\nmetadata:\n  name: frontend\n", encoding="utf-8"
+    )
+    return manifest
+
+
+def _start_lifecycle(
+    tmp_path: Path,
+    *,
+    config: KubernetesConfig | None = None,
+    runner: _Runner | None = None,
+    popen: Callable[..., _Process] | None = None,
+) -> tuple[KubernetesLifecycle, _Runner]:
+    _service_manifest(tmp_path)
+    active_runner = runner or _Runner()
+    active_config = config or _config(Path("manifest.yaml")).model_copy(update={"http_probes": ()})
+    lifecycle = KubernetesLifecycle(
+        active_config,
+        tmp_path,
+        config_dir=tmp_path,
+        runner=active_runner,
+        popen=popen or (lambda *_args, **_kwargs: _Process()),
+    )
+    lifecycle.start()
+    return lifecycle, active_runner
+
+
 def test_manifest_is_config_relative_and_namespace_scoped(tmp_path: Path) -> None:
     candidate = tmp_path / "candidate"
     config_dir = tmp_path / "config"
@@ -124,13 +166,22 @@ def test_manifest_is_config_relative_and_namespace_scoped(tmp_path: Path) -> Non
         "    spec:\n      containers: []\n",
         encoding="utf-8",
     )
+    config = _config(Path("deployment.yaml")).model_copy(update={"http_probes": ()})
+    runner = _Runner()
     lifecycle = KubernetesLifecycle(
-        _config(Path("deployment.yaml")), candidate, config_dir=config_dir
+        config,
+        candidate,
+        config_dir=config_dir,
+        runner=runner,
+        popen=lambda *_args, **_kwargs: _Process(),
     )
+    lifecycle.start()
+    apply_index = next(index for index, call in enumerate(runner.calls) if "apply" in call)
+    rendered = runner.inputs[apply_index]
+    assert rendered is not None
+    documents = list(yaml.safe_load_all(rendered))
 
-    documents = list(yaml.safe_load_all(lifecycle._render_manifests("owned-ns")))  # noqa: SLF001
-
-    assert documents[0]["metadata"]["namespace"] == "owned-ns"
+    assert documents[0]["metadata"]["namespace"] == lifecycle.namespace
     assert lifecycle.base_url == "http://127.0.0.1:15000"
     assert lifecycle.endpoints["users"] == "http://127.0.0.1:18080"
 
@@ -178,6 +229,48 @@ class _HTTPResponse(BytesIO):
     status = 200
 
 
+class _IncompleteHTTPResponse(http.client.BadStatusLine):
+    def __init__(self) -> None:
+        super().__init__("not ready")
+
+
+def test_http_probe_retries_incomplete_response(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(Path("manifest.yaml")).model_copy(
+        update={
+            "http_probes": (
+                HTTPProbe(endpoint="frontend", path="/ready", json_contains={"ready": True}),
+            )
+        }
+    )
+    _service_manifest(tmp_path)
+    runner = _Runner()
+    lifecycle = KubernetesLifecycle(
+        config,
+        tmp_path,
+        config_dir=tmp_path,
+        runner=runner,
+        popen=lambda *_args, **_kwargs: _Process(),
+    )
+    calls = 0
+
+    def open_probe(_opener: object, _url: str, timeout: float) -> _HTTPResponse:
+        nonlocal calls
+        assert timeout == 2
+        calls += 1
+        if calls == 1:
+            raise _IncompleteHTTPResponse
+        return _HTTPResponse(b'{"ready":true}')
+
+    monkeypatch.setattr("urllib.request.OpenerDirector.open", open_probe)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+
+    lifecycle.start()
+
+    assert calls == 2
+
+
 def test_http_probe_waits_for_expected_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -192,17 +285,32 @@ def test_http_probe_waits_for_expected_json(
             )
         }
     )
-    lifecycle = KubernetesLifecycle(config, tmp_path, config_dir=tmp_path)
+    _service_manifest(tmp_path)
+    lifecycle = KubernetesLifecycle(
+        config,
+        tmp_path,
+        config_dir=tmp_path,
+        runner=_Runner(),
+        popen=lambda *_args, **_kwargs: _Process(),
+    )
     responses = iter(
         [
             _HTTPResponse(b'{"data":[{"id":"seed-first"}]}'),
             _HTTPResponse(b'{"data":[{"id":"seed-first"},{"id":"seed-final"}]}'),
         ]
     )
-    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: next(responses))
+
+    def open_probe(_opener: object, _url: str, timeout: float) -> _HTTPResponse:
+        assert timeout == 2
+        return next(responses)
+
+    monkeypatch.setattr(
+        "urllib.request.OpenerDirector.open",
+        open_probe,
+    )
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
-    lifecycle._wait_http()  # noqa: SLF001
+    lifecycle.start()
 
 
 def test_http_probe_json_timeout_reports_expected_subset(
@@ -216,27 +324,41 @@ def test_http_probe_json_timeout_reports_expected_subset(
             ),
         }
     )
-    lifecycle = KubernetesLifecycle(config, tmp_path, config_dir=tmp_path)
+    _service_manifest(tmp_path)
+    lifecycle = KubernetesLifecycle(
+        config,
+        tmp_path,
+        config_dir=tmp_path,
+        runner=_Runner(),
+        popen=lambda *_args, **_kwargs: _Process(),
+    )
     times = iter([0.0, 0.0, 2.0])
     monkeypatch.setattr("time.monotonic", lambda: next(times))
+
+    def open_probe(_opener: object, _url: str, timeout: float) -> _HTTPResponse:
+        assert timeout == 2
+        return _HTTPResponse(b'{"ready":1}')
+
     monkeypatch.setattr(
-        "urllib.request.urlopen", lambda *_args, **_kwargs: _HTTPResponse(b'{"ready":1}')
+        "urllib.request.OpenerDirector.open",
+        open_probe,
     )
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
     with pytest.raises(TimeoutError, match=r"JSON does not contain \{'ready': True\}"):
-        lifecycle._wait_http()  # noqa: SLF001
+        lifecycle.start()
 
 
-def test_lifecycle_start_restart_reset_and_close(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_lifecycle_start_restart_reset_and_close(tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text(
         "apiVersion: v1\nkind: Service\nmetadata:\n  name: frontend\n", encoding="utf-8"
     )
     config = _config(Path("manifest.yaml")).model_copy(
-        update={"restart_deployments": ({"name": "frontend", "pod_selector": "app=frontend"},)}
+        update={
+            "restart_deployments": ({"name": "frontend", "pod_selector": "app=frontend"},),
+            "http_probes": (),
+        }
     )
     config = KubernetesConfig.model_validate(config.model_dump())
     runner = _Runner()
@@ -247,7 +369,6 @@ def test_lifecycle_start_restart_reset_and_close(
         processes.append(process)
         return process
 
-    monkeypatch.setattr(KubernetesLifecycle, "_wait_http", lambda _self: None)
     lifecycle = KubernetesLifecycle(
         config, tmp_path, config_dir=tmp_path, runner=runner, popen=popen
     )
@@ -311,18 +432,8 @@ def test_malformed_namespace_create_output_recovers_and_cleans(tmp_path: Path) -
 
 
 def test_foreign_namespace_is_never_deleted(tmp_path: Path) -> None:
-    manifest = tmp_path / "manifest.yaml"
-    manifest.write_text(
-        "apiVersion: v1\nkind: Service\nmetadata:\n  name: frontend\n", encoding="utf-8"
-    )
-    runner = _Runner()
-    lifecycle = KubernetesLifecycle(
-        _config(Path("manifest.yaml")), tmp_path, config_dir=tmp_path, runner=runner
-    )
-    lifecycle._namespace = "foreign"  # noqa: SLF001
-    lifecycle._namespace_uid = "uid-1"  # noqa: SLF001
-    lifecycle._ownership_token = "ownership-expected"  # noqa: S105, SLF001
-    runner.token = "ownership-different"  # noqa: S105
+    lifecycle, runner = _start_lifecycle(tmp_path)
+    runner.ownership_label = "ownership-different"
 
     with pytest.raises(RuntimeError, match="ownership changed"):
         lifecycle.close()
@@ -330,17 +441,16 @@ def test_foreign_namespace_is_never_deleted(tmp_path: Path) -> None:
 
 
 def test_foreign_namespace_is_never_scaled(tmp_path: Path) -> None:
-    runner = _Runner()
     config = _config(Path("manifest.yaml")).model_copy(
-        update={"restart_deployments": ({"name": "frontend", "pod_selector": "app=frontend"},)}
+        update={
+            "restart_deployments": ({"name": "frontend", "pod_selector": "app=frontend"},),
+            "http_probes": (),
+        }
     )
-    lifecycle = KubernetesLifecycle(
-        KubernetesConfig.model_validate(config.model_dump()), tmp_path, runner=runner
+    lifecycle, runner = _start_lifecycle(
+        tmp_path, config=KubernetesConfig.model_validate(config.model_dump())
     )
-    lifecycle._namespace = "foreign"  # noqa: SLF001
-    lifecycle._namespace_uid = "uid-1"  # noqa: SLF001
-    lifecycle._ownership_token = "ownership-expected"  # noqa: S105, SLF001
-    runner.token = "ownership-different"  # noqa: S105
+    runner.ownership_label = "ownership-different"
 
     with pytest.raises(RuntimeError, match="ownership changed"):
         lifecycle.stop()
@@ -348,23 +458,13 @@ def test_foreign_namespace_is_never_scaled(tmp_path: Path) -> None:
 
 
 def test_delete_failure_retains_ownership_for_retry(tmp_path: Path) -> None:
-    manifest = tmp_path / "manifest.yaml"
-    manifest.write_text(
-        "apiVersion: v1\nkind: Service\nmetadata:\n  name: frontend\n", encoding="utf-8"
-    )
-    runner = _Runner()
-    lifecycle = KubernetesLifecycle(
-        _config(Path("manifest.yaml")), tmp_path, config_dir=tmp_path, runner=runner
-    )
-    lifecycle._namespace = "owned"  # noqa: SLF001
-    lifecycle._namespace_uid = "uid-1"  # noqa: SLF001
-    lifecycle._ownership_token = "ownership-token"  # noqa: S105, SLF001
-    runner.token = "ownership-token"  # noqa: S105
+    lifecycle, runner = _start_lifecycle(tmp_path)
+    owned_namespace = lifecycle.namespace
     runner.fail_delete_once = True
 
     with pytest.raises(RuntimeError, match="transient delete"):
         lifecycle.close()
-    assert lifecycle.namespace == "owned"
+    assert lifecycle.namespace == owned_namespace
     lifecycle.close()
     with pytest.raises(RuntimeError, match="not started"):
         _ = lifecycle.namespace
@@ -554,10 +654,17 @@ def test_stop_forwards_survives_unkillable_forward_and_clears(tmp_path: Path) ->
         def wait(self, timeout: float | None = None) -> int:
             raise subprocess.TimeoutExpired("kubectl", timeout or 0)
 
-    lifecycle = KubernetesLifecycle(_config(Path("manifest.yaml")), tmp_path, config_dir=tmp_path)
-    lifecycle._forwards = [Stubborn(), Stubborn()]  # noqa: SLF001
-    lifecycle._stop_forwards()  # noqa: SLF001
-    assert lifecycle._forwards == []  # noqa: SLF001
+    forwards: list[Stubborn] = []
+
+    def start_forward(*_args: object, **_kwargs: object) -> Stubborn:
+        process = Stubborn()
+        forwards.append(process)
+        return process
+
+    lifecycle, _runner = _start_lifecycle(tmp_path, popen=start_forward)
+    lifecycle.close()
+    assert len(forwards) == 2
+    assert all(process.terminated for process in forwards)
 
 
 def _cli_lifecycle(closed: list[bool], *, fail_close: bool = False) -> type:
@@ -571,7 +678,8 @@ def _cli_lifecycle(closed: list[bool], *, fail_close: bool = False) -> type:
         def close(self) -> None:
             closed.append(True)
             if fail_close:
-                raise RuntimeError("cluster gone")  # noqa: TRY003
+                _failure_message = "cluster gone"
+                raise KeyError(_failure_message)
 
         def stop(self) -> None:
             return None
@@ -603,6 +711,7 @@ def test_cli_close_failure_preserves_child_exit_code(
     monkeypatch.setattr(runtime_cli, "load_config", lambda _path: object())
     monkeypatch.setattr(runtime_cli, "KubernetesLifecycle", lambda *_a, **_k: lifecycle_type())
     monkeypatch.setattr(runtime_cli.subprocess, "Popen", lambda *_a, **_k: Child())
+    prior_handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
 
     result = runtime_cli.main(
         ["--config", str(config), "--candidate-dir", str(tmp_path), "--", "x"]
@@ -611,6 +720,7 @@ def test_cli_close_failure_preserves_child_exit_code(
     assert result == 7
     assert closed == [True]
     assert "cleanup failed" in capsys.readouterr().err
+    assert all(signal.getsignal(sig) == handler for sig, handler in prior_handlers.items())
 
 
 def test_cli_cleanup_survives_vanished_or_unkillable_child(
@@ -648,15 +758,53 @@ def test_cli_cleanup_survives_vanished_or_unkillable_child(
     assert signal.getsignal(signal.SIGTERM) == original_signal
 
 
-def test_cli_renders_managed_lifecycle_control_commands(tmp_path: Path) -> None:
-    lifecycle = cast(
-        "KubernetesLifecycle",
-        type("Lifecycle", (), {"base_url": "http://frontend", "endpoints": {}})(),
-    )
-    socket_path = tmp_path / "control.sock"
+def test_cli_renders_managed_lifecycle_control_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = tmp_path / "runtime.yaml"
+    config.write_text("{}", encoding="utf-8")
+    launched: list[list[str]] = []
 
-    rendered = runtime_cli._render_command(  # noqa: SLF001
+    class Lifecycle:
+        base_url = "http://frontend"
+        endpoints: ClassVar[dict[str, str]] = {"frontend": base_url}
+
+        def start(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def start_stopped(self) -> None:
+            return None
+
+    class Child:
+        def poll(self) -> int:
+            return 0
+
+        def wait(self) -> int:
+            return 0
+
+    def launch(command: list[str], **_kwargs: object) -> Child:
+        launched.append(command)
+        return Child()
+
+    monkeypatch.setattr(runtime_cli, "load_config", lambda _path: object())
+    monkeypatch.setattr(runtime_cli, "KubernetesLifecycle", lambda *_a, **_k: Lifecycle())
+    monkeypatch.setattr(runtime_cli, "LifecycleControlServer", lambda *_a, **_k: nullcontext())
+    monkeypatch.setattr(runtime_cli.subprocess, "Popen", launch)
+    monkeypatch.setattr(runtime_cli.signal, "signal", lambda *_args: signal.SIG_DFL)
+
+    result = runtime_cli.main(
         [
+            "--config",
+            str(config),
+            "--candidate-dir",
+            str(tmp_path),
+            "--",
             "checker",
             "--stop-command-json",
             "${KUBERNETES_STOP_COMMAND_JSON}",
@@ -664,17 +812,22 @@ def test_cli_renders_managed_lifecycle_control_commands(tmp_path: Path) -> None:
             "${KUBERNETES_START_COMMAND_JSON}",
             "--cleanup-command-json",
             "${KUBERNETES_CLEANUP_COMMAND_JSON}",
-        ],
-        lifecycle,
-        socket_path,
+        ]
     )
 
+    assert result == 0
+    rendered = launched[0]
     stop = json.loads(rendered[2])
     start = json.loads(rendered[4])
     cleanup = json.loads(rendered[6])
-    assert stop[-3:] == ["--control", str(socket_path), "stop"]
-    assert start[-3:] == ["--control", str(socket_path), "start"]
-    assert cleanup[-3:] == ["--control", str(socket_path), "cleanup"]
+    assert stop[-1] == "stop"
+    assert stop[0] == sys.executable
+    assert stop[-3] == "--control"
+    assert stop[-2].endswith("/control.sock")
+    assert start[-3] == cleanup[-3] == "--control"
+    assert start[-2] == cleanup[-2] == stop[-2]
+    assert start[-1] == "start"
+    assert cleanup[-1] == "cleanup"
 
 
 def test_cli_signal_during_startup_closes_lifecycle(
@@ -719,7 +872,19 @@ def test_social_network_assets_build_and_override_candidate_services() -> None:
         config_dir=SOCIAL_CONFIG.parent,
     )
 
-    rendered = lifecycle._render_manifests("social-validation")  # noqa: SLF001
+    lifecycle_config = config.model_copy(update={"http_probes": ()})
+    runner = _Runner()
+    lifecycle = KubernetesLifecycle(
+        lifecycle_config,
+        Path("examples/microservices/repositories"),
+        config_dir=SOCIAL_CONFIG.parent,
+        runner=runner,
+        popen=lambda *_args, **_kwargs: _Process(),
+    )
+    lifecycle.start()
+    apply_index = next(index for index, call in enumerate(runner.calls) if "apply" in call)
+    rendered = runner.inputs[apply_index]
+    assert rendered is not None
     documents = list(yaml.safe_load_all(rendered))
 
     assert len(config.image_builds) == 1
@@ -727,7 +892,7 @@ def test_social_network_assets_build_and_override_candidate_services() -> None:
     assert len(config.image_overrides) == 11
     assert all(override.image == "${IMAGE:candidate}" for override in config.image_overrides)
     assert "kind: Namespace" not in rendered
-    assert rendered.count("namespace: social-validation") == 78
+    assert rendered.count(f"namespace: {lifecycle.namespace}") == 78
     mongodb_deployments = [
         document
         for document in documents
@@ -779,9 +944,18 @@ def test_train_ticket_assets_build_current_java_modules(tmp_path: Path) -> None:
     source = candidate / "train-ticket"
     source.mkdir(parents=True)
     config = runtime_cli.load_config(TRAIN_CONFIG)
-    lifecycle = KubernetesLifecycle(config, candidate, config_dir=TRAIN_CONFIG.parent)
-
-    rendered = lifecycle._render_manifests("train-validation")  # noqa: SLF001
+    runner = _Runner()
+    lifecycle = KubernetesLifecycle(
+        config.model_copy(update={"http_probes": ()}),
+        candidate,
+        config_dir=TRAIN_CONFIG.parent,
+        runner=runner,
+        popen=lambda *_args, **_kwargs: _Process(),
+    )
+    lifecycle.start()
+    apply_index = next(index for index, call in enumerate(runner.calls) if "apply" in call)
+    rendered = runner.inputs[apply_index]
+    assert rendered is not None
     dockerfile = (TRAIN_CONFIG.parent / "Dockerfile").read_text(encoding="utf-8")
 
     assert {build.build_args["MODULE"] for build in config.image_builds} == {
@@ -797,7 +971,7 @@ def test_train_ticket_assets_build_current_java_modules(tmp_path: Path) -> None:
     assert "mvn -B" in dockerfile
     assert "COPY . ." in dockerfile
     assert "COPY target" not in dockerfile
-    assert rendered.count("namespace: train-validation") == 24
+    assert rendered.count(f"namespace: {lifecycle.namespace}") == 24
     documents = list(yaml.safe_load_all(rendered))
     deployments = {
         document["metadata"]["name"]: document
@@ -829,9 +1003,7 @@ def test_train_ticket_assets_build_current_java_modules(tmp_path: Path) -> None:
         assert probe["tcpSocket"]["port"] == 27017
 
 
-def test_candidate_image_is_built_once_and_reused_across_reset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_candidate_image_is_built_once_and_reused_across_reset(tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text(
         "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: frontend\n",
@@ -856,10 +1028,10 @@ def test_candidate_image_is_built_once_and_reused_across_reset(
                     "image": "${IMAGE:candidate}",
                 }
             ],
+            "http_probes": [],
         }
     )
     runner = _Runner()
-    monkeypatch.setattr(KubernetesLifecycle, "_wait_http", lambda _self: None)
     lifecycle = KubernetesLifecycle(
         KubernetesConfig.model_validate(config_data),
         tmp_path,

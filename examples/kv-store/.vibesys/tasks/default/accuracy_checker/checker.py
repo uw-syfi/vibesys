@@ -1,8 +1,6 @@
 """Accuracy checker: compare a candidate KV server against a Redis oracle.
-
 The candidate server must already be running. This starts its own Redis oracle
 and runs two correctness phases against both, diffing every reply:
-
   1. Sequential — a deterministic single-connection operation stream, checked in
      lock-step (per-op semantics).
   2. Concurrent — many client threads under load, since the objective rewards
@@ -11,7 +9,6 @@ and runs two correctness phases against both, diffing every reply:
      deterministic despite concurrency; a final reconciliation reads every key
      back over several fresh connections to expose split-brain (e.g. per-process
      unshared maps behind SO_REUSEPORT) and lost concurrent writes.
-
 Usage:
     python checker.py --port 6380
     python checker.py --port 6380 --num-ops 10000
@@ -76,7 +73,6 @@ def _next_operation(rng, num_keys, prefix=""):
     deterministic even under load."""
     kind = rng.choices(["SET", "GET", "DEL", "HSET", "HGETALL"], weights=[30, 35, 5, 20, 10])[0]
     key = f"{prefix}key:{rng.randint(0, num_keys - 1):06d}"
-
     if kind == "SET":
         return Operation(kind, "set", (key, f"v:{rng.randint(0, 999999)}"), {})
     if kind == "GET":
@@ -129,7 +125,6 @@ def _sequential_phase(oracle, candidate, num_ops, num_keys, seed):
     mismatches = 0
     for i in range(num_ops):
         op = _next_operation(rng, num_keys)
-
         expected = getattr(oracle, op.method)(*op.args, **op.kwargs)
         try:
             actual = getattr(candidate, op.method)(*op.args, **op.kwargs)
@@ -142,7 +137,6 @@ def _sequential_phase(oracle, candidate, num_ops, num_keys, seed):
                 print("  candidate connection lost — aborting run")
                 break
             continue
-
         if expected != actual:
             mismatches += 1
             if mismatches <= 10:
@@ -220,7 +214,6 @@ def _concurrent_phase(oracle, oracle_port, args):
     oracle.flushdb()
     _client(args.port).flushdb()
     per_thread = max(1, args.concurrent_ops // args.threads)
-
     with ThreadPoolExecutor(max_workers=args.threads) as pool:
         inflight = sum(
             pool.map(
@@ -230,11 +223,9 @@ def _concurrent_phase(oracle, oracle_port, args):
                 range(args.threads),
             )
         )
-
     candidate_conns = [_client(args.port) for _ in range(args.verify_conns)]
     stress_keys = sorted(oracle.keys("*"))
     stress_recon = _reconcile(oracle, candidate_conns, stress_keys, "concurrent")
-
     hash_keys = [f"shared:h:{i}" for i in range(8)]
     with ThreadPoolExecutor(max_workers=args.threads) as pool:
         fanin_errors = sum(
@@ -244,7 +235,6 @@ def _concurrent_phase(oracle, oracle_port, args):
             )
         )
     fanin = fanin_errors + _reconcile(oracle, candidate_conns, hash_keys, "shared-hash")
-
     print(
         f"  concurrent: threads={args.threads} ops={per_thread * args.threads} "
         f"inflight_mismatches={inflight} reconciled_keys={len(stress_keys)} "
@@ -284,24 +274,19 @@ def main():
         "--no-concurrent", action="store_true", help="Run only the sequential phase."
     )
     args = parser.parse_args()
-
     assert _wait_until_listening(args.port, timeout=5), (
         f"Candidate not responding on port {args.port}"
     )
-
     oracle, oracle_port = _start_oracle()
     candidate = _client(args.port)
     oracle.flushdb()
     candidate.flushdb()
-
     print("=== SEQUENTIAL ===")
     mismatches = _sequential_phase(oracle, candidate, args.num_ops, args.num_keys, args.seed)
     print(f"  sequential: ops={args.num_ops} mismatches={mismatches}")
-
     if not args.no_concurrent:
         print("=== CONCURRENT ===")
         mismatches += _concurrent_phase(oracle, oracle_port, args)
-
     print(f"\nTotal mismatches: {mismatches}")
     print("ALL CHECKS PASSED" if mismatches == 0 else "ACCURACY CHECK FAILED")
     sys.exit(0 if mismatches == 0 else 1)

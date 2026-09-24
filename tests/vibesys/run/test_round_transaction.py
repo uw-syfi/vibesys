@@ -23,6 +23,7 @@ from vs_project.api import (
     AgentRunConfiguration,
     Project,
     RunEnvironmentRecord,
+    StateSlot,
     StateTransition,
     serialize_round,
 )
@@ -94,7 +95,7 @@ def _project(tmp_path: Path) -> tuple[Project, GitTracker, RoundTransactionCoord
     )
 
 
-def _state_slot(project: Project):  # noqa: ANN202
+def _state_slot(project: Project) -> StateSlot[_AgentState]:
     return project.state.portable_namespace(_RUN_ID, "agent").slot(
         "state.json",
         _AgentState,
@@ -179,7 +180,7 @@ def test_recovery_restores_an_already_committed_state_file(
     transition = _transition(project, active=None, rounds=(1,))
     transaction = coordinator.begin(1, state_transition=transition)
 
-    original_clear = coordinator._clear_journal  # noqa: SLF001
+    original_clear = coordinator._clear_journal
     monkeypatch.setattr(coordinator, "_clear_journal", lambda: None)
     transaction.complete()
     monkeypatch.setattr(coordinator, "_clear_journal", original_clear)
@@ -232,7 +233,8 @@ def test_snapshot_failure_remains_recoverable(
     original_snapshot = tracker.snapshot_with_framework_metadata
 
     def fail_snapshot(_label: str, _snapshot: object) -> None:
-        raise RuntimeError("simulated process failure")  # noqa: TRY003
+        _failure_message = "simulated process failure"
+        raise RuntimeError(_failure_message)
 
     monkeypatch.setattr(tracker, "snapshot_with_framework_metadata", fail_snapshot)
     with pytest.raises(RuntimeError, match="simulated process failure"):

@@ -11,7 +11,7 @@ from dataclasses import replace
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import Any, TextIO, TypeVar, overload
+from typing import Any, TextIO, TypeVar, cast, overload
 
 from pydantic import BaseModel
 
@@ -83,6 +83,7 @@ from vibesys.run.round_transaction import (
     RoundRecoveryOutcome,
     RoundTransaction,
     RoundTransactionCoordinator,
+    RoundTransactionError,
 )
 from vibesys.sandbox.run_environment import (
     RunEnvironment,
@@ -135,9 +136,9 @@ def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
         return None
     p = Path(raw).expanduser().resolve()
     if not p.exists():
-        raise ValueError(f"{label} path does not exist: {raw}")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"{label} path does not exist: {raw}")  # noqa: TRY003  # lint-waiver: LW-008198 [TRY003]; preserve CLI ValueError handling and include the rejected path value.
     if not p.is_dir():
-        raise ValueError(f"{label} path is not a directory: {raw}")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"{label} path is not a directory: {raw}")  # noqa: TRY003  # lint-waiver: LW-008199 [TRY003]; preserve CLI ValueError handling and include the rejected path value.
     return p
 
 
@@ -219,14 +220,14 @@ def _coerce_skills_dirs(raw_dirs: list[str] | None) -> list[Path]:
             p = PROJECT_ROOT / p
         p = p.resolve()
         if not p.exists():
-            raise ValueError(f"--skills-dir path does not exist: {raw}")  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"--skills-dir path does not exist: {raw}")  # noqa: TRY003  # lint-waiver: LW-008200 [TRY003]; preserve CLI ValueError handling and the invalid --skills-dir value.
         if not p.is_dir():
-            raise ValueError(f"--skills-dir path is not a directory: {raw}")  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"--skills-dir path is not a directory: {raw}")  # noqa: TRY003  # lint-waiver: LW-008201 [TRY003]; preserve CLI ValueError handling and the invalid --skills-dir value.
         result.append(p)
     return result
 
 
-def create_run_context(  # noqa: PLR0913  # tracked: #288
+def create_run_context(  # noqa: PLR0913  # lint-waiver: LW-008202 [PLR0913]; the CLI factory preserves its named setup options as a stable caller interface.
     config: Config,
     exp_name: str,
     input_path: str,
@@ -311,14 +312,14 @@ def _close_after_construction_failure(
     """Unwind partial resource construction without replacing its root cause."""
     try:
         teardown_stack.close()
-    except BaseException as cleanup_error:  # noqa: BLE001  # tracked: #288
+    except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-008203 [BLE001]; cleanup must annotate the original construction failure even if teardown raises a BaseException.
         construction_error.add_note(
             "Additional error while cleaning up partial resource construction: "
             f"{type(cleanup_error).__name__}: {cleanup_error}"
         )
 
 
-def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
+def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered resource setup and ExitStack rollback share mutable lifecycle state, which helper boundaries would obscure.
     *,
     teardown_stack: ExitStack,
     config: Config,
@@ -386,11 +387,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             run_id = exp_name if existing else generate_run_id(exp_name)
             collection_root = runs_dir.expanduser().resolve() if runs_dir is not None else None
             copied_project = not existing and collection_root is not None
-            if copied_project:
-                assert collection_root is not None  # noqa: S101  # tracked: #288
-                project_root = collection_root / run_id
-            else:
-                project_root = input_dir
+            project_root = collection_root / run_id if copied_project else input_dir
             evaluator_source = _coerce_dir(evaluator_path, "evaluator.source")
 
             if not copied_project and workspace_sources:
@@ -488,10 +485,10 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             environment_patch: EnvironmentPatch | None = None
 
             def _teardown_environment_hooks() -> None:
-                assert environment_context is not None  # noqa: S101  # tracked: #288
+                context = cast("EnvironmentContext", environment_context)
                 try:
-                    hooks.teardown(environment_context)
-                except Exception as exc:  # noqa: BLE001  # tracked: #288
+                    hooks.teardown(context)
+                except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-008205 [BLE001]; hook teardown is best effort and logs arbitrary hook failures without masking run cleanup.
                     hook_log[0](f"[warn] environment hook teardown failed: {exc}")
 
             workspace_files = Workspace(
@@ -504,7 +501,6 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             )
             construction_complete = False
             if copied_project:
-                assert collection_root is not None  # noqa: S101  # tracked: #288
 
                 def _remove_incomplete_project() -> None:
                     if not construction_complete and project_root.exists():
@@ -593,7 +589,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                     evaluator_source=evaluator_source,
                 ),
             )
-            git.init(existing, trusted_input_baseline=trusted_input_baseline)
+            git.init(existing=existing, trusted_input_baseline=trusted_input_baseline)
         with boot_trace.span("project_state_resume"):
             effective_configuration = project_configuration.model_copy(
                 update={"profiler": resolved_profiler_kind.value}
@@ -754,7 +750,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 )
                 environment_patch = hooks.prepare(environment_context)
                 teardown_stack.callback(_teardown_environment_hooks)
-            assert environment_patch is not None  # noqa: S101  # tracked: #288
+            environment_patch = cast("EnvironmentPatch", environment_patch)
 
             plan = workspace_files.plan_setup(
                 existing=True,
@@ -1010,7 +1006,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
     return result
 
 
-def create_candidate_context(  # noqa: PLR0913  # tracked: #288
+def create_candidate_context(  # noqa: PLR0913  # lint-waiver: LW-008206 [PLR0913]; this factory keeps candidate workspace options explicit for its caller.
     parent: "_RunContext",
     *,
     config: Config,
@@ -1055,7 +1051,7 @@ def create_candidate_context(  # noqa: PLR0913  # tracked: #288
         raise
 
 
-def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
+def _assemble_candidate_context(  # noqa: PLR0913  # lint-waiver: LW-008207 [PLR0913]; these values are the candidate's resource ownership boundary and are assembled together for teardown.
     *,
     teardown_stack: ExitStack,
     parent: "_RunContext",
@@ -1250,7 +1246,7 @@ class _RunContext:
     sandbox session.
     """
 
-    def __init__(  # noqa: ANN204, PLR0913  # tracked: #288
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-008208 [PLR0913]; `_RunContext` receives already-owned runtime resources explicitly, without a second mutable parameter container.
         self,
         *,
         backend: ComputeBackend,
@@ -1291,7 +1287,7 @@ class _RunContext:
         run_id: str,
         round_transaction_coordinator: RoundTransactionCoordinator | None = None,
         agent_host_resources: tuple[HostResource, ...] = (),
-    ):
+    ) -> None:
         self.backend = backend
         # Retained so a candidate sub-context can hand its own agent runner the
         # same declarations the parent computed, rather than recomputing them
@@ -1370,7 +1366,7 @@ class _RunContext:
         if self._round_transaction_coordinator is None:
             return
         if self._pending_round_transaction is not None:
-            raise RuntimeError("a completed-round transaction is already active")  # noqa: TRY003  # tracked: #288
+            raise RoundTransactionError.already_active()
         self._pending_round_transaction = self._round_transaction_coordinator.begin(
             round_number,
             state_transition=state_transition,
@@ -1382,7 +1378,7 @@ class _RunContext:
             return
         transaction = self._pending_round_transaction
         if transaction is None:
-            raise RuntimeError("begin_completed_round must precede project round persistence")  # noqa: TRY003  # tracked: #288
+            raise RoundTransactionError.begin_required()
         transaction.complete()
         self._pending_round_transaction = None
 
@@ -1453,7 +1449,7 @@ class _RunContext:
             return None
         return self._progress_stack[-1]
 
-    def invoke(  # noqa: PLR0913  # tracked: #288
+    def invoke(  # noqa: PLR0913  # lint-waiver: LW-008209 [PLR0913]; this typed wrapper keeps core agent options named while preserving direct provider-extension forwarding.
         self,
         *,
         kind: str,
@@ -1463,7 +1459,7 @@ class _RunContext:
         fallback_factory: Callable[[], T],
         round_label: str = "",
         progress: AgentProgress | None = None,
-        **extra: Any,  # noqa: ANN401  # tracked: #288
+        **extra: Any,  # noqa: ANN401  # lint-waiver: LW-008210 [ANN401]; arbitrary provider-specific options are forwarded unchanged to the protocol method.
     ) -> T:
         """Invoke an agent through ``self.agent_client`` with workspace+env defaults.
 
@@ -1539,10 +1535,11 @@ class _RunContext:
                 progress=progress if progress is not None else self.current_progress(),
                 **extra,
             )
-            return result  # noqa: RET504, TRY300  # tracked: #288
         except BaseException as exc:
             error = exc
             raise
+        else:
+            return result
         finally:
             status = _execution_status(error)
             error_text = f"{type(error).__name__}: {error}" if error is not None else None

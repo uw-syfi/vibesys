@@ -22,7 +22,7 @@ MAX_CHANGED_FILES = 3_000
 MAX_GITHUB_LOGIN_LENGTH = 39
 MAX_GRAPHQL_ERROR_TYPES = 5
 API_TIMEOUT_SECONDS = 30
-LANDING_TOKEN_ENV = "LANDING_GH_TOKEN"  # noqa: S105  # env var name, not a secret
+LANDING_CREDENTIAL_ENV_NAME = "LANDING_GH_TOKEN"
 HARD_DENIED_PATHS = frozenset(
     {
         ".github/delegated-merge.toml",
@@ -244,7 +244,7 @@ def landing_client(environ: Mapping[str, str] = os.environ) -> GitHubAPI | None:
     enqueued with ``GITHUB_TOKEN`` do not start the merge queue's CI. It is
     never derived from, or replaced by, the read token.
     """
-    token = environ.get(LANDING_TOKEN_ENV, "").strip()
+    token = environ.get(LANDING_CREDENTIAL_ENV_NAME, "").strip()
     return GitHubAPI(_token=token) if token else None
 
 
@@ -772,7 +772,7 @@ def run(event_path: Path, *, api: GitHubClient, landing_api: GitHubClient | None
         _refuse("the pull request changed during validation; rerun the command")
     if landing_api is None:
         _refuse(
-            f"the landing token is not configured ({LANDING_TOKEN_ENV} is empty); "
+            f"the landing token is not configured ({LANDING_CREDENTIAL_ENV_NAME} is empty); "
             "see .github/delegated-merge.md, Setup"
         )
     strategy = choose_strategy(queue, landing_api, stack_position=read_stack_position(refreshed))

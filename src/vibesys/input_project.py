@@ -25,7 +25,9 @@ from vibesys.sdk_paths import (
 
 
 @dataclass(frozen=True)
-class InputDependency:  # noqa: D101  # tracked: #288
+class InputDependency:
+    """One input-project dependency and its candidate workspace location."""
+
     name: str
     source_path: Path
     workspace_path: Path
@@ -128,7 +130,7 @@ def _collect_sdk_dependencies(
     def visit(current: Path) -> None:
         current = current.resolve()
         if current in visiting:
-            raise InputProjectError(f"Cyclic input dependency involving {current}")  # noqa: TRY003  # tracked: #288
+            raise InputProjectError(f"Cyclic input dependency involving {current}")
         visiting.add(current)
         try:
             for dep_name, raw_path in _path_sources(current).items():
@@ -219,7 +221,7 @@ def _rewrite_pyproject_text(
         if in_uv_sources:
             for source_name, (old_path, new_path) in replacements.items():
                 if re.match(rf"\s*{re.escape(source_name)}\s*=", line):
-                    line = re.sub(  # noqa: PLW2901  # tracked: #288
+                    line = re.sub(
                         rf"(path\s*=\s*['\"]){re.escape(old_path)}(['\"])",
                         lambda match, replacement=new_path: (
                             f"{match.group(1)}{replacement}{match.group(2)}"

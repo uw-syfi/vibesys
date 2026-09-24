@@ -21,7 +21,7 @@ class HypothesisReview(StrEnum):
     """Independent review state, separate from empirical resolution."""
 
     PENDING = "pending"
-    PASS = "pass"  # noqa: S105  # tracked: #288
+    PASS = "pass"
     FAIL = "fail"
     DEFERRED = "deferred"
 
@@ -95,9 +95,7 @@ class ProfileGuidedComponent(BaseModel):
         ):
             rounds = [sample.round for sample in samples]
             if rounds != sorted(set(rounds)):
-                raise ValueError(  # noqa: TRY003
-                    f"{name} history rounds must be unique and ordered"
-                )
+                raise ValueError(f"{name} history rounds must be unique and ordered")
         return self
 
 
@@ -113,16 +111,14 @@ class ProfileGuidanceState(BaseModel):
     def _valid_cursor(self) -> Self:
         names = [component.name for component in self.components]
         if len(names) != len(set(names)):
-            raise ValueError("profile-guided component names must be unique")  # noqa: TRY003
+            raise ValueError("profile-guided component names must be unique")
         active = [
             component.name
             for component in self.components
             if component.status is ProfileGuidanceStatus.ACTIVE
         ]
         if active != ([self.active_component] if self.active_component is not None else []):
-            raise ValueError(  # noqa: TRY003
-                "active_component must name the only active component"
-            )
+            raise ValueError("active_component must name the only active component")
         return self
 
 
@@ -189,18 +185,12 @@ class Hypothesis(BaseModel):
     @model_validator(mode="after")
     def _valid_identity(self) -> Self:
         if self.plan.hypothesis_id != self.hypothesis_id:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "plan hypothesis_id must match its owning hypothesis"
-            )
+            raise ValueError("plan hypothesis_id must match its owning hypothesis")
         round_numbers = [record.round_number for record in self.rounds]
         if round_numbers != sorted(set(round_numbers)):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "hypothesis rounds must be unique and ordered"
-            )
+            raise ValueError("hypothesis rounds must be unique and ordered")
         if any(record.hypothesis_id != self.hypothesis_id for record in self.rounds):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "round hypothesis_id must match its owning hypothesis"
-            )
+            raise ValueError("round hypothesis_id must match its owning hypothesis")
         return self
 
     def clone(self) -> Hypothesis:
@@ -235,22 +225,18 @@ class AgentRunState(BaseModel):
     def _valid_identity(self) -> Self:
         identifiers = [item.hypothesis_id for item in self.hypotheses]
         if len(set(identifiers)) != len(identifiers):
-            raise ValueError("hypothesis IDs must be unique")  # noqa: TRY003  # tracked: #288
+            raise ValueError("hypothesis IDs must be unique")
         if self.active_hypothesis_id is not None:
             active = self.by_id(self.active_hypothesis_id)
             if active is None:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
-                    "active_hypothesis_id must name a known hypothesis"
-                )
+                raise ValueError("active_hypothesis_id must name a known hypothesis")
             if active.strategy is not HypothesisStrategy.AVAILABLE:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
-                    "the active hypothesis must be strategically available"
-                )
+                raise ValueError("the active hypothesis must be strategically available")
         round_numbers = [
             record.round_number for hypothesis in self.hypotheses for record in hypothesis.rounds
         ]
         if len(set(round_numbers)) != len(round_numbers):
-            raise ValueError("round numbers must be globally unique")  # noqa: TRY003  # tracked: #288
+            raise ValueError("round numbers must be globally unique")
         return self
 
     def by_id(self, hypothesis_id: str) -> Hypothesis | None:

@@ -2,6 +2,7 @@
 
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from tests.server.support import ServerParts, build_server_parts
@@ -62,7 +63,7 @@ def _enter_boundary(parts: ServerParts, kind: str, round_label: str, user_prompt
     return execution.user_prompt
 
 
-def test_pause_takes_effect_at_next_safe_point(tmp_path):  # noqa: ANN001, ANN201
+def test_pause_takes_effect_at_next_safe_point(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
     parts.control.request_pause()
@@ -80,7 +81,7 @@ def test_pause_takes_effect_at_next_safe_point(tmp_path):  # noqa: ANN001, ANN20
     assert result == ["prompt"]
 
 
-def test_steering_is_injected_once(tmp_path):  # noqa: ANN001, ANN201
+def test_steering_is_injected_once(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.control.queue_steer("focus on the KV cache")
 
@@ -99,7 +100,7 @@ def test_steering_is_injected_once(tmp_path):  # noqa: ANN001, ANN201
     assert _enter_boundary(parts, "judge", "round 1", "Review it") == "Review it"
 
 
-def test_steering_queued_while_paused_applies_on_resume(tmp_path):  # noqa: ANN001, ANN201
+def test_steering_queued_while_paused_applies_on_resume(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
     parts.control.request_pause()
@@ -120,7 +121,7 @@ def test_steering_queued_while_paused_applies_on_resume(tmp_path):  # noqa: ANN0
     assert "check for reward hacking" in result[0]
 
 
-def test_api_control_commands_ack_and_reach_controller(tmp_path):  # noqa: ANN001, ANN201
+def test_api_control_commands_ack_and_reach_controller(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
 
     pause = parts.api.execute(PauseCommand())
@@ -136,7 +137,7 @@ def test_api_control_commands_ack_and_reach_controller(tmp_path):  # noqa: ANN00
     assert "prioritize latency" in _enter_boundary(parts, "implementer", "round 1", "Work")
 
 
-def test_finish_is_idempotent_and_interrupts_controlled_executions(tmp_path):  # noqa: ANN001, ANN201
+def test_finish_is_idempotent_and_interrupts_controlled_executions(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
 
@@ -156,7 +157,7 @@ def test_finish_is_idempotent_and_interrupts_controlled_executions(tmp_path):  #
     assert finished.status is EventStatus.INTERRUPTED
 
 
-def test_pause_is_pending_until_the_invocation_boundary(tmp_path):  # noqa: ANN001, ANN201
+def test_pause_is_pending_until_the_invocation_boundary(tmp_path: Path) -> None:
     """`/pause` is a request: the call in flight keeps running until it ends."""
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
@@ -168,7 +169,7 @@ def test_pause_is_pending_until_the_invocation_boundary(tmp_path):  # noqa: ANN0
     assert parts.api.snapshot().status is RunStatus.PAUSED
 
 
-def test_every_transition_publishes_exactly_one_status_event(tmp_path):  # noqa: ANN001, ANN201
+def test_every_transition_publishes_exactly_one_status_event(tmp_path: Path) -> None:
     """The status a client folds is the status the controller holds."""
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
@@ -200,7 +201,7 @@ def test_every_transition_publishes_exactly_one_status_event(tmp_path):  # noqa:
     ]
 
 
-def test_resume_before_the_boundary_cancels_the_pending_pause(tmp_path):  # noqa: ANN001, ANN201
+def test_resume_before_the_boundary_cancels_the_pending_pause(tmp_path: Path) -> None:
     """A resume that beats the boundary leaves no pause to apply later."""
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
@@ -216,7 +217,7 @@ def test_resume_before_the_boundary_cancels_the_pending_pause(tmp_path):  # noqa
     ]
 
 
-def test_pause_applies_without_a_matching_execution(tmp_path):  # noqa: ANN001, ANN201
+def test_pause_applies_without_a_matching_execution(tmp_path: Path) -> None:
     """The compatibility boundary is still a boundary, and still publishes."""
     parts = build_server_parts(tmp_path)
     parts.controller.pause_after_call()
@@ -227,7 +228,7 @@ def test_pause_applies_without_a_matching_execution(tmp_path):  # noqa: ANN001, 
     assert _status_changes(parts)[-1] == (RunStatus.PAUSING, RunStatus.PAUSED)
 
 
-def test_snapshot_status_agrees_with_the_fold_at_the_terminal_event(tmp_path):  # noqa: ANN001, ANN201
+def test_snapshot_status_agrees_with_the_fold_at_the_terminal_event(tmp_path: Path) -> None:
     """No sequence containing the terminal event can still read as running."""
     parts = build_server_parts(tmp_path)
     parts.core_events.emit(CoreEventType.RUN_FINISHED, status=CoreEventStatus.COMPLETED)
@@ -243,7 +244,7 @@ def test_snapshot_status_agrees_with_the_fold_at_the_terminal_event(tmp_path):  
     assert [event.type for event in parts.journal.read()].count(EventType.RUN_FINISHED) == 1
 
 
-def test_stop_is_pending_until_the_invocation_boundary(tmp_path):  # noqa: ANN001, ANN201
+def test_stop_is_pending_until_the_invocation_boundary(tmp_path: Path) -> None:
     """`/stop` is a request: the call in flight keeps running until it ends."""
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
@@ -271,7 +272,7 @@ def test_stop_is_pending_until_the_invocation_boundary(tmp_path):  # noqa: ANN00
     ]
 
 
-def test_stopped_run_refuses_the_next_controlled_invocation(tmp_path):  # noqa: ANN001, ANN201
+def test_stopped_run_refuses_the_next_controlled_invocation(tmp_path: Path) -> None:
     """After the stop lands, entering the next boundary unwinds the run."""
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
@@ -282,7 +283,7 @@ def test_stopped_run_refuses_the_next_controlled_invocation(tmp_path):  # noqa: 
         _enter_boundary(parts, "judge", "round 1", "review")
 
 
-def test_stop_requested_between_invocations_starts_no_further_call(tmp_path):  # noqa: ANN001, ANN201
+def test_stop_requested_between_invocations_starts_no_further_call(tmp_path: Path) -> None:
     """The entry side of the boundary is a boundary: nothing else starts."""
     parts = build_server_parts(tmp_path)
     parts.control.request_stop()
@@ -297,7 +298,7 @@ def test_stop_requested_between_invocations_starts_no_further_call(tmp_path):  #
     )
 
 
-def test_stop_releases_the_pause_wait_and_ends_the_run(tmp_path):  # noqa: ANN001, ANN201
+def test_stop_releases_the_pause_wait_and_ends_the_run(tmp_path: Path) -> None:
     """A stop from `paused` wakes the parked thread and ends without a call."""
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
@@ -310,7 +311,7 @@ def test_stop_releases_the_pause_wait_and_ends_the_run(tmp_path):  # noqa: ANN00
     def wait_at_boundary() -> None:
         try:
             _enter_boundary(parts, "judge", "round 1", "review")
-        except BaseException as error:  # noqa: BLE001  # The unwind signal is the assertion.
+        except BaseException as error:  # The unwind signal is the assertion.
             raised.append(error)
 
     waiter = threading.Thread(target=wait_at_boundary)
@@ -330,7 +331,7 @@ def test_stop_releases_the_pause_wait_and_ends_the_run(tmp_path):  # noqa: ANN00
     ]
 
 
-def test_resume_before_the_boundary_cancels_the_pending_stop(tmp_path):  # noqa: ANN001, ANN201
+def test_resume_before_the_boundary_cancels_the_pending_stop(tmp_path: Path) -> None:
     """A resume that beats the stop boundary keeps the run going."""
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round 1", "work")
@@ -342,7 +343,7 @@ def test_resume_before_the_boundary_cancels_the_pending_stop(tmp_path):  # noqa:
     assert parts.controller.before_agent("judge", "round 1", "review") == "review"
 
 
-def test_finish_after_a_landed_stop_records_no_terminal_event(tmp_path):  # noqa: ANN001, ANN201
+def test_finish_after_a_landed_stop_records_no_terminal_event(tmp_path: Path) -> None:
     """The terminal status change is the stop's terminal record."""
     parts = build_server_parts(tmp_path)
     parts.control.request_stop()
@@ -359,7 +360,7 @@ def test_finish_after_a_landed_stop_records_no_terminal_event(tmp_path):  # noqa
     assert parts.api.snapshot().status is RunStatus.STOPPED
 
 
-def test_stop_does_not_block_presentation_only_chat(tmp_path):  # noqa: ANN001, ANN201
+def test_stop_does_not_block_presentation_only_chat(tmp_path: Path) -> None:
     """Chat stays available on a stopped run, exactly as on a finished one."""
     parts = build_server_parts(tmp_path)
     parts.control.request_stop()
@@ -387,7 +388,7 @@ def test_stop_does_not_block_presentation_only_chat(tmp_path):  # noqa: ANN001, 
     assert parts.api.snapshot().status is RunStatus.STOPPED
 
 
-def test_finish_does_not_interrupt_presentation_only_chat(tmp_path):  # noqa: ANN001, ANN201
+def test_finish_does_not_interrupt_presentation_only_chat(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution(
         "chat",

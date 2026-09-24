@@ -25,7 +25,7 @@ def test_cpu_only_control_plane_docker_skips_gpu_runtime(
 
     pick_device.assert_not_called()
     assert isinstance(sandbox, DockerSandbox)
-    assert sandbox._gpus is None  # noqa: SLF001  # tracked: #288
+    assert sandbox._gpus is None
     assert backend.selected_device is None
 
 
@@ -41,7 +41,7 @@ def test_ephemeral_setup_sandbox_is_not_tracked_for_reselection(tmp_path: Path) 
     )
 
     assert isinstance(sandbox, DockerSandbox)
-    assert backend._sandboxes == []  # noqa: SLF001
+    assert backend._sandboxes == []
 
 
 def test_docker_forwards_resources_to_the_sandbox(tmp_path: Path) -> None:
@@ -57,4 +57,4 @@ def test_docker_forwards_resources_to_the_sandbox(tmp_path: Path) -> None:
     )
 
     assert isinstance(sandbox, DockerSandbox)
-    assert resource in sandbox._resources  # noqa: SLF001  # tracked: #288
+    assert resource in sandbox._resources

@@ -15,12 +15,13 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
 EVALUATOR_ROOT = Path(__file__).resolve().parents[1]
 if str(EVALUATOR_ROOT) not in sys.path:
     sys.path.insert(0, str(EVALUATOR_ROOT))
-
+# lint-waiver: LW-008014 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from kubernetes_runtime.control import LifecycleControlServer, request_action  # noqa: E402
+
+# lint-waiver: LW-008015 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from kubernetes_runtime.runtime import KubernetesLifecycle, load_config  # noqa: E402
 
 _STOP_COMMAND_PLACEHOLDER = "${KUBERNETES_STOP_COMMAND_JSON}"
@@ -79,6 +80,7 @@ def _shutdown(
                 child.wait(timeout=5)
     try:
         lifecycle.close()
+    # lint-waiver: LW-008052 [BLE001]; Cleanup is best effort, and every close failure must still restore the prior signal handlers.
     except Exception as error:  # noqa: BLE001
         sys.stderr.write(f"kubernetes cleanup failed: {str(error)[:500]}\n")
     for handled, handler in previous.items():
@@ -129,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
                 "cleanup": lifecycle.close,
             }
             with LifecycleControlServer(socket_path, actions):
+                # lint-waiver: LW-008037 [S603]; The configured workload is intentionally executed as an argv list with no shell.
                 child = subprocess.Popen(  # noqa: S603
                     rendered, env=environment, start_new_session=True
                 )

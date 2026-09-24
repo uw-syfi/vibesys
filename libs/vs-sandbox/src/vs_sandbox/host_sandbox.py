@@ -61,14 +61,18 @@ import shutil
 import subprocess
 import sys
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable, Mapping  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vs_sandbox import landlock
 from vs_sandbox.host_resource_importer import prepare_host_resource_imports
-from vs_sandbox.host_resources import HostResource  # noqa: TC001  # tracked: #288
 from vs_sandbox.project_paths import ProjectPathPolicy
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Mapping
+
+    from vs_sandbox.host_resources import HostResource
 
 DISABLE_ENV = "VIBESYS_AGENT_SANDBOX"
 
@@ -135,8 +139,8 @@ _SYSTEM_READ_ROOTS: tuple[str, ...] = (
 _LINUX_SCRATCH_WRITE_ROOTS: tuple[str, ...] = (
     "/dev",
     "/proc",
-    "/tmp",  # noqa: S108  # tracked: #288
-    "/var/tmp",  # noqa: S108  # tracked: #288
+    "/tmp",
+    "/var/tmp",
 )
 
 
@@ -264,7 +268,7 @@ class HostSandbox(WorkspaceSandbox):
             "--dev",
             "/dev",
             "--tmpfs",
-            "/tmp",  # noqa: S108  # tracked: #288
+            "/tmp",
         ]
         # Leaf config mounts such as ~/.codex/auth.json need their destination
         # parents to exist in bubblewrap's otherwise-empty /home tree. These
@@ -405,7 +409,7 @@ class LandlockSandbox(WorkspaceSandbox):
         for root in write_roots:
             resolved = root.resolve()
             if resolved == workspace or resolved in workspace.parents:
-                raise SandboxUnavailableError(  # noqa: TRY003  # tracked: #288
+                raise SandboxUnavailableError(
                     f"project {workspace} sits inside {resolved}, which the Landlock "
                     "backend must grant write access to. Landlock rules cannot subtract, "
                     "so the project would be effectively unconfined. Move the project "
@@ -604,7 +608,7 @@ def _reject_agent_path_remap(resources: Iterable[HostResource]) -> None:
             continue
         host_path = str(resource.path)
         if resource.agent_path != host_path:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            raise ValueError(
                 f"resource {resource.purpose!r} at {host_path} declares "
                 f"agent_path={resource.agent_path!r}, but host backends "
                 "(bubblewrap, Landlock, Seatbelt) cannot remap paths; set "
@@ -612,7 +616,7 @@ def _reject_agent_path_remap(resources: Iterable[HostResource]) -> None:
             )
 
 
-def build(  # noqa: PLR0913
+def build(
     workspace: Path | str,
     *,
     env: dict[str, str],
@@ -723,7 +727,7 @@ def _bwrap_confines(bwrap: str) -> bool:
     one clear startup error instead of an agent that dies every round.
     """
     try:
-        result = subprocess.run(  # noqa: S603  # tracked: #288
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007118 [S603]; bwrap is resolved from PATH and probed with fixed argv without a shell.
             [bwrap, "--ro-bind", "/", "/", "--unshare-user", "--", "/bin/true"],
             capture_output=True,
             check=False,

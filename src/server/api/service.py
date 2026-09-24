@@ -118,7 +118,7 @@ class _DesignLogGitEvents(NullGitTrackerEvents):
 class RunApi:
     """Authoritative request API consumed by frontend clients."""
 
-    def __init__(  # noqa: PLR0913  # Explicit dependencies define the API boundary.
+    def __init__(  # Explicit dependencies define the API boundary.
         self,
         condition: threading.Condition,
         controller: RunController,
@@ -153,7 +153,7 @@ class RunApi:
             replay_filter=lambda _header: False,
         )
 
-    def execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
+    def execute(self, request: ProtocolRequest) -> Response:
         """Execute one typed request and return its protocol response."""
         if isinstance(request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand)):
             return self._execute_command(request)
@@ -214,7 +214,7 @@ class RunApi:
                 else self.events(request.after_sequence, request.before_sequence)
             )
             return Response(request_id=request.request_id, events=events)
-        raise TypeError(  # noqa: TRY003  # Include the invalid protocol model in the error.
+        raise TypeError(  # Include the invalid protocol model in the error.
             f"Unsupported protocol request: {type(request).__name__}"
         )
 

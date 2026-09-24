@@ -81,7 +81,7 @@ def _restore_resume_constraints(
     return requested != recorded.operator_constraints
 
 
-def _restore_resume_run_environment(  # noqa: C901
+def _restore_resume_run_environment(
     args: argparse.Namespace,
     recorded: RunConfiguration,
     explicit: frozenset[str],
@@ -135,10 +135,10 @@ def _restore_resume_run_environment(  # noqa: C901
 
 def _normalized_resume_cli_value(destination: str, value: object) -> object:
     if destination == "backend" and value is not None:
-        assert isinstance(value, ComputeBackend)  # noqa: S101  # argparse contract
+        assert isinstance(value, ComputeBackend)  # argparse contract
         return value.value
     if destination == "profiler":
-        assert isinstance(value, ProfilerKind)  # noqa: S101  # argparse contract
+        assert isinstance(value, ProfilerKind)  # argparse contract
         return ProfilerKind.NONE.value if value is ProfilerKind.AUTO else value.value
     return value
 

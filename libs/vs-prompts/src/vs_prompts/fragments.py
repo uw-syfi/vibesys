@@ -9,12 +9,13 @@ auto-injects :meth:`FragmentFamily.render_all` as kwargs on every render.
 
 from __future__ import annotations
 
-from collections.abc import Iterable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pathlib import Path
+
     from vs_prompts.renderer import TemplateRenderer
 
 
@@ -53,7 +54,7 @@ class FragmentFamily:
             if not (self.root / str(key) / f"{name}.j2").is_file()
         ]
         if missing:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            raise ValueError(
                 f"FragmentFamily at {self.root}: missing fragment files: "
                 f"{', '.join(missing)}. Use an empty file for a deliberate skip."
             )
@@ -66,7 +67,7 @@ class FragmentFamily:
         whitespace.
         """
         if name not in self.names:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            raise ValueError(
                 f"Unknown fragment {name!r} for {self.root}; valid: {sorted(self.names)}"
             )
         template_name = f"{self._relative_to_search_path(renderer)}/{key}/{name}.j2"
@@ -78,7 +79,7 @@ class FragmentFamily:
                 return self.root.relative_to(candidate_root).as_posix()
             except ValueError:
                 continue
-        raise ValueError(  # noqa: TRY003  # tracked: #288
+        raise ValueError(
             f"{self.root} is not {renderer.root} or a descendant of it or of any "
             f"fallback root {list(renderer.fallback_roots)}"
         )

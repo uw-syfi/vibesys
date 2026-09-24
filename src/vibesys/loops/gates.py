@@ -10,7 +10,6 @@ import uuid
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
-from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: TC001  # tracked: #288
 from vibesys.events import (
     CoreEventType,
     EventStatus,
@@ -19,9 +18,7 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
-from vibesys.loops.metrics import Objective  # noqa: TC001  # tracked: #288
 from vibesys.render.sink import output_sink
-from vibesys.run import LoopContext  # noqa: TC001  # tracked: #288
 from vs_evaluator_protocol.api import (
     Hello,
     ProtocolError,
@@ -33,6 +30,9 @@ from vs_evaluator_protocol.api import (
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from vibesys.evaluators.input_manifest import BenchmarkResult
+    from vibesys.loops.metrics import Objective
+    from vibesys.run import LoopContext
     from vs_sandbox.api import SandboxExecutionResult
 
 # Truncation lengths for gate failure output. All three values are defined
@@ -63,7 +63,7 @@ def emit_gate_started(
     )
 
 
-def emit_gate_finished(  # noqa: PLR0913  # independent payload dimensions
+def emit_gate_finished(  # independent payload dimensions
     gate: GateKind,
     *,
     passed: bool,
@@ -120,7 +120,7 @@ class AccuracyGateResult:
     executed: bool
 
 
-def run_accuracy_gate(  # tracked: #288
+def run_accuracy_gate(
     ctx: LoopContext,
     *,
     process_id: str,
@@ -166,7 +166,7 @@ def run_accuracy_gate(  # tracked: #288
         output = result.output.strip()
         passed = result.exit_code == 0
         _publish_subprocess_output(ctx, process_id=process_id, result=result)
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:
         output = f"accuracy command could not be executed: {exc}"
         passed = False
 
@@ -230,7 +230,7 @@ PROTOCOL_OUTPUT_FLAG = "--vs-output"
 # The SkyPilot bridge allowlists framework result artifacts by this path
 # shape (``_FRAMEWORK_ARTIFACT`` in ``vibesys.skypilot.bridge``); the nonce
 # appended per invocation must stay within its ``[a-zA-Z0-9._-]`` alphabet.
-_BENCHMARK_OUTPUT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # tracked: #288
+_BENCHMARK_OUTPUT_PREFIX = "/tmp/vibesys-framework-benchmark-"
 
 
 @dataclass(frozen=True, slots=True)
@@ -409,14 +409,12 @@ def _check_output_slug(output_slug: str) -> None:
     SkyPilot artifact allowlist and the cleanup both assume.
     """
     if not output_slug:
-        raise ValueError("output_slug must not be empty")  # noqa: TRY003  # tracked: #288
+        raise ValueError("output_slug must not be empty")
     if "/" in output_slug or ".." in output_slug:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"output_slug must be a single path segment, got {output_slug!r}"
-        )
+        raise ValueError(f"output_slug must be a single path segment, got {output_slug!r}")
 
 
-def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
+def run_benchmark_gate(
     ctx: LoopContext,
     *,
     result_spec: BenchmarkResult | None,
@@ -471,7 +469,7 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
     output_path = f"{_BENCHMARK_OUTPUT_PREFIX}{output_slug}-{uuid.uuid4().hex[:12]}.json"
     # Not None: `contract.declared` is true, so one of the two forms set it.
     output_argument = contract.output_argument
-    assert output_argument is not None  # noqa: S101
+    assert output_argument is not None
     # The markers recover the result file through stdout, which is what makes
     # the contract work for remote execution. Both contracts share that
     # transport; only the recovered text is parsed differently.
@@ -507,7 +505,7 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
                 result=result,
                 process_kind="benchmark",
             )
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
+        except Exception as exc:
             output = f"benchmark command could not be executed: {exc}"
             passed = False
         finally:
@@ -558,15 +556,15 @@ def run_benchmark_gate(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #28
                 else:
                     values = _metric_values(payload, result_spec.metric)
                 if len(values) != 1:
-                    raise ValueError(  # noqa: TRY003, TRY301  # tracked: #288
+                    raise ValueError(
                         f"expected exactly one {result_spec.metric!r} field, found {len(values)}"
                     )
                 value = values[0]
                 if isinstance(value, bool) or not isinstance(value, int | float):
-                    raise ValueError(f"{result_spec.metric!r} is not numeric")  # noqa: TRY003, TRY004, TRY301  # tracked: #288
+                    raise ValueError(f"{result_spec.metric!r} is not numeric")
                 metric_value = float(value)
                 if not math.isfinite(metric_value):
-                    raise ValueError(f"{result_spec.metric!r} is not finite")  # noqa: TRY003, TRY301  # tracked: #288
+                    raise ValueError(f"{result_spec.metric!r} is not finite")
             except (ValueError, TypeError, json.JSONDecodeError) as exc:
                 output = f"{output}\ninvalid benchmark result: {exc}".strip()
                 passed = False

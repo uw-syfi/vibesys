@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Unit tests for the multiturn benchmark: metrics writer, hard-fail rules, pacing model.
-
 Covers ``write_metrics``, ``write_turn_records``, ``validate_attempt`` and
 ``check_all_turns_ok`` (the drop/truncation/error hard-fail), ``compute_schedule``
 (pure, deterministic), the send-time rule in ``run_session``
@@ -9,9 +8,7 @@ a fake HTTP server, ``aggregate_metrics``'s reduction, and the evaluator result
 protocol this benchmark emits under ``--vs-output`` (``vs_protocol``, the
 declared metric schema, and ``main_async``'s record stream on both the success
 and the failure path). No real server, no GPU. Run with:
-
     uv run pytest examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/benchmark/test_run.py -q --no-cov -p no:tach
-
 Skips cleanly if ``run.py`` cannot be imported (e.g. ``aiohttp`` missing).
 """
 
@@ -30,18 +27,15 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-
 import vs_protocol
 
 try:
     import run
-except Exception as exc:  # noqa: BLE001 -- env-dependent import; skip, don't fail.
+except Exception as exc:
     run = None
     _IMPORT_ERROR = exc
 else:
     _IMPORT_ERROR = None
-
-
 REF_TTFT_MS = 700.0
 REF_TPOT_MS = 110.0
 
@@ -166,7 +160,6 @@ class WriteTurnRecordsTests(unittest.TestCase):
             path = Path(tmp) / "out.jsonl.turns.jsonl"
             run.write_turn_records(path, results)
             lines = path.read_text().splitlines()
-
         self.assertEqual(len(lines), len(results))
         first = json.loads(lines[0])
         self.assertEqual(first["session_id"], 0)
@@ -184,7 +177,6 @@ class WriteTurnRecordsTests(unittest.TestCase):
         self.assertEqual(first["scheduled_send_ts"], 99.5)
         self.assertEqual(first["scheduled_admission_delay_s"], 12.5)
         self.assertIsNone(first["error"])
-
         second = json.loads(lines[1])
         self.assertIs(second["ok"], False)
         self.assertIsNone(second["ttft_ms"])
@@ -450,7 +442,7 @@ class _FakeClient:
         self._plan = list(plan)
         self.send_times: list[float] = []
 
-    def post(self, url: str, json: object, timeout: object) -> _FakeResponse:  # noqa: A002
+    def post(self, url: str, json: object, timeout: object) -> _FakeResponse:
         self.send_times.append(time.perf_counter())
         ttft_s, total_s, n_tokens = self._plan.pop(0)
         return _FakeResponse(ttft_s, total_s, n_tokens)
@@ -555,7 +547,6 @@ class SendTimeRuleTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_closed_pacing_ignores_any_schedule(self) -> None:
         """--pacing closed: schedule=None, so send logic is exactly closed-loop.
-
         The admission-queue simulation lives entirely inside compute_schedule
         (called only under --pacing scheduled, see run_repetition); closed
         pacing never builds a schedule, so this test -- unmodified by the fix
@@ -586,14 +577,12 @@ class SendTimeRuleTest(unittest.IsolatedAsyncioTestCase):
 
 class _VirtualClock:
     """A deterministic virtual clock for driving many concurrent asyncio tasks.
-
     SendTimeRuleTest's fake clock (above) advances "now" by the sleep's own
     delay on every call, which is only correct when a single task is ever
     sleeping at a time. With N genuinely concurrent sessions (this file's
     admission-queue end-to-end tests below), that naive clock is wrong: if
     task A sleeps 5s and task B concurrently sleeps 2s, "now" must advance to
     the earliest of the two wake times, not their sum.
-
     Implemented as the standard virtual-time technique for pure-asyncio code
     that only ever blocks via ``asyncio.sleep`` and ``asyncio.Semaphore``
     (true here: the fake HTTP client below never does real I/O): track how
@@ -656,7 +645,6 @@ _REAL_ASYNCIO_SLEEP = asyncio.sleep
 
 class _TrackedSemaphore(asyncio.Semaphore):
     """A semaphore whose acquire-wait is visible to a ``_VirtualClock``.
-
     A task blocked here is not "asleep" from the clock's point of view: it
     only becomes runnable when another task's ``release()`` (its ``async
     with`` block exiting) hands it the slot, not because virtual time passed.
@@ -680,7 +668,6 @@ class _SpeedFakeResponse(_FakeResponse):
 
 class _SpeedFakeClient:
     """A fake HTTP client whose response speed is a fixed (ttft_s, tpot_s).
-
     Unlike ``_FakeClient`` (a fixed reply plan popped in call order), this
     computes each reply from the request's own ``max_tokens``, so it works
     correctly when many sessions issue requests concurrently and interleaved.
@@ -693,7 +680,7 @@ class _SpeedFakeClient:
         self._ttft_s = ttft_s
         self._tpot_s = tpot_s
 
-    def post(self, url: str, json: dict, timeout: object) -> _SpeedFakeResponse:  # noqa: A002
+    def post(self, url: str, json: dict, timeout: object) -> _SpeedFakeResponse:
         max_tokens = json["max_tokens"]
         total_s = self._ttft_s + self._tpot_s * (max_tokens - 1)
         return _SpeedFakeResponse(self._ttft_s, total_s, max_tokens)
@@ -739,7 +726,6 @@ async def _run_all_sessions_with_virtual_clock(
 @unittest.skipIf(run is None, f"could not import run.py: {_IMPORT_ERROR}")
 class AdmissionQueueEndToEndTest(unittest.TestCase):
     """schedule_bound_fraction on the real 48-session/CONCURRENCY=16 workload.
-
     Exercises run_session for every session at once (through the real
     CONCURRENCY-slot semaphore) under a _VirtualClock, so these are true
     concurrency tests, not single-session extrapolations. Plain TestCase +
@@ -815,7 +801,10 @@ class AdmissionQueueEndToEndTest(unittest.TestCase):
         second = await _run_all_sessions_with_virtual_clock(
             sessions, start_delays, schedule, run.CONCURRENCY, client
         )
-        key = lambda r: (r.session_id, r.turn_index)  # noqa: E731
+
+        def key(result: run.TurnResult) -> tuple[str, int]:
+            return result.session_id, result.turn_index
+
         self.assertEqual(
             {key(r): r.schedule_bound for r in first},
             {key(r): r.schedule_bound for r in second},

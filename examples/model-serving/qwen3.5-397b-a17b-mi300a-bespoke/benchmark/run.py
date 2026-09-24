@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Multi-turn chat benchmark for the from-scratch Qwen3.5 MI300A bundle.
-
 Launches the candidate's ``python3 server.py`` (see ``launcher.py``), plays a
 deterministic set of concurrent multi-turn chat sessions against its
 OpenAI-compatible ``/v1/chat/completions`` endpoint, and reports the metrics
 through two independent outputs:
-
 - ``--vs-output``: the VibeSys evaluator result protocol v2 record stream (see
   ``vs_protocol.py``). This is what the framework scores. It carries the whole
   metric row, so both objectives of this task, ``total_token_throughput`` (max)
@@ -13,22 +11,18 @@ through two independent outputs:
 - ``--output-json``: the human-readable flat JSON object, for manual runs and
   campaign analysis. Defaults to ``<vs-output>.metrics.json`` when only
   ``--vs-output`` is given. At least one of the two is required.
-
 The run is all-or-nothing. If any turn is dropped, errored, empty, or returns
 fewer completion tokens than its fixed ``max_tokens`` budget, the benchmark
 prints the offending turns, reports a protocol ``error`` record, writes no
 metrics JSON, and exits nonzero, so a faster but lossy server cannot score.
-
 On success a ``<output-json>.turns.jsonl`` sibling file holds one record per
 turn (timestamps, token counts, pacing info) for post-hoc analysis. The
 evaluator never reads it.
-
 Session shape (fixed, deterministic, seeded, not a tunable of this script):
 48 sessions, 3-6 turns each, user messages are pseudo-paragraphs of varying
 length, greedy decoding with ``ignore_eos`` and a per-turn fixed output
 budget, 1-8s think-time between a session's turns. ``--concurrency`` caps how
 many sessions run at once (default 0, meaning unlimited).
-
 Pacing (``--pacing``, see ``compute_schedule``): ``closed`` sends a session's
 next turn as soon as its previous turn's response completes plus think time,
 so the offered load tracks the server's own speed. ``scheduled`` (the default)
@@ -51,15 +45,14 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import launcher  # noqa: E402
-import vs_protocol  # noqa: E402
-from vs_protocol import MetricSpec  # noqa: E402
+import launcher
+import vs_protocol
+from vs_protocol import MetricSpec
 
 # Workload/pacing-model version. Kept at 4: unlimited concurrency and an
 # admission-queue-aware schedule, identical to the multiturn task's v4 workload
 # this bundle was ported from.
 BENCHMARK_VERSION = 4
-
 # Every metric this benchmark produces, declared to the framework in the
 # protocol's ``hello`` record. The two objectives of ``objectives.toml`` are
 # ``total_token_throughput`` and ``p95_ttft_turn2plus_ms``, and an objective
@@ -91,7 +84,6 @@ METRIC_SPECS: dict[str, MetricSpec] = {
 # The metric names, in declaration order. Derived so the spec table above stays
 # the single place a metric is added or removed.
 METRICS: tuple[str, ...] = tuple(METRIC_SPECS)
-
 SEED = 20260225
 N_SESSIONS = 48
 MIN_TURNS = 3
@@ -110,7 +102,6 @@ THINK_TIME_MAX_S = 8.0
 CONCURRENCY = 16
 SESSION_START_STAGGER_S = 0.4
 REQUEST_TIMEOUT_S = 300.0
-
 # Reference server speed the "scheduled" pacing mode assumes (fixed at the
 # values the ported v4 workload used, so results stay comparable). The schedule
 # is computed once from these constants before the run starts; they do not
@@ -119,7 +110,6 @@ REQUEST_TIMEOUT_S = 300.0
 # for exploring how sensitive a result is to the reference assumption.
 REF_TTFT_MS = 700.0
 REF_TPOT_MS = 110.0
-
 WORD_BANK = (
     "system model request latency queue token cache memory schedule batch "
     "network server client stream response prompt session context history "
@@ -228,7 +218,6 @@ def generate_sessions(seed: int, n_sessions: int = N_SESSIONS) -> list[Session]:
 
 def resolve_concurrency(concurrency: int, n_sessions: int) -> int:
     """Resolve the ``--concurrency`` CLI value to an actual admission-queue size.
-
     0 (the default) means unlimited: every session may be in flight at once,
     modeled as an admission queue with one slot per session, so
     ``_simulate_admission_starts`` admits every session at its arrival time
@@ -241,7 +230,6 @@ def resolve_concurrency(concurrency: int, n_sessions: int) -> int:
 
 def session_start_delays(n_sessions: int) -> list[float]:
     """The fixed, seed-independent stagger of each session's opening turn.
-
     Unchanged by --pacing: both modes start session ``i`` at
     ``i * SESSION_START_STAGGER_S`` seconds after the run begins.
     """
@@ -250,7 +238,6 @@ def session_start_delays(n_sessions: int) -> list[float]:
 
 def _session_reference_duration_s(session: Session, ref_ttft_s: float, ref_tpot_s: float) -> float:
     """Wall time session would occupy an admission slot at the reference speed.
-
     Sum over the session's turns of the reference round trip (TTFT plus
     per-token decode time for that turn's known output length) plus the
     session's own think times. This is the same per-turn quantity
@@ -271,7 +258,6 @@ def _simulate_admission_starts(
     concurrency: int,
 ) -> dict[int, float]:
     """Deterministic discrete-event simulation of the ``concurrency``-slot admission queue.
-
     Models exactly what the run-time semaphore does (at most ``concurrency``
     sessions active, held for a whole session), but at the fixed reference
     server speed rather than the real server's speed, so the result does not
@@ -280,7 +266,6 @@ def _simulate_admission_starts(
     has arrived and a slot is free; a slot becomes free ``concurrency`` at a
     time, in order of the admitted session's reference completion time
     (arrival plus its ``_session_reference_duration_s``).
-
     Implemented as the standard "assign to the server that frees up
     earliest" simulation for a c-server FCFS queue: a min-heap holds the
     time each of the ``concurrency`` slots next becomes free (all start at
@@ -292,7 +277,6 @@ def _simulate_admission_starts(
     monotone: because slots are always handed out earliest-free-first to
     sessions processed in nondecreasing arrival order, both admission start
     time and slot free time are nondecreasing in arrival order too.
-
     Returns a map from session_id to its simulated admission start time, in
     seconds from the run's start.
     """
@@ -319,18 +303,14 @@ def compute_schedule(
     concurrency: int = CONCURRENCY,
 ) -> dict[int, tuple[float, ...]]:
     """Precompute each turn's scheduled send time under --pacing scheduled.
-
     Purely deterministic given ``sessions`` (already seeded), ``start_delays``,
     and the reference constants: no randomness of its own, so it is
     reproducible and safe to call before the run starts.
-
     For session ``s`` and turn ``k`` (0-based here; turn 1 in TurnResult's
     1-based numbering is index 0):
-
         T[s][0] = admission_start[s]
         T[s][k] = T[s][k-1] + ref_ttft_ms + ref_tpot_ms * expected_output_tokens[s][k-1]
                   + think_time[s][k]
-
     ``admission_start[s]`` comes from ``_simulate_admission_starts``: a
     discrete-event simulation of the ``concurrency``-slot admission queue at
     the reference server speed. Earlier versions of this function set
@@ -344,12 +324,10 @@ def compute_schedule(
     server speed. Simulating admission at the reference speed keeps ``T[s][0]``
     consistent with the rest of the schedule: a server at the reference speed
     reproduces the same admission delay the real semaphore would produce.
-
     ``expected_output_tokens[s][k-1]`` is ``turns[k-1].max_tokens``: decoding
     is greedy with ``ignore_eos``, so the server is instructed to fill the
     turn's output budget exactly and the generation length is known in
     advance rather than sampled from a reference transcript.
-
     The chaining formula models turn k-1's full round trip at the reference
     server speed (a fixed TTFT plus per-token decode time for its known
     output length) followed by the session's own think time, so T[s][k] is
@@ -357,7 +335,6 @@ def compute_schedule(
     reference speed and admission followed the simulated queue. At run time
     (see run_session) a turn is sent no earlier than its T[s][k], which is
     what makes the offered load stop depending on the real server's speed.
-
     ``concurrency`` must be the same admission-queue size the caller's real
     ``asyncio.Semaphore`` uses (see ``resolve_concurrency``); it defaults to
     ``CONCURRENCY`` (the historical fixed 16) only so callers that predate
@@ -367,7 +344,6 @@ def compute_schedule(
     ``start_delays`` entry with no queueing wait at all, so ``T[s][0]``
     reduces to ``start_delays[s]`` and the schedule is pure per-session
     pacing off the reference speed, unaffected by any other session.
-
     Returns a map from session_id to a tuple of per-turn send times, in
     seconds from the run's start, one entry per turn (index 0 is turn 1).
     Strictly increasing within a session, since ref_ttft_ms > 0 and every
@@ -456,7 +432,7 @@ async def send_chat_turn(
                         first_token = time.perf_counter()
                         first_token_ts_wall = time.time()
                     parts.append(content)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         ttft = first_token and (first_token - started)
         return TurnAttempt(
             "".join(parts),
@@ -481,7 +457,6 @@ async def send_chat_turn(
 
 def validate_attempt(attempt: TurnAttempt, max_tokens: int) -> str | None:
     """Return why a transport-level success is still a failed turn, else None.
-
     Every turn has a fixed output budget the server must fill exactly
     (``ignore_eos``), so an empty reply, a missing usage report, or any
     completion token count other than ``max_tokens`` is a dropped or truncated
@@ -506,7 +481,6 @@ async def run_session(
     run_started: float | None = None,
 ) -> list[TurnResult]:
     """Play one session's turns, closed-loop or against a precomputed schedule.
-
     ``schedule`` is None under --pacing closed: send logic is then bit-for-bit
     today's closed-loop behavior (sleep think time, send). Otherwise
     ``schedule[k]`` (0-based; index 0 is turn 1) is the turn's scheduled send
@@ -520,7 +494,6 @@ async def run_session(
     two, ``schedule[0] - start_delay_s``, is recorded on turn 1's result as
     ``scheduled_admission_delay_s`` so it can be inspected without re-running
     the simulation.
-
     For turn k >= 2 under scheduling, the turn is sent at
     ``max(T[s][k], completion_time_of_turn_k_minus_1 + think_time)``: the
     unconditional think-time sleep below already reaches the closed-loop
@@ -641,17 +614,14 @@ def aggregate_metrics(
     concurrency: int = CONCURRENCY,
 ) -> dict[str, float]:
     """Reduce one benchmark run's turn results to the reported metric row.
-
     Separated from run_benchmark so the reduction itself (in particular
     schedule_bound_fraction and offered_turn_rate_per_s) is unit-testable
     without a server.
-
     ``total_token_throughput`` is the aggregate serving throughput: completion
     tokens summed over every turn of every session, divided by ``wall_s``, the
     wall clock of the whole run. Both sides span the full concurrent run, so
     it is tokens per second across all sessions, not a per-session rate. Two
     properties are worth stating because it is now a ranked objective:
-
     - It counts completion tokens only, not prompt tokens, which is what
       "throughput" means for this repository's serving benchmarks. (Note that
       sglang's ``bench_serving`` uses the same name for prompt plus completion
@@ -679,20 +649,17 @@ def aggregate_metrics(
         if r.ttft_s is not None and r.completion_tokens and r.completion_tokens > 1
     ]
     total_completion_tokens = sum(r.completion_tokens or 0 for r in ok_results)
-
     if not turn2plus_ttft_ms:
         raise RuntimeError(
             f"no successful turn-2+ completions out of {len(all_results)} attempted turns "
             f"({len(failed)} failed); cannot compute p95_ttft_turn2plus_ms. "
             f"First failure: {failed[0].error if failed else '(none)'}"
         )
-
     turn2plus_sends = [r for r in all_results if r.turn_index >= 2]
     schedule_bound_sends = [r for r in turn2plus_sends if r.schedule_bound]
     schedule_bound_fraction = (
         len(schedule_bound_sends) / len(turn2plus_sends) if turn2plus_sends else 0.0
     )
-
     return {
         "p95_ttft_turn2plus_ms": percentile(turn2plus_ttft_ms, 95),
         "mean_tpot_ms": (sum(tpot_ms) / len(tpot_ms)) if tpot_ms else float("nan"),
@@ -729,7 +696,6 @@ async def run_benchmark(
             await run_repetition(base_url, pacing, ref_ttft_ms, ref_tpot_ms, concurrency)
         )
     wall_s = time.perf_counter() - wall_started
-
     values = aggregate_metrics(
         all_results,
         wall_s,
@@ -748,7 +714,6 @@ def turns_output_path(output_json: Path) -> Path:
 
 def metrics_output_path(output_json: str | None, vs_output: str | None) -> Path:
     """Resolve where the human-readable metrics JSON goes.
-
     ``--output-json`` wins when given. Otherwise the framework invoked this
     benchmark with only ``--vs-output`` (the result protocol declares that one
     flag, not this one), and the metrics JSON plus its per-turn records land
@@ -757,7 +722,7 @@ def metrics_output_path(output_json: str | None, vs_output: str | None) -> Path:
     """
     if output_json is not None:
         return Path(output_json)
-    assert vs_output is not None  # noqa: S101 -- guarded by main()
+    assert vs_output is not None
     return Path(vs_output + ".metrics.json")
 
 
@@ -768,7 +733,6 @@ def write_metrics(path: Path, values: dict[str, float]) -> None:
 
 def check_all_turns_ok(all_results: list[TurnResult], repetitions: int) -> None:
     """Raise unless every planned turn was attempted and succeeded.
-
     A failed turn ends its session, so the attempted count also catches turns
     that never ran. Reports up to five offenders.
     """
@@ -825,7 +789,6 @@ def summary_line(pacing: str, values: dict[str, float]) -> str:
 
 async def measure(args: argparse.Namespace) -> tuple[dict[str, float], list[TurnResult]]:
     """Boot the server, play the workload, and reject a lossy run.
-
     Raises on any failure (server startup, transport, a dropped or truncated
     turn) so ``main_async`` has one place to turn a failure into the protocol's
     ``error`` record.
@@ -866,13 +829,12 @@ async def main_async(args: argparse.Namespace) -> int:
         report.declare(METRIC_SPECS)
         try:
             values, all_results = await measure(args)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             print(f"benchmark failed: {message}", file=sys.stderr)
             output_path.unlink(missing_ok=True)
             report.fail(message)
             return 1
-
         print(summary_line(args.pacing, values))
         report.emit(values)
         write_metrics(output_path, values)

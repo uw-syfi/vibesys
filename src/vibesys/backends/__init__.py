@@ -17,8 +17,7 @@ Add a new backend by:
 
 from __future__ import annotations
 
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 from vibesys.backends.base import (
     ComputeBackendImpl,
@@ -27,6 +26,10 @@ from vibesys.backends.base import (
     SandboxKind,
 )
 from vibesys.constants import ComputeBackend
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 # A registry entry is any callable that, given ``log_dir``/``log``/``image``,
 # returns a ``ComputeBackendImpl`` — a bare impl class, or ``LocalBackend``
@@ -37,7 +40,8 @@ _REGISTRY: dict[ComputeBackend, Callable[..., ComputeBackendImpl]] = {}
 _defaults_registered = False
 
 
-def register(backend: ComputeBackend, factory: Callable[..., ComputeBackendImpl]) -> None:  # noqa: D103  # tracked: #288
+def register(backend: ComputeBackend, factory: Callable[..., ComputeBackendImpl]) -> None:
+    """Register the factory used to construct a compute backend."""
     _REGISTRY[backend] = factory
 
 
@@ -51,7 +55,7 @@ def get(
     """Construct the ComputeBackendImpl for *backend*."""
     _ensure_defaults()
     if backend not in _REGISTRY:
-        raise ValueError(f"No backend impl registered for {backend!r}")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"No backend impl registered for {backend!r}")
     return _REGISTRY[backend](
         log_dir=log_dir,
         log=log,
@@ -63,10 +67,10 @@ def get(
 # modules themselves defer DockerSandbox (process-wide signal and atexit
 # handlers) to first sandbox construction, so registration stays side-effect free.
 def _register_defaults() -> None:
-    from vibesys.backends.cuda import CudaBackend  # noqa: PLC0415  # tracked: #288
-    from vibesys.backends.local import cpu_backend, metal_backend  # noqa: PLC0415  # tracked: #288
-    from vibesys.backends.rocm import RocmBackend  # noqa: PLC0415  # tracked: #288
-    from vibesys.backends.trainium import TrainiumBackend  # noqa: PLC0415  # tracked: #288
+    from vibesys.backends.cuda import CudaBackend
+    from vibesys.backends.local import cpu_backend, metal_backend
+    from vibesys.backends.rocm import RocmBackend
+    from vibesys.backends.trainium import TrainiumBackend
 
     register(ComputeBackend.CUDA, CudaBackend)
     register(ComputeBackend.METAL, metal_backend)
@@ -76,7 +80,7 @@ def _register_defaults() -> None:
 
 
 def _ensure_defaults() -> None:
-    global _defaults_registered  # noqa: PLW0603  # tracked: #288
+    global _defaults_registered
     if _defaults_registered:
         return
     _defaults_registered = True

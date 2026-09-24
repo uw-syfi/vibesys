@@ -9,15 +9,25 @@ behaviour of the drain-and-perf-eval outer loop in
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import TYPE_CHECKING
-from unittest.mock import patch
+from typing import TYPE_CHECKING, NotRequired, TypedDict, Unpack
+from unittest.mock import Mock, patch
 
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from pathlib import Path
 
+    from vibesys.evaluators.input_manifest import WorkspaceSource
+    from vibesys.profilers import ProfilerKind
+    from vibesys.repository import RepositoryVisibility
+    from vibesys.sandbox.run_environment import RunEnvironmentSpec
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
+
+from vibesys.config import Config
 from vibesys.constants import DomainName
 from vibesys.loops.plain.loop import PlainLoopState
 from vibesys.loops.plain.loop import run_plain_loop as _run_plain_loop
@@ -40,9 +50,33 @@ from vs_project.api import RUN_SCHEMA_VERSION, Project, RunEnvironmentRecord
 # ---------------------------------------------------------------------------
 
 
-def run_plain_loop(**kwargs):  # noqa: ANN003, ANN201  # tracked: #288
+class _PlainLoopOptions(TypedDict):
+    """Keyword contract for the fixed-domain plain-loop test wrapper."""
+
+    exp_name: str
+    input_path: str
+    accuracy_command: str
+    benchmark_command: str
+    runs_dir: Path | None
+    max_rounds: NotRequired[int]
+    max_attempts_per_issue: NotRequired[int]
+    max_issues_per_perf_eval: NotRequired[int]
+    existing: NotRequired[bool]
+    resume_state: NotRequired[PlainLoopState | None]
+    profiler_kind: NotRequired[ProfilerKind]
+    skills_dirs: NotRequired[list[str] | None]
+    run_environment: NotRequired[RunEnvironmentSpec | None]
+    agent_backend: NotRequired[str | None]
+    cli_provider: NotRequired[str | None]
+    remote_repo: NotRequired[str | None]
+    repo_visibility: NotRequired[RepositoryVisibility]
+    workspace_sources: NotRequired[tuple[WorkspaceSource, ...]]
+
+
+def run_plain_loop(config: Config | dict[str, object], **kwargs: Unpack[_PlainLoopOptions]) -> bool:
     """Run the plain loop with this module's LLM-serving fixture domain."""
-    return _run_plain_loop(domain=DomainName.LLM_SERVING, **kwargs)
+    typed_config = config if isinstance(config, Config) else Config.model_validate(config)
+    return _run_plain_loop(config=typed_config, domain=DomainName.LLM_SERVING, **kwargs)
 
 
 def _make_impl_resp(issue_id: int, summary: str = "Done.") -> IssueImplementerResponse:
@@ -109,7 +143,7 @@ def _plain_local_dir(project_dir: Path) -> Path:
 
 
 @pytest.fixture
-def ref_file(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def ref_file(tmp_path: Path) -> Path:
     """Create a temporary reference file for run_plain_loop tests."""
     project = tmp_path / "input"
     project.mkdir()
@@ -130,7 +164,7 @@ command = ["python", "-c", "print('ok')"]
 """,
         encoding="utf-8",
     )
-    return str(f)
+    return f
 
 
 # ---------------------------------------------------------------------------
@@ -140,12 +174,13 @@ command = ["python", "-c", "print('ok')"]
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_bootstrap_creates_initial_feature_issue_on_first_run(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_bootstrap_creates_initial_feature_issue_on_first_run(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -157,7 +192,7 @@ def test_bootstrap_creates_initial_feature_issue_on_first_run(  # noqa: ANN201  
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -182,15 +217,16 @@ def test_bootstrap_creates_initial_feature_issue_on_first_run(  # noqa: ANN201  
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_bootstrap_idempotent_on_resume(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """A resumed run with bootstrap_done=True must not re-create the bootstrap issue."""
 
     # --- First run: create the exp dir and the bootstrap issue. ---
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -201,7 +237,7 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -245,7 +281,10 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_judge_pass_closes_issue(mock_build_runner, mock_backend, ref_file, tmp_path):  # noqa: ANN001, ANN201, ARG001  # tracked: #288
+def test_judge_pass_closes_issue(
+    mock_build_runner: Mock, mock_backend: Mock, ref_file: Path, tmp_path: Path
+) -> None:
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -257,7 +296,7 @@ def test_judge_pass_closes_issue(mock_build_runner, mock_backend, ref_file, tmp_
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -272,14 +311,15 @@ def test_judge_pass_closes_issue(mock_build_runner, mock_backend, ref_file, tmp_
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_judge_fail_increments_attempts_and_keeps_open(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_judge_fail_increments_attempts_and_keeps_open(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """A FAIL verdict reopens the issue; the next drain pass tries again."""
     # impl1 -> judge1(FAIL) -> drain loops back -> impl2 -> judge2(PASS) -> perf
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1), _make_impl_resp(1, summary="Fixed."))
     fake.enqueue(
@@ -295,7 +335,7 @@ def test_judge_fail_increments_attempts_and_keeps_open(  # noqa: ANN201  # track
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -313,13 +353,14 @@ def test_judge_fail_increments_attempts_and_keeps_open(  # noqa: ANN201  # track
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_issue_blocks_after_max_attempts_exhausted(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_issue_blocks_after_max_attempts_exhausted(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """With max_attempts_per_issue=2, a fail/fail sequence should mark the issue BLOCKED."""
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1), _make_impl_resp(1))
     fake.enqueue(
@@ -334,7 +375,7 @@ def test_issue_blocks_after_max_attempts_exhausted(  # noqa: ANN201  # tracked: 
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -379,18 +420,19 @@ def _spec_args_to_dict(args: Sequence[str]) -> dict[str, str]:
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_judge_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001  # tracked: #288
-):
+def test_judge_invoke_receives_tracker_kwargs(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """The judge phase must receive issue-tracker access scoped to
     creator='judge', cap=1, allowed_types={BUG}.
 
     The PlainLoopAgentClient wrapper injects ``mcp_servers`` (an
     MCPServerSpec) for the inner runner.
     """
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -402,7 +444,7 @@ def test_judge_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -413,7 +455,8 @@ def test_judge_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
     assert len(judge_calls) == 1
     specs = judge_calls[0].mcp_servers
 
-    assert specs is not None and len(specs) == 1  # noqa: PT018  # tracked: #288
+    assert specs is not None
+    assert len(specs) == 1
     spec = specs[0]
     assert spec.name == "vibesys-issues"
     assert spec.command == "python"
@@ -426,18 +469,19 @@ def test_judge_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_perf_eval_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001  # tracked: #288
-):
+def test_perf_eval_invoke_receives_tracker_kwargs(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """The perf_eval phase must receive issue-tracker access scoped to
     creator='perf_eval', cap=max_issues_per_perf_eval, and the
     BUG/FEATURE/PERF allowed-types set.
 
     Injected as ``mcp_servers`` (see PlainLoopAgentClient).
     """
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -449,7 +493,7 @@ def test_perf_eval_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -460,7 +504,8 @@ def test_perf_eval_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #
     assert len(perf_calls) == 1
     specs = perf_calls[0].mcp_servers
 
-    assert specs is not None and len(specs) == 1  # noqa: PT018  # tracked: #288
+    assert specs is not None
+    assert len(specs) == 1
     spec = specs[0]
     parsed = _spec_args_to_dict(spec.args)
     assert parsed["creator"] == "perf_eval"
@@ -472,14 +517,15 @@ def test_perf_eval_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_judge_phase_calls_store_reload_after_invoke(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_judge_phase_calls_store_reload_after_invoke(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """After the judge invoke returns, the loop must reload the store so it
     can see any issues the MCP server wrote during the phase."""
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -491,7 +537,7 @@ def test_judge_phase_calls_store_reload_after_invoke(  # noqa: ANN201  # tracked
 
     original_reload = IssueBoard.reload
 
-    def tracking_reload(self):  # noqa: ANN001, ANN202  # tracked: #288
+    def tracking_reload(self: IssueBoard) -> None:
         reload_call_order.append("reload")
         return original_reload(self)
 
@@ -509,7 +555,7 @@ def test_judge_phase_calls_store_reload_after_invoke(  # noqa: ANN201  # tracked
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -523,12 +569,12 @@ def test_judge_phase_calls_store_reload_after_invoke(  # noqa: ANN201  # tracked
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_implementer_invoke_has_no_tracker_kwargs(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001  # tracked: #288
-):
+def test_implementer_invoke_has_no_tracker_kwargs(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """The implementer phase has no issue tools (the issue is inlined in
     the prompt), so it must NOT receive ``mcp_servers``.
 
@@ -536,6 +582,7 @@ def test_implementer_invoke_has_no_tracker_kwargs(  # noqa: ANN201  # tracked: #
     and is covered in tests/vibesys/agents/test_agent_runners.py. At the loop level we
     only verify which phases get tracker kwargs.
     """
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -547,7 +594,7 @@ def test_implementer_invoke_has_no_tracker_kwargs(  # noqa: ANN201  # tracked: #
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -575,13 +622,14 @@ def test_implementer_invoke_has_no_tracker_kwargs(  # noqa: ANN201  # tracked: #
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_perf_eval_runs_after_drain_complete(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_perf_eval_runs_after_drain_complete(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """Within one outer iteration, the order of invoke kinds is impl -> judge -> perf_eval."""
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -593,7 +641,7 @@ def test_perf_eval_runs_after_drain_complete(  # noqa: ANN201  # tracked: #288
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -613,7 +661,8 @@ def test_perf_eval_runs_after_drain_complete(  # noqa: ANN201  # tracked: #288
     # Sanity: each phase still got a rendered (non-empty) system prompt.
     for call in fake.calls:
         sys_prompt = call.system_prompt
-        assert isinstance(sys_prompt, str) and sys_prompt.strip()  # noqa: PT018  # tracked: #288
+        assert isinstance(sys_prompt, str)
+        assert sys_prompt.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -623,15 +672,16 @@ def test_perf_eval_runs_after_drain_complete(  # noqa: ANN201  # tracked: #288
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_resume_with_bootstrap_done_skips_bootstrap_creation(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """Resuming with bootstrap_done=True must not add another bootstrap issue."""
 
     # Phase 1: fresh run to stand up the exp_dir + git repo.
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -642,7 +692,7 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -683,18 +733,19 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_resume_retries_previously_blocked_issue(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """A run that bailed out with all issues BLOCKED should retry those
     issues on resume. The blocked issue's attempts counter is reset so
     the implementer/judge gets a fresh ``max_attempts_per_issue`` budget.
     """
 
     # Phase 1: bootstrap issue fails twice -> BLOCKED, loop bails out.
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1), _make_impl_resp(1))
     fake.enqueue(
@@ -708,7 +759,7 @@ def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #2
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -762,13 +813,14 @@ def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #2
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """Bootstrap -> pass -> perf_eval files nothing => run returns True and stops."""
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -780,7 +832,7 @@ def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(  # n
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -797,13 +849,14 @@ def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(  # n
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_state_json_written_with_bootstrap_done_after_run(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_state_json_written_with_bootstrap_done_after_run(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """At the end of a successful run, state.json should reflect bootstrap_done=True."""
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -815,7 +868,7 @@ def test_state_json_written_with_bootstrap_done_after_run(  # noqa: ANN201  # tr
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -840,16 +893,17 @@ def test_state_json_written_with_bootstrap_done_after_run(  # noqa: ANN201  # tr
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_issue_loop_writes_per_issue_markdown_via_callback(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_issue_loop_writes_per_issue_markdown_via_callback(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """End-to-end: drive a one-iteration drain cycle and assert that
     local ``plain/issues/INDEX.md`` plus a per-issue MD file are written by the
     store's on_change → render_all callback, with the implementer summary
     and judge analysis surfacing in the per-issue markdown."""
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1, summary="Implemented the streaming endpoint."))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
@@ -861,7 +915,7 @@ def test_issue_loop_writes_per_issue_markdown_via_callback(  # noqa: ANN201  # t
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,
@@ -898,16 +952,17 @@ def test_issue_loop_writes_per_issue_markdown_via_callback(  # noqa: ANN201  # t
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
 @patch("vibesys.context.build_agent_client")
-def test_implementer_retry_user_prompt_includes_prior_judge_feedback(  # noqa: ANN201  # tracked: #288
-    mock_build_runner,  # noqa: ANN001  # tracked: #288
-    mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
-    ref_file,  # noqa: ANN001  # tracked: #288
-    tmp_path,  # noqa: ANN001, ARG001, RUF100  # tracked: #288
-):
+def test_implementer_retry_user_prompt_includes_prior_judge_feedback(
+    mock_build_runner: Mock,
+    mock_backend: Mock,
+    ref_file: Path,
+    tmp_path: Path,
+) -> None:
     """When the judge fails an issue and the drain loop retries, the
     second implementer's *user* prompt must include the prior judge
     feedback so the model knows what to fix."""
 
+    del mock_backend
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue(
         "implementer",
@@ -931,7 +986,7 @@ def test_implementer_retry_user_prompt_includes_prior_judge_feedback(  # noqa: A
             config={"model": {"name": "claude-sonnet-4-6"}},
             exp_name="test",
             runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
+            input_path=str(ref_file.parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
             max_rounds=1,

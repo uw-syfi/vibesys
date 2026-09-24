@@ -55,7 +55,8 @@ def _classify_tool_result(content: str) -> ToolResultPayload | None:
 class OutputSink:
     """Fan core events out to explicitly composed in-process subscribers."""
 
-    def __init__(self) -> None:  # noqa: D107  # tracked: #288
+    def __init__(self) -> None:
+        """Initialize an output sink with no subscribers."""
         self._lock = threading.Lock()
         self._subscribers: tuple[EventHandler, ...] = ()
 
@@ -70,7 +71,7 @@ class OutputSink:
 
         return unsubscribe
 
-    def emit(  # noqa: PLR0913  # tracked: #288
+    def emit(
         self,
         event_type: CoreEventType,
         text: str = "",
@@ -97,7 +98,7 @@ class OutputSink:
             handler(event)
         return event
 
-    def agent_output(  # noqa: D102, PLR0913  # tracked: #288
+    def agent_output(
         self,
         content: str,
         *,
@@ -107,6 +108,7 @@ class OutputSink:
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
+        """Emit an agent output chunk with its channel and invocation metadata."""
         if not content:
             return
         self.emit(
@@ -117,7 +119,7 @@ class OutputSink:
             execution_id=invocation_id,
         )
 
-    def tool_call(  # noqa: D102, PLR0913  # tracked: #288
+    def tool_call(
         self,
         tool: str,
         args: dict[str, Any],
@@ -128,6 +130,7 @@ class OutputSink:
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
+        """Emit a tool call and its JSON-safe argument payload."""
         self.emit(
             CoreEventType.TOOL_CALL,
             data=ToolCallData(tool=tool, call_id=call_id, args=_json_safe(args), status=status),
@@ -136,7 +139,7 @@ class OutputSink:
             execution_id=invocation_id,
         )
 
-    def tool_result(  # noqa: D102, PLR0913  # tracked: #288
+    def tool_result(
         self,
         tool: str,
         content: str,
@@ -148,6 +151,7 @@ class OutputSink:
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
+        """Emit a tool result, classifying its payload when none is supplied."""
         if payload is None:
             payload = _classify_tool_result(content)
         self.emit(
@@ -164,7 +168,7 @@ class OutputSink:
             execution_id=invocation_id,
         )
 
-    def todo_update(  # noqa: D102  # tracked: #288
+    def todo_update(
         self,
         todos: list[TodoItemData],
         *,
@@ -172,6 +176,7 @@ class OutputSink:
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
+        """Emit the current todo items and invocation metadata."""
         if not todos:
             return
         self.emit(
@@ -182,7 +187,7 @@ class OutputSink:
             execution_id=invocation_id,
         )
 
-    def framework_warning(  # tracked: #288
+    def framework_warning(
         self,
         summary: str,
         *,
@@ -203,7 +208,7 @@ class OutputSink:
             round_label=round_label,
         )
 
-    def run_configured(  # noqa: PLR0913  # tracked: #288
+    def run_configured(
         self,
         *,
         run_log_path: str,
@@ -236,7 +241,7 @@ class OutputSink:
             ),
         )
 
-    def usage_update(  # noqa: D102, PLR0913  # tracked: #288
+    def usage_update(
         self,
         input_tokens: int,
         *,
@@ -246,6 +251,7 @@ class OutputSink:
         round_label: str | None = None,
         invocation_id: str | None = None,
     ) -> None:
+        """Emit token usage and optional model context metadata."""
         self.emit(
             CoreEventType.USAGE_UPDATE,
             data=UsageUpdateData(

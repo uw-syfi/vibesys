@@ -9,7 +9,6 @@ import socketserver
 import threading
 import time
 from contextlib import suppress
-from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, TypeAdapter
@@ -26,6 +25,8 @@ from server.transport.subscriptions import SubscriptionTracker
 from vs_project.api import validate_socket_path
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from server.api.service import RunApi, SubscriptionBootstrap
 
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
@@ -58,11 +59,11 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                             self._stream(request)
                         except (BrokenPipeError, ConnectionResetError):
                             pass
-                        except Exception as exc:  # noqa: BLE001  # tracked: #288
+                        except Exception as exc:
                             self._write_stream_error(request.request_id, exc)
                     return
                 response = api.execute(request)
-            except Exception as exc:  # noqa: BLE001  # tracked: #288
+            except Exception as exc:
                 response = Response.from_exception(
                     request_id,
                     exc,
@@ -199,12 +200,13 @@ class _JsonlUnixServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(  # noqa: ANN204  # tracked: #288
+    def __init__(
         self,
         path: Path,
         api: RunApi,
         subscriptions: SubscriptionTracker,
-    ):
+    ) -> None:
+        """Bind the socket server to its API and subscription tracker."""
         self.api = api
         self.subscriptions = subscriptions
         super().__init__(str(path), _RequestHandler)
@@ -213,19 +215,21 @@ class _JsonlUnixServer(socketserver.ThreadingUnixStreamServer):
 class UnixJsonlServer:
     """Own a private Unix socket serving one or more concurrent clients."""
 
-    def __init__(self, path: Path, api: RunApi):  # noqa: ANN204, D107  # tracked: #288
+    def __init__(self, path: Path, api: RunApi) -> None:
+        """Configure a Unix JSONL server without starting its socket yet."""
         self.path = path
         self.api = api
         self._server: _JsonlUnixServer | None = None
         self._thread: threading.Thread | None = None
         self._subscriptions = SubscriptionTracker()
 
-    def start(self) -> None:  # noqa: D102  # tracked: #288
+    def start(self) -> None:
+        """Create the private Unix socket and start serving clients."""
         validate_socket_path(self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.unlink(missing_ok=True)
         self._server = _JsonlUnixServer(self.path, self.api, self._subscriptions)
-        os.chmod(self.path, 0o600)  # noqa: PTH101  # tracked: #288
+        os.chmod(self.path, 0o600)
         self._thread = threading.Thread(
             target=self._server.serve_forever,
             kwargs={"poll_interval": _SHUTDOWN_POLL_SECONDS},
@@ -242,7 +246,8 @@ class UnixJsonlServer:
         """Keep terminal events queryable until the last active subscriber exits."""
         self._subscriptions.wait_for_none_active()
 
-    def close(self) -> None:  # noqa: D102  # tracked: #288
+    def close(self) -> None:
+        """Stop serving clients and remove the socket path."""
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
@@ -252,9 +257,11 @@ class UnixJsonlServer:
             self._thread = None
         self.path.unlink(missing_ok=True)
 
-    def __enter__(self) -> UnixJsonlServer:  # noqa: D105  # tracked: #288
+    def __enter__(self) -> UnixJsonlServer:
+        """Start the server and return it as a context manager."""
         self.start()
         return self
 
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:  # noqa: D105  # tracked: #288
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        """Close the server when leaving its context."""
         self.close()

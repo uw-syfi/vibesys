@@ -1,12 +1,9 @@
 """Accuracy gate: compare a candidate engine against HF transformers golden outputs.
-
 Run from the bundle root:
-
     # any running OpenAI-compatible server (the default, and what vibesys runs)
     uv run python accuracy_checker/checker.py --base-url http://127.0.0.1:8000
     # in-process reference engine
     uv run python accuracy_checker/checker.py --target inproc
-
 Exit status 0 = PASS, 1 = FAIL. Policy and thresholds: see README.md.
 """
 
@@ -52,7 +49,6 @@ def evaluate(target: Target, golden: dict, th: Thresholds, log=print) -> tuple[b
     for case in golden["cases"]:
         prompt, gold = case["prompt_ids"], case["greedy_ids"]
         margins = case["tf_margin"]
-
         got = target.greedy(prompt, len(gold))
         prefix = next(
             (i for i, (a, b) in enumerate(zip(got, gold, strict=False)) if a != b),
@@ -63,7 +59,6 @@ def evaluate(target: Target, golden: dict, th: Thresholds, log=print) -> tuple[b
                 f"{case['name']}: target returned {len(got)} tokens, expected {len(gold)}"
             )
         div_margin = margins[prefix] if prefix < len(gold) else None
-
         forced = target.teacher_forced(prompt, gold)
         dlp = [abs(f.logprob - g) for f, g in zip(forced, case["tf_logprob"], strict=True)]
         flips = sum(
@@ -92,7 +87,6 @@ def evaluate(target: Target, golden: dict, th: Thresholds, log=print) -> tuple[b
             f"  {r.name:<15} prompt={r.prompt_tokens:>5} {div:<34} flips={flips} "
             f"mean|dlp|={r.mean_abs_dlogprob:.4f} max|dlp|={r.max_abs_dlogprob:.4f}"
         )
-
     non_tie_divergences = [
         r.name
         for r in results
@@ -159,11 +153,8 @@ def run_gate(target: Target, golden: dict, th: Thresholds, log=print) -> tuple[b
 
 
 # ----------------------------------------------------------------------------- fault injection
-
-
 def inject_fault(engine, spec: str) -> None:
     """Deliberately break the in-process model to prove the gate has teeth.
-
     gdn-decay-off:L  -> layer L's GDN decay gate is disabled (A_log = -inf, so g = 0: the state never decays).
     attn-gate-off:L  -> layer L's attention output gate is disabled (gate logits zeroed, sigmoid = 0.5).
     """
@@ -194,7 +185,6 @@ def main() -> None:
     p.add_argument("--fault", action="append", default=[], help="inproc only; see inject_fault")
     p.add_argument("--json-out", type=Path, default=None)
     args = p.parse_args()
-
     golden = json.loads(args.golden.read_text())
     print(
         f"golden: {golden['meta']['source']} on {golden['meta']['device']}, {len(golden['cases'])} cases"

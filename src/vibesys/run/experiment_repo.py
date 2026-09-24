@@ -5,12 +5,15 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vibesys.repository import REPOSITORY_SLUG, RepositoryVisibility
 from vs_github.api import GitHubCLI
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _RUN_BRANCH_PREFIXES = ("vibesys-runs/", "vibesys/")
 _GITHUB_ORIGIN = re.compile(
@@ -35,9 +38,9 @@ class ExperimentRepository:
         """Create a GitHub repository and attach it as ``origin``."""
         self._require_project_root()
         if not REPOSITORY_SLUG.fullmatch(slug):
-            raise ValueError(f"--repo must be a GitHub OWNER/NAME pair, got {slug!r}")  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"--repo must be a GitHub OWNER/NAME pair, got {slug!r}")
         if self.has_origin():
-            raise ValueError(f"project repository already has an origin remote: {self.root}")  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"project repository already has an origin remote: {self.root}")
 
         self.github.create_repository(
             slug,
@@ -50,9 +53,9 @@ class ExperimentRepository:
         """Attach an existing remote repository as ``origin``."""
         self._require_project_root()
         if not url.strip():
-            raise ValueError("origin URL must not be empty")  # noqa: TRY003  # tracked: #288
+            raise ValueError("origin URL must not be empty")
         if self.has_origin():
-            raise ValueError(f"project repository already has an origin remote: {self.root}")  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"project repository already has an origin remote: {self.root}")
         self._run(["git", "remote", "add", "origin", url], tool="git")
         self.log("[repo] attached origin remote")
 
@@ -128,9 +131,7 @@ class ExperimentRepository:
             branch.startswith(prefix) and branch.removeprefix(prefix)
             for prefix in _RUN_BRANCH_PREFIXES
         ):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "remote publication requires the current VibeSys run branch"
-            )
+            raise ValueError("remote publication requires the current VibeSys run branch")
         return branch
 
     def _require_project_root(self) -> None:
@@ -140,12 +141,10 @@ class ExperimentRepository:
             tool="git",
         )
         if result.returncode != 0:
-            raise ValueError(f"project directory is not a Git repository: {self.root}")  # noqa: TRY003  # tracked: #288
+            raise ValueError(f"project directory is not a Git repository: {self.root}")
         repository_root = Path(result.stdout.strip()).resolve()
         if repository_root != self.root.resolve():
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"project directory must be the Git repository root: {self.root}"
-            )
+            raise ValueError(f"project directory must be the Git repository root: {self.root}")
 
     def _run(
         self,
@@ -165,7 +164,7 @@ class ExperimentRepository:
             }
         )
         try:
-            result = subprocess.run(  # noqa: PLW1510, S603  # tracked: #288
+            result = subprocess.run(
                 command,
                 cwd=self.root,
                 capture_output=True,
@@ -173,8 +172,8 @@ class ExperimentRepository:
                 env=env,
             )
         except FileNotFoundError as exc:
-            raise RuntimeError(f"{tool} is required for project repository publication") from exc  # noqa: TRY003  # tracked: #288
+            raise RuntimeError(f"{tool} is required for project repository publication") from exc
         if check and result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            raise RuntimeError(f"{tool} command failed ({' '.join(command)}): {detail}")  # noqa: TRY003  # tracked: #288
+            raise RuntimeError(f"{tool} command failed ({' '.join(command)}): {detail}")
         return result

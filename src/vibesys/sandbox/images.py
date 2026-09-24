@@ -60,9 +60,124 @@ _AGENT_DOCKERFILE = _AGENT_IMAGE_DIR / "agent.Dockerfile"
 class TaskImageBuildError(RuntimeError):
     """Raised when Docker cannot produce a valid immutable image."""
 
+    @classmethod
+    def dockerfile_not_regular(cls, dockerfile: Path) -> TaskImageBuildError:
+        """Describe a task Dockerfile that is missing or is a symlink."""
+        return cls(f"Task Dockerfile must be a regular file: {dockerfile}")
+
+    @classmethod
+    def build_failed(
+        cls, target: _BuildTarget, returncode: int, details: str
+    ) -> TaskImageBuildError:
+        """Describe a Docker build failure and its diagnostic output."""
+        return cls(
+            f"Could not build {target.image_label} from {target.dockerfile} "
+            f"(exit {returncode}): {details[:_DIAGNOSTIC_LIMIT]}"
+        )
+
+    @classmethod
+    def inspect_failed(
+        cls,
+        target: _BuildTarget,
+        image_tag: str,
+        returncode: int,
+        details: str,
+    ) -> TaskImageBuildError:
+        """Describe a failed lookup of the built image's immutable ID."""
+        return cls(
+            f"Could not resolve runnable {target.image_label} {image_tag} built from "
+            f"{target.dockerfile} (exit {returncode}): "
+            f"{details[:_DIAGNOSTIC_LIMIT]}"
+        )
+
+    @classmethod
+    def invalid_runnable_id(
+        cls, image_label: str, dockerfile: Path, displayed: str
+    ) -> TaskImageBuildError:
+        """Describe Docker returning a value that is not an immutable image ID."""
+        return cls(
+            f"Docker returned an invalid runnable {image_label} ID for {dockerfile}: {displayed!r}"
+        )
+
+    @classmethod
+    def docker_not_found(cls, action: str, target: _BuildTarget) -> TaskImageBuildError:
+        """Describe Docker being unavailable for an image build action."""
+        return cls(f"Docker was not found while {action} {target.image_label}: {target.dockerfile}")
+
+    @classmethod
+    def docker_timed_out(
+        cls, timeout: float, action: str, target: _BuildTarget
+    ) -> TaskImageBuildError:
+        """Describe a Docker image build action that exceeded its timeout."""
+        return cls(
+            f"Docker timed out after {timeout:g} seconds while {action} "
+            f"{target.image_label}: {target.dockerfile}"
+        )
+
 
 class ImagePushError(RuntimeError):
     """Raised when an agent image cannot be pushed to, or verified in, a registry."""
+
+    @classmethod
+    def run_environment_push_failed(
+        cls, image_id: str, backend_label: str, error: Exception
+    ) -> ImagePushError:
+        """Add the selected environment to an image push failure."""
+        return cls(
+            f"could not push or verify the agent image {image_id} in the "
+            f"registry for a {backend_label} run: {error}"
+        )
+
+    @classmethod
+    def tag_failed(cls, image_id: str, tag: str, returncode: int, details: str) -> ImagePushError:
+        """Describe Docker failing to tag an agent image for publishing."""
+        return cls(
+            f"Could not tag agent image {image_id} as {tag} "
+            f"(exit {returncode}): {details[:_DIAGNOSTIC_LIMIT]}"
+        )
+
+    @classmethod
+    def push_failed(cls, tag: str, returncode: int, details: str) -> ImagePushError:
+        """Describe a registry push failure and the required login step."""
+        return cls(
+            f"Could not push agent image {tag} (exit {returncode}): "
+            f"{details[:_DIAGNOSTIC_LIMIT]}. Authenticate first with "
+            "`docker login ghcr.io` using a token with `write:packages` scope "
+            "(`GITHUB_TOKEN` in CI)."
+        )
+
+    @classmethod
+    def digest_missing(cls, tag: str, details: str) -> ImagePushError:
+        """Describe a push whose Docker inspection returned no repo digest."""
+        return cls(
+            f"Pushed {tag} but Docker returned no repo digest for it: {details[:_DIAGNOSTIC_LIMIT]}"
+        )
+
+    @classmethod
+    def repository_digest_missing(cls, tag: str, repository: str, output: str) -> ImagePushError:
+        """Describe Docker output without a digest for the requested repository."""
+        return cls(
+            f"Docker returned no repo digest for {tag} under {repository}: "
+            f"{output[:_DIAGNOSTIC_LIMIT]!r}"
+        )
+
+    @classmethod
+    def digest_not_visible(cls, pushed: str) -> ImagePushError:
+        """Describe a pushed digest not yet visible to the registry."""
+        return cls(
+            f"Pushed {pushed} but the registry did not report it as present "
+            "immediately afterward; retry, or check registry availability."
+        )
+
+    @classmethod
+    def docker_not_found(cls, action: str) -> ImagePushError:
+        """Describe Docker being unavailable during image publication."""
+        return cls(f"Docker was not found while {action} the agent image")
+
+    @classmethod
+    def docker_timed_out(cls, timeout: float, action: str) -> ImagePushError:
+        """Describe a registry command that exceeded its timeout."""
+        return cls(f"Docker timed out after {timeout:g} seconds while {action} the agent image")
 
 
 @dataclass(frozen=True)
@@ -104,7 +219,7 @@ class SubprocessDockerBuildRunner:
         timeout: float,
     ) -> subprocess.CompletedProcess[str]:
         """Run one Docker command without invoking a shell."""
-        return subprocess.run(  # noqa: S603
+        return subprocess.run(
             tuple(argv),
             cwd=cwd,
             capture_output=True,
@@ -147,10 +262,9 @@ def build_task_image(
     dockerfile = dockerfile_path.expanduser().absolute()
     root = dockerfile.parent
     if not dockerfile.is_file() or dockerfile.is_symlink():
-        raise TaskImageBuildError(  # noqa: TRY003  # external CLI diagnostic
-            f"Task Dockerfile must be a regular file: {dockerfile}"
-        )
+        raise TaskImageBuildError.dockerfile_not_regular(dockerfile)
     if timeout <= 0:
+        # lint-waiver: LW-007127 [TRY003]; public image helper preserves ValueError for an invalid timeout
         raise ValueError("task image build timeout must be positive")  # noqa: TRY003
 
     runner = command_runner or SubprocessDockerBuildRunner()
@@ -164,7 +278,7 @@ def build_task_image(
     return _build_and_inspect(target, extra_build_args, runner=runner, timeout=timeout)
 
 
-def agent_image(  # noqa: PLR0913  # tracked: #288
+def agent_image(
     base_image: str,
     *,
     task_dockerfile: Path | None = None,
@@ -193,6 +307,7 @@ def agent_image(  # noqa: PLR0913  # tracked: #288
     order.
     """
     if timeout <= 0:
+        # lint-waiver: LW-007128 [TRY003]; public image helper preserves ValueError for an invalid timeout
         raise ValueError("agent image build timeout must be positive")  # noqa: TRY003
 
     runner = command_runner or SubprocessDockerBuildRunner()
@@ -250,10 +365,7 @@ def _build_and_inspect(
     )
     if build_result.returncode != 0:
         detail = (build_result.stderr or build_result.stdout or "docker build failed").strip()
-        raise TaskImageBuildError(  # noqa: TRY003  # external CLI diagnostic
-            f"Could not build {target.image_label} from {target.dockerfile} "
-            f"(exit {build_result.returncode}): {detail[:_DIAGNOSTIC_LIMIT]}"
-        )
+        raise TaskImageBuildError.build_failed(target, build_result.returncode, detail)
 
     inspect_argv = (
         "docker",
@@ -268,17 +380,19 @@ def _build_and_inspect(
     )
     if inspect_result.returncode != 0:
         detail = (inspect_result.stderr or inspect_result.stdout or "docker inspect failed").strip()
-        raise TaskImageBuildError(  # noqa: TRY003  # external CLI diagnostic
-            f"Could not resolve runnable {target.image_label} {image_tag} built from "
-            f"{target.dockerfile} (exit {inspect_result.returncode}): "
-            f"{detail[:_DIAGNOSTIC_LIMIT]}"
+        raise TaskImageBuildError.inspect_failed(
+            target,
+            image_tag,
+            inspect_result.returncode,
+            detail,
         )
     image_id = inspect_result.stdout.strip()
     if _IMAGE_ID.fullmatch(image_id) is None:
         displayed = image_id[:_DIAGNOSTIC_LIMIT] or "<empty>"
-        raise TaskImageBuildError(  # noqa: TRY003  # external CLI diagnostic
-            f"Docker returned an invalid runnable {target.image_label} ID for "
-            f"{target.dockerfile}: {displayed!r}"
+        raise TaskImageBuildError.invalid_runnable_id(
+            target.image_label,
+            target.dockerfile,
+            displayed,
         )
     return image_id
 
@@ -294,14 +408,9 @@ def _run_docker(
     try:
         return runner.run(argv, cwd=target.dockerfile.parent, timeout=timeout)
     except FileNotFoundError as exc:
-        raise TaskImageBuildError(  # noqa: TRY003  # external CLI diagnostic
-            f"Docker was not found while {action} {target.image_label}: {target.dockerfile}"
-        ) from exc
+        raise TaskImageBuildError.docker_not_found(action, target) from exc
     except subprocess.TimeoutExpired as exc:
-        raise TaskImageBuildError(  # noqa: TRY003  # external CLI diagnostic
-            f"Docker timed out after {timeout:g} seconds while {action} "
-            f"{target.image_label}: {target.dockerfile}"
-        ) from exc
+        raise TaskImageBuildError.docker_timed_out(timeout, action, target) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -354,10 +463,12 @@ def push_agent_image(
             message also names the `docker login` prerequisite.
     """
     if _IMAGE_ID.fullmatch(image_id) is None:
+        # lint-waiver: LW-007129 [TRY003]; public image helper preserves ValueError for a mutable or malformed image ID
         raise ValueError(  # noqa: TRY003
             f"push_agent_image requires an immutable image ID (sha256:...), got {image_id!r}"
         )
     if timeout <= 0:
+        # lint-waiver: LW-007130 [TRY003]; public image helper preserves ValueError for an invalid timeout
         raise ValueError("agent image push timeout must be positive")  # noqa: TRY003
 
     runner = command_runner or SubprocessDockerBuildRunner()
@@ -369,22 +480,14 @@ def push_agent_image(
     )
     if tag_result.returncode != 0:
         detail = (tag_result.stderr or tag_result.stdout or "docker tag failed").strip()
-        raise ImagePushError(  # noqa: TRY003
-            f"Could not tag agent image {image_id} as {tag} "
-            f"(exit {tag_result.returncode}): {detail[:_DIAGNOSTIC_LIMIT]}"
-        )
+        raise ImagePushError.tag_failed(image_id, tag, tag_result.returncode, detail)
 
     push_result = _run_registry_command(
         runner, ("docker", "push", tag), cwd=cwd, timeout=timeout, action="pushing"
     )
     if push_result.returncode != 0:
         detail = (push_result.stderr or push_result.stdout or "docker push failed").strip()
-        raise ImagePushError(  # noqa: TRY003
-            f"Could not push agent image {tag} (exit {push_result.returncode}): "
-            f"{detail[:_DIAGNOSTIC_LIMIT]}. Authenticate first with "
-            "`docker login ghcr.io` using a token with `write:packages` scope "
-            "(`GITHUB_TOKEN` in CI)."
-        )
+        raise ImagePushError.push_failed(tag, push_result.returncode, detail)
 
     inspect_result = _run_registry_command(
         runner,
@@ -395,18 +498,17 @@ def push_agent_image(
     )
     if inspect_result.returncode != 0 or not inspect_result.stdout.strip():
         detail = (inspect_result.stderr or inspect_result.stdout or "no output").strip()
-        raise ImagePushError(  # noqa: TRY003
-            f"Pushed {tag} but Docker returned no repo digest for it: {detail[:_DIAGNOSTIC_LIMIT]}"
-        )
+        raise ImagePushError.digest_missing(tag, detail)
     # An image carries one repo digest per repository it has been pushed to
     # or pulled from, and the build tag's own digest can come first under the
     # containerd image store, so pick the entry for *repository* rather than
     # the first one.
     digest_reference = _repo_digest_for(inspect_result.stdout, repository)
     if digest_reference is None:
-        raise ImagePushError(  # noqa: TRY003
-            f"Docker returned no repo digest for {tag} under {repository}: "
-            f"{inspect_result.stdout.strip()[:_DIAGNOSTIC_LIMIT]!r}"
+        raise ImagePushError.repository_digest_missing(
+            tag,
+            repository,
+            inspect_result.stdout.strip(),
         )
     return digest_reference
 
@@ -470,10 +572,7 @@ def ensure_pushed(
         image_id, repository=repository, command_runner=runner, timeout=timeout
     )
     if not agent_image_is_pushed(pushed, command_runner=runner, timeout=timeout):
-        raise ImagePushError(  # noqa: TRY003
-            f"Pushed {pushed} but the registry did not report it as present "
-            "immediately afterward; retry, or check registry availability."
-        )
+        raise ImagePushError.digest_not_visible(pushed)
     return pushed
 
 
@@ -534,8 +633,6 @@ def _run_registry_command(
     try:
         return runner.run(argv, cwd=cwd, timeout=timeout)
     except FileNotFoundError as exc:
-        raise ImagePushError(f"Docker was not found while {action} the agent image") from exc  # noqa: TRY003
+        raise ImagePushError.docker_not_found(action) from exc
     except subprocess.TimeoutExpired as exc:
-        raise ImagePushError(  # noqa: TRY003
-            f"Docker timed out after {timeout:g} seconds while {action} the agent image"
-        ) from exc
+        raise ImagePushError.docker_timed_out(timeout, action) from exc

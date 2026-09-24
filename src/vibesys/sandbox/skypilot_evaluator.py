@@ -21,7 +21,7 @@ _MAX_FRAME_BYTES = 1024 * 1024
 _FRAMEWORK_ARGUMENT_COUNT = 2
 
 
-def run_evaluator(  # noqa: C901, PLR0911, PLR0912, PLR0915
+def run_evaluator(
     kind: str,
     socket_path: Path,
     *,
@@ -39,9 +39,7 @@ def run_evaluator(  # noqa: C901, PLR0911, PLR0912, PLR0915
                 len(arguments) != _FRAMEWORK_ARGUMENT_COUNT
                 or not arguments[0].startswith("-")
                 or any(character.isspace() for character in arguments[0])
-                or not arguments[1].startswith(
-                    "/tmp/vibesys-framework-benchmark-"  # noqa: S108
-                )
+                or not arguments[1].startswith("/tmp/vibesys-framework-benchmark-")
                 or not arguments[1].endswith(".json")
             ):
                 print("Unsupported SkyPilot evaluator arguments", file=stderr)
@@ -142,7 +140,7 @@ def run_evaluator(  # noqa: C901, PLR0911, PLR0912, PLR0915
                         and hashlib.sha256(decoded).hexdigest() == frame["sha256"]
                     )
                     if not valid_artifact:
-                        raise ValueError  # noqa: TRY301
+                        raise ValueError
                     _atomic_write(Path(path), decoded)
                 except (binascii.Error, OSError, ValueError):
                     print("SkyPilot bridge returned an invalid artifact", file=stderr)

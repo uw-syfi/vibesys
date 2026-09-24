@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 import pytest
 from tests.server.support import build_server_parts
+from tests.support import run_test_command
 
 from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
@@ -104,7 +105,7 @@ def _view(state: AgentRunState, *, run_id: str = "run-1") -> RunView:
 
 def _git(workspace: Path, *args: str) -> str:
     command = ["git", "-C", str(workspace), *args]
-    result = subprocess.run(command, capture_output=True, check=True, text=True)  # noqa: S603
+    result = run_test_command(command, capture_output=True, check=True, text=True)
     return result.stdout.strip()
 
 
@@ -722,11 +723,11 @@ def test_service_reuses_one_design_projection_per_run(tmp_path: Path) -> None:
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
 
     parts.api.execute(DesignQuery())
-    design = parts.api._design  # noqa: SLF001
+    design = parts.api._design
     parts.api.execute(DesignQuery())
 
     assert design is not None
-    assert parts.api._design is design  # noqa: SLF001
+    assert parts.api._design is design
 
 
 def test_service_reports_design_not_ready_before_attach(tmp_path: Path) -> None:

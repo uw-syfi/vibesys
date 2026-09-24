@@ -1,6 +1,5 @@
 """Sanitizer gate (differential-dataflow `bfs`) — build the candidate under
 **ThreadSanitizer** and run it multi-worker; any reported data race is a hard FAIL.
-
 The determinism gate (`determinism_gate.py`) catches a race only when it actually
 perturbs the *output*. Many races are silently benign-looking on a given schedule
 yet are still undefined behavior that a future compiler/CPU can miscompile. TSan is
@@ -8,22 +7,18 @@ the mechanical oracle for that class: it instruments memory accesses and reports
 race the moment two threads touch the same location without synchronization, even
 if the observed output happened to be correct this run. This is the anti-"passes
 today, breaks tomorrow" backstop for an engine the agent is free to re-parallelize.
-
 Rust TSan requires a **nightly** toolchain plus `rust-src` (for `-Zbuild-std`, so
 the standard library is rebuilt with instrumentation). If either is missing the
 gate reports a **setup error (exit 2)** — it never silently passes: "could not run
 TSan" must not be mistaken for "TSan clean".
-
 Note on allocators: TSan intercepts the system allocator, which conflicts with a
 custom `#[global_allocator]`. The `bfs` example does not install mimalloc (only
 `spines`/`scc`/`columnar` do), so bfs builds under TSan without swapping it out. If
 a future candidate adds a global allocator to the bfs path, set
 `DD_TSAN_NO_MIMALLOC=1` in that build (the gate passes it through as a cfg).
-
 Exit 0 = PASS (TSan reported no race on the multi-worker smoke run);
 1 = a race was reported or the instrumented candidate exited nonzero (hard fail);
 2 = a build/setup error, including nightly/rust-src unavailable.
-
 Usage (the Judge runs this alongside the equivalence + determinism gates):
   python3 accuracy_checker/sanitizer_gate.py \
       --manifest-path engine/Cargo.toml
@@ -42,7 +37,6 @@ import subprocess
 _SMOKE_ARGS = ["5000", "50000", "200", "5", "inspect", "-w", "4"]
 _BUILD_TIMEOUT_S = 1800
 _RUN_TIMEOUT_S = 900
-
 # Substrings that mean TSan found something (stderr).
 _RACE_MARKERS = ("WARNING: ThreadSanitizer", "data race", "ThreadSanitizer: ")
 
@@ -82,24 +76,20 @@ def main():
     )
     args = ap.parse_args()
     manifest = args.manifest_path
-
     print("sanitizer gate — build bfs under ThreadSanitizer, run multi-worker, fail on any race")
     print(f"  manifest : {manifest}")
     print(f"  smoke    : bfs {' '.join(_SMOKE_ARGS)}")
     print("-" * 72)
-
     ok, host_or_err = _nightly_ok()
     if not ok:
         print(f"SANITIZER: SETUP-ERROR — {host_or_err}")
         print("  (this is exit 2, NOT a pass: an un-runnable sanitizer must not read as clean)")
         return 2
     host = host_or_err
-
     env = dict(os.environ)
     env["RUSTFLAGS"] = (env.get("RUSTFLAGS", "") + " -Zsanitizer=thread").strip()
     # Deterministic, loud TSan: report races, keep going so we see them all.
     env["TSAN_OPTIONS"] = "halt_on_error=0 exitcode=99 " + env.get("TSAN_OPTIONS", "")
-
     build = [
         "cargo",
         "+nightly",
@@ -126,13 +116,11 @@ def main():
             f"SANITIZER: SETUP-ERROR — TSan build failed:\n{(b.stderr or b.stdout).strip()[-800:]}"
         )
         return 2
-
     manifest_dir = os.path.dirname(os.path.abspath(manifest))
     tsan_bin = os.path.join(manifest_dir, "target", host, "release", "examples", "bfs")
     if not os.path.exists(tsan_bin):
         print(f"SANITIZER: SETUP-ERROR — TSan build produced no binary at {tsan_bin}")
         return 2
-
     print(f"  running  : {tsan_bin} {' '.join(_SMOKE_ARGS)}")
     try:
         r = subprocess.run(
@@ -145,7 +133,6 @@ def main():
     except subprocess.TimeoutExpired:
         print(f"SANITIZER: SETUP-ERROR — TSan run timed out after {_RUN_TIMEOUT_S}s")
         return 2
-
     stderr = r.stderr or ""
     raced = any(m in stderr for m in _RACE_MARKERS)
     print("-" * 72)

@@ -241,7 +241,7 @@ class ExperimentProjection:
         self._ready = True
         self._force_reset = False
 
-    def _advance(  # noqa: C901  # Fallback validation keeps cache updates safe.
+    def _advance(  # Fallback validation keeps cache updates safe.
         self,
         run_view: RunView,
         *,

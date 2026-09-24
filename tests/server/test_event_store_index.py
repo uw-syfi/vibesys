@@ -120,7 +120,7 @@ def test_warm_attach_uses_the_validated_sidecar_without_scanning_jsonl(
 def _count_header_scans(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """Count JSONL lines classified by the header scan (the suffix/full scan work)."""
     scanned = [0]
-    scan_header = events_module._scan_header_fields  # noqa: SLF001
+    scan_header = events_module._scan_header_fields
 
     def counting(line: bytes) -> _ScannedHeader | None:
         scanned[0] += 1
@@ -294,7 +294,7 @@ def test_source_change_during_scan_does_not_publish_an_index(
 ) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2])
-    scan_header = events_module._scan_header_fields  # noqa: SLF001
+    scan_header = events_module._scan_header_fields
     changed = False
 
     def change_during_scan(line: bytes) -> _ScannedHeader | None:
@@ -319,7 +319,7 @@ def test_source_change_while_loading_sidecar_rejects_the_cache(
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2])
     EventStore(path, run_id="first")
-    validate_footer = event_index_module._valid_footer  # noqa: SLF001
+    validate_footer = event_index_module._valid_footer
     changed = False
 
     def change_after_validation(stream: BinaryIO, digest: event_index_module._Digest) -> bool:
@@ -366,7 +366,7 @@ def test_boundary_fingerprint_rejects_same_size_source_overwrite(
     # stale content fingerprint must still force a source scan.
     _rewrite_sidecar(index_path, copy_current_stat)
     scanned = 0
-    scan_header = events_module._scan_header_fields  # noqa: SLF001
+    scan_header = events_module._scan_header_fields
 
     def count_header_scans(line: bytes) -> _ScannedHeader | None:
         nonlocal scanned
@@ -449,7 +449,7 @@ def test_valid_unterminated_record_stays_outside_the_safe_cache_boundary(
     assert loaded is not None
     assert len(loaded.records) == 1
     scanned = 0
-    scan_header = events_module._scan_header_fields  # noqa: SLF001
+    scan_header = events_module._scan_header_fields
 
     def count_header_scans(line: bytes) -> _ScannedHeader | None:
         nonlocal scanned
@@ -568,7 +568,7 @@ def test_unreadable_sidecar_is_only_a_cache_miss(
     index_path = event_index_path(path)
     real_open = Path.open
 
-    def deny_index_read(  # noqa: PLR0913  # mirrors Path.open for the monkeypatch
+    def deny_index_read(  # mirrors Path.open for the monkeypatch
         target: Path,
         mode: str = "r",
         buffering: int = -1,

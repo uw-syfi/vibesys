@@ -1,5 +1,4 @@
 """Verify the engine-free image: engines gone, build dependencies intact.
-
 Stdlib only. Run at build time and inside the running container:
     python3 /opt/verify_image.py
 Exit code 0 means the image is good.
@@ -27,7 +26,7 @@ KEPT = (
 def _importable(name: str) -> tuple[bool, str]:
     try:
         importlib.import_module(name)
-    except Exception as exc:  # noqa: BLE001  # any import failure counts
+    except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"
     return True, ""
 

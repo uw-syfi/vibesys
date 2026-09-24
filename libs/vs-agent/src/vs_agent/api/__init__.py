@@ -132,22 +132,22 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str) -> Any:  # noqa: ANN401
+def __getattr__(name: str) -> Any:
     """Expose the heavy composition lazily so imports cannot form a cycle."""
     if name == "AgentClient":
-        from vs_agent.client import AgentClient  # noqa: PLC0415
+        from vs_agent.client import AgentClient
 
         return AgentClient
     if name == "agent_driver_supports_mcp_servers":
-        from vs_agent.factory import (  # noqa: PLC0415
+        from vs_agent.factory import (
             agent_driver_supports_mcp_servers,
         )
 
         return agent_driver_supports_mcp_servers
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")  # noqa: TRY003
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")  # noqa: TRY003  # lint-waiver: LW-008089 [TRY003]; module-level `__getattr__` must raise AttributeError with the missing public name.
 
 
-def build_agent_client(  # noqa: PLR0913
+def build_agent_client(
     *,
     spec: AgentSpec,
     backends: dict[str, Any] | None,
@@ -163,7 +163,7 @@ def build_agent_client(  # noqa: PLR0913
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
 ) -> AgentClientProtocol:
     """Build an agent service through the application composition module."""
-    from vs_agent.factory import build_agent_client as build  # noqa: PLC0415
+    from vs_agent.factory import build_agent_client as build
 
     return build(
         spec=spec,

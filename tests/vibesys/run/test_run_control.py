@@ -80,7 +80,7 @@ def test_stop_while_paused_releases_the_wait_and_unwinds() -> None:
     def wait_at_boundary() -> None:
         try:
             channel.wait_while_paused()
-        except BaseException as error:  # noqa: BLE001  # The unwind signal is the assertion.
+        except BaseException as error:  # The unwind signal is the assertion.
             raised.append(error)
 
     waiter = threading.Thread(target=wait_at_boundary)

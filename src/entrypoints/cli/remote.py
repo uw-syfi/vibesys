@@ -210,8 +210,8 @@ def _checkout_remote_run_branch(project_root: Path, selected: _RemoteRunBranch) 
 
 def _resume_git(project_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     """Run a non-shell Git command during remote resume resolution."""
-    return subprocess.run(  # noqa: PLW1510, S603  # tracked: #288
-        ["git", *arguments],  # noqa: S607  # tracked: #288
+    return subprocess.run(
+        ["git", *arguments],
         cwd=project_root,
         capture_output=True,
         text=True,

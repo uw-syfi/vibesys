@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,7 @@ from server.events import (
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
     AgentExecutionStartedData,
+    EventData,
     EventStatus,
     EventType,
     GateFinishedData,
@@ -34,18 +36,20 @@ from server.events import (
 )
 
 
-def _events(path):  # noqa: ANN001, ANN202
+def _events(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def _write_stored_events(log_dir, events):  # noqa: ANN001, ANN202
+def _write_stored_events(log_dir: Path, events: Sequence[RunEvent]) -> None:
     log_dir.mkdir()
     (log_dir / "run-events.jsonl").write_text(
         "".join(event.model_dump_json() + "\n" for event in events)
     )
 
 
-def _stored_event(sequence, event_type, status, data):  # noqa: ANN001, ANN202
+def _stored_event(
+    sequence: int, event_type: EventType, status: EventStatus, data: EventData
+) -> RunEvent:
     return RunEvent(
         sequence=sequence,
         run_id="persisted-run",
@@ -59,7 +63,7 @@ def _stored_event(sequence, event_type, status, data):  # noqa: ANN001, ANN202
     )
 
 
-def test_bootstrap_events_join_durable_history(tmp_path):  # noqa: ANN001, ANN201
+def test_bootstrap_events_join_durable_history(tmp_path: Path) -> None:
     durable = build_server_parts(tmp_path / "durable")
     durable.journal.record(EventType.RUN_FINISHED, status=EventStatus.COMPLETED)
 
@@ -86,7 +90,7 @@ def test_bootstrap_events_join_durable_history(tmp_path):  # noqa: ANN001, ANN20
     ]
 
 
-def test_attach_renumbering_bootstrap_events_starts_a_new_sequence_space(tmp_path):  # noqa: ANN001, ANN201
+def test_attach_renumbering_bootstrap_events_starts_a_new_sequence_space(tmp_path: Path) -> None:
     durable = build_server_parts(tmp_path / "durable")
     durable.journal.record(EventType.RUN_FINISHED, status=EventStatus.COMPLETED)
 
@@ -104,7 +108,7 @@ def test_attach_renumbering_bootstrap_events_starts_a_new_sequence_space(tmp_pat
     assert attached != folded
 
 
-def test_attach_into_an_empty_log_keeps_the_sequence_space(tmp_path):  # noqa: ANN001, ANN201
+def test_attach_into_an_empty_log_keeps_the_sequence_space(tmp_path: Path) -> None:
     current = build_server_parts(tmp_path / "bootstrap")
     bootstrap_store = current.journal.store_id_locked()
     before = [(event.sequence, event.type) for event in current.journal.read()]
@@ -117,7 +121,7 @@ def test_attach_into_an_empty_log_keeps_the_sequence_space(tmp_path):  # noqa: A
     assert [(event.sequence, event.type) for event in current.journal.read()] == before
 
 
-def test_phase_only_legacy_replay_translates_in_place(tmp_path):  # noqa: ANN001, ANN201
+def test_phase_only_legacy_replay_translates_in_place(tmp_path: Path) -> None:
     """A translated phase event replaces the original at its stored sequence."""
     log_dir = tmp_path / "legacy"
     _write_stored_events(
@@ -157,7 +161,7 @@ def test_phase_only_legacy_replay_translates_in_place(tmp_path):  # noqa: ANN001
     )
 
 
-def test_modern_phase_events_replay_unchanged(tmp_path):  # noqa: ANN001, ANN201
+def test_modern_phase_events_replay_unchanged(tmp_path: Path) -> None:
     """Phase events with a canonical lifecycle sibling pass through untouched."""
     log_dir = tmp_path / "modern"
     activity = AgentExecutionActivityData(mode="thinking", summary="Implementing")
@@ -197,7 +201,7 @@ def test_modern_phase_events_replay_unchanged(tmp_path):  # noqa: ANN001, ANN201
     ]
 
 
-def test_invocation_and_terminal_failure_share_diagnostic_identity(tmp_path):  # noqa: ANN001, ANN201
+def test_invocation_and_terminal_failure_share_diagnostic_identity(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     error = RuntimeError("token=super-secret agent process exited")
     execution = parts.controller.start_agent_execution("implementer", "round 5", "prompt")
@@ -251,7 +255,7 @@ def test_operational_failure_events_require_diagnostics(
         parts.journal.append(make_event(event_type, "boom", status=EventStatus.FAILED))
 
 
-def test_append_accepts_failed_gate_outcomes_without_diagnostics(tmp_path):  # noqa: ANN001, ANN201
+def test_append_accepts_failed_gate_outcomes_without_diagnostics(tmp_path: Path) -> None:
     # A failed gate is an expected semantic outcome, not an operational fault,
     # so the append invariant must leave it diagnostic-less.
     parts = build_server_parts(tmp_path)
@@ -265,7 +269,7 @@ def test_append_accepts_failed_gate_outcomes_without_diagnostics(tmp_path):  # n
     assert gate.diagnostic is None
 
 
-def test_semantic_failure_events_do_not_require_diagnostics(tmp_path):  # noqa: ANN001, ANN201
+def test_semantic_failure_events_do_not_require_diagnostics(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     judge = parts.journal.record(
         EventType.JUDGE_RESULT,
@@ -281,7 +285,7 @@ def test_semantic_failure_events_do_not_require_diagnostics(tmp_path):  # noqa: 
     assert round_finished.diagnostic is None
 
 
-def test_capture_failure_emits_nothing_on_success(tmp_path):  # noqa: ANN001, ANN201
+def test_capture_failure_emits_nothing_on_success(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     before = parts.journal.read()
     with parts.journal.capture_failure(
@@ -293,7 +297,7 @@ def test_capture_failure_emits_nothing_on_success(tmp_path):  # noqa: ANN001, AN
     assert parts.journal.read() == before
 
 
-def test_capture_failure_records_once_and_reraises(tmp_path):  # noqa: ANN001, ANN201
+def test_capture_failure_records_once_and_reraises(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     error = KeyboardInterrupt("background worker stopped")
     before = parts.journal.read()
@@ -322,7 +326,7 @@ def test_capture_failure_records_once_and_reraises(tmp_path):  # noqa: ANN001, A
     assert not any(event.type is EventType.RUN_FAILED for event in events)
 
 
-def test_nonterminal_failure_helpers_reject_wrong_event_owners(tmp_path):  # noqa: ANN001, ANN201
+def test_nonterminal_failure_helpers_reject_wrong_event_owners(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     before = parts.journal.read()
     with pytest.raises(ValueError, match="without owning run termination"):
@@ -341,11 +345,12 @@ def test_nonterminal_failure_helpers_reject_wrong_event_owners(tmp_path):  # noq
                 operation="Background maintenance",
             ),
         ):
-            raise RuntimeError("worker failed")  # noqa: TRY003
+            _failure_message = "worker failed"
+            raise RuntimeError(_failure_message)
     assert parts.journal.read() == before
 
 
-def test_terminal_wrapper_reuses_cause_diagnostic(tmp_path):  # noqa: ANN001, ANN201
+def test_terminal_wrapper_reuses_cause_diagnostic(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     cause = RuntimeError("token=super-secret agent process exited")
     execution = parts.controller.start_agent_execution("implementer", "round 5", "prompt")

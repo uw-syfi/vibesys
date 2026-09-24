@@ -7,6 +7,7 @@ import subprocess
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Self
 
 from pydantic import ValidationError
 
@@ -25,6 +26,68 @@ _PRIVATE_PROJECT_ENTRY_NAMES = frozenset({".git", "agent.toml"})
 
 class ProjectProvisioningError(ValueError):
     """Raised when an input directory cannot be provisioned as a project."""
+
+    @classmethod
+    def input_missing(cls, path: Path) -> Self:
+        """Describe a missing input project directory."""
+        return cls(f"input project does not exist: {path}")
+
+    @classmethod
+    def input_not_directory(cls, path: Path) -> Self:
+        """Describe an input path that is not a directory."""
+        return cls(f"input project is not a directory: {path}")
+
+    @classmethod
+    def objective_missing(cls, path: Path) -> Self:
+        """Describe a legacy input project without its objective file."""
+        return cls(f"OBJECTIVE.md not found: {path}")
+
+    @classmethod
+    def destination_inside_input(cls, path: Path) -> Self:
+        """Describe a destination that would copy a project into itself."""
+        return cls(f"project destination must be outside the input project: {path}")
+
+    @classmethod
+    def destination_exists(cls, path: Path) -> Self:
+        """Describe a destination that is already present."""
+        return cls(f"project destination already exists: {path}")
+
+    @classmethod
+    def workspace_root_mismatch(cls, workspace_root: Path, destination: Path) -> Self:
+        """Describe a workspace whose root differs from the destination."""
+        return cls(
+            f"project workspace root does not match destination: {workspace_root} != {destination}"
+        )
+
+    @classmethod
+    def manifest_missing(cls, path: Path) -> Self:
+        """Describe an input directory without its manifest."""
+        return cls(f"input manifest not found: {path}")
+
+    @classmethod
+    def invalid_manifest(cls, path: Path, error: Exception) -> Self:
+        """Describe a manifest that cannot be parsed or validated."""
+        return cls(f"invalid input manifest {path}: {error}")
+
+    @classmethod
+    def workspace_sources_mismatch(cls) -> Self:
+        """Describe mismatched declared and resolved workspace sources."""
+        return cls("workspace source declarations and resolved provisioning sources do not match")
+
+    @classmethod
+    def workspace_sources_require_git_strip(cls) -> Self:
+        """Describe workspace sources that retain repository metadata."""
+        return cls("copied projects require workspace sources with strip_git = true")
+
+    @classmethod
+    def evaluator_declaration_mismatch(cls) -> Self:
+        """Describe mismatched evaluator declarations and resolved sources."""
+        return cls("evaluator declaration and resolved provisioning source do not match")
+
+    @classmethod
+    def evaluator_source_not_directory(cls, path: Path) -> Self:
+        """Describe a resolved evaluator source that is not a directory."""
+        return cls(f"evaluator source is not a directory: {path}")
 
 
 @dataclass(frozen=True)
@@ -113,42 +176,32 @@ def provision_project(
 def _require_input_root(path: Path, *, require_legacy_objective: bool) -> Path:
     root = path.expanduser().resolve()
     if not root.exists():
-        raise ProjectProvisioningError(f"input project does not exist: {root}")  # noqa: TRY003
+        raise ProjectProvisioningError.input_missing(root)
     if not root.is_dir():
-        raise ProjectProvisioningError(f"input project is not a directory: {root}")  # noqa: TRY003
+        raise ProjectProvisioningError.input_not_directory(root)
     if require_legacy_objective and not (root / "OBJECTIVE.md").is_file():
-        raise ProjectProvisioningError(  # noqa: TRY003
-            f"OBJECTIVE.md not found: {root / 'OBJECTIVE.md'}"
-        )
+        raise ProjectProvisioningError.objective_missing(root / "OBJECTIVE.md")
     return root
 
 
 def _validate_destination(source: Path, destination: Path, *, workspace: Workspace) -> None:
     if destination == source or destination.is_relative_to(source):
-        raise ProjectProvisioningError(  # noqa: TRY003
-            f"project destination must be outside the input project: {destination}"
-        )
+        raise ProjectProvisioningError.destination_inside_input(destination)
     if destination.exists() or destination.is_symlink():
-        raise ProjectProvisioningError(  # noqa: TRY003
-            f"project destination already exists: {destination}"
-        )
-    if workspace.root.expanduser().resolve() != destination:
-        raise ProjectProvisioningError(  # noqa: TRY003
-            "project workspace root does not match destination: "
-            f"{workspace.root.expanduser().resolve()} != {destination}"
-        )
+        raise ProjectProvisioningError.destination_exists(destination)
+    workspace_root = workspace.root.expanduser().resolve()
+    if workspace_root != destination:
+        raise ProjectProvisioningError.workspace_root_mismatch(workspace_root, destination)
 
 
 def _load_manifest(source: Path) -> InputManifest:
     path = source / MANIFEST_NAME
     if not path.is_file():
-        raise ProjectProvisioningError(f"input manifest not found: {path}")  # noqa: TRY003
+        raise ProjectProvisioningError.manifest_missing(path)
     try:
         return InputManifest.model_validate(tomllib.loads(path.read_text()))
     except (tomllib.TOMLDecodeError, ValidationError) as exc:
-        raise ProjectProvisioningError(  # noqa: TRY003
-            f"invalid input manifest {path}: {exc}"
-        ) from exc
+        raise ProjectProvisioningError.invalid_manifest(path, exc) from exc
 
 
 def _validate_materialization_contract(
@@ -157,18 +210,12 @@ def _validate_materialization_contract(
 ) -> None:
     declared_sources = manifest.workspace.sources if manifest.workspace is not None else ()
     if declared_sources != spec.workspace_sources:
-        raise ProjectProvisioningError(  # noqa: TRY003
-            "workspace source declarations and resolved provisioning sources do not match"
-        )
+        raise ProjectProvisioningError.workspace_sources_mismatch()
     if any(not source.strip_git for source in spec.workspace_sources):
-        raise ProjectProvisioningError(  # noqa: TRY003
-            "copied projects require workspace sources with strip_git = true"
-        )
+        raise ProjectProvisioningError.workspace_sources_require_git_strip()
     declared_evaluator = manifest.evaluator is not None and manifest.evaluator.source is not None
     if declared_evaluator != (spec.evaluator_source is not None):
-        raise ProjectProvisioningError(  # noqa: TRY003
-            "evaluator declaration and resolved provisioning source do not match"
-        )
+        raise ProjectProvisioningError.evaluator_declaration_mismatch()
 
 
 def _project_copy_excludes(
@@ -218,9 +265,7 @@ def _materialize_evaluator(
 
     evaluator_source = spec.evaluator_source.expanduser().resolve()
     if not evaluator_source.is_dir():
-        raise ProjectProvisioningError(  # noqa: TRY003
-            f"evaluator source is not a directory: {evaluator_source}"
-        )
+        raise ProjectProvisioningError.evaluator_source_not_directory(evaluator_source)
     relative = Path("_evaluator") / evaluator_source.name
     evaluator_destination = destination / relative
 
@@ -277,8 +322,8 @@ def _should_copy_project_entry(relative_path: Path) -> bool:
 
 
 def _is_git_worktree(path: Path) -> bool:
-    result = subprocess.run(  # noqa: S603
-        ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],  # noqa: S607
+    result = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
         check=False,
         capture_output=True,
         text=True,

@@ -25,7 +25,6 @@ mode entries share.
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn
 
@@ -78,6 +77,7 @@ from vibesys.api.request import load_objective, with_operator_constraints
 
 if TYPE_CHECKING:
     import argparse
+    from collections.abc import Callable
 
 # Aliases the tests reach for by name; the submodules use the imported names.
 _load_objective = load_objective
@@ -119,7 +119,7 @@ __all__ = [
 
 
 @dataclass(frozen=True)
-class CliInvocation:  # tracked: #288
+class CliInvocation:
     """One parsed, validated CLI invocation: its loop kind and namespace."""
 
     loop_kind: str
@@ -172,7 +172,7 @@ def _explicit_cli_dests(
     """Return parser destinations whose option strings occur in *argv*."""
     destinations = {
         option: action.dest
-        for action in parser._actions  # noqa: SLF001  # argparse exposes no public lookup
+        for action in parser._actions  # argparse exposes no public lookup
         for option in action.option_strings
     }
     return frozenset(
@@ -240,7 +240,7 @@ def _option_from_argv(argv: list[str], option: str) -> str | None:
 def _render_configuration_error(error: ConfigurationError) -> NoReturn:
     """Print a configuration error to stderr and exit with its code."""
     diagnostic = error.diagnostic
-    print(f"vibesys: {diagnostic.message}", file=sys.stderr)  # noqa: T201  # tracked: #288
+    print(f"vibesys: {diagnostic.message}", file=sys.stderr)
     if diagnostic.usage:
-        print(diagnostic.usage, file=sys.stderr)  # noqa: T201  # tracked: #288
+        print(diagnostic.usage, file=sys.stderr)
     raise SystemExit(diagnostic.exit_code)

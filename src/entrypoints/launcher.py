@@ -124,9 +124,7 @@ def _headless_requested(args: list[str]) -> bool:
 def _run_headless(args: list[str]) -> int:
     module = "entrypoints.server" if args and args[0] == "tui-defaults" else "entrypoints.headless"
     command_args = args if module == "entrypoints.server" else _without_option(args, "--theme")
-    return subprocess.call(  # noqa: S603  # tracked: #288
-        [sys.executable, "-m", module, *command_args]
-    )
+    return subprocess.call([sys.executable, "-m", module, *command_args])
 
 
 def _without_option(args: list[str], option: str) -> list[str]:
@@ -162,10 +160,10 @@ def _bundled_runtime_missing_message() -> str:
 
 def _run_bundled_tui(bundle: BundledTui, args: list[str]) -> int:
     if not bundle.runtime.is_file() or not os.access(bundle.runtime, os.X_OK):
-        print(_bundled_runtime_missing_message(), file=sys.stderr)  # noqa: T201  # tracked: #288
+        print(_bundled_runtime_missing_message(), file=sys.stderr)
         return 1
     if not bundle.launcher.is_file():
-        print(_bundled_runtime_missing_message(), file=sys.stderr)  # noqa: T201  # tracked: #288
+        print(_bundled_runtime_missing_message(), file=sys.stderr)
         return 1
 
     env = {
@@ -178,7 +176,7 @@ def _run_bundled_tui(bundle: BundledTui, args: list[str]) -> int:
         # reach clients/tui/src/boot-trace.ts unchanged.
         **boot_trace.child_env(),
     }
-    return subprocess.call(  # noqa: S603  # tracked: #288
+    return subprocess.call(
         [str(bundle.runtime), str(bundle.launcher), *args],
         env=env,
     )
@@ -232,7 +230,7 @@ def _node_executable() -> Path | None:
 
 def _node_major(node: Path) -> int | None:
     try:
-        result = subprocess.run(  # noqa: S603  # tracked: #288
+        result = subprocess.run(
             [str(node), "--version"], capture_output=True, text=True, check=True
         )
     except (OSError, subprocess.CalledProcessError):
@@ -316,12 +314,12 @@ def _write_install_stamp(root: Path) -> None:
 
 
 def _run_pnpm_install(pnpm: list[str], root: Path) -> bool:
-    print(  # noqa: T201  # tracked: #288
+    print(
         "vibesys: installing JS dependencies (pnpm install --frozen-lockfile)...",
         file=sys.stderr,
     )
     started = time.monotonic()
-    result = subprocess.run(  # noqa: S603  # tracked: #288
+    result = subprocess.run(
         [*pnpm, "install", "--frozen-lockfile"],
         cwd=str(root / _WORKSPACE_REL),
         capture_output=True,
@@ -335,7 +333,7 @@ def _run_pnpm_install(pnpm: list[str], root: Path) -> bool:
         return False
     _write_install_stamp(root)
     elapsed = time.monotonic() - started
-    print(f"vibesys: dependencies installed ({elapsed:.1f}s)", file=sys.stderr)  # noqa: T201  # tracked: #288
+    print(f"vibesys: dependencies installed ({elapsed:.1f}s)", file=sys.stderr)
     return True
 
 
@@ -345,7 +343,7 @@ def _run_codegen_and_build(pnpm: list[str], root: Path) -> bool:
         [*pnpm, "build:clients"],
     )
     for command in steps:
-        result = subprocess.run(  # noqa: S603  # tracked: #288
+        result = subprocess.run(
             command, cwd=str(root / _WORKSPACE_REL), capture_output=True, text=True, check=False
         )
         if result.returncode != 0:
@@ -359,7 +357,7 @@ def _run_codegen_and_build(pnpm: list[str], root: Path) -> bool:
 def _ensure_source_tui_built(root: Path) -> bool:
     pnpm = _pnpm_argv()
     if pnpm is None:
-        print(  # noqa: T201  # tracked: #288
+        print(
             "vibesys: pnpm is required to build the interactive client. Install pnpm "
             "or enable Corepack, or run headless with --headless.",
             file=sys.stderr,
@@ -374,7 +372,7 @@ def _ensure_source_tui_built(root: Path) -> bool:
     # The build failed even though the install-skip heuristic considered
     # dependencies fresh (e.g. a partially removed node_modules). Fall back to
     # a full install and retry once before giving up.
-    print(  # noqa: T201  # tracked: #288
+    print(
         "vibesys: build failed; retrying after a full dependency install...",
         file=sys.stderr,
     )
@@ -384,7 +382,7 @@ def _ensure_source_tui_built(root: Path) -> bool:
 def _run_source_tui(root: Path, args: list[str]) -> int:
     bun = _bun_executable()
     if bun is None:
-        print(  # noqa: T201  # tracked: #288
+        print(
             "vibesys: Bun is required by the OpenTUI client. Install it from "
             "https://bun.sh, or run headless with --headless.",
             file=sys.stderr,
@@ -392,7 +390,7 @@ def _run_source_tui(root: Path, args: list[str]) -> int:
         return 1
     node = _node_executable()
     if node is None or (_node_major(node) or 0) < _MIN_NODE_MAJOR:
-        print(  # noqa: T201  # tracked: #288
+        print(
             f"vibesys: Node.js {_MIN_NODE_MAJOR}+ is required for the interactive client, "
             "or run headless with --headless.",
             file=sys.stderr,
@@ -400,7 +398,7 @@ def _run_source_tui(root: Path, args: list[str]) -> int:
         return 1
     if _needs_rebuild(root):
         reason = _stale_reason(root) or "clients/tui/dist/index.js (missing)"
-        print(  # noqa: T201  # tracked: #288
+        print(
             f"vibesys: TUI bundle is stale (changed: {reason}); rebuilding (~30-60s)...",
             file=sys.stderr,
         )
@@ -408,7 +406,7 @@ def _run_source_tui(root: Path, args: list[str]) -> int:
         if not _ensure_source_tui_built(root):
             return 1
         elapsed = time.monotonic() - started
-        print(f"vibesys: TUI bundle rebuilt ({elapsed:.1f}s)", file=sys.stderr)  # noqa: T201  # tracked: #288
+        print(f"vibesys: TUI bundle rebuilt ({elapsed:.1f}s)", file=sys.stderr)
 
     launcher = root / "clients" / "tui" / "dist" / "launcher.js"
     env = {
@@ -420,9 +418,7 @@ def _run_source_tui(root: Path, args: list[str]) -> int:
         # Launch anchor and stderr-trace request; see _run_bundled_tui.
         **boot_trace.child_env(),
     }
-    return subprocess.call(  # noqa: S603  # tracked: #288
-        [str(node), str(launcher), *args], env=env
-    )
+    return subprocess.call([str(node), str(launcher), *args], env=env)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -444,7 +440,7 @@ def main(argv: list[str] | None = None) -> int:
     if root is not None:
         return _run_source_tui(root, args)
 
-    print(  # noqa: T201  # tracked: #288
+    print(
         "vibesys: interactive TUI is not bundled and no source checkout was found; "
         "running headless. Install a supported platform wheel to get the TUI, or "
         "pass --headless to silence this notice.",

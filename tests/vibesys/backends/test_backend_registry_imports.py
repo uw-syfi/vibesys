@@ -9,9 +9,10 @@ The probe runs in a subprocess because import side effects are a property of a
 fresh interpreter, and the pytest session has usually imported the module.
 """
 
-import subprocess
 import sys
 from pathlib import Path
+
+from tests.support import run_test_command
 
 from vibesys import backends
 from vibesys.backends import SandboxKind
@@ -31,7 +32,7 @@ print("vs_sandbox.docker_sandbox" in sys.modules)
 
 
 def _docker_sandbox_loaded_after_backend_construction(backend: str, log_dir: Path) -> bool:
-    result = subprocess.run(  # noqa: S603  # tracked: #288
+    result = run_test_command(
         [sys.executable, "-c", _PROBE.format(backend=backend, log_dir=str(log_dir))],
         capture_output=True,
         text=True,

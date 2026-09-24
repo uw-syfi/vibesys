@@ -41,7 +41,7 @@ def _project_run(root: Path) -> tuple[Project, str]:
     return project, manifest.run_id
 
 
-def test_inspector_answers_round_and_failure_queries(tmp_path):  # noqa: ANN001, ANN201
+def test_inspector_answers_round_and_failure_queries(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
     project.state.save_round(
         run_id,
@@ -62,7 +62,7 @@ def test_inspector_answers_round_and_failure_queries(tmp_path):  # noqa: ANN001,
     assert "latency regressed" in inspector.answer("why did the judge fail?")
 
 
-def test_inspector_explains_latest_failed_execution(tmp_path):  # noqa: ANN001, ANN201
+def test_inspector_explains_latest_failed_execution(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.controller.start_agent_execution("implementer", "round 5", "prompt")
     parts.controller.after_agent(
@@ -78,7 +78,7 @@ def test_inspector_explains_latest_failed_execution(tmp_path):  # noqa: ANN001, 
     assert "agent process exited" in answer
 
 
-def test_inspector_explains_configuration_failure(tmp_path):  # noqa: ANN001, ANN201
+def test_inspector_explains_configuration_failure(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.journal.record(
         EventType.CONFIGURATION_FAILED,
