@@ -41,6 +41,7 @@ from resources.profilers.rocprof.counters import (
     KernelAgg,
     MfmaPeakContext,
     _aggregate_by_kernel,
+    _discover,
     _duration_from_counter_rows,
     _filter_kernels,
     _hbm_bytes,
@@ -588,11 +589,20 @@ def test_real_mi210_triage_without_flops_falls_back_to_the_uninterpretable_raw_r
 
 def test_real_mi210_triage_expresses_mfma_utilization_as_a_fraction_of_spec_peak():  # noqa: ANN201  # tracked: #288
     # The real capture (job1 pass1) never requested SQ_VALU_MFMA_BUSY_CYCLES,
-    # so this exercises the --flops fallback end to end: FLOPs = 2*M*N*K for
-    # the fixture's bf16 4096^3 GEMM (see the "Real MI210" section docstring
-    # above), duration comes straight from the real Start/End_Timestamp
-    # columns (2320966 ns total across the kernel's 2 dispatches), and
-    # 59.2 TFLOP/s achieved / 181.0 TFLOP/s spec peak = 32.7% -> 33%.
+    # so this exercises the --flops fallback end to end. --flops is FLOPs for
+    # ONE dispatch (2*M*N*K for the fixture's bf16 4096^3 GEMM, see the "Real
+    # MI210" section docstring above); the kernel's summed duration comes
+    # straight from the real Start/End_Timestamp columns (2320966 ns total
+    # across its 2 merged dispatches). triage must scale the per-dispatch
+    # --flops hint by that same dispatch count (2) before dividing by the
+    # summed duration -- dividing one dispatch's FLOPs by two dispatches'
+    # time would understate achieved throughput by ~2x (this reproduced as
+    # "33% of peak", ~59 TFLOP/s, well below the 115-150 TFLOP/s this shape
+    # measures at on real MI210 serving load per
+    # examples/model-serving/qwen3.5-9b-mi210/config/platforms/mi210.toml).
+    # Correctly scaled: 2 * 2*4096^3 FLOPs / 2320966 ns = 118.4 TFLOP/s
+    # achieved / 181.0 TFLOP/s spec peak = 65.4% -> 65%, which lands inside
+    # that measured range.
     flops = 2 * 4096 * 4096 * 4096
     out = _run(
         cmd_triage,
@@ -604,10 +614,82 @@ def test_real_mi210_triage_expresses_mfma_utilization_as_a_fraction_of_spec_peak
     )
     assert _REAL_GEMM_KERNEL in out
     assert "verdict: COMPUTE-BOUND" in out
-    assert "MFMA busy 33% of peak (spec peak, from --flops)" in out
+    assert "MFMA busy 65% of peak (spec peak, from --flops)" in out
     # The old uninterpretable raw-rate form must be gone from this verdict.
     assert "insts/cycle" not in out
     assert "MFMA issue rate" not in out
+
+
+def test_real_mi210_triage_flops_hint_is_scaled_by_dispatch_count_not_divided_by_it():  # noqa: ANN201  # tracked: #288
+    # Regression for the per-dispatch-FLOPs-vs-aggregated-duration mix-up:
+    # --flops documents "FLOP count for the matched kernel's dispatch" (one
+    # dispatch), but the duration passed to derive_metrics is summed across
+    # every dispatch rocprofv3 merged into that kernel's aggregate. The real
+    # fixture's GEMM has exactly 2 merged dispatches (782163_counter_
+    # collection.csv rows for Dispatch_Id 4 and 5), each ~1.16ms, so the
+    # correct achieved rate uses total FLOPs (flops * 2) over the summed
+    # 2.32ms, not one dispatch's FLOPs over the summed 2.32ms. Pinning the
+    # exact TFLOP/s (not just the rounded "% of peak" already covered above)
+    # catches a regression to the unscaled formula even if rounding would
+    # otherwise hide a smaller drift.
+    flops = 2 * 4096 * 4096 * 4096
+    rows = _load_counter_rows(_discover(_real_mi210_dirs(), "counter_collection", (".csv", ".json")))
+    durations = _duration_from_counter_rows(rows)
+    aggs = _aggregate_by_kernel(rows)
+    (gemm,) = _filter_kernels(aggs, _REAL_GEMM_KERNEL)
+    assert gemm.dispatch_count == 2  # noqa: PLR2004
+    gemm_duration_ns = durations[gemm.name]
+    metrics = derive_metrics(
+        gemm,
+        gemm_duration_ns,
+        spec=PEAK_SPECS["gfx90a"],
+        flops=flops,
+    )
+    expected_achieved_tflops = (flops * gemm.dispatch_count) / (gemm_duration_ns / 1e9) / 1e12
+    assert expected_achieved_tflops == pytest.approx(118.43, abs=0.05)
+    assert metrics.mfma_busy_fraction == pytest.approx(expected_achieved_tflops * 1e12 / 181.0e12, rel=1e-9)
+    # The bug divided one dispatch's FLOPs by the 2-dispatch summed duration,
+    # landing at ~59.2 TFLOP/s / 32.7% -- assert we are nowhere near that.
+    assert metrics.mfma_busy_fraction > 0.5  # noqa: PLR2004
+
+
+@given(
+    dispatch_count=st.integers(min_value=1, max_value=50),
+    flops_per_dispatch=st.floats(min_value=1e6, max_value=1e9, allow_nan=False, allow_infinity=False),
+    duration_ns=st.floats(min_value=1e6, max_value=1e12, allow_nan=False, allow_infinity=False),
+)
+@FAST
+def test_flops_hint_scales_achieved_throughput_with_dispatch_count(  # noqa: ANN201
+    dispatch_count: int, flops_per_dispatch: float, duration_ns: float
+):
+    # Generalizes the real-MI210 regression above: --flops is a *per-dispatch*
+    # FLOP count, and duration_ns is summed across every merged dispatch, so
+    # the achieved-FLOP/s numerator must be flops_per_dispatch * dispatch_count
+    # -- not flops_per_dispatch alone, which is what the bug computed (a
+    # formula with no dependence on dispatch_count at all).
+    spec = PEAK_SPECS["gfx90a"]
+    agg = KernelAgg(
+        name="k",
+        dispatch_ids={str(i) for i in range(dispatch_count)},
+        counters={"SQ_INSTS_MFMA": 1.0},  # any nonzero MFMA activity unlocks the flops-hint path
+    )
+    metrics = derive_metrics(agg, duration_ns, spec=spec, flops=flops_per_dispatch)
+    expected_achieved = flops_per_dispatch * dispatch_count / (duration_ns / 1e9)
+    expected_fraction = min(1.0, expected_achieved / (spec.dense_bf16_fp16_tflops * 1e12))
+    assert metrics.mfma_busy_fraction == pytest.approx(expected_fraction, rel=1e-6, abs=1e-9)
+
+    if dispatch_count > 1 and expected_fraction < 0.5:  # noqa: PLR2004
+        # Doubling the dispatch count at the same per-dispatch flops/duration
+        # shape must raise the achieved fraction -- the buggy formula
+        # (flops_per_dispatch / duration_ns, no dispatch_count term) would
+        # report the identical fraction regardless of dispatch_count.
+        doubled = KernelAgg(
+            name="k",
+            dispatch_ids={str(i) for i in range(dispatch_count * 2)},
+            counters={"SQ_INSTS_MFMA": 1.0},
+        )
+        doubled_metrics = derive_metrics(doubled, duration_ns, spec=spec, flops=flops_per_dispatch)
+        assert doubled_metrics.mfma_busy_fraction > metrics.mfma_busy_fraction
 
 
 # ---------------------------------------------------------------------------

@@ -787,8 +787,11 @@ class MfmaPeakContext:
 
     ``simd_num`` comes from ``_simd_num_for`` (agent_info.csv, else the static
     per-arch table); ``spec`` is the arch's ``PeakSpec``; ``flops`` is an
-    optional caller-supplied FLOP count (e.g. ``--flops``) for the fallback
-    achieved-FLOP/s-over-spec-peak path.
+    optional FLOP count for the fallback achieved-FLOP/s-over-spec-peak path,
+    already scaled to match ``duration_ns`` (``derive_metrics`` multiplies the
+    caller's per-dispatch ``--flops`` hint by ``agg.dispatch_count`` before
+    building this context, since ``duration_ns`` is summed across every
+    matched dispatch).
     """
 
     simd_num: int | None = None
@@ -859,6 +862,15 @@ def derive_metrics(
 
     ``simd_num``/``spec``/``flops`` are only needed for ``mfma_busy_fraction``
     (a peak-normalized MFMA utilization); every other metric ignores them.
+
+    ``flops`` is the caller-supplied FLOP count for *one* dispatch of the
+    matched kernel (``--flops``'s documented contract, e.g. ``2*M*N*K`` for a
+    GEMM of known shape); ``duration_ns`` is ``agg``'s merged duration summed
+    across every dispatch rocprofv3 recorded for that kernel name
+    (``_duration_from_counter_rows``). Scale ``flops`` by ``agg.dispatch_count``
+    before treating it as the numerator over that summed duration, or the
+    achieved-FLOP/s estimate divides one dispatch's work by every dispatch's
+    time and understates throughput by roughly a factor of ``dispatch_count``.
     """
     counters = agg.counters
     metrics = DerivedMetrics(duration_ns=duration_ns)
@@ -898,11 +910,12 @@ def derive_metrics(
     if lds_insts is not None and bank_conflicts is not None and lds_insts > 0:
         metrics.lds_bank_conflict_rate_pct = 100.0 * bank_conflicts / lds_insts
 
+    dispatch_flops = flops * agg.dispatch_count if flops is not None else None
     metrics.mfma_busy_fraction, metrics.mfma_busy_source = _mfma_busy_fraction(
         counters=counters,
         busy_cycles=busy,
         duration_ns=duration_ns,
-        peak=MfmaPeakContext(simd_num=simd_num, spec=spec, flops=flops),
+        peak=MfmaPeakContext(simd_num=simd_num, spec=spec, flops=dispatch_flops),
     )
 
     return metrics
@@ -1287,10 +1300,12 @@ def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
         type=float,
         default=None,
         help=(
-            "Total FLOP count for the matched kernel's dispatch (e.g. 2*M*N*K for a GEMM of known "
-            "shape). Fallback MFMA-busy-%%-of-peak signal when SQ_VALU_MFMA_BUSY_CYCLES wasn't "
-            "captured; only applies to kernels with MFMA activity, but still scope with --kernel "
-            "when triaging one specific kernel."
+            "FLOP count for ONE dispatch of the matched kernel (e.g. 2*M*N*K for a GEMM of known "
+            "shape) -- not the total across every dispatch merged into its aggregate; triage "
+            "multiplies this by the kernel's measured dispatch count itself before comparing "
+            "against its (also multi-dispatch) summed duration. Fallback MFMA-busy-%%-of-peak "
+            "signal when SQ_VALU_MFMA_BUSY_CYCLES wasn't captured; only applies to kernels with "
+            "MFMA activity, but still scope with --kernel when triaging one specific kernel."
         ),
     )
     triage.set_defaults(fn=cmd_triage)
