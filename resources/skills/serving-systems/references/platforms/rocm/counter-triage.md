@@ -43,6 +43,34 @@ implementation.
 | **Occupancy-limited** | few resident waves/CU; high VGPR or LDS usage per wave; small workgroup count | Usually a kernel-authoring fix (register/LDS budget, grid sizing) — out of scope here; hand off to `agent-gpu-skills`. At the serving level, check whether batch size/concurrency is structurally too small to fill the grid. |
 | **Latency-bound** | occupancy is fine, high issue/stall counters, low IPC | If the trace shows many small kernels with large gaps between them, this usually isn't a kernel problem at all — it's host/launch overhead. See [`algorithms/async-scheduling.md`](../../algorithms/async-scheduling.md) and [`floor.md`](floor.md)'s HIP graphs section before touching kernel internals. |
 
+## Compute-bound evidence: express MFMA utilization as a fraction of peak
+
+A raw MFMA instruction rate (instructions/cycle) has no reference point — the
+reader can't tell how close that is to the ceiling. `counters.py triage`
+reports MFMA utilization as a **fraction of peak** instead, in priority order:
+
+1. **Measured** — `SQ_VALU_MFMA_BUSY_CYCLES / (GRBM_GUI_ACTIVE * SIMD_NUM)`.
+   Mirrors rocprof-compute's own `MfmaUtil` derived metric exactly (confirmed
+   in a real MI210 `rocprofv3 --list-avail` dump). `SIMD_NUM` comes from a
+   captured `*_agent_info.csv`'s `Cu_Count * Simd_Per_Cu` when present,
+   otherwise the static per-arch table (MI210: 104 CUs x 4 SIMD/CU = 416).
+2. **`--flops` fallback** — when `SQ_VALU_MFMA_BUSY_CYCLES` wasn't captured
+   but the kernel's FLOP count is known (e.g. `2*M*N*K` for a GEMM of known
+   shape), pass it via `--flops`: achieved FLOP/s (FLOPs / elapsed time, from
+   the PMC rows' own timestamps) divided by the arch's spec dense bf16/fp16
+   TFLOP/s peak. Only fires for a kernel that actually issued MFMA
+   instructions, so it can't mislabel a non-MFMA kernel.
+3. **Raw rate fallback** — if neither is available, the evidence falls back to
+   the old `insts/cycle` number, explicitly labeled "no peak reference" so
+   it's never mistaken for a peak-normalized signal.
+
+The fraction is clamped to `[0, 1]` with a stderr warning when a raw ratio
+falls outside it (inconsistent/stitched counters, or a `--flops` hint that
+doesn't match the kernel that ran) — treat that warning as a reason to
+distrust the inputs, not the GPU. Compute-bound triggers at 30% of spec peak,
+well below the ~45-55% of spec peak a tuned GEMM realistically reaches — spec
+peak itself is not the achievable ceiling.
+
 ## Cross-check: kernel-library classification
 
 Before trusting either roof position, confirm which library actually ran.
