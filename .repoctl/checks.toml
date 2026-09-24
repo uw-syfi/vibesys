@@ -152,9 +152,9 @@ commands = [["bash", "check_workloads.sh"]]
 name = "python_ci_tests"
 language = "python"
 directory = "."
-timeout_seconds = 1800
+timeout_seconds = 420
 commands = [
-  ["uv", "run", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--cov-report=xml", "--cov-report=json", "--cov-fail-under=75"],
+  ["uv", "run", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "-o", "faulthandler_timeout=100", "--durations=25", "--cov-report=xml", "--cov-report=json", "--cov-fail-under=75"],
   ["uv", "run", "python", "scripts/check_coverage_floor.py", "coverage.json"],
 ]
 
