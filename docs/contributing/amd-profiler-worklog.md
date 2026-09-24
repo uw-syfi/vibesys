@@ -121,20 +121,25 @@ found bugs that synthetic data did not exercise:
 | `compute.py` | `analyze` output had no banner and no row cap | Real `analyze --max-stat-num` output was 1700 lines | `dd25c876` |
 | `analyze_rocprof.py` | `_hbm_bytes` could go negative on inconsistent counters | Hypothesis property test over counter combinations | `aa6b05e8` |
 | `counters.py` | MFMA utilization was reported as a raw issue-rate number, not a fraction of the hardware's peak MFMA throughput | Follow-up from the counter-catalogue fix; a raw rate has no ceiling to compare against | `c8bd1df8`, `ca18e474` |
+| `counters.py` | `--flops` (a per-dispatch FLOP count) was divided by `duration_ns` summed across every merged dispatch, understating achieved TFLOP/s by roughly the dispatch count | Real fixture's 4096^3 bf16 GEMM (2 merged dispatches) read ~33%/~60 TFLOP/s of spec peak; correctly scaled it reads ~65%/~118 TFLOP/s, inside the 115-150 TFLOP/s this shape measures on real MI210 serving load | `87a78ae1` |
+| `analyze_rocprof.py` | `kernels`/`families` computed "%GPU" as a naive sum of per-kernel durations, double-counting when kernels on different HW queues of the same GPU genuinely overlap | Real graph-mode vLLM trace has overlapping Queue 1/2/4 windows; `idle_gaps`/`host_idle` already used a merged-interval union instead | `d7ee5abc` |
 
 ## Open items / next steps
 
-- **MFMA utilization sanity check**: the real fixture's 4096^3 bf16 GEMM
-  computes to ~33% of the architecture's spec MFMA throughput (~60 TFLOP/s
-  measured against ~180 TFLOP/s spec), while the ROCm platform notes record
-  115-150 TFLOP/s measured on comparable shapes elsewhere. Needs a check of
-  whether this is real (counter-collection passes serialize the GPU) or a
-  per-dispatch-vs-aggregate counting mix-up in the derived-metric formula.
 - **Real-trace validation of the analyzers**: `analyze_rocprof.py` and the
   torch analyzer still need validation against the real vLLM traces captured
   during this work (100-230 MB rocprofv3 CSVs; gzipped Kineto traces),
   including performance on files that size and any capture-guidance updates
-  that fall out of it.
+  that fall out of it. One finding from this pass: the real graph-mode
+  trace's Composable Kernel `FmhaFwdKernel` (grouped/varlen-mode causal
+  attention) averages ~338ms/call over 27 calls, a >1000x outlier against
+  every neighboring kernel on the identical capture (rocprofv3's own
+  `kernel_stats.csv` corroborates the raw per-dispatch rows -- not a VibeSys
+  aggregation bug). `families` now flags this class of outlier
+  (`_outlier_family_note`) instead of reporting it as a plain %GPU line; the
+  underlying question -- badly undersized launch grid vs. a rocprofv3
+  dispatch-timing quirk for this kernel's launch shape -- is still open and
+  needs a targeted `compute.py profile`/`att.py` capture on that kernel.
 - **VibeSys remote execution gap**: SkyPilot/Slurm remote execution only
   supports `--profiler none` today, so `rocprof` cannot yet be selected from
   a remote VibeSys run on the cluster, even though every tool in this work
@@ -160,6 +165,16 @@ hypothesis strategies (`tests/vibesys/loops/rocprof_strategies.py`). Current
 targeted test slice (`rocprof`/`torch_profile` keyword match) passes: 362
 tests. Real-vLLM-trace analyzer validation and the remote-execution gap
 remain open; see Open items above.
+
+Final review pass. Resolved the two open suspicious-number items above:
+`counters.py`'s `--flops` per-dispatch/aggregate-duration mix-up (real fix,
+~2x understated TFLOP/s) and `analyze_rocprof.py`'s naive-sum %GPU
+denominator (real fix, latent double-counting under cross-queue overlap, did
+not materially move the specific number investigated). The real graph
+trace's `FmhaFwdKernel` >1000x-outlier duration is not a VibeSys bug --
+rocprofv3's own `kernel_stats.csv` and the raw per-dispatch rows agree, and
+the tool now flags this class of outlier instead of reporting it silently.
+Targeted test slice now passes 369 tests.
 
 ## Appendix: detailed format notes and commands
 
