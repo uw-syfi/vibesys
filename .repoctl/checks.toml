@@ -154,7 +154,7 @@ language = "python"
 directory = "."
 timeout_seconds = 420
 commands = [
-  ["uv", "run", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "-o", "faulthandler_timeout=100", "--durations=25", "--cov-report=xml", "--cov-report=json", "--cov-fail-under=75"],
+  ["uv", "run", "--with", "pytest-timeout", "python", "-m", "pytest", "-p", "pytest_timeout", "--timeout=90", "--timeout-method=thread", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--cov-report=xml", "--cov-report=json", "--cov-fail-under=75"],
   ["uv", "run", "python", "scripts/check_coverage_floor.py", "coverage.json"],
 ]
 

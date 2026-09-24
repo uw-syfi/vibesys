@@ -367,6 +367,7 @@ jobs:
           go-version-file: support/repoctl/go.mod
 
       - name: Run Python tests and coverage checks
+        timeout-minutes: 9
         run: ./support/repoctl/repoctl run-checks --group python_ci_tests
 
       - name: Upload coverage report
