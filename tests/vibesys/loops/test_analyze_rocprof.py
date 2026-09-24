@@ -206,7 +206,7 @@ def test_classify_family_matches_expected_libraries() -> None:
     assert _classify_family("rocblas_gemm_ex") == "rocBLAS"
     assert _classify_family("MIOpenConvUni") == "MIOpen"
     assert _classify_family("ncclDevKernel_AllReduce_Sum_f32_RING_LL") == "RCCL"
-    assert _classify_family("paged_attention_v1_kernel") == "vLLM/SGLang custom ops"
+    assert _classify_family("paged_attention_v1_kernel") == "serving-engine custom ops"
     assert _classify_family("triton_poi_fused_add_0") == "Triton (JIT)"
     assert (
         _classify_family("void at::native::vectorized_elementwise_kernel<4>")
@@ -685,8 +685,8 @@ _MARKER_FAMILY: dict[str, str] = {
     "triton_": "Triton (JIT)",
     "at::native": "PyTorch native (at::native)",
     "rccl": "RCCL",
-    "paged_attention": "vLLM/SGLang custom ops",
-    "rotary_embedding": "vLLM/SGLang custom ops",
+    "paged_attention": "serving-engine custom ops",
+    "rotary_embedding": "serving-engine custom ops",
 }
 
 
@@ -915,7 +915,7 @@ def test_classify_family_does_not_misclassify_templated_or_mangled_names_as_trit
     """
     assert (
         _classify_family("void wvSplitK_hf_sml_<__hip_bfloat16, 64, 4, 16, 8, 2, 2>(int, int, int)")
-        == "vLLM/SGLang custom ops"
+        == "serving-engine custom ops"
     )
     assert not _looks_like_triton_kernel(
         "void some_other_op_<__hip_bfloat16, 64>(int, int, int, int)"
@@ -1007,7 +1007,7 @@ def test_families_on_the_real_eager_trace_classifies_every_sampled_family_correc
     assert "Composable Kernel (ck::/ck_tile)" in out
     assert "hipBLASLt / Tensile (Cijk_*)" in out
     assert "Triton (JIT)" in out
-    assert "vLLM/SGLang custom ops" in out
+    assert "serving-engine custom ops" in out
     assert "PyTorch native (at::native)" in out
     # The real bug: GDN/wvSplitK kernels must not land in a generic bucket.
     assert not out.splitlines()[-1].startswith("other")
@@ -1026,7 +1026,7 @@ def test_families_on_the_real_graph_trace_classifies_the_replayed_kernels_too() 
     assert "Composable Kernel (ck::/ck_tile)" in out
     assert "hipBLASLt / Tensile (Cijk_*)" in out
     assert "Triton (JIT)" in out
-    assert "vLLM/SGLang custom ops" in out
+    assert "serving-engine custom ops" in out
 
 
 def test_families_on_the_real_graph_trace_flags_the_implausible_fmha_outlier() -> None:

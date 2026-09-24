@@ -24,8 +24,8 @@ Usage:
     python analyze_torch_profile.py memory prof.json
     python analyze_torch_profile.py summary prof.json    # all-in-one (runs certify first)
 
-    # Certify and analyze a raw Kineto/Chrome trace (e.g. vLLM's
-    # VLLM_TORCH_PROFILER_DIR output, a *.pt.trace.json(.gz) file). kernels,
+    # Certify and analyze a raw Kineto/Chrome trace (e.g. a serving engine's
+    # torch.profiler output, a *.pt.trace.json(.gz) file). kernels,
     # operators, memory, cpu-overhead, tables, and summary above also accept
     # this file directly -- they auto-detect and convert it in-process.
     python analyze_torch_profile.py certify trace.pt.trace.json.gz
@@ -331,8 +331,8 @@ except ImportError:  # pragma: no cover
 def _read_json_maybe_gz(path: str) -> dict:
     """Read a JSON file, transparently decompressing a ``.gz`` suffix.
 
-    vLLM's ``/stop_profile`` and ``torch.profiler``'s own Chrome-trace export
-    both commonly gzip the trace (``*.pt.trace.json.gz``).
+    A serving engine's profiler-stop endpoint and ``torch.profiler``'s own
+    Chrome-trace export both commonly gzip the trace (``*.pt.trace.json.gz``).
     """
     if path.endswith(".gz"):
         with gzip.open(path, "rt", encoding="utf-8") as f:
@@ -351,8 +351,8 @@ def _load(path: str) -> dict:
     A raw trace is converted in-process into the same summarized schema
     ``_summarize_prof`` produces, so ``kernels``/``operators``/``memory``/
     ``cpu-overhead``/``tables``/``summary`` all work directly on a real
-    vLLM-captured ``*.pt.trace.json(.gz)`` file, not just our own ``capture``
-    output.
+    serving-engine-captured ``*.pt.trace.json(.gz)`` file, not just our own
+    ``capture`` output.
     """
     raw = _read_json_maybe_gz(path)
     if _is_chrome_trace(raw):
@@ -541,8 +541,8 @@ def cmd_tables(args: argparse.Namespace) -> None:
 # three need per-call detail a summary discards: per-op "Input Dims", and
 # the correlation between a cpu_op and the GPU kernel(s) it launched.  That
 # detail only survives in the raw Chrome trace JSON ``torch.profiler``
-# exports (``prof.export_chrome_trace(...)``), which is also exactly what
-# vLLM's ``POST /stop_profile`` writes under ``VLLM_TORCH_PROFILER_DIR``
+# exports (``prof.export_chrome_trace(...)``), which is also exactly what a
+# serving engine's own profiler-stop endpoint commonly writes
 # (``*.pt.trace.json(.gz)``).
 # ---------------------------------------------------------------------------
 
@@ -640,7 +640,7 @@ _GIB = 1024.0**3
 
 # Fallback signature table for AMD GPUs: ROCm's Kineto exporter has been seen
 # to write ``deviceProperties[].name == ""`` (confirmed on real MI210
-# vLLM/torch.profiler captures, ROCm 7.2.3 / torch 2.12), so the name-hint
+# serving-engine torch.profiler captures, ROCm 7.2.3 / torch 2.12), so the name-hint
 # match above never fires. When the name is unusable, fall back to (compute
 # capability, CU count, HBM capacity) from the same ``deviceProperties``
 # entry -- gfx arch plus CU count plus memory size pins a SKU exactly for
@@ -1199,8 +1199,8 @@ def cmd_certify(args: argparse.Namespace) -> None:
     if not _is_chrome_trace(raw):
         raise SystemExit(  # noqa: TRY003  # tracked: #288
             f"{args.trace} is not a raw Kineto/Chrome trace (no 'traceEvents' key). "
-            "certify expects the *.pt.trace.json(.gz) file torch.profiler / vLLM's "
-            "/stop_profile writes, not a summarized prof.json."
+            "certify expects the *.pt.trace.json(.gz) file torch.profiler / a serving "
+            "engine's profiler-stop endpoint writes, not a summarized prof.json."
         )
     index = _index_trace(raw)
     op_to_kernels = _build_op_to_kernels(index)

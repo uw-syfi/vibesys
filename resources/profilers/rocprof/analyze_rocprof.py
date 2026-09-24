@@ -191,7 +191,7 @@ _FAMILY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("MIOpen", ("miopen", "naive_conv", "gcnasmconv", "sp3asmconv")),
     ("RCCL", ("nccl", "rccl")),
     (
-        "vLLM/SGLang custom ops",
+        "serving-engine custom ops",
         (
             "paged_attention",
             "reshape_and_cache",
@@ -253,8 +253,8 @@ def _looks_like_triton_kernel(name: str) -> bool:
 
     Only kernels rocprofv3 renamed via torch.inductor carry a ``triton_``
     prefix (the ``_FAMILY_RULES`` entry above). A kernel compiled directly
-    from a ``@triton.jit`` function (vLLM/SGLang's own ops — paged-attention
-    helpers, MoE routing, and linear-attention/GDN kernels such as
+    from a ``@triton.jit`` function (a serving engine's own custom ops:
+    paged-attention helpers, MoE routing, and linear-attention/GDN kernels such as
     ``fused_recurrent_gated_delta_rule_packed_decode_kernel`` or
     ``chunk_gated_delta_rule_fwd_kernel_h_blockdim64``) keeps its Python
     function name verbatim instead: snake_case, usually leading-underscore
@@ -1061,7 +1061,7 @@ def _gpu_busy_denominator_ns(disc: DiscoveredReport, naive_sum_ns: float) -> flo
     Merged-interval union across every (agent, queue), not a naive sum of
     per-kernel durations: the naive sum double-counts whenever kernels on
     different HW queues of the same GPU genuinely overlap in wall-clock time
-    (real, if usually small, on rocprofv3 vLLM-serving captures with
+    (real, if usually small, on rocprofv3 serving-workload captures with
     concurrent queues -- see the rocprof worklog's %GPU denominator note).
     ``idle_gaps``/``host_idle`` already back their busy-time accounting with
     this same merged union (``_kernel_union_ns``); ``kernels``/``families``
@@ -1128,7 +1128,7 @@ def cmd_kernels(ns: argparse.Namespace) -> None:
 def _outlier_family_note(ordered: list[tuple[str, dict]]) -> str | None:
     """Flag when one family's average per-call duration dwarfs every other family's.
 
-    Caught on a real MI210 graph-mode vLLM trace: Composable Kernel's
+    Caught on a real MI210 graph-mode serving-workload trace: Composable Kernel's
     FmhaFwdKernel averaged 338ms/call (27 calls, 31% of GPU time) while every
     other family on the same capture averaged tens to hundreds of
     *microseconds* per call -- a 1000x+ outlier that rocprofv3's own
