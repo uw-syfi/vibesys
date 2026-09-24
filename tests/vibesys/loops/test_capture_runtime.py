@@ -408,8 +408,12 @@ def test_profiles_root_absolute_with_relative_env_default(
     assert root == (tmp_path / ".profiles").resolve()
 
 
-@given(relative_env=st.sampled_from(["./.profiles", ".profiles", "out/profiles", "./a/b/.profiles"]))
-@settings(max_examples=5, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(
+    relative_env=st.sampled_from(["./.profiles", ".profiles", "out/profiles", "./a/b/.profiles"])
+)
+@settings(
+    max_examples=5, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
 def test_profiles_root_absolute_for_any_relative_env_value(
     relative_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

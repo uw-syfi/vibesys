@@ -608,7 +608,7 @@ def test_format_timeline_result_always_runs_the_analyzer_regardless_of_status(
             manifest_path=out_dir / "manifest.json",
         )
 
-        out = capture._format_timeline_result(result)  # noqa: SLF001
+        out = capture._format_timeline_result(result)
 
     assert "ROCPROFV3 TRACE SUMMARY" in out
     assert "Top Kernels" in out  # section header always printed, data or not
