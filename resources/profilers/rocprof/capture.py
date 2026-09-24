@@ -77,6 +77,7 @@ _ATT_LIBRARY_PATH_ENV_VARS = ("VIBESYS_ROCPROF_ATT_LIBRARY_PATH", "ROCPROF_ATT_L
 _WORKLOAD_KERNEL_CSV_NAMES = ("pmc_kernel_top.csv", "pmc_perf.csv")
 _TOP_DELTA_ROWS = 15
 _VERSION_TUPLE_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+_ROCM_VERSION_FIELD_RE = re.compile(r"rocm_version:\s*(\d+)\.(\d+)\.(\d+)")
 _COUNTER_METRIC_FIELDS = (
     "l2_hit_rate_pct",
     "achieved_bw_gb_s",
@@ -142,11 +143,32 @@ def _parse_version(text: str) -> tuple[int, int, int] | None:
     return (major, minor, patch)
 
 
+def _parse_rocm_version(text: str) -> tuple[int, int, int] | None:
+    """Extract the ``rocm_version:`` field from real ``rocprofv3 --version`` output.
+
+    Real output (ROCm 7.x) is multi-line and reports two independent
+    versions: the rocprofiler-sdk-tool's own semantic version first (e.g.
+    ``version: 1.3.2``), then the ROCm release it was built against on a
+    separate ``rocm_version: 7.2.3`` line. Gating ``--att`` availability (a
+    ROCm-release feature, not a tool-release feature) needs the latter; a
+    plain first-X.Y.Z-in-the-text match picks up the former instead, which
+    can read as an old version (e.g. ``1.3.2``) even when the underlying
+    ROCm release supports ``--att``. Falls back to ``None`` (letting the
+    caller use the generic first-match parse) when no such field is present,
+    e.g. simplified/synthetic ``--version`` output with a single number.
+    """
+    match = _ROCM_VERSION_FIELD_RE.search(text)
+    if not match:
+        return None
+    major, minor, patch = (int(part) for part in match.groups())
+    return (major, minor, patch)
+
+
 def _rocprofv3_version(rocprofv3_bin: str) -> tuple[int, int, int] | None:
     rc, output = _run([rocprofv3_bin, "--version"])
     if rc != 0:
         return None
-    return _parse_version(output)
+    return _parse_rocm_version(output) or _parse_version(output)
 
 
 def _torch_available() -> tuple[bool, str]:

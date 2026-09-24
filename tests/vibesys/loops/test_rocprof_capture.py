@@ -90,7 +90,9 @@ def _write_script(path: Path, source: str) -> None:
     path.chmod(0o755)
 
 
-def _fake_rocprofv3_source(*, fixtures_dir: Path, version: str, att_skip: bool) -> str:
+def _fake_rocprofv3_source(
+    *, fixtures_dir: Path, version: str, att_skip: bool, rocm_version: str | None = None
+) -> str:
     # Mirrors test_capture_runtime.py's _FAKE_PROFILER_SOURCE SIGINT harness:
     # register the handler before any other import, spawn the wrapped
     # command (after "--") as a real child sharing our own process group
@@ -115,11 +117,24 @@ def _fake_rocprofv3_source(*, fixtures_dir: Path, version: str, att_skip: bool) 
         FIXTURES = Path({str(fixtures_dir)!r})
         VERSION = {version!r}
         ATT_SKIP = {att_skip!r}
+        ROCM_VERSION = {rocm_version!r}
 
         argv = sys.argv[1:]
 
         if argv == ["--version"]:
-            print(f"rocprofv3 (ROCm Profiler v3) version {{VERSION}}")
+            if ROCM_VERSION is not None:
+                # Real rocprofv3 --version (ROCm 7.x) is multi-line and
+                # reports the rocprofiler-sdk-tool's own semantic version
+                # ("version:") separately from the ROCm release it was
+                # built against ("rocm_version:") -- the two can disagree
+                # (e.g. tool version 1.3.2 built against ROCm 7.2.3).
+                print(f"             version: {{VERSION}}")
+                print("        git_revision: deadbeef")
+                print(f"      system_version: 6.1.0")
+                print(f"    compiler_version: 11.4.0")
+                print(f"        rocm_version: {{ROCM_VERSION}}")
+            else:
+                print(f"rocprofv3 (ROCm Profiler v3) version {{VERSION}}")
             sys.exit(0)
 
         out_dir = None
@@ -167,12 +182,21 @@ def _fake_rocprofv3_source(*, fixtures_dir: Path, version: str, att_skip: bool) 
 
 
 def _install_fake_rocprofv3(
-    bin_dir: Path, *, version: str = "7.2.0", att_skip: bool = False
+    bin_dir: Path,
+    *,
+    version: str = "7.2.0",
+    att_skip: bool = False,
+    rocm_version: str | None = None,
 ) -> Path:
     path = bin_dir / "rocprofv3"
     _write_script(
         path,
-        _fake_rocprofv3_source(fixtures_dir=_ROCPROF_FIXTURES, version=version, att_skip=att_skip),
+        _fake_rocprofv3_source(
+            fixtures_dir=_ROCPROF_FIXTURES,
+            version=version,
+            att_skip=att_skip,
+            rocm_version=rocm_version,
+        ),
     )
     return path
 
@@ -334,6 +358,72 @@ def test_profiling_capabilities_reports_rocprofv3_and_att_when_available(
     assert "rocprofv3:" in out
     assert "version 7.2.0" in out
     assert "ATT (instruction-level trace): available" in out
+
+
+def test_profiling_capabilities_att_available_when_tool_version_lags_rocm_version(
+    profiles_dir: Path, bin_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real rocprofv3 --version reports two independent version numbers.
+
+    The rocprofiler-sdk-tool's own semantic version (e.g. 1.3.2) can read as
+    "too old" for the ATT >= 7.1 gate even when the ROCm release it ships
+    with (reported separately on a ``rocm_version:`` line) is 7.2.3 and
+    genuinely supports --att. A naive first-X.Y.Z-in-the-text parse picks up
+    the tool version instead and wrongly reports ATT unavailable.
+    """
+    del profiles_dir
+    _install_fake_rocprofv3(bin_dir, version="1.3.2", rocm_version="7.2.3")
+    _install_fake_att_decoder(tmp_path, monkeypatch)
+
+    out = capture.profiling_capabilities()
+
+    assert "ATT (instruction-level trace): available" in out
+
+
+def test_profiling_capabilities_att_unavailable_when_rocm_version_genuinely_old(
+    profiles_dir: Path, bin_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Still rejects ATT when the real ROCm version (not the tool version) is < 7.1."""
+    del profiles_dir
+    _install_fake_rocprofv3(bin_dir, version="1.3.2", rocm_version="6.4.1")
+    _install_fake_att_decoder(tmp_path, monkeypatch)
+
+    out = capture.profiling_capabilities()
+
+    assert "ATT (instruction-level trace): NOT AVAILABLE" in out
+    assert "rocprofv3 >= 7.1 required" in out
+
+
+@given(
+    tool_version=st.tuples(
+        st.integers(min_value=0, max_value=6),
+        st.integers(min_value=0, max_value=20),
+        st.integers(min_value=0, max_value=20),
+    ),
+    rocm_version=st.tuples(
+        st.integers(min_value=7, max_value=9),
+        st.integers(min_value=0, max_value=20),
+        st.integers(min_value=0, max_value=20),
+    ),
+)
+@PURE_SETTINGS
+def test_rocprofv3_version_prefers_rocm_version_field_over_tool_version(
+    tool_version: tuple[int, int, int], rocm_version: tuple[int, int, int]
+) -> None:
+    """``_parse_rocm_version`` always reads the ``rocm_version:`` field, not the tool version.
+
+    Generalizes the fixed bug: for any tool-version/rocm-version pair
+    embedded in real rocprofv3 --version's multi-line shape (tool version
+    always printed first), the parsed result must be the rocm_version
+    triplet, independent of how the two compare to each other.
+    """
+    text = (
+        f"             version: {'.'.join(map(str, tool_version))}\n"
+        "        git_revision: deadbeef\n"
+        f"        rocm_version: {'.'.join(map(str, rocm_version))}\n"
+    )
+    assert capture._parse_rocm_version(text) == rocm_version  # noqa: SLF001
+    assert capture._parse_version(text) == tool_version  # noqa: SLF001
 
 
 def test_profiling_capabilities_reports_rocprof_compute_binary_when_available(
