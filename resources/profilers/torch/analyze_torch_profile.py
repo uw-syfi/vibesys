@@ -895,6 +895,21 @@ def _self_time_by_name(cpu_ops: list[dict]) -> dict[str, dict]:
     return agg
 
 
+def _gpu_time_by_op_name(cpu_ops: list[dict], op_to_kernels: dict[int, list[dict]]) -> dict[str, float]:
+    """Sum correlated GPU kernel time per cpu_op *name*, across all call instances.
+
+    ``op_to_kernels`` maps a cpu_op's index in ``cpu_ops`` to the kernel(s)
+    it launched (see ``_build_op_to_kernels``); this rolls that up by name so
+    the ``operators`` table can show a real "CUDA time" column instead of a
+    constant 0 for every raw-Kineto-trace op.
+    """
+    by_name: dict[str, float] = {}
+    for i, kernels in op_to_kernels.items():
+        name = cpu_ops[i].get("name", "unknown")
+        by_name[name] = by_name.get(name, 0.0) + sum(float(k.get("dur") or 0) for k in kernels)
+    return by_name
+
+
 def _summarize_chrome_trace(raw: dict) -> dict:
     """Convert a raw Kineto/Chrome trace into the ``_summarize_prof`` schema."""
     index = _index_trace(raw)
@@ -921,6 +936,12 @@ def _summarize_chrome_trace(raw: dict) -> dict:
         )
         total_cuda += entry["dur"]
 
+    # cuda_time_us below is display-only (the GPU work each named op
+    # correlates to, not exclusive/self time) and must not be added to
+    # total_cuda again: every kernel is already counted exactly once above,
+    # keyed by kernel name rather than by the cpu_op that launched it.
+    op_to_kernels = _build_op_to_kernels(index)
+    gpu_us_by_name = _gpu_time_by_op_name(index.cpu_ops, op_to_kernels)
     for name, entry in _self_time_by_name(index.cpu_ops).items():
         category = "operator" if name.startswith(("aten::", "torch::")) else "cpu"
         events.append(
@@ -928,7 +949,7 @@ def _summarize_chrome_trace(raw: dict) -> dict:
                 "name": name,
                 "category": category,
                 "cpu_time_us": entry["total_us"],
-                "cuda_time_us": 0.0,
+                "cuda_time_us": gpu_us_by_name.get(name, 0.0),
                 "self_cpu_time_us": entry["self_us"],
                 "self_cuda_time_us": 0.0,
                 "count": entry["count"],
