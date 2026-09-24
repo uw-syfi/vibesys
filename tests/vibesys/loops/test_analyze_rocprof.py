@@ -36,6 +36,7 @@ from resources.profilers.rocprof.analyze_rocprof import (
     _get,
     _looks_like_triton_kernel,
     _normalize_direction,
+    _outlier_family_note,
     _short_name,
     _union_duration,
     cmd_cpu_overhead,
@@ -325,6 +326,67 @@ def test_cmd_families_does_not_flag_a_clean_aiter_dominant_trace(tmp_path, capsy
 
     assert "AITER (asm/ck)" in out
     assert "*** Finding:" not in out
+
+
+def test_cmd_families_percent_gpu_uses_merged_busy_time_not_naive_sum_of_overlapping_queues(  # noqa: ANN001, ANN201
+    tmp_path, capsys
+):
+    # Regression for the %GPU denominator bug: two families dispatched on
+    # DIFFERENT HW queues of the same GPU but fully overlapping in
+    # wall-clock time (real on rocprofv3 vLLM-serving captures with
+    # concurrent queues -- see the rocprof worklog's %GPU denominator note,
+    # and analyze_rocprof.py's module docstring on per-(agent,queue)
+    # merged-interval accounting). Summing each kernel's own duration
+    # double-counts the overlap: the old code reported each family at 50%
+    # of an artificially 2x-inflated "total" (1000ns each / 2000ns naive
+    # sum), silently hiding that the GPU spent its whole 1000ns window on
+    # BOTH families at once. The merged-interval union recognizes the GPU
+    # was only ever busy for a 1000ns (here: 10ms) window, so each family --
+    # which occupied that entire window on its own queue -- correctly shows
+    # ~100% of the union, and a note calls out the concurrent overlap.
+    d = _process_dir(tmp_path)
+    _kernel_trace(
+        d,
+        "ck::tensor_operation::device::DeviceGemm_Xdl,0,1,101,0,10000000,4242",
+        "Cijk_Alik_Bljk_HHS_BH_MT128x128x16,0,2,102,0,10000000,4242",
+    )
+
+    cmd_families(_ns(str(tmp_path)))
+    out = capsys.readouterr().out
+
+    assert "Composable Kernel (ck::/ck_tile)" in out
+    assert "hipBLASLt / Tensile (Cijk_*)" in out
+    assert " 50.0%" not in out
+    assert "100.0%" in out
+    assert "Note:" in out
+    assert "overlaps across HW queues" in out
+
+
+@given(gap_ns=st.integers(min_value=0, max_value=10_000_000))
+@FAST
+def test_gpu_busy_denominator_never_exceeds_the_naive_sum(tmp_path_factory, gap_ns):  # noqa: ANN001, ANN201
+    # Generalizes the regression above: for ANY separation between two
+    # same-duration kernels on different queues (from fully overlapping,
+    # gap_ns=0, to fully disjoint), the merged-union %GPU denominator must
+    # never exceed the naive per-kernel-duration sum -- merging intervals can
+    # only remove double-counted overlap, never add time that wasn't there.
+    root = tmp_path_factory.mktemp("gpu-busy-denom")
+    d = _process_dir(root)
+    dur = 10_000_000
+    _kernel_trace(
+        d,
+        f"ck::device::DeviceGemm_Xdl,0,1,101,0,{dur},4242",
+        f"Cijk_Alik_Bljk_HHS_BH_MT128x128x16,0,2,102,{gap_ns},{gap_ns + dur},4242",
+    )
+
+    disc = discover(str(root))
+    bundle = analyze_rocprof._get_kernel_bundle(disc)  # noqa: SLF001
+    naive_sum = sum(e["total_ns"] for e in bundle.by_name.values())
+    denom = analyze_rocprof._gpu_busy_denominator_ns(disc, naive_sum)  # noqa: SLF001
+    assert denom <= naive_sum + 1e-6
+    # And when the two windows don't overlap at all, merging changes nothing.
+    if gap_ns >= dur:
+        assert denom == pytest.approx(naive_sum)
 
 
 # ---------------------------------------------------------------------------
@@ -963,6 +1025,70 @@ def test_families_on_the_real_graph_trace_classifies_the_replayed_kernels_too() 
     assert "hipBLASLt / Tensile (Cijk_*)" in out
     assert "Triton (JIT)" in out
     assert "vLLM/SGLang custom ops" in out
+
+
+def test_families_on_the_real_graph_trace_flags_the_implausible_fmha_outlier() -> None:
+    """Regression for the "27 calls, 9.13s, 338ms/call, 31% GPU" investigation
+    (docs/contributing/amd-profiler-worklog.md): the real graph-mode trace's
+    Composable Kernel FmhaFwdKernel dispatches (trimmed to 3 of the real 27 in
+    this fixture) average ~336ms/call while every other sampled family
+    averages tens-to-hundreds of *microseconds* per call -- a >1000x outlier
+    that must not pass through silently as a plain %GPU line.
+    """
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_families(_ns(str(_REAL_FIXTURE_ROOT / "graph")))
+    out = buf.getvalue()
+
+    assert "*** Finding: 'Composable Kernel (ck::/ck_tile)' averages" in out
+    assert "ms/call" in out
+    assert "x the median family's per-call average" in out
+    assert "compute.py profile" in out
+    assert "att.py" in out
+
+
+@given(
+    avgs_ns=st.lists(
+        st.floats(min_value=1.0, max_value=1e6, allow_nan=False, allow_infinity=False),
+        min_size=2,
+        max_size=8,
+    )
+)
+@FAST
+def test_outlier_family_note_never_fires_when_every_family_is_within_the_threshold(  # noqa: ANN201
+    avgs_ns: list[float],
+):
+    # If every family's per-call average is within _OUTLIER_AVG_MULTIPLE of
+    # the smallest one, nothing here looks like the FmhaFwdKernel anomaly --
+    # the note must stay silent (no false positives on an ordinary, if
+    # uneven, mix of kernel costs).
+    smallest = min(avgs_ns)
+    assume(all(avg <= smallest * 20 for avg in avgs_ns))
+    ordered = [
+        (f"family_{i}", {"calls": 1, "total_ns": avg}) for i, avg in enumerate(avgs_ns)
+    ]
+    assert _outlier_family_note(ordered) is None
+
+
+@given(
+    base_ns=st.floats(min_value=1.0, max_value=1e6, allow_nan=False, allow_infinity=False),
+    multiple=st.floats(min_value=21.0, max_value=1e6, allow_nan=False, allow_infinity=False),
+    n_peers=st.integers(min_value=2, max_value=8),
+)
+@FAST
+def test_outlier_family_note_always_fires_when_one_family_dwarfs_its_peers(  # noqa: ANN201
+    base_ns: float, multiple: float, n_peers: int
+):
+    # Generalizes the real-graph-trace regression above: ANY family whose
+    # per-call average exceeds _OUTLIER_AVG_MULTIPLE times the median of
+    # every other family's average must be flagged, regardless of the exact
+    # kernel names or magnitudes involved.
+    peers = [(f"peer_{i}", {"calls": 1, "total_ns": base_ns}) for i in range(n_peers)]
+    dominant = ("dominant", {"calls": 1, "total_ns": base_ns * multiple})
+    note = _outlier_family_note([dominant, *peers])
+    assert note is not None
+    assert "dominant" in note
+    assert "compute.py profile" in note
 
 
 def test_graphs_on_the_real_eager_trace_does_not_flag_degraded_attribution() -> None:

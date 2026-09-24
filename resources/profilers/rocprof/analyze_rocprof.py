@@ -241,6 +241,12 @@ _GEMM_ATTN_RE = re.compile(
 )
 _FALLBACK_FAMILY_SHARE_THRESHOLD = 5.0
 
+# A family whose per-call average dwarfs every other family's is evidence of
+# either severe kernel-selection/occupancy trouble or a capture artifact
+# specific to that kernel's launch shape, not something to cite as a literal
+# %GPU share without checking further -- see _outlier_family_note.
+_OUTLIER_AVG_MULTIPLE = 20.0
+
 
 def _looks_like_triton_kernel(name: str) -> bool:
     """Structural fallback for a Triton JIT kernel with no ``triton_*`` prefix.
@@ -1049,6 +1055,38 @@ def cmd_files(ns: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _gpu_busy_denominator_ns(disc: DiscoveredReport, naive_sum_ns: float) -> float:
+    """True GPU-busy denominator for a "%GPU" share: merged-interval union across
+    every (agent, queue), not a naive sum of per-kernel durations.
+
+    A naive sum of every kernel's own total duration double-counts whenever
+    kernels on different HW queues of the same GPU genuinely overlap in
+    wall-clock time (real, if usually small, on rocprofv3 vLLM-serving
+    captures with concurrent queues -- see the rocprof worklog's %GPU
+    denominator note). ``idle_gaps``/``host_idle`` already back their busy-time
+    accounting with this same merged union (``_kernel_union_ns``); ``kernels``/
+    ``families`` now use it too instead of a bespoke sum that only agrees with
+    it when there happens to be no cross-queue overlap. Falls back to the
+    naive sum when only pre-aggregated ``*_kernel_stats.csv`` is available (no
+    per-event timestamps to merge).
+    """
+    bundle = _get_kernel_bundle(disc)
+    if bundle.by_key:
+        return _kernel_union_ns(bundle)
+    return naive_sum_ns
+
+
+def _print_overlap_note(naive_sum_ns: float, denom_ns: float) -> None:
+    """Flag when %GPU's merged-busy denominator diverges materially from the naive sum."""
+    overlap_ns = naive_sum_ns - denom_ns
+    if overlap_ns > max(1e6, naive_sum_ns * 0.005):
+        print(  # noqa: T201
+            f"Note: {_fmt_ns(overlap_ns)} of the summed kernel time above overlaps across HW "
+            f"queues on the same GPU; %GPU below is computed against the merged busy time "
+            f"({_fmt_ns(denom_ns)}), not the naive per-kernel sum."
+        )
+
+
 def cmd_kernels(ns: argparse.Namespace) -> None:
     """Top GPU kernels by total execution time, with a library-family column."""
     disc = discover(ns.report)
@@ -1061,6 +1099,7 @@ def cmd_kernels(ns: argparse.Namespace) -> None:
 
     total_ns = sum(e["total_ns"] for e in agg.values())
     total_calls = sum(e["calls"] for e in agg.values())
+    denom_ns = _gpu_busy_denominator_ns(disc, total_ns)
     ranked = sorted(agg.items(), key=lambda kv: -kv[1]["total_ns"])[: ns.top]
 
     print(f"Kernel data source: {source}")  # noqa: T201
@@ -1070,7 +1109,7 @@ def cmd_kernels(ns: argparse.Namespace) -> None:
     for name, e in ranked:
         fam = _classify_family(name)
         avg = e["total_ns"] / e["calls"] if e["calls"] else 0.0
-        pct = e["total_ns"] / total_ns * 100 if total_ns else 0.0
+        pct = e["total_ns"] / denom_ns * 100 if denom_ns else 0.0
         min_ns = e["min_ns"] if e["min_ns"] != float("inf") else 0.0
         print(  # noqa: T201
             f"{_truncate(_short_name(name), 44):<44s} {fam:<28s} {e['calls']:>7d} {_fmt_ns(e['total_ns']):>9s} "
@@ -1078,11 +1117,48 @@ def cmd_kernels(ns: argparse.Namespace) -> None:
         )
     print(f"\nTotal GPU kernel time (all kernels): {_fmt_ns(total_ns)}")  # noqa: T201
     print(f"Total kernel launches: {total_calls}")  # noqa: T201
+    _print_overlap_note(total_ns, denom_ns)
 
 
 # ---------------------------------------------------------------------------
 # Subcommand: families  # noqa: ERA001
 # ---------------------------------------------------------------------------
+
+
+def _outlier_family_note(ordered: list[tuple[str, dict]]) -> str | None:
+    """Flag when one family's average per-call duration dwarfs every other family's.
+
+    Caught on a real MI210 graph-mode vLLM trace: Composable Kernel's
+    FmhaFwdKernel averaged 338ms/call (27 calls, 31% of GPU time) while every
+    other family on the same capture averaged tens to hundreds of
+    *microseconds* per call -- a 1000x+ outlier that rocprofv3's own
+    kernel_stats.csv corroborated (not a VibeSys aggregation bug: raw
+    Start/End_Timestamp rows for that kernel are sequential, non-overlapping,
+    and back-to-back with its neighbors). A gap this large from every peer
+    family is real signal (severe kernel-selection/occupancy trouble, e.g. a
+    grouped/varlen attention kernel launched with a badly undersized grid for
+    the batch) or, less likely, a rocprofv3 dispatch-timing quirk specific to
+    that kernel's launch shape -- either way, not something to repeat as a
+    literal %GPU wall-clock share without a targeted follow-up capture.
+    """
+    avgs = [(fam, e["total_ns"] / e["calls"]) for fam, e in ordered if e["calls"] > 0]
+    if len(avgs) < 2:  # noqa: PLR2004
+        return None
+    avgs.sort(key=lambda kv: -kv[1])
+    top_fam, top_avg = avgs[0]
+    rest = sorted(avg for _fam, avg in avgs[1:])
+    median_rest = rest[len(rest) // 2]
+    if median_rest <= 0 or top_avg < median_rest * _OUTLIER_AVG_MULTIPLE:
+        return None
+    return (
+        f"\n*** Finding: '{top_fam}' averages {_fmt_ns(top_avg)}/call, "
+        f"{top_avg / median_rest:.0f}x the median family's per-call average "
+        f"({_fmt_ns(median_rest)}/call). Its %GPU share above reflects rocprofv3's raw "
+        f"measurement, not a VibeSys computation error -- but before citing it as real "
+        f"GPU-bound work, verify with `compute.py profile`/`att.py` on that kernel: this size "
+        f"of gap usually means a badly undersized launch grid or a kernel-selection problem, "
+        f"and occasionally a capture artifact specific to that kernel's launch shape. ***"
+    )
 
 
 def cmd_families(ns: argparse.Namespace) -> None:
@@ -1108,6 +1184,7 @@ def cmd_families(ns: argparse.Namespace) -> None:
             entry["top_name"] = name
 
     total_ns = sum(e["total_ns"] for e in fam_totals.values())
+    denom_ns = _gpu_busy_denominator_ns(disc, total_ns)
     ordered = sorted(fam_totals.items(), key=lambda kv: -kv[1]["total_ns"])
 
     print(f"Kernel data source: {source}")  # noqa: T201
@@ -1117,18 +1194,19 @@ def cmd_families(ns: argparse.Namespace) -> None:
     print(header)  # noqa: T201
     print("-" * len(header))  # noqa: T201
     for fam, e in ordered:
-        pct = e["total_ns"] / total_ns * 100 if total_ns else 0.0
+        pct = e["total_ns"] / denom_ns * 100 if denom_ns else 0.0
         print(  # noqa: T201
             f"{fam:<32s} {e['calls']:>8d} {_fmt_ns(e['total_ns']):>10s} {pct:>5.1f}%  "
             f"{_truncate(_short_name(e['top_name']), 40):<40s}"
         )
+    _print_overlap_note(total_ns, denom_ns)
 
     flags = [
-        (fam, e["top_name"], e["total_ns"] / total_ns * 100 if total_ns else 0.0)
+        (fam, e["top_name"], e["total_ns"] / denom_ns * 100 if denom_ns else 0.0)
         for fam, e in ordered
         if fam in FALLBACK_FAMILIES
         and e["total_ns"] > 0
-        and (e["total_ns"] / total_ns * 100 if total_ns else 0.0)
+        and (e["total_ns"] / denom_ns * 100 if denom_ns else 0.0)
         >= _FALLBACK_FAMILY_SHARE_THRESHOLD
         and _GEMM_ATTN_RE.search(e["top_name"])
     ]
@@ -1143,6 +1221,10 @@ def cmd_families(ns: argparse.Namespace) -> None:
                 f"dispatch/tuning config (e.g. AITER_LOG_TUNED_CONFIG=1) instead of accepting "
                 f"the fallback kernel."
             )
+
+    outlier_note = _outlier_family_note(ordered)
+    if outlier_note:
+        print(outlier_note)  # noqa: T201
 
 
 # ---------------------------------------------------------------------------
