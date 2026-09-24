@@ -14,7 +14,6 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
 from vibesys.api._dispatch import dispatch_loop, resolved_run_id
-from vibesys.api._orchestrations.builtins import built_in_orchestrations
 from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
@@ -164,7 +163,13 @@ class _LocalRunSession:
     ) -> None:
         self._request = request
         self._sink = sink
-        self._registry = registry or built_in_orchestrations()
+        if registry is None:
+            from vibesys.api._orchestrations.builtins import (  # noqa: PLC0415
+                built_in_orchestrations,
+            )
+
+            registry = built_in_orchestrations()
+        self._registry = registry
         self._policy = self._registry.resolve(request.orchestration_id)
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)

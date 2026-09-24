@@ -12,10 +12,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from server.api.protocol import PerformanceContext
-from vibesys.api import agent_projection
+from vibesys.api.agent import agent_projection
 
 if TYPE_CHECKING:
-    from vibesys.api import HypothesisView, RunView
+    from vibesys.api import RunView
+    from vibesys.api.agent import HypothesisView
 
 # The objective document is operator-authored markdown of arbitrary length,
 # and the payload must stay bounded, so only one capped paragraph is sent.

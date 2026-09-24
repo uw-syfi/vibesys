@@ -97,6 +97,10 @@ it absent. The built-in agent policy projects its experiment and round facts as
 `AgentRunProjection`; `agent_projection(view)` validates that payload and
 returns `None` for other policy projections. Committed-view `changed_keys` are
 policy-specific; for the built-in agent policy they identify changed hypotheses.
+Agent-only projection types, `agent_projection`, manifest helpers, and
+`framework_memory_paths` are imported from `vibesys.api.agent`. Explicit
+imports of these names from `vibesys.api` remain available with a deprecation
+warning; the generic API does not load the agent projection until selected.
 
 `AgentDefinition` accepts an `AgentSpec` per agent and optional `resources` as
 `HostResource` grants. `spawn_agent` opens an agent environment with those

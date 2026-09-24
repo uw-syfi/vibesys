@@ -13,16 +13,12 @@ the resource-handoff seam) so they never import their private home modules.
 
 from __future__ import annotations
 
+import warnings
+from importlib import import_module
+from typing import Any
+
 from vibesys import boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config
-from vibesys.api._agent_state import agent_run_objectives, is_agent_run_manifest
-from vibesys.api._orchestrations.agent_projection import (
-    AgentRunProjection,
-    HypothesisRoundView,
-    HypothesisView,
-    agent_projection,
-)
-from vibesys.api._orchestrations.builtins import built_in_orchestrations
 
 # Deprecated public imports retained for existing callers; omitted from __all__.
 from vibesys.api._orchestrations.contracts import (
@@ -73,7 +69,6 @@ from vibesys.events import (
     ToolCallData,
     ToolResultData,
 )
-from vibesys.loops.agent.issue_board import framework_memory_paths
 from vibesys.profilers import ProfilerKind
 from vibesys.render.format import format_status_prefix
 from vibesys.render.run_log import format_framework_event
@@ -84,6 +79,16 @@ from vibesys.run.run_control import RunStopped
 from vibesys.runtime import AgentDefinition, AgentHandle, VibeSysRuntime
 from vs_agent.api import AgentBackend, AgentSpec
 from vs_sandbox.api import HostResource, HostResourceAccess
+
+
+def built_in_orchestrations() -> OrchestrationRegistry:
+    """Construct the built-in registry only when a caller selects it."""
+    from vibesys.api._orchestrations.builtins import (  # noqa: PLC0415
+        built_in_orchestrations as create_builtin_registry,
+    )
+
+    return create_builtin_registry()
+
 
 __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
@@ -146,3 +151,27 @@ __all__ = [
     "open_run_store",
     "output_sink",
 ]
+
+_AGENT_COMPAT_EXPORTS = frozenset(
+    {
+        "AgentRunProjection",
+        "HypothesisRoundView",
+        "HypothesisView",
+        "agent_projection",
+        "agent_run_objectives",
+        "framework_memory_paths",
+        "is_agent_run_manifest",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:  # noqa: ANN401
+    """Resolve deprecated agent-only imports without loading them eagerly."""
+    if name not in _AGENT_COMPAT_EXPORTS:
+        raise AttributeError(name)
+    warnings.warn(
+        f"vibesys.api.{name} is deprecated; import it from vibesys.api.agent",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return getattr(import_module("vibesys.api.agent"), name)

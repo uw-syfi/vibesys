@@ -146,6 +146,9 @@ graph TD
     vibesys.api._orchestrations.runtime --> vibesys.render
     vibesys.api._orchestrations.runtime --> vibesys.run
     vibesys.api._orchestrations.runtime --> vibesys.runtime
+    vibesys.api.agent --> vibesys.api
+    vibesys.api.agent --> vibesys.api._orchestrations
+    vibesys.api.agent --> vibesys.loops.agent
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.api._orchestrations.legacy_request
     vibesys.api.contracts --> vibesys.api.run_request
@@ -272,6 +275,7 @@ graph TD
     server.api --> server.run_lifecycle
     server.api --> server.settings
     server.api --> vibesys.api
+    server.api --> vibesys.api.agent
     server.api --> vs_loop_state
     server.api --> vs_project
     server.chat --> server
@@ -427,6 +431,9 @@ graph TD
     vibesys.api._orchestrations.runtime --> vibesys.run
     vibesys.api._orchestrations.runtime --> vibesys.runtime
     vibesys.api._orchestrations.runtime --> vs_agent
+    vibesys.api.agent --> vibesys.api
+    vibesys.api.agent --> vibesys.api._orchestrations
+    vibesys.api.agent --> vibesys.loops.agent
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.api._orchestrations.legacy_request
     vibesys.api.contracts --> vibesys.api.run_request

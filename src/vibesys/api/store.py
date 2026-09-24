@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.api._orchestrations.builtins import built_in_orchestrations
 from vibesys.api._orchestrations.contracts import HistoryNamespaces, project_run
 from vibesys.api._orchestrations.manifest_compat import orchestration_id
 from vibesys.api.contracts import RunStatus
@@ -40,7 +39,11 @@ class RunStore(Protocol):
 
 def open_run_store(project: Project, *, registry: OrchestrationRegistry | None = None) -> RunStore:
     """Open a read-only run history store for *project*."""
-    return _LocalRunStore(project, registry=registry or built_in_orchestrations())
+    if registry is None:
+        from vibesys.api._orchestrations.builtins import built_in_orchestrations  # noqa: PLC0415
+
+        registry = built_in_orchestrations()
+    return _LocalRunStore(project, registry=registry)
 
 
 def portable_history_snapshots(
@@ -49,7 +52,11 @@ def portable_history_snapshots(
     """Read the portable namespaces selected by the run's policy."""
     manifest = project.state.load_run(run_id)
     policy_id = orchestration_id(manifest)
-    selected = registry or built_in_orchestrations()
+    if registry is None:
+        from vibesys.api._orchestrations.builtins import built_in_orchestrations  # noqa: PLC0415
+
+        registry = built_in_orchestrations()
+    selected = registry
     try:
         policy = selected.resolve(policy_id)
     except ValueError:

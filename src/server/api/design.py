@@ -21,7 +21,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
 
 from server.api.protocol import DesignFileChange, DesignPatch, DesignRound
-from vibesys.api import AgentRunProjection, agent_projection, framework_memory_paths
+from vibesys.api.agent import AgentRunProjection, agent_projection, framework_memory_paths
 from vs_project.api import is_project_state_path
 
 if TYPE_CHECKING:

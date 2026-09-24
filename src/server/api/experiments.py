@@ -1,6 +1,6 @@
 """Reshape a run's agent projection into experiment-log protocol entries.
 
-`vibesys.api`'s `AgentRunProjection`/`HypothesisView`/`HypothesisRoundView` already
+`vibesys.api.agent`'s `AgentRunProjection`/`HypothesisView`/`HypothesisRoundView` already
 derive every fact this module publishes -- copying authoritative state,
 never grouping rounds, selecting a baseline, or inferring a resolution (see
 `vibesys.api._readmodel`). This module only reshapes those boundary DTOs into
@@ -17,10 +17,11 @@ from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from server.api.protocol import ExperimentCursor, ExperimentUpdate, HypothesisEntry, HypothesisRound
-from vibesys.api import agent_projection
+from vibesys.api.agent import agent_projection
 
 if TYPE_CHECKING:
-    from vibesys.api import AgentRunProjection, HypothesisRoundView, HypothesisView, RunView
+    from vibesys.api import RunView
+    from vibesys.api.agent import AgentRunProjection, HypothesisRoundView, HypothesisView
 
 _StrategyDisposition = Literal["available", "parked", "abandoned"]
 

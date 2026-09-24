@@ -48,12 +48,8 @@ from server.api.protocol import (
 from server.api.workspace_git import WorkspacePatchReader
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
-from vibesys.api import (
-    agent_projection,
-    agent_run_objectives,
-    is_agent_run_manifest,
-    open_run_store,
-)
+from vibesys.api import open_run_store
+from vibesys.api.agent import agent_projection, agent_run_objectives, is_agent_run_manifest
 from vs_project.api import (
     GitTracker,
     NullGitTrackerEvents,
