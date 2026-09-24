@@ -14,6 +14,7 @@ current rather than growing them unboundedly.
 | --- | --- |
 | ROCm knowledge docs (measurement protocol, counter triage, roofline, AITER engagement proof, profiler tool map) | Merged |
 | `rocprof` `ProfilerKind`: MCP server, `rocprof.j2` prompt, ROCm backend default | Merged |
+| `capture.py` (shared capture-lifecycle-driven `profile_*` tools; curated MCP surface) | Merged, tested against fake `rocprofv3`/`rocprof-compute` executables (no GPU) |
 | `analyze_rocprof.py` (rocprofv3 system trace) | Merged, validated on real MI210 + vLLM traces |
 | `counters.py` (PMC, <=4 counters/pass) | Merged, validated on real MI210 data |
 | `att.py` (thread trace) | Merged, validated on real MI210 data (ROCm >=7.1 only) |
@@ -41,13 +42,30 @@ demands.
 
 These follow the existing profiler-plugin structure
 (`resources/profilers/<kind>/` analyzer CLIs + a FastMCP server + a prompt
-template, registered as a `ProfilerKind`): `resources/profilers/rocprof/`
-exposes 21 MCP tools across the five CLIs above, `rocprof.j2` teaches the
-profiler agent which tool answers which question, and the ROCm backend's
-default profiler kind was switched from `torch` to `rocprof`. The torch
-analyzer (`resources/profilers/torch/analyze_torch_profile.py`) gained
-`certify`, `gemm_shapes`, and `roofline` subcommands so it can independently
-attribute vLLM traces on ROCm hosts as well as CUDA ones.
+template, registered as a `ProfilerKind`): `rocprof.j2` teaches the profiler
+agent which tool answers which question, and the ROCm backend's default
+profiler kind was switched from `torch` to `rocprof`. The torch analyzer
+(`resources/profilers/torch/analyze_torch_profile.py`) gained `certify`,
+`gemm_shapes`, and `roofline` subcommands so it can independently attribute
+vLLM traces on ROCm hosts as well as CUDA ones.
+
+`resources/profilers/rocprof/capture.py` (new) builds one `profile_*` MCP
+tool per altitude above (`profile_timeline`, `profile_counters`,
+`profile_kernel_deep`, `profile_instructions`; a `profile_ops` tool delegates
+to the torch plugin's own `capture_ops.py`, staged alongside rocprof) on top
+of the shared `capture_runtime` lifecycle
+(`resources/profilers/_common/capture_runtime.py`): start, optionally wait
+for `ready_command` + run `load_command`, stop with `stop_signal`, escalate
+if needed. Each capture writes a `manifest.json` recording its `kind`; a
+dispatching `summary(capture)` and `compare(a, b)` read that field to pick
+the right analyzer instead of the agent needing to know which one to call.
+`profiling_capabilities()` folds what used to be several separate planning
+tools (`counter_plan`, `att_plan`, `counter_sets`, `compute_doctor`) into one
+host-capability report, naming which tool each capability line gates. The
+MCP surface is now curated (capture tools + drill-downs + the torch
+cross-check tools, all accepting either a capture id or an explicit path)
+rather than exposing every CLI subcommand 1:1; the underlying CLIs are
+unchanged and still directly runnable.
 
 ## Verified platform facts
 
