@@ -26,10 +26,16 @@ Verified against real MI210 captures: each row is
 total_cycles, stall_cycles, idle_cycles]`` -- ``code.json``'s own ``header``
 field documents this as ``"ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit,
 Latency, Stall, Idle"``, confirmed independently by the sibling
-``stats_ui_output_agent_<PID>_dispatch_<N>.csv``. It prints the top
-instructions and top source lines by stall cycles, plus stall-category
-totals, and fails with a clear message when ``code.json`` is missing (decoder
-not run, or wrong directory).
+``stats_ui_output_agent_<PID>_dispatch_<N>.csv``. Columns are resolved by
+this header's own NAMES, not by position: decoder releases are not
+guaranteed to keep the column order stable, and a positional reader would
+silently mismap data if it ever changes. When ``code.json`` carries no
+``header`` field at all (older/hand-built output), the documented order
+above is used as a fallback; when a ``header`` field is present but missing
+a column this toolkit needs, parsing fails with a clear error instead of
+guessing. It prints the top instructions and top source lines by stall
+cycles, plus stall-category totals, and fails with a clear message when
+``code.json`` is missing (decoder not run, or wrong directory).
 """  # noqa: EXE001  # tracked: #288
 
 from __future__ import annotations
@@ -107,23 +113,95 @@ def _int_or_zero(value: object) -> int:
     return value if isinstance(value, int) else 0
 
 
-def _instruction_from_row(row: list) -> Instruction | None:  # tracked: #288
-    if len(row) < 10 or not isinstance(row[2], int) or row[2] == 0:  # noqa: PLR2004  # tracked: #288
-        return None
-    return Instruction(
-        asm=str(row[0]),
-        pc_index=row[2],
-        source_loc=str(row[3]) if row[3] else "<unknown>",
-        pc_addr=_int_or_zero(row[5]),
-        exec_count=_int_or_zero(row[6]),
-        total_cycles=_int_or_zero(row[7]),
-        stall_cycles=_int_or_zero(row[8]),
-        idle_cycles=_int_or_zero(row[9]),
-    )
-
-
 class AttOutputNotFoundError(RuntimeError):
-    """Raised when no code.json can be found under the given directory."""
+    """Raised when no code.json is found, or its rows can't be mapped to known columns."""
+
+
+# code.json's own documented `header` field (verified against a real MI210
+# decoder output): "ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency,
+# Stall, Idle". Maps each known header column name to the Instruction field
+# it carries; "_" and "Codeobj" are unused. Resolving by NAME (not position)
+# is what makes parsing robust to a decoder release reordering columns.
+_HEADER_FIELD_MAP: dict[str, str] = {
+    "ISA": "asm",
+    "LineNumber": "pc_index",
+    "Source": "source_loc",
+    "Vaddr": "pc_addr",
+    "Hit": "exec_count",
+    "Latency": "total_cycles",
+    "Stall": "stall_cycles",
+    "Idle": "idle_cycles",
+}
+_REQUIRED_INSTRUCTION_FIELDS = frozenset(_HEADER_FIELD_MAP.values())
+
+# Positional fallback for code.json output with no "header" field at all
+# (the hand-built, docs-derived test fixture predates the decoder always
+# emitting one; real decoder output always has it).
+_DEFAULT_HEADER_COLUMNS: tuple[str, ...] = (
+    "ISA",
+    "_",
+    "LineNumber",
+    "Source",
+    "Codeobj",
+    "Vaddr",
+    "Hit",
+    "Latency",
+    "Stall",
+    "Idle",
+)
+_DEFAULT_INDICES: dict[str, int] = {
+    field: _DEFAULT_HEADER_COLUMNS.index(col) for col, field in _HEADER_FIELD_MAP.items()
+}
+
+
+def _column_indices(columns: tuple[str, ...]) -> dict[str, int]:
+    """Map each Instruction field to its index in ``columns``, resolved by column NAME."""
+    indices = {
+        field: i
+        for i, col in enumerate(columns)
+        for field in (_HEADER_FIELD_MAP.get(col),)
+        if field is not None
+    }
+    missing = _REQUIRED_INSTRUCTION_FIELDS - set(indices)
+    if missing:
+        msg = (
+            f"code.json header {list(columns)!r} is missing required column(s) for: "
+            f"{sorted(missing)} (known column names: {sorted(_HEADER_FIELD_MAP)})"
+        )
+        raise AttOutputNotFoundError(msg)
+    return indices
+
+
+def _parse_header(header: object) -> dict[str, int]:
+    """Resolve code.json's ``header`` field into a field->index map.
+
+    ``header`` is a comma-separated column-name string, e.g. ``"ISA, _,
+    LineNumber, ..."``. Falls back to the documented default column order
+    when no header field is present at all.
+    """
+    if not header or not isinstance(header, str):
+        return _DEFAULT_INDICES
+    columns = tuple(part.strip() for part in header.split(","))
+    return _column_indices(columns)
+
+
+def _instruction_from_row(  # tracked: #288
+    row: list, indices: dict[str, int] = _DEFAULT_INDICES
+) -> Instruction | None:
+    pc_i = indices["pc_index"]
+    if len(row) <= max(indices.values()) or not isinstance(row[pc_i], int) or row[pc_i] == 0:
+        return None
+    source_loc = row[indices["source_loc"]]
+    return Instruction(
+        asm=str(row[indices["asm"]]),
+        pc_index=row[pc_i],
+        source_loc=str(source_loc) if source_loc else "<unknown>",
+        pc_addr=_int_or_zero(row[indices["pc_addr"]]),
+        exec_count=_int_or_zero(row[indices["exec_count"]]),
+        total_cycles=_int_or_zero(row[indices["total_cycles"]]),
+        stall_cycles=_int_or_zero(row[indices["stall_cycles"]]),
+        idle_cycles=_int_or_zero(row[indices["idle_cycles"]]),
+    )
 
 
 def _find_code_json(dispatch_dir: Path) -> Path:
@@ -164,7 +242,8 @@ def load_instructions(dispatch_dir: Path) -> list[Instruction]:
     if not isinstance(rows, list):
         msg = f"{code_json} does not have the expected top-level 'code' list"
         raise AttOutputNotFoundError(msg)
-    instructions = (_instruction_from_row(row) for row in rows if isinstance(row, list))
+    indices = _parse_header(data.get("header") if isinstance(data, dict) else None)
+    instructions = (_instruction_from_row(row, indices) for row in rows if isinstance(row, list))
     return [i for i in instructions if i is not None]
 
 
@@ -311,7 +390,9 @@ def cmd_plan(ns: argparse.Namespace) -> None:
     )
     print(full_command)  # noqa: T201  # tracked: #288
     if ns.write:
-        Path(ns.script_path).write_text("#!/bin/bash\nset -eux\n" + full_command + "\n", encoding="utf-8")
+        Path(ns.script_path).write_text(
+            "#!/bin/bash\nset -eux\n" + full_command + "\n", encoding="utf-8"
+        )
         print(f"\n# wrote {ns.script_path}")  # noqa: T201  # tracked: #288
 
     print("\n# Prerequisites:")  # noqa: T201  # tracked: #288

@@ -28,15 +28,21 @@ import argparse
 import contextlib
 import io
 import json
+import re
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from resources.profilers.rocprof.att import (
+    _DEFAULT_HEADER_COLUMNS,
+    _HEADER_FIELD_MAP,
     STALL_CATEGORIES,
     AttOutputNotFoundError,
     Instruction,
     _find_code_json,
     _instruction_from_row,
+    _parse_header,
     _stall_category,
     aggregate_by_source,
     cmd_hotspots,
@@ -44,6 +50,10 @@ from resources.profilers.rocprof.att import (
     load_instructions,
     stall_category_totals,
 )
+from resources.profilers.rocprof.att import (
+    main as att_main,
+)
+from tests.vibesys.loops.rocprof_strategies import FAST, FEWER, buffer_size_input
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"
 
@@ -168,9 +178,7 @@ def test_load_instructions_parses_real_mi210_att_decoder_output():  # noqa: ANN2
 
 
 def test_cmd_hotspots_on_real_att_data_ranks_the_actual_dominant_stall():  # noqa: ANN201  # tracked: #288
-    out = _run(
-        cmd_hotspots, dispatch_dir=str(_FIXTURES / "att_real"), top=3
-    )
+    out = _run(cmd_hotspots, dispatch_dir=str(_FIXTURES / "att_real"), top=3)
     # The real capture is dominated by a single s_waitcnt vmcnt(0) waiting on a global load.
     assert "VMEM-wait" in out
     assert "s_waitcnt vmcnt(0)" in out
@@ -314,3 +322,115 @@ def test_cmd_plan_can_write_the_command_to_a_script(tmp_path: Path):  # noqa: AN
     )
     assert script_path.is_file()
     assert "--att-target-cu 2" in script_path.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Property tests: code.json column resolution is name-based, not positional
+#
+# Regression context: att.py used to read `code.json`'s `code` rows by fixed
+# position (row[9] == idle cycles). That happened to match the one real
+# decoder capture on hand, but nothing verified the *header* -- if a decoder
+# release ever reorders columns, positional reads would silently mismap data.
+# `_instruction_from_row`/`load_instructions` now resolve columns by the
+# header's own names (falling back to the documented order only when no
+# header is present at all). These tests fuzz the column order and prove the
+# parser tracks the header, not position -- and fails clearly, rather than
+# guessing, when a header is present but missing a column it needs.
+# ---------------------------------------------------------------------------
+
+_COLUMN_VALUES: dict[str, object] = {
+    "ISA": "s_nop",
+    "_": 0,
+    "LineNumber": 7,
+    "Source": "/k.cpp:1",
+    "Codeobj": 0,
+    "Vaddr": 4096,
+    "Hit": 3,
+    "Latency": 100,
+    "Stall": 40,
+    "Idle": 25,
+}
+
+
+@given(order=st.permutations(range(len(_DEFAULT_HEADER_COLUMNS))))
+@FAST
+def test_load_instructions_resolves_columns_by_header_name_under_any_permutation(order):  # noqa: ANN001, ANN201
+    columns = [_DEFAULT_HEADER_COLUMNS[i] for i in order]
+    row = [_COLUMN_VALUES[c] for c in columns]
+
+    indices = _parse_header(", ".join(columns))
+    inst = _instruction_from_row(row, indices)
+
+    assert inst is not None
+    assert inst.asm == "s_nop"
+    assert inst.pc_index == 7
+    assert inst.source_loc == "/k.cpp:1"
+    assert inst.pc_addr == 4096
+    assert inst.exec_count == 3
+    assert inst.total_cycles == 100
+    assert inst.stall_cycles == 40
+    assert inst.idle_cycles == 25
+
+
+@given(renamed_col=st.sampled_from(sorted(_HEADER_FIELD_MAP)))
+@FAST
+def test_parse_header_fails_clearly_when_a_required_column_is_renamed_away(renamed_col):  # noqa: ANN001, ANN201
+    # Rename one required header column to something unrecognized -- every
+    # other required column stays present and correct.
+    columns = [c if c != renamed_col else "Unknown_Renamed_Column" for c in _DEFAULT_HEADER_COLUMNS]
+
+    with pytest.raises(AttOutputNotFoundError, match="missing required column"):
+        _parse_header(", ".join(columns))
+
+
+def test_load_instructions_reads_the_header_field_from_a_real_code_json_file(tmp_path: Path):  # noqa: ANN201
+    # End-to-end (through the filesystem) with a header order that does NOT
+    # match the documented default -- proves `load_instructions` itself (not
+    # just the in-memory helpers above) resolves columns by name.
+    columns = list(reversed(_DEFAULT_HEADER_COLUMNS))
+    row = [_COLUMN_VALUES[c] for c in columns]
+    dispatch_dir = tmp_path / "ui_output_agent_1_dispatch_1"
+    dispatch_dir.mkdir()
+    (dispatch_dir / "code.json").write_text(
+        json.dumps({"header": ", ".join(columns), "code": [row]})
+    )
+
+    instructions = load_instructions(dispatch_dir)
+
+    assert len(instructions) == 1
+    assert instructions[0].idle_cycles == 25
+    assert instructions[0].stall_cycles == 40
+
+
+def test_instruction_from_row_default_indices_still_match_the_documented_order():  # noqa: ANN201
+    # `_instruction_from_row`'s default `indices` argument (used when callers
+    # -- including the existing hand-built-fixture tests above -- pass no
+    # explicit mapping) must still match the module's own documented
+    # positional fallback order.
+    row = [_COLUMN_VALUES[c] for c in _DEFAULT_HEADER_COLUMNS]
+    inst = _instruction_from_row(row)
+    assert inst is not None
+    assert inst.idle_cycles == 25
+    assert inst.stall_cycles == 40
+
+
+# ---------------------------------------------------------------------------
+# Property test: --att-buffer-size is always a plain integer byte count
+# ---------------------------------------------------------------------------
+
+
+@given(value=buffer_size_input())
+@FEWER
+def test_cmd_plan_buffer_size_is_always_a_plain_integer_or_a_clear_cli_error(value):  # noqa: ANN001, ANN201
+    argv = ["plan", "--arch", "gfx90a", "--kernel", "x", "--buffer-size", str(value)]
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            att_main(argv)
+    except SystemExit:
+        # argparse's own `type=int` rejected a non-integer string ("64MB",
+        # "1G") -- a clear CLI error, not a silently-broken command.
+        return
+    match = re.search(r"--att-buffer-size (\S+)", buf.getvalue())
+    assert match is not None
+    assert match.group(1).isdigit()
