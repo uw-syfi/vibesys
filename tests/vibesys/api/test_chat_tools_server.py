@@ -221,7 +221,7 @@ class TestEndToEnd:
         out = asyncio.run(_call(server, "run_summary"))
 
         assert f"run_id: {run_id}" in out
-        assert "loop: agent" in out
+        assert "loop: multi-agent" in out
         assert "active_hypothesis_id: H-01" in out
         assert "hypothesis_count: 1" in out
         assert "round_count: 1" in out

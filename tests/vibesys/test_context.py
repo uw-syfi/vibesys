@@ -28,7 +28,12 @@ from vibesys.evaluators import (
     resolve_evaluator_package,
     tool_install_root,
 )
-from vibesys.evaluators.input_manifest import WorkspaceInput, WorkspaceSource, load_input_bundle
+from vibesys.evaluators.input_manifest import (
+    WorkspaceInput,
+    WorkspaceSource,
+    load_input_bundle,
+    load_project_task,
+)
 from vibesys.events import CoreEventType
 from vibesys.loops.agent.model import AgentRunState
 from vibesys.loops.agent.orchestration import (
@@ -186,15 +191,16 @@ def _create_context(  # noqa: PLR0913
     workspace_sources: tuple[WorkspaceSource, ...] = (),
     agent_backend: str | None = "stub",
 ) -> _RunContext:
-    bundle = load_input_bundle(project)
+    if task_root is not None:
+        selected_project = Project.open(project)
+        bundle = load_project_task(selected_project, selected_project.select_task(task_name))
+    else:
+        bundle = load_input_bundle(project)
     updates: dict[str, object] = {}
     if evaluator is not None:
         updates["evaluator_path"] = evaluator
     if evaluator_package_root is not None:
         updates["evaluator_package_root"] = evaluator_package_root
-    if task_root is not None:
-        updates["task_root"] = task_root
-        updates["task_name"] = task_name
     if workspace_sources:
         updates["manifest"] = bundle.manifest.model_copy(
             update={"workspace": WorkspaceInput(sources=workspace_sources)}

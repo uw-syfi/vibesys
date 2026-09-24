@@ -746,7 +746,7 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
             input_path=str(Path(ref_file).parent),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
-            max_rounds=1,
+            max_rounds=2,
         )
 
     exp_dir = _run_exp_dir(tmp_path)
@@ -767,7 +767,7 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
             input_path=str(exp_dir),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
-            max_rounds=1,
+            max_rounds=2,
             existing=True,
         )
 

@@ -10,6 +10,8 @@ from vibesys.api import OrchestrationRegistry
 from vibesys.api.contracts import RunStatus
 from vibesys.api.store import open_run_store, portable_history_snapshots
 from vibesys.context import RunSetup
+from vibesys.loops.evolve.state import EvolutionStateStore
+from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
@@ -42,7 +44,7 @@ def test_plain_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     assert type(direct.loop) is str
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
-    assert direct.projection is None
+    assert direct.projection == PlainLoopCursor().model_dump(mode="json")
     assert len(listed) == 1
     assert listed[0] == direct
 
@@ -71,7 +73,10 @@ def test_evolve_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     assert direct.loop == "evolve"
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
-    assert direct.projection is None
+    expected = EvolutionStateStore(
+        project.state.portable_namespace(manifest.run_id, "evolve")
+    ).projection()
+    assert direct.projection == expected.model_dump(mode="json")
     assert store.list_runs() == [direct]
 
 

@@ -1819,7 +1819,7 @@ def test_resume_rejects_an_unsupported_run_schema(
         parse_cli_invocation(["--resume", run_id])
 
     assert exc.value.diagnostic.code == "unsupported_run_schema"
-    assert "only v4 runs" in exc.value.diagnostic.message
+    assert "requires version 4" in exc.value.diagnostic.message
     assert run_id in exc.value.diagnostic.message
 
 

@@ -68,7 +68,7 @@ def test_inspector_answers_round_and_failure_queries(tmp_path):  # noqa: ANN001,
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
     inspector = RunInspector(parts.integration)
 
-    assert '"round": 1' in inspector.round_detail(1)
+    assert '"round_number": 1' in inspector.round_detail(1)
     assert "latency regressed" in inspector.answer("why did the judge fail?")
 
 

@@ -19,6 +19,7 @@ from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEnt
 from server.events import EventType, ExperimentsChangedData
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.model import (
     AgentRunState,
     Hypothesis,
@@ -859,19 +860,17 @@ def test_service_reads_performance_from_authoritative_agent_state(tmp_path: Path
 
 
 def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -> None:
-    """Regression for #507: the read path must use the run's stored tolerance.
+    """Regression for #507: the writer must use the run's stored tolerance.
 
-    The server reprojects hypothesis evidence on every read. It has no access
-    to the task's ``objectives.toml``, so the tolerance has to travel with the
-    run state; otherwise a 1% delta under a 5% noise model reaches the client
-    as ``proven`` while the round record says the run learned nothing.
+    The persisted hypothesis summary carries the resolution computed from
+    the 5% noise model, so a 1% delta reaches the client as inconclusive.
     """
     configuration = agent_descriptor(
         metric_space=MetricSpace(objectives=(Objective("ops_s", "max"),))
     )
     project, run_id = _project_run(tmp_path / "project", configuration)
     portable = project.state.portable_namespace(run_id, "agent")
-    AgentRunStateStore(portable).save(
+    state = reproject_run_evidence(
         AgentRunState(
             metrics=MetricSpace(
                 objectives=(Objective(name="ops_s", direction="max"),),
@@ -922,6 +921,7 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
             ],
         )
     )
+    AgentRunStateStore(portable).save(state)
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
     entries = parts.api.execute(ExperimentQuery()).experiments
 

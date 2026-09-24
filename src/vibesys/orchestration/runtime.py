@@ -98,6 +98,32 @@ async def _wait_until_done(task: asyncio.Task) -> None:
             break
 
 
+async def _close_runtime(host: RunContext, error: BaseException | None) -> None:
+    """Drain cleanup while preserving the policy failure or caller cancellation."""
+    cancelled = False
+    cleanup = asyncio.create_task(host.close())
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            cancelled = True
+        except BaseException:  # noqa: BLE001  # inspect the completed task below
+            break
+    try:
+        cleanup.result()
+    except BaseException as cleanup_error:
+        if error is not None:
+            error.add_note(f"runtime cleanup also failed: {cleanup_error}")
+            return
+        if cancelled and not isinstance(cleanup_error, asyncio.CancelledError):
+            cancellation = asyncio.CancelledError()
+            cancellation.add_note(f"runtime cleanup also failed: {cleanup_error}")
+            raise cancellation from cleanup_error
+        raise
+    if cancelled and error is None:
+        raise asyncio.CancelledError
+
+
 class _LocalAgentHandle:
     def __init__(  # noqa: PLR0913  # independently owned agent resources
         self,
@@ -628,22 +654,7 @@ class RunContext:
                 raise
             yield host
         finally:
-            error = sys.exception()
-            cancelled = False
-            cleanup = asyncio.create_task(host.close())
-            while not cleanup.done():
-                try:
-                    await asyncio.shield(cleanup)
-                except asyncio.CancelledError:
-                    cancelled = True
-            try:
-                cleanup.result()
-            except BaseException as cleanup_error:
-                if error is None:
-                    raise
-                error.add_note(f"runtime cleanup also failed: {cleanup_error}")
-            if cancelled and error is None:
-                raise asyncio.CancelledError
+            await _close_runtime(host, sys.exception())
 
     def _validate_capabilities(self) -> None:
         request = self.request
@@ -678,6 +689,8 @@ class RunContext:
 
     def prepare(self) -> None:
         """Open the canonical run context once."""
+        if not self.setup.use_default_agent:
+            self._validate_capabilities()
         self._ensure_context()
 
     async def spawn(

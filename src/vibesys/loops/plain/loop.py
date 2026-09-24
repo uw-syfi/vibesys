@@ -451,6 +451,7 @@ class _PlainTurns:
                 new_issue_ids=tuple(response.new_issue_ids),
             )
         )
+        ctx.state.commit("plain: record performance evaluation", self.state_store.namespace)
         ctx.snapshot_workspace(f"iter-{iteration}-perf_eval")
         ctx.lprint(
             f"\n>>> Perf trend: throughput={response.throughput_trend.value.upper()}, "

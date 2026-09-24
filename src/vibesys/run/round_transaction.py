@@ -226,14 +226,17 @@ class RoundTransactionCoordinator[StateT: BaseModel]:
         status = self._git.framework_snapshot_status(snapshot)
         current_sha = self._git.current_sha()
 
-        if status is FrameworkSnapshotStatus.EXACT:
-            self._state_slot.apply(transition)
-        elif current_sha == journal.pre_commit:
+        # An unchanged cursor may already be exact while other run files are
+        # still dirty. The pre-commit HEAD means this transaction has not
+        # snapshotted those files yet.
+        if current_sha == journal.pre_commit:
             self._state_slot.apply(transition)
             self._git.snapshot_with_framework_metadata(
                 f"vibesys(round {journal.round_number}): record result",
                 snapshot,
             )
+        elif status is FrameworkSnapshotStatus.EXACT:
+            self._state_slot.apply(transition)
         else:
             raise RoundTransactionError("Committed state differs from the transaction journal")
 

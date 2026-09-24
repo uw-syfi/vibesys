@@ -11,6 +11,7 @@ from server.api.performance import build_performance_context, summarize_objectiv
 from server.api.protocol import PerformanceQuery
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace
+from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.model import AgentRunState, Hypothesis, HypothesisMeasurement
 from vibesys.loops.agent.readmodel import project_run_view
 from vibesys.loops.agent.state import AgentRunStateStore
@@ -108,7 +109,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         "# Objective\n\nMaximize queue throughput measured by the mpmc benchmark.\n\nMore detail.\n",
         encoding="utf-8",
     )
-    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(
+    state = reproject_run_evidence(
         AgentRunState(
             hypotheses=[
                 _hypothesis(
@@ -133,6 +134,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         )
     )
 
+    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(state)
     response = _service(project, run_id).execute(PerformanceQuery())
 
     context = response.performance_context
