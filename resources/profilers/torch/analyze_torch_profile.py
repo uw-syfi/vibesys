@@ -895,7 +895,9 @@ def _self_time_by_name(cpu_ops: list[dict]) -> dict[str, dict]:
     return agg
 
 
-def _gpu_time_by_op_name(cpu_ops: list[dict], op_to_kernels: dict[int, list[dict]]) -> dict[str, float]:
+def _gpu_time_by_op_name(
+    cpu_ops: list[dict], op_to_kernels: dict[int, list[dict]]
+) -> dict[str, float]:
     """Sum correlated GPU kernel time per cpu_op *name*, across all call instances.
 
     ``op_to_kernels`` maps a cpu_op's index in ``cpu_ops`` to the kernel(s)

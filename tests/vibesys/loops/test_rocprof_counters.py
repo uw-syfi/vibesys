@@ -633,11 +633,13 @@ def test_real_mi210_triage_flops_hint_is_scaled_by_dispatch_count_not_divided_by
     # catches a regression to the unscaled formula even if rounding would
     # otherwise hide a smaller drift.
     flops = 2 * 4096 * 4096 * 4096
-    rows = _load_counter_rows(_discover(_real_mi210_dirs(), "counter_collection", (".csv", ".json")))
+    rows = _load_counter_rows(
+        _discover(_real_mi210_dirs(), "counter_collection", (".csv", ".json"))
+    )
     durations = _duration_from_counter_rows(rows)
     aggs = _aggregate_by_kernel(rows)
     (gemm,) = _filter_kernels(aggs, _REAL_GEMM_KERNEL)
-    assert gemm.dispatch_count == 2  # noqa: PLR2004
+    assert gemm.dispatch_count == 2
     gemm_duration_ns = durations[gemm.name]
     metrics = derive_metrics(
         gemm,
@@ -647,15 +649,20 @@ def test_real_mi210_triage_flops_hint_is_scaled_by_dispatch_count_not_divided_by
     )
     expected_achieved_tflops = (flops * gemm.dispatch_count) / (gemm_duration_ns / 1e9) / 1e12
     assert expected_achieved_tflops == pytest.approx(118.43, abs=0.05)
-    assert metrics.mfma_busy_fraction == pytest.approx(expected_achieved_tflops * 1e12 / 181.0e12, rel=1e-9)
+    assert metrics.mfma_busy_fraction == pytest.approx(
+        expected_achieved_tflops * 1e12 / 181.0e12, rel=1e-9
+    )
     # The bug divided one dispatch's FLOPs by the 2-dispatch summed duration,
     # landing at ~59.2 TFLOP/s / 32.7% -- assert we are nowhere near that.
-    assert metrics.mfma_busy_fraction > 0.5  # noqa: PLR2004
+    assert metrics.mfma_busy_fraction is not None
+    assert metrics.mfma_busy_fraction > 0.5
 
 
 @given(
     dispatch_count=st.integers(min_value=1, max_value=50),
-    flops_per_dispatch=st.floats(min_value=1e6, max_value=1e9, allow_nan=False, allow_infinity=False),
+    flops_per_dispatch=st.floats(
+        min_value=1e6, max_value=1e9, allow_nan=False, allow_infinity=False
+    ),
     duration_ns=st.floats(min_value=1e6, max_value=1e12, allow_nan=False, allow_infinity=False),
 )
 @FAST
@@ -678,7 +685,7 @@ def test_flops_hint_scales_achieved_throughput_with_dispatch_count(  # noqa: ANN
     expected_fraction = min(1.0, expected_achieved / (spec.dense_bf16_fp16_tflops * 1e12))
     assert metrics.mfma_busy_fraction == pytest.approx(expected_fraction, rel=1e-6, abs=1e-9)
 
-    if dispatch_count > 1 and expected_fraction < 0.5:  # noqa: PLR2004
+    if dispatch_count > 1 and expected_fraction < 0.5:
         # Doubling the dispatch count at the same per-dispatch flops/duration
         # shape must raise the achieved fraction -- the buggy formula
         # (flops_per_dispatch / duration_ns, no dispatch_count term) would
@@ -689,6 +696,8 @@ def test_flops_hint_scales_achieved_throughput_with_dispatch_count(  # noqa: ANN
             counters={"SQ_INSTS_MFMA": 1.0},
         )
         doubled_metrics = derive_metrics(doubled, duration_ns, spec=spec, flops=flops_per_dispatch)
+        assert doubled_metrics.mfma_busy_fraction is not None
+        assert metrics.mfma_busy_fraction is not None
         assert doubled_metrics.mfma_busy_fraction > metrics.mfma_busy_fraction
 
 

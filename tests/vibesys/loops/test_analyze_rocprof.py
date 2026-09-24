@@ -328,8 +328,9 @@ def test_cmd_families_does_not_flag_a_clean_aiter_dominant_trace(tmp_path, capsy
     assert "*** Finding:" not in out
 
 
-def test_cmd_families_percent_gpu_uses_merged_busy_time_not_naive_sum_of_overlapping_queues(  # noqa: ANN001, ANN201
-    tmp_path, capsys
+def test_cmd_families_percent_gpu_uses_merged_busy_time_not_naive_sum_of_overlapping_queues(  # noqa: ANN201
+    tmp_path,  # noqa: ANN001
+    capsys,  # noqa: ANN001
 ):
     # Regression for the %GPU denominator bug: two families dispatched on
     # DIFFERENT HW queues of the same GPU but fully overlapping in
@@ -1064,9 +1065,7 @@ def test_outlier_family_note_never_fires_when_every_family_is_within_the_thresho
     # uneven, mix of kernel costs).
     smallest = min(avgs_ns)
     assume(all(avg <= smallest * 20 for avg in avgs_ns))
-    ordered = [
-        (f"family_{i}", {"calls": 1, "total_ns": avg}) for i, avg in enumerate(avgs_ns)
-    ]
+    ordered = [(f"family_{i}", {"calls": 1, "total_ns": avg}) for i, avg in enumerate(avgs_ns)]
     assert _outlier_family_note(ordered) is None
 
 

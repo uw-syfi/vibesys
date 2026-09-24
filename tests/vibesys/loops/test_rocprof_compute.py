@@ -324,7 +324,11 @@ def test_cmd_doctor_reports_fixes_and_skips_downstream_checks(monkeypatch, capsy
     assert f"${compute.ROCPROF_COMPUTE_BIN_ENV}" in out
 
 
-def test_cmd_doctor_fails_when_legacy_rocprof_missing_even_with_rocprofv3_present(monkeypatch, capsys, compute):  # noqa: ANN001, ANN201
+def test_cmd_doctor_fails_when_legacy_rocprof_missing_even_with_rocprofv3_present(  # noqa: ANN201
+    monkeypatch,  # noqa: ANN001
+    capsys,  # noqa: ANN001
+    compute,  # noqa: ANN001
+):
     """Regression: doctor used to gate on ``rocprofv3``, but a real MI210 run
     confirmed rocprof-compute 3.1.0 shells out to the deprecated *legacy*
     ``rocprof`` internally, not ``rocprofv3`` (every pass logs ROCm's own
@@ -682,7 +686,12 @@ def test_cmd_profile_end_to_end_with_mocked_tool(monkeypatch, tmp_path, capsys, 
     assert "Workload written to" in capsys.readouterr().out
 
 
-def test_cmd_profile_end_to_end_fails_loudly_on_empty_kernel_match(monkeypatch, tmp_path, capsys, compute):  # noqa: ANN001, ANN201
+def test_cmd_profile_end_to_end_fails_loudly_on_empty_kernel_match(  # noqa: ANN201
+    monkeypatch,  # noqa: ANN001
+    tmp_path,  # noqa: ANN001
+    capsys,  # noqa: ANN001
+    compute,  # noqa: ANN001
+):
     """End-to-end regression for the ``-k gemm`` pitfall through the real
     ``cmd_profile`` entry point, using the real failing-run log excerpt as the
     mocked subprocess output."""
@@ -692,7 +701,9 @@ def test_cmd_profile_end_to_end_fails_loudly_on_empty_kernel_match(monkeypatch, 
     def fake_run_with_timeout(cmd, *, timeout=None, **_kw: object):  # noqa: ANN001, ANN202, ARG001
         workload_dir = Path(cmd[cmd.index("-p") + 1])
         workload_dir.mkdir(parents=True)
-        (workload_dir / "pmc_kernel_top.csv").write_text("Kernel_Name,Count,Sum(ns)\n", encoding="utf-8")
+        (workload_dir / "pmc_kernel_top.csv").write_text(
+            "Kernel_Name,Count,Sum(ns)\n", encoding="utf-8"
+        )
         return 1, log
 
     monkeypatch.setattr(
@@ -1149,7 +1160,9 @@ def test_workload_has_kernel_data_depends_only_on_row_count(  # noqa: ANN201
 )
 @settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
 def test_empty_match_guard_fires_iff_filter_matches_no_real_kernel(  # noqa: ANN201
-    tmp_path_factory, capsys, kernel_filter  # noqa: ANN001
+    tmp_path_factory,  # noqa: ANN001
+    capsys,  # noqa: ANN001
+    kernel_filter,  # noqa: ANN001
 ):
     """Property pinning the ``-k gemm`` pitfall fix against the real fixture's
     kernel names: for *any* kernel filter, simulate rocprof-compute's own

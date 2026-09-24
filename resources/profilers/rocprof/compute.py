@@ -337,15 +337,15 @@ def _check_rocprof_legacy() -> _DoctorCheck:
     # every pass shells to this, not rocprofv3 -- see find_rocprof_legacy_bin).
     rocprof_bin = find_rocprof_legacy_bin()
     if rocprof_bin:
-        return _DoctorCheck("OK", f"legacy rocprof (rocprof-compute's internal driver): {rocprof_bin}")
+        return _DoctorCheck(
+            "OK", f"legacy rocprof (rocprof-compute's internal driver): {rocprof_bin}"
+        )
     fix = (
         "Install the ROCm profiler package that ships the deprecated legacy `rocprof` "
         "(v1/v2), or add it to PATH -- rocprof-compute 3.1.0 shells out to it internally, "
         "not rocprofv3, so `profile` cannot run without it."
     )
-    return _DoctorCheck(
-        "FAIL", "legacy rocprof: not found on PATH or under $ROCM_PATH/bin", fix
-    )
+    return _DoctorCheck("FAIL", "legacy rocprof: not found on PATH or under $ROCM_PATH/bin", fix)
 
 
 def _check_aqlprofile() -> _DoctorCheck:
@@ -796,7 +796,9 @@ def _print_pmc_perf_ratios(path: Path) -> bool:
 
     lines = []
     if hits is not None and misses is not None and (hits + misses) > 0:
-        lines.append(f"  L2 cache hit rate (TCC_HIT/(HIT+MISS)): {100 * hits / (hits + misses):.1f}%")
+        lines.append(
+            f"  L2 cache hit rate (TCC_HIT/(HIT+MISS)): {100 * hits / (hits + misses):.1f}%"
+        )
     if valu is not None and mfma is not None and (valu + mfma) > 0:
         lines.append(f"  MFMA share of VALU+MFMA issue slots: {100 * mfma / (valu + mfma):.1f}%")
     if not lines:
@@ -920,7 +922,9 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("profile", help="run `rocprof-compute profile` with a hard timeout")
     p.add_argument("--name", required=True, help="workload name (rocprof-compute -n)")
     p.add_argument("--out", required=True, help="directory to hold workloads/<name>/...")
-    p.add_argument("--kernel", default="", help="substring/regex filtering kernels (rocprof-compute -k)")
+    p.add_argument(
+        "--kernel", default="", help="substring/regex filtering kernels (rocprof-compute -k)"
+    )
     p.add_argument("--dispatch", type=int, default=None, help="filter by dispatch id")
     p.add_argument(
         "--block",

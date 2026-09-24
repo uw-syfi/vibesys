@@ -1056,18 +1056,18 @@ def cmd_files(ns: argparse.Namespace) -> None:
 
 
 def _gpu_busy_denominator_ns(disc: DiscoveredReport, naive_sum_ns: float) -> float:
-    """True GPU-busy denominator for a "%GPU" share: merged-interval union across
-    every (agent, queue), not a naive sum of per-kernel durations.
+    """True GPU-busy denominator for a "%GPU" share.
 
-    A naive sum of every kernel's own total duration double-counts whenever
-    kernels on different HW queues of the same GPU genuinely overlap in
-    wall-clock time (real, if usually small, on rocprofv3 vLLM-serving
-    captures with concurrent queues -- see the rocprof worklog's %GPU
-    denominator note). ``idle_gaps``/``host_idle`` already back their busy-time
-    accounting with this same merged union (``_kernel_union_ns``); ``kernels``/
-    ``families`` now use it too instead of a bespoke sum that only agrees with
-    it when there happens to be no cross-queue overlap. Falls back to the
-    naive sum when only pre-aggregated ``*_kernel_stats.csv`` is available (no
+    Merged-interval union across every (agent, queue), not a naive sum of
+    per-kernel durations: the naive sum double-counts whenever kernels on
+    different HW queues of the same GPU genuinely overlap in wall-clock time
+    (real, if usually small, on rocprofv3 vLLM-serving captures with
+    concurrent queues -- see the rocprof worklog's %GPU denominator note).
+    ``idle_gaps``/``host_idle`` already back their busy-time accounting with
+    this same merged union (``_kernel_union_ns``); ``kernels``/``families``
+    now use it too instead of a bespoke sum that only agrees with it when
+    there happens to be no cross-queue overlap. Falls back to the naive sum
+    when only pre-aggregated ``*_kernel_stats.csv`` is available (no
     per-event timestamps to merge).
     """
     bundle = _get_kernel_bundle(disc)

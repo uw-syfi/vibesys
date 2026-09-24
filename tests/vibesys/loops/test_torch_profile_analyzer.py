@@ -1085,7 +1085,14 @@ class TestDeviceDetectionGeneralization:
         ),
     )
     @FAST
-    def test_never_raises_and_only_returns_known_devices(self, analyzer, major, minor, num_sms, mem_bytes):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_never_raises_and_only_returns_known_devices(  # noqa: ANN201  # tracked: #288
+        self,
+        analyzer,  # noqa: ANN001
+        major,  # noqa: ANN001
+        minor,  # noqa: ANN001
+        num_sms,  # noqa: ANN001
+        mem_bytes,  # noqa: ANN001
+    ):
         props: dict = {}
         if major is not None:
             props["computeMajor"] = major
