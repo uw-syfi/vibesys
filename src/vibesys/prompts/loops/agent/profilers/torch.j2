@@ -54,14 +54,31 @@ If the `{{ profiler_mcp_name }}` MCP server is attached to this round, call its 
 
 | MCP tool | Shell equivalent | Purpose |
 | -------- | ---------------- | ------- |
-| `tables(report)` | `python {{ profiler_support_name }}/analyze_torch_profile.py tables <report>` | Overview: event categories + totals. Start here. |
+| `certify(trace)` | `... certify <trace>` | **Run this first** on a raw `*.pt.trace.json(.gz)` trace. PASS/WARN/FAIL on kernel/op counts, `record_shapes` coverage, step markers, GPU-busy fraction, and graph-replay attribution — each failure names the exact re-capture fix. |
+| `tables(report)` | `python {{ profiler_support_name }}/analyze_torch_profile.py tables <report>` | Overview: event categories + totals. |
 | `kernels(report, top=15)` | `... kernels <report> --top 15` | Top GPU kernels by self-CUDA time. |
 | `operators(report, top=15)` | `... operators <report> --top 15` | Top operators (aten::*, torch::*) by self-CPU time. |
 | `cpu_overhead(report)` | `... cpu-overhead <report>` | CPU-vs-GPU ratio — detects launch-bound / compute-bound. |
 | `memory(report)` | `... memory <report>` | Memory allocation / transfer events. |
-| `summary(report, top=15)` | `... summary <report>` | All-in-one: overhead + kernels + operators + memory. |
+| `gemm_shapes(trace, top=20, out=None)` | `... gemm-shapes <trace> --top 20 [--out shapes.json]` | Ranked (M, N, K, dtype) GEMM demand from `aten::mm`/`addmm`/`bmm`/`baddbmm`/`linear`/`matmul`/`_scaled_mm`, weighted by call count and correlated GPU kernel time. `--out` writes JSON usable as GEMM-tuning input (e.g. hipBLASLt/AITER). |
+| `roofline(trace, device=None, peak_tflops=None, peak_gbps=None, top=20)` | `... roofline <trace> [--device mi210\|mi300x\|mi300a\|mi325x\|mi355x\|h100] [--peak-tflops X --peak-gbps Y]` | Achieved TFLOP/s, GB/s, arithmetic intensity, and compute-vs-memory bound per GEMM/attention op. Device peaks auto-detect from the trace when omitted. |
+| `summary(report, top=15)` | `... summary <report>` | All-in-one: certify (on a raw trace) + overhead + kernels + operators + memory. |
 
-Start with `tables`, then pick the analyses that matter most for the current architecture.
+`kernels`/`operators`/`cpu_overhead`/`memory`/`tables`/`summary` accept either
+a raw `*.pt.trace.json(.gz)` trace or the JSON `capture` writes — the raw
+trace is converted in-process. `certify`/`gemm_shapes`/`roofline` need the raw
+trace itself: shape and kernel-correlation detail a summarized report does
+not carry.
+
+**Certify before analyzing.** Run `certify` on any raw trace before trusting
+`gemm_shapes`, `roofline`, or a per-op reading from `kernels`/`operators`. A
+FAIL means the trace cannot support the claim you are about to make — a WARN
+means the number is usable but degraded (e.g. per-op attribution is unreliable
+under a graph replay). Re-capture using the fix each item names rather than
+reporting a number the trace cannot support.
+
+Start with `tables`, then `certify`, then pick the analyses that matter most
+for the current architecture.
 
 Suggestions are advisory. Report visibility limits rather than declaring the
 optimization loop blocked on new profiler infrastructure. When capture is
@@ -101,6 +118,28 @@ Use the exact capture command above only when it matches the domain's artifact c
 ### Mode B: Server-path (optional)
 
 Include HTTP, async, and batching overhead by instrumenting the server with two admin endpoints and using `capture-server`. See the docstring of `analyze_torch_profile.py` for the required `/admin/profile/start` and `/admin/profile/stop` contract.
+
+### Mode C: the candidate's own torch.profiler endpoints (if it exposes them)
+
+If the candidate is vLLM (or another server that wires up `torch.profiler`
+the same way), it already exposes a profiling contract close to Mode B's:
+setting `VLLM_TORCH_PROFILER_DIR` before start makes `POST /start_profile`
+and `POST /stop_profile` capture directly to that directory as
+`*.pt.trace.json(.gz)` — a raw trace every tool above accepts. Drive
+representative load between the two calls; do not substitute Mode A/B when
+this path is available and the objective concerns the server's own request
+path, since only this mode captures the server's real batching and admission
+behavior.
+
+Pass `record_shapes=True` to whichever mode constructs the `torch.profiler.profile(...)` call (directly in Mode A, or however the candidate wires it up for Mode C). Without it, `certify` will FAIL and `gemm_shapes`/`roofline` have no shapes to extract.
+
+**ROCm note.** On ROCm 6.4 + torch 2.9.1, an async event wait right after a
+`torch.profiler` session ends can hang or fault the GPU. Before ending the
+profiler context (or calling `/stop_profile`), drain in-flight work and call
+`torch.cuda.synchronize()` (the ROCm/HIP path shares the CUDA API). Bound the
+`/stop_profile` wait with a timeout, and if it does not return, kill the
+server process tree rather than waiting indefinitely or leaving a stuck GPU
+for the next round.
 {% endif %}
 
 {% include "profilers/_observer_effect.j2" %}
