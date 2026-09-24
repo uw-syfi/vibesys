@@ -26,6 +26,8 @@ The default-on optimizations are **not the same across hardware**, and applying 
 
 **Open `references/platforms/<backend>/floor.md` for the backend present in this workspace.** Only that platform's directory is materialized, so there is no ambiguity about which applies.
 
+**Read past `floor.md` before writing a conclusion.** Each platform directory also holds the measurement discipline: turning a counter capture into a bound verdict, proving which kernel library actually ran, and the A/B protocol for before/after claims. Before quoting a "compute-bound"/"bandwidth-bound" verdict, a percent-of-peak or percent-of-bandwidth number, or a kernel-library-tuning recommendation, use that discipline instead of estimating from assumed model geometry (weight bytes, layer split, KV head/dim): an assumption is a hypothesis, not a measurement.
+
 ## Portable contracts vs platform implementations
 
 Topics split into two kinds, and the distinction is load-bearing:
