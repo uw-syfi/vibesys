@@ -143,15 +143,27 @@ depends_on = ["vibesys.api", "vibesys.loops.agent", "vibesys.loops.agent.project
 
 [[modules]]
 path = "vibesys.api.contracts"
-depends_on = ["vs_agent", "vibesys", "vs_sandbox", "vibesys.loops", "vs_project", "vibesys.api.run_request", "vibesys.loops.legacy_request"]
+depends_on = ["vs_agent", "vibesys", "vs_sandbox", "vibesys.loops", "vs_project", "vibesys.loops.legacy_request", "vibesys.orchestration.environment", "vibesys.orchestration.request", "vibesys.orchestration.view"]
 
 [[modules]]
 path = "vibesys.api.run_request"
-depends_on = ["vibesys", "vibesys.evaluators", "vibesys.sandbox", "vs_project"]
+depends_on = ["vibesys.orchestration.request"]
 
 [[modules]]
 path = "vibesys.orchestration"
 depends_on = ["vibesys.orchestration.resume"]
+
+[[modules]]
+path = "vibesys.orchestration.request"
+depends_on = ["vibesys", "vibesys.evaluators", "vibesys.sandbox", "vs_project"]
+
+[[modules]]
+path = "vibesys.orchestration.view"
+depends_on = []
+
+[[modules]]
+path = "vibesys.orchestration.environment"
+depends_on = ["vibesys", "vs_agent", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.runtime"
@@ -322,19 +334,19 @@ depends_on = ["vs_project"]
 
 [[modules]]
 path = "vibesys.orchestration.contracts"
-depends_on = ["vibesys.orchestration", "vibesys.api.run_request", "vs_project", "vibesys.api.contracts", "vibesys.runtime"]
+depends_on = ["vibesys.orchestration", "vs_project", "vibesys.runtime", "vibesys.orchestration.request", "vibesys.orchestration.view"]
 
 [[modules]]
 path = "vibesys.orchestration.runner"
-depends_on = ["vibesys.orchestration.contracts", "vibesys.api.contracts", "vibesys.run", "vibesys.api.run_request", "vibesys.orchestration.runtime"]
+depends_on = ["vibesys.orchestration.contracts", "vibesys.run", "vibesys.orchestration.runtime", "vibesys.orchestration.request", "vibesys.orchestration.environment"]
 
 [[modules]]
 path = "vibesys.orchestration.runtime"
-depends_on = ["vibesys.api.contracts", "vibesys", "vs_agent", "vibesys.context", "vibesys.api.run_request", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.run", "vibesys.render"]
+depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.run", "vibesys.render", "vibesys.orchestration.request", "vibesys.orchestration.environment"]
 
 [[modules]]
 path = "vibesys.orchestration._common"
-depends_on = ["vibesys.api.run_request"]
+depends_on = ["vibesys.orchestration.request"]
 
 [[modules]]
 path = "vibesys.orchestration.manifest_compat"

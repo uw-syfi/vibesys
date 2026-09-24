@@ -9,9 +9,9 @@ from vibesys.orchestration.runtime import _LocalVibeSysRuntime
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.api.contracts import AgentEnvironment
-    from vibesys.api.run_request import RunRequestLike
     from vibesys.orchestration.contracts import Orchestration, OrchestrationRegistry
+    from vibesys.orchestration.environment import AgentEnvironment
+    from vibesys.orchestration.request import RunRequestLike
     from vibesys.run.integration import LocalRunIntegration
 
 

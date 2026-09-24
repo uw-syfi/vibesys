@@ -30,9 +30,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vibesys.api.contracts import AgentEnvironment
-    from vibesys.api.run_request import RunRequestLike
     from vibesys.context import _RunContext
+    from vibesys.orchestration.environment import AgentEnvironment
+    from vibesys.orchestration.request import RunRequestLike
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.runtime import AgentDefinition
     from vs_agent.api import AgentClientProtocol, MCPServerSpec

@@ -89,12 +89,12 @@ graph TD
     vibesys.api.agent --> vibesys.loops.agent
     vibesys.api.agent --> vibesys.loops.agent.projection
     vibesys.api.contracts --> vibesys
-    vibesys.api.contracts --> vibesys.api.run_request
     vibesys.api.contracts --> vibesys.loops
     vibesys.api.contracts --> vibesys.loops.legacy_request
-    vibesys.api.run_request --> vibesys
-    vibesys.api.run_request --> vibesys.evaluators
-    vibesys.api.run_request --> vibesys.sandbox
+    vibesys.api.contracts --> vibesys.orchestration.environment
+    vibesys.api.contracts --> vibesys.orchestration.request
+    vibesys.api.contracts --> vibesys.orchestration.view
+    vibesys.api.run_request --> vibesys.orchestration.request
     vibesys.backends --> vibesys
     vibesys.context --> vibesys
     vibesys.context --> vibesys.backends
@@ -240,21 +240,25 @@ graph TD
     vibesys.loops.registry --> vibesys.orchestration
     vibesys.loops.registry --> vibesys.orchestration.contracts
     vibesys.orchestration --> vibesys.orchestration.resume
-    vibesys.orchestration._common --> vibesys.api.run_request
-    vibesys.orchestration.contracts --> vibesys.api.contracts
-    vibesys.orchestration.contracts --> vibesys.api.run_request
+    vibesys.orchestration._common --> vibesys.orchestration.request
     vibesys.orchestration.contracts --> vibesys.orchestration
+    vibesys.orchestration.contracts --> vibesys.orchestration.request
+    vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.contracts --> vibesys.runtime
-    vibesys.orchestration.runner --> vibesys.api.contracts
-    vibesys.orchestration.runner --> vibesys.api.run_request
+    vibesys.orchestration.environment --> vibesys
+    vibesys.orchestration.request --> vibesys
+    vibesys.orchestration.request --> vibesys.evaluators
+    vibesys.orchestration.request --> vibesys.sandbox
     vibesys.orchestration.runner --> vibesys.orchestration.contracts
+    vibesys.orchestration.runner --> vibesys.orchestration.environment
+    vibesys.orchestration.runner --> vibesys.orchestration.request
     vibesys.orchestration.runner --> vibesys.orchestration.runtime
     vibesys.orchestration.runner --> vibesys.run
     vibesys.orchestration.runtime --> vibesys
-    vibesys.orchestration.runtime --> vibesys.api.contracts
-    vibesys.orchestration.runtime --> vibesys.api.run_request
     vibesys.orchestration.runtime --> vibesys.context
     vibesys.orchestration.runtime --> vibesys.orchestration._common
+    vibesys.orchestration.runtime --> vibesys.orchestration.environment
+    vibesys.orchestration.runtime --> vibesys.orchestration.request
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
@@ -387,16 +391,15 @@ graph TD
     vibesys.api.agent --> vibesys.loops.agent
     vibesys.api.agent --> vibesys.loops.agent.projection
     vibesys.api.contracts --> vibesys
-    vibesys.api.contracts --> vibesys.api.run_request
     vibesys.api.contracts --> vibesys.loops
     vibesys.api.contracts --> vibesys.loops.legacy_request
+    vibesys.api.contracts --> vibesys.orchestration.environment
+    vibesys.api.contracts --> vibesys.orchestration.request
+    vibesys.api.contracts --> vibesys.orchestration.view
     vibesys.api.contracts --> vs_agent
     vibesys.api.contracts --> vs_project
     vibesys.api.contracts --> vs_sandbox
-    vibesys.api.run_request --> vibesys
-    vibesys.api.run_request --> vibesys.evaluators
-    vibesys.api.run_request --> vibesys.sandbox
-    vibesys.api.run_request --> vs_project
+    vibesys.api.run_request --> vibesys.orchestration.request
     vibesys.backends --> vibesys
     vibesys.backends --> vs_sandbox
     vibesys.context --> vibesys
@@ -574,24 +577,31 @@ graph TD
     vibesys.loops.registry --> vibesys.orchestration.contracts
     vibesys.loops.registry --> vs_project
     vibesys.orchestration --> vibesys.orchestration.resume
-    vibesys.orchestration._common --> vibesys.api.run_request
-    vibesys.orchestration.contracts --> vibesys.api.contracts
-    vibesys.orchestration.contracts --> vibesys.api.run_request
+    vibesys.orchestration._common --> vibesys.orchestration.request
     vibesys.orchestration.contracts --> vibesys.orchestration
+    vibesys.orchestration.contracts --> vibesys.orchestration.request
+    vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.contracts --> vibesys.runtime
     vibesys.orchestration.contracts --> vs_project
+    vibesys.orchestration.environment --> vibesys
+    vibesys.orchestration.environment --> vs_agent
+    vibesys.orchestration.environment --> vs_sandbox
     vibesys.orchestration.manifest_compat --> vs_project
+    vibesys.orchestration.request --> vibesys
+    vibesys.orchestration.request --> vibesys.evaluators
+    vibesys.orchestration.request --> vibesys.sandbox
+    vibesys.orchestration.request --> vs_project
     vibesys.orchestration.resume --> vs_project
-    vibesys.orchestration.runner --> vibesys.api.contracts
-    vibesys.orchestration.runner --> vibesys.api.run_request
     vibesys.orchestration.runner --> vibesys.orchestration.contracts
+    vibesys.orchestration.runner --> vibesys.orchestration.environment
+    vibesys.orchestration.runner --> vibesys.orchestration.request
     vibesys.orchestration.runner --> vibesys.orchestration.runtime
     vibesys.orchestration.runner --> vibesys.run
     vibesys.orchestration.runtime --> vibesys
-    vibesys.orchestration.runtime --> vibesys.api.contracts
-    vibesys.orchestration.runtime --> vibesys.api.run_request
     vibesys.orchestration.runtime --> vibesys.context
     vibesys.orchestration.runtime --> vibesys.orchestration._common
+    vibesys.orchestration.runtime --> vibesys.orchestration.environment
+    vibesys.orchestration.runtime --> vibesys.orchestration.request
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime

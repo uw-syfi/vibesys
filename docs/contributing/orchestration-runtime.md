@@ -104,6 +104,10 @@ compatibility imports for built-in CLI selection and are deprecated for new
 policies. Accessing either name through `vibesys.api` or
 `vibesys.api.contracts` emits a deprecation warning. Their policy options
 belong to the built-in adapters; importing the generic API does not load them.
+The shared request, run view, and agent environment types are defined under
+`vibesys.orchestration.{request,view,environment}`. `vibesys.api` reexports the
+same classes for external callers; internal orchestration code imports their
+definitions directly.
 `RunResult.loop` and `RunView.loop` return ID strings for every policy;
 `LoopKind` still compares equal to its corresponding string value.
 `RunView` contains run identity, lifecycle status, and an optional JSON object

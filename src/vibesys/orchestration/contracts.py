@@ -12,9 +12,9 @@ from vs_project.api import OrchestrationDescriptor
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.api.contracts import RunStatus, RunView
-    from vibesys.api.run_request import RunRequestLike
     from vibesys.orchestration import ResumeProjection
+    from vibesys.orchestration.request import RunRequestLike
+    from vibesys.orchestration.view import RunStatus, RunView
     from vibesys.runtime import VibeSysRuntime
     from vs_project.api import OrchestrationRunManifest, Project
 
@@ -92,7 +92,7 @@ def empty_run_view(
     loop: str,
 ) -> RunView:
     """Neutral view for policies without persisted read models."""
-    from vibesys.api.contracts import RunView  # noqa: PLC0415
+    from vibesys.orchestration.view import RunView  # noqa: PLC0415
 
     return RunView(
         run_id=run_id,
