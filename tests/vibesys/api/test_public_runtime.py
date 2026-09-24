@@ -33,7 +33,7 @@ from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.api.session import _OpenedAgentEnvironment
 from vibesys.context import RunSetup, borrow_run_agent_environment
 from vibesys.events import AgentExecutionFinishedData, CoreEventType
-from vibesys.orchestration.runtime import RunContext
+from vibesys.orchestration.runtime import RunContext, _Evaluator
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.sandbox.run_environment import LocalEnvironment, SkyPilotEnvironment
 from vs_agent.api import AgentExecutionPolicy, AgentSessionKey, SessionScope
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.context import _RunResources
-    from vibesys.orchestration.runtime import _LocalAgentHandle
+    from vibesys.orchestration.runtime import WorkspaceHandle, _LocalAgentHandle
     from vibesys.sandbox.run_environment import RunEnvironmentRequest, RunEnvironmentSession
 
 
@@ -687,3 +687,101 @@ def test_discard_scope_closes_every_agent_for_any_failure_mix(
         asyncio.run(exercise())
     finally:
         integration.close()
+
+
+class _FakeMutationHost:
+    """Stand in for a RunContext's one parent-tree mutation lock (R6)."""
+
+    def __init__(self) -> None:
+        self._parent_mutation_lock = asyncio.Lock()
+
+
+def test_gate_lock_shares_the_parent_mutation_lock_domain() -> None:
+    """R6 regression: the evaluator no longer keeps its own lock for the
+    parent tree. Old code failed this because ``_Evaluator.__init__`` built
+    a private ``asyncio.Lock()`` for ``scope=None`` instead of reusing
+    ``_parent_mutation_lock``.
+    """
+    host = cast("RunContext", _FakeMutationHost())
+    evaluator = _Evaluator(host)
+    assert evaluator._lock_for(None) is host._parent_mutation_lock  # noqa: SLF001
+    root_handle = cast("WorkspaceHandle", SimpleNamespace(id=None))
+    assert evaluator._lock_for(root_handle) is host._parent_mutation_lock  # noqa: SLF001
+
+
+def test_gate_and_adopt_cannot_interleave_on_the_parent_tree() -> None:
+    """R6 regression: a gate and an adopt/checkpoint on the parent tree
+    must fully serialize. Old code let ``ctx.evaluator.check``/``measure``
+    run concurrently with ``ctx.workspaces.adopt``/``ctx.state.checkpoint``
+    because they held different lock objects; this asserts the order is
+    never interleaved.
+    """
+    host = cast("RunContext", _FakeMutationHost())
+    evaluator = _Evaluator(host)
+    events: list[str] = []
+
+    async def gate() -> None:
+        async with evaluator._lock_for(None):  # noqa: SLF001
+            events.append("gate-start")
+            await asyncio.sleep(0.01)
+            events.append("gate-end")
+
+    async def adopt() -> None:
+        async with host._parent_mutation_lock:  # noqa: SLF001
+            events.append("adopt-start")
+            await asyncio.sleep(0.01)
+            events.append("adopt-end")
+
+    async def exercise() -> None:
+        await asyncio.gather(gate(), adopt())
+
+    asyncio.run(exercise())
+    assert events in (
+        ["gate-start", "gate-end", "adopt-start", "adopt-end"],
+        ["adopt-start", "adopt-end", "gate-start", "gate-end"],
+    )
+
+
+@given(
+    kinds=st.lists(st.sampled_from(["gate", "adopt", "checkpoint"]), min_size=2, max_size=8),
+    delays=st.lists(
+        st.floats(min_value=0.0, max_value=0.005, allow_nan=False, allow_infinity=False),
+        min_size=2,
+        max_size=8,
+    ),
+)
+@settings(
+    max_examples=50, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+def test_parent_tree_lock_domain_serializes_any_gate_adopt_checkpoint_mix(
+    kinds: list[str], delays: list[float]
+) -> None:
+    """Property: whatever mix and interleaving of gate/adopt/checkpoint
+    tasks race on the parent tree's mutation lock, at most one holds it at
+    a time (R6: one lock domain for the parent tree).
+    """
+    host = cast("RunContext", _FakeMutationHost())
+    evaluator = _Evaluator(host)
+    held = 0
+    max_held = 0
+
+    def _lock_for(kind: str) -> asyncio.Lock:
+        if kind == "gate":
+            return evaluator._lock_for(None)  # noqa: SLF001
+        return host._parent_mutation_lock  # noqa: SLF001
+
+    async def task(kind: str, delay: float) -> None:
+        nonlocal held, max_held
+        async with _lock_for(kind):
+            held += 1
+            max_held = max(max_held, held)
+            await asyncio.sleep(delay)
+            held -= 1
+
+    async def exercise() -> None:
+        pairs = list(zip(kinds, delays, strict=False))
+        await asyncio.gather(*(task(kind, delay) for kind, delay in pairs))
+
+    asyncio.run(exercise())
+    assert max_held <= 1
+    assert held == 0
