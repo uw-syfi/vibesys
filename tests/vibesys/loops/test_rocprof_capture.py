@@ -422,8 +422,8 @@ def test_rocprofv3_version_prefers_rocm_version_field_over_tool_version(
         "        git_revision: deadbeef\n"
         f"        rocm_version: {'.'.join(map(str, rocm_version))}\n"
     )
-    assert capture._parse_rocm_version(text) == rocm_version  # noqa: SLF001
-    assert capture._parse_version(text) == tool_version  # noqa: SLF001
+    assert capture._parse_rocm_version(text) == rocm_version
+    assert capture._parse_version(text) == tool_version
 
 
 def test_profiling_capabilities_reports_rocprof_compute_binary_when_available(
