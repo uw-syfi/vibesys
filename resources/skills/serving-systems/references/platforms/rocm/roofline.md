@@ -15,6 +15,13 @@ kernel that ran is the one you intend (see
 these roofs; a fallback kernel's roofline position says nothing about the
 kernel you meant to measure.
 
+**Arithmetic from assumed model geometry is an estimate, not a measurement.**
+Computing AI/bandwidth/TFLOP-s from assumed weight bytes, layer counts, or KV
+geometry (no capture read, model config unavailable, etc.) can land in a
+plausible range by luck; it is still a guess, not evidence. Before writing a
+"% of measured bandwidth" or "% of sustained ceiling" number into a report,
+get a measured point: `profile_counters` and [`counter-triage.md`](counter-triage.md).
+
 ## The model in three lines
 
 - **Sloped bandwidth roof**: `achievable = AI × HBM bandwidth`.
