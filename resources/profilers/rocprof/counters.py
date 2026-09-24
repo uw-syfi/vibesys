@@ -27,12 +27,37 @@ Counter CSV schema (documented rocprofv3 ``*_counter_collection.csv``):
     Grid_Size, Kernel_Id, Kernel_Name, Workgroup_Size, LDS_Block_Size,
     Scratch_Size, VGPR_Count, SGPR_Count, Counter_Name, Counter_Value
 
-Not every counter name below has been confirmed against a real capture on
-every architecture (see ``verified=False`` entries in ``COUNTER_SETS``); this
-toolkit was built against rocprofv3's documented CSV/JSON shapes while real
-MI210 samples were still being collected. ``report``/``triage`` degrade
-gracefully (print "n/a" with the counters they looked for) when a name does
-not match what a capture actually produced.
+Every gfx90a entry in ``COUNTER_SETS`` has been checked against a real MI210
+(gfx90a, ROCm 6.4.1) ``rocprofv3 --list-avail`` dump; ``verified=True`` means
+every counter name in that set exists for gfx90a, with the note saying
+whether the exact combination was also captured together on real hardware.
+gfx942/gfx950 entries not marked verified are still unconfirmed. ``report``/
+``triage`` degrade gracefully (print "n/a" with the counters they looked for)
+when a name does not match what a capture actually produced.
+
+Real MI210 captures (ROCm 6.4.1) also confirmed two behaviors this toolkit
+now assumes:
+
+- ``*_counter_collection.csv`` carries ``Start_Timestamp``/``End_Timestamp``
+  on every row (one pair per dispatch, repeated across that dispatch's
+  counter rows). Per-kernel duration -- needed for achieved-bandwidth --
+  is derived straight from these columns; a separate ``--kernel-trace``
+  capture is optional, not required, and only overrides the PMC-derived
+  duration where present.
+- ``rocprofv3 -d <dir> ...`` always nests output under
+  ``<dir>/pmc_1/<hostname>/<pid>_*``, never directly under ``<dir>``, and
+  the ``pmc_1`` segment names "this run's first PMC pass", not the counter
+  set requested. ``report``/``triage`` discover files recursively so this
+  doesn't matter for parsing, but don't expect flat ``<dir>/<file>`` paths.
+
+``--output-format json`` was also captured on real hardware, but rocprofv3's
+JSON output is a normalized/relational schema (separate ``counters``,
+``kernel_symbols``, ``buffer_records`` tables joined by id) -- it is not the
+flat per-row shape this toolkit's JSON reader assumes. That reader only
+handles a flat ``[{"Counter_Name": ..., "Counter_Value": ...}, ...]`` shape
+(or nested lists/dicts of it) and will silently find zero rows against real
+rocprofv3 JSON. Treat JSON support as unverified; CSV is the confirmed,
+recommended format, and ``plan`` only asks for CSV.
 """  # noqa: EXE001  # tracked: #288
 
 from __future__ import annotations
@@ -164,22 +189,39 @@ COUNTER_SETS: dict[str, dict[str, CounterSet]] = {
     "gfx90a": {
         "occupancy": CounterSet(
             ("SQ_WAVES", "GRBM_GUI_ACTIVE", "GRBM_COUNT"),
-            verified=False,
-            note="waves launched vs. GPU-busy / total cycles.",
+            verified=True,
+            note="All 3 names confirmed in a real MI210 --list-avail dump. SQ_WAVES + "
+            "GRBM_GUI_ACTIVE were also captured together on real hardware (job1 pass1); "
+            "GRBM_COUNT (same GRBM block) wasn't in that pass but is unlikely to conflict.",
         ),
         "mfma": CounterSet(
-            ("SQ_INSTS_VALU_MFMA_MOPS_BF16", "SQ_INSTS_VALU_MFMA_MOPS_F16", "GRBM_COUNT"),
-            verified=False,
-            note="CDNA2 MFMA MOPS counter names inferred from CDNA3 pattern; confirm with --list-avail.",
+            (
+                "SQ_INSTS_MFMA",
+                "SQ_INSTS_VALU_MFMA_MOPS_BF16",
+                "SQ_INSTS_VALU_MFMA_MOPS_F16",
+                "GRBM_COUNT",
+            ),
+            verified=True,
+            note="SQ_INSTS_MFMA (total MFMA instructions issued) is the counter a real MI210 "
+            "capture used (job1 pass1) and is what report/triage prefer for the MFMA issue "
+            "rate. MOPS_BF16/MOPS_F16 (per-dtype math-op counts, a different unit -- already "
+            "divided by 512) and GRBM_COUNT are confirmed present in --list-avail but weren't "
+            "captured in the same pass as SQ_INSTS_MFMA. SQ_VALU_MFMA_BUSY_CYCLES also exists "
+            "on gfx90a as an alternative (per-SIMD MFMA-busy cycles) if instruction counts turn "
+            "out too coarse; not yet captured on real hardware.",
         ),
         "valu": CounterSet(
             ("SQ_INSTS_VALU", "GRBM_GUI_ACTIVE", "GRBM_COUNT"),
-            verified=False,
+            verified=True,
+            note="All 3 names confirmed in --list-avail; SQ_INSTS_VALU + GRBM_GUI_ACTIVE were "
+            "also captured together on real hardware (job1 pass1).",
         ),
         "l2": CounterSet(
             ("TCC_HIT_sum", "TCC_MISS_sum", "TCP_TCC_READ_REQ_sum"),
             verified=True,
-            note="TCC block names match the verified gfx942 config; TCC is a common gfx9 IP block.",
+            note="TCC_HIT_sum + TCC_MISS_sum captured together on real MI210 hardware (job1 "
+            "pass2). TCP_TCC_READ_REQ_sum is confirmed present in --list-avail but wasn't in "
+            "that pass.",
         ),
         "hbm": CounterSet(
             (
@@ -188,12 +230,17 @@ COUNTER_SETS: dict[str, dict[str, CounterSet]] = {
                 "TCC_EA_RDREQ_DRAM_sum",
                 "TCP_TCC_READ_REQ_sum",
             ),
-            verified=False,
-            note="gfx90a is single-die (no XCD split); EA channel suffix dropped vs. gfx942's EA0. Unconfirmed.",
+            verified=True,
+            note="gfx90a is single-die (no XCD split): EA channel suffix is dropped vs. "
+            "gfx942's EA0. All 4 names confirmed in a real MI210 --list-avail dump. "
+            "TCC_EA_RDREQ_sum (paired with TCC_EA_WRREQ_sum, not this exact 4-counter combo) "
+            "was captured on real hardware (job1 pass3).",
         ),
         "lds": CounterSet(
             ("SQ_INSTS_LDS", "SQ_LDS_BANK_CONFLICT", "GRBM_COUNT"),
-            verified=False,
+            verified=True,
+            note="All 3 names confirmed in a real MI210 --list-avail dump; not yet captured "
+            "together on real hardware.",
         ),
     },
     "gfx942": {
@@ -270,11 +317,12 @@ CANDIDATES: dict[str, tuple[str, ...]] = {
     "hbm_rdreq": ("TCC_EA0_RDREQ_sum", "TCC_EA_RDREQ_sum"),
     "hbm_rdreq_32b": ("TCC_EA0_RDREQ_32B_sum", "TCC_EA_RDREQ_32B_sum"),
     "hbm_wrreq": ("TCC_EA0_WRREQ_sum", "TCC_EA_WRREQ_sum"),
-    "hbm_wrreq_32b": ("TCC_EA0_WRREQ_32B_sum", "TCC_EA_WRREQ_32B_sum"),
+    "hbm_wrreq_64b": ("TCC_EA0_WRREQ_64B_sum", "TCC_EA_WRREQ_64B_sum"),
     "busy_cycles": ("GRBM_GUI_ACTIVE",),
     "total_cycles": ("GRBM_COUNT",),
     "waves": ("SQ_WAVES",),
     "valu_insts": ("SQ_INSTS_VALU",),
+    "mfma_insts_total": ("SQ_INSTS_MFMA",),
     "mfma_insts_bf16": ("SQ_INSTS_VALU_MFMA_MOPS_BF16",),
     "mfma_insts_f16": ("SQ_INSTS_VALU_MFMA_MOPS_F16",),
     "mfma_insts_fp8": ("SQ_INSTS_VALU_MFMA_MOPS_FP8",),
@@ -283,6 +331,10 @@ CANDIDATES: dict[str, tuple[str, ...]] = {
     "lds_bank_conflict": ("SQ_LDS_BANK_CONFLICT",),
 }
 
+# Per-dtype MOPS_* counters are a fallback only: they count math *operations*
+# (already divided by 512) rather than raw instructions, a different unit
+# from SQ_INSTS_MFMA, so the two are never summed together (see
+# `_mfma_instruction_count`).
 MFMA_CANDIDATE_KEYS = ("mfma_insts_bf16", "mfma_insts_f16", "mfma_insts_fp8", "mfma_insts_fp6")
 
 
@@ -307,6 +359,8 @@ class CounterRow:
     sgpr_count: int
     counter_name: str
     counter_value: float
+    start_ns: float | None = None
+    end_ns: float | None = None
 
 
 def _to_int(value: object) -> int:
@@ -321,6 +375,15 @@ def _to_float(value: object) -> float:
         return float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return 0.0
+
+
+def _to_optional_float(value: object) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
 
 
 def _row_from_mapping(row: dict[str, Any]) -> CounterRow | None:
@@ -340,6 +403,8 @@ def _row_from_mapping(row: dict[str, Any]) -> CounterRow | None:
         sgpr_count=_to_int(row.get("SGPR_Count", row.get("sgpr_count"))),
         counter_name=str(counter_name),
         counter_value=_to_float(counter_value),
+        start_ns=_to_optional_float(row.get("Start_Timestamp", row.get("start_timestamp"))),
+        end_ns=_to_optional_float(row.get("End_Timestamp", row.get("end_timestamp"))),
     )
 
 
@@ -420,6 +485,29 @@ def _load_kernel_trace_durations(dirs: list[str]) -> dict[str, float]:
                 duration = _to_float(end) - _to_float(start)
                 if duration > 0:
                     totals[str(name)] += duration
+    return dict(totals)
+
+
+def _duration_from_counter_rows(rows: list[CounterRow]) -> dict[str, float]:
+    """Sum per-dispatch wall-clock duration (ns) straight from the PMC rows'
+    own ``Start_Timestamp``/``End_Timestamp`` columns.
+
+    Real rocprofv3 6.4.1 ``*_counter_collection.csv`` carries these on every
+    row; a dedicated ``--kernel-trace`` capture is not required to get
+    duration data. Every counter row for the same dispatch repeats the same
+    (start, end) pair, so dedup by (kernel_name, dispatch_id) before summing
+    to avoid multiplying duration by however many counters were collected.
+    """  # noqa: D205  # tracked: #288
+    seen: dict[tuple[str, str], tuple[float, float]] = {}
+    for row in rows:
+        if row.start_ns is None or row.end_ns is None or not row.dispatch_id:
+            continue
+        seen[(row.kernel_name, row.dispatch_id)] = (row.start_ns, row.end_ns)
+    totals: dict[str, float] = defaultdict(float)
+    for (name, _dispatch_id), (start, end) in seen.items():
+        duration = end - start
+        if duration > 0:
+            totals[name] += duration
     return dict(totals)
 
 
@@ -551,17 +639,54 @@ class DerivedMetrics:
 
 
 def _hbm_bytes(counters: dict[str, float]) -> float | None:
+    """Bytes moved on the TCC-EA (L2-to-HBM) interface.
+
+    Mirrors rocprofv3's own ``FETCH_SIZE``/``WRITE_SIZE`` derived-metric
+    expressions (confirmed in a real MI210 ``--list-avail`` dump):
+    ``FETCH_SIZE = (RDREQ_32B*32 + (RDREQ-RDREQ_32B)*64) / 1024`` and
+    ``WRITE_SIZE = ((WRREQ-WRREQ_64B)*32 + WRREQ_64B*64) / 1024``. The two
+    are *not* symmetric: the read side's size-breakdown counter reports the
+    32B ("partial") request count directly, while the write side's reports
+    the 64B ("full") request count directly. Getting this backwards silently
+    inflates write bytes by ~2x when a partial breakdown is actually present.
+    """
     total = 0.0
     found_any = False
-    for req_key, partial_key in (("hbm_rdreq", "hbm_rdreq_32b"), ("hbm_wrreq", "hbm_wrreq_32b")):
-        req = _lookup(counters, req_key)
-        if req is None:
-            continue
+
+    rd_req = _lookup(counters, "hbm_rdreq")
+    if rd_req is not None:
         found_any = True
-        partial = _lookup(counters, partial_key) or 0.0
-        full = req - partial
-        total += full * 64 + partial * 32
+        rd_partial_32b = _lookup(counters, "hbm_rdreq_32b") or 0.0
+        rd_full_64b = rd_req - rd_partial_32b
+        total += rd_full_64b * 64 + rd_partial_32b * 32
+
+    wr_req = _lookup(counters, "hbm_wrreq")
+    if wr_req is not None:
+        found_any = True
+        wr_full_64b = _lookup(counters, "hbm_wrreq_64b")
+        # No size breakdown captured: conservatively treat every write
+        # request as a full 64B line, matching the read side's default.
+        wr_full_64b = wr_req if wr_full_64b is None else wr_full_64b
+        wr_partial_32b = wr_req - wr_full_64b
+        total += wr_full_64b * 64 + wr_partial_32b * 32
+
     return total if found_any else None
+
+
+def _mfma_instruction_count(counters: dict[str, float]) -> float | None:
+    """Prefer the total-instruction counter (``SQ_INSTS_MFMA``) over the per-dtype ``MOPS_*`` counters.
+
+    ``SQ_INSTS_MFMA`` is the counter a real MI210 capture used and is a
+    straight instruction count. The ``MOPS_*`` counters count math
+    *operations* (already divided by 512, per AMD's description) in a
+    different unit, so they are only summed as a fallback when the total
+    counter wasn't captured -- never added to it.
+    """
+    total_insts = _lookup(counters, "mfma_insts_total")
+    if total_insts is not None:
+        return total_insts
+    dtype_sum = sum(v for k in MFMA_CANDIDATE_KEYS if (v := _lookup(counters, k)) is not None)
+    return dtype_sum if dtype_sum > 0 else None
 
 
 def derive_metrics(agg: KernelAgg, duration_ns: float | None) -> DerivedMetrics:
@@ -581,9 +706,21 @@ def derive_metrics(agg: KernelAgg, duration_ns: float | None) -> DerivedMetrics:
     if busy is not None and total is not None and total > 0:
         metrics.gpu_busy_pct = 100.0 * busy / total
 
-    mfma_total = sum(v for k in MFMA_CANDIDATE_KEYS if (v := _lookup(counters, k)) is not None)
-    if mfma_total > 0 and total is not None and total > 0:
-        metrics.mfma_issue_rate = mfma_total / total
+    mfma_total = _mfma_instruction_count(counters)
+    # Prefer total cycles (GRBM_COUNT) as the rate denominator; a real MI210
+    # capture that includes SQ_INSTS_MFMA didn't also request GRBM_COUNT (4
+    # counters is the pass budget), so fall back to busy cycles
+    # (GRBM_GUI_ACTIVE) when total isn't present. That changes the rate from
+    # "instructions per elapsed cycle" to "instructions per busy cycle" --
+    # if anything a tighter compute-bound signal, since it excludes idle gaps.
+    cycles_for_mfma_rate = total if total is not None and total > 0 else busy
+    if (
+        mfma_total is not None
+        and mfma_total > 0
+        and cycles_for_mfma_rate is not None
+        and cycles_for_mfma_rate > 0
+    ):
+        metrics.mfma_issue_rate = mfma_total / cycles_for_mfma_rate
 
     lds_insts, bank_conflicts = (
         _lookup(counters, "lds_insts"),
@@ -611,13 +748,18 @@ def cmd_list_sets(ns: argparse.Namespace) -> None:
                 print(f"               {cset.note}")  # noqa: T201  # tracked: #288
 
 
-def _plan_command(*, out_dir: str, set_name: str, cset: CounterSet, ns: argparse.Namespace) -> str:
+def _plan_command(*, out_dir: str, cset: CounterSet, ns: argparse.Namespace) -> str:
     command_tokens = [t for t in ns.command if t != "--"]
     command = shlex.join(command_tokens) if command_tokens else "<your_command_and_args>"
-    lines = [f"rocprofv3 --pmc {' '.join(cset.counters)}"]
+    # --output-format csv only: a real rocprofv3 6.4.1 JSON capture is a
+    # normalized/relational schema report/triage cannot parse (see module
+    # docstring), so asking for `json` alongside `csv` only wastes output.
+    # No `-o`: unverified against real hardware, and `-d` alone already
+    # gives each pass its own directory.
+    lines = [f"rocprofv3 --pmc {' '.join(cset.counters)} --output-format csv"]
     if ns.kernel:
         lines.append(f"    --kernel-include-regex {shlex.quote(ns.kernel)}")
-    lines.append(f"    -d {out_dir} -o {set_name}")
+    lines.append(f"    -d {out_dir}")
     lines.append(f"    -- {command}")
     return " \\\n".join(lines)
 
@@ -628,7 +770,7 @@ def _plan_one_set(*, arch: str, set_name: str, cset: CounterSet, ns: argparse.Na
     print(f"\n# {set_name} [{flag}]")  # noqa: T201  # tracked: #288
     if cset.note:
         print(f"# {cset.note}")  # noqa: T201  # tracked: #288
-    print(_plan_command(out_dir=out_dir, set_name=set_name, cset=cset, ns=ns))  # noqa: T201  # tracked: #288
+    print(_plan_command(out_dir=out_dir, cset=cset, ns=ns))  # noqa: T201  # tracked: #288
 
 
 def cmd_plan(ns: argparse.Namespace) -> None:
@@ -655,7 +797,10 @@ def cmd_plan(ns: argparse.Namespace) -> None:
     for set_name in requested:
         _plan_one_set(arch=arch, set_name=set_name, cset=catalogue[set_name], ns=ns)
     print(  # noqa: T201  # tracked: #288
-        "\n# Merge and analyze with:\n"
+        "\n# Note: rocprofv3 nests output under <out_dir>/pmc_1/<hostname>/<pid>_*, not "
+        "directly under <out_dir> (confirmed on real MI210 hardware) -- report/triage "
+        "discover files recursively so this doesn't matter.\n"
+        "# Merge and analyze with:\n"
         f"#   python counters.py report {ns.out_dir}/{arch}/<set1> {ns.out_dir}/{arch}/<set2> ..."
     )
 
@@ -673,6 +818,25 @@ def _print_kernel_resources(agg: KernelAgg, occ: Occupancy) -> None:
     )
 
 
+KERNEL_NAME_PRINT_LIMIT = 100
+
+
+def _short_kernel_name(name: str) -> str:
+    """Truncate a kernel name for display.
+
+    Real Tensile/rocBLAS GEMM names run a few hundred characters and
+    PyTorch's templated RNG-fill kernels can run several thousand (full
+    ``distribution_elementwise_grid_stride_kernel<...>`` template
+    signatures observed on a real MI210 capture); printing them in full
+    blows up report/triage output far past what's useful in an agent
+    prompt. Aggregation and filtering still key off the untruncated name
+    (see ``KernelAgg``/``_filter_kernels``) -- only display is shortened.
+    """
+    if len(name) <= KERNEL_NAME_PRINT_LIMIT:
+        return name
+    return name[: KERNEL_NAME_PRINT_LIMIT - 1] + "…"
+
+
 def _fmt(value: float | None, suffix: str = "", precision: int = 2) -> str:
     return f"{value:.{precision}f}{suffix}" if value is not None else "n/a"
 
@@ -687,7 +851,7 @@ def _print_derived(metrics: DerivedMetrics) -> None:
         f"  HBM bytes: {_fmt(metrics.hbm_bytes, ' B', 0)}   "
         f"achieved BW: {_fmt(metrics.achieved_bw_gb_s, ' GB/s', 1)}"
         + (
-            " (no kernel_trace duration found)"
+            " (no duration data: no Start/End_Timestamp on the PMC rows and no kernel_trace file)"
             if metrics.hbm_bytes is not None and metrics.duration_ns is None
             else ""
         )
@@ -710,14 +874,17 @@ def cmd_report(ns: argparse.Namespace) -> None:
     if not rows:
         print("(counter files found but no usable rows parsed)")  # noqa: T201  # tracked: #288
         return
-    durations = _load_kernel_trace_durations(ns.dirs)
+    # Prefer a dedicated kernel_trace capture (PMC-overhead-free) over the
+    # PMC rows' own timestamps when both are present.
+    durations = _duration_from_counter_rows(rows)
+    durations.update(_load_kernel_trace_durations(ns.dirs))
     aggs = _aggregate_by_kernel(rows)
     kernels = _filter_kernels(aggs, ns.kernel)
     arch = _report_arch_for(ns)
 
     print(f"Merged {len(counter_files)} counter file(s), {len(kernels)} kernel(s) matched.")  # noqa: T201  # tracked: #288
     if durations:
-        print(f"Kernel-trace duration available for {len(durations)} kernel name(s).")  # noqa: T201  # tracked: #288
+        print(f"Duration data available for {len(durations)} kernel name(s).")  # noqa: T201  # tracked: #288
 
     for agg in kernels[: ns.top]:
         duration = durations.get(agg.name)
@@ -729,7 +896,7 @@ def cmd_report(ns: argparse.Namespace) -> None:
             arch=arch or "gfx942",
         )
         metrics = derive_metrics(agg, duration)
-        print(f"\n{agg.name}  ({agg.dispatch_count} dispatch(es))")  # noqa: T201  # tracked: #288
+        print(f"\n{_short_kernel_name(agg.name)}  ({agg.dispatch_count} dispatch(es))")  # noqa: T201  # tracked: #288
         _print_kernel_resources(agg, occ)
         _print_derived(metrics)
 
@@ -840,7 +1007,8 @@ def cmd_triage(ns: argparse.Namespace) -> None:
         print("(no *counter_collection*.csv/.json files found under the given directories)")  # noqa: T201  # tracked: #288
         return
     rows = _load_counter_rows(counter_files)
-    durations = _load_kernel_trace_durations(ns.dirs)
+    durations = _duration_from_counter_rows(rows)
+    durations.update(_load_kernel_trace_durations(ns.dirs))
     aggs = _aggregate_by_kernel(rows)
     kernels = _filter_kernels(aggs, ns.kernel)
 
@@ -855,7 +1023,7 @@ def cmd_triage(ns: argparse.Namespace) -> None:
         )
         metrics = derive_metrics(agg, durations.get(agg.name))
         verdict = _classify(agg=agg, occ=occ, metrics=metrics, spec=spec)
-        print(f"\n{agg.name}")  # noqa: T201  # tracked: #288
+        print(f"\n{_short_kernel_name(agg.name)}")  # noqa: T201  # tracked: #288
         print(f"  verdict: {verdict.label}")  # noqa: T201  # tracked: #288
         print(f"  evidence: {verdict.evidence}")  # noqa: T201  # tracked: #288
         print(f"  next lever: {verdict.lever}")  # noqa: T201  # tracked: #288
