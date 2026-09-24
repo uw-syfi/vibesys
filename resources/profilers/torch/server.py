@@ -33,8 +33,11 @@ import analyze_torch_profile  # noqa: E402
 def _capture(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
     ns = types.SimpleNamespace(**kwargs)
     buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        fn(ns)
+    try:
+        with contextlib.redirect_stdout(buf):
+            fn(ns)
+    except SystemExit as exc:  # certify/gemm_shapes/roofline reject a non-trace report this way
+        return f"error: {exc}"
     out = buf.getvalue()
     return out or "(no output)"
 
@@ -88,13 +91,72 @@ def build_server() -> FastMCP:
 
     @mcp.tool()
     def summary(report: str, top: int = 15) -> str:
-        """All-in-one: overhead + kernels + operators + memory.
+        """All-in-one: certify (raw traces only) + overhead + kernels + operators + memory.
 
         Args:
-            report: Path to the prof.json file.
+            report: Path to prof.json, or a raw *.pt.trace.json(.gz) trace.
             top: Number of kernels/operators per section (default 15).
         """
         return _capture(analyze_torch_profile.cmd_summary, report=report, top=top)
+
+    @mcp.tool()
+    def certify(trace: str) -> str:
+        """Structural validity check on a raw trace before trusting it.
+
+        Checks GPU kernel and cpu_op counts, record_shapes coverage, step/
+        annotation markers, GPU busy fraction in the capture window, and
+        whether kernels ran inside a hipGraphLaunch/cudaGraphLaunch replay
+        (which degrades per-op attribution). Prints PASS/WARN/FAIL with a
+        concrete re-capture instruction per failure.
+
+        Args:
+            trace: Path to a *.pt.trace.json(.gz) Kineto/Chrome trace.
+        """
+        return _capture(analyze_torch_profile.cmd_certify, trace=trace)
+
+    @mcp.tool()
+    def gemm_shapes(trace: str, top: int = 20, out: str | None = None) -> str:
+        """Extract (M, N, K, dtype) GEMM demand from a raw trace, ranked by GPU time.
+
+        Reads aten::mm/addmm/bmm/baddbmm/linear/matmul/_scaled_mm "Input Dims",
+        weighted by call count and the GPU time of the kernel(s) each call
+        launched (via cpu_op -> kernel correlation), deduplicated by shape.
+
+        Args:
+            trace: Path to a *.pt.trace.json(.gz) Kineto/Chrome trace.
+            top: Number of shapes to show (default 20).
+            out: Optional path to also write the ranked shapes as JSON, e.g.
+                as input to hipBLASLt/AITER GEMM tuning.
+        """
+        return _capture(analyze_torch_profile.cmd_gemm_shapes, trace=trace, top=top, out=out)
+
+    @mcp.tool()
+    def roofline(
+        trace: str,
+        device: str | None = None,
+        peak_tflops: float | None = None,
+        peak_gbps: float | None = None,
+        top: int = 20,
+    ) -> str:
+        """Achieved TFLOP/s, GB/s, arithmetic intensity, and bound class per GEMM/attention op.
+
+        Args:
+            trace: Path to a *.pt.trace.json(.gz) Kineto/Chrome trace.
+            device: Known device key (mi210, mi300x, mi300a, mi325x, mi355x,
+                h100). Auto-detected from the trace's deviceProperties when
+                omitted.
+            peak_tflops: Explicit dense peak TFLOP/s; overrides device.
+            peak_gbps: Explicit peak HBM bandwidth in GB/s; overrides device.
+            top: Number of ops to show (default 20).
+        """
+        return _capture(
+            analyze_torch_profile.cmd_roofline,
+            trace=trace,
+            device=device,
+            peak_tflops=peak_tflops,
+            peak_gbps=peak_gbps,
+            top=top,
+        )
 
     return mcp
 
