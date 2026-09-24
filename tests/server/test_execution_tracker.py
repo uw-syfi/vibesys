@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from tests.server.support import ServerParts
-
 from server.events import (
     AgentExecutionActivityData,
     AgentExecutionStartedData,

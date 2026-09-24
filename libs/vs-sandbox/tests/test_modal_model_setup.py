@@ -36,7 +36,7 @@ class _ModalMocks(TypedDict):
 
 @pytest.fixture
 def mock_modal(monkeypatch: pytest.MonkeyPatch) -> _ModalMocks:
-    import modal  # noqa: PLC0415  # lint-waiver: LW-006002; Modal is an optional test dependency.
+    modal = pytest.importorskip("modal")
 
     fake_volume = MagicMock()
     fake_app = MagicMock()

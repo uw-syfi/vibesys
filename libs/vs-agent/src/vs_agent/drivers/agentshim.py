@@ -384,7 +384,8 @@ class AgentShimSession:
     ) -> AgentTurnResult:
         """Add one turn to the conversation and return its raw result."""
         if self._closed:
-            raise RuntimeError("agent session is closed")  # noqa: TRY003  # lint-waiver: LW-008083 [TRY003]; callers rely on the session lifecycle RuntimeError contract.
+            message = "agent session is closed"
+            raise RuntimeError(message)
 
         self._event_handler.observer = observer
         self._event_handler.structured = request.output_schema is not None
@@ -649,9 +650,10 @@ class AgentShimDriver:
         four times as long as a host one.
         """
         if provider not in SHIPPED_PROVIDERS:
-            raise ValueError(  # noqa: TRY003  # lint-waiver: LW-008084 [TRY003]; keep provider validation as ValueError at this configuration boundary.
+            message = (
                 f"unknown AgentShim provider {provider!r}; expected one of: {supported_providers()}"
             )
+            raise ValueError(message)
         self._provider = provider
         self._timeout = timeout
         self._docker_sandboxes = docker_sandboxes
@@ -691,17 +693,20 @@ class AgentShimDriver:
         provider and every non-``exec --json`` command.
         """
         if self._closed:
-            raise RuntimeError("agent driver is closed")  # noqa: TRY003  # lint-waiver: LW-008085 [TRY003]; callers rely on the driver lifecycle RuntimeError contract.
+            message = "agent driver is closed"
+            raise RuntimeError(message)
         if spec.provider != self._provider:
-            raise ValueError(  # noqa: TRY003  # lint-waiver: LW-008086 [TRY003]; preserve ValueError for a provider/spec mismatch during session construction.
+            message = (
                 f"AgentShimDriver for {self._provider!r} cannot create a {spec.provider!r} session"
             )
+            raise ValueError(message)
         in_container = self._docker_sandboxes is not None
         if spec.policy.containerized != in_container:
-            raise ValueError(  # noqa: TRY003  # lint-waiver: LW-008087 [TRY003]; preserve ValueError for an execution-policy/configuration mismatch.
+            message = (
                 "agent session container policy does not match the configured "
                 "AgentShim execution mode"
             )
+            raise ValueError(message)
 
         provider = agentshim.get_provider(spec.provider)
         event_handler = _AgentShimEventHandler()
@@ -794,7 +799,8 @@ class AgentShimDriver:
         assert self._docker_sandboxes is not None
         sandbox = self._docker_sandboxes.get(spec.role)
         if sandbox is None:
-            raise ValueError(f"no AgentShim Docker sandbox configured for role {spec.role!r}")  # noqa: TRY003  # lint-waiver: LW-008088 [TRY003]; preserve the ValueError configuration failure and identify the role needing a sandbox.
+            message = f"no AgentShim Docker sandbox configured for role {spec.role!r}"
+            raise ValueError(message)
         return sandbox
 
     def _container_id_resolver(self, spec: AgentSessionSpec) -> Callable[[], str]:

@@ -15,6 +15,7 @@ from vibesys.render import output_sink
 from vibesys.run.event_journal import EventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.run.paths import RunPaths
+from vs_agent.api import RoundProgress
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:
@@ -110,12 +111,11 @@ def test_run_context_records_complete_invocation_lifecycle(tmp_path: Path) -> No
         client.set_model_for_kind({"implementer": "model-for-implementer"})
         client.enqueue("implementer", _Answer(value="done"))
         uninitialized.agent_client = client
-        uninitialized._paths = RunPaths(
+        uninitialized._paths = RunPaths(  # noqa: SLF001  # lint-waiver: LW-008506 [SLF001]; invoke needs the canonical workspace path, and constructing a full run context would provision unrelated runtime resources.
             project_root=tmp_path,
             log_dir=tmp_path,
             run_log_path=tmp_path / "run.log",
         )
-        uninitialized._progress_stack = []
         uninitialized.gpu_env = dict
 
         answer = context.invoke(
@@ -125,6 +125,7 @@ def test_run_context_records_complete_invocation_lifecycle(tmp_path: Path) -> No
             response_cls=_Answer,
             fallback_factory=lambda: _Answer(value="fallback"),
             round_label="round-1-retry-2",
+            progress=RoundProgress(round_number=1, total_rounds=2),
         )
 
         assert answer == _Answer(value="done")

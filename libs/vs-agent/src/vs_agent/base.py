@@ -9,7 +9,6 @@ from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
 T = TypeVar("T", bound=BaseModel)
 
 

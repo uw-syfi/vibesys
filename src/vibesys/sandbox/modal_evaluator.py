@@ -55,6 +55,7 @@ _MODAL_DEPLOYMENT = re.compile(
 _CANDIDATE_REVISION_ENV = "VIBESYS_CANDIDATE_REVISION"
 _RELEASE_DEPLOYMENT_ENV = "VIBESYS_RELEASE_MODAL_DEPLOYMENT"
 _MAX_DIAGNOSTIC_CHARS = 20_000
+_HTTP_OK_STATUS = 200
 _EXEC_RC_MARKER = "__VIBESYS_EXEC_RC__="
 _OUTPUT_FILE_MARKER = "__VIBESYS_OUTPUT_FILE__"
 _OUTPUT_END_MARKER = "__VIBESYS_OUTPUT_END__"
@@ -107,14 +108,14 @@ def _ensure_runtime_dir(path: Path) -> None:
         runtime_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         metadata = runtime_dir.lstat()
     except OSError as exc:
-        raise RuntimeError(
-            f"cannot use {runtime_dir} as the evaluator runtime directory: {exc}"
-        ) from exc
+        message = f"cannot use {runtime_dir} as the evaluator runtime directory: {exc}"
+        raise RuntimeError(message) from exc
     if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
-        raise RuntimeError(
+        message = (
             f"refusing to use {runtime_dir} as the evaluator runtime directory: "
             f"expected a directory owned by uid {os.getuid()}"
         )
+        raise RuntimeError(message)
     # ``mkdir(exist_ok=True)`` accepts a directory that already existed, and the
     # ``chmod`` below only closes access from here on: it cannot remove files
     # another user planted while the directory was writable by them. So reject a
@@ -122,11 +123,12 @@ def _ensure_runtime_dir(path: Path) -> None:
     # all of ``0o077``, because write permission is the planting vector while a
     # readable ``0o755`` directory is both safe and common.
     if metadata.st_mode & 0o022:
-        raise RuntimeError(
+        message = (
             f"refusing to use {runtime_dir} as the evaluator runtime directory: "
             "it is group- or world-writable, so another user may already have "
             "planted files in it"
         )
+        raise RuntimeError(message)
     runtime_dir.chmod(0o700)
 
 
@@ -140,12 +142,15 @@ class _DeploymentLease:
 def _normalized_setup_command(command: Sequence[str]) -> tuple[str, ...]:
     """Snapshot one opaque executable argv or reject malformed input."""
     if isinstance(command, str) or any(not isinstance(item, str) for item in command):
-        raise TypeError("trusted setup command must contain only argv strings")
+        message = "trusted setup command must contain only argv strings"
+        raise TypeError(message)
     if not command:
-        raise ValueError("trusted setup command must be a non-empty string argv")
+        message = "trusted setup command must be a non-empty string argv"
+        raise ValueError(message)
     normalized = tuple(command)
     if not normalized[0]:
-        raise ValueError("trusted setup command executable must not be empty")
+        message = "trusted setup command executable must not be empty"
+        raise ValueError(message)
     return normalized
 
 
@@ -155,21 +160,25 @@ def encode_setup_command(command: Sequence[str]) -> str:
     document = json.dumps(normalized, separators=(",", ":")).encode()
     encoded = base64.urlsafe_b64encode(document).decode("ascii")
     if len(encoded) > _MAX_ENCODED_SETUP_COMMAND_CHARS:
-        raise ValueError("trusted setup command exceeds the encoded size limit")
+        message = "trusted setup command exceeds the encoded size limit"
+        raise ValueError(message)
     return encoded
 
 
 def _decode_setup_command(encoded: str) -> tuple[str, ...]:
     """Decode and structurally validate framework-owned setup argv."""
     if len(encoded) > _MAX_ENCODED_SETUP_COMMAND_CHARS:
-        raise ValueError("trusted setup command exceeds the encoded size limit")
+        message = "trusted setup command exceeds the encoded size limit"
+        raise ValueError(message)
     try:
         payload = base64.b64decode(encoded, altchars=b"-_", validate=True)
         document = json.loads(payload.decode("utf-8"))
     except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise ValueError("trusted setup command is not valid base64-encoded JSON argv") from exc
+        message = "trusted setup command is not valid base64-encoded JSON argv"
+        raise ValueError(message) from exc
     if not isinstance(document, list):
-        raise TypeError("trusted setup command must decode to a JSON argv array")
+        message = "trusted setup command must decode to a JSON argv array"
+        raise TypeError(message)
     return _normalized_setup_command(document)
 
 
@@ -214,7 +223,8 @@ def extract_modal_web_url(output: str) -> str:
     compact = _compact_rich_output(output)
     matches = _MODAL_WEB_URL.findall(compact)
     if not matches:
-        raise ValueError("modal deploy did not print a *.modal.run web endpoint")
+        message = "modal deploy did not print a *.modal.run web endpoint"
+        raise ValueError(message)
     return matches[-1]
 
 
@@ -223,7 +233,8 @@ def extract_modal_app_identifier(output: str) -> str:
     compact = _compact_rich_output(output)
     matches = _MODAL_DEPLOYMENT.findall(compact)
     if not matches:
-        raise ValueError("modal deploy did not print a deployment URL")
+        message = "modal deploy did not print a deployment URL"
+        raise ValueError(message)
     return matches[-1]
 
 
@@ -269,20 +280,21 @@ def wait_for_health(base_url: str, *, timeout_seconds: float) -> None:
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(health_url, timeout=10) as response:
-                if response.status == 200:
+                if response.status == _HTTP_OK_STATUS:
                     return
                 last_error = f"HTTP {response.status}"
         except (OSError, urllib.error.URLError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
         time.sleep(2)
-    raise TimeoutError(f"{health_url} did not become ready: {last_error}")
+    message = f"{health_url} did not become ready: {last_error}"
+    raise TimeoutError(message)
 
 
 def _healthy_now(base_url: str) -> bool:
     """Return whether an existing deployment is immediately reusable."""
     try:
         with urllib.request.urlopen(f"{base_url.rstrip('/')}/health", timeout=5) as response:
-            return response.status == 200
+            return response.status == _HTTP_OK_STATUS
     except (OSError, urllib.error.URLError):
         return False
 
@@ -375,15 +387,18 @@ def _deployment_path(workspace: str, entrypoint: str) -> Path:
         or not relative.parts
         or any(part in {"", ".", ".."} for part in relative.parts)
     ):
-        raise ValueError("Modal entrypoint must be a project-relative path")
+        message = "Modal entrypoint must be a project-relative path"
+        raise ValueError(message)
     workspace_root = Path(workspace).resolve(strict=True)
     candidate = (workspace_root / relative).resolve(strict=True)
     try:
         candidate.relative_to(workspace_root)
     except ValueError as exc:
-        raise ValueError(f"Modal entrypoint escapes the project: {entrypoint}") from exc
+        message = f"Modal entrypoint escapes the project: {entrypoint}"
+        raise ValueError(message) from exc
     if not candidate.is_file():
-        raise ValueError(f"Modal entrypoint is not a file: {candidate}")
+        message = f"Modal entrypoint is not a file: {candidate}"
+        raise ValueError(message)
     return candidate
 
 
@@ -466,7 +481,8 @@ def _build_stage_archive(
     if evaluator_package_root is not None:
         package_root = Path(evaluator_package_root).resolve(strict=True)
         if not package_root.is_dir():
-            raise ValueError(f"evaluator package root is not a directory: {package_root}")
+            message = f"evaluator package root is not a directory: {package_root}"
+            raise ValueError(message)
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
         for relative in stage_paths:
@@ -497,18 +513,18 @@ def _build_stage_archive(
                 or reserved.is_relative_to(relative_path)
                 for reserved in reserved_paths
             ):
-                raise ValueError(
-                    "workspace evaluator input collides with a reserved framework path"
-                )
+                message = "workspace evaluator input collides with a reserved framework path"
+                raise ValueError(message)
             archive.add(str(workspace_root / relative), arcname=relative)
         if package_root is not None:
             archive.add(str(package_root), arcname=_EVALUATOR_PACKAGE_STAGE_PATH)
     payload = buffer.getvalue()
     if len(payload) > _MAX_STAGE_ARCHIVE_BYTES:
-        raise ValueError(
+        message = (
             f"evaluator inputs too large to stage into the serving container "
             f"({len(payload)} bytes compressed, cap {_MAX_STAGE_ARCHIVE_BYTES})"
         )
+        raise ValueError(message)
     return payload
 
 
@@ -554,9 +570,8 @@ def _find_app_container(
             if name == app_identifier and container_id:
                 return str(container_id)
         if time.monotonic() >= deadline:
-            raise TimeoutError(
-                f"no running container found for Modal app {app_identifier}: {last_error}"
-            )
+            message = f"no running container found for Modal app {app_identifier}: {last_error}"
+            raise TimeoutError(message)
         _healthy_now(base_url)
         time.sleep(5)
 
@@ -777,7 +792,8 @@ def run_evaluator(
 ) -> int:
     """Deploy the candidate and run ``command`` inside its serving container."""
     if not command:
-        raise ValueError("missing evaluator command after '--'")
+        message = "missing evaluator command after '--'"
+        raise ValueError(message)
     normalized_setup = (
         _normalized_setup_command(setup_command) if setup_command is not None else None
     )
@@ -787,7 +803,8 @@ def run_evaluator(
         else None
     )
     if normalized_package_root is not None and not Path(normalized_package_root).is_dir():
-        raise ValueError(f"evaluator package root is not a directory: {normalized_package_root}")
+        message = f"evaluator package root is not a directory: {normalized_package_root}"
+        raise ValueError(message)
 
     with _exclusive_evaluation():
         return _run_evaluator_unlocked(

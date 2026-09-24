@@ -45,7 +45,6 @@ from vibesys.loops.metrics import Measurement, MetricSpace, Objective
 
 if TYPE_CHECKING:
     import random
-
 __all__ = [
     "Individual",
     "Population",
@@ -113,7 +112,6 @@ class Individual:
 
 class Population:
     """A flat archive of individuals with fitness-weighted parent sampling.
-
     Sampling inspiration is diversity-aware.
 
     Failed individuals (``passed=False``) are kept but excluded from

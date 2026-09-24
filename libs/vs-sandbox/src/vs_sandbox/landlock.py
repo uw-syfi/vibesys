@@ -64,7 +64,6 @@ from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from pathlib import Path
-
 # ``linux/landlock.h``. Bits 0-12 are ABI 1; REFER is ABI 2, TRUNCATE ABI 3.
 _ABI_REFER = 2
 _ABI_TRUNCATE = 3

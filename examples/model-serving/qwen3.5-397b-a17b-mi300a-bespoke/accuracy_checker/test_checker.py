@@ -1,4 +1,5 @@
 """Hermetic tests for the pin gate and the probes (in-process fake server, no GPU).
+
 uv run pytest examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/accuracy_checker/test_checker.py -q --no-cov -p no:tach
 """
 
@@ -12,6 +13,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 try:
     import checker
 except Exception as exc:
@@ -19,6 +21,7 @@ except Exception as exc:
     _IMPORT_ERROR = exc
 else:
     _IMPORT_ERROR = None
+
 N = 32
 
 

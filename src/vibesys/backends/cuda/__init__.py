@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from datetime import datetime
+from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never, cast
 
 from vibesys.backends.base import (
     ContentionMonitor,
@@ -22,12 +23,17 @@ from vibesys.backends.cuda.gpu_monitor import (
 )
 from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
-from vs_sandbox.api import LocalShellSandbox
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
+    from vs_sandbox.api import DockerSandbox as DockerSandboxType
+    from vs_sandbox.api import (
+        HostResource,
+        LocalShellSandbox,
+        Sandbox,
+        SandboxLifecycleHooks,
+    )
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
 _DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
@@ -66,7 +72,7 @@ class CudaBackend:
 
     # -- ComputeBackendImpl protocol ---------------------------------------------
 
-    def make_sandbox(
+    def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-009056 [PLR0913]; the method must preserve the established ComputeBackendImpl construction contract.
         self,
         kind: SandboxKind,
         *,
@@ -83,9 +89,8 @@ class CudaBackend:
         resources: Sequence[HostResource] = (),
     ) -> Sandbox:
         """Construct a sandbox configured for CUDA execution."""
-        # Deferred: importing DockerSandbox registers process-wide signal and
-        # atexit handlers. Registration must stay side-effect free.
-        from vs_sandbox.api import DockerSandbox
+        sandbox_api = import_module("vs_sandbox.api")
+        docker_sandbox_class = sandbox_api.DockerSandbox
 
         bind_mounts = bind_mounts or []
         extra_env = extra_env or {}
@@ -112,7 +117,7 @@ class CudaBackend:
                 lifecycle_hooks=lifecycle_hooks,
             )
         elif kind is SandboxKind.DOCKER:
-            sandbox = DockerSandbox(
+            sandbox = docker_sandbox_class(
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=self._docker_gpu_spec() if attach_accelerator else None,
@@ -124,7 +129,8 @@ class CudaBackend:
                 lifecycle_hooks=lifecycle_hooks,
             )
         else:
-            raise ValueError(f"Unknown sandbox kind: {kind!r}")
+            message = f"Unknown sandbox kind: {kind!r}"
+            raise ValueError(message)
 
         if not ephemeral:
             self._sandboxes.append((kind, sandbox))
@@ -163,24 +169,24 @@ class CudaBackend:
         )
         self._save_gpu_metadata(new_gpu)
 
-        # Deferred for the same reason as in make_sandbox; by the time a
-        # rebalance happens the module is already imported.
-        from vs_sandbox.api import DockerSandbox
-
-        # Kind-dispatched pokes at sandbox internals: DOCKER entries are
-        # always DockerSandbox (stop/start/_gpus), LOCAL entries are always
-        # LocalShellSandbox (env). The recorded kind still selects the
-        # branch; the assertions only state that registration invariant so
-        # the concrete attributes resolve.
+        # Dispatch from the kind recorded when each backend-owned sandbox was
+        # registered. Assertions preserve the concrete registration invariant
+        # before the casts make the branch-specific operations type-check.
         for kind, sb in self._sandboxes:
             if kind is SandboxKind.DOCKER:
-                assert isinstance(sb, DockerSandbox)  # registration invariant
-                sb.stop()
-                sb._gpus = self._docker_gpu_spec()
-                sb.start()  # re-runs lifecycle hooks
+                sandbox_api = import_module("vs_sandbox.api")
+                docker_sandbox_type = cast("type[DockerSandboxType]", sandbox_api.DockerSandbox)
+                if not isinstance(sb, docker_sandbox_type):
+                    raise AssertionError
+                sb.restart_with_gpus(self._docker_gpu_spec())
             elif kind is SandboxKind.LOCAL:
-                assert isinstance(sb, LocalShellSandbox)  # registration invariant
+                sandbox_api = import_module("vs_sandbox.api")
+                local_sandbox_type = cast("type[LocalShellSandbox]", sandbox_api.LocalShellSandbox)
+                if not isinstance(sb, local_sandbox_type):
+                    raise AssertionError
                 sb.env["CUDA_VISIBLE_DEVICES"] = str(new_gpu.index)
+            else:
+                assert_never(kind)
 
         # Restart the contention monitor on the new device.
         if self._monitor is not None:
@@ -251,9 +257,14 @@ class CudaBackend:
         """
         try:
             result = subprocess.run(
-                ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+                [  # noqa: S607  # lint-waiver: LW-009059 [S607]; invoke the administrator-installed NVIDIA CLI by its standard executable name.
+                    "nvidia-smi",
+                    "--query-gpu=driver_version",
+                    "--format=csv,noheader",
+                ],
                 capture_output=True,
                 text=True,
+                check=False,
                 timeout=10,
             )
             if result.returncode != 0:
@@ -284,7 +295,7 @@ class CudaBackend:
         data = {
             "selected_gpu": _gpu_to_dict(gpu),
             "all_gpus_at_selection": [_gpu_to_dict(g) for g in all_gpus],
-            "selected_at": datetime.now().isoformat(),
+            "selected_at": datetime.now(UTC).isoformat(),
             "contention_detected": False,
             "contention_events": 0,
         }

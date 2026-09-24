@@ -180,10 +180,8 @@ def test_recovery_restores_an_already_committed_state_file(
     transition = _transition(project, active=None, rounds=(1,))
     transaction = coordinator.begin(1, state_transition=transition)
 
-    original_clear = coordinator._clear_journal
     monkeypatch.setattr(coordinator, "_clear_journal", lambda: None)
     transaction.complete()
-    monkeypatch.setattr(coordinator, "_clear_journal", original_clear)
     _state_slot(project).save(_AgentState(active_hypothesis_id="corrupt"))
     committed_head = tracker.current_sha()
 

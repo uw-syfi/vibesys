@@ -5,7 +5,9 @@ out to ``python neuron_profiler/analyze_neuron.py …``. The capture step
 (``neuron-explorer inspect`` around a live workload) stays a shell command
 — it's too long-running for stdio MCP — but every analysis subcommand is
 exposed here.
+
 Launch (typically spawned by the agent runner via ``MCPServerSpec``):
+
     python neuron_profiler/server.py.
 """
 
@@ -24,7 +26,6 @@ from mcp.server.fastmcp import FastMCP
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 # lint-waiver: LW-008017 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.

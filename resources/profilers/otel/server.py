@@ -19,6 +19,7 @@ class LatencyRow(BaseModel):
     """Validated latency measurements for one result row."""
 
     model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1)
     count: StrictInt = Field(gt=0)
     error_count: StrictInt = Field(ge=0)
@@ -49,6 +50,7 @@ class MeasurementWindow(BaseModel):
     """Validated measurement window bounds."""
 
     model_config = ConfigDict(extra="forbid")
+
     start: str
     end: str
 
@@ -68,6 +70,7 @@ class LatencyDistribution(BaseModel):
     """Validated latency distribution used by schema-v2 trace graphs."""
 
     model_config = ConfigDict(extra="forbid")
+
     count: StrictInt = Field(gt=0)
     error_count: StrictInt = Field(ge=0)
     mean_ms: StrictFloat = Field(ge=0)
@@ -99,6 +102,7 @@ class TraceQuality(BaseModel):
     """Trace eligibility and correlation quality for a graph artifact."""
 
     model_config = ConfigDict(extra="forbid")
+
     captured_traces: StrictInt = Field(gt=0)
     eligible_traces: StrictInt = Field(gt=0)
     excluded_traces: StrictInt = Field(ge=0)
@@ -128,6 +132,7 @@ class TraceTrialQuality(BaseModel):
     """Trace eligibility counts for one benchmark trial."""
 
     model_config = ConfigDict(extra="forbid")
+
     trial: StrictInt = Field(gt=0)
     captured_traces: StrictInt = Field(ge=0)
     eligible_traces: StrictInt = Field(ge=0)
@@ -148,6 +153,7 @@ class TraceGraphNode(BaseModel):
     """One stable service-operation path in a trace graph."""
 
     model_config = ConfigDict(extra="forbid")
+
     id: str = Field(min_length=1)
     path: str = Field(min_length=1)
     service: str = Field(min_length=1)
@@ -161,6 +167,7 @@ class TraceGraphEdge(BaseModel):
     """One observed relationship between graph nodes."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
     from_node: str = Field(alias="from", min_length=1)
     to: str = Field(min_length=1)
     relationship: str = Field(min_length=1)
@@ -171,6 +178,7 @@ class WaterfallSpan(BaseModel):
     """One span in the representative trace waterfall."""
 
     model_config = ConfigDict(extra="forbid")
+
     node_id: str = Field(min_length=1)
     service: str = Field(min_length=1)
     operation: str = Field(min_length=1)
@@ -182,6 +190,7 @@ class RepresentativeTrace(BaseModel):
     """Representative complete trace selected by servicebench."""
 
     model_config = ConfigDict(extra="forbid")
+
     trace_id: str = Field(min_length=1)
     duration_ms: StrictFloat = Field(gt=0)
     spans: list[WaterfallSpan] = Field(min_length=1)
@@ -191,6 +200,7 @@ class CriticalPathNodeContribution(BaseModel):
     """Wall-clock contribution attributed to one graph node."""
 
     model_config = ConfigDict(extra="forbid")
+
     node_id: str = Field(min_length=1)
     path: str = Field(min_length=1)
     service: str = Field(min_length=1)
@@ -202,6 +212,7 @@ class CriticalPathSegment(BaseModel):
     """Contiguous segment of a representative synchronous critical path."""
 
     model_config = ConfigDict(extra="forbid")
+
     node_id: str = Field(min_length=1)
     offset_ms: StrictFloat = Field(ge=0)
     duration_ms: StrictFloat = Field(gt=0)
@@ -211,6 +222,7 @@ class RepresentativeCriticalPath(BaseModel):
     """Critical-path decomposition of the representative trace."""
 
     model_config = ConfigDict(extra="forbid")
+
     trace_id: str = Field(min_length=1)
     duration_ms: StrictFloat = Field(gt=0)
     segments: list[CriticalPathSegment] = Field(min_length=1)
@@ -237,6 +249,7 @@ class CriticalPathSummary(BaseModel):
     """Aggregate synchronous critical-path evidence for one root operation."""
 
     model_config = ConfigDict(extra="forbid")
+
     algorithm: Literal["wall_clock_active_leaf_v1"]
     scope: Literal["synchronous_request"]
     trace_count: StrictInt = Field(gt=0)
@@ -250,6 +263,7 @@ class TraceRootGraph(BaseModel):
     """Aggregated trace graph and critical path for one root operation."""
 
     model_config = ConfigDict(extra="forbid")
+
     service: str = Field(min_length=1)
     operation: str = Field(min_length=1)
     trace_count: StrictInt = Field(gt=0)
@@ -355,6 +369,7 @@ class TraceGraphReport(BaseModel):
     """Strict schema-v2 trace graph emitted by servicebench."""
 
     model_config = ConfigDict(extra="forbid")
+
     schema_version: Literal[2]
     source: str = Field(min_length=1)
     collected_at: str
@@ -401,6 +416,7 @@ class TelemetryReport(BaseModel):
     """Validated telemetry report data."""
 
     model_config = ConfigDict(extra="forbid")
+
     schema_version: Literal[1]
     source: str = Field(min_length=1)
     collected_at: str
@@ -446,6 +462,7 @@ class ReportSummary(BaseModel):
     """Ranked latency evidence returned by the ``summary`` tool."""
 
     model_config = ConfigDict(extra="forbid")
+
     source: str
     collected_at: str
     workload_name: str
@@ -466,6 +483,7 @@ class RowChange(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
     name: str
     before_p95_ms: float | None
     after_p95_ms: float | None
@@ -477,6 +495,7 @@ class ReportComparison(BaseModel):
     """Before/after p95 changes returned by the ``compare`` tool."""
 
     model_config = ConfigDict(extra="forbid")
+
     before_span_count: int
     after_span_count: int
     service_p95_changes: list[RowChange]
@@ -488,6 +507,7 @@ class BoundedRepresentativeCriticalPath(BaseModel):
     """Bounded representative path returned to the profiler agent."""
 
     model_config = ConfigDict(extra="forbid")
+
     trace_id: str
     duration_ms: float
     segments: list[CriticalPathSegment]
@@ -498,6 +518,7 @@ class CriticalPathRootEvidence(BaseModel):
     """Bounded critical-path evidence for one root operation."""
 
     model_config = ConfigDict(extra="forbid")
+
     service: str
     operation: str
     trace_count: int
@@ -516,6 +537,7 @@ class CriticalPathEvidence(BaseModel):
     """Bounded schema-v2 evidence returned by the ``critical_path`` tool."""
 
     model_config = ConfigDict(extra="forbid")
+
     source: str
     collected_at: str
     workload_name: str
@@ -530,6 +552,7 @@ class TraceNodeEvidence(BaseModel):
     """One call-graph node with its inclusive and exclusive latency split."""
 
     model_config = ConfigDict(extra="forbid")
+
     node_id: str
     path: str
     service: str
@@ -544,6 +567,7 @@ class BoundedRepresentativeTrace(BaseModel):
     """Bounded representative waterfall returned to the profiler agent."""
 
     model_config = ConfigDict(extra="forbid")
+
     trace_id: str
     duration_ms: float
     spans: list[WaterfallSpan]
@@ -554,6 +578,7 @@ class TraceBreakdownRootEvidence(BaseModel):
     """Bounded call-graph and waterfall evidence for one root operation."""
 
     model_config = ConfigDict(extra="forbid")
+
     service: str
     operation: str
     trace_count: int
@@ -570,6 +595,7 @@ class TraceBreakdown(BaseModel):
     """Bounded schema-v2 structure returned by the ``trace_breakdown`` tool."""
 
     model_config = ConfigDict(extra="forbid")
+
     source: str
     collected_at: str
     workload_name: str

@@ -26,7 +26,6 @@ from vs_feature_flags.api import parse_feature_flag_overrides
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-
 Provider = Literal["vertex-ai", "anthropic", "google-genai", "openai", "openai-compatible"]
 
 

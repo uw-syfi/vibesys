@@ -62,7 +62,7 @@ class _FakeManager:
         self.shutdown_override: Callable[[], Awaitable[None]] | None = None
         self.instances.append(self)
 
-    async def schemas_for(self, spec: _FakeAgentSpec) -> Any:
+    async def schemas_for(self, spec: _FakeAgentSpec) -> SimpleNamespace:
         self.specs.append(spec)
         return SimpleNamespace(
             schemas=list(self.schemas),
@@ -88,6 +88,21 @@ class _FakeManager:
         self.shutdown_calls += 1
 
 
+def _native_api(
+    manager: type[_FakeManager] = _FakeManager,
+    *,
+    validation: SimpleNamespace | None = None,
+) -> SimpleNamespace:
+    validation_result = validation or SimpleNamespace(valid=True, errors=[])
+    return SimpleNamespace(
+        agent_spec=_FakeAgentSpec,
+        executor_spec=_FakeExecutorSpec,
+        server_config=_FakeMCPServerConfig,
+        manager=manager,
+        validate=lambda _spec: validation_result,
+    )
+
+
 @pytest.fixture(autouse=True)
 def fake_native_api(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeManager.instances.clear()
@@ -104,13 +119,7 @@ def fake_native_api(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         subject,
         "_native_mcp_api",
-        lambda: subject._NativeMCPAPI(
-            agent_spec=_FakeAgentSpec,
-            executor_spec=_FakeExecutorSpec,
-            server_config=_FakeMCPServerConfig,
-            manager=_FakeManager,
-            validate=lambda _spec: SimpleNamespace(valid=True, errors=[]),
-        ),
+        _native_api,
     )
 
 
@@ -218,21 +227,15 @@ def test_cancelled_discovery_closes_manager(
     started = asyncio.Event()
 
     class BlockingManager(_FakeManager):
-        async def schemas_for(self, spec: _FakeAgentSpec) -> Any:
+        async def schemas_for(self, spec: _FakeAgentSpec) -> SimpleNamespace:
             self.specs.append(spec)
             started.set()
-            await asyncio.Future()
+            return await asyncio.Future[SimpleNamespace]()
 
     monkeypatch.setattr(
         subject,
         "_native_mcp_api",
-        lambda: subject._NativeMCPAPI(
-            agent_spec=_FakeAgentSpec,
-            executor_spec=_FakeExecutorSpec,
-            server_config=_FakeMCPServerConfig,
-            manager=BlockingManager,
-            validate=lambda _spec: SimpleNamespace(valid=True, errors=[]),
-        ),
+        lambda: _native_api(BlockingManager),
     )
 
     async def cancel_setup() -> None:
@@ -305,13 +308,7 @@ def test_native_validation_error_preserves_field_path_and_skips_connection(
     monkeypatch.setattr(
         subject,
         "_native_mcp_api",
-        lambda: subject._NativeMCPAPI(
-            agent_spec=_FakeAgentSpec,
-            executor_spec=_FakeExecutorSpec,
-            server_config=_FakeMCPServerConfig,
-            manager=_FakeManager,
-            validate=lambda _spec: SimpleNamespace(valid=False, errors=[validation_error]),
-        ),
+        lambda: _native_api(validation=SimpleNamespace(valid=False, errors=[validation_error])),
     )
 
     with pytest.raises(

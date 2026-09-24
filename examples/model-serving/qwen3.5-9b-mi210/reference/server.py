@@ -1,9 +1,12 @@
 """OpenAI-compatible text-completions server over the reference `Engine`.
+
     python -m reference.server --model Qwen/Qwen3.5-9B --host 0.0.0.0 --port 8000
+
 Response shapes follow vLLM's `/v1/completions` (the Request Factory
 `session_runner --backend openai` client was validated against vLLM),
 including the vLLM extensions `ignore_eos`, `min_tokens`, `return_token_ids`,
 and `return_tokens_as_token_ids`.
+
 Execution model: one GPU worker thread runs requests strictly FIFO, one at a
 time. HTTP handlers only enqueue work, detokenize, and format responses.
 """
@@ -31,8 +34,9 @@ from .engine import Engine, SamplingParams, StepOutput, TokenLogprobs
 
 log = logging.getLogger("reference.server")
 
-
 # ----------------------------------------------------------------------------- request schema
+
+
 class StreamOptions(BaseModel):
     include_usage: bool = False
     continuous_usage_stats: bool = False
@@ -41,6 +45,7 @@ class StreamOptions(BaseModel):
 class CompletionRequest(BaseModel):
     # Unknown keys are accepted and ignored, as vLLM does (session_runner sends `rid`).
     model_config = ConfigDict(extra="allow")
+
     model: str | None = None
     prompt: str | list[int] | list[str] | list[list[int]]
     max_tokens: int | None = 16
@@ -73,6 +78,8 @@ def _error(message: str, status: int) -> JSONResponse:
 
 
 # ----------------------------------------------------------------------------- worker
+
+
 _DONE = object()
 
 
@@ -133,6 +140,8 @@ async def _submit(worker: Worker, run: Callable) -> tuple[AsyncIterator[Any], th
 
 
 # ----------------------------------------------------------------------------- formatting
+
+
 class Detokenizer:
     """Incremental detokenization; holds back text while the tail is an incomplete UTF-8 sequence."""
 
@@ -200,6 +209,8 @@ def _usage(prompt_tokens: int, completion_tokens: int) -> dict[str, Any]:
 
 
 # ----------------------------------------------------------------------------- app
+
+
 def build_app(engine: Engine, served_model_name: str) -> FastAPI:
     app = FastAPI()
     worker = Worker()
@@ -297,10 +308,12 @@ def build_app(engine: Engine, served_model_name: str) -> FastAPI:
             "created": created,
             "model": served_model_name,
         }
+
         if req.stream:
             return StreamingResponse(
                 _stream(items, cancel, base, req, prompt_ids, tok), media_type="text/event-stream"
             )
+
         detok = Detokenizer(tok)
         lp_builder = (
             LogprobsBuilder(tok, req.return_tokens_as_token_ids)
@@ -419,6 +432,7 @@ def main() -> None:
     logging.basicConfig(
         level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+
     engine = Engine(args.model, device=args.device, max_model_len=args.max_model_len)
     list(
         engine.generate(engine.tokenizer("warmup").input_ids, SamplingParams(max_tokens=2))

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Check that every Ruff suppression has a reason and a manifest entry.
+
 The manifest uses stable waiver IDs rather than source line numbers. Each ID
 appears in a comment immediately before its ``# noqa`` directive, with a short
 explanation of why the rule is suppressed. The check parses Ruff's configured Python
 file set, tokenizes comments so strings and docstrings do not count, and uses
 the Python AST to ensure each suppression belongs to a source node.
+
 Usage:
     uv run python scripts/check_lint_waivers.py.
 """
@@ -26,6 +28,7 @@ from typing import TYPE_CHECKING, TypeGuard
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
 DEFAULT_MANIFEST = Path("lint_waivers.jsonl")
 DEFAULT_PYPROJECT = Path("pyproject.toml")
 DEFAULT_EXCLUDED_DIRS = frozenset(
@@ -50,6 +53,7 @@ NOQA_RE = re.compile(
 WAIVER_RE = re.compile(r"#\s*(?:lint-waiver:\s*)?(LW-\d{6})(?:\s+\[([A-Z0-9, ]+)\])?\s*;\s*(.*)$")
 WAIVER_CONTINUATION_RE = re.compile(r"#\s*(?:lint-waiver\+:|>\s*)(.*)$")
 WAIVER_ID_RE = re.compile(r"LW-\d{6}\Z")
+
 EXIT_OK = 0
 EXIT_VIOLATIONS = 1
 EXIT_TOOL_ERROR = 2
@@ -84,6 +88,7 @@ def parse_manifest(path: Path, repo_root: Path) -> tuple[list[ManifestWaiver], l
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
         return [], [f"{path}: cannot be read ({exc})"]
+
     for line_number, line in enumerate(lines, start=1):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -318,6 +323,7 @@ def audit(
                 )
                 continue
             found[waiver.waiver_id] = waiver
+
     recorded = {waiver.waiver_id: waiver for waiver in manifest_waivers}
     for waiver_id, waiver in sorted(found.items()):
         entry = recorded.get(waiver_id)
@@ -345,6 +351,7 @@ def main() -> int:
     manifest_path = args.manifest or repo_root / DEFAULT_MANIFEST
     if not manifest_path.is_absolute():
         manifest_path = repo_root / manifest_path
+
     manifest_waivers, manifest_failures = parse_manifest(manifest_path, repo_root)
     files, discovery_error = discover_ruff_files(repo_root)
     if discovery_error is not None:

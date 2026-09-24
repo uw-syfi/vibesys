@@ -17,6 +17,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
@@ -100,12 +101,14 @@ class MoonshineStreamingCausalConv1d(nn.Conv1d):
     def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         x = nn.functional.pad(x, (self.left_pad, 0))
         x = super().forward(x)
+
         if mask is not None:
             mask = nn.functional.pad(mask, (self.left_pad, 0))[:, None, :]
             weight = torch.ones(1, 1, self.kernel_size[0], device=mask.device)
             mask = nn.functional.conv1d(mask.float(), weight, stride=self.stride)
             mask = mask > 0
             x *= mask
+
         if mask is not None:
             mask = mask.squeeze(1)
         return x, mask
@@ -165,13 +168,16 @@ def eager_attention_forward(
 ):
     key_states = repeat_kv(key, module.num_key_value_groups)
     value_states = repeat_kv(value, module.num_key_value_groups)
+
     attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
     if attention_mask is not None:
         attn_weights = attn_weights + attention_mask
+
     attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
     attn_weights = nn.functional.dropout(attn_weights, p=dropout, training=module.training)
     attn_output = torch.matmul(attn_weights, value_states)
     attn_output = attn_output.transpose(1, 2).contiguous()
+
     return attn_output, attn_weights
 
 
@@ -187,6 +193,7 @@ class MoonshineStreamingEncoderAttention(nn.Module):
         self.scaling = self.head_dim**-0.5
         self.attention_dropout = config.attention_dropout
         self.is_causal = False
+
         self.q_proj = nn.Linear(
             config.hidden_size,
             config.num_attention_heads * self.head_dim,
@@ -216,12 +223,15 @@ class MoonshineStreamingEncoderAttention(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
+
         query_states = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
         key_states = self.k_proj(hidden_states).view(hidden_shape).transpose(1, 2)
         value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+
         attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
             self.config._attn_implementation, eager_attention_forward
         )
+
         attn_output, attn_weights = attention_interface(
             self,
             query_states,
@@ -232,6 +242,7 @@ class MoonshineStreamingEncoderAttention(nn.Module):
             scaling=self.scaling,
             **kwargs,
         )
+
         attn_output = attn_output.reshape(*input_shape, -1).contiguous()
         attn_output = self.o_proj(attn_output)
         return attn_output, attn_weights
@@ -269,6 +280,7 @@ class MoonshineStreamingEncoderLayer(GradientCheckpointingLayer):
             **kwargs,
         )
         hidden_states = residual + hidden_states
+
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
@@ -295,6 +307,7 @@ class MoonshineStreamingEncoderEmbedder(nn.Module):
         hidden_states = self.cmvn(input_values.reshape(input_values.shape[0], -1, self.frame_len))
         hidden_states = self.comp(hidden_states)
         hidden_states = nn.functional.silu(self.linear(hidden_states))
+
         if padding_mask is not None:
             num_frames = padding_mask.sum(-1) // self.frame_len
             padding_mask = (
@@ -302,6 +315,7 @@ class MoonshineStreamingEncoderEmbedder(nn.Module):
                 < num_frames[:, None]
             )
             hidden_states *= padding_mask[..., None]
+
         hidden_states = hidden_states.transpose(1, 2)
         hidden_states, padding_mask = self.conv1(hidden_states, padding_mask)
         hidden_states = nn.functional.silu(hidden_states)
@@ -320,9 +334,10 @@ class MoonshineStreamingPreTrainedModel(PreTrainedModel):
     _no_split_modules = ["MoonshineStreamingEncoderLayer", "MoonshineStreamingDecoderLayer"]
     _supports_flash_attn = True
     _supports_sdpa = True
-    _can_compile_fullgraph = True
 
+    _can_compile_fullgraph = True
     # TODO arthur, how do we separate when it cross / self coming from different layer?
+
     def _get_feat_extract_output_lengths(self, input_lengths: torch.LongTensor) -> torch.LongTensor:
         """
         Computes the output length of the convolutional layers
@@ -353,6 +368,7 @@ def sliding_window_mask_function(sliding_window: tuple[int, int]) -> Callable:
 
     def inner_mask(batch_idx: int, head_idx: int, q_idx: int, kv_idx: int) -> bool:
         left_window_size, right_window_size = sliding_window
+
         dist = q_idx - kv_idx
         left_mask = (dist >= 0) & (dist < left_window_size)
         right_mask = (dist < 0) & (-dist < right_window_size)
@@ -378,6 +394,7 @@ class MoonshineStreamingEncoder(MoonshineStreamingPreTrainedModel):
         )
         self.final_norm = MoonshineStreamingLayerNorm(config.hidden_size)
         self.gradient_checkpointing = False
+
         self.post_init()
 
     @merge_with_config_defaults
@@ -404,6 +421,7 @@ class MoonshineStreamingEncoder(MoonshineStreamingPreTrainedModel):
                 [What are attention masks?](../glossary#attention-mask)
         """
         inputs_embeds, attention_mask = self.embedder(input_values, padding_mask=attention_mask)
+
         if attention_mask is not None:
             mask_kwargs = {
                 "config": self.config,
@@ -419,6 +437,7 @@ class MoonshineStreamingEncoder(MoonshineStreamingPreTrainedModel):
                 )
                 for layer_idx in range(self.config.num_hidden_layers)
             ]
+
         hidden_states = inputs_embeds
         for layer_idx, encoder_layer in enumerate(self.layers):
             hidden_states = encoder_layer(
@@ -428,7 +447,9 @@ class MoonshineStreamingEncoder(MoonshineStreamingPreTrainedModel):
                 else None,
                 **kwargs,
             )
+
         hidden_states = self.final_norm(hidden_states)
+
         return MoonshineStreamingEncoderModelOutput(
             last_hidden_state=hidden_states, attention_mask=attention_mask
         )
@@ -473,12 +494,15 @@ class MoonshineStreamingRotaryEmbedding(nn.Module):
         super().__init__()
         self.max_seq_len_cached = config.max_position_embeddings
         self.original_max_seq_len = config.max_position_embeddings
+
         self.config = config
+
         self.rope_type = self.config.rope_parameters["rope_type"]
         rope_init_fn: Callable = self.compute_default_rope_parameters
         if self.rope_type != "default":
             rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
         inv_freq, self.attention_scaling = rope_init_fn(self.config, device)
+
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self.register_buffer("original_inv_freq", inv_freq.clone(), persistent=False)
 
@@ -507,7 +531,9 @@ class MoonshineStreamingRotaryEmbedding(nn.Module):
             getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
         )
         dim = int(head_dim * partial_rotary_factor)
+
         attention_factor = 1.0  # Unused in this type of RoPE
+
         # Compute the inverse frequencies
         inv_freq = 1.0 / (
             base
@@ -525,6 +551,7 @@ class MoonshineStreamingRotaryEmbedding(nn.Module):
             self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1).to(x.device)
         )
         position_ids_expanded = position_ids[:, None, :].float()
+
         device_type = (
             x.device.type if isinstance(x.device.type, str) and x.device.type != "mps" else "cpu"
         )
@@ -533,6 +560,7 @@ class MoonshineStreamingRotaryEmbedding(nn.Module):
             emb = torch.cat((freqs, freqs), dim=-1)
             cos = emb.cos() * self.attention_scaling
             sin = emb.sin() * self.attention_scaling
+
         return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
 
 
@@ -545,6 +573,7 @@ def rotate_half(x):
 
 def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
     """Applies Rotary Position Embedding to the query and key tensors.
+
     Args:
         q (`torch.Tensor`): The query tensor.
         k (`torch.Tensor`): The key tensor.
@@ -562,16 +591,20 @@ def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
     """
     cos = cos.unsqueeze(unsqueeze_dim)
     sin = sin.unsqueeze(unsqueeze_dim)
+
     # Interleave them instead of usual shape
     cos = cos[..., : cos.shape[-1] // 2].repeat_interleave(2, dim=-1)
     sin = sin[..., : sin.shape[-1] // 2].repeat_interleave(2, dim=-1)
+
     # Keep half or full tensor for later concatenation
     rotary_dim = cos.shape[-1]
     q_rot, q_pass = q[..., :rotary_dim], q[..., rotary_dim:]
     k_rot, k_pass = k[..., :rotary_dim], k[..., rotary_dim:]
+
     # Apply rotary embeddings on the first half or full tensor
     q_embed = (q_rot * cos) + (rotate_half(q_rot) * sin)
     k_embed = (k_rot * cos) + (rotate_half(k_rot) * sin)
+
     # Concatenate back to full shape
     q_embed = torch.cat([q_embed, q_pass], dim=-1)
     k_embed = torch.cat([k_embed, k_pass], dim=-1)
@@ -603,6 +636,7 @@ class MoonshineStreamingAttention(nn.Module):
         self.scaling = self.head_dim**-0.5
         self.attention_dropout = config.attention_dropout
         self.is_causal = is_causal
+
         self.q_proj = nn.Linear(
             config.hidden_size,
             config.num_attention_heads * self.head_dim,
@@ -621,6 +655,7 @@ class MoonshineStreamingAttention(nn.Module):
         self.o_proj = nn.Linear(
             config.num_attention_heads * self.head_dim, config.hidden_size, bias=False
         )
+
         # Pad head dimension to the next specified multiple.
         if self.config.pad_head_dim_to_multiple_of is not None:
             target_multiple = self.config.pad_head_dim_to_multiple_of
@@ -641,11 +676,13 @@ class MoonshineStreamingAttention(nn.Module):
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> tuple[torch.Tensor, torch.Tensor | None, tuple[torch.Tensor] | None]:
         bsz, q_len = hidden_states.shape[:-1]
+
         query_states = (
             self.q_proj(hidden_states)
             .view(bsz, q_len, self.config.num_key_value_heads, self.head_dim)
             .transpose(1, 2)
         )
+
         is_cross_attention = key_value_states is not None
         if past_key_values is not None:
             is_updated = past_key_values.is_updated.get(self.layer_idx)
@@ -655,6 +692,7 @@ class MoonshineStreamingAttention(nn.Module):
                 past_key_values = past_key_values.cross_attention_cache
             else:
                 past_key_values = past_key_values.self_attention_cache
+
         # use key_value_states if cross attention
         current_states = key_value_states if key_value_states is not None else hidden_states
         if is_cross_attention and past_key_values and is_updated:
@@ -675,21 +713,27 @@ class MoonshineStreamingAttention(nn.Module):
                 key_states, value_states = past_key_values.update(
                     key_states, value_states, self.layer_idx
                 )
+
         if not is_cross_attention:
             cos, sin = position_embeddings
             query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+
             if past_key_values is not None:
                 key_states, value_states = past_key_values.update(
                     key_states, value_states, self.layer_idx
                 )
+
         attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
             self.config._attn_implementation, eager_attention_forward
         )
+
         is_causal = self.is_causal and attention_mask is None and q_len > 1
+
         if self.head_dim_padding > 0:
             query_states = torch.nn.functional.pad(query_states, (0, self.head_dim_padding))
             key_states = torch.nn.functional.pad(key_states, (0, self.head_dim_padding))
             value_states = torch.nn.functional.pad(value_states, (0, self.head_dim_padding))
+
         attn_output, attn_weights = attention_interface(
             self,
             query_states,
@@ -701,8 +745,10 @@ class MoonshineStreamingAttention(nn.Module):
             is_causal=is_causal,
             **kwargs,
         )
+
         if self.head_dim_padding > 0:
             attn_output = attn_output[..., : -self.head_dim_padding]
+
         attn_output = attn_output.reshape(bsz, q_len, -1).contiguous()
         attn_output = self.o_proj(attn_output)
         return attn_output, attn_weights
@@ -712,6 +758,7 @@ class MoonshineStreamingDecoderLayer(GradientCheckpointingLayer):
     def __init__(self, config: MoonshineStreamingConfig, layer_idx: int | None = None):
         super().__init__()
         self.hidden_size = config.hidden_size
+
         self.self_attn = MoonshineStreamingAttention(
             config=config,
             layer_idx=layer_idx,
@@ -726,6 +773,7 @@ class MoonshineStreamingDecoderLayer(GradientCheckpointingLayer):
             num_attention_heads=config.num_attention_heads,
             num_key_value_heads=config.num_key_value_heads,
         )
+
         self.mlp = MoonshineStreamingDecoderMLP(config, config.hidden_act)
         self.input_layernorm = nn.LayerNorm(config.hidden_size, bias=False)
         self.post_attention_layernorm = nn.LayerNorm(config.hidden_size, bias=False)
@@ -747,6 +795,7 @@ class MoonshineStreamingDecoderLayer(GradientCheckpointingLayer):
     ) -> tuple[torch.FloatTensor, tuple[torch.FloatTensor, torch.FloatTensor] | None]:
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
+
         hidden_states, _ = self.self_attn(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
@@ -757,6 +806,7 @@ class MoonshineStreamingDecoderLayer(GradientCheckpointingLayer):
             **kwargs,
         )
         hidden_states = residual + hidden_states
+
         if encoder_hidden_states is not None:
             residual = hidden_states
             hidden_states = self.post_attention_layernorm(hidden_states)
@@ -768,6 +818,7 @@ class MoonshineStreamingDecoderLayer(GradientCheckpointingLayer):
                 use_cache=use_cache,
             )
             hidden_states = residual + hidden_states
+
         residual = hidden_states
         hidden_states = self.final_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
@@ -790,6 +841,7 @@ class MoonshineStreamingDecoder(MoonshineStreamingPreTrainedModel):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
+
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
             [MoonshineStreamingDecoderLayer(config, idx) for idx in range(config.num_hidden_layers)]
@@ -800,12 +852,14 @@ class MoonshineStreamingDecoder(MoonshineStreamingPreTrainedModel):
         self.pos_emb = nn.Embedding(
             self.config.max_position_embeddings, config.encoder_config.hidden_size
         )
+
         if config.encoder_config.hidden_size != self.config.hidden_size:
             self.proj = nn.Linear(
                 config.encoder_config.hidden_size, self.config.hidden_size, bias=False
             )
         else:
             self.proj = nn.Identity()
+
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -840,12 +894,15 @@ class MoonshineStreamingDecoder(MoonshineStreamingPreTrainedModel):
         encoder_hidden_states = self.proj(encoder_hidden_states)
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
+
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
+
         if use_cache and past_key_values is None:
             past_key_values = EncoderDecoderCache(
                 DynamicCache(config=self.config), DynamicCache(config=self.config)
             )
+
         if position_ids is None:
             past_seen_tokens = (
                 past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -854,6 +911,7 @@ class MoonshineStreamingDecoder(MoonshineStreamingPreTrainedModel):
                 torch.arange(inputs_embeds.shape[1], device=inputs_embeds.device) + past_seen_tokens
             )
             position_ids = position_ids.unsqueeze(0)
+
         causal_mask = create_causal_mask(
             config=self.config,
             inputs_embeds=inputs_embeds,
@@ -867,8 +925,10 @@ class MoonshineStreamingDecoder(MoonshineStreamingPreTrainedModel):
             attention_mask=encoder_attention_mask,
             encoder_hidden_states=encoder_hidden_states,
         )
+
         hidden_states = inputs_embeds
         position_embeddings = self.rotary_emb(hidden_states, position_ids=position_ids)
+
         for decoder_layer in self.layers:
             hidden_states = decoder_layer(
                 hidden_states,
@@ -881,7 +941,9 @@ class MoonshineStreamingDecoder(MoonshineStreamingPreTrainedModel):
                 position_embeddings=position_embeddings,
                 **kwargs,
             )
+
         hidden_states = self.norm(hidden_states)
+
         return BaseModelOutputWithPastAndCrossAttentions(
             last_hidden_state=hidden_states,
             past_key_values=past_key_values if use_cache else None,
@@ -943,11 +1005,14 @@ class MoonshineStreamingModel(MoonshineStreamingPreTrainedModel):
         decoder_position_ids (`torch.LongTensor` of shape `(batch_size, target_sequence_length)`):
             Indices of positions of each input sequence tokens in the position embeddings.
             Used to calculate the position embeddings up to `config.decoder_config.max_position_embeddings`
+
         Example:
+
         ```python
         >>> import torch
         >>> from transformers import AutoFeatureExtractor, MoonshineStreamingModel
         >>> from datasets import load_dataset
+
         >>> model = MoonshineStreamingModel.from_pretrained("UsefulSensors/moonshine_streaming-tiny")
         >>> feature_extractor = AutoFeatureExtractor.from_pretrained("UsefulSensors/moonshine_streaming-tiny")
         >>> ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
@@ -963,6 +1028,7 @@ class MoonshineStreamingModel(MoonshineStreamingPreTrainedModel):
             encoder_outputs: BaseModelOutput = self.encoder(
                 input_values, attention_mask=attention_mask, **kwargs
             )
+
         decoder_outputs: BaseModelOutputWithPastAndCrossAttentions = self.decoder(
             input_ids=decoder_input_ids,
             attention_mask=decoder_attention_mask,
@@ -974,6 +1040,7 @@ class MoonshineStreamingModel(MoonshineStreamingPreTrainedModel):
             use_cache=use_cache,
             **kwargs,
         )
+
         return Seq2SeqModelOutput(
             last_hidden_state=decoder_outputs.last_hidden_state,
             past_key_values=decoder_outputs.past_key_values,
@@ -993,10 +1060,12 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start
     shifted_input_ids = input_ids.new_zeros(input_ids.shape)
     shifted_input_ids[:, 1:] = input_ids[:, :-1].clone()
     shifted_input_ids[:, 0] = decoder_start_token_id
+
     if pad_token_id is None:
         raise ValueError("self.model.config.pad_token_id has to be defined.")
     # replace possible -100 values in labels by `pad_token_id`
     shifted_input_ids.masked_fill_(shifted_input_ids == -100, pad_token_id)
+
     return shifted_input_ids
 
 
@@ -1014,6 +1083,7 @@ class MoonshineStreamingForConditionalGeneration(
         super().__init__(config)
         self.model = MoonshineStreamingModel(config)
         self.proj_out = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1053,26 +1123,35 @@ class MoonshineStreamingForConditionalGeneration(
         decoder_position_ids (`torch.LongTensor` of shape `(batch_size, target_sequence_length)`):
             Indices of positions of each input sequence tokens in the position embeddings.
             Used to calculate the position embeddings up to `config.decoder_config.max_position_embeddings`
+
         Example:
+
         ```python
         >>> import torch
         >>> from transformers import AutoProcessor, MoonshineStreamingForConditionalGeneration
         >>> from datasets import load_dataset
+
         >>> processor = AutoProcessor.from_pretrained("UsefulSensors/moonshine_streaming-tiny")
         >>> model = MoonshineStreamingForConditionalGeneration.from_pretrained("UsefulSensors/moonshine_streaming-tiny")
+
         >>> ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+
         >>> inputs = processor(ds[0]["audio"]["array"], return_tensors="pt")
         >>> input_values = inputs.input_values
+
         >>> generated_ids = model.generate(input_values, max_new_tokens=100)
+
         >>> transcription = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
         >>> transcription
         'Mr. Quilter is the apostle of the middle classes, and we are glad to welcome his gospel.'
         ```"""
+
         if labels is not None:
             if decoder_input_ids is None and decoder_inputs_embeds is None:
                 decoder_input_ids = shift_tokens_right(
                     labels, self.config.pad_token_id, self.config.decoder_start_token_id
                 )
+
         outputs: Seq2SeqModelOutput = self.model(
             input_values,
             attention_mask=attention_mask,
@@ -1086,11 +1165,13 @@ class MoonshineStreamingForConditionalGeneration(
             **kwargs,
         )
         logits = self.proj_out(outputs.last_hidden_state)
+
         loss = None
         if labels is not None:
             loss = self.loss_function(
                 logits=logits, labels=labels, vocab_size=self.config.vocab_size
             )
+
         return Seq2SeqLMOutput(
             loss=loss,
             logits=logits,

@@ -24,6 +24,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 # Build helpers live in packaging/ as top-level modules. There is deliberately no
 # packaging/__init__.py: a `packaging` package would shadow the PyPA library.
 sys.path.insert(0, str(_REPO_ROOT / "packaging"))
+
 # lint-waiver: LW-008020 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from packaging_support import (  # noqa: E402
     clear_distribution_build_outputs,
@@ -101,6 +102,7 @@ class ReleaseDistribution(_Distribution):
 
 
 packages, package_dirs = discover_distribution_packages(_REPO_ROOT)
+
 setup(
     packages=packages,
     package_dir=package_dirs,

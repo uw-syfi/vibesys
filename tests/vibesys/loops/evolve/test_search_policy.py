@@ -34,6 +34,13 @@ class _IterationOrderSet(set[str]):
         return iter(self._iteration_order)
 
 
+class _UnusedRandom(random.Random):
+    """Caller RNG placeholder: OpenEvolve selection uses its persisted stream."""
+
+    def __init__(self) -> None:
+        pass
+
+
 class _PersistedAdapter(TypedDict):
     active_program_ids: list[str]
 
@@ -93,7 +100,7 @@ def test_initialization_persists_empty_policy_for_bootstrap_resume(tmp_path: Pat
 
     assert OpenEvolveSearchPolicy.has_state(tmp_path)
     assert OpenEvolveSearchPolicy.persisted_config(tmp_path) == config
-    resumed = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=999, config=None, space=MetricSpace())
+    OpenEvolveSearchPolicy(state_dir=tmp_path, seed=999, config=None, space=MetricSpace())
     assert _persisted_adapter(tmp_path)["active_program_ids"] == []
 
 
@@ -113,7 +120,7 @@ def test_openevolve_selection_maps_programs_back_to_vibesys_individuals(tmp_path
 
     selection = policy.select(
         population,
-        rng=random.Random(99),
+        rng=_UnusedRandom(),
         k_top_inspirations=1,
         k_random_inspirations=1,
         selection_temperature=0.5,
@@ -156,16 +163,19 @@ def test_migrants_keep_vibesys_identity_and_state_resumes(tmp_path: Path) -> Non
     resumed = OpenEvolveSearchPolicy(
         state_dir=tmp_path, seed=3, config=_config(), space=MetricSpace()
     )
-    resumed._database.set_current_island(1)
-    selection = resumed.select(
-        population,
-        rng=random.Random(1),
-        k_top_inspirations=0,
-        k_random_inspirations=0,
-        selection_temperature=0.5,
-        space=MetricSpace(),
-        frontier_bias=0.7,
-    )
+    selection = None
+    for _ in range(2):
+        selection = resumed.select(
+            population,
+            rng=_UnusedRandom(),
+            k_top_inspirations=0,
+            k_random_inspirations=0,
+            selection_temperature=0.5,
+            space=MetricSpace(),
+            frontier_bias=0.7,
+        )
+        if selection is not None and selection.target_island == 1:
+            break
 
     assert selection is not None
     assert selection.parent.id in {seed.id, child.id}
@@ -191,7 +201,7 @@ def test_resume_prunes_programs_evicted_before_save(tmp_path: Path) -> None:
         )
 
     active_ids = set(_persisted_adapter(tmp_path)["active_program_ids"])
-    resumed = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=4, config=config, space=MetricSpace())
+    OpenEvolveSearchPolicy(state_dir=tmp_path, seed=4, config=config, space=MetricSpace())
 
     assert len(active_ids) <= 2
     assert set(_persisted_adapter(tmp_path)["active_program_ids"]) == active_ids
@@ -340,26 +350,29 @@ def test_empty_island_copy_resolves_through_vibesys_ancestry(tmp_path: Path) -> 
         target_island=0,
         space=MetricSpace(),
     )
-    policy._database.set_current_island(1)
-    policy._database.config.exploration_ratio = 1.0
-    policy._database.config.exploitation_ratio = 0.0
 
-    selection = policy.select(
-        population,
-        rng=random.Random(1),
-        k_top_inspirations=0,
-        k_random_inspirations=0,
-        selection_temperature=0.5,
-        space=MetricSpace(),
-        frontier_bias=0.7,
-    )
+    selection = None
+    for _ in range(2):
+        selection = policy.select(
+            population,
+            rng=_UnusedRandom(),
+            k_top_inspirations=0,
+            k_random_inspirations=0,
+            selection_temperature=0.5,
+            space=MetricSpace(),
+            frontier_bias=0.7,
+        )
+        if selection is not None and selection.target_island == 1:
+            break
 
     assert selection is not None
     assert selection.parent.id == seed.id
     assert selection.target_island == 1
     assert selection.policy_parent_id is not None
-    copy = policy._database.programs[selection.policy_parent_id]
-    assert copy.metadata["vibesys_individual_id"] == seed.id
+    copy = _persisted_program(tmp_path, selection.policy_parent_id)
+    metadata = copy["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["vibesys_individual_id"] == seed.id
 
 
 def test_empty_island_copy_has_same_identity_after_resume(tmp_path: Path) -> None:
@@ -369,22 +382,24 @@ def test_empty_island_copy_has_same_identity_after_resume(tmp_path: Path) -> Non
     policy = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=2, config=config, space=MetricSpace())
     policy.record(seed, code="seed", policy_parent_id=None, target_island=0, space=MetricSpace())
     resumed = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=999, config=None, space=MetricSpace())
-    for candidate in (policy, resumed):
-        candidate._database.set_current_island(1)
-        candidate._database.config.exploration_ratio = 1.0
-        candidate._database.config.exploitation_ratio = 0.0
-
     selection_args = {
-        "rng": random.Random(1),
+        "rng": _UnusedRandom(),
         "k_top_inspirations": 0,
         "k_random_inspirations": 0,
         "selection_temperature": 0.5,
         "space": MetricSpace(),
         "frontier_bias": 0.7,
     }
-    uninterrupted_selection = policy.select(population, **selection_args)
-    resumed_selection = resumed.select(population, **selection_args)
 
+    island_selections = []
+    for candidate in (policy, resumed):
+        selection = None
+        for _ in range(2):
+            selection = candidate.select(population, **selection_args)
+            if selection is not None and selection.target_island == 1:
+                break
+        island_selections.append(selection)
+    uninterrupted_selection, resumed_selection = island_selections
     assert uninterrupted_selection is not None
     assert resumed_selection is not None
     assert resumed_selection.policy_parent_id == uninterrupted_selection.policy_parent_id
@@ -425,10 +440,16 @@ def test_migration_has_same_program_identity_after_resume(tmp_path: Path) -> Non
         space=MetricSpace(),
     )
 
-    assert set(uninterrupted._database.programs) == set(resumed._database.programs)
+    uninterrupted_program_ids = set(_persisted_adapter(uninterrupted_dir)["active_program_ids"])
+    resumed_program_ids = set(_persisted_adapter(resumed_dir)["active_program_ids"])
+    assert uninterrupted_program_ids == resumed_program_ids
     assert {
-        program.id: program.timestamp for program in uninterrupted._database.programs.values()
-    } == {program.id: program.timestamp for program in resumed._database.programs.values()}
+        program_id: _persisted_program(uninterrupted_dir, program_id)["timestamp"]
+        for program_id in uninterrupted_program_ids
+    } == {
+        program_id: _persisted_program(resumed_dir, program_id)["timestamp"]
+        for program_id in resumed_program_ids
+    }
 
 
 def test_resume_continues_upstream_random_stream_without_touching_global_rng(
@@ -448,7 +469,7 @@ def test_resume_continues_upstream_random_stream_without_touching_global_rng(
 
     global_state = random.getstate()
     selection_args = {
-        "rng": random.Random(1),
+        "rng": _UnusedRandom(),
         "k_top_inspirations": 0,
         "k_random_inspirations": 0,
         "selection_temperature": 0.5,
@@ -457,11 +478,12 @@ def test_resume_continues_upstream_random_stream_without_touching_global_rng(
     }
     policy.select(population, **selection_args)
     resumed = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=19, config=None, space=MetricSpace())
-    program_ids = sorted(policy._database.programs)
-    policy._database.config.exploration_ratio = 1.0
-    resumed._database.config.exploration_ratio = 1.0
-    policy._database.islands[0] = _IterationOrderSet(program_ids, program_ids)
-    resumed._database.islands[0] = _IterationOrderSet(
+    program_ids = sorted(_persisted_adapter(tmp_path)["active_program_ids"])
+    policy._database.islands[0] = _IterationOrderSet(  # noqa: SLF001  # LW-010048; injects unstable upstream set order because the public adapter exposes no ordering hook
+        program_ids,
+        program_ids,
+    )
+    resumed._database.islands[0] = _IterationOrderSet(  # noqa: SLF001  # LW-010036; simulates a resumed process reconstructing the same island in a different hash order
         program_ids,
         program_ids[1:] + program_ids[:1],
     )
@@ -490,7 +512,7 @@ def test_selection_uses_lightweight_checkpoint_without_rewriting_programs(tmp_pa
 
     selection = policy.select(
         population,
-        rng=random.Random(1),
+        rng=_UnusedRandom(),
         k_top_inspirations=0,
         k_random_inspirations=0,
         selection_temperature=0.5,
@@ -579,16 +601,19 @@ def test_missing_perf_fallback_stays_neutral(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "kwargs",
+    ("kwargs", "match"),
     [
-        {"population_size": 0},
-        {"archive_size": 0},
-        {"num_islands": 0},
-        {"migration_interval": 0},
-        {"migration_rate": -0.1},
-        {"migration_rate": 1.1},
+        ({"population_size": 0}, "population_size must be >= 1"),
+        ({"archive_size": 0}, "archive_size must be >= 1"),
+        ({"num_islands": 0}, "num_islands must be >= 1"),
+        ({"migration_interval": 0}, "migration_interval must be >= 1"),
+        ({"migration_rate": -0.1}, r"migration_rate must be in \[0, 1\]"),
+        ({"migration_rate": 1.1}, r"migration_rate must be in \[0, 1\]"),
     ],
 )
-def test_openevolve_config_rejects_invalid_values(kwargs: dict[str, int | float]) -> None:
-    with pytest.raises(ValueError):
+def test_openevolve_config_rejects_invalid_values(
+    kwargs: dict[str, int | float],
+    match: str,
+) -> None:
+    with pytest.raises(ValueError, match=match):
         _config(**kwargs)

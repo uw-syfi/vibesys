@@ -2,16 +2,19 @@
 """Fail when a Markdown link points at something that does not exist.
 
 Two link classes break in ways nothing else in CI catches:
+
 1.  A relative link whose target was renamed or deleted. Nothing type-checks
     Markdown, so the link rots silently until a reader clicks it.
 2.  A link inside `docs/` that escapes `docs/`. Those resolve on GitHub but
     not on the docs website: the Docusaurus docs plugin serves `docs/` as its
     whole content root, so `../src/...` resolves to a site URL that was never
     built. Such links must use an absolute repository URL instead.
+
 Checked: relative links and absolute links back into this repository
 (`https://github.com/uw-syfi/vibesys/blob|tree/<ref>/<path>`), including their
 `#anchor` when the target is Markdown. Other external URLs are not fetched,
 so the check stays offline and deterministic.
+
 Usage:
     uv run python scripts/check_doc_links.py [PATH ...].
 """
@@ -30,9 +33,11 @@ REPO_URL_PREFIXES = (
     "https://github.com/uw-syfi/vibesys/blob/",
     "https://github.com/uw-syfi/vibesys/tree/",
 )
+
 # Subtrees the docs website publishes as its own content root. A relative link
 # from inside one of these must stay inside it.
 PUBLISHED_ROOTS = ("docs",)
+
 # Vendored trees. Their links belong to the upstream project and are broken
 # there too (they point at pages of the original site that were not mirrored),
 # so enforcing them here would only pin us to upstream's bugs.
@@ -43,10 +48,12 @@ EXCLUDED_PREFIXES = (
     "resources/skills/neuron-agentic-development/",
 )
 MARKDOWN_SUFFIXES = (".md", ".mdx")
+
 # Inline `[text](target)` links plus `[id]: target` reference definitions.
 INLINE_LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)\s<>]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)")
 REFERENCE_LINK = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*<?(\S+)>?", re.MULTILINE)
 FENCE = re.compile(r"^\s*(```|~~~)")
+
 EXPLICIT_HEADING_ID = re.compile(r"\{#([^}]+)\}\s*$")
 HTML_ANCHOR = re.compile(r"""(?:id|name)=["']([^"']+)["']""")
 
@@ -222,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Limit the check to these files or directories (default: whole repo).",
     )
     args = parser.parse_args(argv)
+
     repo_root = Path(run_git(["git", "rev-parse", "--show-toplevel"]).strip())
     files = iter_markdown_files(args.paths, repo_root)
     problems = check(files, repo_root)

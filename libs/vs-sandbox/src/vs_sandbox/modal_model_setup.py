@@ -17,7 +17,6 @@ import modal
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
 _UPLOAD_APP_NAME = "vibesys-model-upload"
 _VOL_PREFIX = "vibesys-model-"
 # Sentinel file written after a successful snapshot_download — lets us

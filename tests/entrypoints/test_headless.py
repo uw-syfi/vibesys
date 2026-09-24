@@ -27,6 +27,7 @@ from entrypoints.cli import (
     _render_configuration_error,
     _run_migrate_run_environment,
     _with_operator_constraints,
+    build_run_request,
     load_config_and_skills,
     parse_cli_invocation,
     run_environment_spec_from_args,
@@ -617,6 +618,7 @@ def test_direct_runs_default_to_local_and_copied_runs_default_to_a_remote(
 
 
 def test_short_repository_name_uses_the_configured_owner(tmp_path: Path) -> None:
+
     project = _write_input_project(tmp_path)
     config_path = tmp_path / "agent.toml"
     config_path.write_text('[model]\nname = "gpt-5.5"\n[repository]\nowner = "my-lab"\n')
@@ -693,15 +695,14 @@ def test_evolve_rejects_invalid_search_settings(
 def test_openevolve_knobs_select_openevolve_for_a_new_run(tmp_path: Path) -> None:
 
     project = _write_input_project(tmp_path)
-    args = parse_cli_invocation(
+    invocation = parse_cli_invocation(
         ["--outer-loop", "evolve", "--input", str(project), "--openevolve-num-islands", "3"]
-    ).args
+    )
+    request = build_run_request(invocation)
 
-    policy, config = cli._resolve_openevolve_options(args)  # noqa: SLF001  # lint-waiver: LW-008242 [SLF001]; exercise pure option normalization without request-builder filesystem setup.
-
-    assert policy == "openevolve"
-    assert config is not None
-    assert config.num_islands == 3
+    assert request.search_policy == "openevolve"
+    assert request.openevolve_config is not None
+    assert request.openevolve_config.num_islands == 3
 
 
 def test_openevolve_knobs_cannot_be_combined_with_vibesys_policy(tmp_path: Path) -> None:
@@ -728,6 +729,7 @@ def test_target_validation_loads_the_manifest_contract(tmp_path: Path) -> None:
         manifest.write(
             '\n[benchmark.result]\njson_argument = "--output-json"\nmetric = "ops_per_sec"\n'
         )
+
     args = parse_cli_invocation(["--input", str(project)]).args
 
     assert args.input_bundle.domain is DomainName.GENERIC
@@ -828,6 +830,7 @@ def test_omitted_config_loads_only_the_launch_directory_config(
 
 
 def test_missing_explicit_config_is_a_configuration_error(tmp_path: Path) -> None:
+
     project = _write_input_project(tmp_path)
     args = parse_cli_invocation(
         ["--input", str(project), "--config", str(tmp_path / "missing.toml")]
@@ -1799,6 +1802,7 @@ def test_instrumented_microservice_task_profiles_with_otel_by_default(tmp_path: 
     """
 
     project = _write_microservice_project(tmp_path, traced=True)
+
     invocation = parse_cli_invocation(["--input", str(project)])
     assert invocation.args.profiler is ProfilerKind.OTEL
 
@@ -1807,6 +1811,7 @@ def test_uninstrumented_microservice_task_keeps_auto(tmp_path: Path) -> None:
     """Without a collector there is nothing for the OTel profiler to read."""
 
     project = _write_microservice_project(tmp_path, traced=False)
+
     invocation = parse_cli_invocation(["--input", str(project)])
     assert invocation.args.profiler is ProfilerKind.AUTO
 
@@ -1815,6 +1820,7 @@ def test_explicit_profiler_flag_overrides_the_task_default(tmp_path: Path) -> No
     """The bundle only supplies a default; the operator stays in control."""
 
     project = _write_microservice_project(tmp_path, traced=True)
+
     invocation = parse_cli_invocation(["--input", str(project), "--profiler", "none"])
     assert invocation.args.profiler is ProfilerKind.NONE
 
@@ -1825,6 +1831,7 @@ def test_non_microservice_task_is_unaffected_by_trace_arguments(tmp_path: Path) 
     project = _write_microservice_project(tmp_path, traced=True, name="generic-task")
     manifest = project / "vibesys.input.toml"
     manifest.write_text(manifest.read_text().replace('"microservices"', '"generic"'))
+
     invocation = parse_cli_invocation(["--input", str(project)])
     assert invocation.args.profiler is ProfilerKind.AUTO
 

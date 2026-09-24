@@ -4,7 +4,9 @@ import base64
 import hashlib
 import io
 import json
+import os
 import socket
+import stat
 import tempfile
 import threading
 import uuid
@@ -27,7 +29,11 @@ from vibesys.skypilot.protocol import (
 type _Frame = ArtifactFrame | ErrorFrame | OutputFrame | ResultFrame
 
 
-def _serve_frames(socket_path: Path, frames: list[_Frame]) -> threading.Thread:
+def _serve_frames(
+    socket_path: Path,
+    frames: list[_Frame],
+    invocation_ids: list[str] | None = None,
+) -> threading.Thread:
     """Serve one bridge conversation on ``socket_path``, then exit.
 
     ``ready`` is released from a ``finally`` so a server thread that dies
@@ -46,6 +52,8 @@ def _serve_frames(socket_path: Path, frames: list[_Frame]) -> threading.Thread:
                 with connection:
                     reader = connection.makefile("rb")
                     request = json.loads(reader.readline())
+                    if invocation_ids is not None:
+                        invocation_ids.append(request["invocation_id"])
                     for frame in frames:
                         connection.sendall(encode_message(frame))
                     if any(isinstance(frame, ResultFrame) for frame in frames):
@@ -165,22 +173,40 @@ def test_pending_invocation_identity_survives_helper_process_state_reload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VIBESYS_SKYPILOT_CALLER_STATE", str(tmp_path))
+    invocation_ids: list[str] = []
+    first_path = tmp_path / "first.sock"
+    first_thread = _serve_frames(first_path, [], invocation_ids)
+    assert run_evaluator("accuracy", first_path, stdout=io.StringIO(), stderr=io.StringIO()) == 2
+    first_thread.join()
+    pending_files = list(tmp_path.glob("pending-*"))
+    assert len(pending_files) == 1
+    second_path = tmp_path / "second.sock"
+    second_thread = _serve_frames(
+        second_path,
+        [ResultFrame(status="COMPLETED", sky_exit_code=0, remote_job_id=7)],
+        invocation_ids,
+    )
+    assert run_evaluator("accuracy", second_path, stdout=io.StringIO(), stderr=io.StringIO()) == 0
+    second_thread.join()
 
-    first, path = helper_module._pending_invocation("accuracy", ())
-    second, same_path = helper_module._pending_invocation("accuracy", ())
-
-    assert first == second
-    assert path == same_path
-    assert path.is_relative_to(tmp_path)
+    assert invocation_ids[0] == invocation_ids[1]
+    assert not pending_files[0].exists()
 
 
 def test_acknowledged_pending_invocation_removal_is_directory_durable(
     tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VIBESYS_SKYPILOT_CALLER_STATE", str(tmp_path))
-    _, pending_path = helper_module._pending_invocation("accuracy", ())
     fsynced: list[Path] = []
-    monkeypatch.setattr(helper_module, "_fsync_directory", fsynced.append)
+
+    def track_fsync(descriptor: int) -> None:
+        metadata = os.fstat(descriptor)
+        if stat.S_ISDIR(metadata.st_mode):
+            fsynced.append(Path(f"/proc/self/fd/{descriptor}").readlink())
+        original_fsync(descriptor)
+
+    original_fsync = os.fsync
+    monkeypatch.setattr(helper_module.os, "fsync", track_fsync)
     socket_path = socket_dir / "bridge.sock"
     thread = _serve_frames(
         socket_path,
@@ -190,19 +216,34 @@ def test_acknowledged_pending_invocation_removal_is_directory_durable(
     assert run_evaluator("accuracy", socket_path, stdout=io.StringIO(), stderr=io.StringIO()) == 0
     thread.join()
 
-    assert not pending_path.exists()
-    assert fsynced == [tmp_path]
+    assert list(tmp_path.glob("pending-*")) == []
+    assert fsynced == [tmp_path, tmp_path]
 
 
 def test_pending_invocation_recovers_an_incomplete_token_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VIBESYS_SKYPILOT_CALLER_STATE", str(tmp_path))
-    _, path = helper_module._pending_invocation("accuracy", ())
-    path.write_text("partial", encoding="utf-8")
 
-    recovered, same_path = helper_module._pending_invocation("accuracy", ())
+    first_ids: list[str] = []
+    first_path = socket_dir / "first.sock"
+    first_thread = _serve_frames(first_path, [], first_ids)
+    assert run_evaluator("accuracy", first_path, stdout=io.StringIO(), stderr=io.StringIO()) == 2
+    first_thread.join()
+    pending_path = next(tmp_path.glob("pending-*"))
+    pending_path.write_text("partial", encoding="utf-8")
 
-    assert len(recovered) == 32
-    assert same_path == path
-    assert path.read_text(encoding="utf-8") == recovered
+    recovered_ids: list[str] = []
+    recovered_path = socket_dir / "recovered.sock"
+    recovered_thread = _serve_frames(
+        recovered_path,
+        [ResultFrame(status="COMPLETED", sky_exit_code=0, remote_job_id=7)],
+        recovered_ids,
+    )
+    assert (
+        run_evaluator("accuracy", recovered_path, stdout=io.StringIO(), stderr=io.StringIO()) == 0
+    )
+    recovered_thread.join()
+    assert len(recovered_ids[0]) == 32
+    assert recovered_ids[0] != first_ids[0]
+    assert not pending_path.exists()

@@ -91,6 +91,7 @@ class TestStart:
     def test_start_runs_docker_run_with_correct_args(
         self, mock_run: MagicMock, sandbox: DockerSandbox
     ) -> None:
+
         # Remove CUDA_VISIBLE_DEVICES so fallback to "all" is tested
         os.environ.pop("CUDA_VISIBLE_DEVICES", None)
 
@@ -1380,7 +1381,6 @@ class TestResources:
             args=[], returncode=0, stdout="abc123\n", stderr=""
         )
         sandbox.start()
-
         command = mock_run.call_args_list[0].args[0]
         mount_arguments = [
             command[index + 1] for index, argument in enumerate(command[:-1]) if argument == "-v"

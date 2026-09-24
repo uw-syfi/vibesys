@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock
+import json
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -11,12 +12,12 @@ from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.config import Config
 from vs_agent.api import (
     AgentClient,
+    AgentUsage,
     Driver,
     agent_driver_supports_mcp_servers,
     build_agent_client,
 )
-from vs_agent.drivers.agentshim import AgentShimDriver
-from vs_agent.drivers.omnigent import OmnigentDriver, OmnigentDriverError
+from vs_agent.drivers.omnigent import OmnigentDriverError
 from vs_agent.omnigent import supported_providers
 from vs_agent.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
 from vs_sandbox.api import HostResource, HostResourceAccess
@@ -26,28 +27,31 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+class _BuildOptions(TypedDict, total=False):
+    backends: dict[str, Any] | None
+    model_name: str
+    use_docker: bool
+    log_dir: Path | None
+    host_resources: Iterable[HostResource]
+
+
 def _config(**agent: object) -> Config:
     return Config.model_validate({"model": {"name": "m"}, "agent": agent})
 
 
 def _build(
     config: Config,
-    *,
-    backends: dict[str, Any] | None = None,
-    model_name: str = "m",
-    use_docker: bool = False,
-    log_dir: Path | None = None,
-    host_resources: Iterable[HostResource] = (),
+    **options: Unpack[_BuildOptions],
 ) -> AgentClient:
-    spec = agent_spec_from_config(config, model=model_name)
+    spec = agent_spec_from_config(config, model=options.get("model_name", "m"))
     client = build_agent_client(
         spec=spec,
-        backends=backends,
+        backends=options.get("backends"),
         skill_source_dirs=[],
         run_log_file=None,
-        use_docker=use_docker,
-        log_dir=log_dir,
-        host_resources=host_resources,
+        use_docker=options.get("use_docker", False),
+        log_dir=options.get("log_dir"),
+        host_resources=options.get("host_resources", ()),
     )
     # Every case here selects the cli backend, whose concrete client is what
     # these tests inspect.
@@ -58,15 +62,15 @@ def _build(
 def test_agentshim_is_the_default_driver() -> None:
     client = _build(_config(backend="cli", cli_provider="codex"))
 
-    assert isinstance(client._driver, AgentShimDriver)
+    assert client.driver_name == "agentshim"
 
 
 @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
 def test_default_driver_supports_all_agentshim_providers(provider: str) -> None:
     client = _build(_config(backend="cli", cli_provider=provider))
 
-    assert isinstance(client._driver, AgentShimDriver)
-    assert client._provider == provider
+    assert client.driver_name == "agentshim"
+    assert client.provider == provider
 
 
 def test_agentshim_docker_configuration_is_preserved() -> None:
@@ -78,14 +82,15 @@ def test_agentshim_docker_configuration_is_preserved() -> None:
         use_docker=True,
     )
 
-    assert isinstance(client._driver, AgentShimDriver)
-    assert client._driver._docker_sandboxes is backends
+    assert client.driver_name == "agentshim"
+    assert client.capabilities.container_execution
+    assert not client.capabilities.host_path_grants
 
 
 def test_omnigent_driver_can_be_selected() -> None:
     client = _build(_config(driver="omnigent", backend="cli", cli_provider="claude"))
 
-    assert isinstance(client._driver, OmnigentDriver)
+    assert client.driver_name == "omnigent"
 
 
 def test_unknown_driver_is_rejected() -> None:
@@ -124,8 +129,21 @@ def test_omnigent_selection_passes_model_and_log_dir(tmp_path: Path) -> None:
         log_dir=tmp_path,
     )
 
-    assert client._model_name == "gpt-5"
-    assert client._log_dir == tmp_path
+    assert client.model_for_kind("implementer") == "gpt-5"
+    with patch.object(
+        client,
+        "run",
+        return_value=MagicMock(text="answer", usage=AgentUsage(input_tokens=3)),
+    ):
+        client.invoke_text(
+            kind="implementer",
+            workspace=tmp_path,
+            system_prompt="instructions",
+            user_prompt="prompt",
+            round_label="usage log directory",
+        )
+    usage_record = json.loads((tmp_path / "usage.jsonl").read_text(encoding="utf-8"))
+    assert usage_record["model"] == "gpt-5"
 
 
 def test_driver_is_rejected_for_non_cli_backend() -> None:
@@ -180,7 +198,7 @@ def test_omnigent_accepts_empty_host_resources() -> None:
         host_resources=(),
     )
 
-    assert isinstance(client._driver, OmnigentDriver)
+    assert client.driver_name == "omnigent"
 
 
 def test_omnigent_provider_registry_matches_supported_providers() -> None:

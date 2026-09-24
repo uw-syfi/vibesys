@@ -1,10 +1,12 @@
 """Measured CPU attribution for the differential-dataflow `bfs` engine.
+
 This is the attribution input to the profile-guided policy: it profiles the
 **unmodified** candidate `bfs` binary and produces a deterministic, quantified
 list of which engine **components** burn the most CPU, so the loop can attack the
 hottest one first. It does NOT score the engine — the scored metric stays
 `benchmark/benchmark.py`'s getrusage `cpu_reduction_ratio`; callgrind instruction
 reads (`Ir`) are used only to *rank what to attack*.
+
 Why callgrind (not perf): `perf` is unavailable on this box (`perf_event_paranoid`,
 no sudo), and an in-process profiler would perturb `engine/` (and the diff-gate).
 `valgrind --tool=callgrind` profiles the unmodified binary, is deterministic
@@ -12,6 +14,7 @@ no sudo), and an in-process profiler would perturb `engine/` (and the diff-gate)
 requires), and its symbols map straight to differential-dataflow source. It is
 ~20-50x slower than native, so we profile a dedicated, *smaller*
 `workload.ATTRIBUTION_WORKLOAD` in a single run (no warmups/median — `Ir` is noise-free).
+
 Attribution model — the subtle part: with `-O`/generics, most of the hot
 instructions are *monomorphized* copies of differential-dataflow code that
 callgrind files under `/rustc/.../library/...` (e.g. `vec/mod.rs`, `slice/index.rs`).
@@ -22,9 +25,12 @@ type-parameter paths, which appear as back-refs) and fold the cost onto the owni
 component. Rows with no dd marker fall back to file/symbol heuristics
 (smallvec / timely / libc). The component vocabulary is fixed, so the ranking the
 loop walks is stable across rounds.
+
 Ir undercounts cache/memory-bound cost; if the top-`Ir` component fails to move
 `cpu_reduction_ratio`, add a cachegrind D1/LL-miss pass — do not silently trust `Ir`.
+
 Exit 0 = wrote a ranked attribution; 2 = build/setup/tool error (no verdict).
+
 Usage (the profile-guided outer loop runs this when selecting a new focus):
   python3 profiler/attribute_cpu.py \
       --engine-cmd 'engine/target/release/examples/bfs' \
@@ -42,20 +48,24 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from importlib import import_module
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _WORKSPACE = os.path.normpath(os.path.join(_HERE, ".."))
 sys.path.insert(0, os.path.join(_WORKSPACE, "reference"))
-# lint-waiver: LW-008008 [E402]; This standalone evaluator adds its sibling reference directory to sys.path before importing workload.
-import workload  # noqa: E402
+workload = import_module("workload")
+
 
 _DEFAULT_ENGINE_BIN = os.path.join(_WORKSPACE, "engine", workload.BFS_BINARY_RELPATH)
+
 # callgrind is ~20-50x slower than native; the attribution workload is sized small
 # (workload.ATTRIBUTION_WORKLOAD) so a single run finishes in a few seconds, but be
 # generous in case the agent points this at a larger candidate.
 _RUN_TIMEOUT_S = 1800
+
 _DD_CRATE = "differential_dataflow"
 _DD_SRC_PREFIX = "differential-dataflow/src/"
+
 # libc allocator / mem* leaf functions (rows with no dd marker).
 _MALLOC_FUNCS = {
     "malloc",
@@ -88,6 +98,7 @@ def _dd_component_from_path(rel: str) -> str:
 
 def _dd_defining_path(func: str) -> list[str]:
     """Parse the leading length-prefixed idents right after the dd crate id.
+
     In Rust v0 mangling the defining item's module path follows the crate id
     directly (`...21differential_dataflow9operators6reduce7cursors...`), while
     type-parameter paths appear later as back-refs. Reading only the idents
@@ -173,6 +184,7 @@ _ROW_RE = re.compile(r"^\s*([\d,]+)\s*\(\s*([\d.]+)%\)\s+(\S.*?):(\S.*?)\s*$")
 
 def parse_annotate(text: str) -> list[tuple[int, str, str]]:
     """Parse `callgrind_annotate` output into (ir, file, function) rows.
+
     Only the `file:function` table (rows after the `file:function` header) is
     consumed; the `PROGRAM TOTALS` line and headers are skipped.
     """
@@ -303,6 +315,7 @@ def main() -> int:
         help="where to write the profile-guided protocol v1 result",
     )
     args = ap.parse_args()
+
     tokens = shlex.split(args.engine_cmd)
     if len(tokens) != 1:
         print(
@@ -312,6 +325,7 @@ def main() -> int:
         )
         return 2
     binary = tokens[0]
+
     if args.rebuild_cmd:
         rb = subprocess.run(args.rebuild_cmd, shell=True, capture_output=True, text=True)
         if rb.returncode != 0:
@@ -322,6 +336,7 @@ def main() -> int:
     if not os.path.exists(binary):
         print(f"attribute-cpu ERROR: engine binary not found: {binary}", file=sys.stderr)
         return 2
+
     wl = workload.ATTRIBUTION_WORKLOAD
     print(f"attribute-cpu — callgrind on attribution workload: {' '.join(wl)}")
     tmpdir = tempfile.mkdtemp(prefix="attrib-cpu-")
@@ -337,12 +352,15 @@ def main() -> int:
             return 2
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
     rows = parse_annotate(text)
     if not rows:
         print("attribute-cpu ERROR: parsed no rows from callgrind_annotate output", file=sys.stderr)
         return 2
     components = aggregate(rows)
+
     result = protocol_result(components)
+
     print("-" * 72)
     print(f"{'component':<28} {'Ir %':>7}  top function")
     print("-" * 72)
@@ -352,6 +370,7 @@ def main() -> int:
     print("-" * 72)
     if components:
         print(f"Top bottleneck: {components[0]['component']} ({components[0]['pct']}% of Ir)")
+
     os.makedirs(os.path.dirname(os.path.abspath(args.vs_output)), exist_ok=True)
     with open(args.vs_output, "w") as f:
         json.dump(result, f, indent=2)

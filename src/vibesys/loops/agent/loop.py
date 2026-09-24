@@ -93,6 +93,7 @@ from vibesys.profilers import (
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.render.sink import output_sink
 from vibesys.run import LocalRunIntegration, LoopContext, RepositoryVisibility, RunStateNamespace
+from vibesys.sandbox.model_requests import ModelRequestError, reconcile_model_requests
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -155,11 +156,11 @@ if TYPE_CHECKING:
         ProfileGuidedInput,
         WorkspaceSource,
     )
-
 # Candidate process boundaries selected by ``--interface``. Language, tooling,
 # and artifact requirements belong to the selected domain and input bundle.
 _INTERFACES = ("inprocess", "service")
 DEFAULT_INTERFACE = "inprocess"
+_EN_DASH = "\N{EN DASH}"
 
 _INNER_LOOPS = ("multi-agent", "single-agent")
 
@@ -552,11 +553,11 @@ def _finalize_agent_run(
     if winner is None:
         baseline = ctx.git.trusted_input_baseline
         if baseline is None:
-            raise RuntimeError(
-                "no trusted retained candidate or trusted input baseline is available"
-            )
+            message = "no trusted retained candidate or trusted input baseline is available"
+            raise RuntimeError(message)
         if not ctx.git.checkout_tree(baseline, clean=True, preserve_paths=relative_memory):
-            raise RuntimeError(f"could not restore trusted input baseline at {baseline}")
+            message = f"could not restore trusted input baseline at {baseline}"
+            raise RuntimeError(message)
         ctx.snapshot_workspace("agent: restore trusted input baseline")
         ctx.lprint(
             f"\nNo evaluated winner was retained. Restored trusted input baseline {baseline[:12]}."
@@ -564,14 +565,12 @@ def _finalize_agent_run(
         return
     winner_commit = winner.commit
     if winner_commit is None:
-        raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-008238 [TRY003]; final selection must identify its trusted candidate commit before changing workspace state.
-            "selected final candidate is missing its commit"
-        )
+        message = "selected final candidate is missing its commit"
+        raise RuntimeError(message)
     ctx.git.retain_candidate(f"selected-round-{winner.round_number:04d}", winner_commit)
     if not ctx.git.checkout_tree(winner_commit, clean=True, preserve_paths=relative_memory):
-        raise RuntimeError(
-            f"could not materialize selected round {winner.round_number} at {winner_commit}"
-        )
+        message = f"could not materialize selected round {winner.round_number} at {winner_commit}"
+        raise RuntimeError(message)
     ctx.snapshot_workspace(f"agent: select round {winner.round_number}")
     metrics = (
         _format_metric_row(_record_candidate_metrics(winner), space.objectives)
@@ -627,7 +626,6 @@ def _detect_plateau(
     min_streak: int = _PLATEAU_MIN_STREAK,
 ) -> str | None:
     """Return a warning string if recent same-unit rounds stayed steady.
-
     Check whether the most recent ``min_streak`` rounds
     with **fresh, same-unit** perf metrics stayed within ``threshold_pct``
     of each other; else None.
@@ -675,7 +673,7 @@ def _detect_plateau(
     rounds = [r.round_number for r in tail]
     return (
         f"The last {min_streak} rounds with a fresh perf measurement (rounds "
-        f"{rounds[0]}–{rounds[-1]}) all landed in {lo:.2f}–{hi:.2f}{unit_suffix} "  # noqa: RUF001  # lint-waiver: LW-008241 [RUF001]; this user-facing measurement range keeps the established en-dash wording.
+        f"{rounds[0]}{_EN_DASH}{rounds[-1]}) all landed in {lo:.2f}{_EN_DASH}{hi:.2f}{unit_suffix} "
         f"— a {spread_pct:.2f}% spread, well within bench noise. Whatever you've "
         f"been working on for those rounds is not actually moving the headline "
         f"metric."
@@ -908,7 +906,8 @@ def _invoke_read_only_role(
     ctx.snapshot_workspace(checkpoint_label)
     checkpoint = ctx.git.current_sha()
     if checkpoint is None:
-        raise RuntimeError(f"Cannot isolate {role}: workspace checkpoint is unavailable")
+        message = f"Cannot isolate {role}: workspace checkpoint is unavailable"
+        raise RuntimeError(message)
 
     try:
         return ctx.invoke(**invoke_kwargs)
@@ -927,16 +926,18 @@ def _invoke_read_only_role(
             if allowed_workspace_paths:
                 checkout_kwargs["preserve_paths"] = allowed_workspace_paths
             if not ctx.git.checkout_tree(checkpoint, **checkout_kwargs):
-                raise RuntimeError(
+                message = (
                     f"Cannot isolate {role}: failed to restore workspace checkpoint "
                     f"{checkpoint[:12]}"
                 )
+                raise RuntimeError(message)
             remaining = [path for path in ctx.git.pending_changes() if not is_allowed(path)]
             if remaining:
-                raise RuntimeError(
+                message = (
                     f"Cannot isolate {role}: workspace is still modified after restore: "
                     f"{', '.join(remaining[:_ROLE_CHANGE_DISPLAY_LIMIT])}"
                 )
+                raise RuntimeError(message)
             shown = ", ".join(unauthorized[:_ROLE_CHANGE_DISPLAY_LIMIT])
             suffix = (
                 ""
@@ -1025,10 +1026,12 @@ def _effective_profiler_definition(
     """
     kind = require_profiler_kind(profiler_kind)
     if kind is ProfilerKind.NONE:
-        raise ValueError("No profiler prompt exists when profiling is disabled.")
+        message = "No profiler prompt exists when profiling is disabled."
+        raise ValueError(message)
     definition = profiler_definition(kind)
     if definition.requires_domain_torch_support and not supports_torch_profiler:
-        raise ValueError("The selected domain does not provide Torch profiler support.")
+        message = "The selected domain does not provide Torch profiler support."
+        raise ValueError(message)
     return definition
 
 
@@ -1289,11 +1292,14 @@ def _validate_orchestrator_plan_state(
     if len({update.hypothesis_id for update in plan.hypothesis_updates}) != len(
         plan.hypothesis_updates
     ):
-        raise ValueError("Orchestrator hypothesis_updates must name each hypothesis once")
+        message = "Orchestrator hypothesis_updates must name each hypothesis once"
+        raise ValueError(message)
     if any(update.hypothesis_id == plan.hypothesis_id for update in plan.hypothesis_updates):
-        raise ValueError("Orchestrator hypothesis_updates must refer to prior hypotheses")
+        message = "Orchestrator hypothesis_updates must refer to prior hypotheses"
+        raise ValueError(message)
     if state.by_id(plan.hypothesis_id) is not None:
-        raise ValueError(f"hypothesis ID {plan.hypothesis_id!r} was already used")
+        message = f"hypothesis ID {plan.hypothesis_id!r} was already used"
+        raise ValueError(message)
     # Apply to a copy before any plan artifact is written. The real transition
     # is persisted after the operational active checkpoint is assembled.
     apply_strategy_updates(state, plan.hypothesis_updates)
@@ -1845,12 +1851,15 @@ def _validation_input_digest(workspace: Path, recipe: ValidationRecipe) -> str:
     for relative in sorted(recipe.input_paths):
         unresolved = workspace / relative
         if unresolved.is_symlink():
-            raise ValueError(f"validation input must not be a symlink: {relative}")
+            message = f"validation input must not be a symlink: {relative}"
+            raise ValueError(message)
         path = unresolved.resolve()
         if not path.is_relative_to(workspace_root):
-            raise ValueError(f"validation input escapes workspace: {relative}")
+            message = f"validation input escapes workspace: {relative}"
+            raise ValueError(message)
         if not path.exists():
-            raise ValueError(f"validation input does not exist: {relative}")
+            message = f"validation input does not exist: {relative}"
+            raise ValueError(message)
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0dir\0" if path.is_dir() else b"\0file\0")
         entries = [path]
@@ -1858,14 +1867,16 @@ def _validation_input_digest(workspace: Path, recipe: ValidationRecipe) -> str:
             entries = sorted(candidate for candidate in path.rglob("*") if candidate.is_file())
         for entry in entries:
             if entry.is_symlink():
-                raise ValueError(f"validation input must not be a symlink: {relative}")
+                message = f"validation input must not be a symlink: {relative}"
+                raise ValueError(message)
             total_files += 1
             total_bytes += entry.stat().st_size
             if (
                 total_files > _MAX_VALIDATION_INPUT_FILES
                 or total_bytes > _MAX_VALIDATION_INPUT_BYTES
             ):
-                raise ValueError("validation inputs exceed the 4096-file/256-MiB reuse-hash limit")
+                message = "validation inputs exceed the 4096-file/256-MiB reuse-hash limit"
+                raise ValueError(message)
             entry_relative = entry.relative_to(workspace_root).as_posix()
             digest.update(entry_relative.encode("utf-8"))
             digest.update(b"\0")
@@ -1904,17 +1915,21 @@ def _load_validation_recipes(workspace: Path, artifact: str) -> list[ValidationR
     workspace_root = workspace.resolve()
     path = (workspace / artifact).resolve()
     if not path.is_relative_to(workspace_root):
-        raise ValueError("validation recipe artifact escapes the workspace")
+        message = "validation recipe artifact escapes the workspace"
+        raise ValueError(message)
     if not path.is_file():
-        raise ValueError(f"validation recipe artifact does not exist: {artifact}")
+        message = f"validation recipe artifact does not exist: {artifact}"
+        raise ValueError(message)
     try:
         payload = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"validation recipe artifact is not valid JSON: {exc}") from exc
+        message = f"validation recipe artifact is not valid JSON: {exc}"
+        raise ValueError(message) from exc
     try:
         return ValidationRecipeArtifact.model_validate(payload).recipes
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"validation recipe artifact does not match version 1: {exc}") from exc
+        message = f"validation recipe artifact does not match version 1: {exc}"
+        raise ValueError(message) from exc
 
 
 def _run_framework_validation_gate(
@@ -2207,11 +2222,6 @@ def _reconcile_model_requests(ctx: LoopContext) -> str | None:
     """
     if getattr(ctx.run_environment_view, "env_kind", "local") != "modal":
         return None
-    from vibesys.sandbox.model_requests import (
-        ModelRequestError,
-        reconcile_model_requests,
-    )
-
     try:
         volumes = reconcile_model_requests(ctx.workspace, log=ctx.lprint)
     except ModelRequestError as exc:
@@ -2376,28 +2386,34 @@ def run_agent_loop(
     bundle rather than the process-boundary mode.
     """
     if inner_loop not in _INNER_LOOPS:
-        raise ValueError(
-            f"Unknown inner_loop {inner_loop!r}; choose from {', '.join(_INNER_LOOPS)}"
-        )
+        message = f"Unknown inner_loop {inner_loop!r}; choose from {', '.join(_INNER_LOOPS)}"
+        raise ValueError(message)
     if max_retries_per_round < 1:
         # Guard against a zero-iteration retry loop: with no attempts the
         # round bookkeeping below would reference an unbound loop variable.
-        raise ValueError(f"max_retries_per_round must be >= 1, got {max_retries_per_round}")
+        message = f"max_retries_per_round must be >= 1, got {max_retries_per_round}"
+        raise ValueError(message)
     if judge_every < 1:
-        raise ValueError(f"judge_every must be >= 1, got {judge_every}")
+        message = f"judge_every must be >= 1, got {judge_every}"
+        raise ValueError(message)
     if official_eval_every < 1:
-        raise ValueError(f"official_eval_every must be >= 1, got {official_eval_every}")
+        message = f"official_eval_every must be >= 1, got {official_eval_every}"
+        raise ValueError(message)
     if memory_layout not in issue_board.MEMORY_LAYOUTS:
-        raise ValueError(
+        message = (
             f"Unknown memory_layout {memory_layout!r}; "
             f"choose from {', '.join(issue_board.MEMORY_LAYOUTS)}"
         )
+        raise ValueError(message)
     if interface not in _INTERFACES:
-        raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")
+        message = f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}"
+        raise ValueError(message)
     if domain is None:
-        raise ValueError("domain is required; declare [agent].domain in vibesys.input.toml")
+        message = "domain is required; declare [agent].domain in vibesys.input.toml"
+        raise ValueError(message)
     if outer_loop == "profile-guided" and profile_guided is None:
-        raise ValueError("profile-guided runs require profile guidance settings")
+        message = "profile-guided runs require profile guidance settings"
+        raise ValueError(message)
     # Resolve the registered domain once (fail fast on an unknown name). The
     # per-role files carry language, tooling, and use-case-specific contracts.
     domain_definition = resolve_domain(domain)
@@ -2551,10 +2567,11 @@ def run_agent_loop(
                     progress_path=progress_path,
                 )
                 return True
-            raise ValueError(
+            message = (
                 f"This run has completed {round_number - 1} rounds; max_rounds={max_rounds} "
                 "is a total limit. Increase --max-rounds to continue."
             )
+            raise ValueError(message)
         finally:
             ctx.close()
 
@@ -2681,9 +2698,8 @@ def run_agent_loop(
                     agent_run_state = engine.state
                     active_hypothesis = agent_run_state.active_hypothesis
                     if active_hypothesis is None:
-                        raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-008239 [TRY003]; starting a hypothesis must populate active state before planning its task.
-                            "hypothesis engine did not retain the started hypothesis"
-                        )
+                        message = "hypothesis engine did not retain the started hypothesis"
+                        raise RuntimeError(message)
                     plan = active_hypothesis.plan
                     persist_agent_run_state(
                         ctx,
@@ -2733,9 +2749,8 @@ def run_agent_loop(
                             target, _FAILED_HYPOTHESIS_OUTCOMES
                         )
                         if rollback_commit is None:
-                            raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-008240 [TRY003]; rollback resolution must preserve the validated target commit.
-                                f"rollback target round {target.round_number} has no commit"
-                            )
+                            message = f"rollback target round {target.round_number} has no commit"
+                            raise RuntimeError(message)
                         # Restore the tree without moving HEAD so subsequent
                         # commits land on the current branch as new commits
                         # after the reverted state.
@@ -2810,12 +2825,13 @@ def run_agent_loop(
                 retry = 0
                 first_retry = issue_board.next_implementer_attempt(progress_path, round_number)
                 if first_retry > max_retries_per_round:
-                    raise RuntimeError(
+                    message = (
                         f"Round {round_number} already persisted "
                         f"{first_retry - 1} implementer attempts, exhausting "
                         f"max_retries_per_round={max_retries_per_round}; refusing "
                         "to overwrite or replay paid work."
                     )
+                    raise RuntimeError(message)
                 if first_retry > 1:
                     ctx.lprint(
                         f"[resume] round {round_number} continues at durable "

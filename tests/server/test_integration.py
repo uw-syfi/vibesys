@@ -23,6 +23,7 @@ from server.integration import (
 )
 from server.journal import DIAGNOSTIC_FAILURE_EVENTS
 from server.run_attachment import AgentSelection, RunAttachment
+from vibesys.constants import ComputeBackend
 from vibesys.events import (
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
@@ -42,15 +43,18 @@ from vibesys.events import (
 )
 from vibesys.events import RunStartedData as CoreRunStartedData
 from vibesys.render import output_sink
+from vibesys.run.integration import RunResourceHandoff
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_sandbox.api import ProjectPathPolicy
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
     from vibesys.api import RunSession
+    from vibesys.config import Config
+    from vibesys.sandbox.run_environment import RunEnvironment, RunEnvironmentRequest
 
 
 def _project_run(root: Path) -> tuple[Project, str]:
@@ -120,14 +124,29 @@ def _emit_execution_started(
     return execution_id
 
 
-def _attach_test_run(
-    parts: ServerParts,
-    attachment: RunAttachment,
-) -> Callable[[], None] | None:
-    """Install chat resources without opening the server transport."""
-    return parts.integration._attach_run(  # noqa: SLF001  # lint-waiver: LW-008500 [SLF001]; isolate chat-factory behavior without launching the server runtime and transport.
-        attachment,
+def _attach_test_run(parts: ServerParts, attachment: RunAttachment) -> None:
+    """Publish run resources through the integration's public handoff path."""
+    parts.integration.handle_run_resources(
         cast("RunSession", object()),
+        RunResourceHandoff(
+            project=attachment.project,
+            run_id=attachment.run_id,
+            workspace=attachment.workspace,
+            log_dir=attachment.log_dir,
+            agent_backend=attachment.agent_backend,
+            driver=attachment.agent_defaults.driver,
+            provider=attachment.agent_defaults.provider,
+            model=attachment.agent_defaults.model,
+            role_models=attachment.agent_defaults.role_models,
+            config=cast("Config", object()),
+            compute_backend=ComputeBackend.CPU,
+            skill_source_dirs=(),
+            environment=cast("RunEnvironment", object()),
+            environment_request=cast("RunEnvironmentRequest", object()),
+            run_environment_sandboxed=False,
+            project_path_policy=ProjectPathPolicy(),
+            host_resources=(),
+        ),
     )
 
 
@@ -400,7 +419,7 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
         )
 
     parts = build_server_parts(chat_agent_builder=build_agent)
-    detach = _attach_test_run(
+    _attach_test_run(
         parts,
         RunAttachment(
             project=project,
@@ -411,8 +430,6 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
             agent_defaults=AgentSelection(driver="agentshim", provider="codex", model="gpt-test"),
         ),
     )
-    assert detach is not None
-
     response = parts.api.execute(ChatQuery(text="what improved?"))
 
     assert response.chat is not None
@@ -428,7 +445,7 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
     }
     assert not (project.root / ".vibesys/server").exists()
     assert str(transcript.parent) in call.system_prompt
-    detach()
+    parts.integration.close()
     assert closed == ["closed"]
 
 
@@ -469,6 +486,7 @@ def test_non_cli_run_rejects_new_chat_threads(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="require the CLI agent backend"):
         parts.api.execute(ChatThreadCreateQuery(provider="codex", model="gpt-test"))
+    parts.integration.close()
 
 
 def test_close_is_idempotent_and_stops_event_projection(tmp_path: Path) -> None:

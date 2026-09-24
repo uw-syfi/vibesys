@@ -26,6 +26,7 @@ import pytest
 from tests.support import run_test_command
 
 from vs_sandbox import host_sandbox, landlock
+from vs_sandbox.api import SandboxUnavailableError
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
 from vs_sandbox.host_sandbox import HostSandbox, LandlockSandbox, LinuxBackend, SeatbeltSandbox
 
@@ -40,27 +41,24 @@ if TYPE_CHECKING:
 _PROBE_ENV = {"HOME": "/home/conformance-probe", "PATH": "/usr/bin:/bin"}
 
 
-def _bwrap_path() -> str | None:
-    """Return a working bubblewrap binary, or ``None`` if none is usable."""
-    bwrap = shutil.which("bwrap")
-    if bwrap is None or not host_sandbox._bwrap_confines(bwrap):
-        return None
-    return bwrap
-
-
 def _build_bubblewrap(
     workspace: Path,
     resources: tuple[HostResource, ...],
     _monkeypatch: pytest.MonkeyPatch,
 ) -> WorkspaceSandbox:
-    if _bwrap_path() is None:
-        pytest.skip("requires a working bubblewrap")
-    sandbox = host_sandbox.build(
-        workspace,
-        env=dict(_PROBE_ENV),
-        resources=resources,
-        require_enforcement=True,
-    )
+    if not sys.platform.startswith("linux"):
+        pytest.skip("requires Linux with bubblewrap")
+    try:
+        sandbox = host_sandbox.build(
+            workspace,
+            env=dict(_PROBE_ENV),
+            resources=resources,
+            require_enforcement=True,
+        )
+    except SandboxUnavailableError as error:
+        if "'bwrap'" in str(error):
+            pytest.skip(f"requires working bubblewrap: {error}")
+        raise
     assert isinstance(sandbox, HostSandbox)
     return sandbox
 

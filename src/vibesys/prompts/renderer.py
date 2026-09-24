@@ -96,7 +96,6 @@ def render_string(source: str, **kwargs: object) -> str:
 
 class ComputeBackendFragment(ABC):
     """Provides backend-specific Jinja fragments.
-
     Fragments live under ``vibesys/prompts/backend/<backend>/``.
 
     Subclasses must set ``backend = ComputeBackend.<X>``. The default
@@ -145,7 +144,6 @@ class ComputeBackendFragment(ABC):
     @classmethod
     def validate(cls) -> None:
         """Verify a ``.j2`` file exists for every fragment in :attr:`NAMES`.
-
         Raises ``ValueError`` listing missing files.
         """
         FragmentFamily(root=_BACKEND_FRAGMENTS_ROOT, names=cls.NAMES).validate([cls.backend.value])
@@ -202,7 +200,6 @@ def get_backend_fragment(backend: ComputeBackend, env: TemplateRenderer) -> Comp
 
 class Prompt:
     """Render templates from a per-mode directory with backend fragments.
-
     Fragments are auto-injected as kwargs.
 
     Construction validates the bound backend's fragment files exist
@@ -217,7 +214,6 @@ class Prompt:
     ----------
     template_dir:
         Per-loop directory the renderer searches first.
-
         For example, ``prompts/loops/plain/`` falls back to the shared
         ``vibesys/prompts/`` root, where backend fragments
         live.

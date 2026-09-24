@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Accuracy checker for the from-scratch Qwen3.5 MI300A bundle.
+
 Boots the candidate's ``python3 server.py`` (or, with ``--base-url``, reuses a
 running one) and runs four deterministic gates over HTTP, all with thinking
 disabled (``chat_template_kwargs.enable_thinking = false``):
+
 1. Held-out multi-turn sessions replayed greedily: non-empty replies, sane
    finish reasons, ``usage.prompt_tokens`` strictly growing with the history
    (6 probes).
@@ -13,6 +15,7 @@ disabled (``chat_template_kwargs.enable_thinking = false``):
    ``EXACT_PREFIX_TOKENS`` greedy tokens must (nearly always) match a
    reference forward. See ``accuracy_checker/README.md`` for the schema, the
    budget, and how the pins are produced.
+
 Gates 1-3 are 13 probes in total. Exit code 0 iff every gate passes. The pins
 gate is mandatory: a missing ``reference/pins.json`` fails with instructions
 unless ``--skip-pins`` is passed (local development only; the benchmark
@@ -40,6 +43,7 @@ from engine_scan import scan as scan_for_engine_code  # noqa: E402
 
 DEFAULT_PINS_PATH = BUNDLE_DIR / "reference" / "pins.json"
 PINS_SCHEMA_VERSION = 1
+
 # Pin budget. Each pin is scored on its first EXACT_PREFIX_TOKENS greedy tokens.
 # A pin "matches" when all of them are identical. The gate passes when at least
 # MIN_EXACT_FRACTION of the pins match and every non-matching pin still agrees
@@ -53,19 +57,23 @@ MIN_PINS = 8
 # Retokenizing the returned text may merge or split the final token, so an
 # output this many tokens short of the prefix is not a divergence by itself.
 RETOKENIZE_SLACK = 1
+
 HOLDOUT_SEED = 20260226  # distinct from benchmark/run.py's seed.
 N_HOLDOUT_SESSIONS = 6
 HOLDOUT_TURNS = 4
 HOLDOUT_MAX_TOKENS = 48
 PROMPT_GROWTH_MIN = 1
 PROMPT_GROWTH_MAX = 4000  # generous ceiling; catches non-growth or blowups, not exactness.
+
 HOLDOUT_WORD_BANK = (
     "latency queue token cache memory schedule batch network response prompt "
     "session context history vector compute kernel thread process config "
     "deploy weight tensor layer route gateway cluster device driver runtime "
     "library metric report result summary status detail record value field"
 ).split()
+
 BADGE_CODES = ("KX-7Q2R", "PL-3M9T", "QZ-8J1V", "RT-5K2X")
+
 ARITHMETIC_PROMPTS: tuple[tuple[str, str], ...] = (
     ("What is 3 + 3? Answer with a single number and nothing else.", "6"),
     ("What is 12 - 5? Answer with a single number and nothing else.", "7"),
@@ -271,6 +279,7 @@ def load_pins(path: Path) -> list[Pin]:
 
 def first_divergence(expected: list[int], got: list[int]) -> int:
     """Index of the first mismatch, or ``len(expected)`` when the prefix fully matches.
+
     An output that is shorter than ``expected`` by more than ``RETOKENIZE_SLACK``
     tokens (all present tokens equal) diverges at its own length.
     """
@@ -359,6 +368,7 @@ async def main_async(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(f"accuracy check could not run: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
+
     failures = [o for o in outcomes if not o.ok]
     for outcome in outcomes:
         status = "OK  " if outcome.ok else "FAIL"
@@ -366,6 +376,7 @@ async def main_async(args: argparse.Namespace) -> int:
     print(f"\n{len(outcomes) - len(failures)}/{len(outcomes)} checks passed")
     if args.skip_pins:
         print("WARNING: --skip-pins was passed; the greedy-pin gate did not run.", file=sys.stderr)
+
     if args.output_json:
         Path(args.output_json).write_text(
             json.dumps(
@@ -373,6 +384,7 @@ async def main_async(args: argparse.Namespace) -> int:
                 indent=2,
             )
         )
+
     if failures:
         print("\nACCURACY CHECK FAILED:", file=sys.stderr)
         for outcome in failures:

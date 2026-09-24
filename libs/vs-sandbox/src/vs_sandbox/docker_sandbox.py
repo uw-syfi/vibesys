@@ -12,8 +12,9 @@ import signal
 import subprocess
 import threading
 import uuid
+from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 from vs_sandbox.execution import SandboxExecutionResult, bounded_execution_result
 from vs_sandbox.host_resources import HostResourceAccess
@@ -48,6 +49,21 @@ AGENT_HOME = "/home/agent"
 
 _AGENT_USER = "agent"
 _ROOT_SETUP_TIMEOUT_S = 60
+_CONTAINER_IDENTITY_LINE_COUNT = 2
+
+
+class DockerSandboxNotStartedError(RuntimeError):
+    """Raised when a live-container operation is requested before start."""
+
+    @classmethod
+    def operation_before_start(cls) -> DockerSandboxNotStartedError:
+        """Describe an operation attempted before the sandbox starts."""
+        return cls("Container not started — call start() first")
+
+    @classmethod
+    def container_id_unavailable(cls, workspace: str) -> DockerSandboxNotStartedError:
+        """Describe a container-id read before the sandbox starts."""
+        return cls(f"Docker sandbox for {workspace} has no running container — call start() first")
 
 
 def _is_secret_env_name(name: str) -> bool:
@@ -75,7 +91,7 @@ def _non_secret_env(env: dict[str, str]) -> dict[str, str]:
 def _cleanup_containers() -> None:
     """Stop and remove all tracked containers."""
     for container_id, _name in list(_live_containers.items()):
-        try:
+        with suppress(OSError, subprocess.TimeoutExpired):
             subprocess.run(  # noqa: S603  # lint-waiver: LW-007110 [S603]; fixed docker stop argv is issued without a shell during process cleanup.
                 ["docker", "stop", container_id],  # noqa: S607  # lint-waiver: LW-007119 [S607]; Docker is a PATH-resolved runtime dependency.
                 capture_output=True,
@@ -83,9 +99,8 @@ def _cleanup_containers() -> None:
                 check=False,
                 timeout=30,
             )
-        except Exception:
-            pass
-        try:
+        removed = None
+        with suppress(OSError, subprocess.TimeoutExpired):
             removed = subprocess.run(  # noqa: S603  # lint-waiver: LW-007111 [S603]; fixed docker rm argv is issued without a shell during process cleanup.
                 ["docker", "rm", "-f", container_id],  # noqa: S607  # lint-waiver: LW-007120 [S607]; Docker is a PATH-resolved runtime dependency.
                 capture_output=True,
@@ -93,7 +108,7 @@ def _cleanup_containers() -> None:
                 check=False,
                 timeout=10,
             )
-        except Exception:
+        if removed is None:
             continue
         if removed.returncode == 0 or "No such container" in (removed.stderr or ""):
             _live_containers.pop(container_id, None)
@@ -236,6 +251,7 @@ class DockerSandbox(WorkspaceSandbox):
         """Return a debug repr that never touches the unset dataclass fields."""
         return f"DockerSandbox(image={self._image!r}, container_id={self._container_id!r})"
 
+    @override
     def __init__(
         self,
         host_workspace: str,
@@ -245,7 +261,7 @@ class DockerSandbox(WorkspaceSandbox):
         group_add: list[str] | None = None,
         entrypoint: str | None = None,
         shm_size: str | None = None,
-        auto_remove: bool = False,
+        auto_remove: bool = False,  # noqa: FBT001, FBT002  # lint-waiver: LW-009061 [FBT001, FBT002]; keep the legacy positional constructor option stable.
         default_timeout: int = 300,
         start_timeout: int = 120,
         max_output_bytes: int = 100_000,
@@ -285,6 +301,8 @@ class DockerSandbox(WorkspaceSandbox):
                 (e.g. ``neuronx-cc``, PyTorch dataloaders) exhaust with
                 "No space left on device".  ``None`` (default) uses Docker's
                 default.
+            auto_remove: Ask Docker to remove the container and its writable
+                layer whenever it stops.
             default_timeout: Default command timeout in seconds.
             start_timeout: Timeout in seconds for the initial ``docker run``.
                 This bounds hidden image pulls or Docker daemon stalls before
@@ -396,9 +414,8 @@ class DockerSandbox(WorkspaceSandbox):
         # Fallback: pass through as-is (e.g. user explicitly set gpus="device=0")
         return gpus
 
-    def start(self) -> None:
-        """Start the Docker container."""
-        self._container_name = f"vibesys-{uuid.uuid4().hex[:12]}"
+    def _start_command(self) -> list[str]:
+        """Build the Docker argv for starting this configured sandbox."""
         cmd = [
             "docker",
             "run",
@@ -448,6 +465,12 @@ class DockerSandbox(WorkspaceSandbox):
                 "infinity",
             ]
         )
+        return cmd
+
+    def start(self) -> None:
+        """Start the Docker container."""
+        self._container_name = f"vibesys-{uuid.uuid4().hex[:12]}"
+        cmd = self._start_command()
 
         self._log_cmd(cmd)
         try:
@@ -463,12 +486,13 @@ class DockerSandbox(WorkspaceSandbox):
                 cmd,
                 error=f"docker run timed out after {self._start_timeout}s",
             )
-            raise RuntimeError(
+            message = (
                 "Timed out starting Docker container after "
                 f"{self._start_timeout}s. If this is the first run, pre-pull "
                 f"the image with `docker pull {self._image}`; otherwise check "
                 "Docker daemon health and GPU runtime configuration."
-            ) from exc
+            )
+            raise RuntimeError(message) from exc
         self._log_cmd(cmd, result)
         if result.returncode != 0:
             container_id = result.stdout.strip()
@@ -476,12 +500,13 @@ class DockerSandbox(WorkspaceSandbox):
                 self._container_id = container_id
                 _live_containers[container_id] = self._container_name
                 self._discard_started_container()
-            raise RuntimeError(
+            message = (
                 f"Failed to start Docker container (exit {result.returncode}):\n"
                 f"  stdout: {result.stdout.strip()}\n"
                 f"  stderr: {result.stderr.strip()}\n"
                 f"  cmd: {' '.join(_redacted_command(cmd))}"
             )
+            raise RuntimeError(message)
         self._container_id = result.stdout.strip()
         _live_containers[self._container_id] = self._container_name
 
@@ -495,7 +520,8 @@ class DockerSandbox(WorkspaceSandbox):
         """Finish startup after Docker has created and registered the container."""
         container_id = self._container_id
         if container_id is None:
-            raise RuntimeError("Container was not created before initialization")
+            message = "Container was not created before initialization"
+            raise RuntimeError(message)
 
         # Save metadata for vibesys-shell to reconstruct the environment
         self._metadata = {
@@ -538,14 +564,16 @@ class DockerSandbox(WorkspaceSandbox):
             )
         except subprocess.TimeoutExpired as exc:
             self._log_cmd(cmd, error=f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s")
-            raise RuntimeError(f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s") from exc
+            message = f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s"
+            raise RuntimeError(message) from exc
         self._log_cmd(cmd, result)
         if result.returncode != 0:
-            raise RuntimeError(
+            message = (
                 f"{what} failed (exit {result.returncode}):\n"
                 f"  stdout: {result.stdout.strip()[:500]}\n"
                 f"  stderr: {result.stderr.strip()[:500]}"
             )
+            raise RuntimeError(message)
 
     def _current_agent_ids(self, container_id: str) -> tuple[int, int] | None:
         """Return the image's ``agent`` user's current (uid, gid), if resolvable."""
@@ -566,7 +594,7 @@ class DockerSandbox(WorkspaceSandbox):
         if result.returncode != 0:
             return None
         lines = result.stdout.split()
-        if len(lines) != 2:
+        if len(lines) != _CONTAINER_IDENTITY_LINE_COUNT:
             return None
         try:
             return int(lines[0]), int(lines[1])
@@ -650,13 +678,11 @@ class DockerSandbox(WorkspaceSandbox):
                             f"Failed to remove Docker container {container_id} "
                             f"(exit {result.returncode}): {result.stderr.strip()}"
                         )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009067 [BLE001]; cleanup must record failures but not replace an earlier startup or shutdown error.
                 if cmd[1] == "rm":
                     cleanup_error = exc
-                try:
+                with suppress(Exception):
                     self._log_cmd(cmd, error=f"container cleanup failed: {exc}")
-                except Exception:
-                    pass
 
         if not removed and cleanup_error is not None and not suppress_errors:
             raise cleanup_error
@@ -685,6 +711,12 @@ class DockerSandbox(WorkspaceSandbox):
             self._container_id = None
             _live_containers.pop(container_id, None)
 
+    def restart_with_gpus(self, gpus: str | None) -> None:
+        """Restart the container with a new Docker GPU selection."""
+        self.stop()
+        self._gpus = gpus
+        self.start()
+
     @property
     def container_id(self) -> str:
         """Return the Docker container id backing this sandbox.
@@ -695,10 +727,7 @@ class DockerSandbox(WorkspaceSandbox):
         is running, which is also the state after :meth:`stop`.
         """
         if self._container_id is None:
-            raise RuntimeError(
-                f"Docker sandbox for {self._host_workspace} has no running "
-                "container — call start() first"
-            )
+            raise DockerSandboxNotStartedError.container_id_unavailable(self._host_workspace)
         return self._container_id
 
     @property
@@ -741,7 +770,7 @@ class DockerSandbox(WorkspaceSandbox):
         wins over either.
         """
         if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")
+            raise DockerSandboxNotStartedError.operation_before_start()
         if self._cached_container_path is None:
             self._cached_container_path = self._read_container_path(self._container_id)
         return {"HOME": AGENT_HOME, "PATH": self._cached_container_path, **self._env}
@@ -760,10 +789,11 @@ class DockerSandbox(WorkspaceSandbox):
         self._log_cmd(cmd, result)
         path = result.stdout.strip()
         if result.returncode != 0 or not path:
-            raise RuntimeError(
+            message = (
                 f"could not read PATH from container {container_id} "
                 f"(exit {result.returncode}): {result.stderr.strip()}"
             )
+            raise RuntimeError(message)
         return path
 
     def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
@@ -784,7 +814,7 @@ class DockerSandbox(WorkspaceSandbox):
         working directory.
         """
         if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")
+            raise DockerSandboxNotStartedError.operation_before_start()
         workdir = self.agent_path(cwd) if cwd is not None else self._CONTAINER_ROOT
         env_flags = [flag for key, value in self._env.items() for flag in ("-e", f"{key}={value}")]
         return ["docker", "exec", "-i", "-w", workdir, *env_flags, self._container_id, *argv]
@@ -797,7 +827,7 @@ class DockerSandbox(WorkspaceSandbox):
     ) -> SandboxExecutionResult:
         """Execute a command inside the Docker container."""
         if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")
+            raise DockerSandboxNotStartedError.operation_before_start()
 
         effective_timeout = timeout if timeout is not None else self._default_timeout
 

@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+import vs_agent.api as _agent_api
 from vibesys.constants import PROJECT_ROOT, ComputeBackend, DomainName
-
-# lint-waiver: LW-007009 [F401]; retain the historical VibeSys import path
-from vs_agent.api import NULL_SKILL_SELECTION  # noqa: F401
 from vs_agent.api import SkillSelection
+
+NULL_SKILL_SELECTION = _agent_api.NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence

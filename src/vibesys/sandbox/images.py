@@ -264,8 +264,8 @@ def build_task_image(
     if not dockerfile.is_file() or dockerfile.is_symlink():
         raise TaskImageBuildError.dockerfile_not_regular(dockerfile)
     if timeout <= 0:
-        # lint-waiver: LW-007127 [TRY003]; public image helper preserves ValueError for an invalid timeout
-        raise ValueError("task image build timeout must be positive")  # noqa: TRY003
+        message = "task image build timeout must be positive"
+        raise ValueError(message)
 
     runner = command_runner or SubprocessDockerBuildRunner()
     extra_build_args = ("--build-arg", f"BASE_IMAGE={base_image}") if base_image is not None else ()
@@ -307,8 +307,8 @@ def agent_image(
     order.
     """
     if timeout <= 0:
-        # lint-waiver: LW-007128 [TRY003]; public image helper preserves ValueError for an invalid timeout
-        raise ValueError("agent image build timeout must be positive")  # noqa: TRY003
+        message = "agent image build timeout must be positive"
+        raise ValueError(message)
 
     runner = command_runner or SubprocessDockerBuildRunner()
     base = (
@@ -463,13 +463,11 @@ def push_agent_image(
             message also names the `docker login` prerequisite.
     """
     if _IMAGE_ID.fullmatch(image_id) is None:
-        # lint-waiver: LW-007129 [TRY003]; public image helper preserves ValueError for a mutable or malformed image ID
-        raise ValueError(  # noqa: TRY003
-            f"push_agent_image requires an immutable image ID (sha256:...), got {image_id!r}"
-        )
+        message = f"push_agent_image requires an immutable image ID (sha256:...), got {image_id!r}"
+        raise ValueError(message)
     if timeout <= 0:
-        # lint-waiver: LW-007130 [TRY003]; public image helper preserves ValueError for an invalid timeout
-        raise ValueError("agent image push timeout must be positive")  # noqa: TRY003
+        message = "agent image push timeout must be positive"
+        raise ValueError(message)
 
     runner = command_runner or SubprocessDockerBuildRunner()
     cwd = Path.cwd()

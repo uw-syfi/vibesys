@@ -5,7 +5,9 @@ report JSON produced by the target's own capture entry point (conventionally
 ``benchmark/headroom_capture.sh``, or whatever ``OBJECTIVE.md`` documents).
 Capture stays a shell command; see ``analyze_headroom.py`` for the report
 schema this server understands.
+
 Launch:
+
     python headroom_profiler/server.py
     # or
     uv run python headroom_profiler/server.py.
@@ -27,6 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _HERE = Path(__file__).resolve().parent
+
 sys.path.insert(0, str(_HERE))
 # lint-waiver: LW-008016 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 import analyze_headroom  # noqa: E402

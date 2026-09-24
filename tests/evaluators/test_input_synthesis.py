@@ -260,6 +260,7 @@ def test_missing_current_project_and_standalone_flags_errors(
 
 
 def test_incomplete_standalone_flags_error(tmp_path: Path) -> None:
+
     # Objective + domain but no evaluator commands.
     with pytest.raises(ConfigurationError, match="standalone input requires"):
         _agent_args(

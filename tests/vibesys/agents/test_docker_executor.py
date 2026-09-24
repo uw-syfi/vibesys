@@ -400,7 +400,10 @@ class TestCodexRolloutReading:
             rollout_sessions_root=_ROLLOUT_SESSIONS_ROOT,
         )
         monkeypatch.setattr("vs_agent.docker_executor.subprocess.run", queries)
-        return executor._read_codex_rollout_completion("container-123", THREAD_ID)
+        # lint-waiver: LW-010047 [SLF001]; these parser-edge unit tests isolate rollout-file classification without entering the blocking watchdog run loop, and the reader has no public surface.
+        return executor._read_codex_rollout_completion(  # noqa: SLF001
+            "container-123", THREAD_ID
+        )
 
     def test_no_rollout_file_is_no_evidence(self, monkeypatch: pytest.MonkeyPatch) -> None:
         queries = _FakeDockerQueries(rollout=None)

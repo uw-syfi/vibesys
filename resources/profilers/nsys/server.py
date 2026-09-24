@@ -4,7 +4,9 @@ The orchestrator's profiler agent calls these tools rather than shelling
 out to ``python analyze_nsys.py …``. The capture step (``nsys profile``
 against a live server) stays a shell command — it's too long-running
 for stdio MCP.
+
 Launch (typically spawned by the agent runner via ``MCPServerSpec``):
+
     python nsys_profiler/server.py
     # or, equivalently:
     uv run python nsys_profiler/server.py.
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _HERE = Path(__file__).resolve().parent
+
 # Import the analysis module by path so this file is usable both from inside
 # the workspace (``nsys_profiler/server.py``) and as a host-side helper.
 sys.path.insert(0, str(_HERE))

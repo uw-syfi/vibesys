@@ -1,8 +1,10 @@
 """Accuracy checker (differential-dataflow `bfs`) — the single correctness gate
 the VibeSys harness invokes (`[accuracy] command`).
+
 This is a thin ORCHESTRATOR. It builds the candidate `engine/` once, then runs the
 mechanical behavioral gates ported from the vibe-serve bundle, each of which is an
 independent module under `accuracy_checker/`:
+
   1. equivalence      — candidate bfs output is byte-identical to the pristine
                         round-0 engine (`_ref_engine/`, regenerated LIVE) on every
                         fixed workload (canonical + perturbation).
@@ -11,9 +13,11 @@ independent module under `accuracy_checker/`:
   3. determinism      — metamorphic: identical output across worker counts (-w N).
   4. crash-recovery   — SIGKILL mid-run + restart reproduces the clean-run output.
   5. sanitizer        — build under ThreadSanitizer, run multi-worker, no data race.
+
 It deliberately does NOT implement diff-discipline (the `diff -ru _ref_engine
 engine` "is every hunk a micro-opt" judgment) — that stays in the LLM judge prompt,
 not this mechanical script.
+
 Exit protocol (mirrors kv-store/accuracy_checker/checker.py):
   * exit 0  — every gate PASSED (all checks passed).
   * exit 1  — at least one gate FAILED, or a required reference-backed gate
@@ -25,6 +29,7 @@ Exit protocol (mirrors kv-store/accuracy_checker/checker.py):
               induced) is reported but does not by itself fail the run. The
               reference-backed equivalence gates are required and fail closed even
               without --strict. A real FAIL always exits 1 regardless of --strict.
+
 Usage:
     uv run python accuracy_checker/checker.py
     uv run python accuracy_checker/checker.py --engine-cmd 'engine/target/release/examples/bfs'
@@ -49,6 +54,7 @@ import workload  # noqa: E402
 _ENGINE_DIR = os.path.join(_WORKSPACE, "engine")
 _ENGINE_MANIFEST = os.path.join(_ENGINE_DIR, "Cargo.toml")
 _DEFAULT_ENGINE_BIN = os.path.join(_ENGINE_DIR, workload.BFS_BINARY_RELPATH)
+
 # Gate name -> (script filename, uses_engine_cmd). The sanitizer takes a manifest
 # path instead of an engine binary (it builds its own instrumented binary).
 _GATES: dict[str, tuple[str, bool]] = {
@@ -65,10 +71,12 @@ _DEFAULT_ORDER = [
     "crash-recovery",
     "sanitizer",
 ]
+
 # These gates establish candidate correctness against the pristine round-0
 # engine. Treat any inability to run them as a hard failure: otherwise a missing
 # or unbuildable `_ref_engine/` would silently remove the correctness oracle.
 _REQUIRED_GATES = {"equivalence", "differential-fuzz"}
+
 # Gate exit-code convention (shared by every ported gate):
 _PASS, _FAIL, _SETUP = 0, 1, 2
 
@@ -122,15 +130,18 @@ def main() -> int:
         help="treat a gate SETUP-ERROR (could-not-run) as a failure (exit 2)",
     )
     args = ap.parse_args()
+
     selected = [g.strip() for g in args.gates.split(",") if g.strip()]
     unknown = [g for g in selected if g not in _GATES]
     if unknown:
         print(f"checker ERROR: unknown gate(s): {', '.join(unknown)}", file=sys.stderr)
         print(f"  known gates: {', '.join(_DEFAULT_ORDER)}", file=sys.stderr)
         return 2
+
     print("differential-dataflow bfs accuracy checker")
     print(f"  engine   : {args.engine_cmd}")
     print(f"  gates    : {', '.join(selected)}")
+
     if not args.no_build:
         print("  building candidate engine/ (offline)...")
         ok, msg = _build_candidate()
@@ -138,9 +149,11 @@ def main() -> int:
             print(f"checker FAIL: candidate engine build failed: {msg}")
             return 1
         print(f"  build    : {msg}")
+
     results: dict[str, int] = {}
     for name in selected:
         results[name] = _run_gate(name, args.engine_cmd)
+
     print(f"\n{'=' * 72}\nSUMMARY\n{'=' * 72}")
     label = {_PASS: "PASS", _FAIL: "FAIL", _SETUP: "SETUP-ERROR"}
     any_fail = False
@@ -159,6 +172,7 @@ def main() -> int:
                 any_setup = True
         else:
             any_fail = True
+
     if required_setup:
         print(
             "\nACCURACY CHECK FAILED — required reference-backed gate(s) could not run: "

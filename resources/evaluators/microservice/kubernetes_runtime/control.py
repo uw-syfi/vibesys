@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
 _MAX_REQUEST_BYTES = 64 * 1024
 _REQUEST_TIMEOUT_SECONDS = 0.5
 _RESPONSE_TIMEOUT_SECONDS = 5.0

@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.constants import DomainName
-
 #: Bundle-relative directory name used to stage trusted evaluator source
 #: supplied by standalone flags. It lives inside the synthesized bundle so the
 #: bundle is self-contained; ``load_input_bundle(...)`` permits sources that

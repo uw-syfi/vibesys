@@ -118,7 +118,6 @@ class ComputeBackendImpl(Protocol):
 
     def reselect_device(self) -> None:
         """Re-pick the optimal device for this backend and restart sandboxes.
-
         For example, migrate from a less-loaded GPU and restart affected
         sandboxes in place.
 

@@ -1,20 +1,25 @@
 """
 Serving benchmark for the Trainium Llama-3-8B server (warm, closed-loop).
+
 Two deliberate design choices so the headline number reflects *real serving
 throughput*, not artifacts:
+
 1. **Warm-up before timing.** A first request to a new shape bucket triggers a
    multi-minute `neuronx-cc` compile. Those compiles are run once up front and
    excluded from the measurement, so the metric is steady-state, not compile-
    dominated.
+
 2. **Closed-loop concurrency (no open-loop overload).** Instead of offering a
    fixed Poisson rate the server may not be able to meet (which turns the metric
    into a queue-wait measurement), we keep exactly C requests in flight at all
    times for a fixed duration and sweep C. This self-paces to the server's
    capacity and rewards real device utilization: higher C drives bigger decode
    batches until the NeuronCore saturates.
+
 Fixed input/output token lengths (default 128/256/512). The headline
 `aggregate_throughput` is the **peak steady-state output tok/s** across the
 (length, concurrency) sweep — the max throughput the server can actually sustain.
+
 Usage:
     python benchmark.py --url http://localhost:8000 \
         --lengths 128,256,512 --concurrency 1,2,4,8 \
@@ -37,6 +42,8 @@ _MODEL_PATH_CANDIDATES = ("/model", "/workspace/reference/model", "reference/mod
 # ---------------------------------------------------------------------------
 # Prompt construction (fixed input length)
 # ---------------------------------------------------------------------------
+
+
 def _load_tokenizer(model_path):
     candidates = [model_path] if model_path else list(_MODEL_PATH_CANDIDATES)
     candidates = [c for c in candidates if c and os.path.exists(c)]
@@ -73,6 +80,8 @@ def make_prompt(tokenizer, pool, input_len, rng):
 # ---------------------------------------------------------------------------
 # One request (streaming, fixed output length)
 # ---------------------------------------------------------------------------
+
+
 async def send_request(client, url, prompt, output_len, temperature):
     body = {
         "prompt": prompt,
@@ -124,6 +133,8 @@ async def send_request(client, url, prompt, output_len, temperature):
 # ---------------------------------------------------------------------------
 # Closed-loop measurement: keep C requests in flight for `duration` seconds
 # ---------------------------------------------------------------------------
+
+
 def _pct(vals, p):
     if not vals:
         return None
@@ -145,6 +156,7 @@ async def measure(client, url, tokenizer, pool, length, concurrency, duration, t
     t0 = time.perf_counter()
     await asyncio.gather(*[worker() for _ in range(concurrency)])
     wall = time.perf_counter() - t0
+
     ok = [r for r in results if r["error"] is None]
     gen = sum(r["gen_tokens"] for r in ok)
     ttfts = [r["ttft_s"] for r in ok if r["ttft_s"] is not None]
@@ -175,12 +187,15 @@ async def measure(client, url, tokenizer, pool, length, concurrency, duration, t
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+
 async def run_benchmark(args):
     url = args.url.rstrip("/") + args.endpoint
     lengths = [int(v) for v in args.lengths.split(",") if v.strip()]
     concs = [int(v) for v in args.concurrency.split(",") if v.strip()]
     tokenizer, pool = _load_tokenizer(args.model_path)
     rng = random.Random(args.seed)
+
     print(
         json.dumps(
             {
@@ -194,6 +209,7 @@ async def run_benchmark(args):
         ),
         flush=True,
     )
+
     scenarios: list[dict] = []
     async with httpx.AsyncClient() as client:
         # --- Warm-up: compile every length bucket, untimed and discarded. ---
@@ -213,6 +229,7 @@ async def run_benchmark(args):
                     )
             await asyncio.gather(*warm)
             print("Warm-up done.\n", flush=True)
+
         # --- Timed closed-loop sweep over (length, concurrency). ---
         for length in lengths:
             for c in concs:
@@ -228,9 +245,11 @@ async def run_benchmark(args):
                     f"({s['completed']} reqs, tpot_p50={s['tpot_s']['p50']})",
                     flush=True,
                 )
+
     # Headline: peak sustained output tok/s across the sweep (warm, no overload).
     peak = max((s["output_tokens_per_s"] for s in scenarios), default=0.0)
     best = max(scenarios, key=lambda s: s["output_tokens_per_s"], default=None)
+
     result = {
         "config": {
             "url": url,
@@ -247,6 +266,7 @@ async def run_benchmark(args):
         else None,
         "scenarios": scenarios,
     }
+
     print("\n" + "=" * 56)
     print("  Benchmark summary (warm, closed-loop)")
     print("=" * 56)
@@ -256,6 +276,7 @@ async def run_benchmark(args):
             f"{s['output_tokens_per_s']:7.1f} tok/s   req/s={s['request_throughput_per_s']:.2f}"
         )
     print(f"\nAggregate throughput (peak steady-state): {peak:.1f} tok/s  (headline)")
+
     if args.output_json:
         with open(args.output_json, "w") as f:
             json.dump(result, f, indent=2)

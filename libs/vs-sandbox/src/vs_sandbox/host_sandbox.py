@@ -73,7 +73,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
     from vs_sandbox.host_resources import HostResource
-
 DISABLE_ENV = "VIBESYS_AGENT_SANDBOX"
 
 _DISABLED_VALUES = frozenset({"0", "false", "off", "no"})

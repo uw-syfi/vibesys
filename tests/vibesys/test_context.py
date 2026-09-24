@@ -2,6 +2,7 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypedDict, Unpack
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -32,15 +33,14 @@ from vibesys.evaluators import (
     resolve_evaluator_package,
     tool_install_root,
 )
-from vibesys.evaluators.tools import CargoGitToolSpec
 from vibesys.evaluators.input_manifest import WorkspaceSource
+from vibesys.evaluators.tools import CargoGitToolSpec
 from vibesys.events import CoreEventType
 from vibesys.loops.agent.model import AgentRunState
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.run import (
     DeviceLease,
     LocalRunIntegration,
-    RunLogger,
     RunPaths,
     RunStateNamespace,
 )
@@ -100,6 +100,21 @@ class _RecordingHooks:
     def teardown(self, ctx: EnvironmentContext) -> None:
         del ctx
         self.torn_down += 1
+
+
+class _CreateContextOptions(TypedDict, total=False):
+    runs_dir: Path | None
+    evaluator: Path | None
+    evaluator_package_root: Path | None
+    exp_name: str
+    existing: bool
+    configuration: AgentRunConfiguration | None
+    objective: str
+    task_name: str | None
+    task_root: Path | None
+    remote_repo: str | None
+    hooks: EnvironmentHooks | None
+    integration: LocalRunIntegration | None
 
 
 @pytest.fixture(autouse=True)
@@ -207,42 +222,30 @@ command = ["python", "benchmark.py"]
 
 def _create_context(
     project: Path,
-    *,
-    runs_dir: Path | None = None,
-    evaluator: Path | None = None,
-    evaluator_package_root: Path | None = None,
-    exp_name: str = "queue",
-    existing: bool = False,
-    configuration: AgentRunConfiguration | None = None,
-    objective: str = "Make the queue faster.\n",
-    task_name: str | None = None,
-    task_root: Path | None = None,
-    remote_repo: str | None = None,
-    hooks: EnvironmentHooks | None = None,
-    integration: LocalRunIntegration | None = None,
+    **options: Unpack[_CreateContextOptions],
 ) -> _RunContext:
     return create_run_context(
         config=Config.model_validate({"model": {"name": "gpt-test"}}),
-        exp_name=exp_name,
-        runs_dir=runs_dir,
+        exp_name=options.get("exp_name", "queue"),
+        runs_dir=options.get("runs_dir"),
         input_path=str(project),
         accuracy_command="python _evaluator/checker/check.py",
         benchmark_command="python _evaluator/checker/check.py",
-        task_name=task_name,
-        task_root=task_root,
-        evaluator_path=evaluator,
-        evaluator_package_root=evaluator_package_root,
-        objective=objective,
-        existing=existing,
-        project_configuration=configuration or _configuration(),
+        task_name=options.get("task_name"),
+        task_root=options.get("task_root"),
+        evaluator_path=options.get("evaluator"),
+        evaluator_package_root=options.get("evaluator_package_root"),
+        objective=options.get("objective", "Make the queue faster.\n"),
+        existing=options.get("existing", False),
+        project_configuration=options.get("configuration") or _configuration(),
         profiler_kind=ProfilerKind.NONE,
         profiler_domain=DomainName.GENERIC,
         run_environment=RunEnvironmentSpec("local"),
         agent_backend="stub",
-        environment_hooks=hooks or NoopEnvironmentHooks(),
-        remote_repo=remote_repo,
+        environment_hooks=options.get("hooks") or NoopEnvironmentHooks(),
+        remote_repo=options.get("remote_repo"),
         agent_state_model_type=AgentRunState,
-        integration=integration,
+        integration=options.get("integration"),
     )
 
 
@@ -584,7 +587,8 @@ def test_resume_migrates_legacy_objectives_with_dirty_candidate(tmp_path: Path) 
         run_id = first.run_id
 
     state = Project.open(project).state
-    manifest_path = state._run_manifest_path(run_id)  # migration fixture
+    # lint-waiver: LW-010039 [SLF001]; this migration fixture must remove a field from the persisted legacy JSON before the public resume path loads it.
+    manifest_path = state._run_manifest_path(run_id)  # noqa: SLF001
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     payload["configuration"].pop("objectives")
     manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -882,26 +886,22 @@ def test_hook_teardown_runs_when_provisioning_fails(tmp_path: Path) -> None:
 
 
 def test_log_switch_retargets_stderr_tee(tmp_path: Path) -> None:
-    ctx = object.__new__(_RunContext)
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
     original_stderr = sys.stderr
-    ctx.logger = RunLogger(tmp_path)
-    ctx._paths = RunPaths(
-        project_root=tmp_path,
-        log_dir=tmp_path,
-        run_log_path=ctx.logger.path,
-    )
-    original_file = ctx.logger.file
-    ctx.agent_client = FakeAgentClient()
+    with _create_context(project, evaluator=evaluator) as ctx:
+        original_file = ctx.logger.file
+        ctx.switch_log_file("round001")
 
-    ctx.switch_log_file("round001")
+        assert original_file.closed
+        assert isinstance(ctx.agent_client, FakeAgentClient)
+        assert ctx.agent_client.log_files == [ctx.logger.writer]
+        sys.stderr.write("\033[31mcolored diagnostic\033[0m\n")
+        run_log_path = ctx.run_log_path
 
-    assert original_file.closed
-    assert ctx.agent_client.log_files == [ctx.logger.writer]
-    sys.stderr.write("\033[31mcolored diagnostic\033[0m\n")
-    ctx.logger.close()
     assert sys.stderr is original_stderr
-    assert "colored diagnostic" in ctx.run_log_path.read_text()
-    assert "\033[31m" not in ctx.run_log_path.read_text()
+    assert "colored diagnostic" in run_log_path.read_text()
+    assert "\033[31m" not in run_log_path.read_text()
 
 
 def test_agent_client_gets_a_machine_local_provider_session_store(tmp_path: Path) -> None:
@@ -1030,8 +1030,10 @@ def _pin_context(
     ctx.integration = LocalRunIntegration()
     request.addfinalizer(ctx.integration.close)
     ctx.events = ctx.integration.events
-    ctx._progress_stack = []
-    ctx._paths = RunPaths(
+    # lint-waiver: LW-010040 [SLF001]; this isolated GPU pin fixture bypasses the full context constructor, so initialize the progress stack required by public invoke().
+    ctx._progress_stack = []  # noqa: SLF001
+    # lint-waiver: LW-010041 [SLF001]; the minimal fixture supplies canonical paths required by public invoke() without constructing unrelated project and run resources.
+    ctx._paths = RunPaths(  # noqa: SLF001
         project_root=tmp_path,
         log_dir=log_dir,
         run_log_path=tmp_path / "run.log",

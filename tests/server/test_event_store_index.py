@@ -8,7 +8,7 @@ import os
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, Any, TypedDict, Unpack
 
 import pytest
 
@@ -24,6 +24,14 @@ if TYPE_CHECKING:
 
 type _ScannedHeader = tuple[int, EventType, str | None, str | None]
 type _SidecarMutation = Callable[[dict[str, object], list[list[object]]], None]
+
+
+class _OpenOptions(TypedDict, total=False):
+    buffering: int
+    encoding: str | None
+    errors: str | None
+    newline: str | None
+
 
 _TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -60,6 +68,11 @@ def _rewrite_sidecar(path: Path, mutate: _SidecarMutation) -> None:
     ]
     digest = hashlib.sha256(b"".join(encoded), usedforsecurity=False).hexdigest()
     path.write_bytes(b"".join(encoded) + f'{{"sha256":"{digest}"}}\n'.encode())
+
+
+def _header_scan() -> Callable[[bytes], _ScannedHeader | None]:
+    # lint-waiver: LW-010037 [SLF001]; cache-work tests need to wrap the private classifier because the store exposes no scan counter.
+    return events_module._scan_header_fields  # noqa: SLF001
 
 
 def test_cold_attach_never_reads_the_complete_file_at_once(
@@ -120,7 +133,7 @@ def test_warm_attach_uses_the_validated_sidecar_without_scanning_jsonl(
 def _count_header_scans(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """Count JSONL lines classified by the header scan (the suffix/full scan work)."""
     scanned = [0]
-    scan_header = events_module._scan_header_fields
+    scan_header = _header_scan()
 
     def counting(line: bytes) -> _ScannedHeader | None:
         scanned[0] += 1
@@ -294,7 +307,7 @@ def test_source_change_during_scan_does_not_publish_an_index(
 ) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2])
-    scan_header = events_module._scan_header_fields
+    scan_header = _header_scan()
     changed = False
 
     def change_during_scan(line: bytes) -> _ScannedHeader | None:
@@ -319,7 +332,8 @@ def test_source_change_while_loading_sidecar_rejects_the_cache(
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2])
     EventStore(path, run_id="first")
-    validate_footer = event_index_module._valid_footer
+    # lint-waiver: LW-010038 [SLF001]; this hook deterministically mutates the source after sidecar validation to cover the cache race.
+    validate_footer = event_index_module._valid_footer  # noqa: SLF001
     changed = False
 
     def change_after_validation(stream: BinaryIO, digest: event_index_module._Digest) -> bool:
@@ -366,7 +380,7 @@ def test_boundary_fingerprint_rejects_same_size_source_overwrite(
     # stale content fingerprint must still force a source scan.
     _rewrite_sidecar(index_path, copy_current_stat)
     scanned = 0
-    scan_header = events_module._scan_header_fields
+    scan_header = _header_scan()
 
     def count_header_scans(line: bytes) -> _ScannedHeader | None:
         nonlocal scanned
@@ -449,7 +463,7 @@ def test_valid_unterminated_record_stays_outside_the_safe_cache_boundary(
     assert loaded is not None
     assert len(loaded.records) == 1
     scanned = 0
-    scan_header = events_module._scan_header_fields
+    scan_header = _header_scan()
 
     def count_header_scans(line: bytes) -> _ScannedHeader | None:
         nonlocal scanned
@@ -568,17 +582,10 @@ def test_unreadable_sidecar_is_only_a_cache_miss(
     index_path = event_index_path(path)
     real_open = Path.open
 
-    def deny_index_read(  # mirrors Path.open for the monkeypatch
-        target: Path,
-        mode: str = "r",
-        buffering: int = -1,
-        encoding: str | None = None,
-        errors: str | None = None,
-        newline: str | None = None,
-    ) -> object:
+    def deny_index_read(target: Path, mode: str = "r", **options: Unpack[_OpenOptions]) -> IO[Any]:
         if target == index_path and mode == "rb":
             raise PermissionError
-        return real_open(target, mode, buffering, encoding, errors, newline)
+        return real_open(target, mode, **options)
 
     monkeypatch.setattr(Path, "open", deny_index_read)
 

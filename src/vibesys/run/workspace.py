@@ -174,8 +174,7 @@ class Workspace:
                     steps.append(CopySpec(src=src, dest=cli_target, prune_platforms=True))
 
         if not existing:
-            for source in workspace_sources:
-                steps.append(GitSourceSpec(source=source))
+            steps.extend(GitSourceSpec(source=source) for source in workspace_sources)
             # When the project is pre-populated with Git sources,
             # the input copy must not clear existing children: copy_dir wipes
             # the destination unless collisions are rejected, which would
@@ -208,8 +207,10 @@ class Workspace:
                     )
                 )
 
-            for src in skill_sources:
-                steps.append(CopySpec(src=src, dest=self.root / src.name, prune_platforms=True))
+            steps.extend(
+                CopySpec(src=src, dest=self.root / src.name, prune_platforms=True)
+                for src in skill_sources
+            )
 
             if input_project_dir is not None:
                 steps.append(InputProjectSpec(project_dir=input_project_dir))
@@ -270,23 +271,24 @@ class Workspace:
         try:
             dest.resolve().relative_to(self.root.resolve())
         except ValueError as exc:
-            raise ValueError(
-                f"workspace source {source.name!r} escapes workspace: {source.dest}"
-            ) from exc
+            message = f"workspace source {source.name!r} escapes workspace: {source.dest}"
+            raise ValueError(message) from exc
         if dest.exists() or dest.is_symlink():
-            raise ValueError(
+            message = (
                 f"workspace source destination already exists for {source.name!r}: {source.dest}"
             )
+            raise ValueError(message)
         # Excluded names match at any depth (copy ignores, git info/exclude,
         # Modal uploads), so a colliding dest would be silently dropped from
         # snapshots and sandboxes even though the clone succeeds.
         colliding = [part for part in Path(source.dest).parts if part in self.excluded_dirs]
         if colliding:
-            raise ValueError(
+            message = (
                 f"workspace source {source.name!r} dest {source.dest!r} contains excluded "
                 f"path component(s) {colliding}: files under it would be invisible to "
                 "workspace copies, git tracking, and sandbox uploads. Pick another dest."
             )
+            raise ValueError(message)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         self._run_git(["clone", "--no-checkout", source.repo, str(dest)], cwd=self.root)
@@ -294,9 +296,8 @@ class Workspace:
         actual = self._run_git(["rev-parse", "HEAD"], cwd=dest).strip().lower()
         expected = source.commit.lower()
         if actual != expected and not actual.startswith(expected):
-            raise RuntimeError(
-                f"workspace source {source.name!r} checked out {actual}, expected {expected}"
-            )
+            message = f"workspace source {source.name!r} checked out {actual}, expected {expected}"
+            raise RuntimeError(message)
 
         metadata_path = self.root / "_vibesys_sources.json"
         metadata = []
@@ -328,7 +329,8 @@ class Workspace:
         )
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip()
-            raise RuntimeError(f"git {' '.join(args)} failed: {detail}")
+            message = f"git {' '.join(args)} failed: {detail}"
+            raise RuntimeError(message)
         return result.stdout
 
     # -- copy machinery -------------------------------------------------------
@@ -414,9 +416,8 @@ class Workspace:
             )
             if collisions:
                 paths = ", ".join(collisions)
-                raise ValueError(
-                    f"workspace source and input bundle contain the same paths: {paths}"
-                )
+                message = f"workspace source and input bundle contain the same paths: {paths}"
+                raise ValueError(message)
 
         if dst.exists() and not reject_collisions:
             # Remove children individually so we can skip mount points and
@@ -453,7 +454,7 @@ class Workspace:
                     continue
             try:
                 if child.is_symlink():
-                    os.symlink(os.readlink(child), child_dst)
+                    child_dst.symlink_to(child.readlink())
                 elif child.is_dir():
                     shutil.copytree(child, child_dst, symlinks=True, ignore=_ignore)
                 else:
@@ -488,7 +489,8 @@ class Workspace:
         )
         if result.returncode != 0:
             detail = result.stderr.decode(errors="replace").strip()
-            raise RuntimeError(f"could not evaluate source Git ignores: {detail}")
+            message = f"could not evaluate source Git ignores: {detail}"
+            raise RuntimeError(message)
         return frozenset(
             Path(os.fsdecode(raw).rstrip("/")).parts for raw in result.stdout.split(b"\0") if raw
         )

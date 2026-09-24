@@ -77,7 +77,8 @@ class OmnigentAsyncRuntime:
             self._thread.start()
             started = True
             if not self._ready.wait(timeout=start_timeout):
-                raise RuntimeError("Omnigent event loop did not start")  # noqa: TRY003  # lint-waiver: LW-008090 [TRY003]; preserve the runtime startup RuntimeError and its stable lifecycle message.
+                message = "Omnigent event loop did not start"
+                raise RuntimeError(message)
         except BaseException:
             if started:
                 with contextlib.suppress(BaseException):
@@ -96,7 +97,8 @@ class OmnigentAsyncRuntime:
         with self._state_lock:
             if self._closed:
                 awaitable.close()
-                raise RuntimeError("Omnigent async runtime is closed")  # noqa: TRY003  # lint-waiver: LW-008091 [TRY003]; callers rely on the existing runtime lifecycle RuntimeError.
+                message = "Omnigent async runtime is closed"
+                raise RuntimeError(message)
             return asyncio.run_coroutine_threadsafe(awaitable, self._loop)
 
     def start_task[Result](
@@ -106,11 +108,13 @@ class OmnigentAsyncRuntime:
         """Create a loop-owned task whose cancellation can be drained exactly."""
         if self.is_current_thread():
             awaitable.close()
-            raise RuntimeError("Omnigent task cannot be started synchronously on its event loop")  # noqa: TRY003  # lint-waiver: LW-008092 [TRY003]; preserve the RuntimeError contract for an invalid event-loop call.
+            message = "Omnigent task cannot be started synchronously on its event loop"
+            raise RuntimeError(message)
         with self._state_lock:
             if self._closed:
                 awaitable.close()
-                raise RuntimeError("Omnigent async runtime is closed")  # noqa: TRY003  # lint-waiver: LW-008093 [TRY003]; callers rely on the existing runtime lifecycle RuntimeError.
+                message = "Omnigent async runtime is closed"
+                raise RuntimeError(message)
             completion: concurrent.futures.Future[Result] = concurrent.futures.Future()
             spawn = asyncio.run_coroutine_threadsafe(
                 self._spawn(awaitable, completion),
@@ -130,7 +134,8 @@ class OmnigentAsyncRuntime:
     def close(self) -> None:  # cleanup continues after every failure
         """Drain loop-owned facilities, stop the thread, and close the loop."""
         if self.is_current_thread():
-            raise RuntimeError("Omnigent async runtime cannot close from its event-loop thread")  # noqa: TRY003  # lint-waiver: LW-008094 [TRY003]; preserve the RuntimeError contract preventing self-join on the event-loop thread.
+            message = "Omnigent async runtime cannot close from its event-loop thread"
+            raise RuntimeError(message)
         with self._state_lock:
             if self._closed:
                 return

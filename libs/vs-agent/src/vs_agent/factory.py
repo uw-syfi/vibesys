@@ -64,10 +64,11 @@ def build_agent_client(
     backend = spec.backend
 
     if require_host_sandbox and backend not in {AgentBackend.CLI, AgentBackend.STUB}:
-        raise SystemExit(  # noqa: TRY003  # lint-waiver: LW-008075 [TRY003]; this CLI policy failure must exit with SystemExit for the launcher to report configuration errors.
+        message = (
             "local project execution requires the CLI agent backend so VibeSys can "
             "enforce nested read-only and hidden paths"
         )
+        raise SystemExit(message)
 
     if backend is AgentBackend.STUB:
         from vs_agent.stub_runner import StubAgentClient
@@ -75,7 +76,8 @@ def build_agent_client(
         return StubAgentClient(event_sink=events)
 
     if backend != AgentBackend.CLI:
-        raise SystemExit(f"unknown agent backend: {backend.value!r}")  # noqa: TRY003  # lint-waiver: LW-008076 [TRY003]; preserve the CLI SystemExit contract for an invalid backend.
+        message = f"unknown agent backend: {backend.value!r}"
+        raise SystemExit(message)
 
     driver_name = spec.driver
     provider = spec.provider
@@ -83,7 +85,8 @@ def build_agent_client(
     driver_log = AgentDiagnosticLog(run_log_file)
 
     if use_docker and not agent_catalog()[driver_name].supports_docker:
-        raise SystemExit(f"agent.driver={driver_name.value!r} is not supported with --docker")  # noqa: TRY003  # lint-waiver: LW-008077 [TRY003]; preserve the CLI SystemExit contract for an unsupported docker policy.
+        message = f"agent.driver={driver_name.value!r} is not supported with --docker"
+        raise SystemExit(message)
 
     if driver_name == Driver.OMNIGENT:
         from vs_agent.drivers.omnigent import (
@@ -103,10 +106,11 @@ def build_agent_client(
             from vs_agent.cli_docker import DOCKER_PROVIDER_ENV
 
             if provider not in DOCKER_PROVIDER_ENV:
-                raise SystemExit(  # noqa: TRY003  # lint-waiver: LW-008078 [TRY003]; preserve the CLI SystemExit contract and list providers not yet supported by docker.
+                message = (
                     f"--cli-provider {provider!r} is not yet supported with --docker; "
                     f"supported: {sorted(DOCKER_PROVIDER_ENV)}"
                 )
+                raise SystemExit(message)
             docker_sandboxes = backends
         from vs_agent.drivers.agentshim import AgentShimDriver
 

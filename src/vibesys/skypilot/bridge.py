@@ -135,13 +135,16 @@ class _ArtifactStream:
         if not self._expected:
             return None
         if self._capturing or self._oversized or self._captures != 1 or not self._encoded:
-            raise ValueError("remote evaluator artifact was missing or invalid")  # noqa: TRY003  # lint-waiver: LW-008166 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = "remote evaluator artifact was missing or invalid"
+            raise ValueError(message)
         try:
             data = base64.b64decode("".join(self._encoded), validate=True)
         except ValueError as exc:
-            raise ValueError("remote evaluator artifact was invalid") from exc  # noqa: TRY003  # lint-waiver: LW-008167 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = "remote evaluator artifact was invalid"
+            raise ValueError(message) from exc
         if len(data) > _MAX_ARTIFACT_BYTES:
-            raise ValueError("remote evaluator artifact is too large")  # noqa: TRY003  # lint-waiver: LW-008168 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = "remote evaluator artifact is too large"
+            raise ValueError(message)
         return data
 
 
@@ -168,7 +171,8 @@ class _DecodedLogSpool:
             self._persisted = ""
         record = self._record()
         if len(self._persisted) < record.remote_read_offset:
-            raise ValueError("SkyPilot log spool is shorter than its journal offset")  # noqa: TRY003  # lint-waiver: LW-008169 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = "SkyPilot log spool is shorter than its journal offset"
+            raise ValueError(message)
         if len(self._persisted) > record.remote_read_offset:
             record = self._journal.offsets(
                 record,
@@ -187,7 +191,8 @@ class _DecodedLogSpool:
         """Accept Sky's from-origin log stream and deliver only its new suffix."""
         overlap = min(len(data), max(0, len(self._persisted) - self._seen))
         if data[:overlap] != self._persisted[self._seen : self._seen + overlap]:
-            raise ValueError("SkyPilot replayed log prefix changed")  # noqa: TRY003  # lint-waiver: LW-008170 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = "SkyPilot replayed log prefix changed"
+            raise ValueError(message)
         suffix = data[overlap:]
         self._seen += len(data)
         if not suffix:
@@ -212,12 +217,14 @@ class _DecodedLogSpool:
     def finish(self) -> None:
         """Require a terminal from-origin stream to cover the durable prefix."""
         if self._seen < len(self._persisted):
-            raise ValueError("SkyPilot terminal log replay was truncated")  # noqa: TRY003  # lint-waiver: LW-008171 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = "SkyPilot terminal log replay was truncated"
+            raise ValueError(message)
 
     def _record(self) -> InvocationRecord:
         record = self._journal.load(self._invocation_id)
         if record is None:
-            raise ValueError("SkyPilot invocation journal disappeared")  # noqa: TRY003  # lint-waiver: LW-008172 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = "SkyPilot invocation journal disappeared"
+            raise ValueError(message)
         return record
 
 
@@ -274,7 +281,8 @@ class SkyPilotBridge:
         if self._server is not None:
             return
         if self._closed:
-            raise RuntimeError("SkyPilot bridge cannot be restarted after close")  # noqa: TRY003  # lint-waiver: LW-008173 [TRY003]; bridge errors are serialized by exception class name, so keep the existing RuntimeError lifecycle contract.
+            message = "SkyPilot bridge cannot be restarted after close"
+            raise RuntimeError(message)
         validate_socket_path(self.socket_path)
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
         self.socket_path.unlink(missing_ok=True)
@@ -374,11 +382,13 @@ class SkyPilotBridge:
     ) -> None:
         payload = reader.readline(_MAX_REQUEST_BYTES + 1)
         if not payload or len(payload) > _MAX_REQUEST_BYTES or not payload.endswith(b"\n"):
-            raise ValueError("invalid bridge request framing")  # noqa: TRY003  # lint-waiver: LW-008176 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = "invalid bridge request framing"
+            raise ValueError(message)
         request = decode_request(payload)
         command = self._commands.get(request.kind)
         if command is None:
-            raise ValueError(f"evaluator {request.kind!r} is not configured")  # noqa: TRY003  # lint-waiver: LW-008177 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = f"evaluator {request.kind!r} is not configured"
+            raise ValueError(message)
         if request.arguments:
             valid_dynamic_output = (
                 request.kind == "benchmark"
@@ -388,9 +398,11 @@ class SkyPilotBridge:
                 and _FRAMEWORK_ARTIFACT.fullmatch(request.arguments[1]) is not None
             )
             if not valid_dynamic_output:
-                raise ValueError("invalid evaluator arguments")  # noqa: TRY003  # lint-waiver: LW-008178 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+                message = "invalid evaluator arguments"
+                raise ValueError(message)
         elif request.artifacts:
-            raise ValueError("invalid evaluator artifact")  # noqa: TRY003  # lint-waiver: LW-008179 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = "invalid evaluator artifact"
+            raise ValueError(message)
         effective_command = (*command, *request.arguments)
         staging = self._snapshot(request.invocation_id)
         snapshot_digest = self._snapshot_digest(staging)
@@ -502,9 +514,10 @@ class SkyPilotBridge:
                         if found is None:
                             if active_record.phase is InvocationPhase.SUBMITTING:
                                 if not self._allocation_was_replaced(active_record):
-                                    raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-008180 [TRY003]; preserve the bridge's existing RuntimeError and evaluator-specific diagnostic.
+                                    message = (
                                         "SkyPilot submission outcome is ambiguous; reconcile later"
                                     )
+                                    raise RuntimeError(message)
                                 active_record = self._retry_after_infrastructure_failure(
                                     active_record
                                 )
@@ -514,9 +527,8 @@ class SkyPilotBridge:
                                 InvocationPhase.RUNNING,
                             }:
                                 if not self._allocation_was_replaced(active_record):
-                                    raise RuntimeError(  # noqa: TRY003  # lint-waiver: LW-008181 [TRY003]; preserve the bridge's existing RuntimeError and remote failure details.
-                                        "persisted SkyPilot job disappeared from an active allocation"
-                                    )
+                                    message = "persisted SkyPilot job disappeared from an active allocation"
+                                    raise RuntimeError(message)
                                 active_record = self._retry_after_infrastructure_failure(
                                     active_record
                                 )
@@ -571,7 +583,8 @@ class SkyPilotBridge:
             latest = self._journal.load(request.invocation_id) or record
             attempt_resources = latest.attempt_resources
             if attempt_resources is None:
-                raise ValueError("completed invocation is missing attempt resources")  # noqa: TRY003  # lint-waiver: LW-008182 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+                message = "completed invocation is missing attempt resources"
+                raise ValueError(message)
             artifact_record = (
                 ArtifactRecord.create(request.artifacts[0], artifact)
                 if artifact is not None
@@ -602,7 +615,8 @@ class SkyPilotBridge:
     def _retry_after_infrastructure_failure(self, record: InvocationRecord) -> InvocationRecord:
         """Create one evidence-backed retry while enforcing a restart-stable bound."""
         if record.attempt >= 1 + self._max_infrastructure_retries:
-            raise RuntimeError("SkyPilot infrastructure retry limit was exhausted")  # noqa: TRY003  # lint-waiver: LW-008183 [TRY003]; bridge errors are serialized by exception class name, so keep the existing RuntimeError wire contract.
+            message = "SkyPilot infrastructure retry limit was exhausted"
+            raise RuntimeError(message)
         return self._journal.retry(record)
 
     def _recover_after_allocation_loss(self, record: InvocationRecord) -> InvocationRecord:
@@ -647,7 +661,8 @@ class SkyPilotBridge:
 
     def _require_open_for_remote_action(self) -> None:
         if self._closing.is_set():
-            raise RuntimeError("SkyPilot bridge is closing")  # noqa: TRY003  # lint-waiver: LW-008184 [TRY003]; bridge errors are serialized by exception class name, so keep the existing RuntimeError lifecycle contract.
+            message = "SkyPilot bridge is closing"
+            raise RuntimeError(message)
 
     def _ensure_current_cluster_for_work(self) -> None:
         """Ensure compute unless teardown started, cleaning up a racing launch."""
@@ -682,7 +697,8 @@ class SkyPilotBridge:
         """Replay a durable terminal payload and persist explicit acknowledgement."""
         result = record.result
         if result is None:
-            raise ValueError("terminal invocation is missing its result")  # noqa: TRY003  # lint-waiver: LW-008185 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = "terminal invocation is missing its result"
+            raise ValueError(message)
         if result.artifact is not None:
             artifact = result.artifact
             self._write(
@@ -707,7 +723,8 @@ class SkyPilotBridge:
         payload = reader.readline(_MAX_REQUEST_BYTES + 1)
         acknowledgement = decode_ack(payload)
         if acknowledgement.invocation_id != record.invocation_id:
-            raise ValueError("acknowledgement invocation mismatch")  # noqa: TRY003  # lint-waiver: LW-008186 [TRY003]; bridge errors are serialized by exception class name, so keep the existing ValueError wire contract.
+            message = "acknowledgement invocation mismatch"
+            raise ValueError(message)
         if record.phase is InvocationPhase.COMPLETED:
             record = self._journal.acknowledge(record)
         self._write(
@@ -768,7 +785,8 @@ class SkyPilotBridge:
             elif path.is_dir():
                 digest.update(b"D")
             else:
-                raise ValueError("snapshot contains an unsupported file type")  # noqa: TRY003  # lint-waiver: LW-008187 [TRY003]; preserve the staging ValueError contract for the bridge's request error response.
+                message = "snapshot contains an unsupported file type"
+                raise ValueError(message)
         return digest.hexdigest()
 
     @staticmethod
@@ -837,7 +855,8 @@ class SkyPilotBridge:
         root = self._workspace.resolve()
         for path in self._workspace.rglob("*"):
             if path.is_symlink() and not path.resolve().is_relative_to(root):
-                raise ValueError("workspace symlink escapes the project")  # noqa: TRY003  # lint-waiver: LW-008188 [TRY003]; preserve the staging ValueError contract for the bridge's request error response.
+                message = "workspace symlink escapes the project"
+                raise ValueError(message)
 
     def _stage_workspace(self, staging: Path) -> None:
         hidden = frozenset(self._hidden_paths)
@@ -863,11 +882,13 @@ class SkyPilotBridge:
                 if path.is_dir():
                     continue
                 if not path.is_file():
-                    raise ValueError("workspace contains a special file")  # noqa: TRY003  # lint-waiver: LW-008189 [TRY003]; preserve the staging ValueError contract for the bridge's request error response.
+                    message = "workspace contains a special file"
+                    raise ValueError(message)
                 file_count += 1
                 total_bytes += path.stat().st_size
                 if file_count > _MAX_STAGED_FILES or total_bytes > _MAX_STAGED_BYTES:
-                    raise ValueError("workspace exceeds remote staging limits")  # noqa: TRY003  # lint-waiver: LW-008190 [TRY003]; preserve the staging ValueError contract for the bridge's request error response.
+                    message = "workspace exceeds remote staging limits"
+                    raise ValueError(message)
 
         def ignore(current_text: str, names: list[str]) -> set[str]:
             parent = Path(current_text).relative_to(self._workspace)

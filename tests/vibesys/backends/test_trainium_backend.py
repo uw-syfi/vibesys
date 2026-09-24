@@ -59,6 +59,7 @@ class TestTrainiumSandbox:
             log_path=None,
         )
         assert isinstance(sb, DockerSandbox)
+
         argv = capture_docker_start_argv(sb)
         device_args = [
             argv[index + 1] for index, item in enumerate(argv[:-1]) if item == "--device"

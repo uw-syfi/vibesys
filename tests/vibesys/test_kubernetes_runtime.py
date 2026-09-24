@@ -265,9 +265,7 @@ def test_http_probe_retries_incomplete_response(
 
     monkeypatch.setattr("urllib.request.OpenerDirector.open", open_probe)
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
-
     lifecycle.start()
-
     assert calls == 2
 
 
@@ -797,7 +795,6 @@ def test_cli_renders_managed_lifecycle_control_commands(
     monkeypatch.setattr(runtime_cli, "LifecycleControlServer", lambda *_a, **_k: nullcontext())
     monkeypatch.setattr(runtime_cli.subprocess, "Popen", launch)
     monkeypatch.setattr(runtime_cli.signal, "signal", lambda *_args: signal.SIG_DFL)
-
     result = runtime_cli.main(
         [
             "--config",
@@ -944,6 +941,7 @@ def test_train_ticket_assets_build_current_java_modules(tmp_path: Path) -> None:
     source = candidate / "train-ticket"
     source.mkdir(parents=True)
     config = runtime_cli.load_config(TRAIN_CONFIG)
+
     runner = _Runner()
     lifecycle = KubernetesLifecycle(
         config.model_copy(update={"http_probes": ()}),

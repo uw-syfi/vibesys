@@ -17,6 +17,8 @@ Add a new backend by:
 
 from __future__ import annotations
 
+from functools import cache
+from importlib import import_module
 from typing import TYPE_CHECKING
 
 from vibesys.backends.base import (
@@ -30,14 +32,10 @@ from vibesys.constants import ComputeBackend
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
-
 # A registry entry is any callable that, given ``log_dir``/``log``/``image``,
 # returns a ``ComputeBackendImpl`` — a bare impl class, or ``LocalBackend``
 # with its platform identity bound via ``functools.partial``.
 _REGISTRY: dict[ComputeBackend, Callable[..., ComputeBackendImpl]] = {}
-
-
-_defaults_registered = False
 
 
 def register(backend: ComputeBackend, factory: Callable[..., ComputeBackendImpl]) -> None:
@@ -55,7 +53,8 @@ def get(
     """Construct the ComputeBackendImpl for *backend*."""
     _ensure_defaults()
     if backend not in _REGISTRY:
-        raise ValueError(f"No backend impl registered for {backend!r}")
+        message = f"No backend impl registered for {backend!r}"
+        raise ValueError(message)
     return _REGISTRY[backend](
         log_dir=log_dir,
         log=log,
@@ -67,23 +66,20 @@ def get(
 # modules themselves defer DockerSandbox (process-wide signal and atexit
 # handlers) to first sandbox construction, so registration stays side-effect free.
 def _register_defaults() -> None:
-    from vibesys.backends.cuda import CudaBackend
-    from vibesys.backends.local import cpu_backend, metal_backend
-    from vibesys.backends.rocm import RocmBackend
-    from vibesys.backends.trainium import TrainiumBackend
+    cuda = import_module("vibesys.backends.cuda")
+    local = import_module("vibesys.backends.local")
+    rocm = import_module("vibesys.backends.rocm")
+    trainium = import_module("vibesys.backends.trainium")
 
-    register(ComputeBackend.CUDA, CudaBackend)
-    register(ComputeBackend.METAL, metal_backend)
-    register(ComputeBackend.TRAINIUM, TrainiumBackend)
-    register(ComputeBackend.ROCM, RocmBackend)
-    register(ComputeBackend.CPU, cpu_backend)
+    register(ComputeBackend.CUDA, cuda.CudaBackend)
+    register(ComputeBackend.METAL, local.metal_backend)
+    register(ComputeBackend.TRAINIUM, trainium.TrainiumBackend)
+    register(ComputeBackend.ROCM, rocm.RocmBackend)
+    register(ComputeBackend.CPU, local.cpu_backend)
 
 
+@cache
 def _ensure_defaults() -> None:
-    global _defaults_registered
-    if _defaults_registered:
-        return
-    _defaults_registered = True
     _register_defaults()
 
 

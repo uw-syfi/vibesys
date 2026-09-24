@@ -1,6 +1,8 @@
 """Qwen3.5 text decoder written out explicitly in PyTorch.
+
 Semantics follow `transformers/models/qwen3_5/modeling_qwen3_5.py` (transformers
 5.17), including its dtype boundaries, so the reference tracks HF numerically:
+
 - Zero-centered RMSNorm (`x * (1 + w)`, computed in fp32) for the layer norms,
   the final norm, and the per-head q/k norms.
 - Full attention: q_proj emits `[q | gate]` per head, q/k RMSNorm, partial
@@ -10,8 +12,10 @@ Semantics follow `transformers/models/qwen3_5/modeling_qwen3_5.py` (transformers
   L2-normalized q/k, decay `g = -exp(A_log) * softplus(a + dt_bias)`, write
   strength `beta = sigmoid(b)`, fp32 delta-rule recurrence, and a gated
   RMSNorm (`norm(x) * w * silu(z)`, plain weight, not zero-centered).
+
 Parameter names match the HF checkpoint (after the `model.language_model.`
 prefix is stripped) so weights load with a strict `load_state_dict`.
+
 The model is stateless: all per-sequence state lives in `SequenceState`, which
 `forward` reads and advances. Batch dimension B is supported for sequences that
 share `start_pos`; the engine currently runs B=1.
@@ -27,8 +31,9 @@ from torch import nn
 
 from .config import LayerType, TextConfig
 
-
 # --------------------------------------------------------------------------- state
+
+
 @dataclass
 class AttentionCache:
     """Contiguous per-sequence KV cache for one full-attention layer."""
@@ -90,6 +95,8 @@ def new_sequence_state(
 
 
 # --------------------------------------------------------------------------- norms
+
+
 class RMSNorm(nn.Module):
     """Zero-centered RMSNorm: `(x / rms(x)) * (1 + w)` in fp32, cast back to input dtype."""
 
@@ -122,8 +129,11 @@ class GatedRMSNorm(nn.Module):
 
 
 # --------------------------------------------------------------------------- rotary
+
+
 class RotaryEmbedding(nn.Module):
     """Partial RoPE over the first `rotary_dim` channels of each head.
+
     The checkpoint config declares interleaved M-RoPE (sections 11/11/10). For
     text-only input all three position streams (t, h, w) are equal, so M-RoPE
     reduces exactly to 1-D RoPE with the standard `rotate_half` layout.
@@ -157,6 +167,8 @@ def apply_partial_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) ->
 
 
 # --------------------------------------------------------------------------- full attention
+
+
 class Attention(nn.Module):
     def __init__(self, cfg: TextConfig) -> None:
         super().__init__()
@@ -189,10 +201,12 @@ class Attention(nn.Module):
         cos, sin = rope
         q = apply_partial_rope(q, cos, sin)
         k = apply_partial_rope(k, cos, sin)
+
         end = start_pos + T
         cache.k[:, :, start_pos:end] = k
         cache.v[:, :, start_pos:end] = v
         keys, values = cache.k[:, :, :end], cache.v[:, :, :end]
+
         # Paged KV + a fused (flash / decode) attention kernel would replace this block.
         if T == 1:
             mask, causal = None, False  # one query attends to everything cached
@@ -216,6 +230,8 @@ class Attention(nn.Module):
 
 
 # --------------------------------------------------------------------------- gated delta net
+
+
 def _l2norm(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     return x * torch.rsqrt((x * x).sum(dim=-1, keepdim=True) + eps)
 
@@ -229,6 +245,7 @@ def recurrent_gated_delta_rule(
     state: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Token-by-token gated delta rule (decode path).
+
     q, k: [B, H, T, Dk] fp32, already L2-normalized and q scaled by Dk^-0.5.
     v: [B, H, T, Dv]; g, beta: [B, H, T]; state: [B, H, Dk, Dv] fp32.
     Per token: S = S * exp(g); S += k (beta * (v - S^T k))^T; o = S^T q.
@@ -255,6 +272,7 @@ def chunked_gated_delta_rule(
     chunk_size: int = 64,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Chunk-parallel (WY / UT-transform) form of the same recurrence (prefill path).
+
     Same contract as `recurrent_gated_delta_rule`. Mathematically identical; the
     sequential dependency is only across chunks. Mirrors HF's
     `torch_chunk_gated_delta_rule`; fla's `chunk_gated_delta_rule` is the fused
@@ -266,16 +284,19 @@ def chunked_gated_delta_rule(
     q, k, v = (F.pad(x, (0, 0, 0, pad)) for x in (q, k, v))
     g, beta = (F.pad(x, (0, pad)) for x in (g, beta))
     n = (T + pad) // chunk_size
+
     v_beta = v * beta[..., None]
     k_beta = k * beta[..., None]
     q, k, k_beta, v_beta = (
         x.reshape(B, H, n, chunk_size, x.shape[-1]) for x in (q, k, k_beta, v_beta)
     )
     g = g.reshape(B, H, n, chunk_size)
+
     upper = torch.ones(chunk_size, chunk_size, dtype=torch.bool, device=q.device).triu(1)
     g_cum = g.cumsum(dim=-1)
     # decay[i, j] = prod of exp(g) over (j, i]; zero above the diagonal.
     decay = (g_cum[..., :, None] - g_cum[..., None, :]).masked_fill(upper, float("-inf")).exp()
+
     ut = (
         k_beta @ k.transpose(-1, -2)
     ) * decay  # unit-lower-triangular system (diag added by the solver)
@@ -284,9 +305,11 @@ def chunked_gated_delta_rule(
     w = torch.linalg.solve_triangular(
         ut, k_beta * g_cum.exp()[..., None], upper=False, unitriangular=True
     )
+
     q = q * g_cum.exp()[..., None]
     k = k * (g_cum[..., -1:] - g_cum).exp()[..., None]
     chunk_decay = g_cum[..., -1].exp()[..., None, None]
+
     out = torch.empty(B, H, n, chunk_size, Dv, device=v.device, dtype=v.dtype)
     for i in range(n):
         v_new = u[:, :, i] - w[:, :, i] @ state
@@ -337,6 +360,7 @@ class GatedDeltaNet(nn.Module):
         g = -self.A_log.float().exp() * F.softplus(
             self.in_proj_a(x).float() + self.dt_bias
         )  # log decay <= 0
+
         # Kernel layout [B, H, T, D] in fp32. Key heads are shared by consecutive value heads.
         rep = self.num_v_heads // self.num_k_heads
         q = q.reshape(B, T, self.num_k_heads, self.head_k_dim).repeat_interleave(rep, dim=2)
@@ -347,14 +371,18 @@ class GatedDeltaNet(nn.Module):
         )
         q = _l2norm(q) * self.head_k_dim**-0.5
         k = _l2norm(k)
+
         rule = recurrent_gated_delta_rule if T == 1 else chunked_gated_delta_rule
         out, cache.recurrent = rule(q, k, v, g, beta, cache.recurrent)
+
         out = out.transpose(1, 2).to(x.dtype)  # [B, T, Hv, Dv]
         out = self.norm(out, z).reshape(B, T, self.value_dim)
         return self.out_proj(out)
 
 
 # --------------------------------------------------------------------------- blocks
+
+
 class MLP(nn.Module):
     def __init__(self, cfg: TextConfig) -> None:
         super().__init__()

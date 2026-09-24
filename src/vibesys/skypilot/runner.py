@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -19,7 +20,7 @@ from typing import IO, TYPE_CHECKING, Protocol
 import yaml
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Generator, Sequence
 
     from vibesys.skypilot.config import ResolvedSkyPilotResources
 
@@ -214,7 +215,7 @@ class SubprocessCommandRunner:
     ) -> ProcessResult:
         """Run one command while optionally forwarding output."""
         normalized = tuple(str(part) for part in argv)
-        process = subprocess.Popen(  # fixed external CLI boundary
+        process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-009052 [S603]; execute the caller's argv directly with no shell at the external CLI adapter boundary.
             normalized,
             cwd=cwd,
             stdout=subprocess.PIPE,
@@ -238,18 +239,20 @@ class SubprocessCommandRunner:
                 if sink is not None:
                     try:
                         sink(line)
-                    except Exception as exc:  # keep draining both pipes
+                    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009053 [BLE001]; a sink callback must not stop draining either subprocess pipe.
                         with sink_errors_lock:
                             if not sink_errors:
                                 sink_errors.append(exc)
 
-        assert process.stdout is not None  # requested PIPE
-        assert process.stderr is not None  # requested PIPE
+        if process.stdout is None or process.stderr is None:
+            raise AssertionError
+        stdout = process.stdout
+        stderr = process.stderr
         stdout_thread = threading.Thread(
-            target=forward, args=(process.stdout, stdout_parts, stdout_sink), daemon=True
+            target=forward, args=(stdout, stdout_parts, stdout_sink), daemon=True
         )
         stderr_thread = threading.Thread(
-            target=forward, args=(process.stderr, stderr_parts, stderr_sink), daemon=True
+            target=forward, args=(stderr, stderr_parts, stderr_sink), daemon=True
         )
         stdout_thread.start()
         stderr_thread.start()
@@ -325,8 +328,8 @@ def build_task_document(
 ) -> dict[str, object]:
     """Build the provider-neutral subset of one SkyPilot task document."""
     if not command:
-        # lint-waiver: LW-007132 [TRY003]; public task builder preserves ValueError for an empty command
-        raise ValueError("SkyPilot task command must not be empty")  # noqa: TRY003
+        message = "SkyPilot task command must not be empty"
+        raise ValueError(message)
     resource_document: dict[str, object] = {
         "infra": resources.infra,
         "accelerators": f"{resources.accelerator_type}:{resources.accelerators_per_node}",
@@ -361,7 +364,7 @@ def build_task_document(
 class SkyPilotJobRunner:
     """Inspect, launch, use, cancel, and release named SkyPilot clusters."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-009054 [PLR0913]; separate test seams for clock, sleep, subprocess, and job naming remain independently injectable.
         self,
         command_runner: CommandRunner | None = None,
         *,
@@ -442,7 +445,7 @@ class SkyPilotJobRunner:
             self.release(name, timeout=self._remaining(deadline, default=60) or 60)
         return self.launch(name, resources, timeout=self._remaining(deadline))
 
-    def run(
+    def run(  # noqa: PLR0913  # lint-waiver: LW-009055 [PLR0913]; streaming callbacks and resume identity are independent controls of one public job operation.
         self,
         cluster_name: str,
         resources: ResolvedSkyPilotResources,
@@ -459,8 +462,8 @@ class SkyPilotJobRunner:
     ) -> JobResult:
         """Submit a detached task, identify it, then stream logs to completion."""
         if log_tail < 0:
-            # lint-waiver: LW-007133 [TRY003]; public task runner preserves ValueError for a negative log tail
-            raise ValueError("SkyPilot log tail must be nonnegative")  # noqa: TRY003
+            message = "SkyPilot log tail must be nonnegative"
+            raise ValueError(message)
         deadline = None if timeout is None else self._monotonic() + timeout
         resolved_job_name = job_name or self._job_name_factory()
         if existing_job_id is None:
@@ -632,20 +635,9 @@ class SkyPilotJobRunner:
             raise SkyPilotTimeoutError.command_timed_out(timeout) from exc
 
     @staticmethod
-    def _task_file(document: dict[str, object]):
-        class _TaskFile:
-            def __init__(self, value: dict[str, object]) -> None:
-                self._value = value
-                self._temporary: tempfile.TemporaryDirectory[str] | None = None
-
-            def __enter__(self) -> Path:
-                self._temporary = tempfile.TemporaryDirectory(prefix="vibesys-skypilot-")
-                path = Path(self._temporary.name) / "task.yaml"
-                path.write_text(yaml.safe_dump(self._value, sort_keys=False), encoding="utf-8")
-                return path
-
-            def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-                if self._temporary is not None:
-                    self._temporary.cleanup()
-
-        return _TaskFile(document)
+    @contextmanager
+    def _task_file(document: dict[str, object]) -> Generator[Path]:
+        with tempfile.TemporaryDirectory(prefix="vibesys-skypilot-") as directory:
+            path = Path(directory) / "task.yaml"
+            path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            yield path

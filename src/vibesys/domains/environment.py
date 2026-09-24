@@ -62,12 +62,11 @@ class EnvironmentHooks(Protocol):
 class NoopEnvironmentHooks:
     """Environment hooks implementation for domains with no setup needs."""
 
-    # lint-waiver: LW-007063 [ARG002]; the protocol requires context for domain implementations
-    def prepare(self, ctx: EnvironmentContext) -> EnvironmentPatch:  # noqa: ARG002
+    def prepare(self, ctx: EnvironmentContext) -> EnvironmentPatch:
         """Return an empty patch."""
+        del ctx
         return EnvironmentPatch()
 
-    # lint-waiver: LW-007064 [ARG002]; the protocol requires context for domain implementations
-    def teardown(self, ctx: EnvironmentContext) -> None:  # noqa: ARG002
+    def teardown(self, ctx: EnvironmentContext) -> None:
         """Complete teardown without any domain-owned resources."""
-        return
+        del ctx

@@ -22,8 +22,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 if TYPE_CHECKING:
     import builtins
     from collections.abc import Callable
-
 _STORE_VERSION = 1
+
+
+def _issue_not_found(issue_id: int) -> KeyError:
+    """Build the stable lookup error used by issue update paths."""
+    return KeyError(f"issue #{issue_id} not found")
 
 
 class IssueType(StrEnum):
@@ -100,11 +104,11 @@ class _IssueBoardData(BaseModel):
     def _valid_issue_identity(self) -> Self:
         issue_ids = [issue.id for issue in self.issues]
         if len(issue_ids) != len(set(issue_ids)):
-            # lint-waiver: LW-007122 [TRY003]; Pydantic validators must raise ValueError to preserve structured validation errors
-            raise ValueError("issue IDs must be unique")  # noqa: TRY003
+            message = "issue IDs must be unique"
+            raise ValueError(message)
         if issue_ids and self.next_id <= max(issue_ids):
-            # lint-waiver: LW-007123 [TRY003]; Pydantic validators must raise ValueError to preserve structured validation errors
-            raise ValueError("next_id must be greater than every persisted issue ID")  # noqa: TRY003
+            message = "next_id must be greater than every persisted issue ID"
+            raise ValueError(message)
         return self
 
 
@@ -185,8 +189,7 @@ class IssueBoard:
             if stored.id == issue.id:
                 self._data.issues[idx] = issue.model_copy(deep=True)
                 return
-        # lint-waiver: LW-007124 [TRY003]; missing issue updates preserve KeyError semantics for callers
-        raise KeyError(f"issue #{issue.id} not found")  # noqa: TRY003
+        raise _issue_not_found(issue.id)
 
     def create(
         self,
@@ -251,8 +254,7 @@ class IssueBoard:
         with self._lock:
             issue = self.get(issue_id)
             if issue is None:
-                # lint-waiver: LW-007125 [TRY003]; issue lookup preserves KeyError semantics for callers
-                raise KeyError(f"issue #{issue_id} not found")  # noqa: TRY003
+                raise _issue_not_found(issue_id)
             now = datetime.now().isoformat()
             old_status = issue.status
             issue.status = status
@@ -318,8 +320,7 @@ class IssueBoard:
         with self._lock:
             issue = self.get(issue_id)
             if issue is None:
-                # lint-waiver: LW-007126 [TRY003]; issue lookup preserves KeyError semantics for callers
-                raise KeyError(f"issue #{issue_id} not found")  # noqa: TRY003
+                raise _issue_not_found(issue_id)
             now = datetime.now().isoformat()
             issue.attempts += 1
             issue.updated_at = now

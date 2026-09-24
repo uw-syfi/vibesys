@@ -6,12 +6,15 @@ Ruff already enforces the function-level quality rules this repo cares about
 equivalents plus a per-file line ceiling. Neither tool measures Python *file*
 length, so a module can grow without bound while every function in it stays
 inside the limits. This script closes that gap.
+
 The ceiling is a ratchet, not a hard cut: files already over it are recorded in
 an explicit allowlist at their current length, so the check passes today and
 fails the moment one of them grows. Shrinking a file is always allowed; the
 script prints the entries worth tightening and refuses to let an entry that has
 dropped back under the ceiling linger.
+
 Configuration lives in `pyproject.toml` under `[tool.vibesys.file_length]`:
+
     max_lines  -- ceiling, in physical lines (what `wc -l` counts), for any
                   file that is not allowlisted.
     roots      -- repo-relative directories to scan for `*.py`. Any path with
@@ -21,11 +24,14 @@ Configuration lives in `pyproject.toml` under `[tool.vibesys.file_length]`:
     allowlist  -- table of repo-relative path -> recorded line count for files
                   currently over the ceiling. Every entry should be preceded
                   by a comment explaining why it is still there.
+
 Three conditions fail:
+
     1. A non-allowlisted file exceeds `max_lines`.
     2. An allowlisted file exceeds its recorded count (the ratchet).
     3. An allowlist entry is stale: the file is gone, or it now fits under
        `max_lines` and the entry must be deleted.
+
 Usage:
     uv run python scripts/check_file_length.py
     uv run python scripts/check_file_length.py --root /path/to/repo.
@@ -41,6 +47,7 @@ from pathlib import Path
 
 DEFAULT_PYPROJECT = Path("pyproject.toml")
 SKIPPED_DIR_NAMES = frozenset({"tests", "__pycache__"})
+
 EXIT_OK = 0
 EXIT_VIOLATIONS = 1
 EXIT_TOOL_ERROR = 2
@@ -163,6 +170,7 @@ def report(failures: list[str], stale: list[str], tightenable: list[str], ceilin
             print(line)
     if failures or stale:
         return EXIT_VIOLATIONS
+
     print(f"All scanned Python files are within the {ceiling}-line ceiling or their recorded size.")
     if tightenable:
         print("\nAllowlist entries that shrank; lower the recorded count to lock the gain in:")
@@ -185,12 +193,14 @@ def main() -> int:
     )
     args = parser.parse_args()
     pyproject_path = args.pyproject if args.pyproject is not None else args.root / DEFAULT_PYPROJECT
+
     try:
         config = load_config(pyproject_path)
         measured = measure(args.root, config.roots)
     except (ConfigError, OSError) as exc:
         print(f"check_file_length: {exc}", file=sys.stderr)
         return EXIT_TOOL_ERROR
+
     failures = check_measured_files(measured, config)
     stale, tightenable = check_allowlist(measured, config)
     return report(failures, stale, tightenable, config.max_lines)

@@ -125,36 +125,42 @@ class CargoGitToolSpec(BaseModel):
             or parsed.query
             or parsed.fragment
         ):
-            raise ValueError("git must be an HTTPS URL without credentials, query, or fragment")  # noqa: TRY003  # lint-waiver: LW-007068 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+            message = "git must be an HTTPS URL without credentials, query, or fragment"
+            raise ValueError(message)
         return value
 
     @field_validator("rev")
     @classmethod
     def _full_git_revision(cls, value: str) -> str:
         if not _GIT_REVISION_PATTERN.fullmatch(value):
-            raise ValueError("rev must be a full 40-character lowercase Git commit SHA")  # noqa: TRY003  # lint-waiver: LW-007069 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+            message = "rev must be a full 40-character lowercase Git commit SHA"
+            raise ValueError(message)
         return value
 
     @field_validator("package")
     @classmethod
     def _valid_package(cls, value: str) -> str:
         if not _CARGO_IDENTIFIER_PATTERN.fullmatch(value):
-            raise ValueError("package must be a canonical Cargo package name")  # noqa: TRY003  # lint-waiver: LW-007070 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+            message = "package must be a canonical Cargo package name"
+            raise ValueError(message)
         return value
 
     @field_validator("bins")
     @classmethod
     def _valid_bins(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if not value:
-            raise ValueError("bins must declare at least one binary")  # noqa: TRY003  # lint-waiver: LW-007071 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+            message = "bins must declare at least one binary"
+            raise ValueError(message)
         if len(value) != len(set(value)):
-            raise ValueError("bins must not contain duplicates")  # noqa: TRY003  # lint-waiver: LW-007072 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+            message = "bins must not contain duplicates"
+            raise ValueError(message)
         invalid = next(
             (binary for binary in value if not _CARGO_IDENTIFIER_PATTERN.fullmatch(binary)),
             None,
         )
         if invalid is not None:
-            raise ValueError(f"invalid Cargo binary name: {invalid!r}")  # noqa: TRY003  # lint-waiver: LW-007073 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+            message = f"invalid Cargo binary name: {invalid!r}"
+            raise ValueError(message)
         return value
 
 
@@ -170,16 +176,16 @@ class EvaluatorPackageRequirement(BaseModel):
     @classmethod
     def _valid_name(cls, value: str) -> str:
         if not _IDENTIFIER_PATTERN.fullmatch(value):
-            raise ValueError(  # noqa: TRY003  # lint-waiver: LW-007081 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
-                "name must contain lowercase letters and digits separated by '-' or '.'"
-            )
+            message = "name must contain lowercase letters and digits separated by '-' or '.'"
+            raise ValueError(message)
         return value
 
     @field_validator("version")
     @classmethod
     def _valid_version(cls, value: str) -> str:
         if not _VERSION_PATTERN.fullmatch(value):
-            raise ValueError("version must be an exact package version without whitespace")  # noqa: TRY003  # lint-waiver: LW-007074 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+            message = "version must be an exact package version without whitespace"
+            raise ValueError(message)
         return value
 
 
@@ -199,7 +205,8 @@ class EvaluatorPackageMetadata(EvaluatorPackageRequirement):
         value: tuple[Literal["go", "rust"], ...],
     ) -> tuple[Literal["go", "rust"], ...]:
         if len(value) != len(set(value)):
-            raise ValueError("toolchains must not contain duplicates")  # noqa: TRY003  # lint-waiver: LW-007075 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+            message = "toolchains must not contain duplicates"
+            raise ValueError(message)
         return value
 
     @field_validator("entrypoints")
@@ -209,29 +216,35 @@ class EvaluatorPackageMetadata(EvaluatorPackageRequirement):
         value: dict[str, tuple[str, ...]],
     ) -> dict[str, tuple[str, ...]]:
         if not value:
-            raise ValueError("entrypoints must define at least one command")  # noqa: TRY003  # lint-waiver: LW-007076 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+            message = "entrypoints must define at least one command"
+            raise ValueError(message)
         for name, command in value.items():
             if not _IDENTIFIER_PATTERN.fullmatch(name):
-                raise ValueError(  # noqa: TRY003  # lint-waiver: LW-007082 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+                message = (
                     f"entrypoint {name!r} must contain lowercase letters and digits "
                     "separated by '-' or '.'"
                 )
+                raise ValueError(message)
             if not command:
-                raise ValueError(f"entrypoint {name!r} must contain at least one argv element")  # noqa: TRY003  # lint-waiver: LW-007077 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+                message = f"entrypoint {name!r} must contain at least one argv element"
+                raise ValueError(message)
             if any(not part for part in command):
-                raise ValueError(f"entrypoint {name!r} contains an empty argv element")  # noqa: TRY003  # lint-waiver: LW-007078 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+                message = f"entrypoint {name!r} contains an empty argv element"
+                raise ValueError(message)
             if any(PYTHON_TOKEN in part and part != PYTHON_TOKEN for part in command):
-                raise ValueError(  # noqa: TRY003  # lint-waiver: LW-007083 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+                message = (
                     f"entrypoint {name!r} contains a malformed Python token; "
                     "${PYTHON} must occupy one complete argv element"
                 )
+                raise ValueError(message)
         return value
 
     @model_validator(mode="after")
     def _valid_tools(self) -> EvaluatorPackageMetadata:
         for name in self.tools:
             if not _IDENTIFIER_PATTERN.fullmatch(name):
-                raise ValueError(f"invalid evaluator tool name: {name!r}")  # noqa: TRY003  # lint-waiver: LW-007079 [TRY003]; Pydantic validators need ValueError to produce structured field errors.
+                message = f"invalid evaluator tool name: {name!r}"
+                raise ValueError(message)
         for entrypoint, command in self.entrypoints.items():
             _validate_tool_tokens(self.tools, command, location=f"entrypoint {entrypoint!r}")
         return self
@@ -249,21 +262,22 @@ def _validate_tool_tokens(
         match = _TOOL_TOKEN_PATTERN.fullmatch(part)
         if match is None:
             if TOOL_TOKEN_PREFIX in part:
-                raise ValueError(  # noqa: TRY003  # lint-waiver: LW-007084 [TRY003]; Shared token validation needs ValueError for Pydantic; argv callers translate it into EvaluatorPackageError.
+                message = (
                     f"{location} contains a malformed tool token; "
                     "tool tokens must occupy one complete argv element"
                 )
+                raise ValueError(message)
             continue
         tool_name = match.group("tool")
         binary = match.group("binary")
         try:
             tool = tools[tool_name]
         except KeyError as exc:
-            raise ValueError(f"{location} references undeclared tool {tool_name!r}") from exc  # noqa: TRY003  # lint-waiver: LW-007080 [TRY003]; Shared token validation needs ValueError for Pydantic; argv callers translate it into EvaluatorPackageError.
+            message = f"{location} references undeclared tool {tool_name!r}"
+            raise ValueError(message) from exc
         if binary not in tool.bins:
-            raise ValueError(  # noqa: TRY003  # lint-waiver: LW-007085 [TRY003]; Shared token validation needs ValueError for Pydantic; argv callers translate it into EvaluatorPackageError.
-                f"{location} references undeclared binary {binary!r} from tool {tool_name!r}"
-            )
+            message = f"{location} references undeclared binary {binary!r} from tool {tool_name!r}"
+            raise ValueError(message)
 
 
 @dataclass(frozen=True)

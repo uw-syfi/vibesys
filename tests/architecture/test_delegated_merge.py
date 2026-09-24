@@ -49,8 +49,8 @@ from scripts.delegated_merge import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from hypothesis.strategies import DrawFn
 
+    from hypothesis.strategies import DrawFn
 REPO_ROOT = Path(__file__).parents[2]
 
 

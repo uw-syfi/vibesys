@@ -680,10 +680,8 @@ class TestReopenBlocked:
         assert closed_after.status == IssueStatus.CLOSED
 
     def test_reopen_blocked_no_blocked_is_noop(self, tmp_path: Path) -> None:
-        store = _make_store(tmp_path)
-        _create(store)
         cb = Mock()
-        store._on_change = cb
+        store = IssueBoard(tmp_path / "issues.json", on_change=cb)
         reopened = store.reopen_blocked(actor="loop:resume", iteration=1)
         assert reopened == []
         # No mutation -> no callback fired (and importantly no save).

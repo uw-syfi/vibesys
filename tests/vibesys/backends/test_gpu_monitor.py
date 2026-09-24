@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, patch
 
 from vibesys.backends.base import (
@@ -32,6 +31,9 @@ from vs_sandbox.api import (
     DockerSandbox,
     LocalShellSandbox,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -144,11 +146,12 @@ class TestMonitorLifecycle:
             interval=0.05,
         )
         mon.start()
-        assert mon._thread is not None
-        assert mon._thread.is_alive()
         time.sleep(0.15)
         mon.stop()
-        assert not mon._thread.is_alive()
+        stopped_call_count = mock_procs.call_count
+        time.sleep(0.1)
+        assert stopped_call_count > 1
+        assert mock_procs.call_count == stopped_call_count
 
     @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
     @patch("vibesys.backends.cuda.gpu_monitor._query_gpu_procs")
@@ -284,8 +287,7 @@ class TestMonitorLifecycle:
         mon.start()
         time.sleep(0.15)
         mon.stop()
-        assert mon._thread is not None
-        assert not mon._thread.is_alive()
+        assert not mon.status.is_contended
 
     def test_stop_without_start(self, tmp_path: Path) -> None:
         mon = GpuContentionMonitor(log_dir=tmp_path, gpu_uuid=GPU_A)
@@ -307,7 +309,9 @@ class TestReselectGpu:
 
         ctx = object.__new__(_RunContext)
         ctx.selected_gpu = selected_gpu
-        ctx._paths = RunPaths(
+        # lint-waiver: LW-008504 [SLF001]; the focused reselect fixture skips
+        # full run construction, so it must supply the backing paths field.
+        ctx._paths = RunPaths(  # noqa: SLF001
             project_root=tmp_path / "workspace",
             log_dir=tmp_path / "logs",
             run_log_path=tmp_path / "run.log",
@@ -350,7 +354,7 @@ class TestReselectGpu:
                 )
         else:
             implementer_backend = cast(
-                LocalShellSandbox,
+                "LocalShellSandbox",
                 backend_impl.make_sandbox(
                     SandboxKind.LOCAL,
                     host_workspace=str(ctx.log_dir / "implementer"),
@@ -359,7 +363,7 @@ class TestReselectGpu:
                 ),
             )
             judge_backend = cast(
-                LocalShellSandbox,
+                "LocalShellSandbox",
                 backend_impl.make_sandbox(
                     SandboxKind.LOCAL,
                     host_workspace=str(ctx.log_dir / "judge"),
@@ -445,16 +449,19 @@ class TestReselectGpu:
         # Initial monitor lives on the backend (matches the production flow
         # where _RunContext.__init__ binds ctx.gpu_monitor to the same object).
         old_monitor = MagicMock()
-        cast("CudaBackend", ctx.backend_impl)._monitor = old_monitor
-        ctx.gpu_monitor = old_monitor
 
-        mock_pick.return_value = gpu1
-        ctx.reselect_gpu()
+        next_monitor = MagicMock()
+        with patch(
+            "vibesys.backends.cuda.GpuContentionMonitor",
+            side_effect=[old_monitor, next_monitor],
+        ) as monitor_factory:
+            ctx.device.start_monitor()
+            mock_pick.return_value = gpu1
+            ctx.reselect_gpu()
 
         old_monitor.stop.assert_called_once()
-        assert ctx.gpu_monitor is not old_monitor
-        assert isinstance(ctx.gpu_monitor, GpuContentionMonitor)
-        assert ctx.gpu_monitor._gpu_uuid == GPU_B
+        assert ctx.gpu_monitor is next_monitor
+        assert monitor_factory.call_args.kwargs["gpu_uuid"] == GPU_B
         # Clean up
         ctx.gpu_monitor.stop()
 
@@ -479,20 +486,14 @@ class TestReselectGpu:
 
         implementer_backend = cast("MagicMock", ctx.implementer_backend)
         judge_backend = cast("MagicMock", ctx.judge_backend)
-        implementer_backend.stop.assert_called_once()
-        judge_backend.stop.assert_called_once()
-        assert implementer_backend._gpus == "device=1"
-        assert judge_backend._gpus == "device=1"
-        implementer_backend.start.assert_called_once()
-        judge_backend.start.assert_called_once()
+        implementer_backend.restart_with_gpus.assert_called_once_with("device=1")
+        judge_backend.restart_with_gpus.assert_called_once_with("device=1")
         # Clean up
         assert ctx.gpu_monitor is not None
         ctx.gpu_monitor.stop()
 
-    # Note: symlink replay on restart is now the sandbox class's
-    # responsibility (it runs lifecycle hooks before becoming ready). That
-    # behaviour is tested in libs/vs-sandbox/tests/test_docker_sandbox.py; reselect_gpu
-    # itself just calls sb.stop()/sb.start() and the rest happens for free.
+    # Note: symlink replay on restart is the sandbox class's responsibility
+    # (it runs lifecycle hooks before becoming ready).
 
     @patch("vibesys.backends.cuda.gpu_monitor.query_gpu_info", return_value=[])
     @patch("vibesys.backends.cuda.pick_gpu")

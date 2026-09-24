@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
@@ -236,7 +236,7 @@ class RunIntegrationAdapter:
         self._failure_diagnostics.clear()
         self.controller.attach(log_dir, project=project, run_id=run_id)
 
-    def _handle_run_resources(self, session: RunSession, handoff: RunResourceHandoff) -> None:
+    def handle_run_resources(self, session: RunSession, handoff: RunResourceHandoff) -> None:
         """Convert a core resource handoff into durable attach plus experiment chat.
 
         Registered as this run's sole `RunSession.on_run_resources` listener,
@@ -278,19 +278,21 @@ class RunIntegrationAdapter:
             *, driver: str | None, provider: str | None, model: str | None
         ) -> AgentSelection:
             if attachment.agent_backend != "cli":
-                raise ValueError(
+                message = (
                     "experiment chat threads require the CLI agent backend, "
                     f"but this run uses agent backend {attachment.agent_backend!r}"
                 )
+                raise ValueError(message)
             resolved_driver = driver or defaults.driver
             resolved_provider = provider or defaults.provider
             resolved_model = model or defaults.model
             supported = agent_catalog()[Driver(resolved_driver)].providers
             if resolved_provider not in supported:
-                raise ValueError(
+                message = (
                     f"agent driver {resolved_driver!r} does not support provider "
                     f"{resolved_provider!r}; supported providers: {', '.join(supported)}"
                 )
+                raise ValueError(message)
             return AgentSelection(
                 driver=resolved_driver,
                 provider=resolved_provider,
@@ -317,7 +319,7 @@ class RunIntegrationAdapter:
         self._chat_factory = factory
         try:
             factory.start()
-        except Exception as exc:  # optional server feature
+        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009031 [BLE001]; optional experiment chat startup failures are reported without failing the core run.
             self.journal.publish_output(
                 "stderr",
                 f"Experiment chat is unavailable: {type(exc).__name__}: {exc}\n",
@@ -348,7 +350,7 @@ class RunIntegrationAdapter:
         text: str = "",
         *,
         data: EventData | None = None,
-        **fields: Any,
+        **fields: object,
     ) -> RunEvent:
         """Record a server-only wire event."""
         return self.journal.record(event_type, text, data=data, **fields)

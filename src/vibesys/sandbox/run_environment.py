@@ -38,7 +38,9 @@ import tempfile
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
+from contextlib import suppress
 from dataclasses import dataclass, field
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
@@ -62,7 +64,15 @@ from vibesys.sandbox.modal_evaluator import encode_setup_command
 from vibesys.skypilot.bridge import SkyPilotBridge
 from vibesys.skypilot.config import load_cluster_profiles, resolve_profile
 from vibesys.skypilot.runner import SkyPilotJobRunner, stable_cluster_name
-from vs_agent.api import AgentBackend
+from vs_agent.api import (
+    DOCKER_PROVIDER_ENV,
+    AgentBackend,
+    auth_bind_mounts,
+    auth_copy_paths,
+    auth_env_passthrough,
+    auth_env_vars,
+    auth_paths,
+)
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
 from vs_sandbox.api import (
     BeforeReadyContext,
@@ -142,6 +152,19 @@ class AgentPaths:
     accuracy_command: str | None = None
     benchmark_command: str | None = None
     profiler_support: str | None = None
+
+
+@dataclass(frozen=True)
+class _CommandPathOptions:
+    """Path translation choices for one evaluator command."""
+
+    isolated: bool = False
+    evaluator_package_root: str | None = None
+    evaluator_tools_root: Path | None = None
+    agent_path: Callable[[Path | str], str] | None = None
+
+
+_DEFAULT_COMMAND_PATH_OPTIONS = _CommandPathOptions()
 
 
 @dataclass(frozen=True)
@@ -290,7 +313,7 @@ class _NoopWorkspaceRecovery:
         backend: ComputeBackendImpl,
         log: Callable[[str], None],
     ) -> None:
-        return
+        del workspace, backend, log
 
     def remove_workspace_child(
         self,
@@ -299,10 +322,11 @@ class _NoopWorkspaceRecovery:
         *,
         backend: ComputeBackendImpl,
     ) -> bool:
+        del workspace, rel_path, backend
         return False
 
     def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> None:
-        return
+        del name, log
 
     def candidate_runtime(
         self,
@@ -310,6 +334,7 @@ class _NoopWorkspaceRecovery:
         generation: int,
         child_idx: int,
     ) -> CandidateRuntime:
+        del generation, child_idx
         return CandidateRuntime(view.prompt_notes, view.deployment_namespace)
 
 
@@ -432,13 +457,12 @@ class DockerEnvironment:
 
     def open(self, request: RunEnvironmentRequest) -> RunEnvironmentSession:
         """Start the Docker sandbox and resolve candidate-facing paths."""
-        from vibesys.sandbox.images import agent_image
-
+        image_helpers = import_module("vibesys.sandbox.images")
         tools = _evaluator_tools(request)
         # The task image, when a task has a Dockerfile, is built by the
         # headless entrypoint and arrives here as the backend image; only the
         # agent layer is applied on top of it.
-        container_image = agent_image(
+        container_image = image_helpers.agent_image(
             _docker_backend_image(request),
             toolchains=_docker_agent_toolchains(request, tools),
         )
@@ -452,8 +476,6 @@ class DockerEnvironment:
         auth_files: list[tuple[str, str]] = []
         if resolved_cli is not None:
             provider, cli_provider_env = resolved_cli
-            from vs_agent.api import auth_copy_paths
-
             auth_files = auth_copy_paths(provider)
         cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
         # The agent image's baked toolchain root is read-only (agent.Dockerfile
@@ -527,7 +549,7 @@ class DockerEnvironment:
                     f"(rc={result.returncode}): "
                     f"{result.stderr.decode(errors='replace').strip()}"
                 )
-        except Exception as exc:
+        except (OSError, subprocess.TimeoutExpired) as exc:
             log(f"[warn] chown failed for {workspace}: {exc}")
 
     def remove_workspace_child(
@@ -535,21 +557,19 @@ class DockerEnvironment:
     ) -> bool:
         """Remove a workspace-relative child inside the Docker sandbox."""
         target = workspace / rel_path
-        try:
+        with suppress(OSError, subprocess.TimeoutExpired):
             _docker_workspace_run(
                 workspace,
                 backend=backend,
                 shell_command=f"rm -rf -- {shlex.quote(f'/workspace/{rel_path}')}",
                 timeout=120,
             )
-        except Exception:
-            pass
         return not (target.exists() or target.is_symlink())
 
     def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> None:
         """Leave deployment teardown to the owning Docker session."""
         # The editor container is torn down by the session; nothing per-candidate.
-        return
+        del name, log
 
     def candidate_runtime(
         self,
@@ -558,6 +578,7 @@ class DockerEnvironment:
         child_idx: int,
     ) -> CandidateRuntime:
         """Return candidate prompt/runtime settings for Docker evaluation."""
+        del generation, child_idx
         return CandidateRuntime(view.prompt_notes, view.deployment_namespace)
 
 
@@ -635,7 +656,8 @@ class SkyPilotEnvironment(DockerEnvironment):
         """Validate environment-specific launch options."""
         profile = options.get("profile")
         if not isinstance(profile, str) or not profile:
-            raise ValueError("SkyPilot requires a non-empty cluster profile")
+            message = "SkyPilot requires a non-empty cluster profile"
+            raise ValueError(message)
         raw_path = options.get("profiles_file")
         profiles_file = (
             Path(str(raw_path)).expanduser()
@@ -667,9 +689,11 @@ class SkyPilotEnvironment(DockerEnvironment):
         for running agent CLIs, and this change leaves it untouched.
         """
         if self.config.resources is None:
-            raise ValueError("SkyPilot requires portable run resources")
+            message = "SkyPilot requires portable run resources"
+            raise ValueError(message)
         if request.state_namespace is None:
-            raise ValueError("SkyPilot requires a machine-local state namespace")
+            message = "SkyPilot requires a machine-local state namespace"
+            raise ValueError(message)
         profiles = load_cluster_profiles(self.config.profiles_file)
         cluster_resources = resolve_profile(profiles, self.config.profile, self.config.resources)
         cluster_name = stable_cluster_name(request.run_id, cluster_resources)
@@ -700,18 +724,17 @@ class SkyPilotEnvironment(DockerEnvironment):
         try:
             bridge.start()
 
-            from vibesys.sandbox.images import (
-                agent_image,
-                ensure_pushed,
-            )
+            image_helpers = import_module("vibesys.sandbox.images")
 
             tools = _evaluator_tools(request)
-            container_image = agent_image(
+            container_image = image_helpers.agent_image(
                 _docker_backend_image(request),
                 toolchains=_docker_agent_toolchains(request, tools),
             )
             container_image = _ensure_pushed_for_remote_backend(
-                container_image, ensure_pushed=ensure_pushed, backend_label="SkyPilot"
+                container_image,
+                ensure_pushed=image_helpers.ensure_pushed,
+                backend_label="SkyPilot",
             )
 
             resources, docker_symlinks = _container_mount_plan(request)
@@ -862,19 +885,18 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         self._ensure_model_volume(request)
         self._ensure_draft_volume(request)
 
-        from vibesys.sandbox.images import (
-            agent_image,
-            ensure_pushed,
-        )
+        image_helpers = import_module("vibesys.sandbox.images")
 
         tools = _evaluator_tools(request)
-        container_image = agent_image(
+        container_image = image_helpers.agent_image(
             _docker_backend_image(request),
             toolchains=_docker_agent_toolchains(request, tools),
             pip_extras=_MODAL_EDITOR_PIP_EXTRAS,
         )
         container_image = _ensure_pushed_for_remote_backend(
-            container_image, ensure_pushed=ensure_pushed, backend_label="Modal"
+            container_image,
+            ensure_pushed=image_helpers.ensure_pushed,
+            backend_label="Modal",
         )
 
         resources, docker_symlinks = _container_mount_plan(request)
@@ -912,17 +934,17 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         # HOME of the user the container runs as, the agent image's
         # non-root ``agent`` user, not root. Deferred: the Docker sandbox
         # module imports the agent stack, which this module must not load.
-        from vs_sandbox.api import AGENT_HOME
+        agent_home = import_module("vs_sandbox.api").AGENT_HOME
 
         modal_auth = Path.home() / ".modal.toml"
         if modal_auth.exists():
             resources.append(
-                _resource_for_mount(str(modal_auth), f"{AGENT_HOME}/.modal.toml", read_only=True)
+                _resource_for_mount(str(modal_auth), f"{agent_home}/.modal.toml", read_only=True)
             )
         modal_config_dir = Path.home() / ".modal"
         if modal_config_dir.is_dir():
             resources.append(
-                _resource_for_mount(str(modal_config_dir), f"{AGENT_HOME}/.modal", read_only=True)
+                _resource_for_mount(str(modal_config_dir), f"{agent_home}/.modal", read_only=True)
             )
 
         resources = _dedupe_resources(resources)
@@ -979,9 +1001,11 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                         _environment_command(
                             request,
                             request.accuracy_command,
-                            isolated=True,
-                            evaluator_package_root=".vibesys-evaluator-package",
-                            evaluator_tools_root=_REMOTE_EVALUATOR_TOOLS_ROOT,
+                            paths=_CommandPathOptions(
+                                isolated=True,
+                                evaluator_package_root=".vibesys-evaluator-package",
+                                evaluator_tools_root=_REMOTE_EVALUATOR_TOOLS_ROOT,
+                            ),
                         ),
                     ),
                     benchmark_command=_prefix_command(
@@ -989,9 +1013,11 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                         _environment_command(
                             request,
                             request.benchmark_command,
-                            isolated=True,
-                            evaluator_package_root=".vibesys-evaluator-package",
-                            evaluator_tools_root=_REMOTE_EVALUATOR_TOOLS_ROOT,
+                            paths=_CommandPathOptions(
+                                isolated=True,
+                                evaluator_package_root=".vibesys-evaluator-package",
+                                evaluator_tools_root=_REMOTE_EVALUATOR_TOOLS_ROOT,
+                            ),
                         ),
                     ),
                     profiler_support=(
@@ -1022,15 +1048,16 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         meta_path = request.ref_dir / "meta.json"
         if not meta_path.exists():
             return
-        from vs_sandbox.api import ensure_model_volume
+        ensure_model_volume = import_module("vs_sandbox.api").ensure_model_volume
 
         meta = json.loads(meta_path.read_text())
         model_id = meta.get("model_id")
         if not model_id:
-            raise ValueError(
+            message = (
                 f"meta.json at {meta_path} missing required 'model_id' field "
                 "(needed for Modal auto-upload)"
             )
+            raise ValueError(message)
         hf_available = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))
         local_model = request.ref_dir / "model"
         local_path = None
@@ -1059,14 +1086,13 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         draft_meta_path = request.ref_dir / "draft_meta.json"
         if not draft_meta_path.exists():
             return None
-        from vs_sandbox.api import ensure_model_volume
+        ensure_model_volume = import_module("vs_sandbox.api").ensure_model_volume
 
         draft_meta = json.loads(draft_meta_path.read_text())
         draft_model_id = draft_meta.get("model_id")
         if not draft_model_id:
-            raise ValueError(
-                f"draft_meta.json at {draft_meta_path} missing required 'model_id' field"
-            )
+            message = f"draft_meta.json at {draft_meta_path} missing required 'model_id' field"
+            raise ValueError(message)
         hf_available = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))
         local_draft = request.ref_dir / "draft_model"
         local_path = None
@@ -1091,14 +1117,14 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         leaves an idle app behind and must never fail a run.
         """
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-009088 [S603]; Modal teardown passes fixed argv directly with no shell.
                 [sys.executable, "-m", "modal", "app", "stop", name, "--yes"],
                 capture_output=True,
                 text=True,
                 timeout=60,
                 check=False,
             )
-        except Exception as exc:  # timeout, missing binary, etc.
+        except (OSError, subprocess.TimeoutExpired) as exc:
             log(f"[warn] modal app stop {name} raised: {exc}")
             return
         if result.returncode != 0:
@@ -1171,10 +1197,11 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
         return ModalEnvironment.from_options(spec.options)
     if spec.name == "skypilot":
         return SkyPilotEnvironment.from_options(spec.options, spec.resources)
-    raise ValueError(f"unknown run environment: {spec.name!r}")
+    message = f"unknown run environment: {spec.name!r}"
+    raise ValueError(message)
 
 
-def make_run_environment_spec(
+def make_run_environment_spec(  # noqa: PLR0913  # lint-waiver: LW-009086 [PLR0913]; the compatibility builder accepts each independent CLI environment option.
     *,
     use_docker: bool = False,
     docker_image: str | None = None,
@@ -1199,12 +1226,15 @@ def make_run_environment_spec(
     decorators instead.
     """
     if sum((use_docker, use_modal, use_skypilot)) > 1:
-        raise ValueError("--docker, --modal, and --skypilot are mutually exclusive")
+        message = "--docker, --modal, and --skypilot are mutually exclusive"
+        raise ValueError(message)
     if use_skypilot:
         if not cluster_profile:
-            raise ValueError("--skypilot requires --cluster-profile")
+            message = "--skypilot requires --cluster-profile"
+            raise ValueError(message)
         if resources is None:
-            raise ValueError("--skypilot requires input [resources]")
+            message = "--skypilot requires input [resources]"
+            raise ValueError(message)
         return RunEnvironmentSpec(
             name="skypilot",
             options={
@@ -1281,11 +1311,11 @@ def _materialize_effective_objective(request: RunEnvironmentRequest) -> Path | N
         try:
             path.relative_to(request.workspace.resolve())
         except ValueError as exc:
-            raise ValueError(
-                f"effective objective must be inside the project workspace: {path}"
-            ) from exc
+            message = f"effective objective must be inside the project workspace: {path}"
+            raise ValueError(message) from exc
         if not path.is_file() or path.read_text() != request.objective:
-            raise ValueError(f"effective objective does not match its committed document: {path}")
+            message = f"effective objective does not match its committed document: {path}"
+            raise ValueError(message)
         return path
     path = request.log_dir / "effective-objective.md"
     path.write_text(request.objective)
@@ -1315,16 +1345,20 @@ def _isolated_paths(
         accuracy_command=_environment_command(
             request,
             request.accuracy_command,
-            isolated=True,
-            evaluator_tools_root=evaluator_tools_root,
-            agent_path=sandbox.agent_path,
+            paths=_CommandPathOptions(
+                isolated=True,
+                evaluator_tools_root=evaluator_tools_root,
+                agent_path=sandbox.agent_path,
+            ),
         ),
         benchmark_command=_environment_command(
             request,
             request.benchmark_command,
-            isolated=True,
-            evaluator_tools_root=evaluator_tools_root,
-            agent_path=sandbox.agent_path,
+            paths=_CommandPathOptions(
+                isolated=True,
+                evaluator_tools_root=evaluator_tools_root,
+                agent_path=sandbox.agent_path,
+            ),
         ),
         profiler_support=(request.profiler_support_name if request.profiler_support_path else None),
     )
@@ -1344,10 +1378,7 @@ def _environment_command(
     request: RunEnvironmentRequest,
     command: str | None,
     *,
-    isolated: bool = False,
-    evaluator_package_root: str | None = None,
-    evaluator_tools_root: Path | None = None,
-    agent_path: Callable[[Path | str], str] | None = None,
+    paths: _CommandPathOptions = _DEFAULT_COMMAND_PATH_OPTIONS,
 ) -> str | None:
     """Translate semantic paths in argv, then quote the translated command.
 
@@ -1361,24 +1392,25 @@ def _environment_command(
     try:
         arguments = shlex.split(command)
     except ValueError as exc:
-        raise ValueError(f"invalid evaluator command: {exc}") from exc
+        message = f"invalid evaluator command: {exc}"
+        raise ValueError(message) from exc
     replacements = [
-        (PROJECT_ROOT_TOKEN, "/workspace" if isolated else str(request.workspace)),
-        (PYTHON_TOKEN, "python3" if isolated else sys.executable),
+        (PROJECT_ROOT_TOKEN, "/workspace" if paths.isolated else str(request.workspace)),
+        (PYTHON_TOKEN, "python3" if paths.isolated else sys.executable),
     ]
     if request.evaluator_package_root is not None:
-        if evaluator_package_root is not None:
-            translated_root = evaluator_package_root
-        elif agent_path is not None:
-            translated_root = agent_path(request.evaluator_package_root)
-        elif isolated:
+        if paths.evaluator_package_root is not None:
+            translated_root = paths.evaluator_package_root
+        elif paths.agent_path is not None:
+            translated_root = paths.agent_path(request.evaluator_package_root)
+        elif paths.isolated:
             translated_root = "/opt/vibesys-evaluator-package"
         else:
             translated_root = str(request.evaluator_package_root)
         replacements.append((str(request.evaluator_package_root), translated_root))
     tools = _evaluator_tools(request)
     if tools:
-        tools_root = evaluator_tools_root or _required_evaluator_tools_root(request)
+        tools_root = paths.evaluator_tools_root or _required_evaluator_tools_root(request)
         replacements.extend(tool_path_replacements(tools, tools_root).items())
     _reject_semantic_tokens_in_source(arguments, replacements)
     arguments = [_translate_command_argument(argument, replacements) for argument in arguments]
@@ -1392,8 +1424,10 @@ def _remote_evaluator_command(
     rendered = _environment_command(
         request,
         command,
-        isolated=True,
-        evaluator_tools_root=_REMOTE_EVALUATOR_TOOLS_ROOT,
+        paths=_CommandPathOptions(
+            isolated=True,
+            evaluator_tools_root=_REMOTE_EVALUATOR_TOOLS_ROOT,
+        ),
     )
     if rendered is None:
         return None
@@ -1439,10 +1473,11 @@ def _reject_semantic_tokens_in_source(
     if source_index is not None and any(
         source in arguments[source_index] for source, _ in replacements
     ):
-        raise ValueError(
+        message = (
             "semantic path tokens in executable source are unsafe; pass them as "
             "positional arguments after the source"
         )
+        raise ValueError(message)
 
 
 def _executable_source_index(arguments: list[str]) -> int | None:
@@ -1564,8 +1599,8 @@ def _docker_workspace_run(
     timeout: int,
 ) -> subprocess.CompletedProcess[bytes]:
     image = getattr(backend, "image", "ubuntu:latest")
-    return subprocess.run(
-        [
+    return subprocess.run(  # noqa: S603  # lint-waiver: LW-009089 [S603]; Docker receives framework-built commands and a quoted workspace path with no host shell.
+        [  # noqa: S607  # lint-waiver: LW-009090 [S607]; Docker is intentionally resolved from the operator's configured PATH.
             "docker",
             "run",
             "--rm",
@@ -1715,8 +1750,6 @@ def _container_mount_plan(
         and (request.agent_backend or AgentBackend.CLI) == AgentBackend.CLI
         and request.cli_provider
     ):
-        from vs_agent.api import auth_bind_mounts
-
         bind_mounts.extend(auth_bind_mounts(request.cli_provider))
         bind_mounts.append((str(request.framework_root), "/opt/vibesys", True))
 
@@ -1790,13 +1823,6 @@ def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, s
     effective_agent = request.agent_backend or AgentBackend.CLI
     if effective_agent != "cli" or not request.cli_provider:
         return None
-    from vs_agent.api import (
-        DOCKER_PROVIDER_ENV,
-        auth_env_passthrough,
-        auth_env_vars,
-        auth_paths,
-    )
-
     provider = request.cli_provider
     auth_env = auth_env_passthrough(provider)
     staged_auth = [spec for spec in auth_paths(provider) if spec.host_path.exists()]
@@ -1805,13 +1831,14 @@ def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, s
             ", ".join(str(spec.host_path) for spec in auth_paths(provider)) or "<none registered>"
         )
         checked_env = ", ".join(auth_env_vars(provider)) or "<none registered>"
-        raise ValueError(
+        message = (
             f"no {provider!r} CLI authentication is available for the container: "
             f"none of the host files exist ({checked_files}) and none of the "
             f"environment variables are set ({checked_env}). Authenticate the "
             f"{provider} CLI on this host, or export one of those variables, "
             "before running in an isolated environment."
         )
+        raise ValueError(message)
     env = dict(DOCKER_PROVIDER_ENV.get(provider, {}))
     # Container processes inherit only what ``docker run -e`` sets; the editor
     # container has no other view of the host environment.
@@ -1835,8 +1862,6 @@ def _cli_provider_env_and_auth_files(
     if resolved_cli is None:
         return {}, []
     provider, cli_provider_env = resolved_cli
-    from vs_agent.api import auth_copy_paths
-
     return cli_provider_env, auth_copy_paths(provider)
 
 
@@ -1854,12 +1879,12 @@ def _ensure_pushed_for_remote_backend(
     start because of it, so the operator does not have to guess whether a
     Modal or a SkyPilot launch is the one that failed to reach the registry.
     """
-    from vibesys.sandbox.images import ImagePushError
+    image_push_error = import_module("vibesys.sandbox.images").ImagePushError
 
     try:
         return ensure_pushed(image_id)
-    except ImagePushError as exc:
-        raise ImagePushError.run_environment_push_failed(image_id, backend_label, exc) from exc
+    except image_push_error as exc:
+        raise image_push_error.run_environment_push_failed(image_id, backend_label, exc) from exc
 
 
 def _evaluator_container_setup(
@@ -1896,9 +1921,7 @@ def _evaluator_container_setup(
         )
         go_link = "$PWD/.bin/go" if rootless else "/usr/local/bin/go"
         go_archive = (
-            f"{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/go.tgz"
-            if rootless
-            else "/tmp/vibesys-go.tgz"  # isolated setup container
+            f"{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/go.tgz" if rootless else "/tmp/vibesys-go.tgz"  # noqa: S108  # lint-waiver: LW-009095 [S108]; fixed scratch file is private to the isolated setup container and immediately removed.
         )
         go_download = _python_download_command(
             "https://go.dev/dl/go1.23.12.linux-{arch}.tar.gz",
@@ -1934,7 +1957,7 @@ def _evaluator_container_setup(
         rustup_init = (
             f"{_REMOTE_EVALUATOR_TOOLCHAINS_ROOT}/rustup-init"
             if rootless
-            else "/tmp/vibesys-rustup-init"  # isolated setup container
+            else "/tmp/vibesys-rustup-init"  # noqa: S108  # lint-waiver: LW-009096 [S108]; fixed scratch file is private to the isolated setup container and immediately removed.
         )
         rustup_download = _python_download_command(
             "https://static.rust-lang.org/rustup/dist/{arch}-unknown-linux-gnu/rustup-init",
@@ -2091,8 +2114,8 @@ def _docker_backend_image(request: RunEnvironmentRequest) -> str:
 
 def _inspect_docker_image_id(image: str) -> str | None:
     try:
-        result = subprocess.run(
-            ["docker", "image", "inspect", "--format={{.Id}}", image],
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-009091 [S603]; inspect uses fixed Docker argv and an image value as a single shell-free argument.
+            ["docker", "image", "inspect", "--format={{.Id}}", image],  # noqa: S607  # lint-waiver: LW-009092 [S607]; Docker is intentionally resolved from the operator's configured PATH.
             capture_output=True,
             check=False,
             text=True,
@@ -2115,8 +2138,8 @@ def _resolve_docker_image_id(image: str) -> str:
     if identity := _inspect_docker_image_id(image):
         return identity
     try:
-        pull = subprocess.run(
-            ["docker", "image", "pull", image],
+        pull = subprocess.run(  # noqa: S603  # lint-waiver: LW-009093 [S603]; pull uses fixed Docker argv and an image value as a single shell-free argument.
+            ["docker", "image", "pull", image],  # noqa: S607  # lint-waiver: LW-009094 [S607]; Docker is intentionally resolved from the operator's configured PATH.
             capture_output=True,
             check=False,
             text=True,
@@ -2185,13 +2208,15 @@ def _docker_agent_toolchains(
 
 def _required_evaluator_tools_root(request: RunEnvironmentRequest) -> Path:
     if request.evaluator_tools_root is None:
-        raise ValueError("evaluator tools require an operator-owned tools root")
+        message = "evaluator tools require an operator-owned tools root"
+        raise ValueError(message)
     root = request.evaluator_tools_root.resolve()
     try:
         root.relative_to(request.workspace.resolve())
     except ValueError:
         return root
-    raise ValueError("evaluator tools root must be outside the candidate workspace")
+    message = "evaluator tools root must be outside the candidate workspace"
+    raise ValueError(message)
 
 
 @dataclass(frozen=True)
@@ -2202,9 +2227,8 @@ class _SymlinkLifecycleHooks(SandboxLifecycleHooks):
         for command in self.commands:
             result = context.sandbox.execute(command)
             if result.exit_code != 0:
-                raise RuntimeError(
-                    f"failed to create sandbox symlink with {command!r}: {result.output}"
-                )
+                message = f"failed to create sandbox symlink with {command!r}: {result.output}"
+                raise RuntimeError(message)
         save_symlink_commands = getattr(context.sandbox, "save_symlink_commands", None)
         if callable(save_symlink_commands):
             save_symlink_commands(list(self.commands))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -41,21 +42,30 @@ def _run_validate(argv: list[str]) -> None:
             exit_code=1,
         )
 
-    print("VibeSys validation passed: task is valid.")
-    print(f"  project: {bundle.root}")
+    summary = [
+        "VibeSys validation passed: task is valid.",
+        f"  project: {bundle.root}",
+    ]
     if bundle.task_name is not None:
-        print(f"  task: {bundle.task_name}")
-    print(f"  objective: {bundle.objective_path}")
-    print(f"  accuracy command: {bundle.accuracy_command_display}")
-    print(f"  benchmark command: {bundle.benchmark_command_display}")
-    for source in bundle.workspace_sources:
-        print(f"  workspace source: {source.name} -> {source.dest} @ {source.commit}")
+        summary.append(f"  task: {bundle.task_name}")
+    summary.extend(
+        [
+            f"  objective: {bundle.objective_path}",
+            f"  accuracy command: {bundle.accuracy_command_display}",
+            f"  benchmark command: {bundle.benchmark_command_display}",
+        ]
+    )
+    summary.extend(
+        f"  workspace source: {source.name} -> {source.dest} @ {source.commit}"
+        for source in bundle.workspace_sources
+    )
     if bundle.evaluator_path is not None:
-        print(f"  evaluator source: {bundle.evaluator_path}")
+        summary.append(f"  evaluator source: {bundle.evaluator_path}")
     if bundle.benchmark_result is not None:
-        print(f"  benchmark metric: {bundle.benchmark_result.metric}")
+        summary.append(f"  benchmark metric: {bundle.benchmark_result.metric}")
     if bundle.benchmark_result_protocol is not None:
-        print(f"  benchmark result protocol: {bundle.benchmark_result_protocol}")
+        summary.append(f"  benchmark result protocol: {bundle.benchmark_result_protocol}")
+    sys.stdout.write("\n".join(summary) + "\n")
 
 
 def _load_selected_input(project_root: Path, task_name: str | None) -> InputBundle:

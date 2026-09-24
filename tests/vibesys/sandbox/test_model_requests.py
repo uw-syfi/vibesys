@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.sandbox import model_requests
 from vibesys.sandbox.model_requests import (
     MODEL_MANIFEST_RELPATH,
     ModelRequest,
@@ -108,14 +107,36 @@ def test_allow_prefix_match_and_miss() -> None:
     assert check_allowed("other/baz", allow) is False
 
 
-def test_allow_prefixes_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reconcile_reads_allow_prefixes_from_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("VIBESYS_MODEL_REQUEST_ALLOW", " org/ , trusted/ ")
-    assert model_requests._allow_prefixes() == ("org/", "trusted/")
+    _write_manifest(tmp_path, [{"id": "trusted/model"}])
+    seen: list[str] = []
+
+    def record_provision(model_id: str, **_kwargs: object) -> str:
+        seen.append(model_id)
+        return "volume"
+
+    monkeypatch.setattr("vs_sandbox.api.ensure_model_volume", record_provision)
+    assert reconcile_model_requests(tmp_path) == ["volume"]
+    assert seen == ["trusted/model"]
 
 
-def test_allow_prefixes_unset_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reconcile_allows_any_model_when_allowlist_is_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.delenv("VIBESYS_MODEL_REQUEST_ALLOW", raising=False)
-    assert model_requests._allow_prefixes() is None
+    _write_manifest(tmp_path, [{"id": "unrestricted/model"}])
+    seen: list[str] = []
+
+    def record_provision(model_id: str, **_kwargs: object) -> str:
+        seen.append(model_id)
+        return "volume"
+
+    monkeypatch.setattr("vs_sandbox.api.ensure_model_volume", record_provision)
+    assert reconcile_model_requests(tmp_path) == ["volume"]
+    assert seen == ["unrestricted/model"]
 
 
 # -- reconcile_model_requests ----------------------------------------------

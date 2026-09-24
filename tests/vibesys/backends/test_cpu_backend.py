@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 from entrypoints.cli import _add_common_args
 from vibesys import backends
@@ -36,6 +38,19 @@ def _make_backend(tmp_path: Path) -> LocalBackend:
     impl = backends.get(ComputeBackend.CPU, log_dir=tmp_path / "logs")
     assert isinstance(impl, LocalBackend)
     return impl
+
+
+def _docker_run_command(sandbox: DockerSandbox) -> list[str]:
+    result = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="test-container\n", stderr=""
+    )
+    with patch("subprocess.run", return_value=result) as run:
+        sandbox.start()
+        command = next(
+            call.args[0] for call in run.call_args_list if call.args[0][:2] == ["docker", "run"]
+        )
+        sandbox.stop()
+    return command
 
 
 class TestCpuRegistry:
@@ -84,9 +99,10 @@ class TestCpuSandbox:
             container_image="sha256:" + "a" * 64,
         )
         assert isinstance(sb, DockerSandbox)
-        assert sb._gpus is None
-        assert sb._image == "sha256:" + "a" * 64
-        assert sb._env["FOO"] == "bar"
+        command = _docker_run_command(sb)
+        assert "--gpus" not in command
+        assert "sha256:" + "a" * 64 in command
+        assert "FOO=bar" in command
 
     def test_docker_forwards_resources_to_the_sandbox(self, tmp_path: Path) -> None:
         impl = _make_backend(tmp_path)
@@ -101,7 +117,8 @@ class TestCpuSandbox:
         )
 
         assert isinstance(sb, DockerSandbox)
-        assert resource in sb._resources
+        command = _docker_run_command(sb)
+        assert f"{resource.path}:{resource.agent_path or resource.path}:ro" in command
 
     def test_docker_falls_back_to_the_backend_image_without_a_resolved_container_image(
         self,
@@ -122,7 +139,7 @@ class TestCpuSandbox:
             log_path=None,
         )
         assert isinstance(sb, DockerSandbox)
-        assert sb._image == impl.image
+        assert impl.image in _docker_run_command(sb)
 
 
 class TestCpuDevice:

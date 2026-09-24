@@ -177,9 +177,11 @@ class OmnigentMCPTools:
     async def initialize(self) -> None:
         """Connect servers and discover their namespaced native schemas."""
         if self._initialized:
-            raise RuntimeError("Omnigent MCP tools are already initialized")  # noqa: TRY003  # lint-waiver: LW-008069 [TRY003]; callers rely on the existing RuntimeError lifecycle contract.
+            message = "Omnigent MCP tools are already initialized"
+            raise RuntimeError(message)
         if self._closed:
-            raise RuntimeError("Omnigent MCP tools are closed")  # noqa: TRY003  # lint-waiver: LW-008070 [TRY003]; callers rely on the existing RuntimeError lifecycle contract.
+            message = "Omnigent MCP tools are closed"
+            raise RuntimeError(message)
         try:
             result = await self._manager.schemas_for(self._agent_spec)
             if result.failures:
@@ -206,11 +208,14 @@ class OmnigentMCPTools:
     async def dispatch(self, name: str, arguments: dict[str, Any]) -> str:
         """Invoke one namespaced MCP tool through Omnigent's native manager."""
         if self._closed:
-            raise RuntimeError("Omnigent MCP tools are closed")  # noqa: TRY003  # lint-waiver: LW-008072 [TRY003]; callers rely on the existing RuntimeError lifecycle contract.
+            message = "Omnigent MCP tools are closed"
+            raise RuntimeError(message)
         if not self._initialized:
-            raise RuntimeError("Omnigent MCP tools are not initialized")  # noqa: TRY003  # lint-waiver: LW-008073 [TRY003]; callers rely on the existing RuntimeError lifecycle contract.
+            message = "Omnigent MCP tools are not initialized"
+            raise RuntimeError(message)
         if name not in self._tool_names:
-            raise RuntimeError(f"Omnigent MCP tools do not contain {name!r}")  # noqa: TRY003  # lint-waiver: LW-008074 [TRY003]; preserve the built-in RuntimeError contract for unknown native tool names.
+            message = f"Omnigent MCP tools do not contain {name!r}"
+            raise RuntimeError(message)
         return await self._manager.call_tool(
             self._agent_spec,
             name,

@@ -118,7 +118,6 @@ def test_snapshot_excludes_unreadable_project_file(
     monkeypatch.setattr(tracker, "run", report_permission_failure_once)
     try:
         tracker.snapshot("skip unreadable file")
-
         committed = run_test_command(
             ["git", "show", "--format=", "--name-only", "HEAD"],
             cwd=project,

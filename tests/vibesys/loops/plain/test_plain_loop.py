@@ -21,11 +21,9 @@ if TYPE_CHECKING:
     from vibesys.profilers import ProfilerKind
     from vibesys.repository import RepositoryVisibility
     from vibesys.sandbox.run_environment import RunEnvironmentSpec
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
-
 
 from vibesys.config import Config
 from vibesys.constants import DomainName

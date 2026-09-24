@@ -5,7 +5,9 @@ captured ``prof.json``. The *capture* itself (``capture`` /
 ``capture-server`` subcommands of ``analyze_torch_profile.py``) stays a
 shell command — it loads the model and runs a benchmark loop, which is
 too long-running for stdio MCP.
+
 Launch:
+
     python torch_profiler/server.py
     # or
     uv run python torch_profiler/server.py.
@@ -27,6 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _HERE = Path(__file__).resolve().parent
+
 sys.path.insert(0, str(_HERE))
 # lint-waiver: LW-008019 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 import analyze_torch_profile  # noqa: E402

@@ -27,7 +27,6 @@ class _ToolInfo(Protocol):
 
 class _McpServer(Protocol):
     async def list_tools(self) -> Sequence[_ToolInfo]: ...
-
     async def call_tool(
         self, name: str, arguments: dict[str, object]
     ) -> tuple[Sequence[object], dict[str, object]]: ...

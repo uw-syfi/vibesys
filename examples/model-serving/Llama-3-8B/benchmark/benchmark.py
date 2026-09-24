@@ -1,7 +1,9 @@
 """
 Serving performance benchmark for LLM inference servers.
+
 Generates load following a Poisson arrival process or closed-loop concurrency
 and measures TTFT, TPOT, end-to-end latency, and throughput.
+
 Usage:
     .venv/bin/python benchmark.py --url http://localhost:8002 --rate 2 --duration 30 --max-tokens 64
 """
@@ -52,10 +54,12 @@ PROMPT_POOL = [
 async def run_benchmark(args: argparse.Namespace) -> dict:
     rng = random.Random(args.seed)
     url = args.url.rstrip("/") + args.endpoint
+
     if args.prompt_len is not None:
         prompt_list = [" ".join(["token"] * args.prompt_len) for _ in range(20)]
     else:
         prompt_list = list(PROMPT_POOL)
+
     async with httpx.AsyncClient() as client:
 
         async def send(i: int) -> dict:
@@ -107,6 +111,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
                     f"{len(warmup_errors)} warm-up request(s) failed. "
                     f"First error: {warmup_errors[0]['error']}"
                 )
+
         # Measured run
         if args.concurrency:
             schedule = duration_limited(args.duration)
@@ -115,14 +120,18 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
             n = args.num_requests if args.num_requests else 10**9
             schedule = poisson(n, args.rate, seed=args.seed)
             conc = 10000
+
         result = await run(schedule, send, concurrency=conc)
+
     wall_clock = result.wall_clock
     successes = [r for r in result.results if r["error"] is None]
     errors = [r for r in result.results if r["error"] is not None]
+
     ttfts = [r["ttft"] for r in successes if r["ttft"] is not None]
     tpots = [r["tpot"] for r in successes if r["tpot"] is not None]
     latencies = [r["total_latency"] for r in successes]
     total_output_tokens = sum(r["output_tokens"] for r in successes)
+
     print()
     print("=" * 40)
     print("  Benchmark Results")
@@ -136,10 +145,12 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
     print("Throughput:")
     print(f"  Request:         {len(successes) / wall_clock:.2f} req/s")
     print(f"  Token (output):  {total_output_tokens / wall_clock:.1f} tok/s")
+
     if errors:
         print("Errors:")
         for i, r in enumerate(errors[:5]):
             print(f"  [{i}] {r['error'][:120]}")
+
     result_dict = {
         "config": {
             "url": url,
@@ -168,10 +179,12 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
         "p99_tpot_ms": pct_block(tpots, 1000.0)["p99"] if tpots else None,
         "p99_latency_ms": pct_block(latencies, 1000.0)["p99"] if latencies else None,
     }
+
     if hasattr(args, "output_json") and args.output_json:
         with open(args.output_json, "w") as f:
             json.dump(result_dict, f, indent=2)
         print(f"Results written to {args.output_json}")
+
     return result_dict
 
 

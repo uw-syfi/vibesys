@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import statistics
+import sys
 import tempfile
 import threading
 import time
@@ -36,8 +37,9 @@ def _print(
 ) -> None:
     """Print user-facing benchmark output."""
     if file is None:
-        # lint-waiver: LW-008051 [T201]; This benchmark intentionally prints its result table for command-line use.
-        print(*values, sep=sep, end=end, flush=flush)  # noqa: T201
+        sys.stdout.write(sep.join(map(str, values)) + end)
+        if flush:
+            sys.stdout.flush()
     else:
         print(*values, sep=sep, end=end, file=file, flush=flush)
 
@@ -160,6 +162,7 @@ def _measure(count: int) -> tuple[float, float, float, int, int, int]:
         )
         AgentRunStateStore(value.state.portable_namespace(run_id, "agent")).save(state)
         api, integration, journal = _build_api(value, run_id)
+
         started = time.perf_counter_ns()
         full = api.execute(ExperimentQuery())
         full_ms = (time.perf_counter_ns() - started) / 1_000_000
@@ -173,6 +176,7 @@ def _measure(count: int) -> tuple[float, float, float, int, int, int]:
             projection_id=update.projection_id,
             revision=update.through_revision,
         )
+
         unchanged_times: list[float] = []
         changed_times: list[float] = []
         unchanged_bytes = delta_bytes = 0
@@ -181,6 +185,7 @@ def _measure(count: int) -> tuple[float, float, float, int, int, int]:
             unchanged = api.execute(ExperimentQuery(after=cursor))
             unchanged_times.append((time.perf_counter_ns() - started) / 1_000_000)
             unchanged_bytes = len(unchanged.model_dump_json().encode())
+
             changed_id = state.hypotheses[-1].hypothesis_id
             state = append_round(
                 state,
@@ -224,6 +229,7 @@ def _measure(count: int) -> tuple[float, float, float, int, int, int]:
             cursor = cursor.model_copy(
                 update={"revision": delta.experiment_update.through_revision}
             )
+
         return (
             full_ms,
             statistics.median(unchanged_times),

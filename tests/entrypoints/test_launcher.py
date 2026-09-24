@@ -70,7 +70,6 @@ def test_launcher_routes_noninteractive_commands_to_headless(
     monkeypatch.setattr(
         cli.subprocess, "call", lambda command, **_kwargs: commands.append(command) or 0
     )
-
     for args in (
         ["--headless", "--input", "x"],
         ["validate", "bundle"],
@@ -79,7 +78,6 @@ def test_launcher_routes_noninteractive_commands_to_headless(
         ["-h"],
     ):
         assert cli.main(args) == 0
-
     assert [command[3:] for command in commands] == [
         ["--headless", "--input", "x"],
         ["validate", "bundle"],
@@ -96,7 +94,6 @@ def test_launcher_routes_non_tty_commands_to_headless(monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         cli.subprocess, "call", lambda command, **_kwargs: captured.update(cmd=command) or 0
     )
-
     assert cli.main(["--input", "x"]) == 0
     assert captured["cmd"] == [sys.executable, "-m", "entrypoints.headless", "--input", "x"]
 
@@ -407,6 +404,7 @@ def test_source_checkout_uses_bun_home_fallback(
     bun.parent.mkdir(parents=True)
     bun.write_text("#!/bin/sh\n")
     bun.chmod(0o755)
+
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     _force_interactive(monkeypatch)
     monkeypatch.setattr(cli, "bundled_tui", lambda: None)
@@ -419,6 +417,7 @@ def test_source_checkout_uses_bun_home_fallback(
         "run",
         lambda *_args, **_kwargs: SimpleNamespace(stdout="v22.0.0\n"),
     )
+
     captured: _LaunchCall = {}
     monkeypatch.setattr(
         cli.subprocess,
@@ -453,7 +452,6 @@ def test_source_checkout_rejects_unusable_node_version(
         return SimpleNamespace(stdout="not-a-version\n")
 
     monkeypatch.setattr(cli.subprocess, "run", run)
-
     assert cli.main([]) == 1
     assert "Node.js 20+" in capsys.readouterr().err
 
@@ -588,6 +586,7 @@ def test_source_launcher_installs_and_runs_pnpm_steps(
     assert cli.main([]) == 0
     assert [c[1] for c in calls] == ["install", "--dir", "build:clients"]
     assert calls[1][2:] == ["backend-client", "generate:protocol"]
+
     assert set(cwds) == {str(root / "clients")}
     assert (root / "clients" / "node_modules" / ".vibesys-install-stamp").is_file()
     assert launcher_calls and "launcher.js" in launcher_calls[0][1]

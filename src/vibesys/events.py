@@ -9,6 +9,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
+import vs_agent.api as _agent_api
+
 # AgentOutputChannel, AgentStatusData, TodoItemData, and ToolResultPayload are
 # used directly below. CommandResultPayload and JsonResultPayload are only the
 # ToolResultPayload union members; re-exported here (like vs_loop_state's
@@ -16,13 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from vs_agent.api import (
     AgentOutputChannel,
     AgentStatusData,
-    # lint-waiver: LW-007002 [F401]; keep the command result import public
-    CommandResultPayload,  # noqa: F401
-    # lint-waiver: LW-007003 [F401]; keep the JSON result import public
-    JsonResultPayload,  # noqa: F401
     TodoItemData,
     ToolResultPayload,
 )
+
+CommandResultPayload = _agent_api.CommandResultPayload
+JsonResultPayload = _agent_api.JsonResultPayload
 
 
 class CoreEventType(StrEnum):

@@ -63,7 +63,6 @@ from typing import TYPE_CHECKING, TextIO
 
 if TYPE_CHECKING:
     from types import ModuleType
-
 _MICROSECONDS_PER_SECOND = 1_000_000
 _MICROSECONDS_PER_MILLISECOND = 1000
 _KERNEL_NAME_WIDTH = 58
@@ -127,8 +126,9 @@ def _print(
 ) -> None:
     """Print user-facing command-line output."""
     if file is None:
-        # lint-waiver: LW-008049 [T201]; This standalone CLI intentionally writes user-facing results to stdout.
-        print(*values, sep=sep, end=end, flush=flush)  # noqa: T201
+        sys.stdout.write(sep.join(map(str, values)) + end)
+        if flush:
+            sys.stdout.flush()
     else:
         print(*values, sep=sep, end=end, file=file, flush=flush)
 

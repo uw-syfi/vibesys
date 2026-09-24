@@ -1,5 +1,7 @@
 """OpenAI-style chat server around the seed model.
+
     python3 server.py --model-path <dir> --host 0.0.0.0 --port 8000
+
 One worker thread owns the model and serves requests FIFO, one at a time.
 GET /health is 503 until the weights are loaded and a warmup forward succeeded.
 """

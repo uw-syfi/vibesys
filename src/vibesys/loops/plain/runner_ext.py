@@ -33,7 +33,6 @@ from vs_issue_board.api import IssueType
 
 if TYPE_CHECKING:
     from pathlib import Path
-
 T = TypeVar("T", bound=BaseModel)
 
 

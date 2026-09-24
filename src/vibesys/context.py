@@ -136,9 +136,11 @@ def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
         return None
     p = Path(raw).expanduser().resolve()
     if not p.exists():
-        raise ValueError(f"{label} path does not exist: {raw}")  # noqa: TRY003  # lint-waiver: LW-008198 [TRY003]; preserve CLI ValueError handling and include the rejected path value.
+        message = f"{label} path does not exist: {raw}"
+        raise ValueError(message)
     if not p.is_dir():
-        raise ValueError(f"{label} path is not a directory: {raw}")  # noqa: TRY003  # lint-waiver: LW-008199 [TRY003]; preserve CLI ValueError handling and include the rejected path value.
+        message = f"{label} path is not a directory: {raw}"
+        raise ValueError(message)
     return p
 
 
@@ -220,9 +222,11 @@ def _coerce_skills_dirs(raw_dirs: list[str] | None) -> list[Path]:
             p = PROJECT_ROOT / p
         p = p.resolve()
         if not p.exists():
-            raise ValueError(f"--skills-dir path does not exist: {raw}")  # noqa: TRY003  # lint-waiver: LW-008200 [TRY003]; preserve CLI ValueError handling and the invalid --skills-dir value.
+            message = f"--skills-dir path does not exist: {raw}"
+            raise ValueError(message)
         if not p.is_dir():
-            raise ValueError(f"--skills-dir path is not a directory: {raw}")  # noqa: TRY003  # lint-waiver: LW-008201 [TRY003]; preserve CLI ValueError handling and the invalid --skills-dir value.
+            message = f"--skills-dir path is not a directory: {raw}"
+            raise ValueError(message)
         result.append(p)
     return result
 

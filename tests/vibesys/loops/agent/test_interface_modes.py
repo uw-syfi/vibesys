@@ -33,7 +33,6 @@ from vibesys.prompts import PROMPTS_DIR, render_template
 
 if TYPE_CHECKING:
     from pathlib import Path
-
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 _CRITERION_TEXT = "PC"
 

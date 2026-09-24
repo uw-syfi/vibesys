@@ -388,8 +388,8 @@ def evaluator_tools_install_command(
         None,
     )
     if invalid_name is not None:
-        # lint-waiver: LW-007131 [TRY003]; callers rely on ValueError for invalid public tool names
-        raise ValueError(f"invalid evaluator tool name: {invalid_name!r}")  # noqa: TRY003
+        message = f"invalid evaluator tool name: {invalid_name!r}"
+        raise ValueError(message)
     document = {
         "schema_version": 1,
         "tools": {name: spec.model_dump(mode="json") for name, spec in sorted(tools.items())},

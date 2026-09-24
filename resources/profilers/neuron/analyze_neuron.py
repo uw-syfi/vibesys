@@ -43,8 +43,9 @@ def _print(
 ) -> None:
     """Print user-facing command-line output."""
     if file is None:
-        # lint-waiver: LW-008048 [T201]; This standalone CLI intentionally writes user-facing results to stdout.
-        print(*values, sep=sep, end=end, flush=flush)  # noqa: T201
+        sys.stdout.write(sep.join(map(str, values)) + end)
+        if flush:
+            sys.stdout.flush()
     else:
         print(*values, sep=sep, end=end, file=file, flush=flush)
 

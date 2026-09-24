@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from vibesys.loops.metrics import MetricSpace, Objective
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Iterator
     from pathlib import Path
 
     from vibesys.loops.evolve.population import Individual, Population
@@ -61,15 +61,20 @@ class OpenEvolveSearchConfig:
     def __post_init__(self) -> None:
         """Validate OpenEvolve configuration bounds at construction."""
         if self.population_size < 1:
-            raise ValueError("OpenEvolve population_size must be >= 1")
+            message = "OpenEvolve population_size must be >= 1"
+            raise ValueError(message)
         if self.archive_size < 1:
-            raise ValueError("OpenEvolve archive_size must be >= 1")
+            message = "OpenEvolve archive_size must be >= 1"
+            raise ValueError(message)
         if self.num_islands < 1:
-            raise ValueError("OpenEvolve num_islands must be >= 1")
+            message = "OpenEvolve num_islands must be >= 1"
+            raise ValueError(message)
         if self.migration_interval < 1:
-            raise ValueError("OpenEvolve migration_interval must be >= 1")
+            message = "OpenEvolve migration_interval must be >= 1"
+            raise ValueError(message)
         if not 0.0 <= self.migration_rate <= 1.0:
-            raise ValueError("OpenEvolve migration_rate must be in [0, 1]")
+            message = "OpenEvolve migration_rate must be in [0, 1]"
+            raise ValueError(message)
 
 
 class _PersistedOpenEvolveConfig(BaseModel):
@@ -138,7 +143,7 @@ class SearchPolicy(Protocol):
         """Whether selections require candidate source code."""
         ...
 
-    def select(
+    def select(  # noqa: PLR0913  # lint-waiver: LW-009039 [PLR0913]; the shared selection protocol must pass each independent search control to either policy.
         self,
         population: Population,
         *,
@@ -177,7 +182,7 @@ class VibeSysSearchPolicy:
         """Scalar/Pareto selection uses persisted individuals, not source."""
         return False
 
-    def select(
+    def select(  # noqa: PLR0913  # lint-waiver: LW-009046 [PLR0913]; this concrete policy implements the shared selection signature with all independent search controls.
         self,
         population: Population,
         *,
@@ -219,17 +224,17 @@ class VibeSysSearchPolicy:
         space: MetricSpace,
     ) -> None:
         """Accept an individual without maintaining policy-specific state."""
-        return
+        del individual, code, policy_parent_id, target_island, space
 
     def finish_generation(self, generation: int) -> None:
         """Finish a generation without additional persistence."""
-        return
+        del generation
 
 
 class _SortedIterationSet(set[str]):
     """Set semantics with deterministic iteration for replaying OpenEvolve."""
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(sorted(super().__iter__()))
 
 
@@ -267,22 +272,24 @@ class OpenEvolveSearchPolicy:
         saved_state = self._load_adapter_state()
         saved_config = saved_state.config.to_domain() if saved_state is not None else None
         if config is not None and saved_config is not None and config != saved_config:
-            raise ValueError(
+            message = (
                 "OpenEvolve search configuration does not match the resumed run: "
                 f"saved={saved_config}, requested={config}"
             )
+            raise ValueError(message)
         self.config = config or saved_config or OpenEvolveSearchConfig()
         self._objective_signature = self._objectives_signature(space)
         saved_objectives = saved_state.objective_signature if saved_state else None
         if saved_objectives is not None and saved_objectives != self._objective_signature:
-            raise ValueError(
+            message = (
                 "OpenEvolve fitness objective does not match the resumed run: "
                 f"saved={saved_objectives}, requested={self._objective_signature}"
             )
+            raise ValueError(message)
         self._admitted_individual_ids = set(
             saved_state.admitted_individual_ids if saved_state else ()
         )
-        self._rng = random.Random(seed)
+        self._rng = random.Random(seed)  # noqa: S311  # lint-waiver: LW-009042 [S311]; seeded pseudorandom state makes policy selection replayable, with no security token use.
         if saved_state is not None:
             self._rng.setstate(saved_state.rng_state)
 
@@ -358,7 +365,8 @@ class OpenEvolveSearchPolicy:
         snapshot_name = current_path.read_text().strip()
         snapshot_dir = state_dir / "snapshots" / snapshot_name
         if not snapshot_name or not snapshot_dir.is_dir():
-            raise ValueError(f"invalid OpenEvolve snapshot pointer in {current_path}")
+            message = f"invalid OpenEvolve snapshot pointer in {current_path}"
+            raise ValueError(message)
         return snapshot_dir
 
     @staticmethod
@@ -415,7 +423,8 @@ class OpenEvolveSearchPolicy:
             )
             canonical_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"vibesys-openevolve:{identity}"))
             if canonical_id in self._database.programs or canonical_id in replacements.values():
-                raise RuntimeError(f"duplicate deterministic OpenEvolve program ID: {canonical_id}")
+                message = f"duplicate deterministic OpenEvolve program ID: {canonical_id}"
+                raise RuntimeError(message)
             replacements[program.id] = canonical_id
             program.id = canonical_id
             program.timestamp = float(program.iteration_found or self._database.last_iteration)
@@ -423,12 +432,24 @@ class OpenEvolveSearchPolicy:
         if not replacements:
             return
 
+        self._replace_program_ids(replacements)
+
+    def _replace_program_ids(self, replacements: dict[str, str]) -> None:
+        """Update every upstream index when canonicalizing program identities."""
+        self._rekey_programs(replacements)
+        self._rekey_islands(replacements)
+        self._rekey_history(replacements)
+        self._rekey_prompts(replacements)
+
+    def _rekey_programs(self, replacements: dict[str, str]) -> None:
         for old_id, canonical_id in replacements.items():
             program = self._database.programs.pop(old_id)
             self._database.programs[canonical_id] = program
         for program in self._database.programs.values():
             if program.parent_id in replacements:
                 program.parent_id = replacements[program.parent_id]
+
+    def _rekey_islands(self, replacements: dict[str, str]) -> None:
         for island in self._database.islands:
             for old_id, canonical_id in replacements.items():
                 if old_id in island:
@@ -437,6 +458,8 @@ class OpenEvolveSearchPolicy:
         for feature_map in self._database.island_feature_maps:
             for feature, program_id in list(feature_map.items()):
                 feature_map[feature] = replacements.get(program_id, program_id)
+
+    def _rekey_history(self, replacements: dict[str, str]) -> None:
         self._database.archive = _SortedIterationSet(
             replacements.get(program_id, program_id) for program_id in self._database.archive
         )
@@ -446,13 +469,15 @@ class OpenEvolveSearchPolicy:
             replacements.get(program_id, program_id) if program_id is not None else None
             for program_id in self._database.island_best_programs
         ]
+
+    def _rekey_prompts(self, replacements: dict[str, str]) -> None:
         if self._database.prompts_by_program:
             for old_id, canonical_id in replacements.items():
                 prompts = self._database.prompts_by_program.pop(old_id, None)
                 if prompts is not None:
                     self._database.prompts_by_program[canonical_id] = prompts
 
-    def select(
+    def select(  # noqa: PLR0913  # lint-waiver: LW-009047 [PLR0913]; this adapter implements the shared selection signature with all independent search controls.
         self,
         population: Population,
         *,
@@ -516,7 +541,8 @@ class OpenEvolveSearchPolicy:
         if not individual.passed or not individual.commit:
             return
         if self._objectives_signature(space) != self._objective_signature:
-            raise ValueError("OpenEvolve fitness objective changed during the run")
+            message = "OpenEvolve fitness objective changed during the run"
+            raise ValueError(message)
         if individual.id in self._admitted_individual_ids:
             return
         program_id = f"vibesys-{individual.id}"

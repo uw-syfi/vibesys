@@ -296,12 +296,12 @@ class AgentLogger:
         stdout: str = "",
         stderr: str = "",
         exit_code: int | None = None,
-        # lint-waiver: LW-007006 [ARG002]; the provider callback API requires this keyword
-        duration: float | None = None,  # noqa: ARG002
+        duration: float | None = None,
         *,
         payload: ToolResultPayload | None = None,
     ) -> None:
         """Record a tool result; the text logger does not use duration."""
+        del duration
         is_error = bool(stderr) or (exit_code not in (None, 0))
         content = stdout or stderr
         self.log_tool_result(tool, content, is_error=is_error, payload=payload)

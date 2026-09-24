@@ -13,6 +13,11 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError, model_validator
 
+# AgentOutputChannel, AgentStatusData, TodoItemData, and ToolResultPayload are
+# used directly below. CommandResultPayload and JsonResultPayload are only the
+# ToolResultPayload union members; re-exported here (like vs_loop_state's
+# enums in vibesys.schemas) so existing importers of server.events keep working.
+import vs_agent.api as _agent_api
 from server.diagnostics import Diagnostic
 from server.event_index import (
     EventIndexRecord,
@@ -21,21 +26,16 @@ from server.event_index import (
     write_event_index,
 )
 from server.run_lifecycle import RunStatus
-
-# AgentOutputChannel, AgentStatusData, TodoItemData, and ToolResultPayload are
-# used directly below. CommandResultPayload and JsonResultPayload are only the
-# ToolResultPayload union members; re-exported here (like vs_loop_state's
-# enums in vibesys.schemas) so existing importers of server.events keep working.
 from vs_agent.api import (
     AgentOutputChannel,
     AgentStatusData,
-    # lint-waiver: LW-007004 [F401]; keep the command result import public
-    CommandResultPayload,  # noqa: F401
-    # lint-waiver: LW-007005 [F401]; keep the JSON result import public
-    JsonResultPayload,  # noqa: F401
     TodoItemData,
     ToolResultPayload,
 )
+
+# Compatibility re-exports for existing ``server.events`` importers.
+CommandResultPayload = _agent_api.CommandResultPayload
+JsonResultPayload = _agent_api.JsonResultPayload
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

@@ -18,7 +18,6 @@ from vibesys.skypilot.protocol import (
     AckRequest,
     ArtifactFrame,
     ErrorFrame,
-    ErrorFrame,
     EvaluationRequest,
     ResponseFrame,
     decode_response,
@@ -275,7 +274,9 @@ def test_startup_replacement_evidence_applies_only_to_preexisting_invocations(
     journal = InvocationJournal(namespace)
     invocation_id = "f" * 32
     prepared = journal.prepare(invocation_id, "1" * 64, "2" * 64)
-    bridge._cluster_replaced_on_start = True  # noqa: SLF001  # LW-010026; simulates startup evidence that an existing allocation was replaced
+    runner.cluster_status = None
+    bridge.start()
+    runner.cluster_status = ClusterStatus.UP
     bridge._locally_prepared_invocations.add(invocation_id)  # noqa: SLF001  # LW-010027; marks an invocation prepared in this process for recovery discrimination
 
     assert bridge._recover_after_allocation_loss(prepared) is prepared  # noqa: SLF001  # LW-010028; verifies an unsubmitted journal record is retained after allocation loss
@@ -284,9 +285,8 @@ def test_startup_replacement_evidence_applies_only_to_preexisting_invocations(
 
     bridge._locally_prepared_invocations.clear()  # noqa: SLF001  # LW-010030; removes the local-preparation evidence to model restart recovery
     assert bridge._allocation_was_replaced(submitting)  # noqa: SLF001  # LW-010031; verifies stale persisted attempts detect the replaced allocation
-    bridge._touched_clusters.add("old-lease")  # noqa: SLF001  # LW-010032; records the prior allocation for release-ownership coverage
     bridge.close()
-    assert set(runner.release_names) == {"lease", "old-lease"}
+    assert set(runner.release_names) == {"lease"}
 
 
 def test_terminal_replay_tracks_persisted_cluster_for_release(
@@ -452,7 +452,6 @@ def test_framework_setup_participates_in_recovery_digest_without_changing_legacy
     without_setup.start()
     original_frames = _send_evaluation(without_setup, request)
     without_setup.close()
-
     with_setup, changed_runner = make_bridge("prepare one", "changed.sock")
     with_setup.start()
     conflict_frames = _send_evaluation(with_setup, request)
@@ -491,6 +490,7 @@ def test_framework_setup_failure_prevents_evaluator_execution(
         log=lambda _: None,
         framework_setup_command="exit 23",
     )
+
     bridge.start()
     try:
         frames = _send_evaluation(

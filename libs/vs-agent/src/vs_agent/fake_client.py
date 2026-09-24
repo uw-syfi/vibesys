@@ -30,7 +30,6 @@ if TYPE_CHECKING:
 
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
-
 T = TypeVar("T", bound=BaseModel)
 
 #: Default answer :meth:`FakeAgentClient.invoke_text` returns when nothing is

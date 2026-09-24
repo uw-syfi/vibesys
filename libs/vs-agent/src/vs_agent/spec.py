@@ -62,7 +62,8 @@ class AgentSpec:
 
         supported = agent_catalog()[self.driver].providers
         if self.provider not in supported:
-            raise ValueError(  # noqa: TRY003  # lint-waiver: LW-008082 [TRY003]; AgentSpec uses ValueError for invalid provider configuration and callers depend on that validation contract.
+            message = (
                 f"agent driver {self.driver.value!r} does not support provider "
                 f"{self.provider!r}; supported providers: {', '.join(supported)}"
             )
+            raise ValueError(message)

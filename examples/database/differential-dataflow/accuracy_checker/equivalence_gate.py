@@ -1,22 +1,27 @@
 """Equivalence gate (differential-dataflow `bfs`) — the candidate must produce
 **byte-identical BFS output** to the pristine round-0 upstream engine.
+
 This is the correctness contract for the in-place superoptimization loop. The
 agent may only micro-optimize the vendored differential-dataflow source
 (`engine/`); any edit that changes what the engine *computes* must be caught. It
 is caught here, generically, with no per-query Python truth to reimplement:
+
   1. Build the **pristine** round-0 engine (`_ref_engine/`, framework-managed,
      never edited) once and cache the binary. Run it LIVE on every fixed
      workload (`reference/workload.py`) → normalized golden output.
   2. Build the **candidate** engine (`engine/`) via `--rebuild-cmd` and run its
      binary on the same workloads → normalized candidate output.
   3. Require byte-for-byte equality of the normalized output on EVERY workload.
+
 Running the pristine engine live on ≥2 distinct workloads (canonical +
 perturbation) is the anti-memorization mechanism: there is no stored golden file
 to hardcode, and an engine that special-cases one input still has to reproduce
 the real BFS result on the other. `normalize()` (in `workload.py`) keeps only the
 consolidated data tuples, sorted — so print-order and timing lines never matter.
+
 Exit 0 = PASS (all workloads equivalent); 1 = a real output mismatch;
 2 = a build/setup error (the gate could not render a verdict).
+
 Usage (the Judge runs this before accepting any round):
   python3 acc_checker/equivalence_gate.py \
       --engine-cmd 'engine/target/release/examples/bfs' \
@@ -42,6 +47,7 @@ import workload  # noqa: E402
 _PRISTINE_DIR = os.path.join(_WORKSPACE, "_ref_engine")
 _PRISTINE_MANIFEST = os.path.join(_PRISTINE_DIR, "Cargo.toml")
 _PRISTINE_BIN = os.path.join(_PRISTINE_DIR, workload.BFS_BINARY_RELPATH)
+
 _RUN_TIMEOUT_S = 600
 
 
@@ -51,6 +57,7 @@ def _run(argv, *, cwd=None):
 
 def _build_pristine():
     """Build the pristine `_ref_engine/` bfs binary once; reuse if already present.
+
     The pristine tree is never edited, so a cached binary is always valid for the
     current run. Returns (ok, message)."""
     if os.path.exists(_PRISTINE_BIN):
@@ -93,6 +100,7 @@ def main():
         "(recommended, so the graded binary matches the current source)",
     )
     args = ap.parse_args()
+
     candidate_bin = shlex.split(args.engine_cmd)
     if len(candidate_bin) != 1:
         print(
@@ -102,20 +110,24 @@ def main():
         )
         return 2
     candidate_bin = candidate_bin[0]
+
     print("equivalence gate — candidate bfs output must match the pristine round-0 engine")
     print(f"  candidate : {candidate_bin}")
     print(f"  pristine  : {_PRISTINE_BIN}")
     print(f"  workloads : {len(workload.WORKLOADS)} (canonical + perturbation)")
     print("-" * 72)
+
     if args.rebuild_cmd:
         rb = subprocess.run(args.rebuild_cmd, shell=True, capture_output=True, text=True)
         if rb.returncode != 0:
             print(f"candidate REBUILD FAILED: {(rb.stderr or rb.stdout).strip()[:400]}")
             return 2
+
     ok, msg = _build_pristine()
     if not ok:
         print(f"pristine engine build error: {msg}")
         return 2
+
     all_match = True
     for wl in workload.WORKLOADS:
         gold_ok, gold = _run_engine(_PRISTINE_BIN, wl)
@@ -138,6 +150,7 @@ def main():
                 f"candidate={len(cl)} lines, ~{ndiff} differing)"
             )
             all_match = False
+
     print("-" * 72)
     if all_match:
         print("EQUIVALENCE: PASS — candidate reproduces the pristine BFS output on all workloads.")

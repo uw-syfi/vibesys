@@ -61,6 +61,7 @@ def discover_distribution_packages(repo_root: Path) -> tuple[list[str], dict[str
     """Return every import package and its source directory for setuptools."""
     packages: list[str] = []
     package_dirs: dict[str, str] = {}
+
     for relative_root in PACKAGE_SOURCE_ROOTS:
         source_root = repo_root / relative_root
         discovered: list[str] = []
@@ -84,4 +85,5 @@ def discover_distribution_packages(repo_root: Path) -> tuple[list[str], dict[str
                 for package in discovered
             }
         )
+
     return sorted(packages), package_dirs

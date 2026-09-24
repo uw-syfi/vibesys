@@ -1,4 +1,5 @@
 """Capture the round-0 CPU baseline for the differential-dataflow `bfs` target.
+
 The baseline here is NOT an external engine — it is **round 0 of this very
 target**: the vanilla differential-dataflow source materialized as `_ref_engine/`
 from the pinned workspace source, unmodified. This script builds that pristine
@@ -8,9 +9,11 @@ starts from this same source and only micro-optimizes it,
 `cpu_reduction_ratio = baseline / candidate` is a same-code, same-guarantees
 number: round 0 measures ≈ 1.0, and any improvement is purely cycles the agent
 shaved.
+
 `baseline.json` is machine-specific (absolute CPU-seconds depend on this box's
 CPU) and is captured once, offline against the warm ~/.cargo cache. Re-run it if
 the `_ref_engine/` source or the host changes.
+
 Usage (run once, from the example dir or anywhere):
   uv run python benchmark/capture_baseline.py
 """
@@ -44,14 +47,17 @@ def main():
     if not os.path.isdir(_REF_ENGINE):
         print(f"ERROR: pristine _ref_engine not found at {_REF_ENGINE}", file=sys.stderr)
         return 2
+
     print("  building (offline)...")
     build = subprocess.run(workload.build_cmd(_REF_MANIFEST), capture_output=True, text=True)
     if build.returncode != 0:
         print(f"ERROR: build failed:\n{(build.stderr or build.stdout)[-800:]}", file=sys.stderr)
         return 2
+
     wl = workload.METRIC_WORKLOAD
     print(f"  timing on metric workload: {' '.join(wl)}")
     cpu_seconds, samples = benchmark.measure_cpu(_REF_BIN, wl)
+
     data = {
         "baseline_cpu_seconds": round(cpu_seconds, 6),
         "workload": wl,

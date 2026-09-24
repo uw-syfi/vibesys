@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Generate ``reference/pins.json`` from a Hugging Face transformers reference forward.
+
 Run once on the cluster (needs the weights and GPUs or enough host memory):
+
     python3 accuracy_checker/make_pins.py --model-path "$MODEL_PATH"
+
 For each fixed prompt it applies the chat template with thinking disabled,
 greedy-decodes exactly ``--n-tokens`` tokens (EOS suppressed, matching the
 benchmark's ``ignore_eos``), one prompt at a time (no padding effects), and
 records the token ids. The output schema is documented in
 ``accuracy_checker/README.md``.
+
 The pinned checkpoint is normally the same one candidates serve. If
 transformers cannot load it (for example a quantized MXFP4 export), pass
 ``--model-path`` pointing at a loadable copy of the same model (bf16 or FP8)
@@ -28,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from checker import EXACT_PREFIX_TOKENS, HOLDOUT_WORD_BANK, PINS_SCHEMA_VERSION  # noqa: E402
 
 PINS_SEED = 20260301  # distinct from the benchmark and holdout seeds.
+
 STATIC_PROMPTS: tuple[list[dict], ...] = (
     [{"role": "user", "content": "Explain in two sentences why the sky is blue."}],
     [
@@ -75,6 +80,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.n_tokens < EXACT_PREFIX_TOKENS:
         parser.error(f"--n-tokens must be >= {EXACT_PREFIX_TOKENS} (the checker's prefix length)")
+
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -88,6 +94,7 @@ def main() -> None:
         trust_remote_code=True,
     )
     model.eval()
+
     pins = []
     for index, messages in enumerate((*STATIC_PROMPTS, *generated_prompts())):
         prompt = tokenizer.apply_chat_template(
@@ -104,6 +111,7 @@ def main() -> None:
         ids = out[0, inputs["input_ids"].shape[1] :].tolist()
         pins.append({"id": f"pin{index:02d}", "messages": messages, "expected_token_ids": ids})
         print(f"pin{index:02d}: {tokenizer.decode(ids)[:80]!r}", file=sys.stderr)
+
     payload = {
         "version": PINS_SCHEMA_VERSION,
         "model": args.model_path,

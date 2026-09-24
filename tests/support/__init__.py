@@ -21,7 +21,6 @@ _Command = Sequence[str | PathLike[str]]
 
 class _StartableSandbox(Protocol):
     def start(self) -> None: ...
-
     def stop(self) -> None: ...
 
 
@@ -42,7 +41,6 @@ def capture_docker_start_argv(sandbox: _StartableSandbox) -> list[str]:
             sandbox.start()
         finally:
             sandbox.stop()
-
     return next(command for command in commands if command[1:2] == ["run"])
 
 
@@ -58,8 +56,6 @@ def run_test_command(
     timeout: float | None = None,
     stdin: int | None = None,
 ) -> subprocess.CompletedProcess[str]: ...
-
-
 @overload
 def run_test_command(
     argv: _Command,
@@ -72,8 +68,6 @@ def run_test_command(
     timeout: float | None = None,
     stdin: int | None = None,
 ) -> subprocess.CompletedProcess[bytes]: ...
-
-
 def run_test_command(  # noqa: PLR0913  # lint-waiver: LW-006007; mirrors explicit subprocess options used by test callers.
     argv: _Command,
     *,

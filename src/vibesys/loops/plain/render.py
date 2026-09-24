@@ -37,7 +37,6 @@ from vs_issue_board.api import (
 
 if TYPE_CHECKING:
     from pathlib import Path
-
 _DEFAULT_SLUG = "untitled"
 _SLUG_MAX_LEN = 40
 

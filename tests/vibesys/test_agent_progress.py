@@ -27,8 +27,10 @@ def _make_context(
     ctx.integration = LocalRunIntegration()
     request.addfinalizer(ctx.integration.close)
     ctx.events = ctx.integration.events
-    ctx._progress_stack = []
-    ctx._paths = RunPaths(
+    # lint-waiver: LW-010043 [SLF001]; this minimal fixture bypasses the resource-owning constructor to exercise public progress scoping without provisioning a project.
+    ctx._progress_stack = []  # noqa: SLF001
+    # lint-waiver: LW-010044 [SLF001]; public invoke() requires canonical log paths, and constructing a full run context would add unrelated project resources to this unit test.
+    ctx._paths = RunPaths(  # noqa: SLF001
         project_root=tmp_path,
         log_dir=tmp_path / "logs",
         run_log_path=tmp_path / "run.log",

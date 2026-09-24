@@ -22,7 +22,6 @@ import pytest
 
 if TYPE_CHECKING:
     from types import ModuleType
-
 _REPO = Path(__file__).resolve().parents[4]
 _ATTR_PY = (
     _REPO / "examples" / "database" / "differential-dataflow" / "profiler" / "attribute_cpu.py"

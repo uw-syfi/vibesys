@@ -66,7 +66,6 @@ def _run_deployment_path_case(
     monkeypatch.setattr(modal_evaluator.subprocess, "run", run_deploy)
     monkeypatch.setattr(modal_evaluator, "wait_for_health", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", lambda *_args, **_kwargs: 0)
-
     modal_evaluator.run_evaluator(["true"], workspace=str(workspace), entrypoint=entrypoint)
     return deployed_paths
 
@@ -200,7 +199,6 @@ def test_deployment_path_rejects_absolute_path(
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-
     assert (
         _run_deployment_path_case(workspace, str(tmp_path / "service.py"), tmp_path, monkeypatch)
         == []
@@ -276,6 +274,7 @@ def test_import_does_not_validate_or_create_the_runtime_directory(
 def test_lock_path_creates_private_runtime_dir_and_lock_file(tmp_path: Path) -> None:
     """The lock's runtime directory is created mode 0o700 before flock is taken."""
     lock_path = tmp_path / "rt" / "modal-evaluator.lock"
+
     assert _run_with_lock_path(lock_path, tmp_path) == 1
 
     runtime_dir = lock_path.parent
@@ -668,7 +667,6 @@ def test_evaluator_rejects_workspace_collision_with_framework_paths(
     (workspace / "main.py").write_text("app = object()\n")
 
     result, calls = _run_public_evaluator(workspace, ["python", reserved], tmp_path, monkeypatch)
-
     assert result == 1
     assert not any(call[3:5] == ["container", "exec"] for call in calls)
 
@@ -746,6 +744,7 @@ def test_evaluator_reports_container_list_cli_error(
     listing = SimpleNamespace(returncode=2, stdout="", stderr="token expired")
     monkeypatch.setattr(modal_evaluator, "_healthy_now", MagicMock(return_value=True))
     monkeypatch.setattr(modal_evaluator.time, "sleep", lambda _: None)
+
     ticks = 0
 
     def monotonic() -> float:
@@ -758,7 +757,6 @@ def test_evaluator_reports_container_list_cli_error(
     result, calls = _run_public_evaluator(
         workspace, ["python", "main.py"], tmp_path, monkeypatch, container_listing=listing
     )
-
     assert result == 1
     assert not any(call[3:5] == ["container", "exec"] for call in calls)
     assert "container list exited 2: token expired" in capsys.readouterr().err
@@ -776,6 +774,7 @@ def test_evaluator_reports_missing_running_container(
     warm = MagicMock(return_value=True)
     monkeypatch.setattr(modal_evaluator, "_healthy_now", warm)
     monkeypatch.setattr(modal_evaluator.time, "sleep", lambda _: None)
+
     ticks = 0
 
     def monotonic() -> float:
@@ -784,11 +783,9 @@ def test_evaluator_reports_missing_running_container(
         return 0.0 if ticks < 3 else 1_000.0
 
     monkeypatch.setattr(modal_evaluator.time, "monotonic", monotonic)
-
     result, calls = _run_public_evaluator(
         workspace, ["python", "main.py"], tmp_path, monkeypatch, container_listing=listing
     )
-
     assert result == 1
     assert warm.call_count == 1
     assert not any(call[3:5] == ["container", "exec"] for call in calls)
@@ -945,12 +942,12 @@ def test_bootstrap_script_maps_setup_failure_to_distinct_exit(
         monkeypatch,
         setup_command=["sh", "-c", "exit 23"],
     )
+
     assert result_code == 0
     exec_command = next(call for call in calls if call[3:5] == ["container", "exec"])
     script = exec_command[9]
     encoded = "".join(exec_command[11:])
     monkeypatch.undo()
-
     result = run_test_command(
         ["sh", "-c", script, "vibesys-eval", encoded],
         capture_output=True,
@@ -971,6 +968,7 @@ def test_evaluator_execs_in_container_and_returns_sentinel_rc(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "checker.py").write_text("print('ok')\n")
+
     (workspace / "main.py").write_text("app = object()\n")
     result, calls = _run_public_evaluator(
         workspace,
@@ -996,6 +994,7 @@ def test_evaluator_stages_package_and_includes_setup(
     package = tmp_path / "package"
     package.mkdir()
     (package / "adapter.py").write_text("print('ok')\n")
+
     (workspace / "main.py").write_text("app = object()\n")
     result, calls = _run_public_evaluator(
         workspace,
@@ -1046,6 +1045,7 @@ def test_evaluator_reports_missing_rc_sentinel(
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+
     (workspace / "main.py").write_text("app = object()\n")
     result, _calls = _run_public_evaluator(
         workspace,

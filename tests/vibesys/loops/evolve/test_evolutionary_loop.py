@@ -1795,7 +1795,8 @@ def test_evolve_accuracy_gate_extends_timeout_by_environment_setup_allowance() -
     )
     gate = MagicMock(return_value=SimpleNamespace(feedback=None))
     with patch("vibesys.loops.evolve.loop.run_accuracy_gate", gate):
-        evolve_loop._run_framework_accuracy_gate(
+        # lint-waiver: LW-010046 [SLF001]; this regression verifies the loop's private accuracy-gate adapter adds environment setup allowance before calling the shared gate.
+        evolve_loop._run_framework_accuracy_gate(  # noqa: SLF001
             ctx,
             generation=0,
             child_idx=0,

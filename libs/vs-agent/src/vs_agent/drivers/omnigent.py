@@ -178,7 +178,6 @@ class OmnigentDriverError(RuntimeError):
             "contract-protected read-only project paths; unsupported paths: "
             f"{[str(path) for path in paths]}"
         )
-        raise error
 
 
 class OmnigentDependencyError(OmnigentDriverError):
@@ -327,7 +326,7 @@ def _install_helper_environment_hook() -> None:
         if _helper_environment_hook_installed.is_set():
             return
         try:
-            from omnigent.inner import os_env as omnigent_os_env
+            omnigent_os_env = import_module("omnigent.inner.os_env")
         except ImportError as exc:
             raise OmnigentDependencyError.os_environment_tools(exc) from exc
         # The seam is a private module-level function of a pinned dependency, so
@@ -385,11 +384,14 @@ def _build_os_tools(  # construction cleans every partially-created helper
 ) -> _OwnedOSTools:
     """Build Omnigent's sandboxed filesystem tools and their dispatcher."""
     try:
-        from omnigent.inner.os_env import create_os_environment
-        from omnigent.tools.base import ToolContext
-        from omnigent.tools.builtins.os_env import build_os_env_tools
+        os_env_module = import_module("omnigent.inner.os_env")
+        tools_module = import_module("omnigent.tools.base")
+        builtins_module = import_module("omnigent.tools.builtins.os_env")
     except ImportError as exc:
         raise OmnigentDependencyError.os_environment_tools(exc) from exc
+    create_os_environment = os_env_module.create_os_environment
+    tool_context_class = tools_module.ToolContext
+    build_os_env_tools = builtins_module.build_os_env_tools
 
     try:
         os_env = create_os_environment(os_env_spec)
@@ -418,7 +420,7 @@ def _build_os_tools(  # construction cleans every partially-created helper
             tools = build_os_env_tools(os_env)
         by_name = {tool.name(): tool for tool in tools}
         schemas = [_flatten_tool_schema(tool) for tool in tools]
-        context = ToolContext(task_id="vibesys", agent_id="vibesys", workspace=workspace)
+        context = tool_context_class(task_id="vibesys", agent_id="vibesys", workspace=workspace)
     except BaseException:
         for resource in environments:
             with contextlib.suppress(BaseException):
@@ -486,22 +488,21 @@ async def _drive_turn(
 ) -> AgentTurnResult:
     """Translate one Omnigent event stream into neutral events and a result."""
     try:
-        from omnigent import (
-            ExecutorConfig,
-            TextChunk,
-            ToolCallComplete,
-            ToolCallRequest,
-            TurnComplete,
-        )
+        omnigent = import_module("omnigent")
     except ImportError as exc:
         raise OmnigentDependencyError.executor_events(exc) from exc
+    executor_config_class = omnigent.ExecutorConfig
+    text_chunk_class = omnigent.TextChunk
+    tool_call_complete_class = omnigent.ToolCallComplete
+    tool_call_request_class = omnigent.ToolCallRequest
+    turn_complete_class = omnigent.TurnComplete
 
     message = request.message
     if request.output_schema is not None:
         message += build_schema_hint(request.output_schema)
     messages: list[Any] = [{"role": "user", "content": message}]
     config = (
-        ExecutorConfig(extra={"reasoning_effort": reasoning_effort})
+        executor_config_class(extra={"reasoning_effort": reasoning_effort})
         if reasoning_effort is not None
         else None
     )
@@ -510,10 +511,10 @@ async def _drive_turn(
     usage = AgentUsage()
 
     async for event in executor.run_turn(messages, tool_schemas, request.instructions, config):
-        if isinstance(event, TextChunk):
+        if isinstance(event, text_chunk_class):
             chunks.append(event.text)
             _emit(observer, AgentEvent(AgentEventKind.TEXT, text=event.text))
-        elif isinstance(event, ToolCallRequest):
+        elif isinstance(event, tool_call_request_class):
             _emit(
                 observer,
                 AgentEvent(
@@ -521,7 +522,7 @@ async def _drive_turn(
                     payload={"tool": event.name, "args": event.args},
                 ),
             )
-        elif isinstance(event, ToolCallComplete):
+        elif isinstance(event, tool_call_complete_class):
             duration = event.duration_ms / 1000
             _emit(
                 observer,
@@ -538,7 +539,7 @@ async def _drive_turn(
                     },
                 ),
             )
-        elif isinstance(event, TurnComplete):
+        elif isinstance(event, turn_complete_class):
             response = event.response
             usage = _usage_from_mapping(event.usage or {})
             if event.usage:
@@ -591,13 +592,16 @@ class OmnigentSession:
         with self._turn_lock:
             with self._lifecycle:
                 if self._close_lifecycle.state is not _LifecycleState.OPEN:
-                    raise RuntimeError("Omnigent session is closed")  # noqa: TRY003  # lint-waiver: LW-008058 [TRY003]; preserve the session lifecycle RuntimeError contract.
+                    message = "Omnigent session is closed"
+                    raise RuntimeError(message)
                 if self._failed:
-                    raise RuntimeError("Omnigent session must be reset after a failed turn")  # noqa: TRY003  # lint-waiver: LW-008059 [TRY003]; preserve the session lifecycle RuntimeError contract.
+                    message = "Omnigent session must be reset after a failed turn"
+                    raise RuntimeError(message)
             try:
                 with self._lifecycle:
                     if self._close_lifecycle.state is not _LifecycleState.OPEN:
-                        raise RuntimeError("Omnigent session is closed")  # noqa: TRY003  # lint-waiver: LW-008060 [TRY003]; preserve the session lifecycle RuntimeError contract.
+                        message = "Omnigent session is closed"
+                        raise RuntimeError(message)
                     task = self._driver.start_task(self._run_turn(request, observer))
                     self._active_turn = task
                 try:
@@ -636,7 +640,8 @@ class OmnigentSession:
         failure still surfaces in ``run_turn``, not here.
         """
         if self.owns_current_loop_thread():
-            raise RuntimeError("Omnigent session cannot be cancelled from its event-loop thread")  # noqa: TRY003  # lint-waiver: LW-008061 [TRY003]; preserve the session lifecycle RuntimeError contract.
+            message = "Omnigent session cannot be cancelled from its event-loop thread"
+            raise RuntimeError(message)
         with self._lifecycle:
             if self._close_lifecycle.state is not _LifecycleState.OPEN:
                 return
@@ -647,7 +652,8 @@ class OmnigentSession:
     def close(self) -> None:
         """Release the executor exactly once."""
         if self.owns_current_loop_thread():
-            raise RuntimeError("Omnigent session cannot be closed from its event-loop thread")  # noqa: TRY003  # lint-waiver: LW-008062 [TRY003]; preserve the session lifecycle RuntimeError contract.
+            message = "Omnigent session cannot be closed from its event-loop thread"
+            raise RuntimeError(message)
         active: _OmnigentAsyncTask[Any] | None = None
         owner = self._close_lifecycle.begin_close()
         if owner:
@@ -775,7 +781,8 @@ class OmnigentDriver:
         """Validate setup requirements and create a confined session."""
         with self._lifecycle:
             if self._close_lifecycle.state is not _LifecycleState.OPEN:
-                raise RuntimeError("Omnigent driver is closed")  # noqa: TRY003  # lint-waiver: LW-008063 [TRY003]; preserve the driver lifecycle RuntimeError contract.
+                message = "Omnigent driver is closed"
+                raise RuntimeError(message)
             self._creating_sessions += 1
         try:
             self._validate_spec(spec)
@@ -794,7 +801,8 @@ class OmnigentDriver:
                     self._sessions.add(session)
             if closed:
                 session.close()
-                raise RuntimeError("Omnigent driver is closed")  # noqa: TRY003  # lint-waiver: LW-008064 [TRY003]; preserve the driver lifecycle RuntimeError contract.
+                message = "Omnigent driver is closed"
+                raise RuntimeError(message)
             return session
         finally:
             with self._lifecycle:
@@ -804,7 +812,8 @@ class OmnigentDriver:
     def close(self) -> None:  # exhaustive owner cleanup
         """Close every outstanding session."""
         if self.owns_current_loop_thread():
-            raise RuntimeError("Omnigent driver cannot be closed from its event-loop thread")  # noqa: TRY003  # lint-waiver: LW-008065 [TRY003]; preserve the driver lifecycle RuntimeError contract.
+            message = "Omnigent driver cannot be closed from its event-loop thread"
+            raise RuntimeError(message)
         owner = self._close_lifecycle.begin_close()
         if not owner:
             return
@@ -903,9 +912,11 @@ class OmnigentDriver:
         include_toolchain: bool = False,
     ) -> Any:
         try:
-            from omnigent.inner.datamodel import OSEnvSandboxSpec, OSEnvSpec
+            datamodel = import_module("omnigent.inner.datamodel")
         except ImportError as exc:
             raise OmnigentDependencyError.os_environment_datamodel(exc) from exc
+        os_env_sandbox_spec = datamodel.OSEnvSandboxSpec
+        os_env_spec_class = datamodel.OSEnvSpec
         workspace = spec.workspace
         project_paths = spec.policy.project_paths
         hidden = set(() if project_paths is None else project_paths.hidden_paths)
@@ -930,7 +941,7 @@ class OmnigentDriver:
                     if resource.path.exists()
                 }
             )
-        sandbox = OSEnvSandboxSpec(
+        sandbox = os_env_sandbox_spec(
             type=_sandbox_backend_for_platform(),
             read_paths=read_paths,
             write_paths=[str(workspace), *(str(path) for path in additional_write_paths)],
@@ -940,7 +951,7 @@ class OmnigentDriver:
             mask_paths=sorted({str(path) for path in hidden} | _OMNIGENT_INTERNAL_HIDDEN),
             env_passthrough=list(env_passthrough) or None,
         )
-        return OSEnvSpec(
+        return os_env_spec_class(
             type="caller_process",
             cwd=str(workspace),
             sandbox=sandbox,

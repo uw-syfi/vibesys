@@ -172,13 +172,13 @@ def _run_migrate_run_environment(argv: list[str]) -> None:
             exit_code=1,
         )
 
-    print(
+    sys.stdout.write(
         f"Migrated run {manifest.run_id} to run schema version "
         f"{manifest.schema_version}: run environment "
-        f"{manifest.configuration.run_environment.name}"
+        f"{manifest.configuration.run_environment.name}\n"
     )
-    print(f"  metadata: {project_root}")
-    print("  commit the updated run metadata to keep the run branch clean.")
+    sys.stdout.write(f"  metadata: {project_root}\n")
+    sys.stdout.write("  commit the updated run metadata to keep the run branch clean.\n")
 
 
 def _build_agent_request(args: argparse.Namespace) -> RunRequest:
@@ -199,7 +199,7 @@ def _build_agent_request(args: argparse.Namespace) -> RunRequest:
             objective = with_operator_constraints(bundle.objective, args.constraint)
 
         if args.resume is not None:
-            print(f"Resuming VibeSys run {args.resume} in {bundle.root}/")
+            sys.stdout.write(f"Resuming VibeSys run {args.resume} in {bundle.root}/\n")
 
         with boot_trace.span("load_objectives_toml"):
             metrics = _load_metric_space_toml(bundle.task_root)
@@ -248,9 +248,9 @@ def _run_agent(args: argparse.Namespace) -> None:
     result = _execute_run_request(request)
 
     if result.succeeded:
-        print(f"\nAgent loop completed {args.max_rounds} rounds.")
+        sys.stdout.write(f"\nAgent loop completed {args.max_rounds} rounds.\n")
     else:
-        print("\nAgent loop stopped early (exception or KeyboardInterrupt).")
+        sys.stdout.write("\nAgent loop stopped early (exception or KeyboardInterrupt).\n")
         sys.exit(1)
 
 
@@ -310,15 +310,8 @@ def _resolve_metric_space(args: argparse.Namespace) -> MetricSpace:
     return space
 
 
-def _validate_evolve(args: argparse.Namespace) -> None:
-    _validate_target_inputs(args)
-    _validate_run_environment_profiler(args)
-    if args.children_per_generation < 1:
-        _configuration_error("--children-per-generation must be >= 1.")
-    if args.max_generations < 1:
-        _configuration_error("--max-generations must be >= 1.")
-    if args.selection_temperature <= 0:
-        _configuration_error("--selection-temperature must be > 0.")
+def _validate_openevolve_options(args: argparse.Namespace) -> None:
+    """Validate options specific to the OpenEvolve search policy."""
     if args.search_policy == "vibesys" and any(
         value is not None
         for value in (
@@ -342,6 +335,18 @@ def _validate_evolve(args: argparse.Namespace) -> None:
         0.0 <= args.openevolve_migration_rate <= 1.0
     ):
         _configuration_error("--openevolve-migration-rate must be in [0, 1].")
+
+
+def _validate_evolve(args: argparse.Namespace) -> None:
+    _validate_target_inputs(args)
+    _validate_run_environment_profiler(args)
+    if args.children_per_generation < 1:
+        _configuration_error("--children-per-generation must be >= 1.")
+    if args.max_generations < 1:
+        _configuration_error("--max-generations must be >= 1.")
+    if args.selection_temperature <= 0:
+        _configuration_error("--selection-temperature must be > 0.")
+    _validate_openevolve_options(args)
     if not (0.0 <= args.frontier_bias <= 1.0):
         _configuration_error("--frontier-bias must be in [0, 1].")
     if args.bootstrap_max_attempts < 1:
@@ -395,12 +400,12 @@ def _build_evolve_request(args: argparse.Namespace) -> RunRequest:
     space = _resolve_metric_space(args)
 
     if args.resume is not None:
-        print(f"Resuming evolve run {args.resume} in {bundle.root}/")
+        sys.stdout.write(f"Resuming evolve run {args.resume} in {bundle.root}/\n")
     if space.objectives:
         spec = ", ".join(f"{o.name}({o.direction})" for o in space.objectives)
-        print(
+        sys.stdout.write(
             f"Pareto mode active: [{spec}]; frontier_bias={args.frontier_bias}; "
-            f"tolerance={space.relative_noise:.0%}"
+            f"tolerance={space.relative_noise:.0%}\n"
         )
 
     search_policy, openevolve_config = _resolve_openevolve_options(args)
@@ -445,12 +450,12 @@ def _run_evolve(args: argparse.Namespace) -> None:
     result = _execute_run_request(request)
 
     if result.succeeded:
-        print(
+        sys.stdout.write(
             f"\nEvolve loop completed {args.max_generations} generations "
-            f"× {args.children_per_generation} cands."
+            f"with {args.children_per_generation} candidates each.\n"
         )
     else:
-        print("\nEvolve loop stopped early (exception or KeyboardInterrupt).")
+        sys.stdout.write("\nEvolve loop stopped early (exception or KeyboardInterrupt).\n")
         sys.exit(1)
 
 
@@ -471,7 +476,7 @@ def _build_plain_request(args: argparse.Namespace) -> RunRequest:
     _prepare_experiment_repository(args, config)
 
     if args.resume is not None:
-        print(f"Resuming plain run {args.resume} in {bundle.root}/")
+        sys.stdout.write(f"Resuming plain run {args.resume} in {bundle.root}/\n")
 
     return RunRequest(
         project_root=bundle.root,
@@ -501,9 +506,9 @@ def _run_plain(args: argparse.Namespace) -> None:
     result = _execute_run_request(request)
 
     if result.succeeded:
-        print("\nPlain loop completed: no remaining open issues.")
+        sys.stdout.write("\nPlain loop completed: no remaining open issues.\n")
     else:
-        print(f"\nPlain loop did not complete after {args.max_rounds} rounds.")
+        sys.stdout.write(f"\nPlain loop did not complete after {args.max_rounds} rounds.\n")
         sys.exit(1)
 
 

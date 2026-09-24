@@ -29,12 +29,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
 
+import vs_loop_state.api as _loop_state_api
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
-    # lint-waiver: LW-007001 [F401]; preserve the public schemas import path
-    PerfDeltaReason,  # noqa: F401
 )
+
+PerfDeltaReason = _loop_state_api.PerfDeltaReason
 
 # HypothesisOutcome, CandidateDisposition, and PerfDeltaReason live in
 # vs_loop_state so that server code can import them without deep-importing

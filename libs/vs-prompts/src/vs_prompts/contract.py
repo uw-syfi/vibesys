@@ -30,7 +30,6 @@ from jinja2 import Environment, TemplateSyntaxError, meta, nodes
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
     from pathlib import Path
-
 _env = Environment()
 
 

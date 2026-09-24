@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
 _MIB = 1024 * 1024
 _DEFAULT_SIZES_MIB = (20, 100, 500)
 
@@ -193,6 +194,7 @@ def main() -> None:
         return
     if args.repeats < 1 or any(size < 1 for size in args.sizes_mib):
         parser.error("sizes and repeats must be positive")
+
     results: dict[str, dict[str, dict[str, float | int]]] = {}
     for size_mib in args.sizes_mib:
         source = args.work_dir / f"events-{size_mib}mib.jsonl"
@@ -212,6 +214,7 @@ def main() -> None:
             )
             modes[mode] = _summary(measurements)
         results[str(size_mib)] = modes
+
     rendered = _render_markdown(results)
     print(rendered, end="")  # benchmark report
     if args.output is not None:

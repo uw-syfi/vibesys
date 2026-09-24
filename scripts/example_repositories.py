@@ -4,6 +4,7 @@ A repository-native example is an external repository (a candidate repository
 that lives outside this one) that carries its VibeSys tasks in a ``.vibesys/``
 directory (``docs/running-vibesys.md``). This repository tracks each one as a
 submodule under ``examples/<family>/repositories/<name>``.
+
 Validating those tasks only needs ``.vibesys/``, not the candidate source, so
 this module fetches ``.vibesys/`` alone: a blob-filtered, depth-1 fetch of the
 pinned gitlink commit with a sparse checkout. On the DeathStarBench example
@@ -26,12 +27,16 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
 #: The one directory a repository-native example must contribute.
 VIBESYS_DIRNAME = ".vibesys"
+
 #: ``examples/<family>/repositories/<name>``: the path shape that marks a
 #: submodule as a runnable candidate repository rather than a reference one.
 _EXAMPLE_PATH_PARTS = 4
+
 #: Git's mode for a gitlink entry, as reported by ``git ls-tree``.
 _GITLINK_MODE = "160000"
 
@@ -130,6 +135,7 @@ def discover_example_repositories(repo_root: Path = REPO_ROOT) -> tuple[ExampleR
     """
     config = configparser.ConfigParser()
     config.read(repo_root / ".gitmodules")
+
     repositories: list[ExampleRepository] = []
     for section in config.sections():
         if not section.startswith('submodule "'):
@@ -160,6 +166,7 @@ def _declared_project_paths(manifest: Path) -> Iterator[str]:
     ``[environment.modal] entrypoint``, and an ``accuracy``/``benchmark``
     ``command`` whose executable is a repository path rather than a bare
     program name.
+
     Parsed with ``tomllib`` rather than through ``vibesys.evaluators.input_manifest`` on
     purpose: this runs *before* validation, so it has to tolerate a manifest
     that validation is about to reject.
@@ -168,10 +175,12 @@ def _declared_project_paths(manifest: Path) -> Iterator[str]:
         document = tomllib.loads(manifest.read_text())
     except (OSError, tomllib.TOMLDecodeError):
         return
+
     modal = document.get("environment", {}).get("modal", {})
     entrypoint = modal.get("entrypoint")
     if isinstance(entrypoint, str):
         yield entrypoint
+
     for section in ("accuracy", "benchmark"):
         command = document.get(section, {}).get("command")
         if isinstance(command, list) and command and isinstance(command[0], str):
@@ -201,6 +210,7 @@ def fetch_external_repo(repository: ExampleRepository, repo_root: Path = REPO_RO
     Idempotent: a checkout already sitting at the pinned commit is left alone.
     The resulting directory is a real git repository whose ``HEAD`` matches the
     gitlink, so the superproject sees the submodule as checked out and clean.
+
     A second sparse-checkout pass widens the cone to the directories the
     ``.vibesys/``'s own manifests reference (see ``_declared_project_paths``), so a
     task that names a deployment entrypoint in the candidate repository still
@@ -208,6 +218,7 @@ def fetch_external_repo(repository: ExampleRepository, repo_root: Path = REPO_RO
     """
     target = repo_root / repository.path
     target.mkdir(parents=True, exist_ok=True)
+
     if not (target / ".git").exists() or _git("rev-parse", "HEAD", cwd=target).strip() != (
         repository.commit
     ):
@@ -217,15 +228,18 @@ def fetch_external_repo(repository: ExampleRepository, repo_root: Path = REPO_RO
             _git("remote", "set-url", "origin", repository.url, cwd=target)
         else:
             _git("remote", "add", "origin", repository.url, cwd=target)
+
         # Cone mode also materializes the root-level files, which is both cheap
         # and what a reader expects from a checkout; nothing else comes down.
         _git("sparse-checkout", "init", "--cone", cwd=target)
         _git("sparse-checkout", "set", VIBESYS_DIRNAME, cwd=target)
         _git("fetch", "--depth", "1", "--filter=blob:none", "origin", repository.commit, cwd=target)
         _git("checkout", "--detach", repository.commit, cwd=target)
+
     vibesys_dir = target / VIBESYS_DIRNAME
     if not vibesys_dir.is_dir():
         raise ExampleRepositoryError.missing_vibesys_dir(repository.path, repository.commit)
+
     extra = _sparse_directories(vibesys_dir)
     if extra:
         _git("sparse-checkout", "set", VIBESYS_DIRNAME, *extra, cwd=target)
@@ -243,10 +257,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
     repo_root = arguments.repo_root.expanduser().resolve()
+
     repositories = discover_example_repositories(repo_root)
     if not repositories:
         print(f"No repository-native example submodules declared in {repo_root / '.gitmodules'}")
         return 1
+
     for repository in repositories:
         fetch_external_repo(repository, repo_root)
         print(f"{repository.path}: {VIBESYS_DIRNAME}/ at {repository.commit}")

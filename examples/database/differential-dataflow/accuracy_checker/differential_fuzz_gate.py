@@ -1,6 +1,7 @@
 """Differential fuzz gate (differential-dataflow `bfs`) — the anti-memorization
 oracle: the candidate must match the pristine round-0 engine on **many inputs it
 was never told about**, not just the two fixed workloads.
+
 `equivalence_gate.py` checks output-equivalence on the two workloads in
 `reference/workload.py`. That is enough to catch an honest bug, but it is a fixed,
 knowable target: an engine could in principle special-case those two inputs (return
@@ -11,6 +12,7 @@ that hole mechanically, the way fuzzing always does: it generates a broad set of
 *fresh* inputs and requires the candidate to reproduce the pristine engine's output
 on **every one of them**. You cannot memorize an input distribution you are not
 shown, so the only way to pass is to actually compute BFS.
+
 Two input sources, both graded the same way (candidate vs pristine, live):
   * a curated **corpus** of boundary/regression inputs (a single node, no edges,
     sparse/dense graphs, one-big-batch vs many-small-rounds) — always checked, and
@@ -20,11 +22,14 @@ Two input sources, both graded the same way (candidate vs pristine, live):
     reproducible — a blocking gate in a git-checkpoint loop must give the same
     verdict on re-run. The genuinely-random, seed-varying heavy campaign is a
     separate out-of-band tier (cargo-fuzz), not this per-round gate.
+
 Inputs are input-space, not code-space: they survive an engine rearchitecting, so
 this gate keeps working after the diff-discipline gate is dropped.
+
 Exit 0 = PASS (candidate matches pristine on every corpus + random input);
 1 = a real output divergence on some input (a correctness / memorization defect);
 2 = a build/setup error (the gate could not render a verdict).
+
 Usage (the Judge runs this alongside the other gates):
   python3 accuracy_checker/differential_fuzz_gate.py \
       --engine-cmd 'engine/target/release/examples/bfs' \
@@ -51,9 +56,11 @@ import workload  # noqa: E402
 _PRISTINE_DIR = os.path.join(_WORKSPACE, "_ref_engine")
 _PRISTINE_MANIFEST = os.path.join(_PRISTINE_DIR, "Cargo.toml")
 _PRISTINE_BIN = os.path.join(_PRISTINE_DIR, workload.BFS_BINARY_RELPATH)
+
 _RUN_TIMEOUT_S = 300
 _DEFAULT_SEED = 20260816
 _DEFAULT_COUNT = 24
+
 # Curated boundary/regression corpus (all validated to run clean at -w 1). Append a
 # failing input here as a regression seed whenever a divergence is ever found.
 _CORPUS = [
@@ -119,6 +126,7 @@ def main():
     ap.add_argument("--seed", type=int, default=_DEFAULT_SEED, help="fixed RNG seed (reproducible)")
     ap.add_argument("--count", type=int, default=_DEFAULT_COUNT, help="number of random inputs")
     args = ap.parse_args()
+
     candidate_bin = shlex.split(args.engine_cmd)
     if len(candidate_bin) != 1:
         print(
@@ -127,14 +135,17 @@ def main():
         )
         return 2
     candidate_bin = candidate_bin[0]
+
     rng = random.Random(args.seed)
     inputs = [("corpus", w) for w in _CORPUS]
     inputs += [("random", _rand_workload(rng)) for _ in range(args.count)]
+
     print("differential fuzz gate — candidate must match the pristine engine on every input")
     print(f"  candidate : {candidate_bin}")
     print(f"  pristine  : {_PRISTINE_BIN}")
     print(f"  inputs    : {len(_CORPUS)} corpus + {args.count} random (seed {args.seed})")
     print("-" * 72)
+
     if args.rebuild_cmd:
         rb = subprocess.run(args.rebuild_cmd, shell=True, capture_output=True, text=True)
         if rb.returncode != 0:
@@ -147,6 +158,7 @@ def main():
     if not ok:
         print(f"differential-fuzz: SETUP-ERROR — pristine build error: {msg}")
         return 2
+
     mismatches = 0
     checked = 0
     for kind, base in inputs:
@@ -171,6 +183,7 @@ def main():
                 f"candidate={len(cl)} lines, ~{ndiff} differing)"
             )
             mismatches += 1
+
     print("-" * 72)
     if mismatches == 0:
         print(

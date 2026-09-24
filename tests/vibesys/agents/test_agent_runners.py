@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from headless.render import HeadlessRenderer
-
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.config import Config
 from vibesys.render.log import log_json_and_print, log_prompt_markdown_and_print
@@ -22,7 +21,6 @@ from vibesys.schemas import (
 )
 from vs_agent.api import AgentClient, build_agent_client
 from vs_agent.callbacks import AgentLogger
-from vs_agent.drivers.agentshim import AgentShimDriver
 from vs_sandbox.api import ProjectPathPolicy
 
 
@@ -130,8 +128,8 @@ class TestBuildAgentClient:
         assert runner.backend_name == "cli"
         assert runner.provider == "codex"
 
-    def test_build_agent_client_cli_docker_returns_a_containerized_driver(self) -> None:
-        """cli backend + docker returns an AgentClient over a containerized AgentShim driver."""
+    def test_build_agent_client_cli_docker_enables_container_execution(self) -> None:
+        """cli backend + docker advertises container execution and no host grants."""
         mock_backends = {
             "implementer": MagicMock(),
             "judge": MagicMock(),
@@ -145,8 +143,8 @@ class TestBuildAgentClient:
             use_docker=True,
         )
         assert isinstance(runner, AgentClient)
-        assert isinstance(runner._driver, AgentShimDriver)
-        assert runner._driver._docker_sandboxes is mock_backends
+        assert runner.capabilities.container_execution
+        assert not runner.capabilities.host_path_grants
 
     def test_build_agent_client_rejects_unsupported_docker_provider(self) -> None:
         """A provider unknown to agentshim is rejected building the spec.
@@ -197,14 +195,14 @@ class TestBuildAgentClient:
         runner = _build_client(config, require_host_sandbox=True)
 
         assert isinstance(runner, AgentClient)
-        assert type(runner._driver).__name__ == "OmnigentDriver"
+        assert runner.driver_name == "omnigent"
 
     def test_required_project_enforcement_permits_stub(self) -> None:
         runner = _build_client(_agent_config(backend="stub"), require_host_sandbox=True)
 
         assert runner.backend_name == "stub"
 
-    def test_build_agent_client_forwards_project_policy_to_cli(self) -> None:
+    def test_build_agent_client_forwards_project_policy_to_cli(self, tmp_path: Path) -> None:
         policy = ProjectPathPolicy(
             read_only_paths=(".state",),
             hidden_paths=(".state/local",),
@@ -217,8 +215,17 @@ class TestBuildAgentClient:
         )
 
         assert isinstance(runner, AgentClient)
-        assert runner._policy.project_paths is policy
-        assert runner._policy.require_enforcement is True
+        with patch.object(runner, "run", return_value=MagicMock(text="ok")) as run:
+            runner.invoke_text(
+                kind="implementer",
+                workspace=tmp_path,
+                system_prompt="instructions",
+                user_prompt="prompt",
+                round_label="policy wiring",
+            )
+        session_spec = run.call_args.kwargs["session_spec"]
+        assert session_spec.policy.project_paths is policy
+        assert session_spec.policy.require_enforcement is True
 
     # --- model resolution for the cli backend ---------------------------------
     #
@@ -237,19 +244,17 @@ class TestBuildAgentClient:
             _agent_config(backend="cli", cli_provider=provider),
             model_name="gpt-5.4",
         )
-        assert runner._model_name == "gpt-5.4"
+        assert runner.model_for_kind("implementer") == "gpt-5.4"
 
     def test_displayed_model_name_matches_model_passed(self) -> None:
-        # The run-log header prints _model_name; it must equal the model
-        # actually handed to the CLI tool so the log never reports a model
-        # that isn't running.
+        # The effective default model is exposed through the client contract.
         runner = self._cli_client(
             _agent_config(backend="cli", cli_provider="codex"),
             model_name="gpt-5.4",
         )
-        assert runner._model_name == "gpt-5.4"
+        assert runner.model_for_kind("implementer") == "gpt-5.4"
 
-    def test_cli_backend_carries_outer_and_inner_role_configuration(self) -> None:
+    def test_cli_backend_carries_outer_and_inner_role_configuration(self, tmp_path: Path) -> None:
         config = _agent_config(
             backend="cli",
             cli_provider="codex",
@@ -259,15 +264,22 @@ class TestBuildAgentClient:
         config.thinking.level = "high"
         runner = self._cli_client(config, model_name="gpt-5.6-sol")
 
-        assert runner._default_reasoning_effort == "high"
-        assert runner._role_models == {
-            "orchestrator": "gpt-5.6-sol",
-            "implementer": "gpt-5.6-luna",
-        }
-        assert runner._role_reasoning_efforts == {
-            "orchestrator": "xhigh",
-            "implementer": "xhigh",
-        }
+        with patch.object(runner, "run", return_value=MagicMock(text="ok")) as run:
+            for kind in ("orchestrator", "implementer"):
+                runner.invoke_text(
+                    kind=kind,
+                    workspace=tmp_path,
+                    system_prompt="instructions",
+                    user_prompt="prompt",
+                    round_label="role configuration",
+                )
+        outer_spec = run.call_args_list[0].kwargs["session_spec"]
+        inner_spec = run.call_args_list[1].kwargs["session_spec"]
+        assert outer_spec.model == "gpt-5.6-sol"
+        assert outer_spec.reasoning_effort == "xhigh"
+        assert inner_spec.model == "gpt-5.6-luna"
+        assert inner_spec.reasoning_effort == "xhigh"
+        assert runner.model_for_kind("judge") == "gpt-5.6-sol"
 
 
 class TestAgentLoggerEventHandler:
@@ -304,9 +316,9 @@ class TestAgentLoggerEventHandler:
         assert err_call.kwargs.get("is_error") is True
 
     def test_agent_logger_event_handler_forwards_usage(self) -> None:
-        log_file = MagicMock()
+        event_sink = MagicMock()
         logger = AgentLogger(
-            log_file=log_file,
+            event_sink=event_sink,
             model_name="claude-sonnet-4-6",
             agent_label="Implementer",
         )
@@ -319,8 +331,8 @@ class TestAgentLoggerEventHandler:
         }
         logger.on_usage(usage)
 
-        assert logger._input_tokens == 12_345
-        assert logger._latest_usage == usage
+        event_sink.usage_update.assert_called_once()
+        assert event_sink.usage_update.call_args.args == (12_345,)
 
 
 class TestBuildAgentClientBackendSelection:

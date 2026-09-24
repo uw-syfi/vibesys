@@ -7,14 +7,50 @@ runtime imports so this file runs in isolation.
 
 from __future__ import annotations
 
-import random
 from collections import Counter
+from itertools import cycle
+from typing import TYPE_CHECKING, TypeVar, cast
 
 import pytest
 from pydantic import TypeAdapter
 
 from vibesys.loops.evolve.population import Individual, Population
 from vibesys.loops.metrics import MetricSpace, Objective
+
+if TYPE_CHECKING:
+    import random
+    from collections.abc import Sequence
+_Item = TypeVar("_Item")
+
+
+class _FixedRandom:
+    """Deterministic selection inputs for tests, with no seeded PRNG state."""
+
+    def __init__(
+        self,
+        *,
+        draws: Sequence[float] = (0.5,),
+        choices: Sequence[int] = (0,),
+    ) -> None:
+        self._draws = cycle(draws)
+        self._choices = cycle(choices)
+
+    def random(self) -> float:
+        return next(self._draws)
+
+    def choice(self, seq: Sequence[_Item]) -> _Item:
+        return seq[next(self._choices) % len(seq)]
+
+    def sample(self, population: Sequence[_Item], k: int) -> list[_Item]:
+        return list(population[:k])
+
+
+def _selection_rng(
+    *,
+    draws: Sequence[float] = (0.5,),
+    choices: Sequence[int] = (0,),
+) -> random.Random:
+    return cast("random.Random", _FixedRandom(draws=draws, choices=choices))
 
 
 def _space(*objectives: Objective, noise: float = 0.0) -> MetricSpace:
@@ -103,23 +139,23 @@ def test_best_breaks_ties_by_id() -> None:
 
 
 def test_select_parent_empty_returns_none() -> None:
-    assert Population().select_parent(rng=random.Random(0), space=MetricSpace()) is None
+    assert Population().select_parent(rng=_selection_rng(), space=MetricSpace()) is None
 
 
 def test_select_parent_only_failed_returns_none() -> None:
     pop = Population([_failed(1), _failed(2)])
-    assert pop.select_parent(rng=random.Random(0), space=MetricSpace()) is None
+    assert pop.select_parent(rng=_selection_rng(), space=MetricSpace()) is None
 
 
 def test_select_parent_single_passed_returns_it() -> None:
     pop = Population([_failed(1), _passed(2, 10.0)])
-    assert _selected_id(pop.select_parent(rng=random.Random(0), space=MetricSpace())) == 2
+    assert _selected_id(pop.select_parent(rng=_selection_rng(), space=MetricSpace())) == 2
 
 
 def test_select_parent_low_temperature_concentrates_on_best() -> None:
     """A near-zero temperature should pick the best almost every time."""
     pop = Population([_passed(1, 1.0), _passed(2, 5.0), _passed(3, 10.0)])
-    rng = random.Random(123)
+    rng = _selection_rng(draws=(0.5,))
     counts = Counter(
         _selected_id(pop.select_parent(space=MetricSpace(), rng=rng, temperature=0.01))
         for _ in range(200)
@@ -131,7 +167,7 @@ def test_select_parent_low_temperature_concentrates_on_best() -> None:
 def test_select_parent_high_temperature_spreads() -> None:
     """High temperature flattens the distribution toward uniform."""
     pop = Population([_passed(1, 1.0), _passed(2, 5.0), _passed(3, 10.0)])
-    rng = random.Random(123)
+    rng = _selection_rng(draws=(0.1, 0.5, 0.9))
     counts = Counter(
         _selected_id(pop.select_parent(space=MetricSpace(), rng=rng, temperature=100.0))
         for _ in range(600)
@@ -142,7 +178,7 @@ def test_select_parent_high_temperature_spreads() -> None:
 
 def test_select_parent_uniform_when_all_perfs_equal() -> None:
     pop = Population([_passed(1, 7.0), _passed(2, 7.0), _passed(3, 7.0)])
-    rng = random.Random(42)
+    rng = _selection_rng(choices=(0, 1, 2))
     counts = Counter(
         _selected_id(pop.select_parent(rng=rng, space=MetricSpace())) for _ in range(300)
     )
@@ -158,7 +194,7 @@ def test_select_inspirations_excludes_parent_and_dedupes() -> None:
     pop = Population(
         [_passed(i, float(i)) for i in range(1, 8)]  # ids 1..7, perf 1..7
     )
-    rng = random.Random(0)
+    rng = _selection_rng()
     picks = pop.select_inspirations(parent_id=7, k_top=2, k_random=2, rng=rng, space=MetricSpace())
     ids = [i.id for i in picks]
     assert 7 not in ids  # parent excluded
@@ -167,7 +203,7 @@ def test_select_inspirations_excludes_parent_and_dedupes() -> None:
 
 def test_select_inspirations_top_first_then_random() -> None:
     pop = Population([_passed(i, float(i)) for i in range(1, 8)])
-    rng = random.Random(0)
+    rng = _selection_rng()
     picks = pop.select_inspirations(parent_id=1, k_top=2, k_random=2, rng=rng, space=MetricSpace())
     # First two should be the top-2 highest-perf (ids 7 and 6).
     assert picks[0].id == 7
@@ -183,7 +219,7 @@ def test_select_inspirations_handles_small_population() -> None:
         parent_id=1,
         k_top=2,
         k_random=2,
-        rng=random.Random(0),
+        rng=_selection_rng(),
         space=MetricSpace(),
     )
     # Only one other passed individual exists; no dupes / no errors.
@@ -196,7 +232,7 @@ def test_select_inspirations_empty_when_only_parent_passed() -> None:
         parent_id=1,
         k_top=3,
         k_random=3,
-        rng=random.Random(0),
+        rng=_selection_rng(),
         space=MetricSpace(),
     )
     assert picks == []
@@ -285,7 +321,7 @@ def test_select_parent_pareto_mode_draws_from_frontier_with_full_bias() -> None:
             _multi(3, {"tput": 50.0, "lat": 200.0}),  # dominated
         ]
     )
-    rng = random.Random(0)
+    rng = _selection_rng()
     counts = Counter(
         _selected_id(pop.select_parent(rng=rng, space=_TPUT_LAT, frontier_bias=1.0))
         for _ in range(200)
@@ -304,7 +340,7 @@ def test_select_parent_pareto_mode_falls_back_to_scalar_when_bias_zero() -> None
             _multi(2, {"tput": 80.0, "lat": 50.0}),
         ]
     )
-    rng = random.Random(0)
+    rng = _selection_rng()
     counts = Counter(
         _selected_id(
             pop.select_parent(
@@ -326,7 +362,7 @@ def test_select_parent_scalar_fallback_respects_min_primary() -> None:
             _multi(2, {"lat": 100.0, "quality": 90.0}),
         ]
     )
-    rng = random.Random(0)  # deterministic selection test
+    rng = _selection_rng()
 
     counts = Counter(
         _selected_id(
@@ -352,7 +388,7 @@ def test_select_parent_falls_back_when_frontier_is_empty() -> None:
             _multi(2, {"tput": 80.0}),  # missing 'lat'
         ]
     )
-    rng = random.Random(0)
+    rng = _selection_rng()
     pick = pop.select_parent(rng=rng, space=_TPUT_LAT, frontier_bias=1.0)
     # We get *some* individual via scalar fallback rather than None.
     assert pick is not None
@@ -366,7 +402,7 @@ def test_select_parent_empty_frontier_fallback_respects_min_primary() -> None:
             _multi(2, {"lat": 100.0}),
         ]
     )
-    rng = random.Random(0)  # deterministic selection test
+    rng = _selection_rng()
 
     counts = Counter(
         _selected_id(
@@ -394,7 +430,7 @@ def test_select_inspirations_pareto_mode_pulls_from_frontier_first() -> None:
             _multi(5, {"tput": 50.0, "lat": 110.0}),  # dominated
         ]
     )
-    rng = random.Random(0)
+    rng = _selection_rng()
     picks = pop.select_inspirations(
         parent_id=1,
         k_top=2,
@@ -421,7 +457,7 @@ def test_select_inspirations_backfills_when_frontier_smaller_than_k_top() -> Non
             _multi(4, {"tput": 60.0, "lat": 100.0}),  # dominated
         ]
     )
-    rng = random.Random(0)
+    rng = _selection_rng()
     picks = pop.select_inspirations(
         parent_id=1,
         k_top=3,
@@ -451,7 +487,7 @@ def test_select_inspiration_backfill_respects_min_primary() -> None:
         parent_id=1,
         k_top=3,
         k_random=0,
-        rng=random.Random(0),  # deterministic selection test
+        rng=_selection_rng(),
         space=_LAT_QUALITY,
     )
 
@@ -510,7 +546,7 @@ def test_softmax_revalidates_mutated_fitness_before_sampling() -> None:
     individual.perf_metric = float("-inf")
 
     with pytest.raises(ValueError, match="perf_metric must be a finite number"):
-        population.select_parent(rng=random.Random(0), space=MetricSpace())
+        population.select_parent(rng=_selection_rng(), space=MetricSpace())
 
 
 # ---------------------------------------------------------------------------
@@ -596,7 +632,7 @@ def test_best_orders_on_the_primary_axis_when_the_task_declares_one() -> None:
 def test_frontier_bias_can_still_reach_a_near_tie_parent() -> None:
     """The retained near-tie is a real selection outcome, not just a listing."""
     population = _near_frontier()
-    rng = random.Random(0)
+    rng = _selection_rng(choices=(0, 1))
 
     picked = {
         _selected_id(population.select_parent(rng=rng, space=_tput_lat(0.05), frontier_bias=1.0))

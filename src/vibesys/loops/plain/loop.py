@@ -67,7 +67,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.evaluators.input_manifest import WorkspaceSource
-
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "plain"
 PlainLoopState = PlainLoopCursor
 

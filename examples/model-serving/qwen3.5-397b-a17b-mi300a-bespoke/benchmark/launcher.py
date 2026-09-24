@@ -1,4 +1,5 @@
 """Start and stop the candidate's ``python3 server.py`` for the benchmark and checker.
+
 The candidate contract (see ``OBJECTIVE.md``): ``server.py`` at the workspace
 root, started as ``python3 server.py --model-path <dir> --host <h> --port <p>``,
 serving ``GET /health`` (200 only when ready) and ``POST /v1/chat/completions``.

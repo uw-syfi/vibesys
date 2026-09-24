@@ -28,8 +28,10 @@ from tui_packaging import BUN_VERSION
 from wheel_targets import TARGETS, WheelTarget
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
 if TYPE_CHECKING:
     from email.message import Message
+
 PYPI_FILE_SIZE_LIMIT = 100_000_000
 FRAMEWORK_PACKAGES = (
     "vibesys",
@@ -179,6 +181,7 @@ def verify_wheel(wheel: Path, source_root: Path, target: WheelTarget) -> None:
         )
     if wheel.stat().st_size > PYPI_FILE_SIZE_LIMIT:
         _fail(f"Wheel exceeds the PyPI 100 MB file limit: {wheel.stat().st_size} bytes")
+
     dist_info = f"vibesys-{version}.dist-info"
     platlib = ""
     try:
@@ -302,6 +305,7 @@ def _verify_metadata(
     expected_python = _project_string(project, "requires-python")
     if _singleton_header(metadata, "Requires-Python") != expected_python:
         _fail("Wheel METADATA Requires-Python does not match pyproject.toml")
+
     raw_requirements = metadata.get_all("Requires-Dist", [])
     try:
         actual = Counter(str(Requirement(value)) for value in raw_requirements)
@@ -314,6 +318,7 @@ def _verify_metadata(
             _fail(f"Wheel must not depend on internal distribution {parsed.name}")
         if canonical_name == "mcp" and parsed.specifier.contains("2.0.0", prereleases=True):
             _fail("Wheel MCP dependency must exclude MCP 2.0.0")
+
     expected_values = _project_requirements(project)
     expected = Counter(str(Requirement(value)) for value in expected_values)
     if actual != expected:
@@ -383,6 +388,7 @@ def _verify_framework_packages(
             _archive_path(platlib, f"{package}/py.typed"),
             f"{package} py.typed",
         )
+
     top_level_path = next(
         (name for name in members if name.endswith(".dist-info/top_level.txt")),
         None,
@@ -405,6 +411,7 @@ def _verify_tracked_sources(
 ) -> set[str]:
     tracked = _tracked_files(source_root)
     expected = _expected_packaged_sources(source_root, tracked=tracked, platlib=platlib)
+
     for source_relative, archive_name in expected.items():
         _required_member(members, archive_name, source_relative.as_posix())
         source_digest = hashlib.sha256((source_root / source_relative).read_bytes()).digest()
@@ -433,6 +440,7 @@ def _expected_packaged_sources(
                 platlib,
                 f"{package_prefix.as_posix()}/{suffix}",
             )
+
     sdk_root = Path("sdk/vs-bench")
     for relative in tracked:
         if not relative.is_relative_to(sdk_root) or _excluded(relative):
@@ -504,9 +512,11 @@ def _verify_tui_payload(
     root = _archive_path(platlib, "entrypoints/_tui")
     for relative in _REQUIRED_TUI_FILES:
         _required_member(members, f"{root}/{relative}", relative)
+
     runtime_info = members[f"{root}/bin/bun"]
     if not (runtime_info.external_attr >> 16) & 0o111:
         _fail("Bundled Bun runtime is not executable")
+
     manifest = _load_manifest(archive.read(f"{root}/manifest.json"))
     if manifest.get("schema_version") != 1:
         _fail("Unsupported TUI payload manifest schema")
@@ -650,6 +660,7 @@ def _verify_exact_members(
     aliases = sorted(name for name in directories if name.removesuffix("/") in allowed)
     if aliases:
         _fail(f"Wheel directory entry aliases an allowed file: {aliases}")
+
     entries_by_path: dict[str, str] = {}
     for info in infos:
         path = info.filename.removesuffix("/") if info.is_dir() else info.filename
@@ -657,6 +668,7 @@ def _verify_exact_members(
         if existing is not None:
             _fail(f"Wheel contains colliding archive entries: {existing!r}, {info.filename!r}")
         entries_by_path[path] = info.filename
+
     expected_directories = {
         f"{parent.as_posix()}/"
         for name in allowed
@@ -666,6 +678,7 @@ def _verify_exact_members(
     unexpected_directories = sorted(directories - expected_directories)
     if unexpected_directories:
         _fail(f"Wheel contains unexpected directory entries: {unexpected_directories}")
+
     actual = {info.filename for info in infos if not info.is_dir()}
     unexpected = sorted(actual - allowed)
     if unexpected:

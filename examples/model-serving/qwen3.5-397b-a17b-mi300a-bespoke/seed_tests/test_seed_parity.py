@@ -1,4 +1,5 @@
 """Hermetic CPU tests for the seed: HF parity on a tiny random model, MXFP4 dequant, HTTP smoke.
+
 Run with a python that has torch, transformers, safetensors, aiohttp, pytest:
     /tmp/torchenv/bin/python -m pytest examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/seed_tests -p no:cacheprovider --no-cov
 """
@@ -18,6 +19,7 @@ from transformers import Qwen3_5MoeForCausalLM, Qwen3_5MoeTextConfig
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
 # lint-waiver: LW-008012 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 import model as seed_model  # noqa: E402
 
@@ -111,6 +113,8 @@ def quantize_hf_in_place(m: Qwen3_5MoeForCausalLM) -> None:
 
 
 # ---------------------------------------------------------------- tests
+
+
 def test_mxfp4_dequant_hand_vector() -> None:
     packed = torch.zeros(16, dtype=torch.uint8)
     packed[0], packed[1] = 0x21, 0x73  # low nibble first: 1,2 then 3,7 -> 0.5, 1.0, 1.5, 6.0
@@ -146,10 +150,12 @@ def test_prefill_and_greedy_decode_match_hf(
     )  # exercise chunked prefill over static state
     mine = seed_model.Model(tmp_path, ["cpu"], torch.float32, max_seq=64)
     ids = torch.randint(2, VOCAB, (1, 11))
+
     with torch.no_grad():
         ref = hf(input_ids=ids).logits
     mine.reset()
     assert torch.allclose(mine.forward(ids, 0, all_logits=True), ref[0], atol=1e-4, rtol=1e-4)
+
     mine.reset()  # incremental: prefill in chunks, then 8 greedy steps against HF full recompute
     for s in range(0, ids.shape[1], 4):
         got = mine.forward(ids[:, s : s + 4], s)
@@ -162,6 +168,7 @@ def test_prefill_and_greedy_decode_match_hf(
         assert int(got[-1].argmax()) == int(nxt)
         got = mine.forward(nxt, seq.shape[1])
         seq = torch.cat([seq, nxt], dim=1)
+
     assert list(mine.generate(ids[0].tolist(), 8, 0.0, frozenset())) == seq[0, 11:].tolist()
 
 
@@ -191,7 +198,9 @@ def test_http_smoke(tmp_path: Path) -> None:
     tok = PreTrainedTokenizerFast(
         tokenizer_object=core, unk_token="<unk>", eos_token="<|im_end|>", chat_template=template
     )
+
     tok.save_pretrained(tmp_path)
+
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -210,6 +219,7 @@ def test_http_smoke(tmp_path: Path) -> None:
         assert (
             reply["usage"]["prompt_tokens"] == 8
         )  # <|im_start|> user hello world <|im_end|> <|im_start|> assistant think
+
         status, data = post(
             port, body | {"stream": True, "stream_options": {"include_usage": True}}
         )

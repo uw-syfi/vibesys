@@ -209,7 +209,9 @@ def test_crash_injection_times_out_when_candidate_emits_no_output(
     monkeypatch.setattr(crash_gate, "_CRASH_INJECTION_TIMEOUT_S", 0.05)
 
     started = time.monotonic()
-    crashed, ok, message = crash_gate._crash_then_restart(
+    # Invoke this focused fault-injection seam directly so the test does not
+    # build the example engine or run the entire multi-gate CLI.
+    crashed, ok, message = crash_gate._crash_then_restart(  # noqa: SLF001  # lint-waiver: LW-008508 [SLF001]; exercise timeout recovery without building the external engine or running unrelated CLI gates.
         sys.executable,
         ["-c", "import time; time.sleep(60)"],
         tmp_path,

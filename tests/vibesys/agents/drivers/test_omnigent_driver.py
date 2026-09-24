@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextlib
-import inspect
 import importlib
+import inspect
 import json
 import os
 import shutil
 import sys
-import tempfile
 import threading
 from collections.abc import AsyncIterator, Coroutine
 from dataclasses import dataclass, field, replace
@@ -183,22 +182,40 @@ def _session(
     ("provider", "attribute"),
     [("codex", "_env"), ("claude", "_extra_env")],
 )
-def test_provider_environment_is_explicit_and_does_not_modify_process_environment(
+def test_provider_environment_is_applied_during_session_creation_without_mutating_parent(
     provider: str,
     attribute: str,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     key = "VIBESYS_TEST_PROVIDER_ENV"
     monkeypatch.setenv(key, "ambient")
-    executor = SimpleNamespace(**{attribute: {"BASE": "preserved"}})
+    provider_environments: list[dict[str, str]] = []
 
-    driver_subject._adapt_provider_environment(  # noqa: SLF001  # LW-010000; verifies the pinned provider environment adapter preserves ambient process state
-        executor,
-        provider=provider,
-        environment={key: "session"},
+    class Executor(_FakeExecutor):
+        def __init__(self, **_kwargs: object) -> None:
+            super().__init__([])
+            environment = {"BASE": "preserved"}
+            setattr(self, attribute, environment)
+            provider_environments.append(environment)
+
+    driver = OmnigentDriver()
+    monkeypatch.setattr(driver, "_executor_class", lambda _spec: Executor)
+    monkeypatch.setattr(driver, "_build_os_env", lambda _spec, **_kwargs: object())
+    monkeypatch.setattr(driver_subject, "resolve_active_rust_toolchain", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        driver_subject,
+        "_build_os_tools",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            schemas=[],
+            handles=lambda _name: False,
+            dispatch=lambda _name, _args: None,
+            close=lambda: None,
+        ),
     )
 
-    assert getattr(executor, attribute) == {"BASE": "preserved", key: "session"}
+    driver.create_session(_spec(tmp_path, provider=provider, environment=((key, "session"),)))
+    assert provider_environments == [{"BASE": "preserved", key: "session"}]
     assert os.environ[key] == "ambient"
     inherited = run_test_command(
         [sys.executable, "-c", f"import os; print(os.environ[{key!r}])"],
@@ -207,6 +224,7 @@ def test_provider_environment_is_explicit_and_does_not_modify_process_environmen
         text=True,
     ).stdout.strip()
     assert inherited == "ambient"
+    driver.close()
 
 
 def test_distinct_tool_helpers_snapshot_their_own_environment_without_command_rewrite(
@@ -548,17 +566,11 @@ def test_session_cleanup_closes_owned_os_environments(tmp_path: Path) -> None:
 
     executor = _FakeExecutor([])
     resource = Resource()
-    os_tools = driver_subject._OwnedOSTools(  # noqa: SLF001  # LW-010002; injects owned helper resources to verify session shutdown closes them
-        schemas=[],
-        dispatch=lambda _name, _args: None,
-        environments=(resource,),
-    )
-    resources = driver_subject._ExecutorResources(os_tools=os_tools)  # noqa: SLF001  # LW-010003; this test must inject the private resource owner because production setup is bypassed
     driver = OmnigentDriver()
     with patch.object(
         driver,
         "_build_executor",
-        return_value=(executor, [], None, resources),
+        return_value=(executor, [], None, SimpleNamespace(close=resource.close)),
     ):
         driver.create_session(_spec(tmp_path))
 
@@ -766,15 +778,13 @@ def test_driver_close_drains_blocking_default_executor_work(
 
             return stream()
 
-    class Scratch(tempfile.TemporaryDirectory[str]):
-        def cleanup(self) -> None:
+    class Resources:
+        def close(self) -> None:
             assert finalized.is_set()
             resource_closed.set()
-            super().cleanup()
 
     executor = ThreadedExecutor([])
-    scratch = Scratch()
-    resources = driver_subject._ExecutorResources(scratch=scratch)  # noqa: SLF001  # LW-010004; verifies scratch cleanup waits until the shared executor worker drains
+    resources = Resources()
     driver = OmnigentDriver()
     with patch.object(
         driver,
@@ -1244,7 +1254,8 @@ def test_missing_private_tool_executor_seam_fails_during_setup(
     monkeypatch.setattr(driver, "_build_os_env", lambda _workspace, **_kwargs: object())
 
     with pytest.raises(OmnigentDriverError, match="_tool_executor"):
-        driver._build_executor(_spec(tmp_path))  # noqa: SLF001  # LW-010005; directly exercises setup rejection when the pinned provider dispatch seam is absent
+        driver.create_session(_spec(tmp_path))
+    driver.close()
 
 
 def test_os_policy_is_always_sandboxed_and_workspace_scoped(tmp_path: Path) -> None:
@@ -1369,6 +1380,7 @@ def test_codex_executor_disables_native_tools(
             captured.update(kwargs)
             super().__init__([])
             self._env = {"BASE": "preserved"}
+            captured["provider_environment"] = self._env
 
     driver = OmnigentDriver()
     monkeypatch.setattr(driver, "_executor_class", lambda _spec: Executor)
@@ -1385,12 +1397,13 @@ def test_codex_executor_disables_native_tools(
         _workspace: Path,
         environment: dict[str, str],
         _shell_os_env: object,
-    ) -> driver_subject._OwnedOSTools:
+    ) -> SimpleNamespace:
         captured["tool_environment"] = environment
-        return driver_subject._OwnedOSTools(  # noqa: SLF001  # LW-010010; injects the driver's owned OS tool adapter for executor-construction behavior
+        return SimpleNamespace(
             schemas=[],
+            handles=lambda _name: False,
             dispatch=lambda _name, _args: None,
-            environments=(),
+            close=lambda: None,
         )
 
     monkeypatch.setattr(
@@ -1398,12 +1411,10 @@ def test_codex_executor_disables_native_tools(
         build_tools,
     )
 
-    executor, _schemas, mcp_tools, resources = driver._build_executor(  # noqa: SLF001  # LW-010011; exercises Codex-specific executor construction and captures its internal owned resources
-        _spec(tmp_path, environment=(("DRIVER_TEST", "session"),))
-    )
+    driver.create_session(_spec(tmp_path, environment=(("DRIVER_TEST", "session"),)))
 
     assert captured["disable_native_tools"] is True
-    assert executor._env == {"BASE": "preserved", "DRIVER_TEST": "session"}  # noqa: SLF001  # LW-010012; Codex's provider spawn environment is a pinned private SDK field
+    assert captured["provider_environment"] == {"BASE": "preserved", "DRIVER_TEST": "session"}
     assert str(captured["tool_environment"]["PATH"]).split(os.pathsep)[0] == str(
         rust_sysroot / "bin"
     )
@@ -1413,8 +1424,7 @@ def test_codex_executor_disables_native_tools(
     assert not cargo_home.is_relative_to(tmp_path)
     assert "CARGO_TARGET_DIR" not in captured["tool_environment"]
     assert not any(key.endswith("_LINKER") for key in captured["tool_environment"])
-    assert mcp_tools is None
-    driver.close_executor(executor, resources=resources)
+    driver.close()
     assert not cargo_home.parent.exists()
 
 
@@ -1435,6 +1445,9 @@ def test_executor_routes_only_declared_os_and_mcp_tools(
         def __init__(self, **_kwargs: object) -> None:
             super().__init__([])
             setattr(self, environment_attribute, {})
+            executors.append(self)
+
+    executors: list[Executor] = []
 
     class MCPTools:
         schemas: ClassVar[list[dict[str, Any]]] = [{"name": "profiler__analyze", "parameters": {}}]
@@ -1475,36 +1488,37 @@ def test_executor_routes_only_declared_os_and_mcp_tools(
     monkeypatch.setattr(
         driver_subject,
         "_build_os_tools",
-        lambda *_args, **_kwargs: driver_subject._OwnedOSTools(  # noqa: SLF001  # LW-010013; supplies the private owner needed to test OS/MCP dispatch routing
+        lambda *_args, **_kwargs: SimpleNamespace(
             schemas=[{"name": "sys_os_read", "parameters": {}}],
+            handles=lambda name: name == "sys_os_read",
             dispatch=dispatch_os,
-            environments=(),
+            close=lambda: None,
         ),
     )
 
-    executor, schemas, built_mcp, resources = driver._build_executor(  # noqa: SLF001  # LW-010014; inspects constructed schemas and the provider-specific dispatch seam
+    session = driver.create_session(
         _spec(
             tmp_path,
             provider=provider,
             mcp_servers=(MCPServerSpec("profiler", "python"),),
         )
     )
+    executor = executors[0]
+    session.run_turn(AgentTurnRequest("exercise tool surface"))
+    schemas = executor.calls[0][1]
+    tool_executor = executor._tool_executor  # noqa: SLF001  # LW-010035; the pinned provider dispatch seam has no public invocation path in the fake executor.
+    assert callable(tool_executor)
 
-    assert built_mcp is mcp_tools
     assert mcp_tools.initialize_calls == 1
     assert [schema["name"] for schema in schemas] == ["sys_os_read", "profiler__analyze"]
-    assert asyncio.run(executor._tool_executor("sys_os_read", {"path": "x"})) == "os result"  # noqa: SLF001  # LW-010015; invokes the pinned private dispatch seam to verify OS tool routing
-    assert asyncio.run(executor._tool_executor("profiler__analyze", {"pid": 1})) == "mcp result"  # noqa: SLF001  # LW-010016; invokes the pinned private dispatch seam to verify MCP tool routing
-    assert asyncio.run(executor._tool_executor("undeclared", {})) == {  # noqa: SLF001  # LW-010017; invokes the pinned private dispatch seam to verify undeclared tools are rejected
-        "error": "unknown tool 'undeclared'"
-    }
+    assert asyncio.run(tool_executor("sys_os_read", {"path": "x"})) == "os result"
+    assert asyncio.run(tool_executor("profiler__analyze", {"pid": 1})) == "mcp result"
+    assert asyncio.run(tool_executor("undeclared", {})) == {"error": "unknown tool 'undeclared'"}
     assert dispatched == [
         ("os", "sys_os_read", {"path": "x"}),
         ("mcp", "profiler__analyze", {"pid": 1}),
     ]
 
-    asyncio.run(mcp_tools.close())
-    driver.close_executor(executor, resources=resources)
     driver.close()
     assert mcp_tools.close_calls == 1
 
@@ -1560,15 +1574,16 @@ def test_tool_schema_conflict_attempts_all_cleanup_and_preserves_conflict(
     monkeypatch.setattr(
         driver_subject,
         "_build_os_tools",
-        lambda *_args, **_kwargs: driver_subject._OwnedOSTools(  # noqa: SLF001  # LW-010018; injects a private owned resource to verify cleanup after schema conflict
+        lambda *_args, **_kwargs: SimpleNamespace(
             schemas=[{"name": "sys_os_read", "parameters": {}}],
+            handles=lambda name: name == "sys_os_read",
             dispatch=lambda *_args: None,
-            environments=(resource,),
+            close=resource.close,
         ),
     )
 
     with pytest.raises(OmnigentDriverError, match="conflict") as caught:
-        driver._build_executor(_spec(tmp_path, mcp_servers=(MCPServerSpec("profiler", "python"),)))  # noqa: SLF001  # LW-010019; directly triggers setup failure to verify all partial resources close
+        driver.create_session(_spec(tmp_path, mcp_servers=(MCPServerSpec("profiler", "python"),)))
 
     assert any("MCP cleanup also failed" in note for note in caught.value.__notes__)
     assert mcp_tools.close_calls == 1
@@ -1624,10 +1639,11 @@ def test_interrupted_mcp_initialization_keeps_owner_for_cleanup(
     monkeypatch.setattr(
         driver_subject,
         "_build_os_tools",
-        lambda *_args, **_kwargs: driver_subject._OwnedOSTools(  # noqa: SLF001  # LW-010020; injects a private owned resource to verify cleanup after interrupted MCP initialization
+        lambda *_args, **_kwargs: SimpleNamespace(
             schemas=[],
+            handles=lambda _name: False,
             dispatch=lambda *_args: None,
-            environments=(resource,),
+            close=close_resource,
         ),
     )
     run_calls = 0
@@ -1643,7 +1659,7 @@ def test_interrupted_mcp_initialization_keeps_owner_for_cleanup(
     monkeypatch.setattr(driver, "run_awaitable", interrupt_first)
 
     with pytest.raises(KeyboardInterrupt):
-        driver._build_executor(_spec(tmp_path, mcp_servers=(MCPServerSpec("profiler", "python"),)))  # noqa: SLF001  # LW-010021; directly interrupts executor setup to verify partial-owner cleanup
+        driver.create_session(_spec(tmp_path, mcp_servers=(MCPServerSpec("profiler", "python"),)))
 
     assert mcp_tools.close_calls == 1
     assert executor.close_calls == 1

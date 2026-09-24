@@ -54,7 +54,6 @@ def test_resource_request_round_trips_through_manifest_toml() -> None:
 def test_render_rechecks_mutated_accuracy_entrypoint() -> None:
     manifest = _entrypoint_manifest()
     manifest.accuracy.entrypoint = None
-
     with pytest.raises(ValueError, match="accuracy.entrypoint"):
         render_input_manifest(manifest)
 
@@ -62,7 +61,6 @@ def test_render_rechecks_mutated_accuracy_entrypoint() -> None:
 def test_render_rechecks_mutated_benchmark_entrypoint() -> None:
     manifest = _entrypoint_manifest()
     manifest.benchmark.entrypoint = ""
-
     with pytest.raises(ValueError, match="benchmark.entrypoint"):
         render_input_manifest(manifest)
 
@@ -71,7 +69,6 @@ def test_render_rechecks_mutated_evaluator_name() -> None:
     manifest = _entrypoint_manifest()
     assert manifest.evaluator is not None
     manifest.evaluator.name = None
-
     with pytest.raises(ValueError, match="evaluator.name"):
         render_input_manifest(manifest)
 
@@ -80,7 +77,6 @@ def test_render_rechecks_mutated_evaluator_version() -> None:
     manifest = _entrypoint_manifest()
     assert manifest.evaluator is not None
     manifest.evaluator.version = ""
-
     with pytest.raises(ValueError, match="evaluator.version"):
         render_input_manifest(manifest)
 

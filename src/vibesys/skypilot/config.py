@@ -91,7 +91,8 @@ class SkyPilotProfile(_StrictModel):
             return None
         stripped = value.strip()
         if not stripped:
-            raise ValueError("must not be empty")  # noqa: TRY003  # lint-waiver: LW-007090 [TRY003]; Pydantic profile validation needs ValueError for field errors.
+            message = "must not be empty"
+            raise ValueError(message)
         return stripped
 
     @field_validator("allocation_time")
@@ -101,16 +102,20 @@ class SkyPilotProfile(_StrictModel):
             return None
         match = _ALLOCATION_TIME.fullmatch(value)
         if match is None:
-            raise ValueError("must use [days-]hours:minutes:seconds")  # noqa: TRY003  # lint-waiver: LW-007091 [TRY003]; Pydantic profile validation needs ValueError for field errors.
+            message = "must use [days-]hours:minutes:seconds"
+            raise ValueError(message)
         if (
             int(match.group("minutes")) >= _MINUTES_PER_HOUR
             or int(match.group("seconds")) >= _MINUTES_PER_HOUR
         ):
-            raise ValueError("minutes and seconds must be less than 60")  # noqa: TRY003  # lint-waiver: LW-007092 [TRY003]; Pydantic profile validation needs ValueError for field errors.
+            message = "minutes and seconds must be less than 60"
+            raise ValueError(message)
         if match.group("days") is not None and int(match.group("hours")) >= _HOURS_PER_DAY:
-            raise ValueError("hours must be less than 24 when days are present")  # noqa: TRY003  # lint-waiver: LW-007093 [TRY003]; Pydantic profile validation needs ValueError for field errors.
+            message = "hours must be less than 24 when days are present"
+            raise ValueError(message)
         if not any(int(match.group(part) or 0) for part in ("days", "hours", "minutes", "seconds")):
-            raise ValueError("must be greater than zero")  # noqa: TRY003  # lint-waiver: LW-007094 [TRY003]; Pydantic profile validation needs ValueError for field errors.
+            message = "must be greater than zero"
+            raise ValueError(message)
         return value
 
     @field_validator("remote_artifact_root")
@@ -118,7 +123,8 @@ class SkyPilotProfile(_StrictModel):
     def _absolute_remote_path(cls, value: str) -> str:
         path = PurePosixPath(value)
         if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts[1:]):
-            raise ValueError("must be an absolute normalized POSIX path")  # noqa: TRY003  # lint-waiver: LW-007095 [TRY003]; Pydantic profile validation needs ValueError for field errors.
+            message = "must be an absolute normalized POSIX path"
+            raise ValueError(message)
         return path.as_posix()
 
 
@@ -134,10 +140,12 @@ class ClusterProfilesFile(_StrictModel):
         cls, profiles: dict[str, SkyPilotProfile]
     ) -> dict[str, SkyPilotProfile]:
         if not profiles:
-            raise ValueError("must declare at least one profile")  # noqa: TRY003  # lint-waiver: LW-007096 [TRY003]; Pydantic profile validation needs ValueError for field errors.
+            message = "must declare at least one profile"
+            raise ValueError(message)
         invalid = sorted(name for name in profiles if _PROFILE_NAME.fullmatch(name) is None)
         if invalid:
-            raise ValueError(f"invalid profile name: {invalid[0]!r}")  # noqa: TRY003  # lint-waiver: LW-007097 [TRY003]; Pydantic profile validation needs ValueError for field errors.
+            message = f"invalid profile name: {invalid[0]!r}"
+            raise ValueError(message)
         return profiles
 
 

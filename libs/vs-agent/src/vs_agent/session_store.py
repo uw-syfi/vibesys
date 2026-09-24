@@ -74,7 +74,8 @@ class AgentSessionState(BaseModel):
         for stored in sessions:
             key = AgentSessionKey.parse(stored)
             if not key.durable:
-                raise ValueError(f"session scope is not persistable: {stored!r}")  # noqa: TRY003  # lint-waiver: LW-008081 [TRY003]; Pydantic requires ValueError here to create a structured sessions field validation error.
+                message = f"session scope is not persistable: {stored!r}"
+                raise ValueError(message)
         return sessions
 
 

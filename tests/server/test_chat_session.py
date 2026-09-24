@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from server.controller import RunController
     from server.execution import ExecutionTracker
     from vs_agent.api import AgentClientProtocol
-
 _SHARED_STATE_DIR = "/state/server/chat"
 _FULL_PROMPT = experiment_chat_system_prompt(_SHARED_STATE_DIR)
 _CONTINUATION_PROMPT = experiment_chat_continuation_prompt(_SHARED_STATE_DIR)

@@ -124,16 +124,16 @@ class StateDocument:
         """Construct a validated package-owned document."""
         _validate_project_state_path(project_relative_path)
         if not isinstance(contents, bytes):
-            # lint-waiver: LW-008095 [TRY003]; `_create` keeps TypeError for a non-bytes document payload.
-            raise TypeError("state document contents must be bytes")  # noqa: TRY003
+            message = "state document contents must be bytes"
+            raise TypeError(message)
         try:
             payload = json.loads(contents)
         except (UnicodeDecodeError, ValueError) as exc:
-            # lint-waiver: LW-008096 [TRY003]; `_create` preserves ValueError for malformed JSON document bytes.
-            raise ValueError("state document contents must be a JSON object") from exc  # noqa: TRY003
+            message = "state document contents must be a JSON object"
+            raise ValueError(message) from exc
         if not isinstance(payload, dict):
-            # lint-waiver: LW-008097 [TRY003]; `_create` keeps TypeError for JSON whose root is not an object.
-            raise TypeError("state document contents must be a JSON object")  # noqa: TRY003
+            message = "state document contents must be a JSON object"
+            raise TypeError(message)
         document = object.__new__(cls)
         object.__setattr__(document, "_project_relative_path", project_relative_path)
         object.__setattr__(document, "_contents", contents)
@@ -159,8 +159,8 @@ class StateTransition:
             next_document is not None
             and next_document._project_relative_path != project_relative_path  # noqa: SLF001  # lint-waiver: LW-008211 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
         ):
-            # lint-waiver: LW-008098 [TRY003]; Transition construction preserves ValueError for a target/document path mismatch.
-            raise ValueError("state transition document path must match its target path")  # noqa: TRY003
+            message = "state transition document path must match its target path"
+            raise ValueError(message)
         transition = object.__new__(cls)
         object.__setattr__(transition, "_project_relative_path", project_relative_path)
         object.__setattr__(transition, "_next_document", next_document)
@@ -181,8 +181,8 @@ class StateFile:
         """Reject unsafe paths and mutable or textual contents."""
         _validate_snapshot_relative_path(self.relative_path)
         if not isinstance(self.contents, bytes):
-            # lint-waiver: LW-008099 [TRY003]; StateFile keeps TypeError for callers supplying textual snapshot contents.
-            raise TypeError("state snapshot file contents must be bytes")  # noqa: TRY003
+            message = "state snapshot file contents must be bytes"
+            raise TypeError(message)
 
 
 @dataclass(frozen=True, init=False)
@@ -202,25 +202,23 @@ class StateSnapshot:
         """Construct a validated package-owned snapshot."""
         _validate_snapshot_root(namespace_root)
         if not isinstance(files, tuple):
-            # lint-waiver: LW-008100 [TRY003]; `_create` keeps TypeError for mutable snapshot file collections.
-            raise TypeError("state snapshot files must be an immutable tuple")  # noqa: TRY003
+            message = "state snapshot files must be an immutable tuple"
+            raise TypeError(message)
         if any(not isinstance(item, StateFile) for item in files):
-            # lint-waiver: LW-008101 [TRY003]; `_create` keeps TypeError for entries outside the StateFile contract.
-            raise TypeError("state snapshot files must contain StateFile values")  # noqa: TRY003
+            message = "state snapshot files must contain StateFile values"
+            raise TypeError(message)
         paths = tuple(item.relative_path for item in files)
         if paths != tuple(sorted(paths, key=PurePosixPath.as_posix)):
-            # lint-waiver: LW-008102 [TRY003]; Snapshot construction preserves ValueError for unsorted file entries.
-            raise ValueError("state snapshot files must be ordered by relative path")  # noqa: TRY003
+            message = "state snapshot files must be ordered by relative path"
+            raise ValueError(message)
         if len(paths) != len(set(paths)):
-            # lint-waiver: LW-008103 [TRY003]; Snapshot construction preserves ValueError for duplicate relative paths.
-            raise ValueError("state snapshot files must have unique relative paths")  # noqa: TRY003
+            message = "state snapshot files must have unique relative paths"
+            raise ValueError(message)
         for path in paths:
             combined = namespace_root / path
             if combined.parts[:3] == (*_STATE_DIRECTORY_PARTS, "local"):
-                # lint-waiver: LW-008104 [TRY003]; Snapshot construction preserves ValueError when a file enters machine-local state.
-                raise ValueError(  # noqa: TRY003
-                    "portable state snapshots must not contain .vibesys/state/local files"
-                )
+                message = "portable state snapshots must not contain .vibesys/state/local files"
+                raise ValueError(message)
         snapshot = object.__new__(cls)
         object.__setattr__(snapshot, "_namespace_root", namespace_root)
         object.__setattr__(snapshot, "files", files)
@@ -298,12 +296,12 @@ class ProjectGitIntegration:
                 kind="candidate worktree",
             )
         except ProjectStateError as exc:
-            # lint-waiver: LW-008105 [TRY003]; Git integration exposes ValueError for candidate worktrees outside the run's worktree root.
-            raise ValueError(f"candidate worktree must be below {worktrees_root}: {path}") from exc  # noqa: TRY003
+            message = f"candidate worktree must be below {worktrees_root}: {path}"
+            raise ValueError(message) from exc
         destination = destination.resolve()
         if destination == worktrees_root.resolve():
-            # lint-waiver: LW-008106 [TRY003]; Git integration exposes ValueError when the run root itself is passed as a candidate worktree.
-            raise ValueError(f"candidate worktree must be below {worktrees_root}: {path}")  # noqa: TRY003
+            message = f"candidate worktree must be below {worktrees_root}: {path}"
+            raise ValueError(message)
         return destination
 
     def resolve_snapshot(self, snapshot: StateSnapshot) -> GitSnapshotPlan:
@@ -312,8 +310,8 @@ class ProjectGitIntegration:
         namespace_root = snapshot._namespace_root  # noqa: SLF001  # lint-waiver: LW-008213 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
         parts = namespace_root.parts
         if parts != _STATE_DIRECTORY_PARTS and parts[3] != self._run_id:
-            # lint-waiver: LW-008107 [TRY003]; Git integration exposes ValueError for snapshots owned by another run.
-            raise ValueError(f"state snapshot belongs to run {parts[3]!r}, not {self._run_id!r}")  # noqa: TRY003
+            message = f"state snapshot belongs to run {parts[3]!r}, not {self._run_id!r}"
+            raise ValueError(message)
         destination_root = _contained_without_symlinks(
             self._project_root,
             self._project_root.joinpath(*namespace_root.parts),
@@ -344,11 +342,11 @@ class ProjectGitIntegration:
             len(namespace_root.parts) != _RUN_NAMESPACE_PART_COUNT
             or namespace_root.parts[3] != self._run_id
         ):
-            # lint-waiver: LW-008108 [TRY003]; Replacement snapshots require a dedicated run namespace, surfaced as ValueError to Git callers.
-            raise ValueError(  # noqa: TRY003
+            message = (
                 "framework state snapshot must select a dedicated namespace "
                 f"for run {self._run_id!r}"
             )
+            raise ValueError(message)
         return self.resolve_snapshot(snapshot)
 
 
@@ -473,10 +471,8 @@ class StateNamespace:
         try:
             path.unlink()
         except OSError as exc:
-            # lint-waiver: LW-008118 [TRY003]; Namespace deletion reports the exact path and OS cause to its caller.
-            raise ProjectStateError(  # noqa: TRY003
-                f"Could not delete VibeSys state model at {path}: {exc}"
-            ) from exc
+            message = f"Could not delete VibeSys state model at {path}: {exc}"
+            raise ProjectStateError(message) from exc
         return True
 
     def snapshot(self) -> StateSnapshot:
@@ -668,8 +664,8 @@ class StateSlot[ModelT: BaseModel]:
     def deserialize_transition(self, payload: bytes) -> StateTransition:
         """Parse and schema-validate a transition for exactly this slot."""
         if not isinstance(payload, bytes):
-            # lint-waiver: LW-008109 [TRY003]; The typed transition API keeps TypeError for non-bytes serialization input.
-            raise TypeError("serialized state transition must be bytes")  # noqa: TRY003
+            message = "serialized state transition must be bytes"
+            raise TypeError(message)
         try:
             raw = json.loads(payload)
         except (UnicodeDecodeError, ValueError) as exc:
@@ -848,8 +844,8 @@ class EvolveRunConfiguration(_BaseRunConfiguration):
         if self.search_policy == "vibesys" and any(
             value is not None for value in openevolve_values
         ):
-            # lint-waiver: LW-008110 [TRY003]; Pydantic's model validator must raise ValueError to produce structured validation errors.
-            raise ValueError("OpenEvolve settings require search_policy='openevolve'")  # noqa: TRY003
+            message = "OpenEvolve settings require search_policy='openevolve'"
+            raise ValueError(message)
         return self
 
 
@@ -955,8 +951,8 @@ class ProjectState:
         try:
             children = tuple(root.iterdir())
         except OSError as exc:
-            # lint-waiver: LW-008119 [TRY003]; Collection discovery reports the failed root and OS cause directly.
-            raise ProjectStateError(f"Could not inspect project collection {root}: {exc}") from exc  # noqa: TRY003
+            message = f"Could not inspect project collection {root}: {exc}"
+            raise ProjectStateError(message) from exc
         return tuple(
             sorted(
                 (child.resolve() for child in children if cls.is_project_root(child)),
@@ -1112,17 +1108,17 @@ class ProjectState:
         self._validate_storage_roots()
         project = self.load_project()
         if manifest.project_id != project.project_id:
-            # lint-waiver: LW-008120 [TRY003]; Run creation reports both project identities so the caller can fix the ownership mismatch.
-            raise ProjectStateError(  # noqa: TRY003
+            message = (
                 f"Run {manifest.run_id!r} belongs to project {manifest.project_id!r}, "
                 f"not {project.project_id!r}"
             )
+            raise ProjectStateError(message)
         path = self._run_manifest_path(manifest.run_id)
         if path.exists():
             existing = self.load_run(manifest.run_id)
             if existing != manifest:
-                # lint-waiver: LW-008121 [TRY003]; Existing run metadata conflicts are reported with the exact manifest path.
-                raise ProjectStateError(f"Run metadata already exists with different data: {path}")  # noqa: TRY003
+                message = f"Run metadata already exists with different data: {path}"
+                raise ProjectStateError(message)
         else:
             _atomic_write_model(path, manifest)
         self.log_directory(manifest.run_id).mkdir(parents=True, exist_ok=True)
@@ -1166,27 +1162,27 @@ class ProjectState:
         raw = _read_json_object(path)
         recorded_version = raw.get("schema_version")
         if recorded_version == RUN_SCHEMA_VERSION:
-            # lint-waiver: LW-008122 [TRY003]; Migration rejects already-current metadata and reports its exact path/version.
-            raise ProjectStateError(  # noqa: TRY003
+            message = (
                 f"Run metadata at {path} is already at run schema version {RUN_SCHEMA_VERSION}"
             )
+            raise ProjectStateError(message)
         if recorded_version not in {1, 2}:
-            # lint-waiver: LW-008123 [TRY003]; Migration names unsupported versions and its accepted versions in the operator diagnostic.
-            raise ProjectStateError(  # noqa: TRY003
+            message = (
                 f"Run metadata at {path} records unsupported run schema version "
                 f"{recorded_version!r}; only versions 1 and 2 can be migrated"
             )
+            raise ProjectStateError(message)
         configuration = raw.get("configuration")
         if not isinstance(configuration, dict):
-            # lint-waiver: LW-008124 [TRY003]; Migration reports the manifest path whose required configuration is absent.
-            raise ProjectStateError(f"Run metadata at {path} has no configuration object")  # noqa: TRY003
+            message = f"Run metadata at {path} has no configuration object"
+            raise ProjectStateError(message)
         if recorded_version == 1:
             if "run_environment" in configuration:
-                # lint-waiver: LW-008125 [TRY003]; Migration reports the schema/content inconsistency at the exact run manifest.
-                raise ProjectStateError(  # noqa: TRY003
+                message = (
                     f"Run metadata at {path} already records a run environment; "
                     "its schema version is inconsistent with its contents"
                 )
+                raise ProjectStateError(message)
             migrated_environment = run_environment
         else:
             recorded_environment = configuration.get("run_environment")
@@ -1195,16 +1191,14 @@ class ProjectState:
                     recorded_environment, strict=True
                 )
             except (TypeError, ValueError) as exc:
-                # lint-waiver: LW-008126 [TRY003]; Migration preserves the original validation detail with the manifest path.
-                raise ProjectStateError(  # noqa: TRY003
-                    f"Run metadata at {path} has an invalid run environment: {exc}"
-                ) from exc
+                message = f"Run metadata at {path} has an invalid run environment: {exc}"
+                raise ProjectStateError(message) from exc
             if migrated_environment != run_environment:
-                # lint-waiver: LW-008127 [TRY003]; Version 2 migration requires the supplied environment to equal its recorded value.
-                raise ProjectStateError(  # noqa: TRY003
+                message = (
                     f"Run metadata at {path} records a different run environment; "
                     "supply the environment already recorded by version 2"
                 )
+                raise ProjectStateError(message)
         migrated = {
             **raw,
             "schema_version": RUN_SCHEMA_VERSION,
@@ -1216,8 +1210,8 @@ class ProjectState:
         try:
             manifest = RunManifest.model_validate_json(json.dumps(migrated), strict=True)
         except (TypeError, ValueError) as exc:
-            # lint-waiver: LW-008128 [TRY003]; Migration reports the exact manifest path and validation cause if the upgraded model is invalid.
-            raise ProjectStateError(f"Could not migrate VibeSys metadata at {path}: {exc}") from exc  # noqa: TRY003
+            message = f"Could not migrate VibeSys metadata at {path}: {exc}"
+            raise ProjectStateError(message) from exc
         _atomic_write_model(path, manifest)
         return manifest
 
@@ -1240,11 +1234,11 @@ class ProjectState:
         self._validate_storage_roots()
         manifest = self.load_run(run_id)
         if configuration.outer_loop != manifest.configuration.outer_loop:
-            # lint-waiver: LW-008129 [TRY003]; Run updates report both loop selections so callers can correct the mismatched configuration.
-            raise ProjectStateError(  # noqa: TRY003
+            message = (
                 f"Run {manifest.run_id!r} uses outer loop "
                 f"{manifest.configuration.outer_loop!r}, not {configuration.outer_loop!r}"
             )
+            raise ProjectStateError(message)
         path = self._run_manifest_path(run_id)
         updated = manifest.model_copy(update={"configuration": configuration})
         if updated != manifest:
@@ -1259,8 +1253,8 @@ class ProjectState:
         manifests: list[RunManifest] = []
         for child in sorted(runs_dir.iterdir()):
             if not child.is_dir():
-                # lint-waiver: LW-008139 [TRY003]; Run listing names the unexpected entry so it can be removed from the metadata tree.
-                raise ProjectStateError(f"Unexpected file in VibeSys runs directory: {child}")  # noqa: TRY003
+                message = f"Unexpected file in VibeSys runs directory: {child}"
+                raise ProjectStateError(message)
             manifests.append(self.load_run(child.name))
         return sorted(manifests, key=lambda manifest: (manifest.created_at, manifest.run_id))
 
@@ -1277,10 +1271,8 @@ class ProjectState:
         try:
             value = self._current_run_path.read_text(encoding="utf-8").strip()
         except OSError as exc:
-            # lint-waiver: LW-008137 [TRY003]; Current-run lookup reports the exact pointer path and read failure.
-            raise ProjectStateError(  # noqa: TRY003
-                f"Could not read current run pointer {self._current_run_path}: {exc}"
-            ) from exc
+            message = f"Could not read current run pointer {self._current_run_path}: {exc}"
+            raise ProjectStateError(message) from exc
         return _validate_run_id(value, source=self._current_run_path)
 
     def set_current_run(self, run_id: str | None) -> None:
@@ -1302,8 +1294,8 @@ class ProjectState:
             return self.load_run(current)
         latest = self.latest_run()
         if latest is None:
-            # lint-waiver: LW-008130 [TRY003]; Run resolution names the project state directory with no available runs.
-            raise ProjectStateError(f"No VibeSys runs exist under {self._metadata_dir}")  # noqa: TRY003
+            message = f"No VibeSys runs exist under {self._metadata_dir}"
+            raise ProjectStateError(message)
         return latest
 
     def save_round(self, run_id: str, record: RoundRecord) -> StateSnapshot:
@@ -1505,10 +1497,10 @@ class ProjectState:
                 else ""
             )
         except OSError as exc:
-            # lint-waiver: LW-008138 [TRY003]; The Git ignore contract error includes its path and OS cause for repair.
-            raise ProjectStateError(  # noqa: TRY003
+            message = (
                 f"Could not read VibeSys ignore contract {self._metadata_gitignore_path}: {exc}"
-            ) from exc
+            )
+            raise ProjectStateError(message) from exc
         if required in existing.splitlines():
             return
         separator = "" if not existing or existing.endswith("\n") else "\n"
@@ -1520,10 +1512,8 @@ class ProjectState:
         try:
             record = parse_round_record(payload)
         except ValidationError as exc:
-            # lint-waiver: LW-008136 [TRY003]; Round loading includes the round file path and Pydantic field diagnostics for repair.
-            raise ProjectStateError(  # noqa: TRY003
-                f"Invalid completed-round metadata at {path}: {_validation_message(exc)}"
-            ) from exc
+            message = f"Invalid completed-round metadata at {path}: {_validation_message(exc)}"
+            raise ProjectStateError(message) from exc
         _validate_portable_round(record, source=path)
         return record
 
@@ -1607,8 +1597,8 @@ def _prepare_state_home(state_home: Path) -> None:
         state_home.mkdir(parents=True, exist_ok=True, mode=0o700)
         (state_home / "projects").mkdir(exist_ok=True, mode=0o700)
     except OSError as exc:
-        # lint-waiver: LW-008131 [TRY003]; State-home setup reports the failed configured path and OS cause.
-        raise ProjectStateError(f"Could not create VibeSys state home {state_home}: {exc}") from exc  # noqa: TRY003
+        message = f"Could not create VibeSys state home {state_home}: {exc}"
+        raise ProjectStateError(message) from exc
 
 
 def _migrate_legacy_local_directory(source: Path, destination: Path) -> None:
@@ -1631,10 +1621,8 @@ def _migrate_legacy_local_directory(source: Path, destination: Path) -> None:
                 raise
         _remove_migrated_legacy_entries(source)
     except OSError as exc:
-        # lint-waiver: LW-008132 [TRY003]; Legacy migration reports both source and destination because recovery depends on them.
-        raise ProjectStateError(  # noqa: TRY003
-            f"Could not migrate VibeSys local state from {source} to {destination}: {exc}"
-        ) from exc
+        message = f"Could not migrate VibeSys local state from {source} to {destination}: {exc}"
+        raise ProjectStateError(message) from exc
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
 
@@ -1719,21 +1707,21 @@ def _validate_state_relative_path(raw_path: str | PurePosixPath) -> PurePosixPat
 
 def _validate_project_state_path(path: PurePosixPath) -> None:
     if not isinstance(path, PurePosixPath):
-        # lint-waiver: LW-008111 [TRY003]; The opaque document API keeps TypeError for non-PurePosixPath path arguments.
-        raise TypeError("state document paths must be PurePosixPath values")  # noqa: TRY003
+        message = "state document paths must be PurePosixPath values"
+        raise TypeError(message)
     try:
         _validate_state_relative_path(path)
     except ProjectStateError as exc:
         raise ValueError(str(exc)) from exc
     if path.parts[:2] != _STATE_DIRECTORY_PARTS or path == _STATE_DIRECTORY_POSIX:
-        # lint-waiver: LW-008112 [TRY003]; Document paths outside the state tree remain a ValueError contract.
-        raise ValueError("state document paths must identify a file below .vibesys/state")  # noqa: TRY003
+        message = "state document paths must identify a file below .vibesys/state"
+        raise ValueError(message)
 
 
 def _validate_snapshot_relative_path(path: PurePosixPath) -> None:
     if not isinstance(path, PurePosixPath):
-        # lint-waiver: LW-008113 [TRY003]; Snapshot path validation keeps TypeError for non-PurePosixPath input.
-        raise TypeError("state snapshot paths must be PurePosixPath values")  # noqa: TRY003
+        message = "state snapshot paths must be PurePosixPath values"
+        raise TypeError(message)
     try:
         _validate_state_relative_path(path)
     except ProjectStateError as exc:
@@ -1746,24 +1734,24 @@ def _validate_snapshot_root(path: PurePosixPath) -> None:
     if parts == _STATE_DIRECTORY_PARTS:
         return
     if parts[:3] == (*_STATE_DIRECTORY_PARTS, "local"):
-        # lint-waiver: LW-008114 [TRY003]; Snapshot root validation preserves ValueError for machine-local roots.
-        raise ValueError("portable state snapshot root must not be below .vibesys/state/local")  # noqa: TRY003
+        message = "portable state snapshot root must not be below .vibesys/state/local"
+        raise ValueError(message)
     if parts[:3] != (*_STATE_DIRECTORY_PARTS, "runs") or len(parts) not in {4, 5}:
-        # lint-waiver: LW-008115 [TRY003]; Snapshot root validation preserves ValueError for unsupported root layouts.
-        raise ValueError(  # noqa: TRY003
+        message = (
             "portable state snapshot root must be .vibesys/state, "
             ".vibesys/state/runs/<run-id>, or "
             ".vibesys/state/runs/<run-id>/<namespace>"
         )
+        raise ValueError(message)
     if re.fullmatch(_IDENTIFIER_PATTERN, parts[3]) is None:
-        # lint-waiver: LW-008116 [TRY003]; Snapshot root validation preserves ValueError for invalid run identifiers.
-        raise ValueError(f"portable state snapshot root contains an invalid run ID: {path}")  # noqa: TRY003
+        message = f"portable state snapshot root contains an invalid run ID: {path}"
+        raise ValueError(message)
     if (
         len(parts) == _RUN_NAMESPACE_PART_COUNT
         and re.fullmatch(_IDENTIFIER_PATTERN, parts[4]) is None
     ):
-        # lint-waiver: LW-008117 [TRY003]; Snapshot root validation preserves ValueError for invalid namespace identifiers.
-        raise ValueError(f"portable state snapshot root contains an invalid namespace: {path}")  # noqa: TRY003
+        message = f"portable state snapshot root contains an invalid namespace: {path}"
+        raise ValueError(message)
 
 
 def _snapshot_selected_files(
@@ -1845,10 +1833,8 @@ def _contained_state_dir(parent: Path, namespace: str, *, kind: str) -> Path:
         if path.exists() and not path.is_dir():
             raise ProjectStateError.state_path_not_directory(kind, path)
     except OSError as exc:
-        # lint-waiver: LW-008133 [TRY003]; Namespace lookup reports its kind, resolved path, and filesystem cause.
-        raise ProjectStateError(  # noqa: TRY003
-            f"Could not validate VibeSys {kind} state directory {path}: {exc}"
-        ) from exc
+        message = f"Could not validate VibeSys {kind} state directory {path}: {exc}"
+        raise ProjectStateError(message) from exc
     return path
 
 
@@ -1861,10 +1847,8 @@ def _contained_without_symlinks(parent: Path, child: Path, *, kind: str) -> Path
             if current.is_symlink():
                 raise ProjectStateError.state_path_symlink(kind, current)
         except OSError as exc:
-            # lint-waiver: LW-008134 [TRY003]; Symlink-boundary validation reports the failing component and filesystem cause.
-            raise ProjectStateError(  # noqa: TRY003
-                f"Could not validate VibeSys {kind} path {current}: {exc}"
-            ) from exc
+            message = f"Could not validate VibeSys {kind} path {current}: {exc}"
+            raise ProjectStateError(message) from exc
     return path
 
 
@@ -1885,8 +1869,8 @@ def _validate_storage_root(path: Path, parent: Path, *, name: str) -> None:
         parent_resolved = parent.resolve()
         path_resolved = path.resolve()
     except OSError as exc:
-        # lint-waiver: LW-008135 [TRY003]; Storage-root validation reports the owning root name, path, and OS cause.
-        raise ProjectStateError(f"Could not validate VibeSys {name} root {path}: {exc}") from exc  # noqa: TRY003
+        message = f"Could not validate VibeSys {name} root {path}: {exc}"
+        raise ProjectStateError(message) from exc
     if not path_resolved.is_relative_to(parent_resolved):
         raise ProjectStateError.storage_root_escapes(name, parent_resolved, path, path_resolved)
 
@@ -1921,11 +1905,11 @@ def _update_fingerprint(digest: _Digest, path: Path, relative: Path) -> None:
                     update(block)
             update(b"\0")
         else:
-            # lint-waiver: LW-008140 [TRY003]; Fingerprinting rejects special files with their path so callers can identify the unsupported input.
-            raise ProjectStateError(f"Unsupported input file type: {path}")  # noqa: TRY003
+            message = f"Unsupported input file type: {path}"
+            raise ProjectStateError(message)
     except OSError as exc:
-        # lint-waiver: LW-008141 [TRY003]; Fingerprinting preserves the source path and OS cause in its boundary error.
-        raise ProjectStateError(f"Could not fingerprint project input {path}: {exc}") from exc  # noqa: TRY003
+        message = f"Could not fingerprint project input {path}: {exc}"
+        raise ProjectStateError(message) from exc
 
 
 def _require_current_run_schema(path: Path, run_id: str) -> None:

@@ -23,7 +23,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 import agentshim
 import pytest
@@ -76,6 +76,13 @@ Codex and Gemini print one cached-token total, so no scripted turn can carry a
 separate cache-write count through them. The neutral usage contract keeps the
 two fields distinct regardless; these are the providers that can fill both.
 """
+
+
+class _DriverOptions(TypedDict, total=False):
+    timeout: int | None
+    log: Callable[[str], None] | None
+    docker_sandboxes: dict[str, Any] | None
+    check_timeout: float | None
 
 
 @dataclass
@@ -184,11 +191,7 @@ def _spec(tmp_path: Path, **changes: object) -> AgentSessionSpec:
 def _driver(
     provider: str,
     runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
-    *,
-    timeout: int | None = None,
-    log: Callable[[str], None] | None = None,
-    docker_sandboxes: dict[str, Any] | None = None,
-    check_timeout: float | None = None,
+    **options: Unpack[_DriverOptions],
 ) -> tuple[subject.AgentShimDriver, FakeExecutor]:
     """Build a driver whose provider process is the scripted fake executor.
 
@@ -201,10 +204,10 @@ def _driver(
     fake = FakeExecutor(runs)
     driver = subject.AgentShimDriver(
         provider=provider,
-        timeout=timeout,
-        log=log,
-        docker_sandboxes=docker_sandboxes,
-        check_timeout=check_timeout,
+        timeout=options.get("timeout"),
+        log=options.get("log"),
+        docker_sandboxes=options.get("docker_sandboxes"),
+        check_timeout=options.get("check_timeout"),
         executor_factory=lambda: fake,
     )
     return driver, fake
@@ -214,20 +217,9 @@ def _session(
     tmp_path: Path,
     provider: str,
     runs: FakeRun | Sequence[FakeRun] | Callable[[agentshim.CommandRequest], FakeRun],
-    *,
-    timeout: int | None = None,
-    log: Callable[[str], None] | None = None,
-    docker_sandboxes: dict[str, Any] | None = None,
-    check_timeout: float | None = None,
+    **options: Unpack[_DriverOptions],
 ) -> tuple[AgentSession, FakeExecutor]:
-    driver, fake = _driver(
-        provider,
-        runs,
-        timeout=timeout,
-        log=log,
-        docker_sandboxes=docker_sandboxes,
-        check_timeout=check_timeout,
-    )
+    driver, fake = _driver(provider, runs, **options)
     return driver.create_session(_spec(tmp_path, provider=provider)), fake
 
 
@@ -726,7 +718,7 @@ def test_a_container_binary_check_gets_the_container_budget(
 
     check = fake.requests[0]
     assert "--help" in check.argv
-    assert check.timeout == subject._CONTAINER_BINARY_CHECK_TIMEOUT_S
+    assert check.timeout == 60.0
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -805,7 +797,7 @@ def test_the_watchdog_rollout_root_comes_from_the_sandbox_home(
         *,
         rollout_sessions_root: str,
         log: Callable[[str], None],
-    ) -> Any:
+    ) -> object:
         captured["rollout_sessions_root"] = rollout_sessions_root
         return real(
             inner,
@@ -1084,7 +1076,11 @@ def test_a_schema_no_dialect_accepts_falls_back_to_the_prompt_contract(
 
     class UnsupportedResponse(JudgeResponse):
         @classmethod
-        def model_json_schema(cls, *args: object, **kwargs: object) -> dict[str, Any]:
+        def model_json_schema(
+            cls,
+            *_args: object,
+            **_kwargs: object,
+        ) -> dict[str, Any]:
             return {
                 "type": "object",
                 "properties": {"analysis": {"type": "string"}},

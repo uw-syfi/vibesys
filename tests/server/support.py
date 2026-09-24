@@ -93,10 +93,10 @@ class ServerParts:
         """Feed a projected view to the API as `RunSession.on_committed_view` would.
 
         Production wires this through `ServerRuntime.drive`
-        (`session.on_committed_view(self.api._observe_committed_state)`); this
+        (`session.on_committed_view(self.api.observe_committed_state)`); this
         harness has no session, so it calls the same method directly.
         """
-        self.api._observe_committed_state(view, changed_keys)
+        self.api.observe_committed_state(view, changed_keys)
 
 
 def build_server_parts(

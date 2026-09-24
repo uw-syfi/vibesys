@@ -44,7 +44,6 @@ from pydantic.dataclasses import dataclass
 if TYPE_CHECKING:
     from collections.abc import Container
 
-
 # lint-waiver: LW-007011 [TC001]; Pydantic resolves this dataclass field at runtime
 from vs_loop_state.metrics import MetricComparison  # noqa: TC001
 

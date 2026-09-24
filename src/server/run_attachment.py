@@ -1,6 +1,6 @@
 """Server-owned resources describing a live core run.
 
-`RunIntegrationAdapter._handle_run_resources` builds a `RunAttachment` from the
+`RunIntegrationAdapter.handle_run_resources` builds a `RunAttachment` from the
 run's resource handoff; `ExperimentChatFactory` and its callers consume it to
 attach an experiment-chat surface to the run.
 """
@@ -10,8 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-# lint-waiver: LW-007010 [F401]; preserve the server resource import surface
-from vs_agent.api import AgentSelection  # noqa: F401
+from vs_agent.api import AgentSelection
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,3 +34,6 @@ class RunAttachment:
     log_dir: Path
     agent_backend: str
     agent_defaults: AgentSelection
+
+
+__all__ = ["AgentSelection", "RunAttachment"]

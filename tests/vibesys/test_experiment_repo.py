@@ -17,7 +17,6 @@ from vs_github.api import GitHubCLI
 
 if TYPE_CHECKING:
     from pathlib import Path
-
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "test",
     "GIT_AUTHOR_EMAIL": "test@example.com",

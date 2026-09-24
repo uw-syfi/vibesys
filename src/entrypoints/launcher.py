@@ -160,10 +160,10 @@ def _bundled_runtime_missing_message() -> str:
 
 def _run_bundled_tui(bundle: BundledTui, args: list[str]) -> int:
     if not bundle.runtime.is_file() or not os.access(bundle.runtime, os.X_OK):
-        print(_bundled_runtime_missing_message(), file=sys.stderr)
+        sys.stderr.write(_bundled_runtime_missing_message() + "\n")
         return 1
     if not bundle.launcher.is_file():
-        print(_bundled_runtime_missing_message(), file=sys.stderr)
+        sys.stderr.write(_bundled_runtime_missing_message() + "\n")
         return 1
 
     env = {
@@ -314,10 +314,7 @@ def _write_install_stamp(root: Path) -> None:
 
 
 def _run_pnpm_install(pnpm: list[str], root: Path) -> bool:
-    print(
-        "vibesys: installing JS dependencies (pnpm install --frozen-lockfile)...",
-        file=sys.stderr,
-    )
+    sys.stderr.write("vibesys: installing JS dependencies (pnpm install --frozen-lockfile)...\n")
     started = time.monotonic()
     result = subprocess.run(
         [*pnpm, "install", "--frozen-lockfile"],
@@ -333,7 +330,7 @@ def _run_pnpm_install(pnpm: list[str], root: Path) -> bool:
         return False
     _write_install_stamp(root)
     elapsed = time.monotonic() - started
-    print(f"vibesys: dependencies installed ({elapsed:.1f}s)", file=sys.stderr)
+    sys.stderr.write(f"vibesys: dependencies installed ({elapsed:.1f}s)\n")
     return True
 
 
@@ -357,10 +354,9 @@ def _run_codegen_and_build(pnpm: list[str], root: Path) -> bool:
 def _ensure_source_tui_built(root: Path) -> bool:
     pnpm = _pnpm_argv()
     if pnpm is None:
-        print(
+        sys.stderr.write(
             "vibesys: pnpm is required to build the interactive client. Install pnpm "
-            "or enable Corepack, or run headless with --headless.",
-            file=sys.stderr,
+            "or enable Corepack, or run headless with --headless.\n"
         )
         return False
 
@@ -372,41 +368,35 @@ def _ensure_source_tui_built(root: Path) -> bool:
     # The build failed even though the install-skip heuristic considered
     # dependencies fresh (e.g. a partially removed node_modules). Fall back to
     # a full install and retry once before giving up.
-    print(
-        "vibesys: build failed; retrying after a full dependency install...",
-        file=sys.stderr,
-    )
+    sys.stderr.write("vibesys: build failed; retrying after a full dependency install...\n")
     return _run_pnpm_install(pnpm, root) and _run_codegen_and_build(pnpm, root)
 
 
 def _run_source_tui(root: Path, args: list[str]) -> int:
     bun = _bun_executable()
     if bun is None:
-        print(
+        sys.stderr.write(
             "vibesys: Bun is required by the OpenTUI client. Install it from "
-            "https://bun.sh, or run headless with --headless.",
-            file=sys.stderr,
+            "https://bun.sh, or run headless with --headless.\n"
         )
         return 1
     node = _node_executable()
     if node is None or (_node_major(node) or 0) < _MIN_NODE_MAJOR:
-        print(
+        sys.stderr.write(
             f"vibesys: Node.js {_MIN_NODE_MAJOR}+ is required for the interactive client, "
-            "or run headless with --headless.",
-            file=sys.stderr,
+            "or run headless with --headless.\n"
         )
         return 1
     if _needs_rebuild(root):
         reason = _stale_reason(root) or "clients/tui/dist/index.js (missing)"
-        print(
-            f"vibesys: TUI bundle is stale (changed: {reason}); rebuilding (~30-60s)...",
-            file=sys.stderr,
+        sys.stderr.write(
+            f"vibesys: TUI bundle is stale (changed: {reason}); rebuilding (~30-60s)...\n"
         )
         started = time.monotonic()
         if not _ensure_source_tui_built(root):
             return 1
         elapsed = time.monotonic() - started
-        print(f"vibesys: TUI bundle rebuilt ({elapsed:.1f}s)", file=sys.stderr)
+        sys.stderr.write(f"vibesys: TUI bundle rebuilt ({elapsed:.1f}s)\n")
 
     launcher = root / "clients" / "tui" / "dist" / "launcher.js"
     env = {
@@ -440,11 +430,10 @@ def main(argv: list[str] | None = None) -> int:
     if root is not None:
         return _run_source_tui(root, args)
 
-    print(
+    sys.stderr.write(
         "vibesys: interactive TUI is not bundled and no source checkout was found; "
         "running headless. Install a supported platform wheel to get the TUI, or "
-        "pass --headless to silence this notice.",
-        file=sys.stderr,
+        "pass --headless to silence this notice.\n"
     )
     return _run_headless(args)
 

@@ -14,6 +14,7 @@ SERVICES = {
     "route": 11178,
     "price": 16579,
 }
+
 READINESS_PATHS = {
     "config": "/api/v1/configservice/welcome",
     "station": "/api/v1/stationservice/welcome",

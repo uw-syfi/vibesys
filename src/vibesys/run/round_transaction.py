@@ -207,8 +207,8 @@ class _StrictJournal(BaseModel):
     @classmethod
     def _require_run_id(cls, value: str) -> str:
         if not value:
-            # lint-waiver: LW-007065 [TRY003]; Pydantic validators need ValueError for structured field errors
-            raise ValueError("run_id must not be empty")  # noqa: TRY003
+            message = "run_id must not be empty"
+            raise ValueError(message)
         return value
 
 
@@ -526,8 +526,8 @@ def _decode_base64(value: str) -> bytes:
     try:
         return base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as exc:
-        # lint-waiver: LW-007066 [TRY003]; invalid base64 must reach Pydantic as a ValueError
-        raise ValueError("must contain canonical base64-encoded bytes") from exc  # noqa: TRY003
+        message = "must contain canonical base64-encoded bytes"
+        raise ValueError(message) from exc
 
 
 def _sha256(contents: bytes) -> str:

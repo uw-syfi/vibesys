@@ -33,7 +33,6 @@ from typing import TYPE_CHECKING, TextIO
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
 _MIN_KERNEL_NAME_COMPONENTS = 2
 _MIN_IDLE_GAP_KERNELS = 2
 _MIN_GRAPH_REPLAY_TRACES = 2
@@ -57,8 +56,9 @@ def _print(
 ) -> None:
     """Print user-facing command-line output."""
     if file is None:
-        # lint-waiver: LW-008047 [T201]; This standalone CLI intentionally writes user-facing results to stdout.
-        print(*values, sep=sep, end=end, flush=flush)  # noqa: T201
+        sys.stdout.write(sep.join(map(str, values)) + end)
+        if flush:
+            sys.stdout.flush()
     else:
         print(*values, sep=sep, end=end, file=file, flush=flush)
 
@@ -391,7 +391,6 @@ def cmd_idle_gaps(args: argparse.Namespace) -> None:
     by_device: dict[int, list[tuple[int, int, int, int]]] = defaultdict(list)
     for row in rows:
         by_device[row[3]].append(row)
-
     gaps: list[tuple[str, str, int]] = []
     total_idle = total_busy = 0
     for kernels in by_device.values():
@@ -535,7 +534,6 @@ def _find_step_boundaries(rows: list[tuple[int, int, int]]) -> tuple[int, list[i
     )
     if not all_gaps:
         return None
-
     best_threshold = None
     for percentile in (0.01, 0.02, 0.05, 0.1):
         threshold = all_gaps[max(0, int(len(all_gaps) * percentile))]
@@ -546,7 +544,6 @@ def _find_step_boundaries(rows: list[tuple[int, int, int]]) -> tuple[int, list[i
         if sizes and max(sizes) < _MAX_STEP_SIZE_RATIO * min(sizes):
             best_threshold = threshold
             break
-
     if best_threshold is None:
         best_threshold = (
             all_gaps[min(_FALLBACK_GAP_SAMPLE_INDEX, len(all_gaps) - 1)]
@@ -581,13 +578,11 @@ def _display_step_timeline(
     _print(f"Gap time:  {gap_time / 1000:.0f} us")
     _print(f"Wall time: {wall_time / 1000:.0f} us")
     _print(f"GPU util:  {gpu_time / wall_time * 100:.0f}%" if wall_time else "")
-
     kernel_stats = defaultdict(lambda: {"count": 0, "total": 0})
     for row in step_rows:
         name = _resolve_name(row[0], strings)
         kernel_stats[name]["count"] += 1
         kernel_stats[name]["total"] += row[2] - row[1]
-
     _print(f"\n{'Kernel':<50s} {'Cnt':>5s} {'Total(us)':>10s} {'Avg(us)':>8s} {'%step':>6s}")
     _print("-" * 83)
     for name, stats in sorted(kernel_stats.items(), key=lambda item: -item[1]["total"]):
@@ -596,7 +591,6 @@ def _display_step_timeline(
             f"{name:<50s} {stats['count']:>5d} {stats['total'] / 1000:>10.1f} "
             f"{stats['total'] / stats['count'] / 1000:>8.1f} {percent:>5.1f}%"
         )
-
     gap_stats = defaultdict(lambda: {"count": 0, "total": 0})
     for index in range(1, len(step_rows)):
         gap = step_rows[index][1] - step_rows[index - 1][2]
@@ -606,7 +600,6 @@ def _display_step_timeline(
             transition = f"{previous:20s} → {following}"
             gap_stats[transition]["count"] += 1
             gap_stats[transition]["total"] += gap
-
     _print(f"\n{'Gap transition':<45s} {'Cnt':>5s} {'Total(us)':>10s} {'Avg(us)':>8s}")
     _print("-" * 72)
     for name, stats in sorted(gap_stats.items(), key=lambda item: -item[1]["total"])[:10]:
@@ -650,12 +643,14 @@ def cmd_step_timeline(args: argparse.Namespace) -> None:
     if detection is None:
         _print("(No gaps between kernels.)")
         return
+
     threshold, boundaries = detection
     if len(boundaries) < _MIN_DECODE_STEPS:
         _print(
             "(Could not detect decode step boundaries. Try graph-replays if CUDA graphs are active.)"
         )
         return
+
     _display_step_timeline(rows, boundaries, threshold, strings, args.step)
 
 

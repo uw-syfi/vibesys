@@ -454,24 +454,24 @@ def test_project_discovery_validates_manifests_without_exposing_layout(tmp_path:
 
 
 @pytest.mark.parametrize(
-    ("relative_path", "expected"),
+    ("relative_path", "ownership"),
     [
-        ("src/queue.py", False),
-        (".git/HEAD", False),
-        (".vs/project.json", False),
-        (".vibesys/tasks/queue/vibesys.input.toml", False),
-        ("nested/.vibesys/tasks/queue/OBJECTIVE.md", False),
-        (".vibesys/stateful/project.json", False),
-        ("nested/.vibesys/state/project.json", True),
-        ("agent.toml", False),
-        ("nested/.env.local", False),
+        ("src/queue.py", "not-owned"),
+        (".git/HEAD", "not-owned"),
+        (".vs/project.json", "not-owned"),
+        (".vibesys/tasks/queue/vibesys.input.toml", "not-owned"),
+        ("nested/.vibesys/tasks/queue/OBJECTIVE.md", "not-owned"),
+        (".vibesys/stateful/project.json", "not-owned"),
+        ("nested/.vibesys/state/project.json", "owned"),
+        ("agent.toml", "not-owned"),
+        ("nested/.env.local", "not-owned"),
     ],
 )
 def test_project_state_path_ownership_is_semantic(
     relative_path: str,
-    expected: bool,
+    ownership: str,
 ) -> None:
-    assert is_project_state_path(relative_path) is expected
+    assert is_project_state_path(relative_path) is (ownership == "owned")
 
 
 def test_semantic_runtime_and_sandbox_paths(tmp_path: Path) -> None:
@@ -1479,7 +1479,7 @@ def test_metadata_snapshot_rejects_symlinked_files(tmp_path: Path) -> None:
 )
 def test_state_snapshot_rejects_unsafe_or_local_roots(root: PurePosixPath) -> None:
     with pytest.raises(ValueError, match=r"portable state snapshot|invalid"):
-        StateSnapshot._create(namespace_root=root, files=())  # noqa: SLF001  # lint-waiver: LW-006000; the opaque snapshot constructor owns root validation
+        StateSnapshot._create(namespace_root=root, files=())  # noqa: SLF001  # lint-waiver: LW-006000 [SLF001]; exercise unsafe-root rejection through the opaque snapshot factory, which owns this validation.
 
 
 @pytest.mark.parametrize(
@@ -1498,7 +1498,7 @@ def test_state_snapshot_rejects_local_file_below_metadata_root() -> None:
     )
 
     with pytest.raises(ValueError, match=r"must not contain \.vibesys/state/local"):
-        StateSnapshot._create(  # noqa: SLF001  # lint-waiver: LW-006001; the opaque constructor alone rejects local files in portable snapshots
+        StateSnapshot._create(  # noqa: SLF001  # lint-waiver: LW-006001 [SLF001]; exercise portable-snapshot rejection for local paths through the opaque factory that owns this boundary.
             namespace_root=PurePosixPath(".vibesys/state"), files=(local_file,)
         )
 

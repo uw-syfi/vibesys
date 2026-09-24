@@ -12,7 +12,6 @@ from vibesys.events import CoreEvent, CoreEventData, CoreEventType, make_core_ev
 
 if TYPE_CHECKING:
     from pathlib import Path
-
 EventSubscriber = Callable[[CoreEvent], None]
 
 

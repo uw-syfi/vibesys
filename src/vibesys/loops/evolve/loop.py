@@ -94,7 +94,6 @@ if TYPE_CHECKING:
         BenchmarkResult,
         WorkspaceSource,
     )
-
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "evolve"
 _AGENT_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 _INTERFACE = "inprocess"
@@ -128,12 +127,14 @@ def _persist_evolve_state(
 def _materialize_selected_candidate(ctx: LoopContext, individual: Individual) -> None:
     """Make one deterministic selected candidate the run branch's final tree."""
     if not individual.commit:
-        raise RuntimeError(f"selected individual {individual.id} has no Git commit")
+        message = f"selected individual {individual.id} has no Git commit"
+        raise RuntimeError(message)
     ctx.git.retain_candidate(f"selected-{individual.id}", individual.commit)
     if not ctx.git.checkout_tree(individual.commit, clean=True):
-        raise RuntimeError(
+        message = (
             f"could not materialize selected individual {individual.id} at {individual.commit}"
         )
+        raise RuntimeError(message)
     ctx.snapshot_workspace(f"evolve: select individual {individual.id}")
 
 
@@ -1191,7 +1192,6 @@ def _bootstrap_seed(
     domain_definition: DomainDefinition,
     pass_criteria: str,
     max_attempts: int,
-    rng: random.Random,
     population: Population,
     state_store: EvolutionStateStore,
     search_policy: SearchPolicy,
@@ -1209,8 +1209,6 @@ def _bootstrap_seed(
     ``Individual`` so the next attempt can repair it in place. Returns ``None``
     if every attempt fails — the caller aborts the run.
 
-    ``rng`` is accepted for signature parity with the generation loop (bootstrap
-    does no parent/inspiration sampling) and forward-compatibility.
     """
     ctx.switch_log_file("bootstrap")
     ctx.lprint(
@@ -1225,14 +1223,17 @@ def _bootstrap_seed(
         # snapshotted; otherwise the workspace stays as the framework seeded it
         # (the bare reference tree).
         wip_seed = _latest_wip_seed(population)
-        if wip_seed is not None and wip_seed.commit:
-            if not ctx.git.checkout_tree(wip_seed.commit, clean=True):
-                output_sink().framework_warning(
-                    f"could not check out WIP seed {wip_seed.id} "
-                    f"(commit {wip_seed.commit[:8]}); starting from reference",
-                    source=FrameworkSource.LOOP,
-                )
-                wip_seed = None
+        if (
+            wip_seed is not None
+            and wip_seed.commit
+            and not ctx.git.checkout_tree(wip_seed.commit, clean=True)
+        ):
+            output_sink().framework_warning(
+                f"could not check out WIP seed {wip_seed.id} "
+                f"(commit {wip_seed.commit[:8]}); starting from reference",
+                source=FrameworkSource.LOOP,
+            )
+            wip_seed = None
 
         # Use an environment-owned candidate deployment so a failed attempt's
         # cumulative state never poisons the next attempt's judge.
@@ -1417,7 +1418,8 @@ def _initialize_search_policy(
     else:
         policy_name = SearchPolicyName(requested)
         if policy_name is SearchPolicyName.VIBESYS and config is not None:
-            raise ValueError("OpenEvolve configuration requires the OpenEvolve search policy")
+            message = "OpenEvolve configuration requires the OpenEvolve search policy"
+            raise ValueError(message)
     if policy_name is not SearchPolicyName.OPENEVOLVE:
         return policy_name, VibeSysSearchPolicy()
 
@@ -1511,7 +1513,8 @@ def run_evolve_loop(
     the legacy behavior, kept for back-compat.
     """
     if domain is None:
-        raise ValueError("domain is required; declare [agent].domain in vibesys.input.toml")
+        message = "domain is required; declare [agent].domain in vibesys.input.toml"
+        raise ValueError(message)
     domain_definition = resolve_domain(domain)
     if modality is None and domain_definition.name is DomainName.LLM_SERVING:
         modality = "text_generation"
@@ -1675,7 +1678,6 @@ def run_evolve_loop(
                 domain_definition=domain_definition,
                 pass_criteria=pass_criteria,
                 max_attempts=bootstrap_max_attempts,
-                rng=rng,
                 population=population,
                 state_store=state_store,
                 search_policy=policy,
@@ -1801,12 +1803,13 @@ def run_evolve_loop(
             )
         else:
             ctx.lprint("\nNo passing individual produced. Inspect logs.")
-        return True
     except KeyboardInterrupt:
         ctx.lprint("[evolutionary] interrupted; population preserved.")
         return False
     except Exception as exc:
         ctx.lprint(f"[evolutionary] aborted with: {exc}")
         return False
+    else:
+        return True
     finally:
         ctx.close()

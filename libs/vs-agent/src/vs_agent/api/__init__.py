@@ -144,7 +144,8 @@ def __getattr__(name: str) -> Any:
         )
 
         return agent_driver_supports_mcp_servers
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")  # noqa: TRY003  # lint-waiver: LW-008089 [TRY003]; module-level `__getattr__` must raise AttributeError with the missing public name.
+    message = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(message)
 
 
 def build_agent_client(

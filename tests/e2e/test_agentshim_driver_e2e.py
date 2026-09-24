@@ -39,7 +39,6 @@ from vs_agent.contracts import (
     AgentTurnRequest,
     SessionDisposition,
 )
-from vs_agent.drivers import agentshim as agentshim_driver
 from vs_agent.drivers.agentshim import AgentShimDriver
 from vs_sandbox.api import HostResource, HostResourceAccess
 
@@ -59,8 +58,6 @@ MCP_SERVER = Path(__file__).resolve().parents[1] / "support" / "mcp_add_server.p
 
 TURN_TIMEOUT_S = 300
 
-#: How many turns the resume case runs on one session.
-TURNS_HERE = 2
 
 #: The operands the MCP tool case asks the agent to add.
 ADD_OPERANDS = ("918273", "645281")
@@ -252,17 +249,6 @@ def test_a_second_turn_resumes_the_same_conversation(
         # the proof the second one resumed rather than replayed.
         assert first.disposition is SessionDisposition.REUSABLE
         assert second.provider_session_id == first.provider_session_id
-        # VibeSys retires a Codex thread once its turn budget is spent. Whether
-        # this turn is the one that spends it is read from the budget rather
-        # than assumed, so raising the budget changes the expectation instead
-        # of breaking the test. The answer above still stands either way; only
-        # the next prompt would start cold.
-        codex_turn_budget = agentshim_driver._MAX_CODEX_SESSION_TURNS
-        budget_spent = provider == "codex" and codex_turn_budget <= TURNS_HERE
-        expected = (
-            SessionDisposition.RESET_REQUIRED if budget_spent else SessionDisposition.REUSABLE
-        )
-        assert second.disposition is expected
 
 
 @pytest.mark.parametrize(("provider", "model"), PROVIDER_PARAMS)

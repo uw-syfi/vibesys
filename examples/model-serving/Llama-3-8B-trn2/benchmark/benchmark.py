@@ -1,8 +1,10 @@
 """
 Serving benchmark for the Trainium Llama-3-8B server (warm, closed-loop).
+
 Warm-up before timing to exclude neuronx-cc compiles. Closed-loop concurrency
 sweep over (length, concurrency) pairs. The headline `aggregate_throughput` is
 the peak steady-state output tok/s across the sweep.
+
 Usage:
     python benchmark.py --url http://localhost:8000 \
         --lengths 128,256,512 --concurrency 1,2,4,8 \
@@ -94,6 +96,7 @@ async def measure(client, url, tokenizer, pool, length, concurrency, duration, t
         }
 
     result = await run(duration_limited(duration), send, concurrency=concurrency)
+
     ok = [r for r in result.results if r["error"] is None]
     gen = sum(r["gen_tokens"] for r in ok)
     wall = result.wall_clock
@@ -128,6 +131,7 @@ async def run_benchmark(args):
     concs = [int(v) for v in args.concurrency.split(",") if v.strip()]
     tokenizer, pool = _load_tokenizer(args.model_path)
     rng = random.Random(args.seed)
+
     print(
         json.dumps(
             {
@@ -141,6 +145,7 @@ async def run_benchmark(args):
         ),
         flush=True,
     )
+
     scenarios: list[dict] = []
     async with httpx.AsyncClient() as client:
         # Warmup: compile every length bucket
@@ -166,6 +171,7 @@ async def run_benchmark(args):
                     )
             await asyncio.gather(*warm)
             print("Warm-up done.\n", flush=True)
+
         # Timed closed-loop sweep
         for length in lengths:
             for c in concs:
@@ -181,8 +187,10 @@ async def run_benchmark(args):
                     f"({s['completed']} reqs, tpot_p50={s['tpot_s']['p50']})",
                     flush=True,
                 )
+
     peak = max((s["output_tokens_per_s"] for s in scenarios), default=0.0)
     best = max(scenarios, key=lambda s: s["output_tokens_per_s"], default=None)
+
     result = {
         "config": {
             "url": url,
@@ -199,6 +207,7 @@ async def run_benchmark(args):
         else None,
         "scenarios": scenarios,
     }
+
     print("\n" + "=" * 56)
     print("  Benchmark summary (warm, closed-loop)")
     print("=" * 56)
@@ -208,6 +217,7 @@ async def run_benchmark(args):
             f"{s['output_tokens_per_s']:7.1f} tok/s   req/s={s['request_throughput_per_s']:.2f}"
         )
     print(f"\nAggregate throughput (peak steady-state): {peak:.1f} tok/s  (headline)")
+
     if args.output_json:
         with open(args.output_json, "w") as f:
             json.dump(result, f, indent=2)

@@ -7,6 +7,7 @@ itself. The *target* owns capture: its bundle ships a capture entry point
 report. This toolkit analyzes that report: which kernels are farthest from the
 hardware's speed-of-light, and whether the gap is kernel quality, eliminable
 data movement, or missing fusion.
+
 Usage:
     python analyze_headroom.py waterfall report.json
     python analyze_headroom.py top report.json [--top 15] [--klass movement]
@@ -14,8 +15,10 @@ Usage:
     python analyze_headroom.py subgraphs report.json
     python analyze_headroom.py compare old.json new.json [--top 15]
     python analyze_headroom.py summary report.json [--top 10]
+
 Report schema (headroom report v1) — the contract a capture entry point must
 produce. Required:
+
     {
         "kernels": [
             {
@@ -35,6 +38,7 @@ produce. Required:
             ...
         ]
     }
+
 Optional top-level fields, surfaced when present: ``buckets_ms_per_step``
 (additive waterfall, e.g. observed / speed_of_light / movement_elimination /
 fusion_in_graph / estimated_floor), ``subgraphs`` (per compiled-subgraph fusion
@@ -60,8 +64,9 @@ def _print(
 ) -> None:
     """Print user-facing command-line output."""
     if file is None:
-        # lint-waiver: LW-008050 [T201]; This standalone CLI intentionally writes user-facing results to stdout.
-        print(*values, sep=sep, end=end, flush=flush)  # noqa: T201
+        sys.stdout.write(sep.join(map(str, values)) + end)
+        if flush:
+            sys.stdout.flush()
     else:
         print(*values, sep=sep, end=end, file=file, flush=flush)
 
@@ -236,31 +241,38 @@ def main(argv: list[str] | None = None) -> None:
         description="Analyze a kernel headroom report (see module docstring for the schema).",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
     waterfall = sub.add_parser("waterfall", help="bucket waterfall + ratios")
     waterfall.add_argument("report")
     waterfall.set_defaults(fn=cmd_waterfall)
+
     top = sub.add_parser("top", help="kernels ranked by recoverable ms/step")
     top.add_argument("report")
     top.add_argument("--top", type=int, default=15)
     top.add_argument("--klass", default=None, help="filter by class (movement, quality, ...)")
     top.set_defaults(fn=cmd_top)
+
     kernel = sub.add_parser("kernel", help="full detail for kernels matching a substring")
     kernel.add_argument("report")
     kernel.add_argument("name")
     kernel.set_defaults(fn=cmd_kernel)
+
     subgraphs = sub.add_parser("subgraphs", help="per-subgraph fusion view")
     subgraphs.add_argument("report")
     subgraphs.set_defaults(fn=cmd_subgraphs)
+
     compare = sub.add_parser("compare", help="deltas between two reports")
     compare.add_argument("old")
     compare.add_argument("new")
     compare.add_argument("--top", type=int, default=15)
     compare.set_defaults(fn=cmd_compare)
+
     summary = sub.add_parser("summary", help="waterfall + top + caveats")
     summary.add_argument("report")
     summary.add_argument("--top", type=int, default=10)
     summary.add_argument("--klass", default=None)
     summary.set_defaults(fn=cmd_summary)
+
     ns = parser.parse_args(argv)
     ns.fn(ns)
 

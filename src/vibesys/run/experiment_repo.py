@@ -14,7 +14,6 @@ from vs_github.api import GitHubCLI
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
 _RUN_BRANCH_PREFIXES = ("vibesys-runs/", "vibesys/")
 _GITHUB_ORIGIN = re.compile(
     r"^(?:https://github\.com/|ssh://git@github\.com/|git@github\.com:)"

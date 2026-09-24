@@ -10,7 +10,7 @@ recording, streamed output, ``on_invoke`` side effects, session reuse, and
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, override
 
 import pytest
 from pydantic import BaseModel
@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from vs_agent.contracts import AgentCapabilities
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.session_key import AgentSessionKey, SessionScope
+from vs_agent.sink import AgentEventSink
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentProgress, MCPServerSpec
@@ -31,13 +32,14 @@ class _Response(BaseModel):
     detail: str = ""
 
 
-class _CapturingSink:
+class _CapturingSink(AgentEventSink):
     """Minimal :class:`AgentEventSink` that records every ``agent_output`` call."""
 
     def __init__(self) -> None:
         self.outputs: list[tuple[str, AgentOutputChannel, str | None, str | None]] = []
 
-    def agent_output(  # noqa: PLR0913  # lint-waiver: LW-006008; the event sink protocol requires these keyword event fields.
+    @override
+    def agent_output(
         self,
         content: str,
         *,
@@ -50,7 +52,8 @@ class _CapturingSink:
         del status, invocation_id
         self.outputs.append((content, channel, agent_kind, round_label))
 
-    def tool_call(  # noqa: PLR0913  # lint-waiver: LW-006009; the event sink protocol requires these keyword event fields.
+    @override
+    def tool_call(
         self,
         tool: str,
         args: dict[str, Any],
@@ -63,7 +66,8 @@ class _CapturingSink:
     ) -> None:
         del tool, args, call_id, status, agent_kind, round_label, invocation_id
 
-    def tool_result(  # noqa: PLR0913  # lint-waiver: LW-006010; the event sink protocol requires these keyword event fields.
+    @override
+    def tool_result(
         self,
         tool: str,
         content: str,
@@ -87,7 +91,8 @@ class _CapturingSink:
     ) -> None:
         del todos, agent_kind, round_label, invocation_id
 
-    def usage_update(  # noqa: PLR0913  # lint-waiver: LW-006011; the event sink protocol requires these keyword event fields.
+    @override
+    def usage_update(
         self,
         input_tokens: int,
         *,

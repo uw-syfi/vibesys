@@ -46,7 +46,8 @@ class AgentSessionKey:
     def __post_init__(self) -> None:
         """Reject identifiers that cannot round-trip through the stored form."""
         if not self.identifier:
-            raise ValueError(f"{self.scope.value} session key needs an identifier")  # noqa: TRY003  # lint-waiver: LW-008079 [TRY003]; the key value object documents ValueError for malformed identifiers.
+            message = f"{self.scope.value} session key needs an identifier"
+            raise ValueError(message)
 
     def __str__(self) -> str:
         """Return the stored form, ``"<scope>:<identifier>"``."""
@@ -67,5 +68,6 @@ class AgentSessionKey:
         """
         scope_text, separator, identifier = stored.partition(":")
         if not separator:
-            raise ValueError(f"session key is missing a scope prefix: {stored!r}")  # noqa: TRY003  # lint-waiver: LW-008080 [TRY003]; parse() documents ValueError so persisted key callers can handle malformed data uniformly.
+            message = f"session key is missing a scope prefix: {stored!r}"
+            raise ValueError(message)
         return cls(SessionScope(scope_text), identifier)
