@@ -1,3 +1,46 @@
-Profiler-guided analysis on ROCm is not yet wired up in this repository. `torch.profiler` works on ROCm and is the available framework-altitude tool; `rocprofv3` (system timeline) and `omniperf` (kernel altitude) are the ROCm equivalents of nsys and ncu but have no toolkit here yet.
+A ROCm profiling toolkit is available at `rocprof_profiler/analyze_rocprof.py`, wrapping `rocprofv3`'s system trace. Capture takes several minutes (AITER/Triton JIT + capture + export), which is why profiling is gated by the diagnosis step above. See `resources/skills/serving-systems/references/platforms/rocm/profiler.md` for the full tool-to-question map (counters, kernel-internal `rocprof-compute`, thread trace, paired A/B) and `measurement-protocol.md` / `counter-triage.md` / `aiter-engagement.md` in the same directory for the measurement discipline and the AITER-fallback check.
 
-Diagnose from benchmark evidence instead: sweep concurrency to find saturation, compare TTFT against TPOT to separate prefill from decode cost, and check whether throughput scales with batch size. If you reach for a profiler, `torch.profiler` with a Chrome trace export is the supported path.
+1. Inspect the manifest, checker, and candidate build/run documentation to identify
+   the real server command and port. Pre-warm (CRITICAL — first-time AITER/Triton
+   kernel resolution and any TunableOp search take minutes and will otherwise
+   dominate the capture):
+   ```
+   <declared server command> > /tmp/prewarm.log 2>&1 &
+   PID=$!
+   for i in $(seq 1 120); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
+   curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
+     -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
+   kill $PID 2>/dev/null; wait $PID 2>/dev/null; sleep 2
+   ```
+
+2. Profile under a representative benchmark load (pick the load level closest to saturation from your earlier runs). If the server is tensor-parallel, profile the worker process that actually issues HIP kernels, not the API-server/driver process — a driver-only capture reads as idle by construction:
+   ```
+   python rocprof_profiler/analyze_rocprof.py capture --out /tmp/profile \
+     -- <declared server command> &
+   ROCPROF_PID=$!
+   for i in $(seq 1 120); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
+   curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
+     -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
+   {% if benchmark_command is defined and benchmark_command %}{{ benchmark_command }}{% else %}<manifest benchmark command>{% endif %} --url http://localhost:8077 --rate <chosen_rate> --duration 10 --max-tokens 64
+   kill -INT $ROCPROF_PID 2>/dev/null; wait $ROCPROF_PID 2>/dev/null; sleep 3
+   ```
+
+3. Analyze:
+   ```
+   python rocprof_profiler/analyze_rocprof.py summary /tmp/profile
+   python rocprof_profiler/analyze_rocprof.py kernels /tmp/profile
+   python rocprof_profiler/analyze_rocprof.py families /tmp/profile
+   ```
+   Then run only the analyses relevant to what you saw. Decision rule:
+   - If `graphs` shows a small number of large graph-launch entries covering decode → decode is HIP-graphed; focus on replay timing and inter-replay scheduling gaps.
+   - If `graphs` shows one entry per op instead → decode is eager; use `idle_gaps` and `cpu_overhead` to diagnose launch-bound vs. kernel-bound.
+   - If `families` shows a Triton/torch-native share where AITER/CK was expected → a silent fallback, not a hardware limit; see `aiter-engagement.md` before diagnosing further.
+   - Other useful subcommands: `files`, `memory`, `host_idle`.
+
+4. Classify the **primary bottleneck** into exactly one of:
+   `cpu_launch_bound`, `python_overhead_bound`, `input_pipeline_bound`,
+   `sync_bound`, `memcpy_bound`, `comm_bound`, `kernel_bound`, `mixed_or_unclear`.
+
+   Cite specific numbers from the analysis output as evidence (e.g. "GPU idle gaps total 412 ms over the 2 s capture; `families` shows 38% of GPU time on a Triton fallback for the paged-attention kernel").
+
+If profiling fails (server won't start, rocprofv3 hangs, capture is empty), file a `bug` issue describing what you tried and proceed to opportunities without profiler evidence. If a `torch.profiler` capture is what hung, note this may be the known ROCm 6.4 + torch 2.9.1 post-capture drain issue (`measurement-protocol.md`) rather than a fresh bug.
