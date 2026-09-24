@@ -246,6 +246,11 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 # `packaging` package would shadow the PyPA `packaging` library), and release
 # tools that report on stdout/stderr like scripts/.
 "packaging/*.py" = ["INP001", "T201"]
+# This file unit-tests resources/profilers/torch/analyze_torch_profile.py, a
+# standalone script (no public library API) loaded by file path. Exercising
+# its trace-indexing, correlation, and shape/roofline math directly means
+# calling its underscore-prefixed helpers; there is no other entry point.
+"tests/vibesys/loops/test_torch_profile_analyzer.py" = ["SLF001"]
 # examples/ ships candidate reference implementations, benchmark harnesses,
 # and vendored submodule checkouts (transformers, DeathStarBench, TensorRT-LLM,
 # Show-o, train-ticket, TraceLab) rather than first-party framework code. Keep

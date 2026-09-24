@@ -710,6 +710,88 @@ def _trace_graph() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _chrome_trace_events(  # noqa: ANN202  # tracked: #288
+    *,
+    include_step_marker: bool = True,
+    record_shapes: bool = True,
+    num_calls: int = 2,
+    graph_launch: bool = False,
+    device_name: str = "AMD Instinct MI210",
+):
+    """Build a minimal, Kineto-shaped raw Chrome trace with one GEMM (aten::addmm).
+
+    Shape: bias(11008), mat1 (32, 4096) x mat2 (4096, 11008), bf16. Each call
+    gets its own cpu_op -> hip_runtime launch -> kernel triple, linked by
+    "External id" and "correlation" the way roctracer/Kineto traces link them
+    (see ``_build_op_to_kernels`` in ``analyze_torch_profile.py``).
+    """
+    events: list[dict] = [{"ph": "M", "name": "process_name", "pid": 1, "args": {"name": "python"}}]
+    if include_step_marker:
+        events.append(
+            {
+                "ph": "X",
+                "cat": "user_annotation",
+                "name": "ProfilerStep#1",
+                "pid": 1,
+                "tid": 1,
+                "ts": 0,
+                "dur": 5000,
+                "args": {},
+            }
+        )
+    ts = 100
+    for i in range(num_calls):
+        args = {
+            "Input type": ["c10::BFloat16", "c10::BFloat16", "c10::BFloat16"],
+            "External id": 1000 + i,
+        }
+        if record_shapes:
+            args["Input Dims"] = [[11008], [32, 4096], [4096, 11008]]
+        events.append(
+            {
+                "ph": "X",
+                "cat": "cpu_op",
+                "name": "aten::addmm",
+                "pid": 1,
+                "tid": 1,
+                "ts": ts,
+                "dur": 200,
+                "args": args,
+            }
+        )
+        events.append(
+            {
+                "ph": "X",
+                "cat": "hip_runtime",
+                "name": "hipLaunchKernel",
+                "pid": 1,
+                "tid": 1,
+                "ts": ts + 10,
+                "dur": 5,
+                "args": {"External id": 1000 + i, "correlation": 5000 + i},
+            }
+        )
+        kernel_name = "hipGraphLaunch" if graph_launch else "Cijk_Ailk_Bljk_HHS_BH_MT128x128"
+        events.append(
+            {
+                "ph": "X",
+                "cat": "kernel",
+                "name": kernel_name,
+                "pid": 0,
+                "tid": 2,
+                "ts": ts + 20,
+                "dur": 300,
+                "args": {"correlation": 5000 + i, "device": 0},
+            }
+        )
+        ts += 400
+    return {
+        "schemaVersion": 1,
+        "deviceProperties": [{"id": 0, "name": device_name}],
+        "traceEvents": events,
+    }
+
+
 class TestTorchMcpServer:
     def test_registers_expected_tools(self, torch_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
         server = torch_server_mod.build_server()
@@ -721,6 +803,9 @@ class TestTorchMcpServer:
             "cpu_overhead",
             "memory",
             "summary",
+            "certify",
+            "gemm_shapes",
+            "roofline",
         }
 
     def test_tables_tool_reports_prof_json_overview(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -799,6 +884,104 @@ class TestTorchMcpServer:
         out = asyncio.run(_call_tool(server, "kernels", report=str(prof), top=5))
         # flash_fwd_kernel is the bigger one and should appear first.
         assert out.index("flash_fwd_kernel") < out.index("rms_norm_kernel")
+
+    def test_kernels_tool_also_accepts_a_raw_chrome_trace(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(num_calls=2)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "kernels", report=str(trace)))
+        assert "Cijk_Ailk_Bljk_HHS_BH_MT128x128" in out
+
+    def test_certify_passes_a_well_formed_trace(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(num_calls=1)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "certify", trace=str(trace)))
+        assert "record_shapes" in out
+        assert "step_markers" in out
+        assert "[PASS]" in out
+
+    def test_certify_fails_without_record_shapes(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(record_shapes=False, num_calls=1)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "certify", trace=str(trace)))
+        assert "Trace certification: FAIL" in out
+        assert "record_shapes=True" in out
+
+    def test_certify_flags_graph_replay_as_degraded_attribution(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(graph_launch=True, num_calls=1)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "certify", trace=str(trace)))
+        assert "graph_replay" in out
+        assert "hipGraphLaunch" in out
+
+    def test_certify_rejects_a_summarized_report(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        prof = tmp_path / "prof.json"
+        prof.write_text(
+            json.dumps(
+                {"version": 1, "total_cuda_time_us": 1.0, "total_cpu_time_us": 1.0, "events": []}
+            )
+        )
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "certify", trace=str(prof)))
+        assert out.startswith("error:")
+        assert "not a raw Kineto/Chrome trace" in out
+
+    def test_gemm_shapes_dedups_and_ranks_by_gpu_time(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(num_calls=3)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "gemm_shapes", trace=str(trace), top=5))
+        assert "32x11008x4096" in out
+        # Three identical-shape calls collapse into one deduplicated row.
+        assert out.count("addmm") == 1
+        assert out.count("32x11008x4096") == 1
+
+    def test_gemm_shapes_writes_ranked_json_when_out_given(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(num_calls=2)))
+        out_path = tmp_path / "shapes.json"
+
+        server = torch_server_mod.build_server()
+        asyncio.run(_call_tool(server, "gemm_shapes", trace=str(trace), out=str(out_path)))
+
+        written = json.loads(out_path.read_text())
+        assert written[0]["op"] == "addmm"
+        assert written[0]["m"] == 32
+        assert written[0]["n"] == 11008
+        assert written[0]["k"] == 4096
+        assert written[0]["call_count"] == 2
+
+    def test_roofline_classifies_bound_and_reports_device_peaks(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(json.dumps(_chrome_trace_events(num_calls=1)))
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "roofline", trace=str(trace)))
+        assert "MI210" in out
+        # A skinny M=32 GEMM at this shape is memory-bound on MI210.
+        assert "memory" in out
+
+    def test_roofline_prefers_explicit_peaks_over_autodetect(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        trace = tmp_path / "trace.pt.trace.json"
+        trace.write_text(
+            json.dumps(_chrome_trace_events(num_calls=1, device_name="Unrecognized GPU"))
+        )
+
+        server = torch_server_mod.build_server()
+        out = asyncio.run(
+            _call_tool(server, "roofline", trace=str(trace), peak_tflops=100.0, peak_gbps=1000.0)
+        )
+        assert "100.0 TFLOP/s" in out
+        assert "1000 GB/s" in out
 
 
 # ---------------------------------------------------------------------------
