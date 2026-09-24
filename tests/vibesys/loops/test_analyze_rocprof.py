@@ -695,13 +695,14 @@ _MARKER_FAMILY: dict[str, str] = {
 def test_classify_family_is_invariant_to_short_name_and_namespace_noise(marker, data):  # noqa: ANN001, ANN201  # tracked: #288
     name = data.draw(wrap_with_namespace_and_template_noise(marker))
     expected = _MARKER_FAMILY[marker]
-    # The random namespace-noise prefix can occasionally spell out a
-    # *different* marker (e.g. a "ck" prefix segment in front of "cijk_"
-    # produces "ck::cijk_", which legitimately classifies as Composable
-    # Kernel since that rule is checked first) -- ordered first-match-wins
-    # behavior, not an invariance violation. Skip that rare collision rather
-    # than asserting an ordering `_classify_family` never promised.
-    other_markers = [m for m in _MARKER_FAMILY if m != marker]
+    # Build the exclusion set from _FAMILY_RULES: every marker belonging to
+    # families other than the expected one. The test's _MARKER_FAMILY dict
+    # is incomplete (e.g. missing "asm_pa_" from AITER); using the full
+    # classifier's rules ensures we skip all collisions.
+    other_markers = set()
+    for family_name, markers in analyze_rocprof._FAMILY_RULES:  # noqa: SLF001
+        if family_name != expected:
+            other_markers.update(markers)
     assume(not any(m in name.lower() for m in other_markers))
 
     family_from_full = _classify_family(name)
