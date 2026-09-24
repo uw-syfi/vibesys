@@ -2,29 +2,49 @@
 r"""rocprof-compute (kernel-altitude counters) toolkit — subcommand-based.
 
 Wraps AMD's ROCm Compute Profiler (``rocprof-compute``, formerly Omniperf): a
-hardware-counter profiler that replays a profiled command through
-``rocprofv3`` to collect per-kernel counters, then derives System
-Speed-of-Light / Top-Stats / Roofline tables from them.
+hardware-counter profiler that replays a profiled command to collect
+per-kernel counters, then derives System Speed-of-Light / Top-Stats /
+Roofline tables from them. Verified on a real MI210 (gfx90a) against
+rocprof-compute **3.1.0**: despite the name, ``profile`` shells out to the
+**deprecated legacy ``rocprof`` (v1/v2)** internally, not ``rocprofv3`` --
+every pass prints ROCm's own "phasing out ... rocprof/rocprofv2 in favor of
+rocprofiler-sdk/rocprofv3" deprecation warning. Expect this module to need an
+update whenever a ROCm release removes legacy ``rocprof`` entirely.
 
 Usage:
     python compute.py doctor
     python compute.py profile --name run --out ./rocprof_out -- python driver.py
     python compute.py profile --name run --out ./rocprof_out \\
         --kernel 'gemm.*' --dispatch 3 --timeout 900 -- python driver.py
-    python compute.py analyze ./rocprof_out/workloads/run/<gpu> \\
+    python compute.py analyze ./rocprof_out/workloads/run \\
         --blocks 0,2,4 --max-stat 10
 
 ``doctor`` never installs anything; it only diagnoses. ``profile`` runs the
 profiled command in its own process group and kills the whole subtree on
-timeout, SIGTERM, or SIGINT, so a stuck ``rocprofv3`` child is never
-orphaned. ``analyze`` falls back to reading the workload's raw CSVs directly
-if the ``analyze`` phase itself fails (most often the dependency gate below),
-clearly labeled as unprocessed data.
+timeout, SIGTERM, or SIGINT, so a stuck child is never orphaned, and fails
+loudly (rather than handing back an empty workload) when the kernel/dispatch
+filter matched nothing. ``analyze`` falls back to reading the workload's raw
+CSVs directly if the ``analyze`` phase itself fails (most often the
+dependency gate below), clearly labeled as unprocessed data.
 
-Analyze blocks (rocprof-compute's own numbering): ``0`` Top Stats (per-kernel
-time breakdown), ``2`` System Speed-of-Light (per-engine % of peak), ``4``
-Roofline (arithmetic intensity vs. empirical peak). The default set covers
-all three; pass ``--blocks`` to narrow it.
+Analyze blocks (rocprof-compute's own numbering, confirmed against a real
+analyze run): ``0`` Top Stats (per-kernel time breakdown), ``2`` System
+Speed-of-Light (per-engine % of peak), ``4`` Roofline (arithmetic intensity
+vs. empirical peak). The default set covers all three; pass ``--blocks`` to
+narrow it.
+
+**The silent-empty-output pitfall.** ``-k``/``--kernel`` filters by literal
+kernel-name substring. torch GEMMs dispatch through rocBLAS/hipBLASLt as
+Tensile kernels named e.g. ``Cijk_Ailk_Bljk_BBS_BH_..._MT256x128x32_...`` --
+they do **not** contain the substring ``"gemm"``, so a naive ``-k gemm``
+filter matches zero dispatches. Every counter-collection pass then silently
+comes back with "0 contexts collected" and a header-only CSV, and
+rocprof-compute's own post-processing crashes later with a confusing
+``pandas.errors... KeyError: 'Grid_Size'`` deep inside ``join_prof()`` --
+the empty match, not a pandas-version issue, is almost always the real
+cause. ``profile`` here detects this pattern (from the subprocess log and/or
+an empty resulting workload) and fails with an actionable message instead of
+forwarding the raw traceback.
 
 The dependency gate: rocprof-compute's launcher runs an all-or-nothing
 ``verify_deps()`` preflight and refuses to run under an interpreter missing
@@ -68,10 +88,22 @@ DEFAULT_ANALYZE_TIMEOUT = 300.0
 DEFAULT_PREFLIGHT_TIMEOUT = 60.0
 DEFAULT_DEPS_CHECK_TIMEOUT = 60.0
 DEFAULT_PANDAS_CHECK_TIMEOUT = 30.0
+DEFAULT_ANALYZE_CLEAN_MAX_LINES = 500
+
+# rocprof-compute `profile -b`/`--block` hardware-block choices (profile help text);
+# distinct from analyze's `-b` numeric section ids in DEFAULT_ANALYZE_BLOCKS above.
+_HARDWARE_BLOCKS = ("SQ", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF")
 
 _AQLPROFILE_LIB_NAMES = ("libaqlprofile64.so", "libaqlprofile.so")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _DECORATION_RE = re.compile(r"^[=\-_*]{5,}$")
+# The ROCm ASCII-art banner rocprof-compute prints at the top of every
+# invocation: only whitespace and shape-drawing ASCII (no alnum), which
+# distinguishes it from the Unicode box-drawing table borders we want to keep.
+_BANNER_ART_RE = re.compile(r"^[\s_/\\|().,'`]+$")
+_CONTEXTS_COLLECTED_RE = re.compile(r"(\d+) contexts collected")
+_EMPTY_JOIN_KEYERROR = "KeyError: 'Grid_Size'"
+_WORKLOAD_KERNEL_CSVS = ("pmc_kernel_top.csv", "pmc_perf.csv")
 
 # ---------------------------------------------------------------------------
 # Locating the tool
@@ -103,7 +135,11 @@ def find_rocprof_compute_bin() -> str | None:
 
 
 def find_rocprofv3_bin() -> str | None:
-    """Locate ``rocprofv3`` (the counter-collection replay tool)."""
+    """Locate ``rocprofv3``.
+
+    Used only by this module's optional torch-import preflight, not by
+    rocprof-compute itself -- see ``find_rocprof_legacy_bin``.
+    """
     on_path = shutil.which("rocprofv3")
     if on_path:
         return on_path
@@ -114,8 +150,26 @@ def find_rocprofv3_bin() -> str | None:
     return None
 
 
+def find_rocprof_legacy_bin() -> str | None:
+    """Locate the deprecated legacy ``rocprof`` (v1/v2) binary.
+
+    Confirmed on a real MI210 run (rocprof-compute 3.1.0): ``profile`` shells
+    out to this tool internally, not ``rocprofv3`` -- every counter-collection
+    pass logs ROCm's own deprecation warning for it. It ships alongside
+    ``rocprof-compute``/``rocprofv3`` in the same ROCm ``bin/`` directory.
+    """
+    on_path = shutil.which("rocprof")
+    if on_path:
+        return on_path
+    for root in _rocm_path_roots():
+        candidate = Path(root) / "bin" / "rocprof"
+        if os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
 def find_aqlprofile_lib() -> str | None:
-    """Locate the aqlprofile shared library ``rocprofv3`` loads as its HSA tool."""
+    """Locate the aqlprofile shared library the profiler loads as its HSA tool."""
     for root in _rocm_path_roots():
         for name in _AQLPROFILE_LIB_NAMES:
             candidate = Path(root) / "lib" / name
@@ -278,12 +332,20 @@ def _check_pandas(deps_python: str | None) -> _DoctorCheck:
     return _DoctorCheck("FAIL", f"pandas: {pandas_msg}", fix)
 
 
-def _check_rocprofv3() -> _DoctorCheck:
-    rocprofv3_bin = find_rocprofv3_bin()
-    if rocprofv3_bin:
-        return _DoctorCheck("OK", f"rocprofv3: {rocprofv3_bin}")
-    fix = "Install the ROCm profiler package that ships rocprofv3, or add it to PATH."
-    return _DoctorCheck("FAIL", "rocprofv3: not found on PATH or under $ROCM_PATH/bin", fix)
+def _check_rocprof_legacy() -> _DoctorCheck:
+    # rocprof-compute's own internal dependency (confirmed on a real capture:
+    # every pass shells to this, not rocprofv3 -- see find_rocprof_legacy_bin).
+    rocprof_bin = find_rocprof_legacy_bin()
+    if rocprof_bin:
+        return _DoctorCheck("OK", f"legacy rocprof (rocprof-compute's internal driver): {rocprof_bin}")
+    fix = (
+        "Install the ROCm profiler package that ships the deprecated legacy `rocprof` "
+        "(v1/v2), or add it to PATH -- rocprof-compute 3.1.0 shells out to it internally, "
+        "not rocprofv3, so `profile` cannot run without it."
+    )
+    return _DoctorCheck(
+        "FAIL", "legacy rocprof: not found on PATH or under $ROCM_PATH/bin", fix
+    )
 
 
 def _check_aqlprofile() -> _DoctorCheck:
@@ -297,6 +359,31 @@ def _check_aqlprofile() -> _DoctorCheck:
     return _DoctorCheck("FAIL", "aqlprofile library: not resolvable", fix)
 
 
+_VERSION_RE = re.compile(r"rocprofiler-compute version:\s*(\S+)")
+
+
+def _check_version(rocprof_bin: str | None, deps_python: str | None) -> _DoctorCheck:
+    """Informational: report the installed version (confirmed working: 3.1.0)."""
+    if not rocprof_bin or not deps_python:
+        return _DoctorCheck("SKIP", "version: no runnable rocprof-compute to check")
+    try:
+        result = subprocess.run(  # noqa: S603
+            [deps_python, rocprof_bin, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=DEFAULT_DEPS_CHECK_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return _DoctorCheck("SKIP", f"version: could not run --version ({exc})")
+    match = _VERSION_RE.search(result.stdout)
+    if not match:
+        return _DoctorCheck("SKIP", "version: unparsable --version output")
+    version = match.group(1)
+    note = "" if version.startswith("3.") else " (verified against 3.1.0; other majors may differ)"
+    return _DoctorCheck("OK", f"version: {version}{note}")
+
+
 def cmd_doctor(ns: argparse.Namespace) -> None:
     """Diagnose the rocprof-compute install and print actionable fixes."""
     del ns
@@ -306,7 +393,8 @@ def cmd_doctor(ns: argparse.Namespace) -> None:
         bin_check,
         deps_check,
         _check_pandas(deps_python),
-        _check_rocprofv3(),
+        _check_version(rocprof_bin, deps_python),
+        _check_rocprof_legacy(),
         _check_aqlprofile(),
     ]
 
@@ -422,7 +510,11 @@ def check_torch_import_under_rocprofv3(
 
     Some images collide (e.g. an LLVM option registered twice) when
     rocprofv3 and torch share a process; this catches that before a long
-    ``profile`` run burns its timeout on it.
+    ``profile`` run burns its timeout on it. Note: rocprof-compute 3.1.0 has
+    been confirmed to shell out to the deprecated *legacy* ``rocprof``
+    internally, not ``rocprofv3`` (see the module docstring), so this is a
+    best-effort generic canary for a torch/profiler-in-same-process collision
+    -- not a literal rehearsal of what ``profile`` itself will run.
     """
     rocprofv3 = find_rocprofv3_bin()
     if not rocprofv3:
@@ -476,33 +568,104 @@ def _maybe_preflight_torch_import(ns: argparse.Namespace, cmd: list[str]) -> Non
 
 
 def _build_profile_cmd(
-    python: str, rocprof_bin: str, ns: argparse.Namespace, cmd: list[str]
+    python: str,
+    rocprof_bin: str,
+    ns: argparse.Namespace,
+    cmd: list[str],
+    workload_dir: Path,
 ) -> list[str]:
-    profile_cmd = [python, rocprof_bin, "profile", "-n", ns.name]
+    # `-p` is explicit and points directly at the final workload directory:
+    # confirmed on a real MI210 run that rocprof-compute 3.1.0 writes CSVs
+    # straight into whatever `-p` names, with no extra `<gpu>` subdirectory
+    # layer -- relying on the tool's own cwd-relative default (and then
+    # globbing for a results subdirectory) picks up the wrong directory (see
+    # `_report_profile_result`'s history for why that glob was removed).
+    profile_cmd = [python, rocprof_bin, "profile", "-n", ns.name, "-p", str(workload_dir)]
     if ns.kernel:
         profile_cmd += ["-k", ns.kernel]
     if ns.dispatch is not None:
         profile_cmd += ["--dispatch", str(ns.dispatch)]
+    if ns.block:
+        profile_cmd += ["-b", *ns.block]
     return [*profile_cmd, "--", *cmd]
 
 
-def _report_profile_result(rc: int, log: str, out_dir: Path, name: str) -> None:
+def _log_shows_zero_contexts(log: str) -> bool:
+    """True iff every counter-collection pass in the log collected zero contexts.
+
+    That's the silent-empty-match signature: seen on a real run right before
+    rocprof-compute's own post-processing crashed with
+    ``KeyError: 'Grid_Size'``.
+    """
+    counts = [int(n) for n in _CONTEXTS_COLLECTED_RE.findall(log)]
+    return bool(counts) and all(count == 0 for count in counts)
+
+
+def _workload_has_kernel_data(workload_dir: Path) -> bool | None:
+    """Whether the workload has at least one profiled kernel dispatch.
+
+    Checks the first of ``_WORKLOAD_KERNEL_CSVS`` that exists (whichever
+    rocprof-compute wrote) and treats "header row only" as no data, regardless
+    of column order or count. Returns ``None`` -- a different failure than an
+    empty match -- when none of those files exist at all.
+    """
+    for name in _WORKLOAD_KERNEL_CSVS:
+        path = workload_dir / name
+        if not path.is_file():
+            continue
+        with path.open(newline="", encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+        return len(rows) > 1
+    return None
+
+
+def _empty_match_message(kernel: str, dispatch: int | None) -> str:
+    filters = []
+    if kernel:
+        filters.append(f"--kernel {kernel!r}")
+    if dispatch is not None:
+        filters.append(f"--dispatch {dispatch}")
+    filter_note = f" Current filter: {', '.join(filters)}." if filters else ""
+    return (
+        "kernel filter matched no dispatches; list kernel names with "
+        "`rocprofv3 --kernel-trace --stats` first. torch GEMMs dispatch through "
+        "rocBLAS/hipBLASLt as Tensile kernels named like "
+        "'Cijk_Ailk_Bljk_BBS_BH_..._MT256x128x32_...', not anything containing "
+        f"the literal substring 'gemm'.{filter_note}"
+    )
+
+
+def _report_profile_result(
+    rc: int,
+    log: str,
+    workload_dir: Path,
+    *,
+    kernel: str = "",
+    dispatch: int | None = None,
+) -> None:
+    empty_match = _log_shows_zero_contexts(log) or _EMPTY_JOIN_KEYERROR in log
+
     if rc != 0:
         print("PROFILE FAILED.")  # noqa: T201
+        if empty_match:
+            print(_empty_match_message(kernel, dispatch))  # noqa: T201
         print(log[-2000:])  # noqa: T201
         sys.exit(1)
 
-    workloads = sorted((out_dir / "workloads" / name).glob("*"))
-    workload = next((w for w in workloads if w.is_dir()), None)
-    if not workload:
+    if not workload_dir.is_dir():
         print("PROFILE completed but produced no workload directory.")  # noqa: T201
         print(log[-1000:])  # noqa: T201
         sys.exit(1)
 
-    print(f"Workload written to: {workload}")  # noqa: T201
+    if empty_match or _workload_has_kernel_data(workload_dir) is False:
+        print("PROFILE completed but matched no kernel dispatches.")  # noqa: T201
+        print(_empty_match_message(kernel, dispatch))  # noqa: T201
+        sys.exit(1)
+
+    print(f"Workload written to: {workload_dir}")  # noqa: T201
     print(  # noqa: T201
         "Raw counters (pmc_perf.csv etc.) live under that directory. Analyze with:\n"
-        f"  python compute.py analyze {workload}"
+        f"  python compute.py analyze {workload_dir}"
     )
 
 
@@ -513,12 +676,13 @@ def cmd_profile(ns: argparse.Namespace) -> None:
     _maybe_preflight_torch_import(ns, cmd)
 
     out_dir = Path(ns.out)
+    workload_dir = out_dir / "workloads" / ns.name
     out_dir.mkdir(parents=True, exist_ok=True)
     install_signal_handlers()
 
-    profile_cmd = _build_profile_cmd(python, rocprof_bin, ns, cmd)
-    rc, log = run_with_timeout(profile_cmd, cwd=str(out_dir), timeout=ns.timeout)
-    _report_profile_result(rc, log, out_dir, ns.name)
+    profile_cmd = _build_profile_cmd(python, rocprof_bin, ns, cmd, workload_dir)
+    rc, log = run_with_timeout(profile_cmd, timeout=ns.timeout)
+    _report_profile_result(rc, log, workload_dir, kernel=ns.kernel, dispatch=ns.dispatch)
 
 
 # ---------------------------------------------------------------------------
@@ -526,18 +690,28 @@ def cmd_profile(ns: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _clean_analyze_output(text: str) -> str:
-    """Strip ANSI escapes and banner/separator decoration, keep it prompt-sized."""
+def _clean_analyze_output(text: str, *, max_lines: int = DEFAULT_ANALYZE_CLEAN_MAX_LINES) -> str:
+    """Strip ANSI escapes, the ROCm ASCII-art banner, and separator decoration.
+
+    Also caps the total line count so an unfiltered (all-18-section) analyze
+    dump still stays prompt-sized. Unicode box-drawing table borders
+    (``╒═╤``, ...) are untouched -- only the ASCII-art banner and
+    ``----``/``====`` rules are decoration here.
+    """
     cleaned_lines = []
     for raw_line in _ANSI_RE.sub("", text).splitlines():
         line = raw_line.rstrip()
-        if _DECORATION_RE.match(line.strip()):
+        stripped = line.strip()
+        if _DECORATION_RE.match(stripped) or (stripped and _BANNER_ART_RE.match(stripped)):
             continue
         cleaned_lines.append(line)
     while cleaned_lines and not cleaned_lines[0].strip():
         cleaned_lines.pop(0)
     while cleaned_lines and not cleaned_lines[-1].strip():
         cleaned_lines.pop()
+    if len(cleaned_lines) > max_lines:
+        omitted = len(cleaned_lines) - max_lines
+        cleaned_lines = [*cleaned_lines[:max_lines], f"... ({omitted} more lines truncated) ..."]
     return "\n".join(cleaned_lines)
 
 
@@ -545,11 +719,127 @@ def _find_workload_csvs(workload: str) -> list[Path]:
     return sorted(Path(workload).rglob("*.csv"))
 
 
+def _shorten_kernel_name(name: str, *, max_len: int = 80) -> str:
+    return name if len(name) <= max_len else f"{name[: max_len - 3]}..."
+
+
+def _format_percent(raw: str) -> str:
+    """Round a percentage string to 1 decimal place; pass through unparsable input."""
+    try:
+        return f"{float(raw):.1f}"
+    except ValueError:
+        return raw
+
+
+def _print_top_kernels_from_csv(path: Path, *, max_rows: int) -> bool:
+    """Print rocprof-compute's own precomputed per-kernel time breakdown.
+
+    ``pmc_kernel_top.csv`` (Kernel_Name, Count, Sum(ns), Mean(ns), Median(ns),
+    Pct) is written during ``profile`` itself, already sorted by time -- no
+    aggregation needed here, just formatting. Column access is by name (not
+    position), so column order/additions in a future rocprof-compute version
+    don't break this. Returns whether anything was printed.
+    """
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
+        return False
+    print(f"\n--- top kernels by time ({path.name}) ---")  # noqa: T201
+    for row in rows[:max_rows]:
+        name = _shorten_kernel_name(row.get("Kernel_Name", "?"))
+        pct = _format_percent(row.get("Pct", "?"))
+        count = row.get("Count", "?")
+        total_ns = row.get("Sum(ns)", "?")
+        print(f"  {pct:>6}%  {name}  (count={count}, sum={total_ns}ns)")  # noqa: T201
+    if len(rows) > max_rows:
+        print(f"  ... ({len(rows) - max_rows} more kernels omitted)")  # noqa: T201
+    return True
+
+
+def _sum_column(rows: list[dict[str, str]], column: str) -> float | None:
+    """Sum a named column across rows.
+
+    Tolerates missing/blank/non-numeric values (e.g. a counter set that
+    didn't collect that column). Returns ``None`` if the column contributed
+    no numeric value at all.
+    """
+    total = 0.0
+    seen = False
+    for row in rows:
+        raw = row.get(column)
+        if not raw:
+            continue
+        try:
+            total += float(raw)
+        except ValueError:
+            continue
+        seen = True
+    return total if seen else None
+
+
+def _print_pmc_perf_ratios(path: Path) -> bool:
+    """Print a couple of SoL-style ratios from raw ``pmc_perf.csv`` counters.
+
+    Computed by summing each counter across every dispatch. These are rough
+    and unweighted (not rocprof-compute's own peak-normalized Speed-of-Light
+    numbers, which ``analyze`` derives) -- useful as a cheap signal when
+    ``analyze`` itself isn't available. Returns whether anything was printed.
+    """
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
+        return False
+    hits = _sum_column(rows, "TCC_HIT_sum")
+    misses = _sum_column(rows, "TCC_MISS_sum")
+    valu = _sum_column(rows, "SQ_INSTS_VALU")
+    mfma = _sum_column(rows, "SQ_INSTS_MFMA")
+
+    lines = []
+    if hits is not None and misses is not None and (hits + misses) > 0:
+        lines.append(f"  L2 cache hit rate (TCC_HIT/(HIT+MISS)): {100 * hits / (hits + misses):.1f}%")
+    if valu is not None and mfma is not None and (valu + mfma) > 0:
+        lines.append(f"  MFMA share of VALU+MFMA issue slots: {100 * mfma / (valu + mfma):.1f}%")
+    if not lines:
+        return False
+    print(f"\n--- rough counter ratios from {path.name} (not peak-normalized) ---")  # noqa: T201
+    for line in lines:
+        print(line)  # noqa: T201
+    return True
+
+
 def _print_csv_fallback(workload: str, *, max_rows: int) -> None:
+    workload_path = Path(workload)
     csvs = _find_workload_csvs(workload)
     if not csvs:
         print(f"No CSVs found under {workload} either.")  # noqa: T201
         return
+
+    printed = False
+    top_kernels = workload_path / "pmc_kernel_top.csv"
+    if top_kernels.is_file() and _print_top_kernels_from_csv(top_kernels, max_rows=max_rows):
+        printed = True
+
+    pmc_perf = workload_path / "pmc_perf.csv"
+    if pmc_perf.is_file() and _print_pmc_perf_ratios(pmc_perf):
+        printed = True
+
+    roofline = workload_path / "roofline.csv"
+    if roofline.is_file():
+        with roofline.open(newline="", encoding="utf-8") as f:
+            roofline_rows = list(csv.reader(f))
+        if len(roofline_rows) > 1:
+            print(  # noqa: T201
+                f"\n--- {roofline.name} also present: {len(roofline_rows[0])} columns, "
+                f"{len(roofline_rows) - 1} device row(s) (device peak/achieved FLOPs and "
+                "bandwidth; not expanded here)"
+            )
+            printed = True
+
+    if printed:
+        return
+
+    # Nothing we know how to specifically summarize -- dump the most
+    # promising raw CSV, same as before, clearly marked as unprocessed.
     preferred = [c for c in csvs if c.name == "pmc_perf.csv"] or csvs[:1]
     for path in preferred:
         print(f"\n--- {path} ---")  # noqa: T201
@@ -630,8 +920,15 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("profile", help="run `rocprof-compute profile` with a hard timeout")
     p.add_argument("--name", required=True, help="workload name (rocprof-compute -n)")
     p.add_argument("--out", required=True, help="directory to hold workloads/<name>/...")
-    p.add_argument("--kernel", default="", help="regex filtering kernels (rocprof-compute -k)")
+    p.add_argument("--kernel", default="", help="substring/regex filtering kernels (rocprof-compute -k)")
     p.add_argument("--dispatch", type=int, default=None, help="filter by dispatch id")
+    p.add_argument(
+        "--block",
+        nargs="+",
+        choices=_HARDWARE_BLOCKS,
+        default=None,
+        help="narrow capture to these hardware blocks (rocprof-compute -b), fewer passes/less overhead",
+    )
     p.add_argument("--timeout", type=float, default=DEFAULT_PROFILE_TIMEOUT)
     p.add_argument(
         "--check-torch-import",
