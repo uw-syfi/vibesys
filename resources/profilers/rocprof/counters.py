@@ -921,6 +921,34 @@ def derive_metrics(
     return metrics
 
 
+def kernel_metrics_by_name(
+    dirs: list[str], *, kernel: str | None = None, arch: str | None = None
+) -> dict[str, DerivedMetrics]:
+    """Per-kernel ``DerivedMetrics`` merged from PMC passes under *dirs*.
+
+    Structured counterpart to ``cmd_report``/``cmd_triage``'s printed
+    output, for callers (``compare``) that need per-kernel numeric deltas
+    rather than formatted text. Returns an empty dict when no counter files
+    are found under *dirs*.
+    """
+    counter_files = _discover(dirs, "counter_collection", (".csv", ".json"))
+    if not counter_files:
+        return {}
+    rows = _load_counter_rows(counter_files)
+    if not rows:
+        return {}
+    durations = _duration_from_counter_rows(rows)
+    durations.update(_load_kernel_trace_durations(dirs))
+    aggs = _aggregate_by_kernel(rows)
+    kernels = _filter_kernels(aggs, kernel)
+    spec = PEAK_SPECS.get(normalize_arch(arch)) if arch else None
+    simd_num = _simd_num_for(spec, _load_agent_info(dirs)) if spec else None
+    return {
+        agg.name: derive_metrics(agg, durations.get(agg.name), simd_num=simd_num, spec=spec)
+        for agg in kernels
+    }
+
+
 def cmd_list_sets(ns: argparse.Namespace) -> None:
     """Print the counter-set catalogue for one architecture, or all of them."""
     families = [_normalize_arch_or_exit(ns.arch)] if ns.arch else sorted(COUNTER_SETS)

@@ -1012,6 +1012,30 @@ def _load_kernels(disc: DiscoveredReport) -> tuple[dict[str, dict], str]:
     return bundle.by_name, bundle.source
 
 
+def kernel_time_totals(report: str) -> dict[str, float]:
+    """Per-kernel total GPU time in nanoseconds, keyed by kernel name.
+
+    Thin, structured counterpart to ``cmd_kernels``'s printed table, for
+    callers (``compare``) that need numeric deltas rather than formatted
+    text. Returns an empty dict when *report* has no kernel data.
+    """
+    agg, _source = _load_kernels(discover(report))
+    return {name: entry["total_ns"] for name, entry in agg.items()}
+
+
+def family_time_totals(report: str) -> dict[str, float]:
+    """Per-library-family total GPU time in nanoseconds.
+
+    Same family classification as ``cmd_families``, structured for
+    ``compare`` rather than printed.
+    """
+    totals: dict[str, float] = {}
+    for name, total_ns in kernel_time_totals(report).items():
+        family = _classify_family(name)
+        totals[family] = totals.get(family, 0.0) + total_ns
+    return totals
+
+
 # ---------------------------------------------------------------------------
 # Subcommand: files  # noqa: ERA001
 # ---------------------------------------------------------------------------

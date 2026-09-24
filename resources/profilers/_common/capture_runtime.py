@@ -58,7 +58,9 @@ __all__ = [
     "Lifecycle",
     "format_result",
     "list_captures",
+    "load_manifest",
     "new_capture",
+    "profiles_root",
     "resolve",
     "run_capture",
     "write_manifest",
@@ -163,6 +165,11 @@ def _profiles_root() -> Path:
     return Path(raw).expanduser()
 
 
+def profiles_root() -> Path:
+    """Public accessor for the capture store root (``$VIBESYS_PROFILE_DIR``, default ``./.profiles``)."""
+    return _profiles_root()
+
+
 def new_capture(kind: str) -> tuple[str, Path]:
     """Allocate a fresh capture id + directory under ``$VIBESYS_PROFILE_DIR``."""
     root = _profiles_root()
@@ -200,6 +207,20 @@ def resolve(capture_id_or_path: str) -> Path:
     raise FileNotFoundError(  # noqa: TRY003
         f"capture not found: {capture_id_or_path!r} (checked that path and {root})"
     )
+
+
+def load_manifest(capture_dir: Path) -> dict[str, Any]:
+    """Load ``manifest.json`` from *capture_dir*, raising a clear error if absent/malformed."""
+    path = Path(capture_dir) / _MANIFEST_NAME
+    if not path.is_file():
+        raise FileNotFoundError(f"no manifest.json under {capture_dir}")  # noqa: TRY003
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"malformed manifest.json under {capture_dir}: {exc}") from exc  # noqa: TRY003
+    if isinstance(data, dict):
+        return data
+    raise ValueError(f"manifest.json under {capture_dir} is not a JSON object")  # noqa: TRY003
 
 
 def list_captures(limit: int = 20) -> list[CaptureSummary]:
