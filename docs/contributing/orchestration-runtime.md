@@ -120,10 +120,13 @@ and review turn in `policy_single.py`. `ProfileGuidedFlow` wraps either inner fl
 with component profiling and measurement from `policy_profile.py`. Evolve has its
 own policy in `src/vibesys/loops/evolve/policy_flow.py`: `EvolveSearch` selects
 parents, records outcomes, checkpoints search state, and chooses the final
-candidate. `evaluate_candidate` orders mutation, review, framework gates,
+candidate. `EvolveRunScheduler` decides when to bootstrap, how each generation
+is dispatched, when to checkpoint, and when to finalize. `evaluate_candidate`
+orders mutation, review, framework gates,
 measurement, and snapshotting through typed `CandidateEffects`. The adapter in
 `loop.py` binds those effects to agents, the run context, task gates, Git, and
-the run environment. Policy tests use fake effects and in-memory populations.
+the run environment. The concrete bootstrap attempt body and candidate worker
+pools remain there. Policy tests use fake effects and in-memory populations.
 The agent executor owns
 durable retry numbering, framework gates, and round transactions. These built-in
 policies receive typed `AgentTurns`, `RoundEffects`, and profile effect ports;

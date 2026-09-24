@@ -265,3 +265,77 @@ class EvolveSearch:
 def parallel_enabled(max_parallelism: int, *, supported: bool) -> bool:
     """Allow concurrent evaluation only when the environment supports it."""
     return max_parallelism > 1 and supported
+
+
+class EvolveRunEffects(Protocol):
+    """Concrete work and reporting required by the run-level scheduler."""
+
+    def bootstrap(self) -> Individual | None:
+        """Establish and record the first passing seed in the shared population."""
+        ...
+
+    def bootstrap_failed(self) -> None:
+        """Report exhausted bootstrap attempts."""
+        ...
+
+    def parallel_unsupported(self, max_parallelism: int) -> None:
+        """Report a requested concurrency level that cannot be used."""
+        ...
+
+    def begin_generation(
+        self, generation: int, max_generations: int, population_size: int, passed_count: int
+    ) -> None:
+        """Open generation-scoped logs and progress."""
+        ...
+
+    def run_serial(self, generation: int) -> None:
+        """Evaluate one generation on the shared context."""
+        ...
+
+    def run_parallel(self, generation: int) -> None:
+        """Evaluate one generation in isolated contexts."""
+        ...
+
+    def finalize(self, frontier: list[Individual] | None, best: Individual | None) -> None:
+        """Report the final frontier and materialize the selected candidate."""
+        ...
+
+
+@dataclass
+class EvolveRunScheduler:
+    """Schedule resume/bootstrap, generations, checkpoints, and final selection."""
+
+    search: EvolveSearch
+    search_effects: SearchEffects
+    effects: EvolveRunEffects
+    max_generations: int
+    max_parallelism: int
+    supports_parallel: bool
+
+    def run(self) -> bool:
+        """Complete the configured budget, or stop if bootstrap finds no seed."""
+        if self.search.needs_bootstrap() and self.effects.bootstrap() is None:
+            self.effects.bootstrap_failed()
+            return False
+        parallel = parallel_enabled(self.max_parallelism, supported=self.supports_parallel)
+        if self.max_parallelism > 1 and not parallel:
+            self.effects.parallel_unsupported(self.max_parallelism)
+        for generation in range(1, self.max_generations + 1):
+            self.effects.begin_generation(
+                generation,
+                self.max_generations,
+                len(self.search.population),
+                len(self.search.population.passed),
+            )
+            if parallel:
+                self.effects.run_parallel(generation)
+            else:
+                self.effects.run_serial(generation)
+            self.search.complete_generation(generation, self.search_effects)
+        frontier = (
+            self.search.population.frontier(self.search.space)
+            if self.search.space.objectives
+            else None
+        )
+        self.effects.finalize(frontier, self.search.final_choice())
+        return True

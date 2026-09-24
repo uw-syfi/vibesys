@@ -66,10 +66,10 @@ from vibesys.loops.evolve.policy_flow import (
     CandidateIdentity,
     CandidateJudgement,
     CandidateOutcome,
+    EvolveRunScheduler,
     EvolveSearch,
     SelectionSettings,
     evaluate_candidate,
-    parallel_enabled,
 )
 from vibesys.loops.evolve.population import (
     Individual,
@@ -1358,7 +1358,7 @@ def _initialize_search_policy(  # noqa: PLR0913  # tracked: #288
     return policy_name, policy
 
 
-def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
+def run_evolve_loop(  # noqa: C901, PLR0913  # tracked: #288
     config: Config,
     exp_name: str,
     input_path: str,
@@ -1582,15 +1582,14 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     )
 
     rng = random.Random(seed)  # noqa: S311  # tracked: #288
+    search = EvolveSearch(population, policy, space)
 
-    try:
-        # Bootstrap phase: guarantee a passing generation-0 seed before the
-        # generation loop, so evolution never cold-starts. Skipped when a
-        # passing individual already exists (e.g. --resume).
-        search = EvolveSearch(population, policy, space)
-        search_effects = _LoopSearchEffects(ctx, state_store)
-        if search.needs_bootstrap():
-            seed_individual = _bootstrap_seed(
+    class RunEffects:
+        """Bind scheduler effects to the opened evolve run."""
+
+        def bootstrap(self) -> Individual | None:
+            """Create a passing generation-zero seed when needed."""
+            return _bootstrap_seed(
                 ctx,
                 objective=objective,
                 space=space,
@@ -1606,116 +1605,126 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 accuracy_timeout_seconds=accuracy_timeout_seconds,
                 benchmark_contract=benchmark_contract,
             )
-            if seed_individual is None:
-                ctx.lprint(
-                    "[evolutionary] bootstrap could not produce a passing seed in "
-                    f"{bootstrap_max_attempts} attempt(s); aborting before the "
-                    "generation loop."
-                )
-                return False
 
-        # The selected run environment declares whether isolated candidate
-        # evaluations can execute concurrently. Local single-device backends
-        # normally leave this false; remote deployment adapters may enable it.
-        env_kind = ctx.run_environment_view.env_kind
-        supports_parallel = ctx.run_environment_view.supports_parallel_candidate_evaluation
-        parallel = parallel_enabled(max_parallelism, supported=supports_parallel)
-        if max_parallelism > 1 and not parallel:
+        def bootstrap_failed(self) -> None:
+            """Report an exhausted first-seed budget."""
+            ctx.lprint(
+                "[evolutionary] bootstrap could not produce a passing seed in "
+                f"{bootstrap_max_attempts} attempt(s); aborting before the "
+                "generation loop."
+            )
+
+        def parallel_unsupported(self, max_parallelism: int) -> None:
+            """Report the environment's serial-only capability."""
             ctx.lprint(
                 f"[parallel] --max-parallelism={max_parallelism} ignored: parallel "
                 "candidate evaluation is unsupported by the selected environment "
-                f"(env_kind={env_kind}); running serially"
+                f"(env_kind={ctx.run_environment_view.env_kind}); running serially"
             )
 
-        for generation in range(1, max_generations + 1):
+        def begin_generation(
+            self, generation: int, max_generations: int, population_size: int, passed_count: int
+        ) -> None:
+            """Open the generation's log file and print its progress header."""
             ctx.switch_log_file(f"gen{generation:03d}")
             ctx.lprint(
                 f"\n{'=' * 60}\n  Generation {generation}/{max_generations} — "
-                f"population={len(population)} (passed={len(population.passed)})\n"
+                f"population={population_size} (passed={passed_count})\n"
                 f"{'=' * 60}\n"
             )
 
-            if parallel:
-                _run_generation_parallel(
-                    ctx,
-                    config=config,
-                    agent_backend=agent_backend,
-                    cli_provider=cli_provider,
-                    max_parallelism=max_parallelism,
-                    generation=generation,
-                    children_per_generation=children_per_generation,
-                    population=population,
-                    state_store=state_store,
-                    rng=rng,
-                    k_top_inspirations=k_top_inspirations,
-                    k_random_inspirations=k_random_inspirations,
-                    selection_temperature=selection_temperature,
-                    objective=objective,
-                    space=space,
-                    frontier_bias=frontier_bias,
-                    modality=modality,
-                    domain_definition=domain_definition,
-                    pass_criteria=pass_criteria,
-                    keep_deployments=keep_deployments,
-                    search_policy=policy,
-                    accuracy_timeout_seconds=accuracy_timeout_seconds,
-                    benchmark_contract=benchmark_contract,
-                )
-            else:
-                _run_generation_serial(
-                    ctx,
-                    generation=generation,
-                    max_generations=max_generations,
-                    children_per_generation=children_per_generation,
-                    population=population,
-                    state_store=state_store,
-                    rng=rng,
-                    k_top_inspirations=k_top_inspirations,
-                    k_random_inspirations=k_random_inspirations,
-                    selection_temperature=selection_temperature,
-                    objective=objective,
-                    space=space,
-                    frontier_bias=frontier_bias,
-                    modality=modality,
-                    domain_definition=domain_definition,
-                    pass_criteria=pass_criteria,
-                    keep_deployments=keep_deployments,
-                    search_policy=policy,
-                    accuracy_timeout_seconds=accuracy_timeout_seconds,
-                    benchmark_contract=benchmark_contract,
-                )
-
-            search.complete_generation(generation, search_effects)
-
-        if space.objectives:
-            front = population.frontier(space)
-            if front:
-                ctx.lprint(f"\nFinal Pareto frontier ({len(front)} individuals):")
-                for ind in front:
-                    metrics_repr = " ".join(
-                        f"{o.name}={ind.metrics.get(o.name, 'n/a'):g}"
-                        if isinstance(ind.metrics.get(o.name), (int, float))
-                        else f"{o.name}=n/a"
-                        for o in space.objectives
-                    )
-                    ctx.lprint(
-                        f"  #{ind.id}: {metrics_repr} "
-                        f"(commit {ind.commit[:8] if ind.commit else 'n/a'})"
-                    )
-            else:
-                ctx.lprint("\nFrontier is empty (no individual reported all objective metrics).")
-
-        best = search.final_choice()
-        if best is not None:
-            _materialize_selected_candidate(ctx, best)
-            ctx.lprint(
-                f"\nFinal scalar-best: individual #{best.id} "
-                f"perf={best.perf_metric} {best.perf_unit or ''} "
-                f"(commit {best.commit[:8] if best.commit else 'n/a'})"
+        def run_serial(self, generation: int) -> None:
+            """Evaluate offspring on the shared run context."""
+            _run_generation_serial(
+                ctx,
+                generation=generation,
+                max_generations=max_generations,
+                children_per_generation=children_per_generation,
+                population=population,
+                state_store=state_store,
+                rng=rng,
+                k_top_inspirations=k_top_inspirations,
+                k_random_inspirations=k_random_inspirations,
+                selection_temperature=selection_temperature,
+                objective=objective,
+                space=space,
+                frontier_bias=frontier_bias,
+                modality=modality,
+                domain_definition=domain_definition,
+                pass_criteria=pass_criteria,
+                keep_deployments=keep_deployments,
+                search_policy=policy,
+                accuracy_timeout_seconds=accuracy_timeout_seconds,
+                benchmark_contract=benchmark_contract,
             )
-        else:
-            ctx.lprint("\nNo passing individual produced. Inspect logs.")
-        return True  # noqa: TRY300  # tracked: #288
+
+        def run_parallel(self, generation: int) -> None:
+            """Evaluate offspring in isolated candidate contexts."""
+            _run_generation_parallel(
+                ctx,
+                config=config,
+                agent_backend=agent_backend,
+                cli_provider=cli_provider,
+                max_parallelism=max_parallelism,
+                generation=generation,
+                children_per_generation=children_per_generation,
+                population=population,
+                state_store=state_store,
+                rng=rng,
+                k_top_inspirations=k_top_inspirations,
+                k_random_inspirations=k_random_inspirations,
+                selection_temperature=selection_temperature,
+                objective=objective,
+                space=space,
+                frontier_bias=frontier_bias,
+                modality=modality,
+                domain_definition=domain_definition,
+                pass_criteria=pass_criteria,
+                keep_deployments=keep_deployments,
+                search_policy=policy,
+                accuracy_timeout_seconds=accuracy_timeout_seconds,
+                benchmark_contract=benchmark_contract,
+            )
+
+        def finalize(self, frontier: list[Individual] | None, best: Individual | None) -> None:
+            """Report Pareto results and materialize the scalar champion."""
+            if frontier is not None:
+                if frontier:
+                    ctx.lprint(f"\nFinal Pareto frontier ({len(frontier)} individuals):")
+                    for individual in frontier:
+                        metrics_repr = " ".join(
+                            f"{axis.name}={individual.metrics.get(axis.name, 'n/a'):g}"
+                            if isinstance(individual.metrics.get(axis.name), (int, float))
+                            else f"{axis.name}=n/a"
+                            for axis in space.objectives
+                        )
+                        ctx.lprint(
+                            f"  #{individual.id}: {metrics_repr} "
+                            f"(commit {individual.commit[:8] if individual.commit else 'n/a'})"
+                        )
+                else:
+                    ctx.lprint(
+                        "\nFrontier is empty (no individual reported all objective metrics)."
+                    )
+            if best is not None:
+                _materialize_selected_candidate(ctx, best)
+                ctx.lprint(
+                    f"\nFinal scalar-best: individual #{best.id} "
+                    f"perf={best.perf_metric} {best.perf_unit or ''} "
+                    f"(commit {best.commit[:8] if best.commit else 'n/a'})"
+                )
+            else:
+                ctx.lprint("\nNo passing individual produced. Inspect logs.")
+
+    try:
+        return EvolveRunScheduler(
+            search=search,
+            search_effects=_LoopSearchEffects(ctx, state_store),
+            effects=RunEffects(),
+            max_generations=max_generations,
+            max_parallelism=max_parallelism,
+            supports_parallel=ctx.run_environment_view.supports_parallel_candidate_evaluation,
+        ).run()
     except KeyboardInterrupt:
         ctx.lprint("[evolutionary] interrupted; population preserved.")
         return False

@@ -12,6 +12,7 @@ from vibesys.loops.evolve.policy_flow import (
     CandidateIdentity,
     CandidateJudgement,
     CandidateOutcome,
+    EvolveRunScheduler,
     EvolveSearch,
     SelectionSettings,
     evaluate_candidate,
@@ -19,7 +20,7 @@ from vibesys.loops.evolve.policy_flow import (
 )
 from vibesys.loops.evolve.population import Individual, Population
 from vibesys.loops.evolve.search_policy import SearchSelection
-from vibesys.loops.metrics import MetricSpace
+from vibesys.loops.metrics import MetricSpace, Objective
 
 
 @dataclass
@@ -216,3 +217,198 @@ def test_failed_candidate_is_persisted_without_registering_search_code() -> None
     assert policy.events == []
     assert effects.events[0] == "save:1"
     assert "FAILED" in effects.events[1]
+
+
+@dataclass
+class FakeRunEffects:
+    population: Population
+    timeline: list[str]
+    bootstrap_succeeds: bool = True
+    final_best: Individual | None = None
+    final_frontier: list[Individual] | None = None
+
+    def bootstrap(self) -> Individual | None:
+        self.timeline.append("bootstrap")
+        if not self.bootstrap_succeeds:
+            return None
+        seed = Individual(
+            id=self.population.next_id(),
+            generation=0,
+            parent_id=None,
+            passed=True,
+            commit="seed",
+            perf_metric=0.0,
+        )
+        self.population.add(seed)
+        return seed
+
+    def bootstrap_failed(self) -> None:
+        self.timeline.append("bootstrap_failed")
+
+    def parallel_unsupported(self, max_parallelism: int) -> None:
+        self.timeline.append(f"parallel_unsupported:{max_parallelism}")
+
+    def begin_generation(
+        self, generation: int, max_generations: int, population_size: int, passed_count: int
+    ) -> None:
+        self.timeline.append(
+            f"begin:{generation}/{max_generations}:population={population_size}:passed={passed_count}"
+        )
+
+    def run_serial(self, generation: int) -> None:
+        self.timeline.append(f"serial:{generation}")
+        self._record_child(generation)
+
+    def run_parallel(self, generation: int) -> None:
+        self.timeline.append(f"parallel:{generation}")
+        self._record_child(generation)
+
+    def _record_child(self, generation: int) -> None:
+        self.population.add(
+            Individual(
+                id=self.population.next_id(),
+                generation=generation,
+                parent_id=1,
+                passed=True,
+                commit=f"child-{generation}",
+                perf_metric=float(generation),
+            )
+        )
+
+    def finalize(self, frontier: list[Individual] | None, best: Individual | None) -> None:
+        self.timeline.append("finalize")
+        self.final_frontier = frontier
+        self.final_best = best
+
+
+def test_run_scheduler_bootstraps_then_completes_all_serial_generations() -> None:
+    timeline: list[str] = []
+    population = Population()
+    policy = FakeSearchPolicy(None, timeline)
+    effects = FakeRunEffects(population, timeline)
+    scheduler = EvolveRunScheduler(
+        EvolveSearch(population, policy, MetricSpace()),
+        FakeSearchEffects(timeline),
+        effects,
+        max_generations=2,
+        max_parallelism=1,
+        supports_parallel=False,
+    )
+
+    assert scheduler.run()
+    assert effects.final_best is not None
+    assert effects.final_best.commit == "child-2"
+    assert timeline == [
+        "bootstrap",
+        "begin:1/2:population=1:passed=1",
+        "serial:1",
+        "finish:1",
+        "checkpoint:evolve: complete generation 1",
+        "begin:2/2:population=2:passed=2",
+        "serial:2",
+        "finish:2",
+        "checkpoint:evolve: complete generation 2",
+        "finalize",
+    ]
+
+
+def test_run_scheduler_resumes_with_parallel_dispatch() -> None:
+    timeline: list[str] = []
+    seed = Individual(id=1, generation=0, parent_id=None, passed=True, commit="seed")
+    population = Population([seed])
+    effects = FakeRunEffects(population, timeline)
+    scheduler = EvolveRunScheduler(
+        EvolveSearch(population, FakeSearchPolicy(None, timeline), MetricSpace()),
+        FakeSearchEffects(timeline),
+        effects,
+        max_generations=1,
+        max_parallelism=3,
+        supports_parallel=True,
+    )
+
+    assert scheduler.run()
+    assert timeline == [
+        "begin:1/1:population=1:passed=1",
+        "parallel:1",
+        "finish:1",
+        "checkpoint:evolve: complete generation 1",
+        "finalize",
+    ]
+
+
+def test_run_scheduler_stops_before_generation_when_bootstrap_fails() -> None:
+    timeline: list[str] = []
+    population = Population()
+    scheduler = EvolveRunScheduler(
+        EvolveSearch(population, FakeSearchPolicy(None, timeline), MetricSpace()),
+        FakeSearchEffects(timeline),
+        FakeRunEffects(population, timeline, bootstrap_succeeds=False),
+        max_generations=3,
+        max_parallelism=2,
+        supports_parallel=True,
+    )
+
+    assert scheduler.run() is False
+    assert timeline == ["bootstrap", "bootstrap_failed"]
+
+
+def test_run_scheduler_downgrades_unsupported_parallel_mode() -> None:
+    timeline: list[str] = []
+    seed = Individual(id=1, generation=0, parent_id=None, passed=True, commit="seed")
+    population = Population([seed])
+    scheduler = EvolveRunScheduler(
+        EvolveSearch(population, FakeSearchPolicy(None, timeline), MetricSpace()),
+        FakeSearchEffects(timeline),
+        FakeRunEffects(population, timeline),
+        max_generations=1,
+        max_parallelism=4,
+        supports_parallel=False,
+    )
+
+    assert scheduler.run()
+    assert timeline[:3] == [
+        "parallel_unsupported:4",
+        "begin:1/1:population=1:passed=1",
+        "serial:1",
+    ]
+
+
+def test_run_scheduler_sends_frontier_and_scalar_choice_to_finalizer() -> None:
+    timeline: list[str] = []
+    low = Individual(
+        id=1,
+        generation=0,
+        parent_id=None,
+        passed=True,
+        commit="low",
+        perf_metric=1.0,
+        metrics={"throughput": 1.0},
+    )
+    high = Individual(
+        id=2,
+        generation=0,
+        parent_id=None,
+        passed=True,
+        commit="high",
+        perf_metric=2.0,
+        metrics={"throughput": 2.0},
+    )
+    population = Population([low, high])
+    effects = FakeRunEffects(population, timeline)
+    scheduler = EvolveRunScheduler(
+        EvolveSearch(
+            population,
+            FakeSearchPolicy(None, timeline),
+            MetricSpace(objectives=(Objective(name="throughput", direction="max"),)),
+        ),
+        FakeSearchEffects(timeline),
+        effects,
+        max_generations=0,
+        max_parallelism=1,
+        supports_parallel=False,
+    )
+
+    assert scheduler.run()
+    assert effects.final_frontier == [high]
+    assert effects.final_best is high
+    assert timeline == ["finalize"]
