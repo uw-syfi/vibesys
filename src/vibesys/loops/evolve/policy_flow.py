@@ -45,7 +45,7 @@ class SelectionSettings:
 class SearchEffects(Protocol):
     """Persistence, code lookup, and reporting needed by the search policy."""
 
-    def checkpoint(self, label: str) -> None:
+    async def checkpoint(self, label: str) -> None:
         """Commit durable policy state."""
         ...
 
@@ -53,11 +53,11 @@ class SearchEffects(Protocol):
         """Write the current population."""
         ...
 
-    def retain_candidate(self, label: str, commit: str) -> None:
+    async def retain_candidate(self, label: str, commit: str) -> None:
         """Keep a candidate commit reachable."""
         ...
 
-    def candidate_code(self, commit: str) -> str:
+    async def candidate_code(self, commit: str) -> str:
         """Read the candidate patch when the search policy needs it."""
         ...
 
@@ -78,7 +78,7 @@ class EvolveSearch:
     search_policy: SearchPolicy
     space: MetricSpace
 
-    def plan(
+    async def plan(
         self, effects: SearchEffects, *, rng: random.Random, settings: SelectionSettings
     ) -> SearchSelection | None:
         """Select from current population and checkpoint the policy's sampler state."""
@@ -91,12 +91,12 @@ class EvolveSearch:
             space=self.space,
             frontier_bias=settings.frontier_bias,
         )
-        effects.checkpoint("evolve: record search selection")
+        await effects.checkpoint("evolve: record search selection")
         if selection is None:
             effects.warn("no passing parent available; skipping candidate")
         return selection
 
-    def record(
+    async def record(
         self, outcome: CandidateOutcome, *, generation: int, effects: SearchEffects
     ) -> Individual:
         """Assign a stable ID, persist, and register a passing candidate."""
@@ -116,7 +116,7 @@ class EvolveSearch:
             policy_target_island=outcome.target_island,
         )
         if individual.commit:
-            effects.retain_candidate(f"individual-{individual.id}", individual.commit)
+            await effects.retain_candidate(f"individual-{individual.id}", individual.commit)
         self.population.add(individual)
         effects.save_population(self.population)
         if outcome.passed:
@@ -124,7 +124,7 @@ class EvolveSearch:
                 self.search_policy.record(
                     individual,
                     code=(
-                        effects.candidate_code(individual.commit)
+                        await effects.candidate_code(individual.commit)
                         if self.search_policy.requires_code
                         else ""
                     ),

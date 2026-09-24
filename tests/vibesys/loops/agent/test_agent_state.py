@@ -5,7 +5,7 @@ import math
 import pytest
 from pydantic import ValidationError
 
-from vibesys.loops.agent.model import AgentRunState, Hypothesis
+from vibesys.loops.agent.state import AgentRunState, Hypothesis
 from vibesys.schemas import OrchestratorPlan
 
 

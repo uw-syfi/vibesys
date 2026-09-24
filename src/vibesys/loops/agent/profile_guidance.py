@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.loops.agent.model import ProfileBottleneck
+from vibesys.loops.agent.state import ProfileBottleneck
 
 if TYPE_CHECKING:
     from vibesys.evaluators.input_manifest import ProfileGuidedInput

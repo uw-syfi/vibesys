@@ -11,7 +11,7 @@ from vibesys.loops.agent.hypotheses import (
     start_hypothesis,
     update_active_hypothesis,
 )
-from vibesys.loops.agent.model import (
+from vibesys.loops.agent.state import (
     AgentRunState,
     ProfileAttributionSample,
     ProfileBottleneck,
@@ -26,8 +26,7 @@ if TYPE_CHECKING:
 
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.events import ExperimentsChangeReason
-    from vibesys.loops.agent.model import Hypothesis
-    from vibesys.loops.agent.state import AgentRunStateStore
+    from vibesys.loops.agent.state import AgentRunStateStore, Hypothesis
     from vibesys.run import LoopContext
     from vibesys.schemas import OrchestratorPlan
     from vs_loop_state.api import RoundRecord
@@ -386,10 +385,12 @@ def publish_experiments_changed(
     state: AgentRunState,
     reason: ExperimentsChangeReason,
     changed_keys: Sequence[str | None],
+    *,
+    namespace: str,
 ) -> None:
     """Publish the committed agent state hint, then announce its revision."""
     keys = tuple(key for key in changed_keys if key is not None)
-    ctx.publish_committed_state("agent", state, changed_keys=keys)
+    ctx.publish_committed_state(namespace, state, changed_keys=keys)
     ctx.events.emit(
         CoreEventType.EXPERIMENTS_CHANGED,
         data=ExperimentsChangedData(reason=reason, revision=state.experiment_revision),

@@ -13,7 +13,7 @@ from typing import Literal, TypedDict, Unpack
 from vibesys.api.agent import AgentRunProjection, agent_projection
 from vibesys.api.contracts import RunStatus
 from vibesys.loops.agent.hypotheses import measurement_delta_reason
-from vibesys.loops.agent.model import (
+from vibesys.loops.agent.state import (
     AgentRunState,
     Hypothesis,
     HypothesisMeasurement,

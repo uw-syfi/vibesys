@@ -12,7 +12,7 @@ from server.api.protocol import PerformanceQuery
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
-from vibesys.loops.agent.model import AgentRunState, Hypothesis, HypothesisMeasurement
+from vibesys.loops.agent.state import AgentRunState, Hypothesis, HypothesisMeasurement
 from vibesys.loops.agent.readmodel import project_run_view
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.schemas import OrchestratorPlan
@@ -134,7 +134,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         )
     )
 
-    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(state)
+    AgentRunStateStore(project.state.portable_namespace(run_id, "single")).save(state)
     response = _service(project, run_id).execute(PerformanceQuery())
 
     context = response.performance_context
@@ -152,7 +152,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
 
 def test_service_names_the_objective_before_the_first_measurement(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project", ("total_ops_per_sec:max",))
-    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(AgentRunState())
+    AgentRunStateStore(project.state.portable_namespace(run_id, "single")).save(AgentRunState())
 
     response = _service(project, run_id).execute(PerformanceQuery())
 

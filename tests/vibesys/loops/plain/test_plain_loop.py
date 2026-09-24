@@ -1,6 +1,6 @@
 """Integration tests for the issue-loop orchestrator.
 
-These tests mock ``vibesys.context.build_agent_client`` so the real
+These tests mock ``vibesys.orchestration.runtime.build_agent_client`` so the real
 agent CLI plumbing never executes. Each test exercises one focused
 behaviour of the drain-and-perf-eval outer loop in
 ``vibesys/plain/loop.py``.
@@ -12,7 +12,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -23,9 +23,9 @@ from vibesys.config import as_config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND
 from vibesys.errors import ConfigurationError
 from vibesys.evaluators.input_manifest import load_input_bundle
-from vibesys.loops.plain.entrypoint import PlainOrchestrator
-from vibesys.loops.plain.orchestration import PlainOrchestrationOptions, descriptor_from_options
-from vibesys.loops.plain.state import PlainStateStore
+from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
+from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
+from vibesys.loops.issue_queue.state import IssueQueueStateStore
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.runner import run_orchestration
 from vibesys.profilers import ProfilerKind
@@ -43,6 +43,24 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_issue_board.api import IssueBoard, IssueStatus
 from vs_project.api import OrchestrationRunManifest, Project, RunEnvironmentRecord
 
+
+class _SharedFakeClient:
+    """Keep one scripted client usable across independently closed role handles."""
+
+    def __init__(self, scripted: FakeAgentClient) -> None:
+        self._scripted = scripted
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._scripted, name)
+
+    def close(self) -> None:
+        """Leave the shared script open for the other roles."""
+
+
+def _share_client(mock_build_runner: MagicMock, fake: FakeAgentClient) -> None:
+    mock_build_runner.side_effect = lambda **_kwargs: _SharedFakeClient(fake)
+
+
 # ---------------------------------------------------------------------------
 # Helpers — factories and fixtures shared across tests
 # ---------------------------------------------------------------------------
@@ -54,7 +72,7 @@ def _run_plain_request(**kwargs) -> bool:  # noqa: ANN003  # tracked: #288
     bundle = load_input_bundle(Path(kwargs["input_path"]))
     profiler = kwargs.get("profiler_kind", ProfilerKind.AUTO)
     backend = kwargs.get("backend", DEFAULT_COMPUTE_BACKEND)
-    options = PlainOrchestrationOptions(
+    options = IssueQueueOptions(
         max_rounds=kwargs.get("max_rounds", 5),
         max_attempts_per_issue=kwargs.get("max_attempts_per_issue", 3),
         max_issues_per_perf_eval=kwargs.get("max_issues_per_perf_eval", 3),
@@ -79,7 +97,7 @@ def _run_plain_request(**kwargs) -> bool:  # noqa: ANN003  # tracked: #288
     async def execute() -> bool:
         integration = LocalRunIntegration()
         try:
-            return await run_orchestration(request, integration, PlainOrchestrator(descriptor))
+            return await run_orchestration(request, integration, IssueQueueOrchestrator(descriptor))
         finally:
             integration.close()
 
@@ -139,9 +157,9 @@ def _run_id(project_dir: Path) -> str:
     return runs[0].run_id
 
 
-def _plain_state_store(project_dir: Path) -> PlainStateStore:
+def _plain_state_store(project_dir: Path) -> IssueQueueStateStore:
     project = Project.open(project_dir)
-    return PlainStateStore(project.state.portable_namespace(_run_id(project_dir), "plain"))
+    return IssueQueueStateStore(project.state.portable_namespace(_run_id(project_dir), "plain"))
 
 
 def _plain_local_dir(project_dir: Path) -> Path:
@@ -180,7 +198,7 @@ command = ["python", "-c", "print('ok')"]
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_bootstrap_creates_initial_feature_issue_on_first_run(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -191,7 +209,7 @@ def test_bootstrap_creates_initial_feature_issue_on_first_run(  # noqa: ANN201  
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = _run_plain_request(
@@ -225,7 +243,7 @@ def test_bootstrap_creates_initial_feature_issue_on_first_run(  # noqa: ANN201  
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -239,7 +257,7 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -261,7 +279,7 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
     fake2.enqueue(
         "perf_eval", _make_perf_resp(new_issue_ids=[])
     )  # only perf_eval — nothing open to drain
-    mock_build_runner.return_value = fake2
+    _share_client(mock_build_runner, fake2)
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -282,7 +300,7 @@ def test_bootstrap_idempotent_on_resume(  # noqa: ANN201  # tracked: #288
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_v4_plain_budget_increase_requires_clean_workspace(
     mock_build_runner,  # noqa: ANN001
     mock_backend,  # noqa: ANN001, ARG001
@@ -293,7 +311,7 @@ def test_v4_plain_budget_increase_requires_clean_workspace(
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -332,7 +350,7 @@ def test_v4_plain_budget_increase_requires_clean_workspace(
     resumed = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     resumed.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
     resumed.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = resumed
+    _share_client(mock_build_runner, resumed)
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(**resume)
     updated = Project.open(exp_dir).state.load_run(run_id)
@@ -346,13 +364,13 @@ def test_v4_plain_budget_increase_requires_clean_workspace(
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_judge_pass_closes_issue(mock_build_runner, mock_backend, ref_file, tmp_path):  # noqa: ANN001, ANN201, ARG001  # tracked: #288
     fake = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(
@@ -373,7 +391,7 @@ def test_judge_pass_closes_issue(mock_build_runner, mock_backend, ref_file, tmp_
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_judge_fail_increments_attempts_and_keeps_open(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -390,7 +408,7 @@ def test_judge_fail_increments_attempts_and_keeps_open(  # noqa: ANN201  # track
         _make_judge_resp(1, verdict="pass"),
     )
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = _run_plain_request(
@@ -414,7 +432,7 @@ def test_judge_fail_increments_attempts_and_keeps_open(  # noqa: ANN201  # track
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_issue_blocks_after_max_attempts_exhausted(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -429,7 +447,7 @@ def test_issue_blocks_after_max_attempts_exhausted(  # noqa: ANN201  # tracked: 
         _make_judge_resp(1, verdict="fail", feedback="Still broken."),
         _make_judge_resp(1, verdict="fail", feedback="Still broken."),
     )
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = _run_plain_request(
@@ -480,7 +498,7 @@ def _spec_args_to_dict(args: Sequence[str]) -> dict[str, str]:
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_judge_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -496,7 +514,7 @@ def test_judge_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(
@@ -526,7 +544,7 @@ def test_judge_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_perf_eval_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -543,7 +561,7 @@ def test_perf_eval_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(
@@ -572,7 +590,7 @@ def test_perf_eval_invoke_receives_tracker_kwargs(  # noqa: ANN201  # tracked: #
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_judge_phase_calls_store_reload_after_invoke(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -585,7 +603,7 @@ def test_judge_phase_calls_store_reload_after_invoke(  # noqa: ANN201  # tracked
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     reload_call_order: list[str] = []
     invoke_call_order: list[str] = []
@@ -623,7 +641,7 @@ def test_judge_phase_calls_store_reload_after_invoke(  # noqa: ANN201  # tracked
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_implementer_invoke_has_no_tracker_kwargs(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -641,7 +659,7 @@ def test_implementer_invoke_has_no_tracker_kwargs(  # noqa: ANN201  # tracked: #
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(
@@ -675,7 +693,7 @@ def test_implementer_invoke_has_no_tracker_kwargs(  # noqa: ANN201  # tracked: #
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_perf_eval_runs_after_drain_complete(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -687,7 +705,7 @@ def test_perf_eval_runs_after_drain_complete(  # noqa: ANN201  # tracked: #288
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(
@@ -723,7 +741,7 @@ def test_perf_eval_runs_after_drain_complete(  # noqa: ANN201  # tracked: #288
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -737,7 +755,7 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -758,7 +776,7 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
     mock_build_runner.reset_mock()
     fake2 = FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
     fake2.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake2
+    _share_client(mock_build_runner, fake2)
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -782,7 +800,7 @@ def test_resume_with_bootstrap_done_skips_bootstrap_creation(  # noqa: ANN201  #
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -802,7 +820,7 @@ def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #2
         _make_judge_resp(1, verdict="fail", feedback="nope"),
         _make_judge_resp(1, verdict="fail", feedback="still nope"),
     )
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result1 = _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -829,7 +847,7 @@ def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #2
     fake2.enqueue("implementer", _make_impl_resp(1, summary="Fixed."))
     fake2.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake2.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake2
+    _share_client(mock_build_runner, fake2)
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result2 = _run_plain_request(
             config={"model": {"name": "claude-sonnet-4-6"}},
@@ -860,7 +878,7 @@ def test_resume_retries_previously_blocked_issue(  # noqa: ANN201  # tracked: #2
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -872,7 +890,7 @@ def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(  # n
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = _run_plain_request(
@@ -895,7 +913,7 @@ def test_run_returns_true_when_perf_eval_files_no_issues_after_clean_drain(  # n
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_state_json_written_with_bootstrap_done_after_run(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -907,7 +925,7 @@ def test_state_json_written_with_bootstrap_done_after_run(  # noqa: ANN201  # tr
     fake.enqueue("implementer", _make_impl_resp(1))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(
@@ -938,7 +956,7 @@ def test_state_json_written_with_bootstrap_done_after_run(  # noqa: ANN201  # tr
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_issue_loop_writes_per_issue_markdown_via_callback(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -953,7 +971,7 @@ def test_issue_loop_writes_per_issue_markdown_via_callback(  # noqa: ANN201  # t
     fake.enqueue("implementer", _make_impl_resp(1, summary="Implemented the streaming endpoint."))
     fake.enqueue("judge", _make_judge_resp(1, verdict="pass"))
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(
@@ -996,7 +1014,7 @@ def test_issue_loop_writes_per_issue_markdown_via_callback(  # noqa: ANN201  # t
 
 
 @patch("vibesys.backends.cuda.make_local_shell_sandbox")
-@patch("vibesys.context.build_agent_client")
+@patch("vibesys.orchestration.runtime.build_agent_client")
 def test_implementer_retry_user_prompt_includes_prior_judge_feedback(  # noqa: ANN201  # tracked: #288
     mock_build_runner,  # noqa: ANN001  # tracked: #288
     mock_backend,  # noqa: ANN001, ARG001  # tracked: #288
@@ -1023,7 +1041,7 @@ def test_implementer_retry_user_prompt_includes_prior_judge_feedback(  # noqa: A
         _make_judge_resp(1, verdict="pass"),
     )
     fake.enqueue("perf_eval", _make_perf_resp(new_issue_ids=[]))
-    mock_build_runner.return_value = fake
+    _share_client(mock_build_runner, fake)
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         _run_plain_request(

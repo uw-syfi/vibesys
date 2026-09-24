@@ -1,6 +1,6 @@
 """Tests for the per-issue markdown renderer (vibesys/plain/render.py)."""
 
-from vibesys.loops.plain.render import (
+from vibesys.loops.issue_queue.render import (
     issue_md_filename,
     issue_md_path,
     render_all,

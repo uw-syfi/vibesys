@@ -27,9 +27,9 @@ from vibesys.api import (
     RunResult,
     boot_trace,
 )
+from vibesys.api.evolve import resolve_openevolve_options
 from vibesys.api.request import (
     InputBundle,
-    OpenEvolveSearchConfig,
     validate_descriptor,
     with_operator_constraints,
 )
@@ -215,33 +215,17 @@ def _validate_evolve(args: argparse.Namespace) -> None:  # noqa: C901  # tracked
 
 def _resolve_openevolve_options(
     args: argparse.Namespace,
-) -> tuple[str | None, OpenEvolveSearchConfig | None]:
-    openevolve_defaults = OpenEvolveSearchConfig()
-    openevolve_values = (
-        args.openevolve_population_size,
-        args.openevolve_archive_size,
-        args.openevolve_num_islands,
-        args.openevolve_migration_interval,
-        args.openevolve_migration_rate,
+) -> tuple[str | None, dict[str, int | float | None]]:
+    return resolve_openevolve_options(
+        args.search_policy,
+        {
+            "openevolve_population_size": args.openevolve_population_size,
+            "openevolve_archive_size": args.openevolve_archive_size,
+            "openevolve_num_islands": args.openevolve_num_islands,
+            "openevolve_migration_interval": args.openevolve_migration_interval,
+            "openevolve_migration_rate": args.openevolve_migration_rate,
+        },
     )
-    openevolve_config = (
-        OpenEvolveSearchConfig(
-            population_size=args.openevolve_population_size or openevolve_defaults.population_size,
-            archive_size=args.openevolve_archive_size or openevolve_defaults.archive_size,
-            num_islands=args.openevolve_num_islands or openevolve_defaults.num_islands,
-            migration_interval=args.openevolve_migration_interval
-            or openevolve_defaults.migration_interval,
-            migration_rate=(
-                args.openevolve_migration_rate
-                if args.openevolve_migration_rate is not None
-                else openevolve_defaults.migration_rate
-            ),
-        )
-        if any(value is not None for value in openevolve_values)
-        else None
-    )
-    search_policy = args.search_policy or ("openevolve" if openevolve_config is not None else None)
-    return search_policy, openevolve_config
 
 
 def _validate_plain(args: argparse.Namespace) -> None:
@@ -308,11 +292,7 @@ def _evolve_policy_descriptor(
         "selection_temperature": args.selection_temperature,
         "seed": args.seed,
         "search_policy": search_policy,
-        "openevolve_population_size": openevolve.population_size if openevolve else None,
-        "openevolve_archive_size": openevolve.archive_size if openevolve else None,
-        "openevolve_num_islands": openevolve.num_islands if openevolve else None,
-        "openevolve_migration_interval": openevolve.migration_interval if openevolve else None,
-        "openevolve_migration_rate": openevolve.migration_rate if openevolve else None,
+        **openevolve,
         "frontier_bias": args.frontier_bias,
         "bootstrap_max_attempts": args.bootstrap_max_attempts,
         "keep_deployments": args.keep_deployments,

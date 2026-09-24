@@ -35,7 +35,7 @@ from vibesys.evaluators.input_manifest import (
     load_project_task,
 )
 from vibesys.events import CoreEventType
-from vibesys.loops.agent.model import AgentRunState
+from vibesys.loops.agent.state import AgentRunState
 from vibesys.loops.agent.orchestration import (
     AgentOrchestrationOptions,
     compare_resume_descriptors,

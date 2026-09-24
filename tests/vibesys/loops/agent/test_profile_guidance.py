@@ -8,7 +8,7 @@ import pytest
 
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.loops.agent import profile_guidance as runner
-from vibesys.loops.agent.model import ProfileBottleneck
+from vibesys.loops.agent.state import ProfileBottleneck
 
 if TYPE_CHECKING:
     from pathlib import Path

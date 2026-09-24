@@ -1,0 +1,24 @@
+## Observer-effect calibration
+
+Compare the profiled run with the most recent uninstrumented result for the
+same candidate, workload shape, and operating point. Prefer a recent retained
+point; run one targeted uninstrumented control only when no comparable result
+exists. Do not duplicate a full canonical sweep merely to calibrate a profile.
+
+Report the two headline values and their relative difference in `analysis` as
+`profiled_metric`, `control_metric`, and `observer_effect_fraction`. Classify
+phase attribution as follows:
+
+- `usable`: the values differ by at most 10%, and the capture method does not
+  add synchronization or otherwise change the critical path;
+- `perturbed`: they differ by more than 10%, or the capture method serializes,
+  reschedules, or changes the measured path;
+- `uncalibrated`: no comparable control is available.
+
+For `perturbed` or `uncalibrated` captures, profiler events may establish path
+activation, operation ordering, graph coverage, fallback, or the presence of a
+cost center. They must not be converted into exclusive phase shares, removable
+milliseconds, Amdahl ceilings, or a ranking of optimization hypotheses. Say so
+explicitly in `analysis`, `bottlenecks`, and `suggestions`. Accumulated CPU and
+CUDA times from overlapping asynchronous scopes are not additive end-to-end
+time even when observer overhead is small.

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
 from vibesys.evaluators.metrics import Measurement, MetricComparison, MetricSpace
-from vibesys.loops.agent.model import (
+from vibesys.loops.agent.state import (
     AgentRunState,
     Hypothesis,
     HypothesisMeasurement,

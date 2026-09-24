@@ -12,11 +12,10 @@ from __future__ import annotations
 import asyncio
 import json
 import shlex
-import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from tests.support.run_execution import run_execution_record
@@ -24,10 +23,10 @@ from tests.support.run_execution import run_execution_record
 from vibesys.config import Config, as_config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, DomainName
 from vibesys.domains.registry import resolve_domain
+from vibesys.evaluators.gates import framework_command_timeout
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import FrameworkWarningData
-from vibesys.loops.evolve import loop as evolve_loop
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
 from vibesys.loops.evolve.loop import (
     _candidate_code,
@@ -36,7 +35,6 @@ from vibesys.loops.evolve.loop import (
     _initialize_search_policy,
     _latest_wip_seed,
     _recent_failure_lessons,
-    _run_framework_benchmark_gate,
     _teardown_candidate_deployment,
 )
 from vibesys.loops.evolve.orchestration import EvolveOptions, descriptor_from_options
@@ -54,7 +52,7 @@ from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.runner import run_orchestration
 from vibesys.profilers import ProfilerKind
 from vibesys.render.sink import output_sink
-from vibesys.run import EventJournal, GitTracker, LoopContext, RunState, RunStateNamespace
+from vibesys.run import EventJournal, GitTracker, RunState, RunStateNamespace
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentSpec
@@ -134,13 +132,8 @@ def _discard_log(_message: str) -> None:
     """Drop log output emitted by a helper under test."""
 
 
-class _FakeLoopContext(LoopContext):
-    """A ``LoopContext`` exposing only the members a helper under test reads.
-
-    Subclassing the protocol keeps the fake assignable to the declared
-    parameter type. Members a test does not wire up stay unset, so a helper
-    that reaches past what the test set up fails loudly.
-    """
+class _FakeLoopContext:
+    """A small host-capability fake for evolve's focused helper assertions."""
 
     def __init__(  # noqa: PLR0913  # tracked: #288
         self,
@@ -156,17 +149,44 @@ class _FakeLoopContext(LoopContext):
             self.events = events
         if git is not None:
             self.git = git
+            self.workspaces = SimpleNamespace(
+                root=SimpleNamespace(candidate_patch=AsyncMock(side_effect=git.candidate_patch))
+            )
         if state is not None:
             self.state = state
         if run_environment is not None:
             self.run_environment = run_environment
         if run_environment_view is not None:
             self.run_environment_view = run_environment_view
+        if run_environment is not None:
+            self.environment = SimpleNamespace(
+                candidate_runtime=lambda generation, child_idx, scope=None: (
+                    run_environment.candidate_runtime(  # noqa: ARG005
+                        self.run_environment_view, generation, child_idx
+                    )
+                ),
+                teardown_deployment=AsyncMock(
+                    side_effect=lambda name: run_environment.teardown_deployment(name, log=log)
+                ),
+            )
         self._log = log
 
-    def lprint(self, text: str) -> None:
+    def log(self, text: str) -> None:
         """Record a log line the same way the real context would emit it."""
         self._log(text)
+
+
+class _SharedFakeClient:
+    """Give each spawned handle independent close ownership over one script."""
+
+    def __init__(self, scripted: FakeAgentClient) -> None:
+        self._scripted = scripted
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._scripted, name)
+
+    def close(self) -> None:
+        """The scripted client remains available to other role handles."""
 
 
 # ---------------------------------------------------------------------------
@@ -371,11 +391,14 @@ def _invoke_loop(
 
     with (
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
-        patch("vibesys.context.build_agent_client", return_value=runner),
+        patch(
+            "vibesys.orchestration.runtime.build_agent_client",
+            side_effect=lambda **_kwargs: _SharedFakeClient(runner),
+        ),
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
         patch(
             "vibesys.loops.evolve.loop._run_framework_accuracy_gate",
-            accuracy_gate,
+            AsyncMock(side_effect=accuracy_gate),
         ),
     ):
         return asyncio.run(execute())
@@ -1016,7 +1039,7 @@ def test_candidate_code_is_multi_file_but_excludes_framework_state(tmp_path):  #
     commit = tracker.current_sha()
 
     assert commit is not None
-    code = _candidate_code(_FakeLoopContext(git=tracker), commit)
+    code = asyncio.run(_candidate_code(_FakeLoopContext(git=tracker), commit))
     assert "src/lib.rs" in code
     assert "src/ffi.rs" in code
     assert "population.json" not in code
@@ -1026,14 +1049,16 @@ def test_programmatic_openevolve_config_infers_policy(tmp_path):  # noqa: ANN001
     ctx, state_store = _stateful_context(tmp_path)
     config = OpenEvolveSearchConfig(num_islands=1)
 
-    name, policy = _initialize_search_policy(
-        ctx,
-        Population(),
-        state_store,
-        requested=None,
-        seed=1,
-        config=config,
-        space=MetricSpace(),
+    name, policy = asyncio.run(
+        _initialize_search_policy(
+            ctx,
+            Population(),
+            state_store,
+            requested=None,
+            seed=1,
+            config=config,
+            space=MetricSpace(),
+        )
     )
 
     assert name.value == "openevolve"
@@ -1045,14 +1070,16 @@ def test_programmatic_openevolve_config_rejects_vibesys_policy(tmp_path):  # noq
     ctx, state_store = _stateful_context(tmp_path)
 
     with pytest.raises(ValueError, match="requires the OpenEvolve search policy"):
-        _initialize_search_policy(
-            ctx,
-            Population(),
-            state_store,
-            requested="vibesys",
-            seed=1,
-            config=OpenEvolveSearchConfig(),
-            space=MetricSpace(),
+        asyncio.run(
+            _initialize_search_policy(
+                ctx,
+                Population(),
+                state_store,
+                requested="vibesys",
+                seed=1,
+                config=OpenEvolveSearchConfig(),
+                space=MetricSpace(),
+            )
         )
 
 
@@ -1154,9 +1181,9 @@ def test_teardown_candidate_deployment_delegates_to_run_environment():  # noqa: 
     run_env = MagicMock()
     ctx = _FakeLoopContext(run_environment=run_env)
 
-    _teardown_candidate_deployment(ctx, "vibesys-run-g1c2", keep=False)
+    asyncio.run(_teardown_candidate_deployment(ctx, "vibesys-run-g1c2", keep=False))
 
-    run_env.teardown_deployment.assert_called_once_with("vibesys-run-g1c2", log=ctx.lprint)
+    assert run_env.teardown_deployment.call_args.args[0] == "vibesys-run-g1c2"
 
 
 def test_teardown_candidate_deployment_noop_when_kept_or_absent():  # noqa: ANN201  # tracked: #288
@@ -1164,9 +1191,9 @@ def test_teardown_candidate_deployment_noop_when_kept_or_absent():  # noqa: ANN2
     ctx = _FakeLoopContext(run_environment=run_env)
 
     # Opt-out: keep the app for post-hoc inspection.
-    _teardown_candidate_deployment(ctx, "vibesys-run-g1c2", keep=True)
+    asyncio.run(_teardown_candidate_deployment(ctx, "vibesys-run-g1c2", keep=True))
     # No per-candidate deployment (non-Modal env).
-    _teardown_candidate_deployment(ctx, None, keep=False)
+    asyncio.run(_teardown_candidate_deployment(ctx, None, keep=False))
 
     run_env.teardown_deployment.assert_not_called()
 
@@ -1213,24 +1240,22 @@ def test_evaluate_in_subcontext_skips_parent_without_commit():  # noqa: ANN201  
     seen = []
     unsubscribe = output_sink().subscribe(seen.append)
     try:
-        outcome = _evaluate_in_subcontext(
-            parent_ctx,
-            config=Config.model_validate({"model": {"name": "m"}}),
-            agent_backend=None,
-            cli_provider=None,
-            generation=2,
-            child_idx=1,
-            parent=parentless,
-            inspirations=[],
-            objective="obj",
-            space=MetricSpace(),
-            modality="text_generation",
-            domain_definition=_LLM_SERVING_DOMAIN,
-            pass_criteria="crit",  # noqa: S106  # tracked: #288
-            keep_deployments=False,
-            policy_parent_id=None,
-            target_island=None,
-            worktree_lock=threading.Lock(),
+        outcome = asyncio.run(
+            _evaluate_in_subcontext(
+                parent_ctx,
+                generation=2,
+                child_idx=1,
+                parent=parentless,
+                inspirations=[],
+                objective="obj",
+                space=MetricSpace(),
+                modality="text_generation",
+                domain_definition=_LLM_SERVING_DOMAIN,
+                pass_criteria="crit",  # noqa: S106  # tracked: #288
+                keep_deployments=False,
+                policy_parent_id=None,
+                target_island=None,
+            )
         )
     finally:
         unsubscribe()
@@ -1320,55 +1345,20 @@ def test_benchmark_gate_extends_timeout_by_environment_setup_allowance():  # noq
     """Environment-owned deployment/readiness time must not eat the benchmark
     command's declared budget: the evolve gate forwards setup + contract, the
     same setup-aware policy the agent path uses."""
-    from vibesys.evaluators.gates import BenchmarkContract  # noqa: PLC0415  # tracked: #288
-    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
-
     ctx = _FakeLoopContext(
         run_environment_view=SimpleNamespace(framework_setup_timeout_seconds=90),
         events=MagicMock(),
     )
-    contract = BenchmarkContract(
-        result_spec=BenchmarkResult(json_argument="--json", metric="total_ops_per_sec"),
-        timeout_seconds=120,
-    )
-    gate = MagicMock(return_value=_passing_gate_result(1.0))
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
-        _run_framework_benchmark_gate(
-            ctx,
-            generation=0,
-            child_idx=0,
-            contract=contract,
-            space=MetricSpace(),
-        )
-
-    # 120 (contract budget) + 90 (environment setup allowance), not the bare 120.
-    assert gate.call_args.kwargs["timeout_seconds"] == 210
+    assert framework_command_timeout(ctx, 120) == 210
 
 
 def test_benchmark_gate_timeout_unchanged_without_setup_allowance():  # noqa: ANN201  # tracked: #288
     """With no setup allowance the forwarded budget is exactly the contract's."""
-    from vibesys.evaluators.gates import BenchmarkContract  # noqa: PLC0415  # tracked: #288
-    from vibesys.evaluators.input_manifest import BenchmarkResult  # noqa: PLC0415  # tracked: #288
-
     ctx = _FakeLoopContext(
         run_environment_view=SimpleNamespace(framework_setup_timeout_seconds=0),
         events=MagicMock(),
     )
-    contract = BenchmarkContract(
-        result_spec=BenchmarkResult(json_argument="--json", metric="total_ops_per_sec"),
-        timeout_seconds=120,
-    )
-    gate = MagicMock(return_value=_passing_gate_result(1.0))
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
-        _run_framework_benchmark_gate(
-            ctx,
-            generation=0,
-            child_idx=0,
-            contract=contract,
-            space=MetricSpace(),
-        )
-
-    assert gate.call_args.kwargs["timeout_seconds"] == 120
+    assert framework_command_timeout(ctx, 120) == 120
 
 
 def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
@@ -1378,7 +1368,7 @@ def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path, ref_file):  # 
 
     runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(2))
     gate = MagicMock(side_effect=[_passing_gate_result(42.5), _passing_gate_result(43.75)])
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
         result = _invoke_loop(
             tmp_path,
             ref_file,
@@ -1417,7 +1407,7 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_pat
             feedback="Framework benchmark failed.\nbenchmark exploded"
         ),
     )
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", MagicMock(return_value=failing)):
+    with patch("vibesys.orchestration.runtime.run_benchmark_gate", MagicMock(return_value=failing)):
         result = _invoke_bootstrap(
             tmp_path,
             ref_file,
@@ -1438,7 +1428,7 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_pat
 def test_no_benchmark_contract_keeps_profiler_fitness(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(1))
     gate = MagicMock()
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
         result = _invoke_bootstrap(tmp_path, ref_file, runner)
 
     assert result is True
@@ -1486,7 +1476,7 @@ def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(tmp_path
     ]
     runner = FakeAgentClient().enqueue("profiler", *profiler_responses)
     gate = MagicMock(side_effect=[_passing_gate_result(42.5), _passing_gate_result(43.75)])
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
         result = _invoke_loop(
             tmp_path,
             ref_file,
@@ -1514,7 +1504,7 @@ def test_protocol_contract_records_the_evaluator_declared_unit(tmp_path, ref_fil
     """The recorded unit is the evaluator's declaration when it supplies one."""
     runner = FakeAgentClient()
     gate = MagicMock(return_value=_passing_gate_result(42.5, unit="ops/s"))
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
         result = _invoke_bootstrap(
             tmp_path,
             ref_file,
@@ -1536,13 +1526,4 @@ def test_evolve_accuracy_gate_extends_timeout_by_environment_setup_allowance(): 
     ctx = _FakeLoopContext(
         run_environment_view=SimpleNamespace(framework_setup_timeout_seconds=90),
     )
-    gate = MagicMock(return_value=SimpleNamespace(feedback=None))
-    with patch("vibesys.loops.evolve.loop.run_accuracy_gate", gate):
-        evolve_loop._run_framework_accuracy_gate(  # noqa: SLF001  # tracked: #288
-            ctx,
-            generation=0,
-            child_idx=0,
-            timeout_seconds=120,
-        )
-
-    assert gate.call_args.kwargs["timeout_seconds"] == 210
+    assert framework_command_timeout(ctx, 120) == 210

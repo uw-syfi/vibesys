@@ -17,7 +17,7 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError
-from vibesys.loops.agent.entrypoint import MultiAgentOrchestrator
+from vibesys.loops.multi.entrypoint import MultiAgentOrchestrator
 from vibesys.loops.agent.orchestration import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.agent.policy_support import (
     _INTERFACES,
@@ -28,7 +28,8 @@ from vibesys.loops.agent.policy_support import (
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts import PROMPTS_DIR, render_template
 
-_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
+_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
+_SINGLE_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "single"
 
 
 def test_domain_module_has_no_language_axis():  # noqa: ANN201  # tracked: #288
@@ -261,7 +262,7 @@ def _render_single_agent(
     )
     return render_template(
         "single_agent_round_prompt.j2",
-        template_dir=_TEMPLATE_DIR,
+        template_dir=_SINGLE_TEMPLATE_DIR,
         modality=None,
         interface=interface,
         profile_execution="local",

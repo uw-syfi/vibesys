@@ -28,14 +28,14 @@ from vibesys.loops.agent.hypotheses import (
     apply_strategy_updates,
     trusted_perf_provenance,
 )
-from vibesys.loops.agent.model import (
-    AgentRunState,
-    Hypothesis,
-    HypothesisResolution,
-)
 from vibesys.loops.agent.roles import (
     SharedAgentHandle,
     _invoke_read_only_role,
+)
+from vibesys.loops.agent.state import (
+    AgentRunState,
+    Hypothesis,
+    HypothesisResolution,
 )
 from vibesys.loops.profiler import mcp_spec as profiler_mcp_spec
 from vibesys.profilers import (
@@ -43,7 +43,7 @@ from vibesys.profilers import (
     profiler_definition,
     require_profiler_kind,
 )
-from vibesys.prompts import PROMPTS_DIR, render_template
+from vibesys.prompts import render_template
 from vibesys.render.sink import output_sink
 from vibesys.schemas import (
     CandidateDisposition,
@@ -83,8 +83,6 @@ if TYPE_CHECKING:
 # and artifact requirements belong to the selected domain and input bundle.
 _INTERFACES = ("inprocess", "service")
 DEFAULT_INTERFACE = "inprocess"
-
-_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 
 
 def _backfill_revert_commit(
@@ -808,6 +806,7 @@ def _is_fresh_cold_start(round_number: int, records: list[RoundRecord]) -> bool:
 def _run_pre_round_decision(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    template_dir: Path,
     agent: SharedAgentHandle,
     round_number: int,
     objective: str,
@@ -818,7 +817,7 @@ def _run_pre_round_decision(  # noqa: PLR0913  # tracked: #288
 ) -> PreRoundDecision:
     system_prompt = render_template(
         "orchestrator_pre_round_prompt.j2",
-        template_dir=_TEMPLATE_DIR,
+        template_dir=template_dir,
         objective=objective,
         objective_location=ctx.objective_location,
         regression_info=carry.regression_info,
@@ -888,6 +887,7 @@ def _effective_profiler_definition(  # noqa: ANN202  # tracked: #288
 def _run_profiler(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    template_dir: Path,
     agent: SharedAgentHandle,
     round_number: int,
     profile_focus: str,
@@ -908,7 +908,7 @@ def _run_profiler(  # noqa: PLR0913  # tracked: #288
     )
     system_prompt = render_template(
         template,
-        template_dir=_TEMPLATE_DIR,
+        template_dir=template_dir,
         profile_focus=profile_focus,
         benchmark_command=ctx.profiler_benchmark_command,
         modality=modality,
@@ -1016,6 +1016,7 @@ def _domain_render_context(
 def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    template_dir: Path,
     agent: SharedAgentHandle,
     agent_run_state: AgentRunState,
     round_number: int,
@@ -1043,7 +1044,7 @@ def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
     )
     system_prompt = render_template(
         "orchestrator_plan_prompt.j2",
-        template_dir=_TEMPLATE_DIR,
+        template_dir=template_dir,
         objective=objective,
         objective_location=ctx.objective_location,
         profiler_summary=profiler_summary,
@@ -1263,6 +1264,7 @@ def _validate_skill_selections(
 def _run_implementer(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    template_dir: Path,
     agent: SharedAgentHandle,
     round_number: int,
     retry: int,
@@ -1307,7 +1309,7 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
     )
     system_prompt = render_template(
         ("implementer_continuation_prompt.j2" if continuation_step else "implementer_prompt.j2"),
-        template_dir=_TEMPLATE_DIR,
+        template_dir=template_dir,
         reference_path=ctx.ref_name,
         modality=modality,
         interface=interface,
@@ -1396,6 +1398,7 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
 def _run_judge(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    template_dir: Path,
     agent: SharedAgentHandle,
     round_number: int,
     retry: int,
@@ -1450,7 +1453,7 @@ def _run_judge(  # noqa: PLR0913  # tracked: #288
     )
     system_prompt = render_template(
         "judge_prompt.j2",
-        template_dir=_TEMPLATE_DIR,
+        template_dir=template_dir,
         accuracy_command=ctx.judge_accuracy_command,
         benchmark_command=ctx.judge_benchmark_command,
         pass_criteria=plan.pass_criteria,
@@ -1548,6 +1551,7 @@ def _run_judge(  # noqa: PLR0913  # tracked: #288
 def _run_single_agent_round(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
+    template_dir: Path,
     agent: SharedAgentHandle,
     round_number: int,
     retry: int,
@@ -1601,7 +1605,7 @@ def _run_single_agent_round(  # noqa: PLR0913  # tracked: #288
     )
     system_prompt = render_template(
         "single_agent_round_prompt.j2",
-        template_dir=_TEMPLATE_DIR,
+        template_dir=template_dir,
         reference_path=ctx.ref_name,
         modality=modality,
         interface=interface,

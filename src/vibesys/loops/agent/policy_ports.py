@@ -13,9 +13,9 @@ if TYPE_CHECKING:
     from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent.hypothesis_controller import HypothesisEngine
-    from vibesys.loops.agent.model import AgentRunState
     from vibesys.loops.agent.policy_attempts import AttemptRequest, AttemptState
     from vibesys.loops.agent.policy_support import _CarryOver, _ImplementerAttempt
+    from vibesys.loops.agent.state import AgentRunState
     from vibesys.schemas import (
         JudgeResponse,
         PreRoundDecision,

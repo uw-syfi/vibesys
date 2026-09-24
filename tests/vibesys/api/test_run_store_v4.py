@@ -141,7 +141,7 @@ def test_history_snapshots_follow_the_policy_namespace(tmp_path: Path) -> None:
         trusted_input_baseline="0" * 40,
     )
     project.state.create_run(manifest)
-    project.state.portable_namespace(manifest.run_id, "agent").write_bytes("agent.json", b"{}")
+    project.state.portable_namespace(manifest.run_id, "profile_multi").write_bytes("agent.json", b"{}")
     project.state.portable_namespace(manifest.run_id, "plain").write_bytes("plain.json", b"{}")
 
     snapshots = portable_history_snapshots(project, manifest.run_id)

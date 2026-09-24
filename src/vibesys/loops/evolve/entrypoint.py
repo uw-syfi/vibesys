@@ -6,14 +6,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.context import RunSetup, RunStartHints
+from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.evolve.orchestration import compare_resume, options_from_descriptor
 from vibesys.loops.evolve.run import EvolveRun
 from vibesys.loops.evolve.state import (
     EvolutionProjection,
     EvolutionStateStore,
+    GenerationCursor,
     restore_uncommitted_evolve_state,
 )
 from vibesys.orchestration.view import RunStatus, RunView
+from vs_loop_state.api import PopulationSnapshot
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -34,9 +37,14 @@ class EvolveOrchestrator:
         """Validate evolve settings before the run host opens resources."""
         self.options = options_from_descriptor(descriptor)
         self.setup = RunSetup(
+            state_namespace="evolve",
+            state_slots={
+                "population.json": PopulationSnapshot,
+                "metrics.json": MetricSpace,
+                "generation.json": GenerationCursor,
+            },
             resume_policy=compare_resume,
             resume_recovery=restore_uncommitted_evolve_state,
-            use_default_agent=True,
             start_hints=RunStartHints(
                 max_rounds=self.options.max_generations,
                 expected_roles=("implementer", "judge"),
@@ -45,7 +53,7 @@ class EvolveOrchestrator:
 
     async def run(self, ctx: RunContext) -> bool:
         """Run the full generation budget through the shared host."""
-        run = await ctx.run_blocking(EvolveRun.open, ctx, self.options)
+        run = await EvolveRun.open(ctx, self.options)
         if not await self._bootstrap_if_needed(ctx, run):
             return False
 
@@ -53,15 +61,14 @@ class EvolveOrchestrator:
         run.report_parallel_mode()
         for generation in range(run.first_generation, self.options.max_generations + 1):
             await ctx.control.boundary()
-            await ctx.run_blocking(run.begin_generation, generation)
+            await run.begin_generation(generation)
             if parallel:
-                plans = await ctx.run_blocking(run.plan_generation, generation)
-                outcomes = await ctx.run_blocking(run.evaluate_parallel, generation, plans)
+                plans = await run.plan_generation(generation)
+                outcomes = await run.evaluate_parallel(generation, plans)
                 for child_idx in range(
                     run.next_child(generation), self.options.children_per_generation + 1
                 ):
-                    await ctx.run_blocking(
-                        run.record_candidate,
+                    await run.record_candidate(
                         generation,
                         child_idx,
                         outcomes.get(child_idx),
@@ -73,23 +80,19 @@ class EvolveOrchestrator:
                 ):
                     await ctx.control.boundary()
                     with run.candidate_progress(generation, child_idx):
-                        plan = await ctx.run_blocking(run.plan_candidate, generation, child_idx)
+                        plan = await run.plan_candidate(generation, child_idx)
                         if plan is None:
                             continue
-                        outcome = await ctx.run_blocking(
-                            run.evaluate_candidate, generation, child_idx, plan
-                        )
-                        await ctx.run_blocking(
-                            run.record_candidate, generation, child_idx, outcome, serial=True
-                        )
-            await ctx.run_blocking(run.complete_generation, generation)
+                        outcome = await run.evaluate_candidate(generation, child_idx, plan)
+                        await run.record_candidate(generation, child_idx, outcome, serial=True)
+            await run.complete_generation(generation)
 
         best = run.search.final_choice()
         if best is not None:
             if best.commit is None:
                 raise _UncommittedSelectionError(best.id)
             await ctx.workspaces.adopt(best.commit)
-            await ctx.workspaces.snapshot(f"evolve: select individual {best.id}")
+            await ctx.workspaces.root.snapshot(f"evolve: select individual {best.id}")
         run.report_final(best)
         return True
 
@@ -99,9 +102,9 @@ class EvolveOrchestrator:
         if not run.search.needs_bootstrap():
             return True
         await ctx.control.boundary()
-        if await ctx.run_blocking(run.bootstrap) is not None:
+        if await run.bootstrap() is not None:
             return True
-        run.ctx.lprint("[evolutionary] bootstrap produced no passing seed.")
+        ctx.log("[evolutionary] bootstrap produced no passing seed.")
         return False
 
 

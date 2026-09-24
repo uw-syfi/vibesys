@@ -5,7 +5,7 @@ from vibesys.loops.agent.hypothesis_controller import (
     ProfileGuidanceOutcome,
     ProfileGuidedHypothesisController,
 )
-from vibesys.loops.agent.model import (
+from vibesys.loops.agent.state import (
     AgentRunState,
     ProfileBottleneck,
     ProfileGuidanceStatus,

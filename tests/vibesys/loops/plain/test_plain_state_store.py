@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 import pytest
 from tests.support.run_execution import run_execution_record
 
-from vibesys.loops.plain.orchestration import PlainOrchestrationOptions, descriptor_from_options
-from vibesys.loops.plain.state import PlainStateStore
+from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
+from vibesys.loops.issue_queue.state import IssueQueueStateStore
 from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
 from vs_project.api import (
     Project,
@@ -15,7 +15,7 @@ from vs_project.api import (
 )
 
 
-def _store(tmp_path) -> PlainStateStore:  # noqa: ANN001
+def _store(tmp_path) -> IssueQueueStateStore:  # noqa: ANN001
     project = Project.open(tmp_path)
     project.state.create_project("test")
     run = project.state.new_run_manifest(
@@ -27,7 +27,7 @@ def _store(tmp_path) -> PlainStateStore:  # noqa: ANN001
         run_environment=RunEnvironmentRecord(name="local"),
         execution=run_execution_record(),
         orchestration=descriptor_from_options(
-            PlainOrchestrationOptions(
+            IssueQueueOptions(
                 max_rounds=1,
                 max_attempts_per_issue=1,
                 max_issues_per_perf_eval=1,
@@ -36,7 +36,7 @@ def _store(tmp_path) -> PlainStateStore:  # noqa: ANN001
     )
     project.state.create_run(run)
     namespace = project.state.portable_namespace("run-1", "plain")
-    return PlainStateStore(namespace)
+    return IssueQueueStateStore(namespace)
 
 
 def test_plain_state_store_round_trips_typed_state(tmp_path) -> None:  # noqa: ANN001

@@ -12,8 +12,8 @@ from vibesys.loops.agent.hypothesis_controller import (
 
 if TYPE_CHECKING:
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
-    from vibesys.loops.agent.model import AgentRunState
     from vibesys.loops.agent.policy_ports import ProfileEffect
+    from vibesys.loops.agent.state import AgentRunState
 
 
 @dataclass(frozen=True)

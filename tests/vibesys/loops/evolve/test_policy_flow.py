@@ -5,6 +5,8 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
+import pytest
+
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.evolve.policy_flow import (
     CandidateOutcome,
@@ -36,16 +38,16 @@ class FakeSearchPolicy:
 class FakeSearchEffects:
     events: list[str] = field(default_factory=list)
 
-    def checkpoint(self, label: str) -> None:
+    async def checkpoint(self, label: str) -> None:
         self.events.append(f"checkpoint:{label}")
 
     def save_population(self, population: Population) -> None:
         self.events.append(f"save:{len(population.all)}")
 
-    def retain_candidate(self, label: str, commit: str) -> None:
+    async def retain_candidate(self, label: str, commit: str) -> None:
         self.events.append(f"retain:{label}:{commit}")
 
-    def candidate_code(self, commit: str) -> str:
+    async def candidate_code(self, commit: str) -> str:
         self.events.append(f"code:{commit}")
         return "patch text"
 
@@ -56,7 +58,8 @@ class FakeSearchEffects:
         self.events.append(f"warn:{message}")
 
 
-def test_search_policy_selects_records_and_checkpoints_without_run_environment() -> None:
+@pytest.mark.asyncio
+async def test_search_policy_selects_records_and_checkpoints_without_run_environment() -> None:
     seed = Individual(id=1, generation=0, parent_id=None, passed=True, commit="seed-sha")
     population = Population([seed])
     policy = FakeSearchPolicy(SearchSelection(parent=seed, inspirations=[]))
@@ -65,7 +68,7 @@ def test_search_policy_selects_records_and_checkpoints_without_run_environment()
 
     assert not search.needs_bootstrap()
     rng = random.Random(7)  # noqa: S311  # Deterministic selection fixture.
-    selection = search.plan(
+    selection = await search.plan(
         effects,
         rng=rng,
         settings=SelectionSettings(2, 1, 0.5, 0.7),
@@ -82,7 +85,7 @@ def test_search_policy_selects_records_and_checkpoints_without_run_environment()
         feedback="approved",
         commit="candidate-sha",
     )
-    recorded = search.record(outcome, generation=1, effects=effects)
+    recorded = await search.record(outcome, generation=1, effects=effects)
 
     assert recorded.id == 2
     assert recorded.commit == "candidate-sha"
@@ -96,14 +99,15 @@ def test_search_policy_selects_records_and_checkpoints_without_run_environment()
     ]
 
 
-def test_search_policy_handles_no_parent_and_no_fitness_resume() -> None:
+@pytest.mark.asyncio
+async def test_search_policy_handles_no_parent_and_no_fitness_resume() -> None:
     policy = FakeSearchPolicy(None)
     effects = FakeSearchEffects()
     empty = EvolveSearch(Population(), policy, MetricSpace())
     assert empty.needs_bootstrap()
     assert empty.final_choice() is None
     rng = random.Random(1)  # noqa: S311  # Deterministic selection fixture.
-    assert empty.plan(effects, rng=rng, settings=SelectionSettings(0, 0, 0.0, 0.0)) is None
+    assert await empty.plan(effects, rng=rng, settings=SelectionSettings(0, 0, 0.0, 0.0)) is None
     assert effects.events == [
         "checkpoint:evolve: record search selection",
         "warn:no passing parent available; skipping candidate",
@@ -115,7 +119,8 @@ def test_search_policy_handles_no_parent_and_no_fitness_resume() -> None:
     assert resumed.final_choice() is latest
 
 
-def test_failed_candidate_is_persisted_without_registering_search_code() -> None:
+@pytest.mark.asyncio
+async def test_failed_candidate_is_persisted_without_registering_search_code() -> None:
     policy = FakeSearchPolicy(None)
     effects = FakeSearchEffects()
     search = EvolveSearch(Population(), policy, MetricSpace())
@@ -127,7 +132,7 @@ def test_failed_candidate_is_persisted_without_registering_search_code() -> None
         feedback="accuracy failed",
     )
 
-    recorded = search.record(failed, generation=2, effects=effects)
+    recorded = await search.record(failed, generation=2, effects=effects)
 
     assert recorded.id == 1
     assert recorded.passed is False

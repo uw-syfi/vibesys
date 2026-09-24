@@ -19,7 +19,8 @@ from vibesys.loops.agent import issue_board
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import PROMPTS_DIR, render_template
 
-_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
+_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
+_SINGLE_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "single"
 
 
 @dataclass(frozen=True)
@@ -142,7 +143,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
         ),
         "single_agent_nsys": render_template(
             "single_agent_round_prompt.j2",
-            template_dir=_TEMPLATE_DIR,
+            template_dir=_SINGLE_TEMPLATE_DIR,
             modality=context["modality"],
             interface=context["interface"],
             profile_execution=context["profile_execution"],
@@ -164,7 +165,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
         ),
         "single_agent_torch": render_template(
             "single_agent_round_prompt.j2",
-            template_dir=_TEMPLATE_DIR,
+            template_dir=_SINGLE_TEMPLATE_DIR,
             modality=context["modality"],
             interface=context["interface"],
             profile_execution=context["profile_execution"],

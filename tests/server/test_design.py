@@ -13,7 +13,7 @@ from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
 from server.api.workspace_git import WorkspacePatchReader
 from vibesys.api.contracts import RunStatus
-from vibesys.loops.agent.model import AgentRunState, Hypothesis
+from vibesys.loops.agent.state import AgentRunState, Hypothesis
 from vibesys.loops.agent.readmodel import project_run_view
 from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.run.git_events import NullGitTrackerEvents
@@ -627,7 +627,7 @@ def test_service_builds_design_from_workspace_history(tmp_path: Path) -> None:
     first = _commit_all(workspace, "round 1")
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
-    portable = project.state.portable_namespace(run_id, "agent")
+    portable = project.state.portable_namespace(run_id, "single")
     AgentRunStateStore(portable).save(
         AgentRunState(
             hypotheses=[
@@ -659,7 +659,7 @@ def test_service_serves_patches_for_published_design_ranges(tmp_path: Path) -> N
     first = _commit_all(workspace, "round 1")
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
-    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(
+    AgentRunStateStore(project.state.portable_namespace(run_id, "single")).save(
         AgentRunState(
             hypotheses=[
                 _hypothesis("H-01", 1, rounds=[_round(1, hypothesis_id="H-01", commit=first)])
@@ -699,7 +699,7 @@ def test_service_reuses_one_design_projection_per_run(tmp_path: Path) -> None:
     first = _commit_all(workspace, "round 1")
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
-    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(
+    AgentRunStateStore(project.state.portable_namespace(run_id, "single")).save(
         AgentRunState(
             hypotheses=[
                 _hypothesis("H-01", 1, rounds=[_round(1, hypothesis_id="H-01", commit=first)])

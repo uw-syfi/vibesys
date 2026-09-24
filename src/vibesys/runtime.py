@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vs_agent.api import AgentSessionKey, AgentSpec, MCPServerSpec
+    from vs_agent.api import AgentCapabilities, AgentSessionKey, AgentSpec, MCPServerSpec
     from vs_sandbox.api import HostResource
 
 T = TypeVar("T", bound=BaseModel)
@@ -37,6 +37,31 @@ class WorkspaceScope:
 
 class AgentHandle(Protocol):
     """A live agent conversation owned by one runtime."""
+
+    @property
+    def capabilities(self) -> AgentCapabilities:
+        """Return features the selected driver can enforce."""
+        ...
+
+    @property
+    def backend_name(self) -> str:
+        """Return the selected agent backend."""
+        ...
+
+    @property
+    def driver_name(self) -> str | None:
+        """Return the selected CLI driver, when configured."""
+        ...
+
+    @property
+    def provider(self) -> str | None:
+        """Return the selected provider, when configured."""
+        ...
+
+    @property
+    def model(self) -> str | None:
+        """Return the model used for this role."""
+        ...
 
     async def turn(
         self,

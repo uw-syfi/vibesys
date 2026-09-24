@@ -30,7 +30,8 @@ from vibesys.schemas import (
 from vs_agent.cli_common import build_schema_hint
 
 _ROOT = Path(__file__).resolve().parents[4]
-_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
+_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
+_SINGLE_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "single"
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompt_snapshots"
 
 _ROLES = ("implementer", "implementer_continuation", "judge", "single_agent", "orchestrator")
@@ -204,7 +205,7 @@ def _render_prompt(domain: DomainName, role: str, context: dict[str, object]) ->
         profiler = profiler_definition(ProfilerKind.NSYS)
         return render_template(
             "single_agent_round_prompt.j2",
-            template_dir=_TEMPLATE_DIR,
+            template_dir=_SINGLE_TEMPLATE_DIR,
             **common,
             modality=context["modality"],
             interface=context["interface"],

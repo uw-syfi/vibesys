@@ -5,7 +5,7 @@ import re
 import shutil
 import time
 import uuid
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, replace
 from importlib.metadata import PackageNotFoundError
@@ -80,7 +80,9 @@ from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
 )
+from vibesys.run.recovery import RecoveryWorkspace
 from vibesys.run.round_transaction import (
+    MultiSlotRoundTransactionCoordinator,
     RoundRecoveryOutcome,
     RoundTransaction,
     RoundTransactionCoordinator,
@@ -133,18 +135,23 @@ class RunSetup:
 
     state_namespace: str | None = None
     state_model: type[BaseModel] | None = None
+    state_slots: Mapping[str, type[BaseModel]] | None = None
     resume_policy: (
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
     ) = None
-    resume_recovery: Callable[[Project, GitTracker, str], None] | None = None
+    resume_recovery: Callable[[RecoveryWorkspace], None] | None = None
     use_default_agent: bool = False
     start_hints: RunStartHints | None = None
 
     def __post_init__(self) -> None:
         """Reject incomplete policy-owned state slot declarations."""
-        if (self.state_namespace is None) != (self.state_model is None):
-            raise ValueError("RunSetup requires state_namespace and state_model together")  # noqa: TRY003
+        if self.state_namespace is None and (self.state_model is not None or self.state_slots):
+            raise ValueError("RunSetup state slots require state_namespace")  # noqa: TRY003
+        if self.state_namespace is not None and self.state_model is None and not self.state_slots:
+            raise ValueError("RunSetup requires at least one state slot")  # noqa: TRY003
+        if self.state_model is not None and self.state_slots:
+            raise ValueError("RunSetup cannot mix legacy state_model with state_slots")  # noqa: TRY003
         if self.state_namespace == "":
             raise ValueError("RunSetup.state_namespace must be nonempty")  # noqa: TRY003
 
@@ -288,10 +295,40 @@ def _exact_resume_descriptor(
 
 def _round_transaction_for_setup(
     setup: RunSetup,
-) -> Callable[[Project, GitTracker, str], RoundTransactionCoordinator[BaseModel]] | None:
+) -> (
+    Callable[
+        [Project, GitTracker, str],
+        RoundTransactionCoordinator | MultiSlotRoundTransactionCoordinator,
+    ]
+    | None
+):
     namespace = setup.state_namespace
     model = setup.state_model
-    if namespace is None or model is None:
+    models = setup.state_slots
+    if namespace is None:
+        return None
+
+    if models is not None:
+
+        def open_multi_coordinator(
+            project: Project, git: GitTracker, run_id: str
+        ) -> MultiSlotRoundTransactionCoordinator:
+            # A resumed v4 run can still have a journal written before the
+            # policy adopted multi-slot checkpoints. Replay it through its
+            # original typed slot before opening the new journal.
+            legacy_model = models.get("state.json")
+            if legacy_model is not None:
+                legacy_slot = project.state.portable_namespace(run_id, namespace).slot(
+                    "state.json", legacy_model
+                )
+                RoundTransactionCoordinator(project, git, run_id, state_slot=legacy_slot).recover()
+            return MultiSlotRoundTransactionCoordinator(
+                project, git, run_id, namespace=namespace, models=models
+            )
+
+        return open_multi_coordinator
+
+    if model is None:
         return None
 
     def open_coordinator(
@@ -647,7 +684,9 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
             git.init(existing, trusted_input_baseline=trusted_input_baseline)
         with boot_trace.span("project_state_resume"):
             effective_orchestration = orchestration_descriptor
-            round_transaction_coordinator: RoundTransactionCoordinator | None = None
+            round_transaction_coordinator: (
+                RoundTransactionCoordinator | MultiSlotRoundTransactionCoordinator | None
+            ) = None
             if existing:
                 project_state.load_project()
                 run_manifest = project_state.load_run(run_id)
@@ -694,8 +733,21 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
                     execution_record,
                     orchestration_resume,
                 )
+                if round_transaction_factory is not None:
+                    round_transaction_coordinator = round_transaction_factory(project, git, run_id)
+                    recovery = round_transaction_coordinator.recover()
+                    if recovery is not RoundRecoveryOutcome.NO_TRANSACTION:
+                        logger.lprint(f"[project] recovered round transaction: {recovery.value}")
                 if setup.resume_recovery is not None:
-                    setup.resume_recovery(project, git, run_id)
+                    if setup.state_namespace is None:
+                        raise TypeError("resume recovery requires a state namespace")  # noqa: TRY003
+                    setup.resume_recovery(
+                        RecoveryWorkspace(
+                            project,
+                            git,
+                            project.state.portable_namespace(run_id, setup.state_namespace),
+                        )
+                    )
                 if decision.descriptor is not None:
                     if decision.requires_clean_workspace:
                         pending = git.pending_changes()
@@ -749,12 +801,8 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
                 )
 
         with boot_trace.span("round_transaction_recovery"):
-            if round_transaction_factory is not None:
+            if not existing and round_transaction_factory is not None:
                 round_transaction_coordinator = round_transaction_factory(project, git, run_id)
-                if existing:
-                    recovery = round_transaction_coordinator.recover()
-                    if recovery is not RoundRecoveryOutcome.NO_TRANSACTION:
-                        logger.lprint(f"[project] recovered round transaction: {recovery.value}")
 
         with boot_trace.span("workspace_setup"):
             integration.attach(log_dir, project=project, run_id=run_id)
@@ -1397,7 +1445,9 @@ class _RunContext:
         project: Project,
         state: RunState,
         run_id: str,
-        round_transaction_coordinator: RoundTransactionCoordinator | None = None,
+        round_transaction_coordinator: (
+            RoundTransactionCoordinator | MultiSlotRoundTransactionCoordinator | None
+        ) = None,
         agent_host_resources: tuple[HostResource, ...] = (),
     ):
         self.backend = backend
@@ -1489,6 +1539,8 @@ class _RunContext:
         """Journal a completed project round before mutating local state."""
         if self._round_transaction_coordinator is None:
             return
+        if isinstance(self._round_transaction_coordinator, MultiSlotRoundTransactionCoordinator):
+            raise TypeError
         if self._pending_round_transaction is not None:
             raise RuntimeError("a completed-round transaction is already active")  # noqa: TRY003  # tracked: #288
         self._pending_round_transaction = self._round_transaction_coordinator.begin(

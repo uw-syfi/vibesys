@@ -23,9 +23,8 @@ from vibesys.schemas import CandidateDisposition, HypothesisOutcome
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
-    from vibesys.loops.agent.model import AgentRunState, Hypothesis
     from vibesys.loops.agent.policy_attempts import AttemptState, PerformanceProjection
-    from vibesys.run.protocol import LoopContext
+    from vibesys.loops.agent.state import AgentRunState, Hypothesis
     from vibesys.schemas import OrchestratorPlan
     from vs_loop_state.api import MetricComparison
 
@@ -34,7 +33,6 @@ if TYPE_CHECKING:
 class RecordInput:
     """Authoritative final-attempt facts for one completed round."""
 
-    ctx: LoopContext
     state: AgentRunState
     records: list[RoundRecord]
     round_number: int
@@ -44,6 +42,12 @@ class RecordInput:
     projection: PerformanceProjection
     reviewed: bool
     framework_benchmark_configured: bool
+    accuracy_configured: bool
+    candidate_commit: str | None
+    backend_name: str
+    driver_name: str | None
+    provider: str | None
+    model: str | None
 
 
 @dataclass(frozen=True)
@@ -222,8 +226,8 @@ def build_round_record(data: RecordInput) -> RoundRecord:
     official = (
         attempt.passed
         and attempt.official_reason is not None
-        and data.ctx.agent_client.backend_name != "stub"
-        and (bool(data.ctx.judge_accuracy_command) or data.framework_benchmark_configured)
+        and data.backend_name != "stub"
+        and (data.accuracy_configured or data.framework_benchmark_configured)
     )
     reviewed = data.reviewed
     metrics = _measurement(data, _accepted_metrics(data), official=official)
@@ -244,7 +248,7 @@ def build_round_record(data: RecordInput) -> RoundRecord:
     )
     return RoundRecord(
         round_number=data.round_number,
-        commit=data.ctx.git.current_sha(),
+        commit=data.candidate_commit,
         perf_metric=projection.metric,
         perf_unit=projection.unit,
         passed=attempt.passed,
@@ -282,7 +286,7 @@ def build_round_record(data: RecordInput) -> RoundRecord:
         perf_delta_pct=metrics.delta_pct,
         perf_comparison=metrics.comparison,
         perf_provenance=projection.provenance,
-        implementer_driver=data.ctx.agent_client.driver_name,
-        implementer_provider=data.ctx.agent_client.provider,
-        implementer_model=data.ctx.agent_client.model_for_kind("implementer"),
+        implementer_driver=data.driver_name,
+        implementer_provider=data.provider,
+        implementer_model=data.model,
     )

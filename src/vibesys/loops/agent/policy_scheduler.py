@@ -32,8 +32,8 @@ if TYPE_CHECKING:
         HypothesisEngine,
         ProfileGuidanceView,
     )
-    from vibesys.loops.agent.model import AgentRunState, Hypothesis
     from vibesys.loops.agent.policy_attempts import AttemptPolicy, AttemptState
+    from vibesys.loops.agent.state import AgentRunState, Hypothesis
     from vibesys.schemas import OrchestratorPlan, ProfilerSummary, SingleAgentRoundResponse
     from vs_loop_state.api import RoundHistory, RoundRecord
 

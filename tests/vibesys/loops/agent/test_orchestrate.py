@@ -20,13 +20,12 @@ from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.input_manifest import PROTOCOL_OUTPUT_FLAG, BenchmarkResult
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.agent import issue_board
-from vibesys.loops.agent.entrypoint import (
-    AgentProjector,
-    MultiAgentOrchestrator,
-    SingleAgentOrchestrator,
-)
+from vibesys.loops.multi.entrypoint import MultiAgentOrchestrator
+from vibesys.loops.multi.projection import MultiProjector
+from vibesys.loops.single.entrypoint import SingleAgentOrchestrator
+from vibesys.loops.single.projection import SingleProjector
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
-from vibesys.loops.agent.model import Hypothesis, HypothesisResolution, HypothesisReview
+from vibesys.loops.agent.state import Hypothesis, HypothesisResolution, HypothesisReview
 from vibesys.loops.agent.orchestration import (
     AgentOrchestrationOptions,
     descriptor_from_options,
@@ -388,12 +387,15 @@ def _invoke_orchestrate(
         backend=ComputeBackend.CUDA,
     )
     registry = OrchestrationRegistry()
-    for policy in (MultiAgentOrchestrator, SingleAgentOrchestrator):
+    for policy, projector in (
+        (MultiAgentOrchestrator, MultiProjector()),
+        (SingleAgentOrchestrator, SingleProjector()),
+    ):
         registry.register(
             policy.orchestration_id,
             policy,
-            projector=AgentProjector(policy.orchestration_id),
-            portable_namespaces=("agent",),
+            projector=projector,
+            portable_namespaces=(("multi" if policy is MultiAgentOrchestrator else "single"),),
         )
 
     def discard(event: CoreEvent) -> None:
@@ -429,10 +431,16 @@ def _run_id(project: Path) -> str:
     return runs[0].run_id
 
 
+def _policy_namespace(project: Path) -> str:
+    """Find the strategy-owned state namespace for this test run."""
+    kind = Project.open(project).state.load_run(_run_id(project)).orchestration.id
+    return {"multi-agent": "multi", "single-agent": "single"}[kind]
+
+
 def _round_payloads(tmp_path: Path) -> list[dict[str, object]]:
     project = _created_project(tmp_path)
     state = Project.open(project).state
-    records = AgentRunStateStore(state.portable_namespace(_run_id(project), "agent")).load().rounds
+    records = AgentRunStateStore(state.portable_namespace(_run_id(project), _policy_namespace(project))).load().rounds
     assert records
     return [serialize_round_record(record) for record in records]
 
@@ -441,7 +449,7 @@ def _active_hypothesis(tmp_path: Path) -> Hypothesis | None:
     project = _created_project(tmp_path)
     store = Project.open(project).state
     return (
-        AgentRunStateStore(store.portable_namespace(_run_id(project), "agent"))
+        AgentRunStateStore(store.portable_namespace(_run_id(project), _policy_namespace(project)))
         .load()
         .active_hypothesis
     )
@@ -3445,7 +3453,7 @@ def test_cadence_review_is_not_duplicated_for_provisional_retry(tmp_path, ref_fi
     # unreviewed round leaves it deferred and unresolved, not failed/rejected.
     project = _created_project(tmp_path)
     state = Project.open(project).state
-    unified = AgentRunStateStore(state.portable_namespace(_run_id(project), "agent")).load()
+    unified = AgentRunStateStore(state.portable_namespace(_run_id(project), _policy_namespace(project))).load()
     stable = reproject_run_evidence(unified).by_id("stable-hypothesis")
     assert stable is not None
     assert stable.review is HypothesisReview.DEFERRED
@@ -3498,7 +3506,7 @@ def test_gate_retry_does_not_persist_the_previous_attempts_pass(tmp_path, ref_fi
 
     project = _created_project(tmp_path)
     state = Project.open(project).state
-    unified = AgentRunStateStore(state.portable_namespace(_run_id(project), "agent")).load()
+    unified = AgentRunStateStore(state.portable_namespace(_run_id(project), _policy_namespace(project))).load()
     hypothesis = reproject_run_evidence(unified).by_id("gate-retry")
     assert hypothesis is not None
     assert hypothesis.review is HypothesisReview.DEFERRED
@@ -3839,7 +3847,7 @@ def test_hypothesis_revert_is_applied_once_across_continuation_rounds(tmp_path, 
     )
     project = _created_project(tmp_path)
     store = Project.open(project).state
-    agent_run_state = AgentRunStateStore(store.portable_namespace(_run_id(project), "agent")).load()
+    agent_run_state = AgentRunStateStore(store.portable_namespace(_run_id(project), _policy_namespace(project))).load()
     seed = agent_run_state.by_id("seed")
     assert seed is not None
     assert seed.strategy.value == "abandoned"
@@ -4035,7 +4043,7 @@ def test_official_regression_disproves_and_drops_queue_candidate(tmp_path, ref_f
 
     project = _created_project(tmp_path)
     store = Project.open(project).state
-    agent_run_state = AgentRunStateStore(store.portable_namespace(_run_id(project), "agent")).load()
+    agent_run_state = AgentRunStateStore(store.portable_namespace(_run_id(project), _policy_namespace(project))).load()
     m3 = agent_run_state.by_id("m3-pow2-mask-addressing")
     assert m3 is not None
     assert m3.resolution is not None
@@ -4562,7 +4570,8 @@ def test_read_roadmap_missing_returns_empty(tmp_path):  # noqa: ANN001, ANN201  
 
 
 def test_outer_prompts_reference_memory_paths_without_embedding_contents():  # noqa: ANN201  # tracked: #288
-    template_dir = PROMPTS_DIR / "loops" / "agent"
+    template_dir = PROMPTS_DIR / "loops" / "multi"
+    single_template_dir = PROMPTS_DIR / "loops" / "single"
     plan_prompt = (template_dir / "orchestrator_plan_prompt.j2").read_text()
     pre_prompt = (template_dir / "orchestrator_pre_round_prompt.j2").read_text()
 
@@ -4580,7 +4589,8 @@ def test_outer_prompts_reference_memory_paths_without_embedding_contents():  # n
     assert "recent_progress_text" not in pre_prompt
 
     for name in ("implementer_prompt.j2", "judge_prompt.j2", "single_agent_round_prompt.j2"):
-        role_prompt = (template_dir / name).read_text()
+        role_dir = single_template_dir if name == "single_agent_round_prompt.j2" else template_dir
+        role_prompt = (role_dir / name).read_text()
         assert "pareto_archive_location" in role_prompt
         assert "pareto_archive_summary" not in role_prompt
 

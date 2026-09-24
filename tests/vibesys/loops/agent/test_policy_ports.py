@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.loops.agent.hypothesis_controller import HypothesisEngine
-from vibesys.loops.agent.model import AgentRunState
+from vibesys.loops.agent.state import AgentRunState
 from vibesys.loops.agent.policy_attempts import (
     AttemptDecision,
     AttemptRequest,

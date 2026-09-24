@@ -25,7 +25,8 @@ from vibesys.domains.registry import (
 from vibesys.domains.rendering import render_domain_section
 from vibesys.prompts import PROMPTS_DIR, render_template
 
-_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
+_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
+_SINGLE_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "single"
 
 
 def _temporary_domain(prompt_dir: Path) -> DomainDefinition:

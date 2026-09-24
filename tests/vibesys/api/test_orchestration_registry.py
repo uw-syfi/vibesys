@@ -22,14 +22,12 @@ from vibesys.api import (
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.context import RunSetup
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
-from vibesys.loops.agent.entrypoint import (
-    MultiAgentOrchestrator,
-    ProfileGuidedMultiAgentOrchestrator,
-    ProfileGuidedSingleAgentOrchestrator,
-    SingleAgentOrchestrator,
-)
+from vibesys.loops.multi.entrypoint import MultiAgentOrchestrator
+from vibesys.loops.profile_multi.entrypoint import ProfileGuidedMultiAgentOrchestrator
+from vibesys.loops.profile_single.entrypoint import ProfileGuidedSingleAgentOrchestrator
+from vibesys.loops.single.entrypoint import SingleAgentOrchestrator
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
-from vibesys.loops.plain.entrypoint import PlainOrchestrator
+from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
 from vibesys.loops.registry import built_in_orchestrations
 from vs_project.api import OrchestrationDescriptor, Project
 
@@ -114,7 +112,7 @@ def test_builtin_ids_resolve_to_distinct_concrete_orchestrators() -> None:
         "single-agent": SingleAgentOrchestrator,
         "profile-guided-multi-agent": ProfileGuidedMultiAgentOrchestrator,
         "profile-guided-single-agent": ProfileGuidedSingleAgentOrchestrator,
-        "plain": PlainOrchestrator,
+        "plain": IssueQueueOrchestrator,
         "evolve": EvolveOrchestrator,
     }
     for kind, implementation in expected.items():

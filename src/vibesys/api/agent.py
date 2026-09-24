@@ -7,7 +7,7 @@ when an application explicitly handles the built-in agent policy.
 from __future__ import annotations
 
 from vibesys.loops.agent.issue_board import framework_memory_paths
-from vibesys.loops.agent.projection import (
+from vibesys.loops.agent.readmodel import (
     AgentRunProjection,
     HypothesisRoundView,
     HypothesisView,

@@ -15,8 +15,8 @@ from vibesys.schemas import Verdict
 
 if TYPE_CHECKING:
     from vibesys.loops.agent.hypothesis_controller import HypothesisEngine
-    from vibesys.loops.agent.model import AgentRunState, Hypothesis
     from vibesys.loops.agent.policy_ports import AgentTurns, RoundEffects
+    from vibesys.loops.agent.state import AgentRunState, Hypothesis
     from vibesys.schemas import (
         ImplementerResponse,
         OrchestratorPlan,
@@ -188,6 +188,26 @@ class AttemptPolicy(Protocol):
         self, state: AttemptState, continuation_rounds: int, /
     ) -> bool:
         """Report whether terminal edits need an explicit parent choice."""
+        ...
+
+
+class MultiAttemptPolicy(AttemptPolicy, Protocol):
+    """Multi role turn order exposed to the legacy session adapter."""
+
+    def implement(self, request: AttemptRequest, state: AttemptState) -> bool:
+        """Run one implementer turn."""
+        ...
+
+    def review(self, request: AttemptRequest, state: AttemptState) -> AttemptDecision:
+        """Review the implementation and choose its next gate."""
+        ...
+
+
+class SingleAttemptPolicy(AttemptPolicy, Protocol):
+    """Combined turn exposed to the legacy session adapter."""
+
+    def run_attempt(self, request: AttemptRequest, state: AttemptState) -> AttemptDecision:
+        """Run one combined implementation and review turn."""
         ...
 
 

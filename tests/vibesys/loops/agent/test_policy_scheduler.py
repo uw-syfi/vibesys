@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from vibesys.loops.agent.hypothesis_controller import HypothesisEngine
-from vibesys.loops.agent.model import AgentRunState
+from vibesys.loops.agent.state import AgentRunState
 from vibesys.loops.agent.policy_attempts import AttemptState
 from vibesys.loops.agent.policy_scheduler import (
     PlanRequest,
@@ -24,7 +24,7 @@ from vs_loop_state.api import RoundHistory, RoundRecord
 if TYPE_CHECKING:
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent.hypothesis_controller import ProfileGuidanceOutcome
-    from vibesys.loops.agent.model import Hypothesis
+    from vibesys.loops.agent.state import Hypothesis
     from vibesys.loops.agent.policy_attempts import (
         AttemptDecision,
         AttemptRequest,

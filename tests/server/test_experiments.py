@@ -20,7 +20,7 @@ from server.events import EventType, ExperimentsChangedData
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
-from vibesys.loops.agent.model import (
+from vibesys.loops.agent.state import (
     AgentRunState,
     Hypothesis,
     HypothesisMeasurement,
@@ -646,7 +646,7 @@ def _project_run(
 
 def test_service_reads_only_authoritative_agent_state(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    portable = project.state.portable_namespace(run_id, "agent")
+    portable = project.state.portable_namespace(run_id, "single")
     AgentRunStateStore(portable).save(
         AgentRunState(
             active_hypothesis_id="H-02",
@@ -669,7 +669,7 @@ def test_service_projects_committed_live_state_without_reloading_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    store = AgentRunStateStore(project.state.portable_namespace(run_id, "agent"))
+    store = AgentRunStateStore(project.state.portable_namespace(run_id, "single"))
     initial = AgentRunState(
         experiment_revision=1,
         hypotheses=[
@@ -722,7 +722,7 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    store = AgentRunStateStore(project.state.portable_namespace(run_id, "agent"))
+    store = AgentRunStateStore(project.state.portable_namespace(run_id, "single"))
     initial = AgentRunState(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=1)],
@@ -776,7 +776,7 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-first", 1, last_experiment_revision=1)],
     )
-    AgentRunStateStore(first_project.state.portable_namespace(run_id, "agent")).save(first_state)
+    AgentRunStateStore(first_project.state.portable_namespace(run_id, "single")).save(first_state)
     parts = build_server_parts(
         first_project.state.log_directory(run_id),
         project=first_project,
@@ -790,7 +790,7 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-second", 1, last_experiment_revision=1)],
     )
-    AgentRunStateStore(second_project.state.portable_namespace(run_id, "agent")).save(second_state)
+    AgentRunStateStore(second_project.state.portable_namespace(run_id, "single")).save(second_state)
     parts.attach(
         second_project.state.log_directory(run_id),
         project=second_project,
@@ -833,7 +833,7 @@ def test_committed_state_is_projected_synchronously_before_later_mutation(tmp_pa
 
 def test_service_reads_performance_from_authoritative_agent_state(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    portable = project.state.portable_namespace(run_id, "agent")
+    portable = project.state.portable_namespace(run_id, "single")
     AgentRunStateStore(portable).save(
         AgentRunState(
             hypotheses=[
@@ -869,7 +869,7 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
         metric_space=MetricSpace(objectives=(Objective("ops_s", "max"),))
     )
     project, run_id = _project_run(tmp_path / "project", configuration)
-    portable = project.state.portable_namespace(run_id, "agent")
+    portable = project.state.portable_namespace(run_id, "single")
     state = reproject_run_evidence(
         AgentRunState(
             metrics=MetricSpace(

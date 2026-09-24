@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from vibesys.api.agent import is_agent_run_manifest
 from vibesys.errors import ConfigurationError
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.loops.agent.entrypoint import MultiAgentOrchestrator, SingleAgentOrchestrator
+from vibesys.loops.multi.entrypoint import MultiAgentOrchestrator
 from vibesys.loops.agent.orchestration import (
     AgentOrchestrationOptions,
     UnsupportedAgentOrchestrationError,
@@ -18,6 +18,7 @@ from vibesys.loops.agent.orchestration import (
     descriptor_from_options,
     options_from_descriptor,
 )
+from vibesys.loops.single.entrypoint import SingleAgentOrchestrator
 from vs_project.api import (
     OrchestrationDescriptor,
     OrchestrationRunManifest,

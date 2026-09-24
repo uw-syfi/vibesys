@@ -7,8 +7,8 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Literal, cast
 from unittest.mock import AsyncMock, patch
 
-from vibesys.loops.plain.entrypoint import PlainOrchestrator
-from vibesys.loops.plain.orchestration import PlainOrchestrationOptions, descriptor_from_options
+from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
+from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
 from vibesys.schemas import (
     IssueImplementerResponse,
     IssueJudgeResponse,
@@ -36,9 +36,6 @@ class _Context:
 
     async def boundary(self) -> None:
         return
-
-    async def run_blocking(self, operation, *args) -> object:  # noqa: ANN001, ANN002
-        return operation(*args)
 
 
 class _PlainRun:
@@ -98,19 +95,19 @@ class _PlainRun:
     def log(self, message: str) -> None:
         self.calls.append(message)
 
-    def implement(self, issue: Issue) -> IssueImplementerResponse:
+    async def implement(self, issue: Issue) -> IssueImplementerResponse:
         self.calls.append(f"implement:{issue.id}")
         return IssueImplementerResponse(
             issue_id=issue.id, summary="changed", files_touched=[], self_check="ok"
         )
 
-    def record_implementation(
+    async def record_implementation(
         self, issue: Issue, response: IssueImplementerResponse, iteration: int
     ) -> None:
         del response, iteration
         self.calls.append(f"snapshot:{issue.id}")
 
-    def judge(self, issue: Issue, iteration: int) -> IssueJudgeResponse:
+    async def judge(self, issue: Issue, iteration: int) -> IssueJudgeResponse:
         del iteration
         self.calls.append(f"judge:{issue.id}")
         verdict = next(self.verdicts)
@@ -122,7 +119,10 @@ class _PlainRun:
             new_issues_filed=[],
         )
 
-    def evaluate_performance(self, iteration: int) -> IssuePerfEvalResponse:
+    async def evaluate_performance(
+        self, iteration: int, cursor: PlainLoopCursor
+    ) -> IssuePerfEvalResponse:
+        del cursor
         self.calls.append(f"perf:{iteration}")
         new_ids = next(self.perf_issues)
         for issue_id in new_ids:
@@ -145,13 +145,16 @@ class _PlainRun:
 
 
 def _run_policy(run: _PlainRun, *, max_rounds: int, max_attempts: int = 3) -> bool:
-    options = PlainOrchestrationOptions(
+    options = IssueQueueOptions(
         max_rounds=max_rounds,
         max_attempts_per_issue=max_attempts,
         max_issues_per_perf_eval=3,
     )
-    policy = PlainOrchestrator(descriptor_from_options(options))
-    with patch("vibesys.loops.plain.entrypoint.PlainRun.open", new=AsyncMock(return_value=run)):
+    policy = IssueQueueOrchestrator(descriptor_from_options(options))
+    with patch(
+        "vibesys.loops.issue_queue.entrypoint.IssueQueueRun.open",
+        new=AsyncMock(return_value=run),
+    ):
         return asyncio.run(policy.run(cast("RunContext", run.host)))
 
 

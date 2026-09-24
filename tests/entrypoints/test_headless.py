@@ -44,7 +44,7 @@ from vibesys.loops.agent.orchestration import (
 )
 from vibesys.loops.evolve.orchestration import EvolveOptions
 from vibesys.loops.evolve.orchestration import descriptor_from_options as evolve_descriptor
-from vibesys.loops.plain.orchestration import PlainOrchestrationOptions, descriptor_from_options
+from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
 from vibesys.profilers import ProfilerKind
 from vibesys.sandbox.run_environment import run_environment_record
 from vs_project.api import (
@@ -267,7 +267,7 @@ def _agent_configuration(
 
 
 def _plain_configuration(*, max_rounds: int = 6) -> _RecordedRun:
-    options = PlainOrchestrationOptions(
+    options = IssueQueueOptions(
         max_rounds=max_rounds,
         max_attempts_per_issue=4,
         max_issues_per_perf_eval=2,
@@ -752,8 +752,7 @@ def test_openevolve_knobs_select_openevolve_for_a_new_run(tmp_path: Path) -> Non
     policy, config = cli._resolve_openevolve_options(args)  # noqa: SLF001
 
     assert policy == "openevolve"
-    assert config is not None
-    assert config.num_islands == 3
+    assert config["openevolve_num_islands"] == 3
 
 
 def test_openevolve_knobs_cannot_be_combined_with_vibesys_policy(tmp_path: Path) -> None:

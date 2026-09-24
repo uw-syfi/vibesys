@@ -40,8 +40,8 @@ from vibesys.prompts import PROMPTS_DIR
 from vibesys.prompts.renderer import _build_env
 from vs_prompts.api import filter_skip_marked
 
-_PROFILERS_DIR = PROMPTS_DIR / "loops" / "agent" / "profilers"
-_AGENT_LOOP_ROOT = PROMPTS_DIR / "loops" / "agent"
+_PROFILERS_DIR = PROMPTS_DIR / "loops" / "multi" / "profilers"
+_AGENT_LOOP_ROOT = PROMPTS_DIR / "loops" / "multi"
 
 # Exactly the kwargs _run_profiler (src/vibesys/loops/agent/loop.py:834-846)
 # passes to whichever profiler template profiler_kind resolves to. Keep this

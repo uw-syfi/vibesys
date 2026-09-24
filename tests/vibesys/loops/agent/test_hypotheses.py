@@ -22,7 +22,7 @@ from vibesys.loops.agent.hypotheses import (
     start_hypothesis,
     update_active_hypothesis,
 )
-from vibesys.loops.agent.model import (
+from vibesys.loops.agent.state import (
     AgentRunState,
     Hypothesis,
     HypothesisResolution,

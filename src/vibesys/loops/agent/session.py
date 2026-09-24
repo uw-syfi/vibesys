@@ -18,11 +18,11 @@ from vibesys import constants
 from vibesys.domains.registry import resolve_domain
 from vibesys.events import CoreEventType, EventStatus, RoundFinishedData
 from vibesys.loops.agent import issue_board
+from vibesys.loops.agent.framework import _LocalAgentPolicyIO
 from vibesys.loops.agent.hypotheses import (
     adopt_metric_space,
 )
 from vibesys.loops.agent.hypothesis_controller import HypothesisEngine, publish_experiments_changed
-from vibesys.loops.agent.model import AgentRunState
 from vibesys.loops.agent.policy_attempts import (
     AttemptDecision,
     AttemptPolicy,
@@ -33,7 +33,6 @@ from vibesys.loops.agent.policy_attempts import (
     JudgeSkipReason,
     run_official_gates,
 )
-from vibesys.loops.agent.policy_local import _LocalAgentPolicyIO
 from vibesys.loops.agent.policy_ports import RoundPreparation, RoundPreparationServices
 from vibesys.loops.agent.policy_scheduler import (
     RoundSelection,
@@ -51,7 +50,7 @@ from vibesys.loops.agent.policy_support import (
 )
 from vibesys.loops.agent.record import RecordInput, build_round_record
 from vibesys.loops.agent.roles import BuiltInAgentRoles
-from vibesys.loops.agent.state import AgentRunStateStore
+from vibesys.loops.agent.state import AgentRunState, AgentRunStateStore
 from vibesys.profilers import ProfilerKind
 from vibesys.render.sink import output_sink
 from vs_agent.api import RoundProgress
@@ -59,11 +58,11 @@ from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
+    from pathlib import Path
 
     from vibesys.loops.agent.orchestration import AgentOrchestrationOptions
-    from vibesys.loops.agent.policy_multi import MultiAgentAttemptPolicy
+    from vibesys.loops.agent.policy_attempts import MultiAttemptPolicy, SingleAttemptPolicy
     from vibesys.loops.agent.policy_profile import ProfilePolicy
-    from vibesys.loops.agent.policy_single import SingleAgentAttemptPolicy
     from vibesys.orchestration.runtime import RunContext
 
 _P = ParamSpec("_P")
@@ -79,6 +78,17 @@ class AgentRound:
     attempt: AttemptState
 
 
+@dataclass(frozen=True)
+class AgentSessionPolicy:
+    """Policy decisions supplied by one agent strategy during migration."""
+
+    profile: ProfilePolicy
+    preparation_factory: Callable[[RoundPreparationServices], RoundPreparation]
+    attempt_factory: Callable[[AttemptServices], AttemptPolicy]
+    template_dir: Path
+    state_namespace: str
+
+
 class AgentSession:
     """Policy-owned adapter for one host, one agent state, and one round cursor."""
 
@@ -86,16 +96,16 @@ class AgentSession:
         self,
         host: RunContext,
         options: AgentOrchestrationOptions,
-        profile: ProfilePolicy,
-        preparation_factory: Callable[[RoundPreparationServices], RoundPreparation],
-        attempt_factory: Callable[[AttemptServices], AttemptPolicy],
+        policy: AgentSessionPolicy,
     ) -> None:
         """Bind one opened host and the selected policy components."""
         self.host = host
         self.options = options
-        self.profile = profile
-        self.preparation_factory = preparation_factory
-        self.attempt_factory = attempt_factory
+        self.profile = policy.profile
+        self.preparation_factory = policy.preparation_factory
+        self.attempt_factory = policy.attempt_factory
+        self.template_dir = policy.template_dir
+        self.state_namespace = policy.state_namespace
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vibesys-agent-policy")
         self._progress_cm = None
         self._closed = False
@@ -105,12 +115,10 @@ class AgentSession:
         cls,
         host: RunContext,
         options: AgentOrchestrationOptions,
-        profile: ProfilePolicy,
-        preparation_factory: Callable[[RoundPreparationServices], RoundPreparation],
-        attempt_factory: Callable[[AttemptServices], AttemptPolicy],
+        policy: AgentSessionPolicy,
     ) -> AgentSession:
         """Bind existing host resources and load the policy's durable state."""
-        session = cls(host, options, profile, preparation_factory, attempt_factory)
+        session = cls(host, options, policy)
         try:
             await session._call(session._initialize)
         except BaseException:
@@ -168,13 +176,13 @@ class AgentSession:
             issue_board.pareto_archive_path(progress_path), ctx.workspace
         )
         self.progress_path = progress_path
-        state_store = AgentRunStateStore(ctx.state.portable("agent"))
+        state_store = AgentRunStateStore(ctx.state.portable(self.state_namespace))
         previous_state = state_store.load_optional()
         state = adopt_metric_space(previous_state or AgentRunState(), options.metric_space)
         if previous_state != state:
             state_store.save(state)
             ctx.state.commit("agent: initialize policy state", state_store.namespace)
-            ctx.publish_committed_state("agent", state)
+            ctx.publish_committed_state(self.state_namespace, state)
         self.state_store = state_store
         self.state = state
         self.history = RoundHistory(records=state.rounds)
@@ -186,6 +194,8 @@ class AgentSession:
         self.io = _LocalAgentPolicyIO(
             ctx=ctx,
             agents=agents,
+            template_dir=self.template_dir,
+            state_namespace=self.state_namespace,
             state_store=state_store,
             domain_definition=domain,
             objective=objective,
@@ -316,17 +326,17 @@ class AgentSession:
 
     async def implement(self, round_: AgentRound) -> bool:
         """Invoke the multi-agent implementer once."""
-        policy = cast("MultiAgentAttemptPolicy", self.attempt_policy)
+        policy = cast("MultiAttemptPolicy", self.attempt_policy)
         return await self._call(policy.implement, round_.request, round_.attempt)
 
     async def review(self, round_: AgentRound) -> AttemptDecision:
         """Apply sparse review, judge, and local validation."""
-        policy = cast("MultiAgentAttemptPolicy", self.attempt_policy)
+        policy = cast("MultiAttemptPolicy", self.attempt_policy)
         return await self._call(policy.review, round_.request, round_.attempt)
 
     async def combined_turn(self, round_: AgentRound) -> AttemptDecision:
         """Invoke the single combined implementation and review agent."""
-        policy = cast("SingleAgentAttemptPolicy", self.attempt_policy)
+        policy = cast("SingleAttemptPolicy", self.attempt_policy)
         return await self._call(policy.run_attempt, round_.request, round_.attempt)
 
     async def official_gates(self, round_: AgentRound) -> bool:
@@ -375,7 +385,6 @@ class AgentSession:
             self.last_single_response = projection.next_single_response
         record = build_round_record(
             RecordInput(
-                ctx=self.ctx,
                 state=attempt.agent_run_state,
                 records=self.records,
                 round_number=self.round_number,
@@ -385,6 +394,12 @@ class AgentSession:
                 projection=projection,
                 reviewed=self.attempt_policy.reviewed(attempt),
                 framework_benchmark_configured=self.framework_benchmark_configured,
+                accuracy_configured=bool(self.ctx.judge_accuracy_command),
+                candidate_commit=self.ctx.git.current_sha(),
+                backend_name=self.ctx.agent_client.backend_name,
+                driver_name=self.ctx.agent_client.driver_name,
+                provider=self.ctx.agent_client.provider,
+                model=self.ctx.agent_client.model_for_kind("implementer"),
             )
         )
         terminal = transition_round(
@@ -418,7 +433,11 @@ class AgentSession:
         self.carry = terminal.carry
         self.round_number += 1
         publish_experiments_changed(
-            self.ctx, self.state, "round_persisted", (record.hypothesis_id,)
+            self.ctx,
+            self.state,
+            "round_persisted",
+            (record.hypothesis_id,),
+            namespace=self.state_namespace,
         )
         self.ctx.events.emit(
             CoreEventType.ROUND_FINISHED,

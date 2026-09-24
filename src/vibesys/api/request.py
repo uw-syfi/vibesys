@@ -30,7 +30,6 @@ from vibesys.evaluators.input_synthesis import (
     synthesize_input_bundle,
 )
 from vibesys.evaluators.objective import load_objective, with_operator_constraints
-from vibesys.loops.evolve.search_policy import OpenEvolveSearchConfig
 from vibesys.profilers import CLI_PROFILER_CHOICES, coerce_profiler_kind
 from vibesys.repository import (
     REPOSITORY_SLUG,
@@ -60,7 +59,6 @@ __all__ = [
     "REPOSITORY_SLUG",
     "InputBundle",
     "InputSynthesisError",
-    "OpenEvolveSearchConfig",
     "RunEnvironmentSpec",
     "SynthesizedInputSpec",
     "build_task_image",
