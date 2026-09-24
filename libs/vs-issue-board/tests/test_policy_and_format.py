@@ -38,7 +38,7 @@ class TestParseType:
         assert parse_type("perf") is IssueType.PERF
 
     def test_garbage_raises_value_error(self) -> None:
-        with pytest.raises(ValueError, match="Unknown issue type"):
+        with pytest.raises(ValueError, match="not a valid IssueType"):
             parse_type("enhancement")
 
 

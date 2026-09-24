@@ -473,7 +473,7 @@ def test_each_outer_loop_builds_the_task_image_once(
         run(invocation.args)
 
     build.assert_called_once_with(dockerfile.resolve())
-    assert loop_runner.call_args.kwargs["run_environment"].options["image"] == image_id
+    assert loop_runner.call_args.args[0].run_environment.options["image"] == image_id
 
 
 @pytest.mark.parametrize(
@@ -1718,7 +1718,7 @@ def test_main_routes_to_the_selected_loop(
         main()
 
     runner.assert_called_once()
-    assert runner.call_args.kwargs["input_path"] == str(project.resolve())
+    assert runner.call_args.args[0].input_bundle.root == project.resolve()
 
 
 def test_dispatch_owns_headless_rendering(

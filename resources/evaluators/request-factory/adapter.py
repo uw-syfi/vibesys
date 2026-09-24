@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import argparse
 import os
 import sys
 from typing import TYPE_CHECKING
@@ -12,23 +11,31 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+_FORWARD_PREFIX_LENGTH = 3
+_USAGE = "usage: adapter.py --engine <path> -- <script> [arguments ...]"
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Inject the installed engine into one task-owned benchmark adapter."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--engine", required=True)
-    parser.add_argument("script")
-    parser.add_argument("script_arguments", nargs=argparse.REMAINDER)
-    arguments = parser.parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if (
+        len(arguments) <= _FORWARD_PREFIX_LENGTH
+        or arguments[0] != "--engine"
+        or arguments[2] != "--"
+    ):
+        raise ValueError(_USAGE)
+    engine = arguments[1]
+    script = arguments[3]
+    script_arguments = arguments[4:]
     # lint-waiver: LW-008028 [S606]; Replacing the adapter process preserves direct argv execution and signal forwarding without a shell.
     os.execv(  # noqa: S606
         sys.executable,
         [
             sys.executable,
-            arguments.script,
+            script,
             "--request-factory-engine",
-            arguments.engine,
-            *arguments.script_arguments,
+            engine,
+            *script_arguments,
         ],
     )
     return 0  # pragma: no cover

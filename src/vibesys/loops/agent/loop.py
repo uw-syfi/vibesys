@@ -911,7 +911,7 @@ def _run_orchestrator_plan(
         modality = "text_generation"
     interface = request.interface
     domain_definition = resolve_domain(bundle.domain)
-    progress_path, roadmap_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)
+    roadmap_path, progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)
     progress_location = issue_board.display_path(progress_path, ctx.workspace)
     roadmap_location = issue_board.display_path(roadmap_path, ctx.workspace)
     pareto_archive_location = issue_board.display_path(
@@ -2461,7 +2461,7 @@ def _apply_agent_rollback(
     if rollback_commit is None:
         message = f"rollback target round {target.round_number} has no commit"
         raise RuntimeError(message)
-    progress_path, roadmap_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)
+    roadmap_path, progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)
     memory_paths = tuple(
         str(path.relative_to(ctx.workspace))
         for path in (roadmap_path, progress_path, issue_board.pareto_archive_path(progress_path))

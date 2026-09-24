@@ -95,4 +95,4 @@ def _dispatch_evolve(request: RunRequest, integration: LocalRunIntegration) -> b
 
 def _dispatch_plain(request: RunRequest, integration: LocalRunIntegration) -> bool:
     run_plain_loop = import_module("vibesys.loops.plain.loop").run_plain_loop
-    return run_plain_loop(request=request, integration=integration)
+    return run_plain_loop(request, integration=integration)
