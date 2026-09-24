@@ -15,7 +15,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import partial
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, NotRequired, TypedDict, TypeVar, Unpack
+from typing import TYPE_CHECKING, Literal, NotRequired, Protocol, TypedDict, TypeVar, Unpack
 
 from pydantic import BaseModel
 
@@ -42,13 +42,16 @@ from vibesys.events import (
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
     AgentExecutionStartedData,
+    CoreEventData,
     CoreEventType,
     EventStatus,
+    ExperimentsChangedData,
     FrameworkSource,
     GateKind,
     InvocationFinishedData,
     InvocationStartedData,
     PhaseData,
+    RoundFinishedData,
     json_value,
 )
 from vibesys.render.sink import output_sink
@@ -76,11 +79,14 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
+    from pydantic import JsonValue
+
     from vibesys.context import _RunResources
     from vibesys.evaluators.input_manifest import WorkspaceSource
     from vibesys.evaluators.metrics import Objective
     from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.request import RunRequest
+    from vibesys.orchestration.view import RunView
     from vibesys.profilers import ProfilerKind
     from vibesys.run.event_journal import EventJournal
     from vibesys.run.git_tracker import GitTracker
@@ -97,6 +103,40 @@ class _CheckpointOptions(TypedDict):
     publish: NotRequired[BaseModel | None]
     candidate: NotRequired[bool]
     label: NotRequired[str | None]
+
+
+class _CommittedStateProjector(Protocol):
+    """The one projector method `ctx.state.commit` needs.
+
+    Structurally identical to (and satisfied by any)
+    `vibesys.orchestration.contracts.OrchestrationProjector`; declared locally
+    rather than imported so this module, the dependency graph's base layer,
+    never depends on `contracts` (which itself depends on this module).
+    """
+
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+        """Project a state just committed by the host."""
+        ...
+
+
+class _EventSink(Protocol):
+    """The one method `_emit_commit_events` needs from `ctx.events`.
+
+    Declared locally (rather than typed as `EventJournal` directly) so the
+    derivation logic can be exercised against a minimal fake in tests,
+    without constructing a full `RunContext`.
+    """
+
+    def emit(
+        self,
+        event_type: CoreEventType,
+        text: str = "",
+        *,
+        data: CoreEventData | None = None,
+        **fields: object,
+    ) -> object:
+        """Create, record, and publish one core event."""
+        ...
 
 
 _active_progress: ContextVar[AgentProgress | None] = ContextVar(
@@ -467,6 +507,15 @@ class _RunState:
 
     def __init__(self, host: RunContext) -> None:
         self._host = host
+        # Cache of the last published `RunView`, used by `commit` to derive
+        # round/experiment events from a before/after diff without re-reading
+        # the run's durable state on every call. `_last_view_loaded` is False
+        # until this process has computed it once; the first `commit` call
+        # then resolves it from whatever was already durable (see
+        # `_previous_view`), so a resumed run does not replay events for
+        # already-committed rounds.
+        self._last_view: RunView | None = None
+        self._last_view_loaded = False
 
     @property
     def namespace(self) -> StateNamespace:
@@ -521,7 +570,7 @@ class _RunState:
     ) -> str:
         """Journal and commit typed writes with candidate edits, then publish."""
         async with self._host._parent_mutation_lock:
-            return await self._host._run_blocking(
+            revision, _committed = await self._host._run_blocking(
                 self._checkpoint,
                 sequence,
                 writes,
@@ -529,6 +578,62 @@ class _RunState:
                 candidate=options.get("candidate", True),
                 label=options.get("label"),
             )
+            return revision
+
+    async def commit(
+        self,
+        *,
+        sequence: int,
+        writes: Mapping[str, BaseModel],
+        **options: Unpack[_CheckpointOptions],
+    ) -> str:
+        """Checkpoint typed writes, publish, then emit the events that follow.
+
+        A thin wrapper over `checkpoint` that additionally diffs the read
+        model before and after this write and emits `ROUND_FINISHED` for
+        every newly completed round and `EXPERIMENTS_CHANGED` when the
+        experiment revision moved, so strategies stop hand-rolling that
+        sequence themselves. Strategies whose read projection carries no
+        rounds or revision (evolve, issue_queue) see no events derived here.
+        """
+        async with self._host._parent_mutation_lock:
+            before = await self._previous_view()
+            revision, committed = await self._host._run_blocking(
+                self._checkpoint,
+                sequence,
+                writes,
+                options.get("publish"),
+                candidate=options.get("candidate", True),
+                label=options.get("label"),
+            )
+        after = self._project(committed)
+        self._last_view = after
+        self._last_view_loaded = True
+        _emit_commit_events(self._host.events, before, after)
+        return revision
+
+    async def _previous_view(self) -> RunView | None:
+        """Return the last published view, resolving it from disk once."""
+        if not self._last_view_loaded:
+            self._last_view = await self._load_previous_view()
+            self._last_view_loaded = True
+        return self._last_view
+
+    async def _load_previous_view(self) -> RunView | None:
+        setup = self._host._setup
+        declared = setup.state_slots or {}
+        model = declared.get("state.json")
+        if model is None:
+            return None
+        state = await self.slot("state.json", model).load()
+        return self._project(state)
+
+    def _project(self, state: BaseModel | None) -> RunView | None:
+        projector = self._host._projector
+        namespace = self._host._setup.state_namespace
+        if projector is None or namespace is None or state is None:
+            return None
+        return projector.project_committed(namespace, state, run_id=self._host._resources.run_id)
 
     def _checkpoint(
         self,
@@ -538,7 +643,7 @@ class _RunState:
         *,
         candidate: bool,
         label: str | None,
-    ) -> str:
+    ) -> tuple[str, BaseModel | None]:
         context = self._host._resources
         namespace = self._host._setup.state_namespace
         if namespace is None:
@@ -553,7 +658,91 @@ class _RunState:
         revision = context.git.current_sha()
         if revision is None:
             raise RuntimeError("checkpoint completed without a Git revision")  # noqa: TRY003
-        return revision
+        return revision, committed
+
+
+def _agent_projection(view: RunView | None) -> dict[str, JsonValue] | None:
+    """Read *view*'s projection if it carries the generic round/revision shape.
+
+    `"kind": "agent"` is the read-model's own discriminator (see
+    `vibesys.agent_run.readmodel.AgentRunProjection`), not a strategy ID: any
+    orchestration that publishes rounds and an experiment revision through
+    that shape gets events derived here, whichever strategy it is. A
+    projection under a different kind (or none) yields no derived events.
+    """
+    if view is None or view.projection is None:
+        return None
+    if view.projection.get("kind") != "agent":
+        return None
+    return view.projection
+
+
+def _round_entries(projection: Mapping[str, JsonValue] | None) -> dict[int, dict[str, JsonValue]]:
+    rounds = projection.get("rounds") if projection is not None else None
+    if not isinstance(rounds, list):
+        return {}
+    return {
+        int(entry["round_number"]): entry
+        for entry in rounds
+        if isinstance(entry, dict) and isinstance(entry.get("round_number"), int)
+    }
+
+
+def _emit_commit_events(events: _EventSink, before: RunView | None, after: RunView | None) -> None:
+    """Emit the round/experiment events one `commit` newly made observable."""
+    after_projection = _agent_projection(after)
+    if after_projection is None:
+        return
+    before_projection = _agent_projection(before)
+    before_rounds = _round_entries(before_projection)
+    after_rounds = _round_entries(after_projection)
+    new_round_numbers = sorted(number for number in after_rounds if number not in before_rounds)
+    for number in new_round_numbers:
+        _emit_round_finished(events, after_rounds[number])
+    # A run's very first commit has no prior projection to diff against (see
+    # `_previous_view`): nothing has been observed yet, so nothing changed,
+    # regardless of the revision value that first projection happens to carry.
+    if before_projection is None:
+        return
+    before_revision = before_projection.get("experiment_revision")
+    after_revision = after_projection.get("experiment_revision")
+    if after_revision is not None and after_revision != before_revision:
+        reason = "round_persisted" if new_round_numbers else "active_hypothesis_changed"
+        revision = after_revision if isinstance(after_revision, int) else None
+        events.emit(
+            CoreEventType.EXPERIMENTS_CHANGED,
+            data=ExperimentsChangedData(reason=reason, revision=revision),
+        )
+
+
+def _emit_round_finished(events: _EventSink, round_entry: Mapping[str, JsonValue]) -> None:
+    raw_verdict = round_entry.get("judge_verdict")
+    verdict: Literal["pass", "fail", "skipped"]
+    if raw_verdict == "pass":
+        verdict = "pass"
+    elif raw_verdict == "fail":
+        verdict = "fail"
+    else:
+        verdict = "skipped"
+    status = EventStatus.FAILED if verdict == "fail" else EventStatus.COMPLETED
+    raw_attempts = round_entry.get("attempts")
+    attempts = raw_attempts if isinstance(raw_attempts, int) else 1
+    raw_perf_metric = round_entry.get("perf_metric")
+    perf_metric = raw_perf_metric if isinstance(raw_perf_metric, (int, float)) else None
+    raw_perf_unit = round_entry.get("perf_unit")
+    perf_unit = raw_perf_unit if isinstance(raw_perf_unit, str) else None
+    events.emit(
+        CoreEventType.ROUND_FINISHED,
+        status=status,
+        round_label=f"round-{round_entry['round_number']}",
+        data=RoundFinishedData(
+            attempts=attempts,
+            judge_verdict=verdict,
+            perf_metric=perf_metric,
+            perf_unit=perf_unit,
+            profile_skipped=bool(round_entry.get("profile_skipped", False)),
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1111,12 +1300,14 @@ class RunContext:
         *,
         setup: RunSetup,
         open_agent_environment: Callable[..., AgentEnvironment] | None,
+        projector: _CommittedStateProjector | None = None,
     ) -> None:
         """Bind request, policy setup, and the application control channel."""
         self.request = request
         self._setup = setup
         self._integration = integration
         self._open_agent_environment = open_agent_environment
+        self._projector = projector
         self._resource_owner: _RunResources | None = None
         self._session_store: SynchronizedSessionStore | None = None
         self._agents: dict[tuple[str | None, str], _LocalAgentHandle] = {}
@@ -1215,6 +1406,7 @@ class RunContext:
         *,
         setup: RunSetup,
         open_agent_environment: Callable[..., AgentEnvironment] | None = None,
+        projector: _CommittedStateProjector | None = None,
     ) -> AsyncIterator[RunContext]:
         """Construct and close the run, including after cancellation or setup failure."""
         host = cls(
@@ -1222,6 +1414,7 @@ class RunContext:
             integration,
             setup=setup,
             open_agent_environment=open_agent_environment,
+            projector=projector,
         )
         try:
             prepare = asyncio.create_task(asyncio.to_thread(host._prepare))

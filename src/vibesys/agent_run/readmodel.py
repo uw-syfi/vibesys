@@ -114,6 +114,11 @@ class RoundView(BaseModel):
     passed: bool
     profile_skipped: bool = False
     official_evaluation: bool = False
+    # The two fields below exist so `RunContext.state.commit` can derive a
+    # byte-identical `RoundFinishedData` from this view alone, without any
+    # strategy-specific knowledge (see `vibesys.orchestration.runtime`).
+    attempts: int = 1
+    judge_verdict: Literal["pass", "fail", "skipped"] | None = None
 
 
 class AgentRunProjection(BaseModel):
@@ -273,7 +278,21 @@ def _round_view(record: RoundRecord) -> RoundView:
         passed=record.passed,
         profile_skipped=record.profile_skipped,
         official_evaluation=record.official_evaluation,
+        attempts=record.attempts,
+        judge_verdict=_round_finished_verdict(record.judge_verdict),
     )
+
+
+def _round_finished_verdict(value: str | None) -> Literal["pass", "fail", "skipped"] | None:
+    """Map a round's stored verdict to the coarser `RoundFinishedData` vocabulary.
+
+    `"deferred"` (sparse-review policy skipped both the judge and the official
+    gates) and a legacy record with no recorded verdict both read as
+    `"skipped"`, matching what the strategies used to emit by hand.
+    """
+    if value in ("pass", "fail"):
+        return value
+    return "skipped"
 
 
 def _outcome(value: str | None) -> str | None:

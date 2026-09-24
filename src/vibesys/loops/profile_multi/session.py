@@ -43,13 +43,7 @@ from vibesys.evaluators.gates import (
     emit_gate_finished,
     emit_gate_started,
 )
-from vibesys.events import (
-    CoreEventType,
-    EventStatus,
-    ExperimentsChangedData,
-    GateKind,
-    RoundFinishedData,
-)
+from vibesys.events import GateKind
 from vibesys.loops.profile_multi.attribution import run_attribution
 from vibesys.loops.profile_multi.decisions import (
     AttemptRequest,
@@ -86,7 +80,6 @@ if TYPE_CHECKING:
 
     from vibesys.agent_run.options import AgentOrchestrationOptions
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
-    from vibesys.events import ExperimentsChangeReason
     from vibesys.orchestration.runtime import RunContext
 
 
@@ -246,16 +239,13 @@ class ProfileMultiSession:
         self.last_profile_focus = "general latency hotspots on /v1/completions"
         self.engine = HypothesisEngine.create(state, config=self.profile.config)
         if previous != state:
-            await self._save_state(state, label="profile_multi: initialize policy state")
-
-    async def _save_state(self, state: AgentRunState, *, label: str) -> None:
-        await self.ctx.state.checkpoint(
-            sequence=self.round_number,
-            writes={"state.json": state},
-            candidate=False,
-            label=label,
-            publish=state,
-        )
+            await self.ctx.state.commit(
+                sequence=self.round_number,
+                writes={"state.json": state},
+                candidate=False,
+                label="profile_multi: initialize policy state",
+                publish=state,
+            )
 
     @property
     def has_next_round(self) -> bool:
@@ -289,7 +279,13 @@ class ProfileMultiSession:
                 )
             )
             state = engine.state
-            await self._save_state(state, label=f"profile-guided: prepare round {number}")
+            await self.ctx.state.commit(
+                sequence=self.round_number,
+                writes={"state.json": state},
+                candidate=False,
+                label=f"profile-guided: prepare round {number}",
+                publish=state,
+            )
             provisional = _provisional_candidates_since_official(self.records)
             summary = await self._pre_round_profile()
             plan = await self.turns.plan(
@@ -327,10 +323,13 @@ class ProfileMultiSession:
             hypothesis = state.active_hypothesis
             if hypothesis is None:
                 raise ProfileMultiSessionError.missing_active()
-            await self._save_state(
-                state, label=f"profile_multi: start hypothesis {plan.hypothesis_id}"
+            await self.ctx.state.commit(
+                sequence=self.round_number,
+                writes={"state.json": state},
+                candidate=False,
+                label=f"profile_multi: start hypothesis {plan.hypothesis_id}",
+                publish=state,
             )
-            self._announce_experiments("active_hypothesis_changed", state)
         else:
             plan = hypothesis.plan
             issue_board.append_hypothesis_continuation(
@@ -413,8 +412,12 @@ class ProfileMultiSession:
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback
         state = update_active_hypothesis(selection.state, hypothesis)
-        await self._save_state(
-            state, label=f"profile_multi: set hypothesis {hypothesis.hypothesis_id} parent"
+        await self.ctx.state.commit(
+            sequence=self.round_number,
+            writes={"state.json": state},
+            candidate=False,
+            label=f"profile_multi: set hypothesis {hypothesis.hypothesis_id} parent",
+            publish=state,
         )
         self.state = state
         self.engine = self.engine.replace_state(state)
@@ -445,9 +448,12 @@ class ProfileMultiSession:
         attempt.retry = retry
         attempt.official_reason = None
         attempt.judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
-        await self._save_state(
-            attempt.agent_run_state,
+        await self.ctx.state.commit(
+            sequence=self.round_number,
+            writes={"state.json": attempt.agent_run_state},
+            candidate=False,
             label=f"profile_multi: start round {self.round_number} attempt {retry}",
+            publish=attempt.agent_run_state,
         )
         await self.ctx.environment.reselect_device()
 
@@ -510,7 +516,17 @@ class ProfileMultiSession:
         if verdict.verdict is not Verdict.PASS:
             state.feedback = verdict.feedback
             request.active_hypothesis.feedback = verdict.feedback
-            await self._checkpoint_active(selected)
+            agent_state = update_active_hypothesis(
+                selected.attempt.agent_run_state, selected.request.active_hypothesis
+            )
+            selected.attempt.agent_run_state = agent_state
+            await self.ctx.state.commit(
+                sequence=self.round_number,
+                writes={"state.json": agent_state},
+                candidate=False,
+                label=f"profile_multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
+                publish=agent_state,
+            )
             return AttemptDecision.RETRY
         validation_feedback = await self._validate_local(
             selected, implementation.validation_recipe_artifact
@@ -518,7 +534,17 @@ class ProfileMultiSession:
         if validation_feedback is not None:
             state.feedback = validation_feedback
             request.active_hypothesis.feedback = validation_feedback
-            await self._checkpoint_active(selected)
+            agent_state = update_active_hypothesis(
+                selected.attempt.agent_run_state, selected.request.active_hypothesis
+            )
+            selected.attempt.agent_run_state = agent_state
+            await self.ctx.state.commit(
+                sequence=self.round_number,
+                writes={"state.json": agent_state},
+                candidate=False,
+                label=f"profile_multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
+                publish=agent_state,
+            )
             return AttemptDecision.RETRY
         await self._approve_candidate(selected)
         candidate_ready = (
@@ -563,7 +589,17 @@ class ProfileMultiSession:
         hypothesis.gate_approved_candidate_retention_reason = (
             implementation.candidate_retention_reason
         )
-        await self._checkpoint_active(selected)
+        state = update_active_hypothesis(
+            selected.attempt.agent_run_state, selected.request.active_hypothesis
+        )
+        selected.attempt.agent_run_state = state
+        await self.ctx.state.commit(
+            sequence=self.round_number,
+            writes={"state.json": state},
+            candidate=False,
+            label=f"profile_multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
+            publish=state,
+        )
 
     async def _validate_local(  # noqa: C901  # bounded framework recipe gate
         self, selected: ProfileMultiRound, recipe_artifact: str | None
@@ -683,21 +719,21 @@ class ProfileMultiSession:
         hypothesis.gate_approved_perf_unit = implementation.perf_unit
         hypothesis.gate_approved_metrics = dict(implementation.metrics)
         hypothesis.gate_approved_evaluation_artifact = implementation.evaluation_artifact
-        await self._checkpoint_active(selected)
-
-    async def official_gates(self, selected: ProfileMultiRound) -> bool:
-        """Evaluate a candidate only after independent review passes."""
-        return await self._official_gates(selected)
-
-    async def _checkpoint_active(self, selected: ProfileMultiRound) -> None:
         state = update_active_hypothesis(
             selected.attempt.agent_run_state, selected.request.active_hypothesis
         )
         selected.attempt.agent_run_state = state
-        await self._save_state(
-            state,
+        await self.ctx.state.commit(
+            sequence=self.round_number,
+            writes={"state.json": state},
+            candidate=False,
             label=f"profile_multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
+            publish=state,
         )
+
+    async def official_gates(self, selected: ProfileMultiRound) -> bool:
+        """Evaluate a candidate only after independent review passes."""
+        return await self._official_gates(selected)
 
     def _record_official_decision(
         self, selected: ProfileMultiRound, *, run: bool, reason: str
@@ -751,7 +787,17 @@ class ProfileMultiSession:
         hypothesis.gate_candidate_commit = commit
         hypothesis.gate_accuracy_passed = accuracy_passed
         hypothesis.feedback = feedback
-        await self._checkpoint_active(selected)
+        state = update_active_hypothesis(
+            selected.attempt.agent_run_state, selected.request.active_hypothesis
+        )
+        selected.attempt.agent_run_state = state
+        await self.ctx.state.commit(
+            sequence=self.round_number,
+            writes={"state.json": state},
+            candidate=False,
+            label=f"profile_multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
+            publish=state,
+        )
         return False
 
     async def _run_gates(
@@ -890,7 +936,7 @@ class ProfileMultiSession:
                 self.options.max_retries_per_round,
                 terminal.exhaustion_feedback,
             )
-        await self.ctx.state.checkpoint(
+        await self.ctx.state.commit(
             sequence=self.round_number,
             writes={"state.json": terminal.state},
             publish=terminal.state,
@@ -901,31 +947,6 @@ class ProfileMultiSession:
         self.history = RoundHistory(records=self.records)
         self.carry = terminal.carry
         self.round_number += 1
-        self._announce_experiments("round_persisted", terminal.state)
-        self.ctx.events.emit(
-            CoreEventType.ROUND_FINISHED,
-            status=EventStatus.COMPLETED
-            if attempt.passed or not record.reviewed
-            else EventStatus.FAILED,
-            round_label=f"round-{record.round_number}",
-            data=RoundFinishedData(
-                attempts=attempt.retry,
-                judge_verdict="pass"
-                if attempt.passed
-                else "fail"
-                if record.reviewed
-                else "skipped",
-                perf_metric=projection.metric,
-                perf_unit=projection.unit,
-                profile_skipped=projection.profile_skipped,
-            ),
-        )
-
-    def _announce_experiments(self, reason: ExperimentsChangeReason, state: AgentRunState) -> None:
-        self.ctx.events.emit(
-            CoreEventType.EXPERIMENTS_CHANGED,
-            data=ExperimentsChangedData(reason=reason, revision=state.experiment_revision),
-        )
 
     def _memory_paths(self) -> tuple[str, ...]:
         root = self.workspace.path

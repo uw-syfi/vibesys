@@ -330,7 +330,7 @@ depends_on = ["vibesys.orchestration.contracts", "vibesys.run", "vibesys.orchest
 
 [[modules]]
 path = "vibesys.orchestration.runtime"
-depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.render", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vs_project", "vibesys.sandbox", "vs_sandbox"]
+depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.render", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.orchestration.view", "vs_project", "vibesys.sandbox", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.orchestration._common"

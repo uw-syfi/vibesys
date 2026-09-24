@@ -490,18 +490,6 @@
   {
     "agent_kind": null,
     "data": {
-      "kind": "experiments_changed",
-      "reason": "round_persisted",
-      "revision": 2
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "experiments_changed"
-  },
-  {
-    "agent_kind": null,
-    "data": {
       "attempts": 1,
       "judge_verdict": "pass",
       "kind": "round_finished",
@@ -513,6 +501,18 @@
     "status": "completed",
     "text": "",
     "type": "round_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "experiments_changed",
+      "reason": "round_persisted",
+      "revision": 2
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "experiments_changed"
   },
   {
     "agent_kind": null,

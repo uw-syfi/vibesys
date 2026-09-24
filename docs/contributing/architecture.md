@@ -195,6 +195,7 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.evaluators
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
     vibesys.orchestration.runtime --> vibesys.orchestration.request
+    vibesys.orchestration.runtime --> vibesys.orchestration.view
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
@@ -470,6 +471,7 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.evaluators
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
     vibesys.orchestration.runtime --> vibesys.orchestration.request
+    vibesys.orchestration.runtime --> vibesys.orchestration.view
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime

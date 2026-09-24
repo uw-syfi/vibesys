@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -141,23 +141,26 @@ async def test_new_plan_checkpoints_hypothesis_then_continues_without_new_design
         SimpleNamespace(plan=plan, progress_path=tmp_path / "progress.md"),
         raising=False,
     )
-    monkeypatch.setattr(session, "ctx", SimpleNamespace(log=lambda _message: None), raising=False)
+    commit = AsyncMock()
+    monkeypatch.setattr(
+        session,
+        "ctx",
+        SimpleNamespace(log=lambda _message: None, state=SimpleNamespace(commit=commit)),
+        raising=False,
+    )
     monkeypatch.setattr(
         session, "workspace", SimpleNamespace(revision="trusted-base"), raising=False
     )
-    save = AsyncMock()
-    announce = MagicMock()
     rollback = AsyncMock()
-    monkeypatch.setattr(session, "_save_state", save)
-    monkeypatch.setattr(session, "_announce_experiments", announce)
     monkeypatch.setattr(session, "_apply_rollback", rollback)
 
     first = await session.select_hypothesis()
 
     assert first.selection.hypothesis.hypothesis_id == "h1"
     assert first.selection.hypothesis.parent_commit == "trusted-base"
-    save.assert_awaited_once()
-    announce.assert_called_once_with("active_hypothesis_changed", session.state)
+    commit.assert_awaited_once()
+    assert commit.await_args is not None
+    assert commit.await_args.kwargs["label"] == "single: start hypothesis h1"
     rollback.assert_awaited_once_with(first.selection)
     assert plan.await_args is not None
     assert plan.await_args.args[0].profile_guidance.plan_prompt_context() == {}
@@ -177,7 +180,7 @@ async def test_paid_attempt_is_marked_before_turn_and_failed_review_checkpoints(
 ) -> None:
     session, selected = _session()
     order: list[str] = []
-    checkpoint = AsyncMock(side_effect=lambda **_kwargs: order.append("checkpoint"))
+    commit = AsyncMock(side_effect=lambda **_kwargs: order.append("commit"))
     snapshot = AsyncMock(side_effect=lambda _label: order.append("snapshot"))
     reselect = AsyncMock(side_effect=lambda: order.append("reselect"))
     monkeypatch.setattr(
@@ -185,7 +188,7 @@ async def test_paid_attempt_is_marked_before_turn_and_failed_review_checkpoints(
         "ctx",
         SimpleNamespace(
             log=lambda _message: None,
-            state=SimpleNamespace(checkpoint=checkpoint),
+            state=SimpleNamespace(commit=commit),
             environment=SimpleNamespace(reselect_device=reselect),
         ),
         raising=False,
@@ -207,8 +210,8 @@ async def test_paid_attempt_is_marked_before_turn_and_failed_review_checkpoints(
     decision = await session.combined_turn(selected)
 
     assert decision is AttemptDecision.RETRY
-    assert order[:3] == ["checkpoint", "snapshot", "reselect"]
-    assert checkpoint.await_count == 2
+    assert order[:3] == ["commit", "snapshot", "reselect"]
+    assert commit.await_count == 2
     assert selected.request.active_hypothesis.feedback == "repair accuracy"
     assert issue_board.next_implementer_attempt(session.turns.progress_path, 1) == 2
 
@@ -247,7 +250,13 @@ async def test_official_gate_failure_keeps_accuracy_evidence_for_same_revision(
     session, selected = _session()
     session.round_number = 3
     session.records = []
-    monkeypatch.setattr(session, "ctx", SimpleNamespace(log=lambda _message: None), raising=False)
+    commit = AsyncMock()
+    monkeypatch.setattr(
+        session,
+        "ctx",
+        SimpleNamespace(log=lambda _message: None, state=SimpleNamespace(commit=commit)),
+        raising=False,
+    )
     monkeypatch.setattr(
         session, "workspace", SimpleNamespace(revision="candidate-revision"), raising=False
     )
@@ -255,8 +264,6 @@ async def test_official_gate_failure_keeps_accuracy_evidence_for_same_revision(
     selected.attempt.official_reason = "final_round"
     selected.attempt.retry = 2
     monkeypatch.setattr(session, "_record_official_decision", lambda *_args, **_kwargs: None)
-    checkpoint_active = AsyncMock()
-    monkeypatch.setattr(session, "_checkpoint_active", checkpoint_active)
     monkeypatch.setattr(
         session,
         "_run_gates",
@@ -267,13 +274,21 @@ async def test_official_gate_failure_keeps_accuracy_evidence_for_same_revision(
     assert selected.request.active_hypothesis.gate_revalidation_pending
     assert selected.request.active_hypothesis.gate_candidate_commit == "candidate-revision"
     assert selected.request.active_hypothesis.gate_accuracy_passed
-    checkpoint_active.assert_awaited_once_with(selected)
+    commit.assert_awaited_once()
+    assert commit.await_args is not None
+    assert commit.await_args.kwargs["label"] == "single: checkpoint hypothesis h1"
 
 
 @pytest.mark.asyncio
-async def test_passed_round_commits_record_and_publishes_one_finished_event(
+async def test_passed_round_commits_record_through_ctx_state_commit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """`commit_round` hands its record to `ctx.state.commit` and stops there.
+
+    `ROUND_FINISHED`/`EXPERIMENTS_CHANGED` are now derived by the host from
+    the committed state (see `vibesys.orchestration.runtime._emit_commit_events`
+    and the golden event snapshots), not emitted by this strategy.
+    """
     session, selected = _session()
     session.round_number = 1
     session.records = []
@@ -284,17 +299,15 @@ async def test_passed_round_commits_record_and_publishes_one_finished_event(
     selected.attempt.retry = 1
     selected.attempt.single_agent_response = _response(Verdict.PASS)
     selected.attempt.judge = JudgeReviewed(Verdict.PASS)
-    checkpoint = AsyncMock(return_value="state-revision")
-    events = MagicMock()
+    commit = AsyncMock(return_value="state-revision")
     monkeypatch.setattr(
         session,
         "ctx",
         SimpleNamespace(
-            state=SimpleNamespace(checkpoint=checkpoint),
+            state=SimpleNamespace(commit=commit),
             environment=SimpleNamespace(
                 view=SimpleNamespace(paths=SimpleNamespace(accuracy_command=None))
             ),
-            events=events,
         ),
         raising=False,
     )
@@ -319,10 +332,11 @@ async def test_passed_round_commits_record_and_publishes_one_finished_event(
     assert session.state.rounds[0].commit == "candidate-revision"
     assert session.state.rounds[0].judge_verdict == "pass"
     assert session.state.active_hypothesis is None
-    checkpoint.assert_awaited_once()
-    assert checkpoint.await_args.kwargs["sequence"] == 1
-    assert checkpoint.await_args.kwargs["writes"]["state.json"] == session.state
-    assert events.emit.call_count == 2
+    commit.assert_awaited_once()
+    assert commit.await_args is not None
+    assert commit.await_args.kwargs["sequence"] == 1
+    assert commit.await_args is not None
+    assert commit.await_args.kwargs["writes"]["state.json"] == session.state
 
 
 def test_retry_cursor_and_official_command_keep_policy_boundaries(

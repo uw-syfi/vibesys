@@ -289,4 +289,5 @@ def build_round_record(data: RecordInput) -> RoundRecord:
         implementer_driver=data.driver_name,
         implementer_provider=data.provider,
         implementer_model=data.model,
+        attempts=attempt.retry,
     )

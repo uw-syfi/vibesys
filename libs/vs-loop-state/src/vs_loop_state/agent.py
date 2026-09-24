@@ -225,6 +225,12 @@ class RoundRecord:
     implementer_provider: str | None = None
     implementer_model: str | None = None
 
+    # How many implementer attempts this round took before its final
+    # disposition, counting from 1. Populated by the framework from the
+    # attempt loop that produced the round; a legacy record predates this
+    # field and reports 1 regardless of how many attempts actually ran.
+    attempts: int = 1
+
     @model_validator(mode="after")
     def _normalize_review(self) -> RoundRecord:
         """Keep the review state expressible only through ``judge_verdict``.

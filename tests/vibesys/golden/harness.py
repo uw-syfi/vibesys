@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 from vibesys.config import Config, as_config
 from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.loops.registry import built_in_orchestrations
 from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.runner import run_orchestration
 from vibesys.profilers import ProfilerKind
@@ -124,10 +125,17 @@ def run_scripted(  # noqa: PLR0913  # tracked: #288
         profiler_kind=profiler_kind,
     )
 
+    projector = built_in_orchestrations().resolve(orchestration_id).projector
+
     async def execute() -> bool:
         integration = LocalRunIntegration()
         try:
-            return await run_orchestration(request, integration, orchestrator_factory(descriptor))
+            return await run_orchestration(
+                request,
+                integration,
+                orchestrator_factory(descriptor),
+                projector=projector,
+            )
         finally:
             integration.close()
 

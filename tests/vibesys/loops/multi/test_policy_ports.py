@@ -137,7 +137,15 @@ def test_profile_guidance_prepares_cursor_before_designer(
     from vibesys.loops.profile_multi.session import _ProfilePolicy  # noqa: PLC0415
 
     session.profile = _ProfilePolicy(config)
-    session.ctx = SimpleNamespace(events=SimpleNamespace(emit=lambda *_args, **_kwargs: None))
+
+    async def fake_commit(*, sequence: int, writes: object, **kwargs: object) -> None:
+        del sequence, writes
+        calls.append(f"checkpoint:{kwargs['label']}")
+
+    session.ctx = SimpleNamespace(
+        events=SimpleNamespace(emit=lambda *_args, **_kwargs: None),
+        state=SimpleNamespace(commit=fake_commit),
+    )
     session.state = AgentRunState()
     session.engine = ProfileHypothesisEngine.create(session.state, config=config)
     session.records = []
@@ -162,12 +170,8 @@ def test_profile_guidance_prepares_cursor_before_designer(
             reasoning="plan",
         )
 
-    async def fake_save(_state: AgentRunState, *, label: str) -> None:
-        calls.append(f"checkpoint:{label}")
-
     monkeypatch.setattr("vibesys.loops.profile_multi.session.run_attribution", fake_attribution)
     session.turns = SimpleNamespace(plan=fake_plan)
-    session._save_state = fake_save
     session._pre_round_profile = AsyncMock(return_value=None)
     session._apply_rollback = AsyncMock()
 
@@ -189,15 +193,20 @@ def test_multi_validation_failure_checkpoints_before_retry_and_official_gate() -
     session.round_number = 1
     session.options = SimpleNamespace(max_rounds=1, judge_every=1, official_eval_every=1)
     session.workspace = SimpleNamespace(revision="a" * 40)
-    session.ctx = SimpleNamespace(log=lambda _message: calls.append("log"))
     validation_feedback = ["bad recipe", None]
 
     async def validate(_selected: object, _recipe: str | None) -> str | None:
         calls.append(f"validate:{state.retry}")
         return validation_feedback.pop(0)
 
-    async def checkpoint(_selected: object) -> None:
+    async def commit(*, sequence: int, writes: object, **kwargs: object) -> None:
+        del sequence, writes, kwargs
         calls.append(f"checkpoint:{state.retry}")
+
+    session.ctx = SimpleNamespace(
+        log=lambda _message: calls.append("log"),
+        state=SimpleNamespace(commit=commit),
+    )
 
     async def gates(
         _retry: int, _commit: str | None, *, reuse_accuracy: bool
@@ -207,7 +216,6 @@ def test_multi_validation_failure_checkpoints_before_retry_and_official_gate() -
         return None, FrameworkBenchmarkOutcome(), True
 
     session._validate_local = validate
-    session._checkpoint_active = checkpoint
     session._run_gates = gates
     session._record_official_decision = lambda _selected, *, run, reason: calls.append(
         f"official-decision:{state.retry}:{run}:{reason}"
@@ -456,11 +464,12 @@ def test_multi_official_gate_failure_persists_revalidation_for_exact_commit() ->
     selected = SimpleNamespace(request=request, attempt=attempt)
     session = cast("Any", MultiSession.__new__(MultiSession))
     session.workspace = SimpleNamespace(revision="a" * 40)
+    session.ctx = SimpleNamespace(state=SimpleNamespace(commit=AsyncMock()))
+    session.round_number = 1
     decisions: list[tuple[bool, str]] = []
     session._record_official_decision = lambda _selected, *, run, reason: decisions.append(
         (run, reason)
     )
-    session._checkpoint_active = AsyncMock()
     session._run_gates = AsyncMock(
         side_effect=[
             ("benchmark failed", FrameworkBenchmarkOutcome(), True),
@@ -474,7 +483,7 @@ def test_multi_official_gate_failure_persists_revalidation_for_exact_commit() ->
     assert hypothesis.gate_revalidation_pending
     assert hypothesis.gate_accuracy_passed
     assert hypothesis.gate_candidate_commit == "a" * 40
-    session._checkpoint_active.assert_awaited_once_with(selected)
+    session.ctx.state.commit.assert_awaited_once()
 
     assert asyncio.run(session._official_gates(selected))
     assert attempt.passed

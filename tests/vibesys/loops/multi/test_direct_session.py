@@ -131,7 +131,7 @@ def _session(tmp_path: Path) -> MultiSession:
         warning=MagicMock(),
         events=SimpleNamespace(emit=MagicMock()),
         agents=SimpleNamespace(progress=lambda _progress: nullcontext()),
-        state=SimpleNamespace(load=AsyncMock(return_value=None), checkpoint=AsyncMock()),
+        state=SimpleNamespace(load=AsyncMock(return_value=None), commit=AsyncMock()),
         environment=environment,
         evaluator=SimpleNamespace(
             check=AsyncMock(), measure=AsyncMock(), reuse_accuracy=AsyncMock()
@@ -150,26 +150,27 @@ def test_initialize_and_select_checkpoint_after_plan(
     session = cast("Any", _session(tmp_path))
     asyncio.run(session._initialize())
     assert session.round_number == 1
-    assert session.ctx.state.checkpoint.await_count == 1
+    assert session.ctx.state.commit.await_count == 1
     assert session.has_next_round
 
     order: list[str] = []
 
-    async def checkpoint(_state: AgentRunState, *, label: str) -> None:
-        order.append(f"checkpoint:{label}")
+    async def commit(*, sequence: int, writes: object, **kwargs: object) -> None:
+        del sequence, writes
+        order.append(f"commit:{kwargs['label']}")
 
     async def plan(_request: object) -> OrchestratorPlan:
         order.append("plan")
         return _plan()
 
-    session._save_state = checkpoint
+    session.ctx.state.commit = commit
     session._pre_round_profile = AsyncMock(return_value=None)
     session._apply_rollback = AsyncMock()
     session.turns.plan = plan
 
     selected = asyncio.run(session.select_hypothesis())
     assert selected.request.plan.hypothesis_id == "h1"
-    assert order.index("plan") < order.index("checkpoint:multi: start hypothesis h1")
+    assert order.index("plan") < order.index("commit:multi: start hypothesis h1")
     assert session.state.active_hypothesis is not None
 
     monkeypatch.setattr(
@@ -192,11 +193,10 @@ def test_attempt_preflight_and_unparseable_implementation(
         lambda _path, _round: 2,
     )
     assert list(session.remaining_attempts(selected)) == [2]
-    session._save_state = AsyncMock()
     asyncio.run(session.begin_attempt(selected, 2))
     assert selected.attempt.retry == 2
     assert isinstance(selected.attempt.judge, JudgeSkipped)
-    session._save_state.assert_awaited_once()
+    session.ctx.state.commit.assert_awaited_once()
     session.ctx.environment.reselect_device.assert_awaited_once()
 
     response = ImplementerResponse(summary="unparseable", expected_behavior="unknown")
@@ -215,7 +215,6 @@ def test_attempt_preflight_and_unparseable_implementation(
 def test_review_retries_rejection_and_validation_before_official_gate(tmp_path: Path) -> None:
     session = cast("Any", _session(tmp_path))
     selected = _selected()
-    session._checkpoint_active = AsyncMock()
     session._validate_local = AsyncMock(return_value=None)
     session._approve_candidate = AsyncMock()
     session._approve_perf = AsyncMock()
@@ -234,7 +233,7 @@ def test_review_retries_rejection_and_validation_before_official_gate(tmp_path: 
     )
     assert asyncio.run(session.review(selected)) is AttemptDecision.RETRY
     assert selected.attempt.feedback == "repair"
-    session._checkpoint_active.assert_awaited()
+    session.ctx.state.commit.assert_awaited()
 
     session.turns.review.return_value = JudgeResponse(
         analysis="good", feedback="", verdict=Verdict.PASS
@@ -286,7 +285,6 @@ def test_official_gate_feedback_is_checkpointed_and_success_passes(tmp_path: Pat
     selected.attempt.official_reason = "final_round"
     selected.attempt.retry = 1
     session._record_official_decision = MagicMock()
-    session._checkpoint_active = AsyncMock()
     benchmark = FrameworkBenchmarkOutcome(metric_name="throughput", metric_value=42.0)
     session._run_gates = AsyncMock(return_value=("benchmark failed", benchmark, True))
 
@@ -294,7 +292,7 @@ def test_official_gate_feedback_is_checkpointed_and_success_passes(tmp_path: Pat
     assert selected.request.active_hypothesis.gate_revalidation_pending
     assert selected.request.active_hypothesis.gate_accuracy_passed
     assert selected.attempt.framework_perf_metric == 42.0
-    session._checkpoint_active.assert_awaited_once()
+    session.ctx.state.commit.assert_awaited_once()
 
     session._run_gates.return_value = (None, benchmark, True)
     assert asyncio.run(session.official_gates(selected))
@@ -397,10 +395,9 @@ def test_completed_reviewed_round_checkpoints_record_before_advancing(tmp_path: 
     assert record.hypothesis_id == "h1"
     assert record.official_evaluation
     assert record.passed
-    checkpoint = session.ctx.state.checkpoint.await_args
-    assert checkpoint.kwargs["sequence"] == 1
-    assert checkpoint.kwargs["writes"]["state.json"].rounds == session.records
-    assert session.ctx.events.emit.call_count >= 2
+    commit = session.ctx.state.commit.await_args
+    assert commit.kwargs["sequence"] == 1
+    assert commit.kwargs["writes"]["state.json"].rounds == session.records
 
 
 def test_accuracy_and_benchmark_gates_attach_revision_and_snapshot(tmp_path: Path) -> None:
