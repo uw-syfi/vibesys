@@ -43,9 +43,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
+import io
 import json
 import re
+import sqlite3
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -890,6 +893,388 @@ def cmd_idle_gaps(ns: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Subcommand: cpu_overhead  # noqa: ERA001
+# ---------------------------------------------------------------------------
+
+_LAUNCH_API_PREFIXES = (
+    "hiplaunchkernel",
+    "hipmodulelaunchkernel",
+    "hipextlaunchkernel",
+    "hipextmodulelaunchkernel",
+    "hipgraphlaunch",
+)
+_SYNC_APIS = frozenset({"hipstreamsynchronize", "hipdevicesynchronize", "hipeventsynchronize"})
+_TOP_API_ROWS = 10
+_LAUNCH_BOUND_RATIO_THRESHOLD = 1.0
+
+
+def _is_launch_api(name: str) -> bool:
+    lname = name.lower()
+    return any(lname.startswith(p) for p in _LAUNCH_API_PREFIXES)
+
+
+def _is_graph_launch_api(name: str) -> bool:
+    return name.lower().startswith("hipgraphlaunch")
+
+
+def _print_api_table(ranked: list[tuple[str, dict]]) -> None:
+    print(f"\n{'API':<36s} {'Calls':>8s} {'Total':>10s} {'Avg':>10s}")  # noqa: T201
+    print("-" * 68)  # noqa: T201
+    for name, e in ranked:
+        avg = e["total_ns"] / e["calls"] if e["calls"] else 0.0
+        print(  # noqa: T201
+            f"{_truncate(name, 36):<36s} {e['calls']:>8d} {_fmt_ns(e['total_ns']):>10s} {_fmt_ns(avg):>10s}"
+        )
+
+
+def _launch_bound_from_correlation(launch_calls: list[dict], kernel_events: list[dict]) -> None:
+    by_corr: dict[str, list[float]] = defaultdict(list)
+    for k in kernel_events:
+        if k["corr"]:
+            by_corr[k["corr"]].append(k["dur_ns"])
+
+    matched_cpu = []
+    matched_gpu = []
+    for c in launch_calls:
+        durs = by_corr.get(c["corr"]) if c["corr"] else None
+        if durs:
+            matched_cpu.append(c["dur_ns"])
+            matched_gpu.append(sum(durs) / len(durs))
+
+    if not matched_cpu:
+        print(  # noqa: T201
+            "\n(no matching Correlation_Id between HIP API and kernel trace — "
+            "cannot compute a matched launch-bound ratio)"
+        )
+        return
+
+    avg_cpu = sum(matched_cpu) / len(matched_cpu)
+    avg_gpu = sum(matched_gpu) / len(matched_gpu)
+    print(f"\nKernel launch overhead ({len(matched_cpu)} matched by Correlation_Id):")  # noqa: T201
+    print(f"  Avg CPU launch: {_fmt_ns(avg_cpu)}")  # noqa: T201
+    print(f"  Avg GPU exec:   {_fmt_ns(avg_gpu)}")  # noqa: T201
+    if avg_gpu > 0:
+        ratio = avg_cpu / avg_gpu
+        print(f"  CPU/GPU ratio:  {ratio:.2f}x")  # noqa: T201
+        if ratio > _LAUNCH_BOUND_RATIO_THRESHOLD:
+            print("  *** LAUNCH-BOUND — CPU launch overhead exceeds GPU execution time ***")  # noqa: T201
+
+
+def _cpu_overhead_from_trace(events: list[dict], disc: DiscoveredReport) -> None:
+    total_calls = len(events)
+    total_ns = sum(e["dur_ns"] for e in events)
+    print(f"Total HIP API calls: {total_calls}")  # noqa: T201
+    print(f"Total CPU time in HIP APIs: {_fmt_ns(total_ns)}")  # noqa: T201
+
+    per_api: dict[str, dict] = defaultdict(lambda: {"calls": 0, "total_ns": 0.0})
+    for e in events:
+        entry = per_api[e["name"]]
+        entry["calls"] += 1
+        entry["total_ns"] += e["dur_ns"]
+    _print_api_table(sorted(per_api.items(), key=lambda kv: -kv[1]["total_ns"])[:_TOP_API_ROWS])
+
+    sync_calls = [e for e in events if e["name"].lower() in _SYNC_APIS]
+    sync_total = sum(e["dur_ns"] for e in sync_calls)
+    print(f"\nSynchronization stalls: {len(sync_calls)} calls, {_fmt_ns(sync_total)}")  # noqa: T201
+
+    launch_calls = [e for e in events if _is_launch_api(e["name"])]
+    window_ns = max(e["end_ns"] for e in events) - min(e["start_ns"] for e in events)
+    rate = len(launch_calls) / (window_ns / _NS_PER_SEC) if window_ns > 0 else 0.0
+    print(  # noqa: T201
+        f"\nKernel launch calls: {len(launch_calls)}  ({rate:.1f} launches/sec over the capture window)"
+    )
+
+    kernel_events = _load_kernel_events(disc)
+    if kernel_events and launch_calls:
+        _launch_bound_from_correlation(launch_calls, kernel_events)
+    elif launch_calls:
+        print(  # noqa: T201
+            "\n(no *_kernel_trace.csv found — cannot compute a matched CPU-launch-vs-GPU-exec ratio)"
+        )
+
+
+def _cpu_overhead_from_stats(stats: dict[str, dict], disc: DiscoveredReport) -> None:
+    total_calls = sum(s["calls"] for s in stats.values())
+    total_ns = sum(s["total_ns"] for s in stats.values())
+    print(f"Total HIP API calls: {total_calls}  (aggregated from *_hip_api_stats.csv)")  # noqa: T201
+    print(f"Total CPU time in HIP APIs: {_fmt_ns(total_ns)}")  # noqa: T201
+    _print_api_table(sorted(stats.items(), key=lambda kv: -kv[1]["total_ns"])[:_TOP_API_ROWS])
+
+    launch_ns = sum(s["total_ns"] for n, s in stats.items() if _is_launch_api(n))
+    launch_calls = sum(s["calls"] for n, s in stats.items() if _is_launch_api(n))
+    kernel_agg, _src = _load_kernels(disc)
+    kernel_ns = sum(e["total_ns"] for e in kernel_agg.values())
+    print(f"\nKernel launch calls: {launch_calls}, total CPU time {_fmt_ns(launch_ns)}")  # noqa: T201
+    if kernel_ns > 0 and launch_ns > 0:
+        ratio = launch_ns / kernel_ns
+        print(  # noqa: T201
+            f"Coarse CPU-launch-time / GPU-kernel-time ratio: {ratio:.2f}x (aggregate, not per-launch matched)"
+        )
+        if ratio > _LAUNCH_BOUND_RATIO_THRESHOLD:
+            print("*** Possibly launch-bound — coarse launch time exceeds kernel GPU time ***")  # noqa: T201
+
+
+def cmd_cpu_overhead(ns: argparse.Namespace) -> None:
+    """HIP API time, launch rate, sync stalls, and a launch-bound heuristic."""
+    disc = discover(ns.report)
+    events = _load_api_events(disc)
+    if events:
+        _cpu_overhead_from_trace(events, disc)
+        return
+    stats = _load_api_stats(disc)
+    if not stats:
+        print(  # noqa: T201
+            "(no HIP API data found — no *_hip_api_trace.csv or *_hip_api_stats.csv under report path)"
+        )
+        return
+    _cpu_overhead_from_stats(stats, disc)
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: memory  # noqa: ERA001
+# ---------------------------------------------------------------------------
+
+
+def cmd_memory(ns: argparse.Namespace) -> None:
+    """Memory copies by direction, bytes, time, and bandwidth."""
+    disc = discover(ns.report)
+    events = _load_memcpy_events(disc)
+    if not events:
+        print("(no memory copy data found — no *_memory_copy_trace.csv under report path)")  # noqa: T201
+        return
+
+    by_dir: dict[str, dict] = defaultdict(lambda: {"count": 0, "total_ns": 0.0, "bytes": 0.0})
+    for e in events:
+        entry = by_dir[e["direction"]]
+        entry["count"] += 1
+        entry["total_ns"] += e["dur_ns"]
+        entry["bytes"] += e["bytes"]
+
+    ordered = sorted(by_dir.items(), key=lambda kv: -kv[1]["total_ns"])
+    print(f"{'Direction':<10s} {'Count':>8s} {'Total':>10s} {'Bytes':>16s} {'Bandwidth':>12s}")  # noqa: T201
+    print("-" * 60)  # noqa: T201
+    for d, e in ordered:
+        bw_gbps = (
+            (e["bytes"] / _BYTES_PER_GB) / (e["total_ns"] / _NS_PER_SEC)
+            if e["total_ns"] > 0
+            else 0.0
+        )
+        print(  # noqa: T201
+            f"{d:<10s} {e['count']:>8d} {_fmt_ns(e['total_ns']):>10s} {e['bytes']:>16,.0f} {bw_gbps:>10.1f}GB/s"
+        )
+
+    total_bytes = sum(e["bytes"] for e in by_dir.values())
+    total_ns = sum(e["total_ns"] for e in by_dir.values())
+    print(f"\nTotal memory copy: {total_bytes / _BYTES_PER_GB:.2f} GB in {_fmt_ns(total_ns)}")  # noqa: T201
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: graphs  # noqa: ERA001
+# ---------------------------------------------------------------------------
+
+_GRAPH_DEGRADED_KERNELS_PER_LAUNCH = 3.0
+_GRAPH_DEGRADED_DIRECT_LAUNCH_FRACTION = 0.5
+
+
+def _report_graph_counts(graph_calls: int, direct_calls: int, total_kernels: int) -> None:
+    print(f"hipGraphLaunch calls: {graph_calls}")  # noqa: T201
+    print(f"Direct launch calls (hipLaunchKernel/hipModuleLaunchKernel/...): {direct_calls}")  # noqa: T201
+    print(f"Total kernels recorded: {total_kernels}")  # noqa: T201
+    if graph_calls == 0:
+        print(  # noqa: T201
+            "\n(No HIP graph launches detected — per-kernel attribution via direct "
+            "launch APIs should be reliable.)"
+        )
+        return
+
+    kernels_per_launch = total_kernels / graph_calls
+    print(f"\nKernels per graph launch (coarse): {kernels_per_launch:.1f}")  # noqa: T201
+    degraded = (
+        direct_calls < total_kernels * _GRAPH_DEGRADED_DIRECT_LAUNCH_FRACTION
+        or kernels_per_launch > _GRAPH_DEGRADED_KERNELS_PER_LAUNCH
+    )
+    if degraded:
+        print(  # noqa: T201
+            "\n*** Kernel attribution is likely DEGRADED: most kernels execute under "
+            "hipGraphLaunch rather than individual launch calls, so per-kernel timing "
+            "and family breakdowns above may be missing or misattributed. Recommendation: "
+            "re-capture with HIP graph capture disabled (eager mode) for reliable "
+            "per-kernel attribution. ***"
+        )
+
+
+def _report_matched_graph_kernels(graph_events: list[dict], kernel_events: list[dict]) -> None:
+    by_corr: dict[str, list[float]] = defaultdict(list)
+    for k in kernel_events:
+        if k["corr"]:
+            by_corr[k["corr"]].append(k["dur_ns"])
+    matched = [by_corr[g["corr"]] for g in graph_events if g["corr"] in by_corr]
+    if not matched:
+        return
+    counts = [len(ks) for ks in matched]
+    times = [sum(ks) for ks in matched]
+    print(f"\nGraph launches with matched kernels (by Correlation_Id): {len(matched)}")  # noqa: T201
+    print(  # noqa: T201
+        f"  Avg kernels per launch: {sum(counts) / len(counts):.1f}  (min {min(counts)}, max {max(counts)})"
+    )
+    print(f"  Avg GPU time per launch: {_fmt_ns(sum(times) / len(times))}")  # noqa: T201
+
+
+def cmd_graphs(ns: argparse.Namespace) -> None:
+    """HIP graph launches, and detection of graph-degraded kernel attribution."""
+    disc = discover(ns.report)
+    kernel_events = _load_kernel_events(disc)
+    kernel_agg, _kernel_source = _load_kernels(disc)
+    total_kernels = (
+        len(kernel_events) if kernel_events else sum(e["calls"] for e in kernel_agg.values())
+    )
+
+    events = _load_api_events(disc)
+    if events:
+        graph_events = [e for e in events if _is_graph_launch_api(e["name"])]
+        direct_events = [
+            e for e in events if _is_launch_api(e["name"]) and not _is_graph_launch_api(e["name"])
+        ]
+        _report_graph_counts(len(graph_events), len(direct_events), total_kernels)
+        if graph_events and kernel_events:
+            _report_matched_graph_kernels(graph_events, kernel_events)
+        return
+
+    stats = _load_api_stats(disc)
+    if not stats:
+        print("(no HIP API data found — cannot detect HIP graph launches)")  # noqa: T201
+        return
+    graph_calls = sum(s["calls"] for n, s in stats.items() if _is_graph_launch_api(n))
+    direct_calls = sum(
+        s["calls"] for n, s in stats.items() if _is_launch_api(n) and not _is_graph_launch_api(n)
+    )
+    _report_graph_counts(graph_calls, direct_calls, total_kernels)
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: host_idle  # noqa: ERA001
+# ---------------------------------------------------------------------------
+
+_HOST_IDLE_BUSY_PCT_THRESHOLD = 5.0
+
+
+def cmd_host_idle(ns: argparse.Namespace) -> None:
+    """Detect a mostly host-idle capture (missed load, or an idle server)."""
+    disc = discover(ns.report)
+    kernel_events = _load_kernel_events(disc)
+    api_events = _load_api_events(disc)
+    mem_events = _load_memcpy_events(disc)
+
+    all_events = kernel_events + api_events + mem_events
+    if not all_events:
+        kernel_agg, _src = _load_kernels(disc)
+        if kernel_agg:
+            print(  # noqa: T201
+                "(only aggregate stats found — no per-event timestamps to compute a capture "
+                "window; cannot run the host-idle check. Use `kernels`/`families` instead.)"
+            )
+        else:
+            print("(no timestamped data found at all — nothing to check.)")  # noqa: T201
+        return
+
+    window_ns = max(e["end_ns"] for e in all_events) - min(e["start_ns"] for e in all_events)
+    busy_ns = _union_duration(kernel_events)
+    busy_pct = busy_ns / window_ns * 100 if window_ns > 0 else 0.0
+
+    print(f"Capture window: {_fmt_ns(window_ns)}")  # noqa: T201
+    print(f"GPU kernel activity: {_fmt_ns(busy_ns)} ({busy_pct:.2f}% of window)")  # noqa: T201
+    print(f"Kernels recorded: {len(kernel_events)}")  # noqa: T201
+
+    if not kernel_events or busy_pct < _HOST_IDLE_BUSY_PCT_THRESHOLD:
+        print(  # noqa: T201
+            "\n*** VERDICT: trace looks mostly HOST-IDLE — the GPU did little or no work "
+            "during the capture window. The capture likely missed the load (started before "
+            "or after the workload ran) or the server was idle. Recommendation: re-capture "
+            "under active load, or widen the capture window to cover the workload's steady "
+            "state. ***"
+        )
+    else:
+        print(  # noqa: T201
+            f"\nVerdict: GPU active for {busy_pct:.1f}% of the capture window — trace looks valid."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: query  # noqa: ERA001
+# ---------------------------------------------------------------------------
+
+
+def cmd_query(ns: argparse.Namespace) -> None:
+    """Run arbitrary SQL against a rocpd SQLite export, if one is present."""
+    disc = discover(ns.report)
+    if not disc.db_files:
+        print(  # noqa: T201
+            "(no rocpd SQLite (.db) file found under report path. `query` only works "
+            "against ROCm 7's rocpd SQLite output; use `kernels`/`families`/`summary`/etc. "
+            "for CSV or JSON traces.)"
+        )
+        return
+    conn = sqlite3.connect(str(disc.db_files[0]))
+    try:
+        cur = conn.execute(ns.sql)
+        if cur.description:
+            headers = [d[0] for d in cur.description]
+            print("\t".join(headers))  # noqa: T201
+            for row in cur.fetchall():
+                print("\t".join(str(v) for v in row))  # noqa: T201
+        else:
+            print("(no results)")  # noqa: T201
+    except sqlite3.OperationalError as exc:
+        print(f"SQL error: {exc}", file=sys.stderr)  # noqa: T201
+        sys.exit(1)
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: summary  # noqa: ERA001
+# ---------------------------------------------------------------------------
+
+_SUMMARY_LINE_CAP = 40
+
+
+def _capped(fn, ns: argparse.Namespace) -> str:  # noqa: ANN001
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        fn(ns)
+    lines = buf.getvalue().splitlines()
+    if len(lines) > _SUMMARY_LINE_CAP:
+        lines = [
+            *lines[:_SUMMARY_LINE_CAP],
+            f"... ({len(lines) - _SUMMARY_LINE_CAP} more lines omitted)",
+        ]
+    return "\n".join(lines)
+
+
+def cmd_summary(ns: argparse.Namespace) -> None:
+    """All-in-one analysis: files, validity checks, kernels/families/idle/overhead/memory/graphs."""
+    ns.top = getattr(ns, "top", 15)
+
+    print("=" * 78)  # noqa: T201
+    print("  ROCPROFV3 TRACE SUMMARY")  # noqa: T201
+    print("=" * 78)  # noqa: T201
+
+    sections = (
+        ("Files", cmd_files),
+        ("Trace Validity (host-idle check)", cmd_host_idle),
+        ("Top Kernels", cmd_kernels),
+        ("Kernel Library Families", cmd_families),
+        ("GPU Idle Gaps", cmd_idle_gaps),
+        ("CPU / HIP API Overhead", cmd_cpu_overhead),
+        ("Memory Copies", cmd_memory),
+        ("HIP Graph Launches", cmd_graphs),
+    )
+    for title, fn in sections:
+        print(f"\n## {title}\n")  # noqa: T201
+        print(_capped(fn, ns))  # noqa: T201
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -923,6 +1308,26 @@ def build_parser() -> argparse.ArgumentParser:
     _add_report_arg(p)
     p.add_argument("--top", type=int, default=10)
 
+    p = sub.add_parser("cpu_overhead", help="HIP API launch overhead and launch-bound heuristic")
+    _add_report_arg(p)
+
+    p = sub.add_parser("memory", help="Memory copies by direction, bytes, bandwidth")
+    _add_report_arg(p)
+
+    p = sub.add_parser("graphs", help="HIP graph launches and attribution-degradation check")
+    _add_report_arg(p)
+
+    p = sub.add_parser("host_idle", help="Detect a mostly host-idle / load-missed capture")
+    _add_report_arg(p)
+
+    p = sub.add_parser("query", help="Run arbitrary SQL against a rocpd SQLite export, if present")
+    _add_report_arg(p)
+    p.add_argument("sql")
+
+    p = sub.add_parser("summary", help="All-in-one analysis")
+    _add_report_arg(p)
+    p.add_argument("--top", type=int, default=15)
+
     return parser
 
 
@@ -931,6 +1336,12 @@ _COMMANDS = {
     "kernels": cmd_kernels,
     "families": cmd_families,
     "idle_gaps": cmd_idle_gaps,
+    "cpu_overhead": cmd_cpu_overhead,
+    "memory": cmd_memory,
+    "graphs": cmd_graphs,
+    "host_idle": cmd_host_idle,
+    "query": cmd_query,
+    "summary": cmd_summary,
 }
 
 
