@@ -145,6 +145,7 @@ class Workspace:
         profiler_support_name: str | None,
         workspace_sources: tuple[WorkspaceSource, ...] = (),
         extra_input_excludes: frozenset[str] = frozenset(),
+        profiler_support_extra: tuple[tuple[str, str], ...] = (),
     ) -> tuple[WorkspaceStep, ...]:
         """Build the ordered copy plan for ``setup``.
 
@@ -218,6 +219,10 @@ class Workspace:
                         src=Path(profiler_support_path), dest=self.root / profiler_support_name
                     )
                 )
+                steps.extend(
+                    CopySpec(src=Path(extra_path), dest=self.root / extra_name)
+                    for extra_path, extra_name in profiler_support_extra
+                )
 
         # Always ensure profiler harnesses are present in the project, even
         # when resuming — the original run may not have had them.
@@ -225,6 +230,10 @@ class Workspace:
             destination = self.root / profiler_support_name
             if not destination.exists():
                 steps.append(CopySpec(src=Path(profiler_support_path), dest=destination))
+            for extra_path, extra_name in profiler_support_extra:
+                extra_destination = self.root / extra_name
+                if not extra_destination.exists():
+                    steps.append(CopySpec(src=Path(extra_path), dest=extra_destination))
 
         return tuple(steps)
 

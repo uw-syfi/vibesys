@@ -195,6 +195,11 @@ class RunEnvironmentRequest:  # noqa: D101  # tracked: #288
     evaluator_tools_root: Path | None = None
     profiler_support_path: str | None = None
     profiler_support_name: str | None = None
+    # Sibling support directories staged alongside the primary profiler
+    # support dir (the shared capture-runtime package, plus any profiler
+    # kind's own extra plugin dirs), as (host_source_path, workspace_name)
+    # pairs. Meaningless without profiler_support_path/name set.
+    profiler_support_extra: tuple[tuple[str, str], ...] = ()
     git_history_root: Path | None = None
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     workspace_sources: tuple[WorkspaceSource, ...] = ()
@@ -1652,6 +1657,10 @@ def _container_mount_plan(  # tracked: #288
                 f"/workspace/{request.profiler_support_name}",
                 True,
             )
+        )
+        bind_mounts.extend(
+            (extra_path, f"/workspace/{extra_name}", True)
+            for extra_path, extra_name in request.profiler_support_extra
         )
 
     if request.evaluator_package_root is not None:
