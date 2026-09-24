@@ -37,14 +37,12 @@ from vibesys.api.contracts import (
     ConfigurationError,
     CoreEvent,
     EventStatus,
-    LoopKind,
     MetricSpace,
     Objective,
     OrchestrationDescriptor,
     OrchestrationRunRequest,
     PerfDeltaReason,
     ResumeRef,
-    RunRequest,
     RunRequestLike,
     RunResult,
     RunStatus,
@@ -166,7 +164,14 @@ _AGENT_COMPAT_EXPORTS = frozenset(
 
 
 def __getattr__(name: str) -> Any:  # noqa: ANN401
-    """Resolve deprecated agent-only imports without loading them eagerly."""
+    """Resolve deprecated built-in imports without loading them eagerly."""
+    if name in {"LoopKind", "RunRequest"}:
+        warnings.warn(
+            f"vibesys.api.{name} is deprecated for new policies; use OrchestrationRunRequest",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return getattr(import_module("vibesys.api._orchestrations.legacy_request"), name)
     if name not in _AGENT_COMPAT_EXPORTS:
         raise AttributeError(name)
     warnings.warn(

@@ -13,7 +13,7 @@ from vibesys.loops.evolve.orchestration import resume_projection
 
 if TYPE_CHECKING:
     from vibesys.api._orchestrations.contracts import RunDescription
-    from vibesys.api.contracts import RunRequest
+    from vibesys.api._orchestrations.legacy_request import RunRequest
     from vibesys.orchestration import ResumeProjection
     from vibesys.run.integration import LocalRunIntegration
     from vs_project.api import OrchestrationRunManifest

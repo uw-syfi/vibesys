@@ -8,13 +8,13 @@ type defined here: a run's workspace is expressed as `vs_sandbox.HostResource`
 
 from __future__ import annotations
 
+import warnings
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from importlib import import_module
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
-# Legacy public names remain here for import compatibility.
-from vibesys.api._orchestrations.legacy_request import LoopKind, RunRequest
 from vibesys.api.run_request import OrchestrationRunRequest, ResumeRef, RunRequestLike
 from vibesys.config import Config
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -25,6 +25,7 @@ from vs_project.api import OrchestrationDescriptor
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.api._orchestrations.legacy_request import LoopKind, RunRequest
     from vibesys.skills import SkillSelection
     from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
 
@@ -58,8 +59,16 @@ __all__ = [
 ]
 
 
-# Compatibility alias; generic framework code accepts ``RunRequestLike``.
-type AnyRunRequest = RunRequest | OrchestrationRunRequest
+def __getattr__(name: str) -> Any:  # noqa: ANN401
+    """Resolve deprecated built-in request names on explicit access."""
+    if name not in {"LoopKind", "RunRequest"}:
+        raise AttributeError(name)
+    warnings.warn(
+        f"vibesys.api.contracts.{name} is deprecated for new policies; use OrchestrationRunRequest",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return getattr(import_module("vibesys.api._orchestrations.legacy_request"), name)
 
 
 class RunResult(BaseModel):

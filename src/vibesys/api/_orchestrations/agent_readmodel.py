@@ -19,7 +19,8 @@ from vibesys.api._orchestrations.agent_projection import (
     HypothesisView,
     RoundView,
 )
-from vibesys.api.contracts import LoopKind, RunStatus, RunView
+from vibesys.api._orchestrations.legacy_request import LoopKind
+from vibesys.api.contracts import RunStatus, RunView
 from vibesys.loops.agent.hypotheses import measurement_delta_reason
 from vibesys.loops.agent.model import HypothesisResolution
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome, derive_hypothesis_title

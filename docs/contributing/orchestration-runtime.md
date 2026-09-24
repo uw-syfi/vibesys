@@ -88,7 +88,9 @@ result = asyncio.run(session.await_result())
 `OrchestrationRunRequest` is the generic descriptor-based request. The framework
 reads it through `RunRequestLike`. `RunRequest` and `LoopKind` remain public
 compatibility imports for built-in CLI selection and are deprecated for new
-policies. Their policy options belong to the built-in adapters.
+policies. Accessing either name through `vibesys.api` or
+`vibesys.api.contracts` emits a deprecation warning. Their policy options
+belong to the built-in adapters; importing the generic API does not load them.
 `RunResult.loop` and `RunView.loop` return ID strings for every policy;
 `LoopKind` still compares equal to its corresponding string value.
 `RunView` contains run identity, lifecycle status, and an optional JSON object

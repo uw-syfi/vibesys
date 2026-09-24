@@ -15,14 +15,15 @@ from vibesys.api._orchestrations.agent_readmodel import (
     project_run_view,
 )
 from vibesys.api._orchestrations.agent_state import load_agent_run_state
-from vibesys.api.contracts import LoopKind, RunStatus
+from vibesys.api._orchestrations.legacy_request import LoopKind
 from vibesys.loops.agent.model import AgentRunState
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.api._orchestrations.contracts import RunDescription
-    from vibesys.api.contracts import RunRequest, RunView
+    from vibesys.api._orchestrations.legacy_request import RunRequest
+    from vibesys.api.contracts import RunStatus, RunView
     from vibesys.orchestration import ResumeProjection
     from vibesys.run.integration import LocalRunIntegration
     from vs_project.api import OrchestrationRunManifest, Project

@@ -11,8 +11,8 @@ from vibesys.api._orchestrations.contracts import (
     project_run,
 )
 from vibesys.api._orchestrations.evolve import EvolveOrchestration
+from vibesys.api._orchestrations.legacy_request import LoopKind, RunRequest
 from vibesys.api._orchestrations.plain import PlainOrchestration
-from vibesys.api.contracts import LoopKind, RunRequest
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
