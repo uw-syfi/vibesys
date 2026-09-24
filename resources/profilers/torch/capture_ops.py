@@ -35,6 +35,7 @@ import contextlib
 import io
 import os
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -105,6 +106,50 @@ def _build_capture_env(
 def discover_traces(out_dir: Path) -> list[Path]:
     """Every ``<pid>.pt.trace.json.gz`` the capture's processes wrote, sorted."""
     return sorted(out_dir.rglob(_TRACE_GLOB))
+
+
+_POST_STOP_TRACE_POLL_S = 1.0
+
+
+def wait_for_additional_traces(out_dir: Path, *, grace_s: float) -> None:
+    """Give sibling/descendant target processes a bounded window to export.
+
+    ``capture_runtime.run_capture`` only waits for the *one* process it
+    directly launched (``command``, e.g. a serving engine's API-server
+    process) to exit. A multi-process target's other processes (e.g. a
+    separate engine-core/worker process, the one that actually does GPU
+    work) receive the same ``stop_signal`` via the process-group broadcast
+    (``os.killpg`` in ``capture_runtime``) and, if this injection is armed
+    there too, run their own independent ``stop_and_export()`` -- which
+    pays the same real, minutes-scale ROCm post-export hang documented in
+    ``inject/sitecustomize.py``, on its own schedule, not synchronized with
+    the directly-launched process's exit at all. Observed on real ROCm
+    hardware (see the worklog): the worker process's own
+    "profiling started" log line appeared, but by the time this function's
+    caller used to call ``discover_traces`` immediately, its trace file did
+    not exist yet -- so the primary-trace selection silently fell back to
+    the driver-only process's near-empty trace (0 GPU kernels) instead of
+    the real one, with no error at all.
+
+    Bounded and cheap in the common single-process case: polls for
+    ``*.pt.trace.json.gz`` files under *out_dir* and returns as soon as the
+    set of paths and their sizes are unchanged across one full poll
+    interval (nothing left to arrive, or nothing ever will), so it costs at
+    most one ``_POST_STOP_TRACE_POLL_S`` tick when there is only ever one
+    trace. Never waits longer than *grace_s*, the same "how long might the
+    known hang take" budget the caller already sized for the directly
+    launched process's own stop.
+    """
+    if grace_s <= 0:
+        return
+    deadline = time.monotonic() + grace_s
+    last_sizes: dict[Path, int] | None = None
+    while time.monotonic() < deadline:
+        current = {p: p.stat().st_size for p in discover_traces(out_dir) if p.is_file()}
+        if last_sizes is not None and current == last_sizes:
+            return
+        last_sizes = current
+        time.sleep(min(_POST_STOP_TRACE_POLL_S, max(0.0, deadline - time.monotonic())))
 
 
 def _kernel_count(path: Path) -> int | None:
@@ -224,6 +269,21 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
     own; set it (with ``ready_command``) to drive a server under load, then
     stop it with ``stop_signal`` (default ``SIGINT``) once the load finishes.
 
+    A multi-process ``command`` (e.g. a server that forks/spawns worker
+    processes) only has *one* process directly awaited by
+    ``capture_runtime.run_capture``: the one ``command`` itself launched.
+    Every other process that armed this injection receives the same
+    ``stop_signal`` via the process-group broadcast and runs its own
+    independent stop/export afterward, on its own schedule -- observed on
+    real ROCm hardware to still be writing its trace after the directly
+    launched process had already exited and ``run_capture`` returned. Before
+    picking the primary trace, this function gives any such sibling process
+    a bounded window (``wait_for_additional_traces``, capped at ``grace_s``)
+    to finish, rather than finalizing the trace list immediately and
+    silently missing the process that actually did the GPU work (this can
+    otherwise fall back to a driver-only process's near-empty trace with no
+    error at all).
+
     Returns prompt-sized text: the capture id, lifecycle status, the primary
     trace's certify verdict, and its top ops/kernels/GEMM shapes. The full
     manifest (every trace path, which one was primary) is written to
@@ -257,6 +317,7 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
 
     lines = [capture_runtime.format_result(result)]
 
+    wait_for_additional_traces(out_dir, grace_s=grace_s)
     traces = discover_traces(out_dir)
     if not traces:
         _record_traces_in_manifest(out_dir, primary=None, traces=[])

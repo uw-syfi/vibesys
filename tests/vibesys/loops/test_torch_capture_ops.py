@@ -18,6 +18,8 @@ import json
 import socket
 import sys
 import textwrap
+import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -34,6 +36,11 @@ _TORCH_DIR = _REPO / "resources" / "profilers" / "torch"
 
 FAST = settings(
     max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+# For property tests whose body sleeps real wall-clock time (bounded waits):
+# fewer examples keeps the suite fast without weakening the property itself.
+FAST_SHORT = settings(
+    max_examples=8, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
 )
 
 
@@ -130,6 +137,127 @@ def test_pick_primary_trace_is_the_max_kernel_trace(
 
     # Order independence: shuffling the input must not change the winner.
     assert capture_ops.pick_primary_trace(list(reversed(paths))) == primary
+
+
+# ---------------------------------------------------------------------------
+# wait_for_additional_traces
+#
+# Regression for a real MI210 finding (vllm-serve topology, multi-process
+# target): capture_runtime.run_capture only waits for the *one* process it
+# directly launched. A sibling process that received the same stop signal
+# via the process-group broadcast (e.g. vLLM V1's EngineCore worker, the
+# one actually doing GPU work) runs its own independent stop/export on its
+# own schedule and can still be writing its trace file after run_capture
+# has already returned. Without a bounded wait, primary-trace selection ran
+# immediately and silently missed it, falling back to a near-empty
+# driver-process trace with no error.
+# ---------------------------------------------------------------------------
+
+
+def test_wait_for_additional_traces_returns_immediately_with_nothing_pending(
+    capture_ops: ModuleType, tmp_path: Path
+) -> None:
+    t0 = time.monotonic()
+    capture_ops.wait_for_additional_traces(tmp_path, grace_s=5.0)
+    assert time.monotonic() - t0 < 2.0
+
+
+def test_wait_for_additional_traces_zero_grace_is_a_no_op(
+    capture_ops: ModuleType, tmp_path: Path
+) -> None:
+    t0 = time.monotonic()
+    capture_ops.wait_for_additional_traces(tmp_path, grace_s=0.0)
+    assert time.monotonic() - t0 < 0.1
+
+
+@FAST_SHORT
+@given(
+    delay_s=st.floats(min_value=0.0, max_value=0.4, allow_nan=False),
+    n_kernels=st.integers(min_value=0, max_value=5),
+)
+def test_wait_for_additional_traces_eventually_sees_a_delayed_file(
+    capture_ops: ModuleType, tmp_path: Path, delay_s: float, n_kernels: int
+) -> None:
+    """For any arrival delay comfortably inside grace_s, the delayed file is
+    visible via discover_traces once the wait returns -- regardless of how
+    late (within budget) a sibling process finishes exporting.
+    """
+    case_dir = tmp_path / f"case-{delay_s}-{n_kernels}"
+    case_dir.mkdir()
+    path = case_dir / "555555.pt.trace.json.gz"
+
+    def _delayed_writer() -> None:
+        time.sleep(delay_s)
+        _write_trace(path, n_kernels=n_kernels)
+
+    writer = threading.Thread(target=_delayed_writer)
+    writer.start()
+    try:
+        capture_ops.wait_for_additional_traces(case_dir, grace_s=1.5)
+        assert path.is_file()
+        assert capture_ops.discover_traces(case_dir) == [path]
+    finally:
+        writer.join(timeout=5.0)
+
+
+def test_profile_ops_finds_a_sibling_trace_that_exports_after_the_tracked_process_exits(
+    capture_ops: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end regression: ``command`` exits almost immediately (like the
+    vllm-serve API server), but spawns a detached sibling process that keeps
+    running and writes its own trace ~0.6s later (like EngineCore's own,
+    independently-scheduled stop/export). ``profile_ops`` must still find
+    it, because a multi-process target's traces are not all produced by the
+    time the one directly-launched process exits.
+    """
+    fake_torch = write_fake_torch(tmp_path / "fake_torch")
+    profiles_dir = tmp_path / "profiles"
+    monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(profiles_dir))
+
+    sibling_script = tmp_path / "sibling.py"
+    sibling_script.write_text(
+        textwrap.dedent(
+            """
+            import gzip, json, os, sys, time
+
+            time.sleep(0.6)
+            out_dir = os.environ["VIBESYS_TORCH_PROFILE_OUT_DIR"]
+            events = [
+                {"ph": "X", "cat": "kernel", "name": "late_sibling_kernel", "ts": 0, "dur": 5, "args": {}}
+            ]
+            data = {"traceEvents": events, "deviceProperties": []}
+            path = os.path.join(out_dir, "999999999.pt.trace.json.gz")
+            with gzip.open(path, "wt", encoding="utf-8") as f:
+                json.dump(data, f)
+            """
+        )
+    )
+    script = tmp_path / "workload.py"
+    script.write_text(
+        textwrap.dedent(
+            f"""
+            import subprocess, sys
+            import torch  # noqa: F401  (arms this process's own injection too)
+
+            subprocess.Popen([sys.executable, {str(sibling_script)!r}])
+            """
+        )
+    )
+
+    output = capture_ops.profile_ops(
+        command=f"{sys.executable} {script}",
+        env={"PYTHONPATH": str(fake_torch)},
+        delay_s=0.0,
+        duration_s=0.05,
+        timeout_s=20,
+        grace_s=3,
+    )
+
+    assert ": ok" in output, output
+    captures = list(profiles_dir.iterdir())
+    assert len(captures) == 1
+    manifest = json.loads((captures[0] / "manifest.json").read_text())
+    assert "999999999.pt.trace.json.gz" in manifest["trace_files"], manifest
 
 
 # ---------------------------------------------------------------------------

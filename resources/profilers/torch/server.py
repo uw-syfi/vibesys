@@ -105,8 +105,18 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
         the moment the target process imports torch and shows a visible
         GPU, starts after `delay_s`, and stops after `duration_s` (or at
         process exit / SIGINT). Multi-process targets each write their own
-        trace; this picks the one with the most GPU kernel events as
-        primary and runs certify + a compact summary against it.
+        trace; sibling processes get a bounded grace window to finish
+        exporting before this picks the one with the most GPU kernel events
+        as primary and runs certify + a compact summary against it.
+
+        Measured on real ROCm hardware: prof.start() itself takes ~2s to
+        actually begin recording after the signal fires, and `duration_s`
+        is measured from when the signal is *sent* -- pad short windows
+        accordingly. Also, a background thread that was already running
+        before the profiler started records GPU kernels fine but zero
+        CPU-side ops (no record_shapes/gemm_shapes/roofline attribution for
+        it); prefer `delay_s=0` so recording starts before the target
+        spawns its own worker threads.
 
         Args:
             command: Target command, run via bash -lc.
