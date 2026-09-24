@@ -106,6 +106,7 @@ def _turns(tmp_path: Path) -> ProfileMultiTurns:
             ),
             events=SimpleNamespace(emit=MagicMock()),
             log=MagicMock(),
+            warning=MagicMock(),
         ),
     )
     turns = ProfileMultiTurns(ctx, _options())

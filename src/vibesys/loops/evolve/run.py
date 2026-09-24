@@ -41,7 +41,6 @@ from vibesys.loops.evolve.state import (
     GenerationCursor,
     GenerationJournal,
 )
-from vibesys.render.sink import output_sink
 from vs_agent.api import CandidateProgress
 
 if TYPE_CHECKING:
@@ -223,7 +222,7 @@ class EvolveRun:
                 f"[{axes}], frontier_bias={options.frontier_bias}, "
                 f"tolerance={space.relative_noise:.0%}"
             )
-        output_sink().run_configured(
+        host.run_configured(
             run_log_path=str(host.environment.run_log_path),
             project_root=str(host.workspaces.root.path),
             objective=objective,
@@ -405,7 +404,7 @@ class EvolveRun:
             if plan is None:
                 continue
             if plan.parent.commit is None:
-                output_sink().framework_warning(
+                self.host.warning(
                     f"parent {plan.parent.id} has no commit; cannot isolate "
                     f"candidate g{generation}c{child_idx}; skipping",
                     source=FrameworkSource.LOOP,
@@ -445,7 +444,7 @@ class EvolveRun:
             if parent_commit:
                 await self.host.workspaces.root.restore(parent_commit, clean=True)
         except Exception:  # noqa: BLE001  # preserve the skipped-candidate policy
-            output_sink().framework_warning(
+            self.host.warning(
                 f"could not check out parent {parent.id} "
                 f"(commit {parent_commit[:8] if parent_commit else 'n/a'}); skipping candidate",
                 source=FrameworkSource.LOOP,

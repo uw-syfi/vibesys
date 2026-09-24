@@ -108,6 +108,7 @@ def _turns(tmp_path: Path) -> MultiAgentTurns:
             ),
             events=SimpleNamespace(emit=MagicMock()),
             log=MagicMock(),
+            warning=MagicMock(),
         ),
     )
     turns = MultiAgentTurns(ctx, _options())

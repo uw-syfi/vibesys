@@ -31,7 +31,6 @@ from vibesys.profilers import (
     mcp_spec as profiler_mcp_spec,
 )
 from vibesys.prompts import PROMPTS_DIR, render_template
-from vibesys.render.sink import output_sink
 from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,
@@ -258,7 +257,7 @@ class ProfileMultiTurns:
             return [], []
         sources = self.ctx.environment.skill_source_paths
         if not sources:
-            output_sink().framework_warning(
+            self.ctx.warning(
                 "ignored skill recommendations because no skills are installed",
                 source=FrameworkSource.LOOP,
                 source_label="skills",
@@ -269,7 +268,7 @@ class ProfileMultiTurns:
                 selections, build_skill_catalog(sources)
             )
         except (OSError, ValueError) as error:
-            output_sink().framework_warning(
+            self.ctx.warning(
                 "ignored skill recommendations because the catalog is invalid",
                 detail=f"{type(error).__name__}: {error}",
                 source=FrameworkSource.LOOP,
@@ -277,9 +276,7 @@ class ProfileMultiTurns:
             )
             return [], []
         for diagnostic in diagnostics:
-            output_sink().framework_warning(
-                diagnostic, source=FrameworkSource.LOOP, source_label="skills"
-            )
+            self.ctx.warning(diagnostic, source=FrameworkSource.LOOP, source_label="skills")
         return [
             SkillResourceSelection(
                 skill=item.skill,
@@ -431,7 +428,7 @@ Write bounded durable profile evidence only below
                 mcp_servers=[spec] if spec is not None else None,
             )
         except Exception as error:  # noqa: BLE001  # profile evidence is optional
-            output_sink().framework_warning(
+            self.ctx.warning(
                 "profiler failed",
                 detail=str(error),
                 source=FrameworkSource.LOOP,

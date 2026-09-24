@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from vibesys.loops.issue_queue.render import render_all
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
 from vibesys.prompts import PROMPTS_DIR, Prompt
-from vibesys.render.sink import output_sink
 from vibesys.schemas import (
     IssueImplementerResponse,
     IssueJudgeResponse,
@@ -193,7 +192,7 @@ class IssueQueueRun:
     @classmethod
     async def open(cls, host: RunContext, options: IssueQueueOptions) -> IssueQueueRun:
         """Open issue memory in the host's workspace and load its durable cursor."""
-        output_sink().run_configured(
+        host.run_configured(
             run_log_path=str(host.environment.run_log_path),
             project_root=str(host.workspaces.root.path),
             model=host.environment.model_name,

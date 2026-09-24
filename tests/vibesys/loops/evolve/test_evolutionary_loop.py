@@ -26,7 +26,7 @@ from vibesys.domains.registry import resolve_domain
 from vibesys.evaluators.gates import framework_command_timeout
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.events import FrameworkWarningData
+from vibesys.events import FrameworkSource, FrameworkWarningData
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
 from vibesys.loops.evolve.loop import (
     _candidate_code,
@@ -192,6 +192,24 @@ class _FakeRunContext:
     def log(self, text: str) -> None:
         """Record a log line the same way the real context would emit it."""
         self._log(text)
+
+    def warning(
+        self,
+        summary: str,
+        *,
+        detail: str | None = None,
+        source: FrameworkSource = FrameworkSource.LOOP,
+        source_label: str | None = None,
+        round_label: str | None = None,
+    ) -> None:
+        """Publish a framework warning the same way the real context would."""
+        output_sink().framework_warning(
+            summary,
+            detail=detail,
+            source=source,
+            source_label=source_label,
+            round_label=round_label,
+        )
 
     def trusted_input_changes(self) -> list[str]:
         return []

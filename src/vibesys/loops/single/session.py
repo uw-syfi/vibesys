@@ -45,7 +45,6 @@ from vibesys.events import (
 from vibesys.loops.single.hypothesis import HypothesisEngine
 from vibesys.loops.single.turns import SingleAgentTurns
 from vibesys.orchestration.runtime import MeasurementOptions
-from vibesys.render.sink import output_sink
 from vibesys.schemas import ProfilerSummary, Verdict
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
@@ -177,7 +176,7 @@ class SingleSession:
     async def _initialize(self) -> None:
         ctx = self.ctx
         turns = self.turns
-        output_sink().run_configured(
+        ctx.run_configured(
             run_log_path=str(ctx.environment.run_log_path),
             project_root=str(ctx.request.project_root),
             objective=turns.objective,

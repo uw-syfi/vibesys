@@ -44,6 +44,7 @@ from vibesys.events import (
     AgentExecutionStartedData,
     CoreEventType,
     EventStatus,
+    FrameworkSource,
     GateKind,
     InvocationFinishedData,
     InvocationStartedData,
@@ -1130,6 +1131,46 @@ class RunContext:
     def log(self, message: str) -> None:
         """Write one line to the active run log."""
         self._resources.lprint(message)
+
+    def warning(
+        self,
+        summary: str,
+        *,
+        detail: str | None = None,
+        source: FrameworkSource = FrameworkSource.LOOP,
+        source_label: str | None = None,
+        round_label: str | None = None,
+    ) -> None:
+        """Publish one non-fatal framework fault as a FRAMEWORK_WARNING event."""
+        output_sink().framework_warning(
+            summary,
+            detail=detail,
+            source=source,
+            source_label=source_label,
+            round_label=round_label,
+        )
+
+    def run_configured(  # noqa: PLR0913
+        self,
+        *,
+        run_log_path: str,
+        project_root: str,
+        model: str | None = None,
+        objective: str | None = None,
+        search_policy: str | None = None,
+        benchmark_contract: bool = False,
+        pareto_objectives: str | None = None,
+    ) -> None:
+        """Publish the one-per-run resolved loop configuration event."""
+        output_sink().run_configured(
+            run_log_path=run_log_path,
+            project_root=project_root,
+            model=model,
+            objective=objective,
+            search_policy=search_policy,
+            benchmark_contract=benchmark_contract,
+            pareto_objectives=pareto_objectives,
+        )
 
     def switch_log(self, label: int | str) -> None:
         """Select a policy phase log for subsequent output and agent turns."""

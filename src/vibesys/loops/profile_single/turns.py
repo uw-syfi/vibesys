@@ -25,7 +25,6 @@ from vibesys.profilers import (
     require_profiler_kind,
 )
 from vibesys.prompts import PROMPTS_DIR, render_template
-from vibesys.render.sink import output_sink
 from vibesys.schemas import (
     OrchestratorPlan,
     SingleAgentRoundResponse,
@@ -237,7 +236,7 @@ class ProfileSingleTurns:
             return [], []
         sources = self.ctx.environment.skill_source_paths
         if not sources:
-            output_sink().framework_warning(
+            self.ctx.warning(
                 "ignored skill recommendations because no skills are installed",
                 source=FrameworkSource.LOOP,
                 source_label="skills",
@@ -248,7 +247,7 @@ class ProfileSingleTurns:
                 selections, build_skill_catalog(sources)
             )
         except (OSError, ValueError) as error:
-            output_sink().framework_warning(
+            self.ctx.warning(
                 "ignored skill recommendations because the catalog is invalid",
                 detail=f"{type(error).__name__}: {error}",
                 source=FrameworkSource.LOOP,
@@ -256,9 +255,7 @@ class ProfileSingleTurns:
             )
             return [], []
         for diagnostic in diagnostics:
-            output_sink().framework_warning(
-                diagnostic, source=FrameworkSource.LOOP, source_label="skills"
-            )
+            self.ctx.warning(diagnostic, source=FrameworkSource.LOOP, source_label="skills")
         return [
             SkillResourceSelection(
                 skill=item.skill,

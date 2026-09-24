@@ -127,6 +127,8 @@ def _session(tmp_path: Path) -> MultiSession:
     session.ctx = SimpleNamespace(
         log=MagicMock(),
         switch_log=MagicMock(),
+        run_configured=MagicMock(),
+        warning=MagicMock(),
         events=SimpleNamespace(emit=MagicMock()),
         agents=SimpleNamespace(progress=lambda _progress: nullcontext()),
         state=SimpleNamespace(load=AsyncMock(return_value=None), checkpoint=AsyncMock()),

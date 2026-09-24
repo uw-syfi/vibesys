@@ -62,7 +62,6 @@ from vibesys.loops.evolve.search_policy import (
 from vibesys.orchestration.runtime import MeasurementOptions
 from vibesys.profilers import ProfilerKind, mcp_spec, profiler_definition
 from vibesys.prompts import PROMPTS_DIR
-from vibesys.render.sink import output_sink
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
 
 if TYPE_CHECKING:
@@ -150,7 +149,7 @@ async def _discard_working_tree(ctx: RunContext) -> None:
     try:
         await ctx.workspaces.root.restore("HEAD", clean=True)
     except Exception as exc:  # noqa: BLE001  # tracked: #288
-        output_sink().framework_warning(
+        ctx.warning(
             "discard working tree failed",
             detail=str(exc),
             source=FrameworkSource.LOOP,
@@ -448,7 +447,7 @@ async def _run_profiler(  # noqa: PLR0913  # tracked: #288
             mcp_servers=[spec] if spec is not None else None,
         )
     except Exception as exc:  # noqa: BLE001  # tracked: #288
-        output_sink().framework_warning(
+        ctx.warning(
             "profiler failed", detail=str(exc), source=FrameworkSource.LOOP, round_label=label
         )
         return None
@@ -733,7 +732,7 @@ class _LoopSearchEffects:
         self.ctx.log(message)
 
     def warn(self, message: str) -> None:
-        output_sink().framework_warning(message, source=FrameworkSource.LOOP)
+        self.ctx.warning(message, source=FrameworkSource.LOOP)
 
 
 async def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
@@ -759,7 +758,7 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
     label = f"g{generation}c{child_idx}"
     commit = parent.commit
     if commit is None:
-        output_sink().framework_warning(
+        ctx.warning(
             f"candidate {label} has no parent commit; skipping",
             source=FrameworkSource.LOOP,
         )
@@ -773,7 +772,7 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
     try:
         scope = await ctx.workspaces.fork(commit)
     except Exception as exc:  # noqa: BLE001  # tracked: #288
-        output_sink().framework_warning(
+        ctx.warning(
             f"candidate {label} setup failed",
             detail=str(exc),
             source=FrameworkSource.LOOP,
@@ -816,7 +815,7 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
             # object that Git is then free to prune.
             await ctx.workspaces.root.retain(label, outcome.commit)
     except Exception as exc:  # noqa: BLE001  # tracked: #288
-        output_sink().framework_warning(
+        ctx.warning(
             f"candidate {label} evaluation raised",
             detail=str(exc),
             source=FrameworkSource.LOOP,
@@ -834,7 +833,7 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
         try:
             await scope.discard()
         except Exception as exc:  # noqa: BLE001  # tracked: #288
-            output_sink().framework_warning(
+            ctx.warning(
                 f"candidate {label} teardown failed",
                 detail=str(exc),
                 source=FrameworkSource.LOOP,
@@ -944,7 +943,7 @@ class _BootstrapAdapter:
             try:
                 await self.ctx.workspaces.root.restore(wip_seed.commit, clean=True)
             except Exception:  # noqa: BLE001  # recover by rebuilding from reference
-                output_sink().framework_warning(
+                self.ctx.warning(
                     f"could not check out WIP seed {wip_seed.id} "
                     f"(commit {wip_seed.commit[:8]}); starting from reference",
                     source=FrameworkSource.LOOP,
@@ -958,7 +957,7 @@ class _BootstrapAdapter:
             sha_before = self.ctx.workspaces.root.revision
             sha_after = await self.ctx.workspaces.root.snapshot(f"wip-seed-bootstrap{number}")
         except Exception as exc:  # noqa: BLE001  # tracked: #288
-            output_sink().framework_warning(
+            self.ctx.warning(
                 "wip-seed snapshot failed",
                 detail=str(exc),
                 source=FrameworkSource.LOOP,
