@@ -95,8 +95,8 @@ already-identified hot kernel — this is not a whole-run tool.
 
 | MCP tool | Shell equivalent | Purpose |
 | -------- | ---------------- | ------- |
-| `compute_doctor()` | `... compute.py doctor` | Diagnose the rocprof-compute install (binary, deps interpreter, pandas version, rocprofv3, aqlprofile) before spending a capture on it. |
-| `compute_analyze(workload_dir, blocks=..., max_stat=10, kernel="", timeout=300)` | `... analyze <workload_dir>` | Run `rocprof-compute analyze`; falls back to raw CSVs if it fails. |
+| `compute_doctor()` | `... compute.py doctor` | Diagnose the rocprof-compute install (binary, deps interpreter, pandas version, the deprecated legacy `rocprof` it actually shells out to, aqlprofile) before spending a capture on it. |
+| `compute_analyze(workload_dir, blocks=..., max_stat=10, kernel="", timeout=300)` | `... analyze <workload_dir>` | Run `rocprof-compute analyze`; falls back to a summarized read of the raw CSVs (top kernels by time, a couple of rough counter ratios) if it fails. |
 
 `compute.py profile` (the capture step) is long-running and stays **shell
 command, not an MCP tool** — same reasoning as `rocprofv3` capture itself. Run
@@ -110,6 +110,15 @@ a whole run:
 python {{ profiler_support_name }}/compute.py profile --name <workload> --out /tmp/rocprof_compute \
   --kernel <regex> --timeout 900 -- <command>
 ```
+
+**`--kernel` matches a literal substring, not a friendly name — verify it
+first.** Confirmed on a real capture: torch GEMMs dispatch through
+rocBLAS/hipBLASLt as Tensile kernels named like
+`Cijk_Ailk_Bljk_BBS_BH_..._MT256x128x32_...`, which does **not** contain the
+substring `"gemm"` — a naive `--kernel gemm` filter matches zero dispatches,
+and `profile` here now fails loudly with the fix (list real kernel names with
+`rocprofv3 --kernel-trace --stats` first) instead of forwarding rocprof-
+compute's own confusing `KeyError: 'Grid_Size'` crash.
 
 ### Instruction-level (`att.py`, Advanced Thread Trace) — version-gated
 

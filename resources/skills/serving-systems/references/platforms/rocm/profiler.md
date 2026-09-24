@@ -9,14 +9,15 @@ substitution table plus the ROCm-specific mechanics.
 > **Status.** The `rocprof` profiler kind is wired up: system trace, PMC
 > counters, thread trace, kernel-internal, and paired A/B timing all have a
 > workspace tool (`rocprof_profiler/`, below). PMC counter capture, tool
-> inventory, and **ATT thread-trace capture + decode** are verified on this
-> repo's MI210 test cluster (ROCm 6.2.1 through 7.2.0 modules available; host
-> venv runs ROCm 6.4.1 to match `torch 2.9.1+rocm6.4`); end-to-end capture
-> against a **live vLLM/SGLang server**, and `rocprof-compute` kernel-internal
-> analysis, were still in progress on this cluster as of this writing — treat
-> those two recipes as directionally correct and verify against your ROCm
-> version. The `torch.profiler` pitfall in this file's Pitfalls section **is**
-> measured on this repo's MI210 bundle.
+> inventory, **ATT thread-trace capture + decode**, and **`rocprof-compute`
+> kernel-internal `profile`/`analyze`** are verified on this repo's MI210 test
+> cluster (ROCm 6.2.1 through 7.2.0 modules available; host venv runs ROCm
+> 6.4.1 to match `torch 2.9.1+rocm6.4`; `rocprof-compute` version confirmed
+> `3.1.0`). End-to-end capture against a **live vLLM/SGLang server** was still
+> in progress on this cluster as of this writing — treat that recipe as
+> directionally correct and verify against your ROCm version. The
+> `torch.profiler` pitfall in this file's Pitfalls section **is** measured on
+> this repo's MI210 bundle.
 
 ## Altitudes and tools
 
@@ -176,6 +177,28 @@ relative hardware performance. See [`aiter-engagement.md`](aiter-engagement.md).
   MI210 test cluster — system `python3`'s `pandas` was already `2.2.2`,
   ahead of the `>=3` version known to break `rocprof-compute`'s CSV
   converter — but check `doctor` on any other host before relying on this.)
+- **`rocprof-compute profile -k` matches a literal substring, and a bad
+  filter fails silently, then confusingly — verified end to end.** torch
+  GEMMs dispatch through rocBLAS/hipBLASLt as Tensile kernels named like
+  `Cijk_Ailk_Bljk_BBS_BH_..._MT256x128x32_...`, which does not contain the
+  substring `"gemm"` — `-k gemm` matches zero dispatches. Every
+  counter-collection pass then comes back with "0 contexts collected" and a
+  header-only CSV, and rocprof-compute's own post-processing crashes later
+  with a confusing `KeyError: 'Grid_Size'` deep in `join_prof()`, nowhere
+  near the actual cause. List real kernel names first (`rocprofv3
+  --kernel-trace --stats`) before writing a filter; `compute.py profile` now
+  detects this pattern and fails with that fix instead of forwarding the raw
+  traceback. Also verified: rocprof-compute 3.1.0's `profile` still shells
+  out to the **deprecated legacy `rocprof`** (v1/v2) internally, not
+  `rocprofv3` — every pass logs ROCm's own deprecation warning for it — so
+  `doctor` checks for legacy `rocprof`, not `rocprofv3`.
+- **`rocprof-compute profile -p <dir>` writes straight into `<dir>`, no
+  `<gpu>` subdirectory.** Verified on a real run: with an explicit `-p`, CSVs
+  (`pmc_perf.csv`, `pmc_kernel_top.csv`, `roofline.csv`, ...) land directly in
+  that directory, alongside rocprof-compute's own internal `perfmon/`
+  subdirectory — there is no extra per-GPU subdirectory layer to glob for.
+  `compute.py analyze <workload_dir>` expects that directory itself, not a
+  parent to search.
 - **ATT is version-gated and needs an extra package — verified working end
   to end.** ROCm 6.4.1's `rocprofv3` has **no** `--att`/thread-trace flag at
   all; the option first appears in ROCm 7.1.0/7.2.0. Even there, it fails
