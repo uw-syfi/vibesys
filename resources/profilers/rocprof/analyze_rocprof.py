@@ -47,6 +47,7 @@ import csv
 import json
 import re
 import sys
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -707,6 +708,188 @@ def cmd_files(ns: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Subcommand: kernels  # noqa: ERA001
+# ---------------------------------------------------------------------------
+
+
+def cmd_kernels(ns: argparse.Namespace) -> None:
+    """Top GPU kernels by total execution time, with a library-family column."""
+    disc = discover(ns.report)
+    agg, source = _load_kernels(disc)
+    if not agg:
+        print(  # noqa: T201
+            "(no kernel data found — no *_kernel_trace.csv or *_kernel_stats.csv under report path)"
+        )
+        return
+
+    total_ns = sum(e["total_ns"] for e in agg.values())
+    total_calls = sum(e["calls"] for e in agg.values())
+    ranked = sorted(agg.items(), key=lambda kv: -kv[1]["total_ns"])[: ns.top]
+
+    print(f"Kernel data source: {source}")  # noqa: T201
+    header = f"{'Kernel':<44s} {'Family':<28s} {'Calls':>7s} {'Total':>9s} {'Avg':>9s} {'Min':>9s} {'Max':>9s} {'%GPU':>6s}"
+    print(header)  # noqa: T201
+    print("-" * len(header))  # noqa: T201
+    for name, e in ranked:
+        fam = _classify_family(name)
+        avg = e["total_ns"] / e["calls"] if e["calls"] else 0.0
+        pct = e["total_ns"] / total_ns * 100 if total_ns else 0.0
+        min_ns = e["min_ns"] if e["min_ns"] != float("inf") else 0.0
+        print(  # noqa: T201
+            f"{_truncate(_short_name(name), 44):<44s} {fam:<28s} {e['calls']:>7d} {_fmt_ns(e['total_ns']):>9s} "
+            f"{_fmt_ns(avg):>9s} {_fmt_ns(min_ns):>9s} {_fmt_ns(e['max_ns']):>9s} {pct:>5.1f}%"
+        )
+    print(f"\nTotal GPU kernel time (all kernels): {_fmt_ns(total_ns)}")  # noqa: T201
+    print(f"Total kernel launches: {total_calls}")  # noqa: T201
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: families  # noqa: ERA001
+# ---------------------------------------------------------------------------
+
+
+def cmd_families(ns: argparse.Namespace) -> None:
+    """GPU time grouped by kernel-library family, flagging fallback-family hot spots."""
+    disc = discover(ns.report)
+    agg, source = _load_kernels(disc)
+    if not agg:
+        print(  # noqa: T201
+            "(no kernel data found — no *_kernel_trace.csv or *_kernel_stats.csv under report path)"
+        )
+        return
+
+    fam_totals: dict[str, dict] = {}
+    for name, e in agg.items():
+        fam = _classify_family(name)
+        entry = fam_totals.setdefault(
+            fam, {"calls": 0, "total_ns": 0.0, "top_name": "", "top_ns": 0.0}
+        )
+        entry["calls"] += e["calls"]
+        entry["total_ns"] += e["total_ns"]
+        if e["total_ns"] > entry["top_ns"]:
+            entry["top_ns"] = e["total_ns"]
+            entry["top_name"] = name
+
+    total_ns = sum(e["total_ns"] for e in fam_totals.values())
+    ordered = sorted(fam_totals.items(), key=lambda kv: -kv[1]["total_ns"])
+
+    print(f"Kernel data source: {source}")  # noqa: T201
+    header = (
+        f"{'Family':<32s} {'Calls':>8s} {'Total':>10s} {'%GPU':>6s}  {'Top kernel in family':<40s}"
+    )
+    print(header)  # noqa: T201
+    print("-" * len(header))  # noqa: T201
+    for fam, e in ordered:
+        pct = e["total_ns"] / total_ns * 100 if total_ns else 0.0
+        print(  # noqa: T201
+            f"{fam:<32s} {e['calls']:>8d} {_fmt_ns(e['total_ns']):>10s} {pct:>5.1f}%  "
+            f"{_truncate(_short_name(e['top_name']), 40):<40s}"
+        )
+
+    flags = [
+        (fam, e["top_name"], e["total_ns"] / total_ns * 100 if total_ns else 0.0)
+        for fam, e in ordered
+        if fam in FALLBACK_FAMILIES
+        and e["total_ns"] > 0
+        and (e["total_ns"] / total_ns * 100 if total_ns else 0.0)
+        >= _FALLBACK_FAMILY_SHARE_THRESHOLD
+        and _GEMM_ATTN_RE.search(e["top_name"])
+    ]
+    if flags:
+        print(  # noqa: T201
+            "\n*** Finding: GEMM/attention-shaped work is landing in a fallback family "
+            "instead of AITER/CK/hipBLASLt ***"
+        )
+        for fam, top_name, share in flags:
+            print(  # noqa: T201
+                f"  {fam}: '{_short_name(top_name)}' — {share:.1f}% of GPU time. Check "
+                f"dispatch/tuning config (e.g. AITER_LOG_TUNED_CONFIG=1) instead of accepting "
+                f"the fallback kernel."
+            )
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: idle_gaps  # noqa: ERA001
+# ---------------------------------------------------------------------------
+
+_IDLE_GAP_THRESHOLD_NS = 1000.0
+
+
+def _gaps_for_key(
+    key: tuple[str, str], evs: list[tuple[float, float, str]]
+) -> tuple[float, list[tuple[tuple[str, str], str, str, float]]]:
+    """Merge one agent/queue's kernel intervals; return (busy_ns, gaps > threshold)."""
+    evs = sorted(evs)
+    merged: list[list[float]] = []
+    for s, e, _n in evs:
+        if merged and s <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+    busy_ns = sum(e - s for s, e in merged)
+
+    end_name = {e: n for _s, e, n in evs}
+    start_name = {s: n for s, _e, n in evs}
+    gaps: list[tuple[tuple[str, str], str, str, float]] = []
+    for i in range(1, len(merged)):
+        gap = merged[i][0] - merged[i - 1][1]
+        if gap > _IDLE_GAP_THRESHOLD_NS:
+            prev_name = end_name.get(merged[i - 1][1], "?")
+            next_name = start_name.get(merged[i][0], "?")
+            gaps.append((key, prev_name, next_name, gap))
+    return busy_ns, gaps
+
+
+def cmd_idle_gaps(ns: argparse.Namespace) -> None:
+    """GPU busy vs. idle over the trace window, per agent/queue, largest gaps."""
+    disc = discover(ns.report)
+    events = _load_kernel_events(disc)
+    if len(events) < 2:  # noqa: PLR2004
+        if disc.kernel_stats and not disc.kernel_trace:
+            print(  # noqa: T201
+                "(idle-gap analysis needs per-event timestamps from *_kernel_trace.csv; "
+                "only aggregate *_kernel_stats.csv was found.)"
+            )
+        else:
+            print("(fewer than 2 kernel events with timestamps found.)")  # noqa: T201
+        return
+
+    by_key: dict[tuple[str, str], list[tuple[float, float, str]]] = defaultdict(list)
+    for e in events:
+        by_key[(e["agent"], e["queue"])].append((e["start_ns"], e["end_ns"], e["name"]))
+
+    gaps: list[tuple[tuple[str, str], str, str, float]] = []
+    total_busy = 0.0
+    for key, evs in by_key.items():
+        busy_ns, key_gaps = _gaps_for_key(key, evs)
+        total_busy += busy_ns
+        gaps.extend(key_gaps)
+
+    gaps.sort(key=lambda x: -x[3])
+    total_idle = sum(g[3] for g in gaps)
+    window_ns = max(e["end_ns"] for e in events) - min(e["start_ns"] for e in events)
+
+    print(f"Capture window: {_fmt_ns(window_ns)}")  # noqa: T201
+    print(f"GPU busy (union per agent/queue): {_fmt_ns(total_busy)}")  # noqa: T201
+    denom = total_busy + total_idle
+    pct_idle = total_idle / denom * 100 if denom else 0.0
+    print(f"GPU idle (intra-key gaps > 1us): {_fmt_ns(total_idle)} ({pct_idle:.1f}%)")  # noqa: T201
+    print(f"Idle gaps found: {len(gaps)}")  # noqa: T201
+
+    top = gaps[: ns.top]
+    if top:
+        print(f"\nTop {len(top)} gaps:")  # noqa: T201
+        print(f"  {'Agent/Queue':<16s} {'Gap':>10s}  {'After':<32s} -> {'Before':<32s}")  # noqa: T201
+        print("  " + "-" * 92)  # noqa: T201
+        for (agent, queue), prev_name, next_name, gap in top:
+            key_str = f"{agent}/{queue}"
+            print(  # noqa: T201
+                f"  {key_str:<16s} {_fmt_ns(gap):>10s}  {_truncate(_short_name(prev_name), 32):<32s} -> "
+                f"{_truncate(_short_name(next_name), 32):<32s}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -729,11 +912,25 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("files", help="Discover output files, processes, agents, row counts")
     _add_report_arg(p)
 
+    p = sub.add_parser("kernels", help="Top GPU kernels by total time")
+    _add_report_arg(p)
+    p.add_argument("--top", type=int, default=15)
+
+    p = sub.add_parser("families", help="GPU time grouped by kernel library family")
+    _add_report_arg(p)
+
+    p = sub.add_parser("idle_gaps", help="GPU busy vs idle, largest gaps")
+    _add_report_arg(p)
+    p.add_argument("--top", type=int, default=10)
+
     return parser
 
 
 _COMMANDS = {
     "files": cmd_files,
+    "kernels": cmd_kernels,
+    "families": cmd_families,
+    "idle_gaps": cmd_idle_gaps,
 }
 
 
