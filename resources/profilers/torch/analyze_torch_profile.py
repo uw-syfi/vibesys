@@ -636,14 +636,67 @@ _DEVICE_NAME_HINTS: tuple[tuple[str, str], ...] = (
     ("H100", "h100"),
 )
 
+_GIB = 1024.0**3
+
+# Fallback signature table for AMD GPUs: ROCm's Kineto exporter has been seen
+# to write ``deviceProperties[].name == ""`` (confirmed on real MI210
+# vLLM/torch.profiler captures, ROCm 7.2.3 / torch 2.12), so the name-hint
+# match above never fires. When the name is unusable, fall back to (compute
+# capability, CU count, HBM capacity) from the same ``deviceProperties``
+# entry -- gfx arch plus CU count plus memory size pins a SKU exactly for
+# every currently-supported device except MI250/MI250X, whose non-X GCD
+# reports the identical (gfx90a, 104 CUs, 64GiB) signature as MI210; that
+# specific pair is unresolvable from deviceProperties alone; we prefer
+# "mi210" as the more common single-GCD deployment, and pass --device
+# explicitly on MI250 hardware.
+#
+# Each entry is compute-major, compute-minor, CU count, min/max HBM
+# capacity in GiB, and the matching _DEVICE_PEAKS key.
+_GFX_SIGNATURES: tuple[tuple[int, int, int, float, float, str], ...] = (
+    (9, 0, 104, 60.0, 70.0, "mi210"),
+    (9, 4, 304, 180.0, 200.0, "mi300x"),
+    (9, 4, 228, 120.0, 136.0, "mi300a"),
+    (9, 4, 304, 240.0, 264.0, "mi325x"),
+    (9, 5, 256, 280.0, 300.0, "mi355x"),
+)
+
+
+def _detect_device_key_from_signature(prop: dict) -> str | None:
+    """Match ``(gfx arch, CU count, HBM capacity)`` against known AMD SKUs.
+
+    Used when ``deviceProperties[].name`` is blank or unrecognized (see
+    ``_GFX_SIGNATURES`` for why the name can't always be trusted).
+    """
+    try:
+        major = int(prop["computeMajor"])
+        minor = int(prop["computeMinor"])
+        num_sms = int(prop["numSms"])
+        mem_gib = float(prop["totalGlobalMem"]) / _GIB
+    except (KeyError, TypeError, ValueError):
+        return None
+    for sig_major, sig_minor, sig_sms, lo, hi, key in _GFX_SIGNATURES:
+        if major == sig_major and minor == sig_minor and num_sms == sig_sms and lo <= mem_gib <= hi:
+            return key
+    return None
+
 
 def _detect_device_key(raw: dict) -> str | None:
-    """Best-effort device match from the trace's ``deviceProperties`` name."""
-    for prop in raw.get("deviceProperties") or []:
+    """Best-effort device match from the trace's ``deviceProperties``.
+
+    Tries the human-readable ``name`` first (populated on CUDA/NVIDIA
+    traces), then falls back to the CU-count/HBM-capacity signature for
+    AMD traces where ``name`` is blank.
+    """
+    props = raw.get("deviceProperties") or []
+    for prop in props:
         name = str(prop.get("name", "")).upper()
         for hint, key in _DEVICE_NAME_HINTS:
             if hint in name:
                 return key
+    for prop in props:
+        key = _detect_device_key_from_signature(prop)
+        if key is not None:
+            return key
     return None
 
 
