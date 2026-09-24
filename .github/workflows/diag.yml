@@ -3,31 +3,13 @@ on:
   push:
     branches: [tmp/ci-hang-diag]
 jobs:
-  per-file-cov:
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    strategy:
-      fail-fast: false
-      matrix:
-        file: ["libs/vs-project/tests/test_errors.py", "libs/vs-project/tests/test_git_tracker_guards.py", "libs/vs-project/tests/test_state_guards.py", "tests/packaging/test_fetch_bun.py", "tests/vibesys/agents/drivers/test_omnigent_errors.py", "tests/vibesys/agents/drivers/test_omnigent_mcp.py", "tests/vibesys/loops/agent/test_loop_guards.py", "tests/vibesys/loops/agent/test_state_validation_errors.py", "tests/vibesys/loops/evolve/test_evolve_failure_paths.py", "tests/vibesys/loops/test_gates.py", "tests/vibesys/loops/test_request_protocols.py", "tests/vibesys/run/test_round_transaction.py", "tests/vibesys/run/test_round_transaction_errors.py", "tests/vibesys/sandbox/test_command_translation.py", "tests/vibesys/sandbox/test_modal_evaluator.py", "tests/vibesys/sandbox/test_run_environment.py", "tests/vibesys/skypilot/test_bridge.py", "tests/vibesys/skypilot/test_evaluator_helper_frames.py", "tests/vibesys/skypilot/test_recovery.py", "tests/vibesys/skypilot/test_runner.py", "tests/vibesys/test_evaluator_packages.py", "tests/vibesys/test_input_manifest_validation.py", "tests/vibesys/test_profilers.py", "tests/vibesys/test_project_provisioning.py", "tests/vibesys/test_workspace.py"]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - run: uv python install 3.12
-      - run: uv sync --dev
-      - name: One file with coverage
-        timeout-minutes: 5
-        run: uv run python -m pytest ${{ matrix.file }} -n 2 -p no:tach -q -p no:cacheprovider --cov-fail-under=0
-  full-cov-without-group:
+  full-cov-without-file:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        drop: [0, 1, 2, 3, 4, 5]
+        drop: ["libs/vs-project/tests/test_state_guards.py", "tests/vibesys/loops/agent/test_state_validation_errors.py", "tests/vibesys/run/test_round_transaction_errors.py", "tests/vibesys/skypilot/test_evaluator_helper_frames.py", "tests/vibesys/test_profilers.py"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -36,10 +18,6 @@ jobs:
           cache-dependency-glob: uv.lock
       - run: uv python install 3.12
       - run: uv sync --dev
-      - name: Full suite with coverage, ignoring group
+      - name: Full suite with coverage, ignoring one file
         timeout-minutes: 9
-        env:
-          GROUPS_JSON: '[["libs/vs-project/tests/test_errors.py", "tests/vibesys/agents/drivers/test_omnigent_mcp.py", "tests/vibesys/loops/test_request_protocols.py", "tests/vibesys/sandbox/test_run_environment.py", "tests/vibesys/test_evaluator_packages.py"], ["libs/vs-project/tests/test_git_tracker_guards.py", "tests/vibesys/loops/agent/test_loop_guards.py", "tests/vibesys/run/test_round_transaction.py", "tests/vibesys/skypilot/test_bridge.py", "tests/vibesys/test_input_manifest_validation.py"], ["libs/vs-project/tests/test_state_guards.py", "tests/vibesys/loops/agent/test_state_validation_errors.py", "tests/vibesys/run/test_round_transaction_errors.py", "tests/vibesys/skypilot/test_evaluator_helper_frames.py", "tests/vibesys/test_profilers.py"], ["tests/packaging/test_fetch_bun.py", "tests/vibesys/loops/evolve/test_evolve_failure_paths.py", "tests/vibesys/sandbox/test_command_translation.py", "tests/vibesys/skypilot/test_recovery.py", "tests/vibesys/test_project_provisioning.py"], ["tests/vibesys/agents/drivers/test_omnigent_errors.py", "tests/vibesys/loops/test_gates.py", "tests/vibesys/sandbox/test_modal_evaluator.py", "tests/vibesys/skypilot/test_runner.py", "tests/vibesys/test_workspace.py"], []]'
-        run: |
-          IGN=$(python3 -c "import json,os;print(' '.join('--ignore='+f for f in json.loads(os.environ['GROUPS_JSON'])[${{ matrix.drop }}]))")
-          uv run python -m pytest -v -n auto --dist loadgroup -p no:cacheprovider --cov-report=xml --cov-report=json --cov-fail-under=0 $IGN
+        run: uv run python -m pytest -v -n auto --dist loadgroup -p no:cacheprovider --cov-report=xml --cov-report=json --cov-fail-under=0 --ignore=${{ matrix.drop }}
