@@ -129,14 +129,12 @@ The evolve policy in `src/vibesys/loops/evolve/policy_flow.py` selects parents,
 records outcomes, and chooses the final candidate. `EvolveRunScheduler`
 schedules bootstrap, serial or parallel generations, checkpoints, and final
 selection. `retry_bootstrap` owns first-seed retry numbering and stop-on-pass or
-exhaustion through `BootstrapEffects`. `evaluate_candidate` orders mutation, review, framework gates,
-measurement, and snapshotting through typed `CandidateEffects`. The loop
+exhaustion through `BootstrapEffects`. `evaluate_candidate` orders mutation,
+review, framework gates, measurement, and snapshotting through typed
+`CandidateEffects`. The loop
 adapter binds these effects to agents, task gates, Git, and the run environment.
 The concrete bootstrap attempt body and candidate workers remain there.
 Policy tests use fake effects and in-memory populations.
-
-Custom orchestrations implement `execute(request, runtime)` above and may
-choose agents, messages, and later actions from earlier outputs.
 
 The built-in plain loop's `PlainPolicy` in
 `src/vibesys/loops/plain/policy.py` owns issue draining, retry budgets,
@@ -150,6 +148,9 @@ with an in-memory fake port, as tested in
 project, agent client, sandbox, or run environment.
 Run the fake-port checks with
 `uv run pytest tests/vibesys/loops/plain/test_plain_policy.py`.
+
+Custom orchestrations implement `execute(request, runtime)` above and may
+choose agents, messages, and later actions from earlier outputs.
 
 This is the first runtime slice. Agents share the run workspace unless the
 selected run environment isolates it. The runtime does not yet offer a generic
