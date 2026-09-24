@@ -251,6 +251,10 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 # its trace-indexing, correlation, and shape/roofline math directly means
 # calling its underscore-prefixed helpers; there is no other entry point.
 "tests/vibesys/loops/test_torch_profile_analyzer.py" = ["SLF001"]
+# capture_runtime.py is staged standalone (stdlib only) into arbitrary agent
+# workspaces and must run under Python 3.10+, so it avoids enum.StrEnum,
+# added in 3.11.
+"resources/profilers/_common/capture_runtime.py" = ["UP042"]
 # examples/ ships candidate reference implementations, benchmark harnesses,
 # and vendored submodule checkouts (transformers, DeathStarBench, TensorRT-LLM,
 # Show-o, train-ticket, TraceLab) rather than first-party framework code. Keep
