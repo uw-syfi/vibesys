@@ -24,11 +24,15 @@ import importlib.util
 import io
 import itertools
 import json
+import math
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import assume, given
+from hypothesis import strategies as st
+from tests.vibesys.loops.rocprof_strategies import FAST, FEWER
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -151,6 +155,126 @@ def _trace(events: list[dict], *, device_name: str = "AMD Instinct MI210") -> di
         "deviceProperties": [{"id": 0, "name": device_name}],
         "traceEvents": events,
     }
+
+
+# ---------------------------------------------------------------------------
+# Hypothesis strategies for the fuzz/property tests below.
+#
+# These generate deliberately malformed/partial Kineto-shaped event dicts
+# (random subsets of the optional "args"/"Input Dims"/"dur"/id fields present
+# or absent) so certify/gemm-shapes/roofline can be exercised against traces
+# that don't look like the hand-built fixtures above. Kept as a small,
+# reusable set of composites rather than copy-pasted per test.
+# ---------------------------------------------------------------------------
+
+_FUZZ_OP_NAMES = (
+    "aten::mm",
+    "aten::addmm",
+    "aten::bmm",
+    "aten::baddbmm",
+    "aten::linear",
+    "aten::matmul",
+    "aten::_scaled_mm",
+    "aten::scaled_dot_product_attention",
+    "aten::relu",  # not a GEMM/attention op -- should just be ignored
+)
+_FUZZ_DTYPES = ("c10::BFloat16", "float32", "c10::Half", "int8", "mystery_dtype")
+
+_fuzzy_dims = st.lists(
+    st.lists(st.integers(min_value=1, max_value=64), max_size=4),
+    max_size=4,
+)
+
+
+@st.composite
+def _fuzzy_op_args(draw: st.DrawFn) -> dict:
+    """A cpu_op "args" dict with each optional field independently present/absent."""
+    args: dict = {}
+    if draw(st.booleans()):
+        args["External id"] = draw(st.integers(min_value=1, max_value=1_000_000))
+    if draw(st.booleans()):
+        dims = draw(_fuzzy_dims)
+        args["Input Dims"] = dims
+        if draw(st.booleans()):
+            args["Input type"] = draw(
+                st.lists(st.sampled_from(_FUZZ_DTYPES), max_size=len(dims) + 2)
+            )
+    return args
+
+
+@st.composite
+def _fuzzy_cpu_op(draw: st.DrawFn) -> dict:
+    ev: dict = {
+        "ph": "X",
+        "cat": "cpu_op",
+        "pid": 1,
+        "tid": 1,
+        "name": draw(st.sampled_from(_FUZZ_OP_NAMES)),
+    }
+    if draw(st.booleans()):
+        ev["ts"] = draw(st.integers(min_value=0, max_value=100_000))
+    if draw(st.booleans()):
+        ev["dur"] = draw(st.integers(min_value=0, max_value=10_000))
+    if draw(st.booleans()):
+        ev["args"] = draw(_fuzzy_op_args())
+    return ev
+
+
+@st.composite
+def _fuzzy_linking_args(draw: st.DrawFn) -> dict:
+    """A kernel/runtime-launch "args" dict -- correlation/External id, each optional."""
+    args: dict = {}
+    if draw(st.booleans()):
+        args["correlation"] = draw(st.integers(min_value=1, max_value=1_000_000))
+    if draw(st.booleans()):
+        args["External id"] = draw(st.integers(min_value=1, max_value=1_000_000))
+    return args
+
+
+@st.composite
+def _fuzzy_kernel(draw: st.DrawFn) -> dict:
+    ev: dict = {
+        "ph": "X",
+        "cat": "kernel",
+        "pid": 0,
+        "tid": 2,
+        "name": draw(st.sampled_from(("Cijk_kernel", "vectorized_elementwise", "hipGraphLaunch"))),
+    }
+    if draw(st.booleans()):
+        ev["ts"] = draw(st.integers(min_value=0, max_value=100_000))
+    if draw(st.booleans()):
+        ev["dur"] = draw(st.integers(min_value=0, max_value=10_000))
+    if draw(st.booleans()):
+        ev["args"] = draw(_fuzzy_linking_args())
+    return ev
+
+
+@st.composite
+def _fuzzy_runtime_launch(draw: st.DrawFn) -> dict:
+    ev: dict = {"ph": "X", "cat": "hip_runtime", "pid": 1, "tid": 1, "name": "hipLaunchKernel"}
+    if draw(st.booleans()):
+        ev["ts"] = draw(st.integers(min_value=0, max_value=100_000))
+    if draw(st.booleans()):
+        ev["dur"] = draw(st.integers(min_value=0, max_value=10_000))
+    if draw(st.booleans()):
+        ev["args"] = draw(_fuzzy_linking_args())
+    return ev
+
+
+_fuzzy_events = st.lists(
+    st.one_of(_fuzzy_cpu_op(), _fuzzy_kernel(), _fuzzy_runtime_launch()),
+    max_size=12,
+)
+
+# GPU kernel (start, duration) intervals for the busy-fraction robustness test --
+# duration may be 0 (instant kernels), and starts/durations are wide enough to
+# produce heavy overlap as well as a single far-away kernel that stretches the
+# capture window without adding busy time.
+_kernel_interval = st.tuples(
+    st.integers(min_value=0, max_value=1_000_000),
+    st.integers(min_value=0, max_value=50_000),
+)
+_kernel_intervals = st.lists(_kernel_interval, max_size=10)
 
 
 class TestChromeTraceIndexing:
@@ -560,3 +684,214 @@ class TestCliCommands:
 
         assert "Trace Certification" in out
         assert out.index("Trace Certification") < out.index("Top GPU Kernels")
+
+
+# ---------------------------------------------------------------------------
+# Property-based generalization tests.
+#
+# The fixture-based tests above pin specific known-good/known-bad traces.
+# These fuzz the shapes of the input rather than hand-picking examples, to
+# catch cases the hand-built fixtures happen not to exercise.
+# ---------------------------------------------------------------------------
+
+
+class TestFuzzMalformedTraceFields:
+    """Property 1: certify/gemm-shapes/roofline never raise on partial traces.
+
+    Real captures can be missing "args", "Input Dims", "dur", or the
+    correlation/external ids Kineto normally stamps (e.g. a trace processed
+    by a tool that strips unrecognized fields) -- these must degrade to
+    empty/partial output, not an exception.
+    """
+
+    @given(events=_fuzzy_events)
+    @FAST
+    def test_certify_gemm_shapes_and_roofline_never_raise(self, analyzer, events):  # noqa: ANN001, ANN201  # tracked: #288
+        index = analyzer._index_trace(_trace(events))
+        op_to_kernels = analyzer._build_op_to_kernels(index)
+
+        items = analyzer._certify(index, op_to_kernels)
+        assert isinstance(items, list)
+        assert all(item.status in ("PASS", "WARN", "FAIL") for item in items)
+        assert analyzer._certify_verdict(items) in ("PASS", "WARN", "FAIL")
+
+        shapes = analyzer._extract_gemm_shapes(index, op_to_kernels)
+        assert isinstance(shapes, list)
+        for shape in shapes:
+            assert shape.m > 0
+            assert shape.n > 0
+            assert shape.k > 0
+            assert shape.batch > 0
+            assert shape.call_count > 0
+
+        rows = analyzer._extract_roofline_rows(
+            index, op_to_kernels, peak_tflops=181.0, peak_gbps=1600.0
+        )
+        assert isinstance(rows, list)
+        for row in rows:
+            assert row.gpu_time_us > 0
+            assert math.isfinite(row.pct_of_peak)
+            assert row.bound in ("compute", "memory")
+
+
+class TestGemmShapeGeneralization:
+    """Property 2: GEMM (M, N, K, batch) extraction matches PyTorch's real
+    operand/weight-layout conventions across the whole GEMM-family op set,
+    not just the fixed fixture shapes in ``TestGemmShapeExtraction``.
+    """
+
+    @given(
+        leading=st.lists(st.integers(min_value=1, max_value=64), min_size=1, max_size=3),
+        in_features=st.integers(min_value=1, max_value=8192),
+        out_features=st.integers(min_value=1, max_value=8192),
+    )
+    @FAST
+    def test_linear_weight_transposition(self, analyzer, leading, in_features, out_features):  # noqa: ANN001, ANN201  # tracked: #288
+        # nn.Linear.weight is (out_features, in_features) -- x @ weight.T.
+        input_dims = [*leading, in_features]
+        weight_dims = [out_features, in_features]
+
+        shape = analyzer._shape_for_gemm_op("aten::linear", [input_dims, weight_dims])
+
+        expected_m = 1
+        for d in leading:
+            expected_m *= d
+        assert shape == (expected_m, out_features, in_features, 1)
+
+    @given(m=st.integers(1, 8192), k=st.integers(1, 8192), n=st.integers(1, 8192))
+    @FAST
+    def test_dense_2d_shape_for_mm_matmul_and_scaled_mm(self, analyzer, m, k, n):  # noqa: ANN001, ANN201  # tracked: #288
+        assert analyzer._shape_dense_2d([m, k], [k, n]) == (m, n, k, 1)
+        for op_name in ("aten::mm", "aten::matmul", "aten::_scaled_mm"):
+            assert analyzer._shape_for_gemm_op(op_name, [[m, k], [k, n]]) == (m, n, k, 1)
+
+    @given(
+        m=st.integers(1, 8192),
+        k1=st.integers(1, 8192),
+        k2=st.integers(1, 8192),
+        n=st.integers(1, 8192),
+    )
+    @FAST
+    def test_dense_2d_returns_none_not_a_wrong_shape_on_mismatch(self, analyzer, m, k1, k2, n):  # noqa: ANN001, ANN201  # tracked: #288
+        assume(k1 != k2)
+        assert analyzer._shape_dense_2d([m, k1], [k2, n]) is None
+
+    @given(
+        batch=st.integers(1, 256),
+        m=st.integers(1, 4096),
+        k=st.integers(1, 4096),
+        n=st.integers(1, 4096),
+    )
+    @FAST
+    def test_batched_preserves_batch_dim(self, analyzer, batch, m, k, n):  # noqa: ANN001, ANN201  # tracked: #288
+        assert analyzer._shape_batched([batch, m, k], [batch, k, n]) == (m, n, k, batch)
+        assert analyzer._shape_for_gemm_op("aten::bmm", [[batch, m, k], [batch, k, n]]) == (
+            m,
+            n,
+            k,
+            batch,
+        )
+
+    @given(
+        bias_dims=st.lists(st.integers(min_value=1, max_value=999), max_size=4),
+        m=st.integers(1, 8192),
+        k=st.integers(1, 8192),
+        n=st.integers(1, 8192),
+    )
+    @FAST
+    def test_addmm_ignores_bias_operand_shape(self, analyzer, bias_dims, m, k, n):  # noqa: ANN001, ANN201  # tracked: #288
+        # addmm's operand order is (bias, mat1, mat2) -- the bias shape must
+        # never influence the extracted (M, N, K).
+        shape = analyzer._shape_for_gemm_op("aten::addmm", [bias_dims, [m, k], [k, n]])
+        assert shape == (m, n, k, 1)
+
+
+class TestGpuBusyFractionRobustness:
+    """Property 3: certify's gpu_busy fraction never leaves [0, 1], however
+    the underlying GPU kernel intervals overlap, sit idle, or stretch the
+    capture window.
+    """
+
+    @given(ivals=_kernel_intervals)
+    @FAST
+    def test_busy_fraction_stays_in_unit_interval(self, analyzer, ivals):  # noqa: ANN001, ANN201  # tracked: #288
+        kernels = [
+            _kernel(ts=start, dur=dur, correlation=1000 + i) for i, (start, dur) in enumerate(ivals)
+        ]
+        index = analyzer._index_trace(_trace(kernels))
+        op_to_kernels = analyzer._build_op_to_kernels(index)
+
+        items = analyzer._certify(index, op_to_kernels)  # must not raise
+        assert isinstance(items, list)
+
+        window_us = index.trace_ts_max - index.trace_ts_min
+        if window_us > 0 and index.kernels:
+            busy_frac = analyzer._merged_duration(index.kernels) / window_us
+            assert 0.0 <= busy_frac <= 1.0
+
+
+class TestRooflineFlopsBytesGeneralization:
+    """Property 4: roofline FLOPs/bytes math is exact and never blows up."""
+
+    @given(
+        m=st.integers(1, 65536),
+        n=st.integers(1, 65536),
+        k=st.integers(1, 65536),
+        batch=st.integers(1, 256),
+        dtype=st.text(min_size=0, max_size=20),
+    )
+    @FEWER
+    def test_gemm_flops_is_exactly_2mnk_batch(self, analyzer, m, n, k, batch, dtype):  # noqa: ANN001, ANN201, PLR0913  # tracked: #288
+        # dtype affects only bytes (element size), never FLOPs.
+        flops, _total_bytes = analyzer._gemm_flops_bytes(m, n, k, batch, dtype)
+        assert flops == 2.0 * batch * m * n * k
+
+    @given(
+        # A trace's "dur" is always an integer number of microseconds, so
+        # gpu_us is realistically 0 or >= 1.0 (see
+        # `test_roofline_row_zero_gpu_time_does_not_divide_by_zero` below for
+        # the 0 edge case). Bounding away from 0 here keeps this test in the
+        # realistic input domain -- an adversarial subnormal float (e.g.
+        # ~1e-311) makes ``nbytes / seconds`` overflow to inf no matter how
+        # the roofline math is written, which is not a reachable state for a
+        # value built by summing integer microsecond durations.
+        gpu_us=st.floats(min_value=1e-3, max_value=1e9, allow_nan=False, allow_infinity=False),
+        tflops=st.floats(min_value=1e-6, max_value=1e6, allow_nan=False, allow_infinity=False),
+        gbps=st.floats(min_value=1e-6, max_value=1e6, allow_nan=False, allow_infinity=False),
+        flops=st.floats(min_value=0.0, max_value=1e18, allow_nan=False, allow_infinity=False),
+        nbytes=st.floats(min_value=0.0, max_value=1e15, allow_nan=False, allow_infinity=False),
+    )
+    @FEWER
+    def test_roofline_row_finite_and_nonneg(self, analyzer, gpu_us, tflops, gbps, flops, nbytes):  # noqa: ANN001, ANN201, PLR0913  # tracked: #288
+        metrics = analyzer._OpFlopsBytes(
+            op_label="mm",
+            shape="fuzz",
+            dtype="c10::BFloat16",
+            gpu_time_us=gpu_us,
+            flops=flops,
+            total_bytes=nbytes,
+        )
+
+        row = analyzer._roofline_row(metrics, peak_tflops=tflops, peak_gbps=gbps)
+
+        assert row.achieved_tflops >= 0.0
+        assert row.achieved_gbps >= 0.0
+        assert math.isfinite(row.pct_of_peak)
+        assert row.pct_of_peak >= 0.0
+        assert row.bound in ("compute", "memory")
+
+    def test_roofline_row_zero_gpu_time_does_not_divide_by_zero(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+        metrics = analyzer._OpFlopsBytes(
+            op_label="mm",
+            shape="4096x4096x4096",
+            dtype="c10::BFloat16",
+            gpu_time_us=0.0,
+            flops=2.0 * 4096**3,
+            total_bytes=float(4096 * 4096 * 3 * 2),
+        )
+
+        row = analyzer._roofline_row(metrics, peak_tflops=181.0, peak_gbps=1600.0)
+
+        assert row.achieved_tflops == 0.0
+        assert row.achieved_gbps == 0.0
+        assert row.pct_of_peak == 0.0
