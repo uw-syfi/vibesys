@@ -53,21 +53,13 @@ def test_profiler_prompt_templates_name_no_serving_engine() -> None:
     assert paths, f"no profiler prompt templates found under {_PROMPT_GLOBS}"
 
     failures = [hit for path in paths for hit in _matches(path)]
-    assert not failures, "engine name found in a profiler prompt template:\n" + "\n".join(
-        failures
-    )
+    assert not failures, "engine name found in a profiler prompt template:\n" + "\n".join(failures)
 
 
 def test_profiler_resource_code_names_no_serving_engine() -> None:
     root = PROJECT_ROOT / _PROFILER_CODE_ROOT
-    paths = sorted(
-        p
-        for p in root.rglob("*.py")
-        if "__pycache__" not in p.parts and p.is_file()
-    )
+    paths = sorted(p for p in root.rglob("*.py") if "__pycache__" not in p.parts and p.is_file())
     assert paths, f"no profiler resource code found under {root}"
 
     failures = [hit for path in paths for hit in _matches(path)]
-    assert not failures, "engine name found in resources/profilers code:\n" + "\n".join(
-        failures
-    )
+    assert not failures, "engine name found in resources/profilers code:\n" + "\n".join(failures)

@@ -44,6 +44,7 @@ import os
 import secrets
 import signal
 import socket
+import stat
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -71,6 +72,15 @@ _TARGET_LOG_NAME = "target.log"
 _LOAD_LOG_NAME = "load.log"
 _ESCALATION_WAIT_S = 2.0
 
+# Lifecycle commands are written to script files rather than passed as
+# inline ``bash -lc <text>`` argv (see ``_write_script``'s docstring for
+# why); one script name per lifecycle command.
+_TARGET_SCRIPT_NAME = "target.sh"
+_READY_SCRIPT_NAME = "ready.sh"
+_LOAD_SCRIPT_NAME = "load.sh"
+_SCRIPT_SHEBANG = "#!/usr/bin/env bash\n"
+_SCRIPT_EXEC_BITS = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+
 
 class CaptureStatus(str, Enum):
     """Terminal outcome of one ``run_capture`` call."""
@@ -87,7 +97,10 @@ class CaptureStatus(str, Enum):
 class Lifecycle:
     """Generic start/ready/load/stop lifecycle for one capture target.
 
-    ``command`` is run via ``bash -lc``. When ``load_command`` is ``None``,
+    ``command`` is written to a script file and run via plain ``bash
+    <script>`` (see ``run_capture``); it may be arbitrary multi-line shell
+    text (heredocs, embedded quotes, `$vars`, ...) since nothing re-tokenizes
+    it after this. When ``load_command`` is ``None``,
     the target is expected to exit on its own (a bounded benchmark script);
     ``run_capture`` just waits for it, up to ``timeout_s``. When
     ``load_command`` is set, the target is expected to keep running (a
@@ -143,6 +156,12 @@ class _Outcome:
     escalated: bool = False
     ready_achieved: bool | None = None
     load_tail: str | None = None
+    # Wall-clock/monotonic timestamps bracketing the load phase (the window
+    # between ready_command succeeding and load_command finishing), or None
+    # when there is no load_command (a bounded script has no separate
+    # "startup" vs. "steady state" phase to distinguish). See
+    # ``_clock_stamps`` for the fields each phase's stamp carries.
+    load_window: dict[str, dict[str, int]] | None = None
 
 
 @dataclass(frozen=True)
@@ -155,6 +174,9 @@ class _ManifestContext:
     meta: dict[str, Any]
     outcome: _Outcome
     timings: dict[str, float]
+    scripts: dict[str, str]
+    capture_start: dict[str, int]
+    capture_end: dict[str, int]
 
 
 # -- capture store ------------------------------------------------------------
@@ -298,10 +320,62 @@ def _tail(path: Path, *, max_chars: int = 4000) -> str:
     return text if len(text) <= max_chars else text[-max_chars:]
 
 
+def _write_script(directory: Path, name: str, text: str) -> Path:
+    """Write *text* verbatim (after a shebang line) as an executable script.
+
+    A lifecycle command used to be passed as inline argv text (``bash -lc
+    "<text>"``) to whatever ``profiler_prefix`` wraps it. That is fragile in
+    general: a multi-line command with embedded quotes depends on every
+    layer between here and the final ``bash`` treating the trailing argv as
+    fully opaque, which is not guaranteed of every profiler wrapper. Writing
+    the command to a script file and handing the wrapper a single, simple
+    path argument removes that whole class of risk: nothing between here and
+    the ``bash`` that finally reads and runs the file re-tokenizes *text*, so
+    newlines, quotes, ``$vars``, and heredocs all survive intact regardless
+    of what a profiler wrapper does to simple argv tokens. (A real rocprofv3
+    incident this branch also hardens against turned out to have a different
+    root cause -- rocprofv3 injecting itself into every descendant process,
+    including a `$(...)`-captured helper, and one of those descendants
+    printing a diagnostic banner into the value being captured; see
+    ``resources/profilers/rocprof/capture.py``'s ``_ROCPROFV3_QUIET_ENV`` and
+    the serving-engines profiling doc for that fix.)
+
+    *text* is preserved byte-for-byte after the shebang line: no ``set -e``
+    or other semantics are injected.
+    """
+    path = directory / name
+    path.write_text(_SCRIPT_SHEBANG + text)
+    path.chmod(path.stat().st_mode | _SCRIPT_EXEC_BITS)
+    return path
+
+
+def _clock_stamps() -> dict[str, int]:
+    """Wall-clock + monotonic readings of "now", for later clock alignment.
+
+    Records ``time.monotonic_ns()``, the raw ``time.clock_gettime_ns(
+    time.CLOCK_MONOTONIC)`` reading (implemented the same way on
+    CPython/Linux, but both kept since a downstream analyzer may only trust
+    one), and ``time.clock_gettime_ns(time.CLOCK_REALTIME)`` (wall-clock
+    epoch ns). An external tool's own trace timestamps (e.g. rocprofv3's
+    system-trace CSV ``Start_Timestamp``/``End_Timestamp`` columns, verified
+    against real MI210 captures to be CLOCK_MONOTONIC-based ns -- see
+    ``docs/contributing/amd-profiler-worklog.md``) can then be compared
+    directly against ``clock_monotonic_ns`` when both processes ran on the
+    same host, without any offset math. A downstream analyzer that cannot
+    verify this alignment for a given capture must fall back to analyzing
+    the whole run rather than silently mis-slicing it.
+    """
+    return {
+        "monotonic_ns": time.monotonic_ns(),
+        "clock_monotonic_ns": time.clock_gettime_ns(time.CLOCK_MONOTONIC),
+        "realtime_ns": time.clock_gettime_ns(time.CLOCK_REALTIME),
+    }
+
+
 def _start_process(
-    lifecycle: Lifecycle, profiler_prefix: list[str], log_path: Path
+    lifecycle: Lifecycle, profiler_prefix: list[str], log_path: Path, script_path: Path
 ) -> subprocess.Popen[bytes]:
-    argv = [*profiler_prefix, "bash", "-lc", lifecycle.command]
+    argv = [*profiler_prefix, "bash", str(script_path)]
     with log_path.open("wb") as handle:
         return subprocess.Popen(  # noqa: S603  # tracked: #288
             argv,
@@ -323,10 +397,10 @@ def _run_no_load(proc: subprocess.Popen[bytes], lifecycle: Lifecycle, start: flo
     return _Outcome(status, rc)
 
 
-def _run_check(command: str, lifecycle: Lifecycle, timeout: float) -> int | None:
+def _run_check(script_path: Path, lifecycle: Lifecycle, timeout: float) -> int | None:
     try:
         result = subprocess.run(  # noqa: S603  # tracked: #288
-            ["bash", "-lc", command],  # noqa: S607  # tracked: #288
+            ["bash", str(script_path)],  # noqa: S607  # tracked: #288
             cwd=lifecycle.cwd,
             env=_effective_env(lifecycle),
             stdout=subprocess.DEVNULL,
@@ -340,9 +414,12 @@ def _run_check(command: str, lifecycle: Lifecycle, timeout: float) -> int | None
 
 
 def _poll_ready(
-    proc: subprocess.Popen[bytes], lifecycle: Lifecycle, start: float
+    proc: subprocess.Popen[bytes], lifecycle: Lifecycle, start: float, ready_script: Path
 ) -> tuple[bool, bool]:
-    """Poll ``ready_command`` until it succeeds. Return (ready, target_exited_early)."""
+    """Poll ``ready_command`` (as *ready_script*) until it succeeds.
+
+    Return (ready, target_exited_early).
+    """
     assert lifecycle.ready_command is not None  # noqa: S101  # tracked: #288
     ready_start = time.monotonic()
     while True:
@@ -353,7 +430,7 @@ def _poll_ready(
         if elapsed_ready >= lifecycle.ready_timeout_s or remaining_overall <= 0:
             return False, False
         check_budget = min(10.0, lifecycle.ready_timeout_s - elapsed_ready, remaining_overall)
-        if _run_check(lifecycle.ready_command, lifecycle, check_budget) == 0:
+        if _run_check(ready_script, lifecycle, check_budget) == 0:
             return True, False
         sleep_for = min(
             lifecycle.ready_interval_s,
@@ -364,12 +441,14 @@ def _poll_ready(
             time.sleep(sleep_for)
 
 
-def _run_load(lifecycle: Lifecycle, timeout: float, out_dir: Path) -> tuple[int | None, str, bool]:
+def _run_load(
+    lifecycle: Lifecycle, timeout: float, out_dir: Path, load_script: Path
+) -> tuple[int | None, str, bool]:
     assert lifecycle.load_command is not None  # noqa: S101  # tracked: #288
     log_path = out_dir / _LOAD_LOG_NAME
     with log_path.open("wb") as handle:
         proc = subprocess.Popen(  # noqa: S603  # tracked: #288
-            ["bash", "-lc", lifecycle.load_command],  # noqa: S607  # tracked: #288
+            ["bash", str(load_script)],  # noqa: S607  # tracked: #288
             cwd=lifecycle.cwd,
             env=_effective_env(lifecycle),
             stdout=handle,
@@ -397,10 +476,15 @@ def _stop_and_wait_grace(proc: subprocess.Popen[bytes], lifecycle: Lifecycle) ->
     return True, False
 
 
-def _run_with_load(
-    proc: subprocess.Popen[bytes], lifecycle: Lifecycle, start: float, out_dir: Path
+def _run_with_load(  # noqa: PLR0913  # tracked: #288
+    proc: subprocess.Popen[bytes],
+    lifecycle: Lifecycle,
+    start: float,
+    out_dir: Path,
+    ready_script: Path,
+    load_script: Path,
 ) -> _Outcome:
-    ready, target_exited_early = _poll_ready(proc, lifecycle, start)
+    ready, target_exited_early = _poll_ready(proc, lifecycle, start, ready_script)
     if target_exited_early:
         return _Outcome(CaptureStatus.TARGET_FAILED, proc.returncode, ready_achieved=False)
 
@@ -413,8 +497,16 @@ def _run_with_load(
         )
         return _Outcome(status, proc.returncode, escalated=escalated, ready_achieved=False)
 
+    # The load phase (ready_command succeeded -> load_command finishes) is
+    # the "steady state" window a capture's later analysis wants, distinct
+    # from everything before it (server startup: weight load, warmup, KV
+    # init, ...). Bracket it with clock stamps so an analyzer can slice a
+    # timeline capture down to just this window instead of the whole run.
+    ready_stamp = _clock_stamps()
+    load_start_stamp = _clock_stamps()
     remaining = _remaining(start, lifecycle.timeout_s)
-    load_rc, load_tail, load_timed_out = _run_load(lifecycle, remaining, out_dir)
+    load_rc, load_tail, load_timed_out = _run_load(lifecycle, remaining, out_dir, load_script)
+    load_window = {"ready": ready_stamp, "start": load_start_stamp, "end": _clock_stamps()}
     if load_timed_out or load_rc != 0:
         _exited, escalated = _stop_and_wait_grace(proc, lifecycle)
         status = CaptureStatus.TIMED_OUT if load_timed_out else CaptureStatus.LOAD_FAILED
@@ -425,6 +517,7 @@ def _run_with_load(
             escalated=escalated,
             ready_achieved=True,
             load_tail=load_tail,
+            load_window=load_window,
         )
 
     exited, escalated = _stop_and_wait_grace(proc, lifecycle)
@@ -436,6 +529,7 @@ def _run_with_load(
         escalated=escalated,
         ready_achieved=True,
         load_tail=load_tail,
+        load_window=load_window,
     )
 
 
@@ -607,6 +701,17 @@ def _build_manifest(ctx: _ManifestContext) -> dict[str, Any]:
         "meta": ctx.meta,
         "git_head": _git_head(ctx.lifecycle.cwd),
         "output_files": _output_files(ctx.out_dir),
+        "scripts": ctx.scripts,
+        "load_window": outcome.load_window,
+        # Bracket the whole capture (not just the load phase) so an
+        # analyzer can also reconstruct a "startup" window
+        # (capture_start .. load_window["start"], i.e. everything before
+        # load_command ran: server boot, weight load, warmup, KV init) and
+        # sanity-check clock alignment (do the profiled tool's own trace
+        # timestamps fall inside this same span, same clock domain) before
+        # trusting a "load"/"startup" slice at all.
+        "capture_start": ctx.capture_start,
+        "capture_end": ctx.capture_end,
     }
 
 
@@ -628,25 +733,46 @@ def run_capture(
     natural exit or escalated through SIGTERM/SIGKILL across its whole
     descendant tree, never left running past this call. Writes
     ``manifest.json`` into *out_dir* before returning.
+
+    ``command`` (and ``ready_command``/``load_command``, when given) are
+    written to script files under *out_dir* rather than passed as inline
+    ``bash -lc <text>`` argv -- see ``_write_script``'s docstring -- and run
+    as ``profiler_prefix + ["bash", <script path>]``. Their paths (relative
+    to *out_dir*) are recorded in the manifest under ``"scripts"``.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     capture_id = out_dir.name
-    argv = [*profiler_prefix, "bash", "-lc", lifecycle.command]
+
+    target_script = _write_script(out_dir, _TARGET_SCRIPT_NAME, lifecycle.command)
+    scripts = {"target": target_script.name}
+    ready_script: Path | None = None
+    if lifecycle.ready_command is not None:
+        ready_script = _write_script(out_dir, _READY_SCRIPT_NAME, lifecycle.ready_command)
+        scripts["ready"] = ready_script.name
+    load_script: Path | None = None
+    if lifecycle.load_command is not None:
+        load_script = _write_script(out_dir, _LOAD_SCRIPT_NAME, lifecycle.load_command)
+        scripts["load"] = load_script.name
+
+    argv = [*profiler_prefix, "bash", str(target_script)]
     target_log_path = out_dir / _TARGET_LOG_NAME
 
     start = time.monotonic()
+    capture_start = _clock_stamps()
     timings: dict[str, float] = {"started_at": time.time()}
-    proc = _start_process(lifecycle, profiler_prefix, target_log_path)
+    proc = _start_process(lifecycle, profiler_prefix, target_log_path, target_script)
 
-    outcome = (
-        _run_no_load(proc, lifecycle, start)
-        if lifecycle.load_command is None
-        else _run_with_load(proc, lifecycle, start, out_dir)
-    )
+    if lifecycle.load_command is None:
+        outcome = _run_no_load(proc, lifecycle, start)
+    else:
+        assert ready_script is not None  # noqa: S101  # tracked: #288
+        assert load_script is not None  # noqa: S101  # tracked: #288
+        outcome = _run_with_load(proc, lifecycle, start, out_dir, ready_script, load_script)
 
     timings["finished_at"] = time.time()
     timings["duration_s"] = time.monotonic() - start
+    capture_end = _clock_stamps()
 
     manifest = _build_manifest(
         _ManifestContext(
@@ -658,6 +784,9 @@ def run_capture(
             meta=meta,
             outcome=outcome,
             timings=timings,
+            scripts=scripts,
+            capture_start=capture_start,
+            capture_end=capture_end,
         )
     )
     manifest_path = write_manifest(out_dir, manifest)

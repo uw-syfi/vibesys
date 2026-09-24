@@ -21,6 +21,7 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import sys
 import textwrap
 import time
@@ -28,7 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 if TYPE_CHECKING:
@@ -377,6 +378,225 @@ def test_format_result_is_compact_and_mentions_status(tmp_path: Path) -> None:
     assert "ok" in text
     assert result.capture_id in text
     assert "hello" in text
+
+
+# -- command scripts (issue: profiler wrappers must not re-tokenize `command`) --
+
+_MANGLING_PROFILER_SOURCE = textwrap.dedent(
+    """
+    import shlex
+    import subprocess
+    import sys
+
+    # Mimics a profiler wrapper that re-joins its trailing argv with spaces
+    # and re-splits it (e.g. to log or re-parse the command about to run)
+    # instead of exec'ing the received argv list untouched.
+    joined = " ".join(sys.argv[1:])
+    mangled = shlex.split(joined)
+    sys.exit(subprocess.run(mangled).returncode)
+    """
+)
+
+
+@pytest.fixture
+def mangling_profiler(tmp_path: Path) -> Path:
+    path = tmp_path / "mangling_profiler.py"
+    path.write_text(_MANGLING_PROFILER_SOURCE)
+    return path
+
+
+def test_command_survives_a_profiler_that_rejoins_and_resplits_argv(
+    mangling_profiler: Path, tmp_path: Path
+) -> None:
+    """Regression: a profiler wrapper that re-joins/re-splits its trailing argv
+
+    must not corrupt a multi-line ``command`` with embedded quotes. Writing
+    ``command`` to a script file and handing the wrapper a single, simple
+    path argument (``run_capture``'s fix) keeps the wrapper's re-join/
+    re-split a no-op, since there is nothing left in the wrapped argv for it
+    to mangle -- unlike the old ``bash -lc "<command>"`` argv, whose own
+    quotes and newlines a naive re-join+``shlex.split`` destroys.
+    """
+    marker = tmp_path / "out.txt"
+    command = textwrap.dedent(
+        f"""\
+        python3 -c "
+        import pathlib
+        pathlib.Path({str(marker)!r}).write_text('multi\\nline \\'quoted\\' \\$HOME text\\n')
+        "
+        """
+    )
+    lifecycle = cr.Lifecycle(command=command, timeout_s=10.0)
+    result = cr.run_capture(
+        [sys.executable, str(mangling_profiler)],
+        lifecycle,
+        kind="unit",
+        out_dir=tmp_path / "c",
+        meta={},
+    )
+
+    assert result.status is cr.CaptureStatus.OK, result.target_log_tail
+    assert marker.read_text() == "multi\nline 'quoted' $HOME text\n"
+
+
+def test_run_capture_writes_executable_scripts_and_records_them_in_manifest(
+    tmp_path: Path,
+) -> None:
+    lifecycle = cr.Lifecycle(
+        command="true", ready_command="true", load_command="true", grace_s=1.0, timeout_s=5.0
+    )
+    out_dir = tmp_path / "c"
+    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
+
+    manifest = json.loads(result.manifest_path.read_text())
+    assert manifest["scripts"] == {"target": "target.sh", "ready": "ready.sh", "load": "load.sh"}
+    for name in ("target.sh", "ready.sh", "load.sh"):
+        script = out_dir / name
+        assert script.is_file()
+        assert os.access(script, os.X_OK)
+        assert script.read_text().startswith("#!/usr/bin/env bash\n")
+
+
+def test_run_capture_no_load_command_writes_only_target_script(tmp_path: Path) -> None:
+    lifecycle = cr.Lifecycle(command="true", timeout_s=5.0)
+    out_dir = tmp_path / "c"
+    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
+
+    manifest = json.loads(result.manifest_path.read_text())
+    assert manifest["scripts"] == {"target": "target.sh"}
+    assert not (out_dir / "ready.sh").exists()
+    assert not (out_dir / "load.sh").exists()
+
+
+_PRINTABLE_ASCII = st.text(
+    alphabet=st.characters(min_codepoint=32, max_codepoint=126), max_size=200
+)
+
+
+@given(content=_PRINTABLE_ASCII)
+@PROC_SETTINGS
+def test_property_script_text_is_byte_for_byte_and_matches_bash_c(
+    tmp_path_factory: pytest.TempPathFactory, content: str
+) -> None:
+    """For arbitrary bounded printable command text, the executed script's
+
+    text equals the input byte-for-byte (after the shebang line), and the
+    command runs with the same result as ``bash -c <text>`` directly.
+    Wrapped in a quoted heredoc so *content* (which may contain quotes,
+    ``$vars``, or heredoc-ish substrings itself) is never shell-expanded --
+    the property under test is about this module's own script-writing/exec
+    path, not about generating syntactically valid-vs-invalid shell text.
+    """
+    assume("VIBESYS_EOF" not in content)
+    tmp_path = tmp_path_factory.mktemp("cr")
+    text = f"cat <<'VIBESYS_EOF'\n{content}\nVIBESYS_EOF\n"
+
+    direct = subprocess.run(  # noqa: S603  # tracked: #288
+        ["bash", "-c", text],  # noqa: S607  # tracked: #288
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    lifecycle = cr.Lifecycle(command=text, timeout_s=10.0)
+    out_dir = tmp_path / "c"
+    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
+
+    assert (out_dir / "target.sh").read_text() == "#!/usr/bin/env bash\n" + text
+    assert result.target_returncode == direct.returncode
+    assert result.target_log_tail.rstrip("\n") == direct.stdout.rstrip("\n")
+
+
+# -- load window (issue: server captures polluted by startup) -------------------
+
+
+def test_run_capture_records_load_window_bracketing_the_load_phase(tmp_path: Path) -> None:
+    lifecycle = cr.Lifecycle(
+        command="sleep 100",
+        ready_command="true",
+        load_command="sleep 0.05",
+        grace_s=2.0,
+        timeout_s=5.0,
+    )
+    out_dir = tmp_path / "c"
+    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
+
+    manifest = json.loads(result.manifest_path.read_text())
+    window = manifest["load_window"]
+    assert window is not None
+    for phase in ("ready", "start", "end"):
+        stamp = window[phase]
+        assert stamp["monotonic_ns"] > 0
+        assert stamp["clock_monotonic_ns"] > 0
+        assert stamp["realtime_ns"] > 0
+    assert window["ready"]["clock_monotonic_ns"] <= window["start"]["clock_monotonic_ns"]
+    assert window["start"]["clock_monotonic_ns"] <= window["end"]["clock_monotonic_ns"]
+
+
+def test_run_capture_load_window_is_none_without_load_command(tmp_path: Path) -> None:
+    lifecycle = cr.Lifecycle(command="true", timeout_s=5.0)
+    result = cr.run_capture([], lifecycle, kind="unit", out_dir=tmp_path / "c", meta={})
+
+    manifest = json.loads(result.manifest_path.read_text())
+    assert manifest["load_window"] is None
+
+
+def test_run_capture_records_capture_start_and_end_regardless_of_load_command(
+    tmp_path: Path,
+) -> None:
+    """``capture_start``/``capture_end`` bracket the *whole* capture, not just the load phase.
+
+    A downstream analyzer (``analyze_rocprof.py``'s window resolution) needs
+    these two anchors for two things a load-phase-only window can't give it:
+    the 'startup' window (``capture_start`` .. the load phase's own start)
+    and a clock-alignment sanity check (do a trace's own timestamps
+    plausibly fall inside this capture's real span at all, before trusting
+    any window slice of it). Recorded even for a bounded no-load-command
+    capture, which still has a real start/end even though it has no
+    separate "startup" vs. "load" phase to distinguish.
+    """
+    lifecycle = cr.Lifecycle(command="true", timeout_s=5.0)
+    result = cr.run_capture([], lifecycle, kind="unit", out_dir=tmp_path / "c", meta={})
+
+    manifest = json.loads(result.manifest_path.read_text())
+    for key in ("capture_start", "capture_end"):
+        stamp = manifest[key]
+        assert stamp["monotonic_ns"] > 0
+        assert stamp["clock_monotonic_ns"] > 0
+        assert stamp["realtime_ns"] > 0
+    assert (
+        manifest["capture_start"]["clock_monotonic_ns"]
+        <= manifest["capture_end"]["clock_monotonic_ns"]
+    )
+
+
+@given(load_sleep_s=st.floats(min_value=0.01, max_value=0.15))
+@PROC_SETTINGS
+def test_property_capture_start_ready_load_end_are_monotonically_ordered(
+    tmp_path_factory: pytest.TempPathFactory, load_sleep_s: float
+) -> None:
+    """capture_start <= ready <= load-start <= load-end <= capture_end, for any load duration."""
+    tmp_path = tmp_path_factory.mktemp("cr")
+    lifecycle = cr.Lifecycle(
+        command="sleep 100",
+        ready_command="true",
+        load_command=f"sleep {load_sleep_s:.3f}",
+        grace_s=2.0,
+        timeout_s=5.0,
+    )
+    result = cr.run_capture([], lifecycle, kind="unit", out_dir=tmp_path / "c", meta={})
+
+    manifest = json.loads(result.manifest_path.read_text())
+    window = manifest["load_window"]
+    order = [
+        manifest["capture_start"]["clock_monotonic_ns"],
+        window["ready"]["clock_monotonic_ns"],
+        window["start"]["clock_monotonic_ns"],
+        window["end"]["clock_monotonic_ns"],
+        manifest["capture_end"]["clock_monotonic_ns"],
+    ]
+    assert order == sorted(order)
 
 
 # -- capture store ---------------------------------------------------------------
