@@ -649,6 +649,14 @@ def _hbm_bytes(counters: dict[str, float]) -> float | None:
     32B ("partial") request count directly, while the write side's reports
     the 64B ("full") request count directly. Getting this backwards silently
     inflates write bytes by ~2x when a partial breakdown is actually present.
+
+    Real hardware counters should never report a breakdown count larger than
+    the matching total request count, but nothing guarantees that (measurement
+    races, a corrupted/partial capture, or a stitched-together file merging
+    counters from different passes/dispatches). Clamp the derived complementary
+    count at 0 instead of letting it go negative, which would otherwise make
+    this function's result -- and everything derived from it (achieved
+    bandwidth) -- silently negative instead of just imprecise.
     """
     total = 0.0
     found_any = False
@@ -657,7 +665,7 @@ def _hbm_bytes(counters: dict[str, float]) -> float | None:
     if rd_req is not None:
         found_any = True
         rd_partial_32b = _lookup(counters, "hbm_rdreq_32b") or 0.0
-        rd_full_64b = rd_req - rd_partial_32b
+        rd_full_64b = max(0.0, rd_req - rd_partial_32b)
         total += rd_full_64b * 64 + rd_partial_32b * 32
 
     wr_req = _lookup(counters, "hbm_wrreq")
@@ -667,7 +675,7 @@ def _hbm_bytes(counters: dict[str, float]) -> float | None:
         # No size breakdown captured: conservatively treat every write
         # request as a full 64B line, matching the read side's default.
         wr_full_64b = wr_req if wr_full_64b is None else wr_full_64b
-        wr_partial_32b = wr_req - wr_full_64b
+        wr_partial_32b = max(0.0, wr_req - wr_full_64b)
         total += wr_full_64b * 64 + wr_partial_32b * 32
 
     return total if found_any else None

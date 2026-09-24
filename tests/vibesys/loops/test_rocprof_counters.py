@@ -538,9 +538,16 @@ def _catalogued_counter_subset(draw: st.DrawFn) -> tuple[str, dict[str, float]]:
     arch = draw(arch_name)
     names = sorted({c for cset in COUNTER_SETS[arch].values() for c in cset.counters})
     chosen = draw(st.lists(st.sampled_from(names), min_size=0, max_size=len(names), unique=True))
+    # Real hardware performance counters are non-negative integer event
+    # counts (rocprofv3's Counter_Value column), never fractional -- in
+    # particular, never a subnormal near-zero float. Drawing arbitrary
+    # `st.floats` here once produced a denominator of 5e-324 (the smallest
+    # positive double) and blew `mfma_issue_rate` up to `inf`: a hypothesis
+    # strategy artifact outside the real counter-value domain, not a
+    # production bug, so the fix is a more representative strategy here.
     values = draw(
         st.lists(
-            st.floats(min_value=0, max_value=1e9, allow_nan=False, allow_infinity=False),
+            st.integers(min_value=0, max_value=1_000_000_000).map(float),
             min_size=len(chosen),
             max_size=len(chosen),
         )
@@ -589,10 +596,17 @@ def test_derive_metrics_never_crashes_or_emits_nan_inf_negative_for_any_counter_
     if busy is not None and total is not None and total > 0:
         assert metrics.gpu_busy_pct is not None
 
+    # Mirrors `_mfma_instruction_count`'s own precedence exactly: the total
+    # counter (SQ_INSTS_MFMA) is authoritative whenever it was CAPTURED, even
+    # if its value is 0 (a truthful "no MFMA issued"); the per-dtype MOPS_*
+    # counters are only a fallback when the total counter is entirely absent.
     mfma_total = _lookup(counters, "mfma_insts_total")
     dtype_sum = sum(v for k in MFMA_CANDIDATE_KEYS if (v := _lookup(counters, k)) is not None)
+    effective_mfma = (
+        mfma_total if mfma_total is not None else (dtype_sum if dtype_sum > 0 else None)
+    )
     cycles_for_rate = total if (total is not None and total > 0) else busy
-    mfma_present = (mfma_total is not None and mfma_total > 0) or dtype_sum > 0
+    mfma_present = effective_mfma is not None and effective_mfma > 0
     if mfma_present and cycles_for_rate is not None and cycles_for_rate > 0:
         assert metrics.mfma_issue_rate is not None
 
@@ -692,6 +706,30 @@ def test_hbm_bytes_without_a_write_breakdown_assumes_every_request_is_a_full_lin
     # the bug: the bug was ignoring a *present* breakdown).
     req = full + partial
     assert _hbm_bytes({"TCC_EA0_WRREQ_sum": float(req)}) == pytest.approx(float(req) * 64)
+
+
+@given(
+    req=st.floats(min_value=0, max_value=1_000, allow_nan=False, allow_infinity=False),
+    breakdown=st.floats(min_value=0, max_value=1_000_000, allow_nan=False, allow_infinity=False),
+    side=st.sampled_from(("read", "write")),
+)
+@FAST
+def test_hbm_bytes_never_goes_negative_when_a_breakdown_counter_exceeds_the_total(  # noqa: ANN201
+    req: float, breakdown: float, side: str
+):
+    # Regression for a bug this property suite itself found: real counters
+    # should never report a size-breakdown count larger than the matching
+    # total request count, but nothing guarantees that (measurement races, a
+    # partial/corrupted capture, or counters stitched together from
+    # different passes). `req=0, breakdown=1` used to make `_hbm_bytes`
+    # return -32.0.
+    if side == "read":
+        counters = {"TCC_EA0_RDREQ_sum": req, "TCC_EA0_RDREQ_32B_sum": breakdown}
+    else:
+        counters = {"TCC_EA0_WRREQ_sum": req, "TCC_EA0_WRREQ_64B_sum": breakdown}
+    result = _hbm_bytes(counters)
+    assert result is not None
+    assert result >= 0
 
 
 # ---------------------------------------------------------------------------
