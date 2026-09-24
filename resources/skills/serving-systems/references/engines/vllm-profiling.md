@@ -60,12 +60,24 @@ stop_signal = "SIGINT"
 grace_s = 300
 ```
 
-**Unverified:** whether `vllm serve` actually shuts down cleanly enough
-under `SIGINT` for a wrapping clean-exit-only profiler to get a flushed
-trace this way has not been confirmed end to end. The offline
-single-process path above is the one that has been verified to produce
-real, non-empty traces; treat the server-capture shape as the fallback to
-try, not the default to reach for, until it's been checked.
+**Verified:** a graceful `SIGINT` to the server process group does make
+rocprofv3 flush a complete, non-empty trace (confirmed: a full-size
+`kernel_trace.csv` matching the offline-script path's output), in both
+default multiprocessing and the single-process (`VLLM_ENABLE_V1_MULTIPROCESSING=0`)
+mode -- the engine's own process topology (forked worker or not) does not
+by itself block the flush the way it was assumed to. What *is* still
+reliably true: the server process group rarely exits cleanly within a
+typical grace period even after that flush -- something else in its own
+shutdown/event-loop path keeps it alive -- so expect the capture's overall
+status to read as an escalated/forced-kill outcome rather than a clean
+exit, in both multiprocessing modes, even when the trace itself is
+complete and safe to analyze. A capture tool that discards non-clean-exit
+captures outright will discard a real trace this way; one that still
+attempts analysis on a non-clean-exit capture (checking what's actually on
+disk) surfaces the data correctly. Still prefer the offline single-process
+path when the objective is engine-internal (no HTTP path involved): fewer
+moving parts, and its capture completes with a clean exit rather than
+needing escalation.
 
 ## torch.profiler interface: check the installed build
 
