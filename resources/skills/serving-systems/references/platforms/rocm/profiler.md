@@ -8,12 +8,15 @@ substitution table plus the ROCm-specific mechanics.
 
 > **Status.** The `rocprof` profiler kind is wired up: system trace, PMC
 > counters, thread trace, kernel-internal, and paired A/B timing all have a
-> workspace tool (`rocprof_profiler/`, below). Command syntax is accurate to
-> `rocprofv3` / `rocprof-compute`'s documented CLI; end-to-end capture against
-> a live vLLM/SGLang server has not yet been verified on this repo's MI210
-> test machine — verify flags against your ROCm version. The `torch.profiler`
-> pitfall in this file's Pitfalls section **is** measured on this repo's
-> MI210 bundle.
+> workspace tool (`rocprof_profiler/`, below). PMC counter capture and tool
+> inventory are verified on this repo's MI210 test cluster (ROCm 6.2.1
+> through 7.2.0 modules available; host venv runs ROCm 6.4.1 to match
+> `torch 2.9.1+rocm6.4`); end-to-end capture against a **live vLLM/SGLang
+> server**, and `rocprof-compute` kernel-internal analysis, were still in
+> progress on this cluster as of this writing — treat those two recipes as
+> directionally correct and verify against your ROCm version. The
+> `torch.profiler` pitfall in this file's Pitfalls section **is** measured on
+> this repo's MI210 bundle.
 
 ## Altitudes and tools
 
@@ -23,7 +26,7 @@ substitution table plus the ROCm-specific mechanics.
 | Framework / op | which torch op dominates; which library a dispatch actually hit | `torch.profiler` (works unmodified on ROCm) | `resources/profilers/torch/analyze_torch_profile.py` — `certify`, `gemm_shapes`, `roofline` |
 | Counters (PMC) | which hardware ceiling one kernel is against | `rocprofv3` hardware counters | `rocprof_profiler/counters.py` — `plan`, `report`, `triage` |
 | Kernel-internal | full Speed-of-Light + memory chart + empirical roofline for one kernel | `rocprof-compute` (named `omniperf` before ROCm 6.3) | `rocprof_profiler/compute.py` — `doctor`, `profile`, `analyze` |
-| Instruction-level | per-instruction stalls inside one kernel, on one CU | `rocprofv3` thread trace (ATT) | `rocprof_profiler/att.py` — `plan`, `hotspots` |
+| Instruction-level | per-instruction stalls inside one kernel, on one CU | `rocprofv3` thread trace (ATT) | `rocprof_profiler/att.py` — `plan`, `hotspots`. **Version-gated: see Pitfalls.** |
 | Paired A/B | did a change actually move the needle, same session | HIP event timing around an isolated replay | `rocprof_profiler/kernel_bench.py` |
 
 Exact argument syntax for each tool lives in its own prompt/help text, not
@@ -94,6 +97,12 @@ issues its own kernels.
   process," not "the GPU is idle."
 - For TP > 1, capture each worker independently; a single capture on the
   driver process will not see the other ranks' kernels.
+- **ROCm 7.x's `rocprofv3` can attach to an already-running process**
+  (`--attach PID`, verified present in the 7.x CLI, absent from 6.4.1). Where
+  available, this is the cleaner way to profile a specific already-spawned
+  engine-core or TP-worker process without relaunching the whole server tree
+  under the profiler wrapper. On ROCm 6.x, without `--attach`, wrap the
+  top-level launch command instead.
 - Before trusting an `idle_gaps` or `host_idle` read, confirm with
   `analyze_rocprof.py kernels` that the captured process's trace actually
   contains model kernels.
@@ -163,10 +172,40 @@ relative hardware performance. See [`aiter-engagement.md`](aiter-engagement.md).
   Python dependency set (`dash`, `textual`, etc.) is importable in whichever
   interpreter runs it — an all-or-nothing preflight, not a partial
   degradation. Run `compute.py doctor` before spending a capture on it,
-  rather than discovering the gate mid-run.
+  rather than discovering the gate mid-run. (Verified clear on this repo's
+  MI210 test cluster — system `python3`'s `pandas` was already `2.2.2`,
+  ahead of the `>=3` version known to break `rocprof-compute`'s CSV
+  converter — but check `doctor` on any other host before relying on this.)
+- **ATT is version-gated and needs an extra package — verified.** ROCm
+  6.4.1's `rocprofv3` has **no** `--att`/thread-trace flag at all; the option
+  first appears in ROCm 7.1.0/7.2.0. Even there, it fails immediately with
+  `rocprof-trace-decoder library path not found` unless the
+  `rocprof-trace-decoder` package is installed separately — it is not part
+  of a stock ROCm module tree. Run `att.py plan` early and treat a decoder
+  error as "ATT unavailable here," not a usage bug; fall back to
+  `counters.py`/`compute.py` for hardware-ceiling evidence instead. Where it
+  is available, `--att-buffer-size` (and equivalents) take a **plain integer
+  byte count** (e.g. `67108864`), not a unit-suffixed string like `64MB`.
+- **`rocprofv3`'s PMC output directory naming is not verbatim.** Regardless
+  of the `-d`/output-directory name you pass, each counter-collection pass
+  writes into a `pmc_1/<hostname>/<pid>_*` subtree — the `pmc_1` segment
+  names "this run's first (and only) counter pass," not your pass number.
+  Give each pass its own **base** output directory rather than relying on a
+  per-pass filename to disambiguate.
+- **A container's ROCm build can differ from the host's, and may be missing
+  `rocprof-compute` entirely.** A vLLM ROCm image observed on this cluster
+  ships ROCm 7.2.3 and a different torch build than the host venv's ROCm
+  6.4.1 / torch 2.9.1; `rocprofv3` was present inside the container but
+  `rocprof-compute` was not installed there at all. Check what's actually
+  inside the server's container before planning a kernel-internal capture,
+  and match the tool's ROCm build to the traced binary's — see the note
+  about ABI matching in the capture recipes above.
 - **`compute.py`/`att.py` overhead.** Same warning as `ncu`: target one
   kernel, never a whole run. Overhead scales from moderate (PMC) to very high
-  (thread trace).
+  (thread trace). For a small workload, measured PMC overhead was under 15%
+  of an untraced baseline (a ~40-dispatch, ≤4-counters-per-pass microbench);
+  don't extrapolate that figure to a real serving workload's much larger
+  kernel and replay count.
 - **HIP graph replay vs. eager decode.** Don't sum per-op eager timings and
   call the result graph-era throughput — time whole-graph replay separately
   and use an eager, same-shape run only for sub-forward attribution. Same
