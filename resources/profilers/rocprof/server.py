@@ -219,28 +219,32 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
         arch: str,
         kernel: str,
         target_cu: int = att.DEFAULT_TARGET_CU,
-        buffer_size: str = att.DEFAULT_BUFFER_SIZE,
+        buffer_size: int = att.DEFAULT_BUFFER_SIZE,
         se_mask: str = att.DEFAULT_SE_MASK,
         simd_select: str = att.DEFAULT_SIMD_SELECT,
-        iteration_range: str = att.DEFAULT_ITERATION_RANGE,
+        iteration_range: list[str] | None = None,
         out_dir: str = "rocprof_att",
-        yaml_path: str = "rocprof_att.yaml",
+        decoder_lib_dir: str | None = None,
+        script_path: str = "rocprof_att.sh",
         write: bool = False,  # noqa: FBT001, FBT002  # tracked: #288
         command: list[str] | None = None,
     ) -> str:
-        """Print a rocprofv3 Advanced Thread Trace (ATT) job config and invocation.
+        """Print a rocprofv3 Advanced Thread Trace (ATT) command line and prerequisites.
 
         Args:
             arch: e.g. gfx90a, mi210, gfx942, mi300x, gfx950, mi355x.
             kernel: kernel_include_regex value selecting which kernel to trace.
             target_cu: Which compute unit to trace (default 1; keeps output small).
-            buffer_size: ATT buffer size (raise if the decoded trace reports truncation).
-            se_mask: Shader-engine mask.
-            simd_select: SIMD select mask.
-            iteration_range: Which kernel iterations to trace (default skips warmup).
+            buffer_size: Plain decimal ATT buffer-size byte count (raise if the decoded trace
+                reports truncation; unit-suffixed strings like "64MB" are rejected).
+            se_mask: Shader-engine mask (hex or decimal).
+            simd_select: SIMD select mask (hex or decimal).
+            iteration_range: Values passed through to --kernel-iteration-range, if any.
             out_dir: Directory ATT output lands under.
-            yaml_path: Path for the printed job config.
-            write: Also write the config to yaml_path (default False; print only).
+            decoder_lib_dir: Directory containing librocprof-trace-decoder.so
+                (--att-library-path). Without it the printed command uses a placeholder.
+            script_path: Path for the printed command when write=True.
+            write: Also write the command to script_path (default False; print only).
             command: The program to profile, as argv tokens (without a leading "--").
         """
         return _capture(
@@ -253,7 +257,8 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
             simd_select=simd_select,
             iteration_range=iteration_range,
             out_dir=out_dir,
-            yaml_path=yaml_path,
+            decoder_lib_dir=decoder_lib_dir,
+            script_path=script_path,
             write=write,
             command=list(command or ()),
         )

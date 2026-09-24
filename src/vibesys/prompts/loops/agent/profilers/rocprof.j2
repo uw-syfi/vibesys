@@ -118,13 +118,20 @@ python {{ profiler_support_name }}/compute.py profile --name <workload> --out /t
 | `att_plan(arch, kernel, target_cu=1, ..., command=None)` | `... att.py plan --arch <arch> --kernel <regex> -- <command>` | Print a rocprofv3 ATT job config and the invocation to run it. |
 | `att_hotspots(dispatch_dir, top=15)` | `... hotspots <dispatch_dir>` | Top stall hotspots (instructions + source lines) from a decoded ATT dispatch directory. |
 
-ATT needs a ROCm version with `--att`/thread-trace support and the separate
-`rocprof-trace-decoder` package. Run `att_plan` early; treat a decoder-path
-error as "ATT unavailable on this host," not a usage bug, and fall back to
-`counters.py`/`compute.py` for hardware-ceiling evidence instead. Only reach
-for ATT after counters already point at a specific stall class — it attributes
-per-instruction stalls inside one kernel, one compute unit, and costs the most
-overhead of any tool here.
+ATT needs a `rocprofv3` >= ROCm 7.1 (the `--att`/thread-trace flag doesn't
+exist before that) and the separate `rocprof-trace-decoder` shared library,
+which ships as its own GitHub release, not inside any ROCm module. Run
+`att_plan` early — it prints the exact working command line, including
+`--att-library-path`, once you know where the decoder `.so` is. A decoder-path
+error means it isn't installed or isn't pointed at yet: the library is a
+single small `.so` extractable from the release tarball with no build step
+and no root, so try installing it into a scratch directory before giving up
+on ATT for the session; if that isn't practical in the time available, treat
+the error as "ATT unavailable on this host," not a usage bug, and fall back
+to `counters.py`/`compute.py` for hardware-ceiling evidence instead. Only
+reach for ATT after counters already point at a specific stall class — it
+attributes per-instruction stalls inside one kernel, one compute unit, and
+costs the most overhead of any tool here.
 
 ### Paired A/B (`kernel_bench.py`) — did the change actually help
 

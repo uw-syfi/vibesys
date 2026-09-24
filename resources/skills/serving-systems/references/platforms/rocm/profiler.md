@@ -8,15 +8,15 @@ substitution table plus the ROCm-specific mechanics.
 
 > **Status.** The `rocprof` profiler kind is wired up: system trace, PMC
 > counters, thread trace, kernel-internal, and paired A/B timing all have a
-> workspace tool (`rocprof_profiler/`, below). PMC counter capture and tool
-> inventory are verified on this repo's MI210 test cluster (ROCm 6.2.1
-> through 7.2.0 modules available; host venv runs ROCm 6.4.1 to match
-> `torch 2.9.1+rocm6.4`); end-to-end capture against a **live vLLM/SGLang
-> server**, and `rocprof-compute` kernel-internal analysis, were still in
-> progress on this cluster as of this writing — treat those two recipes as
-> directionally correct and verify against your ROCm version. The
-> `torch.profiler` pitfall in this file's Pitfalls section **is** measured on
-> this repo's MI210 bundle.
+> workspace tool (`rocprof_profiler/`, below). PMC counter capture, tool
+> inventory, and **ATT thread-trace capture + decode** are verified on this
+> repo's MI210 test cluster (ROCm 6.2.1 through 7.2.0 modules available; host
+> venv runs ROCm 6.4.1 to match `torch 2.9.1+rocm6.4`); end-to-end capture
+> against a **live vLLM/SGLang server**, and `rocprof-compute` kernel-internal
+> analysis, were still in progress on this cluster as of this writing — treat
+> those two recipes as directionally correct and verify against your ROCm
+> version. The `torch.profiler` pitfall in this file's Pitfalls section **is**
+> measured on this repo's MI210 bundle.
 
 ## Altitudes and tools
 
@@ -176,16 +176,31 @@ relative hardware performance. See [`aiter-engagement.md`](aiter-engagement.md).
   MI210 test cluster — system `python3`'s `pandas` was already `2.2.2`,
   ahead of the `>=3` version known to break `rocprof-compute`'s CSV
   converter — but check `doctor` on any other host before relying on this.)
-- **ATT is version-gated and needs an extra package — verified.** ROCm
-  6.4.1's `rocprofv3` has **no** `--att`/thread-trace flag at all; the option
-  first appears in ROCm 7.1.0/7.2.0. Even there, it fails immediately with
-  `rocprof-trace-decoder library path not found` unless the
-  `rocprof-trace-decoder` package is installed separately — it is not part
-  of a stock ROCm module tree. Run `att.py plan` early and treat a decoder
-  error as "ATT unavailable here," not a usage bug; fall back to
-  `counters.py`/`compute.py` for hardware-ceiling evidence instead. Where it
-  is available, `--att-buffer-size` (and equivalents) take a **plain integer
-  byte count** (e.g. `67108864`), not a unit-suffixed string like `64MB`.
+- **ATT is version-gated and needs an extra package — verified working end
+  to end.** ROCm 6.4.1's `rocprofv3` has **no** `--att`/thread-trace flag at
+  all; the option first appears in ROCm 7.1.0/7.2.0. Even there, it fails
+  immediately with `rocprof-trace-decoder library path not found` unless the
+  `rocprof-trace-decoder` shared library is installed separately — it is a
+  standalone GitHub release (`ROCm/rocprof-trace-decoder`), not part of a
+  stock ROCm module tree. It installs in user space with no build step and
+  no root: the release tarball (e.g. `rocprof-trace-decoder-manylinux-2.28-
+  0.1.6-Linux.tar.gz`) contains exactly one file,
+  `opt/rocm/lib/librocprof-trace-decoder.so` (~200KB) — extract it anywhere
+  and pass its containing directory to `rocprofv3 --att-library-path <dir>`
+  (verified on ROCm 7.2.0/MI210; `att.py plan` prints this flag once you know
+  the path). All ATT options are plain `rocprofv3` CLI flags — there is no
+  separate `-i <job.yaml>` config path for ATT. `--att-buffer-size` takes a
+  **plain decimal integer byte count** only (e.g. `67108864`); a unit-suffixed
+  string like `64MB` fails with `ValueError: invalid literal for int()`.
+  `--att-simd-select`/`--att-shader-engine-mask` accept hex (`0xf`) or
+  decimal, both verified — the buffer-size restriction does not generalize to
+  every numeric ATT flag. Run `att.py plan` early; if the decoder still can't
+  be installed in the time available, treat a decoder-path error as "ATT
+  unavailable here," not a usage bug, and fall back to `counters.py`/
+  `compute.py` for hardware-ceiling evidence instead. A kernel can match
+  `--kernel-include-regex` and still produce no decoded `code.json` (e.g.
+  degenerate fill kernels) even though `rocprofv3` exits 0 — that's a decoder
+  limitation for that kernel, not a broken capture.
 - **`rocprofv3`'s PMC output directory naming is not verbatim.** Regardless
   of the `-d`/output-directory name you pass, each counter-collection pass
   writes into a `pmc_1/<hostname>/<pid>_*` subtree — the `pmc_1` segment

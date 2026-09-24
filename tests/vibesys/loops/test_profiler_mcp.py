@@ -1219,7 +1219,7 @@ class TestRocprofMcpServer:
         assert "gemv_lowocc_kernel" in out
         assert "OCCUPANCY-LIMITED" in out
 
-    def test_att_plan_tool_prints_a_job_config_and_invocation(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_att_plan_tool_prints_a_working_command_line(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
         server = rocprof_server_mod.build_server()
         out = asyncio.run(
             _call_tool(
@@ -1227,11 +1227,13 @@ class TestRocprofMcpServer:
                 "att_plan",
                 arch="gfx90a",
                 kernel="flash_attn.*",
+                decoder_lib_dir="/opt/rocm/lib/att_decoder",
                 command=["python", "bench.py"],
             )
         )
-        assert "rocprofv3 -i rocprof_att.yaml" in out
-        assert "python bench.py" in out
+        assert "rocprofv3 --att" in out
+        assert "--att-library-path /opt/rocm/lib/att_decoder" in out
+        assert "-- python bench.py" in out
 
     def test_att_hotspots_tool_ranks_stall_hotspots(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
         dispatch_dir = _ROCPROF_FIXTURES / "att" / "ui_output_agent_123_dispatch_1"

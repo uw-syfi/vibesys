@@ -7,10 +7,19 @@ root on ``sys.path``, and statically because the repo root is listed in
 documents for the nsys toolkit.
 
 ``fixtures/rocprof/att/ui_output_agent_123_dispatch_1/code.json`` is a small,
-hand-built rocprofv3 ATT decoder output shaped to the documented
-``[asm, _, pc_index, source_loc, _, pc_addr, exec_count, total_cycles,
-stall_cycles, issue_cycles]`` row schema (real MI210 captures were still
-being collected while this toolkit was written).
+hand-built rocprofv3 ATT decoder output shaped to the documented row schema
+(real MI210 captures were still being collected while this toolkit was
+originally written).
+
+``fixtures/rocprof/att_real/ui_output_agent_14537_dispatch_1/code.json`` is a
+trimmed, path-sanitized copy of a **real** rocprofv3 ATT decoder output: MI210
+(gfx90a), ROCm 7.2.0, decoder release 0.1.6, captured from a from-scratch
+``axpy`` HIP kernel (`--att --att-target-cu 1 --att-buffer-size 67108864
+--att-library-path <dir>`, see `att.py`'s module docstring). It confirms
+``load_instructions``/``cmd_hotspots`` against the decoder's actual output
+shape and its self-documented ``header`` field, not just the docs-derived
+hand-built fixture above. Only the `Source` column's cluster-local build path
+was rewritten to a portable `/src/...` path; every other field is verbatim.
 """
 
 from __future__ import annotations
@@ -96,7 +105,7 @@ def test_instruction_stall_pct_is_zero_without_total_cycles():  # noqa: ANN201  
         exec_count=0,
         total_cycles=0,
         stall_cycles=0,
-        issue_cycles=0,
+        idle_cycles=0,
     )
     assert inst.stall_pct == 0.0
 
@@ -136,6 +145,36 @@ def test_load_instructions_parses_the_fixture():  # noqa: ANN201  # tracked: #28
         "VMEM-wait",
         "LDS",
     }
+
+
+def test_load_instructions_parses_real_mi210_att_decoder_output():  # noqa: ANN201  # tracked: #288
+    """Regression test against real rocprofv3/rocprof-trace-decoder output (see module
+    docstring), not just the docs-derived hand-built fixture: confirms the decoder's own
+    ``header`` field ("ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle")
+    lines up with att.py's positional parsing, and that column 9 is idle cycles, not issue
+    cycles (the docs-only guess this toolkit originally shipped with)."""
+    instructions = load_instructions(_FIXTURES / "att_real" / "ui_output_agent_14537_dispatch_1")
+    # 26 rows total; the leading "; <mangled name>" comment row (pc_index=0) is dropped.
+    assert len(instructions) == 25  # tracked: #288
+    first = instructions[0]
+    assert first.asm == "s_load_dword s2, s[4:5], 0x24"
+    assert first.pc_index == 1  # tracked: #288
+    assert first.stall_cycles == 46468  # tracked: #288
+    assert first.idle_cycles == 30636  # tracked: #288
+    assert first.category == "SMEM"
+    real_source_insns = [i for i in instructions if i.source_loc.startswith("/src/")]
+    assert real_source_insns  # DWARF-mapped instructions carry the compiled kernel's own source
+    assert all(i.source_loc != "<unknown>" for i in instructions)
+
+
+def test_cmd_hotspots_on_real_att_data_ranks_the_actual_dominant_stall():  # noqa: ANN201  # tracked: #288
+    out = _run(
+        cmd_hotspots, dispatch_dir=str(_FIXTURES / "att_real"), top=3
+    )
+    # The real capture is dominated by a single s_waitcnt vmcnt(0) waiting on a global load.
+    assert "VMEM-wait" in out
+    assert "s_waitcnt vmcnt(0)" in out
+    assert "/src/tiny_kernel.cpp:8" in out
 
 
 def test_load_instructions_raises_on_malformed_json(tmp_path: Path):  # noqa: ANN201  # tracked: #288
@@ -188,27 +227,33 @@ def test_cmd_hotspots_reports_a_clean_error_when_decoder_output_is_absent(tmp_pa
         _run(cmd_hotspots, dispatch_dir=str(tmp_path), top=5)
 
 
-def test_cmd_plan_prints_a_yaml_job_and_invocation():  # noqa: ANN201  # tracked: #288
+def test_cmd_plan_prints_a_working_rocprofv3_command_line():  # noqa: ANN201  # tracked: #288
     out = _run(
         cmd_plan,
         arch="gfx90a",
         kernel="flash_attn.*",
         target_cu=1,
-        buffer_size="0x6000000",
-        se_mask="0xf",
+        buffer_size=67_108_864,
+        se_mask="0x1",
         simd_select="0xf",
-        iteration_range="[1, [2-4]]",
+        iteration_range=None,
         out_dir="rocprof_att",
-        yaml_path="rocprof_att.yaml",
+        decoder_lib_dir="/opt/rocm-7.2.0/lib/att_decoder",
+        script_path="rocprof_att.sh",
         write=False,
         command=["--", "python", "bench.py"],
     )
-    assert "kernel_include_regex: 'flash_attn.*'" in out
-    assert "advanced_thread_trace: true" in out
-    assert "att_target_cu: 1" in out
-    assert "rocprofv3 -i rocprof_att.yaml -- python bench.py" in out
-    assert "-- -- python bench.py" not in out  # the leading -- must not be duplicated
+    assert "--kernel-include-regex 'flash_attn.*'" in out
+    assert "--att " in out
+    assert "--att-target-cu 1" in out
+    # ATT is plain rocprofv3 CLI flags -- no `-i <job.yaml>` config path.
+    assert "-i " not in out
+    assert "--att-buffer-size 67108864" in out
+    assert "--att-library-path /opt/rocm-7.2.0/lib/att_decoder" in out
+    assert "rocprofv3" in out
+    assert out.count("-- python bench.py") == 1  # the leading -- must not be duplicated
     assert "rocprof-trace-decoder" in out
+    assert "PLAIN DECIMAL INTEGER" in out
 
 
 def test_cmd_plan_without_a_command_prints_a_placeholder():  # noqa: ANN201  # tracked: #288
@@ -217,33 +262,55 @@ def test_cmd_plan_without_a_command_prints_a_placeholder():  # noqa: ANN201  # t
         arch="gfx90a",
         kernel="flash_attn.*",
         target_cu=1,
-        buffer_size="0x6000000",
-        se_mask="0xf",
+        buffer_size=67_108_864,
+        se_mask="0x1",
         simd_select="0xf",
-        iteration_range="[1, [2-4]]",
+        iteration_range=None,
         out_dir="rocprof_att",
-        yaml_path="rocprof_att.yaml",
+        decoder_lib_dir=None,
+        script_path="rocprof_att.sh",
         write=False,
         command=[],
     )
     assert "<your_command_and_args>" in out
+    assert "<dir containing librocprof-trace-decoder.so>" in out
 
 
-def test_cmd_plan_can_write_the_yaml_to_disk(tmp_path: Path):  # noqa: ANN201  # tracked: #288
-    yaml_path = tmp_path / "job.yaml"
+def test_cmd_plan_includes_an_iteration_range_when_given():  # noqa: ANN201  # tracked: #288
+    out = _run(
+        cmd_plan,
+        arch="gfx90a",
+        kernel="gemm.*",
+        target_cu=1,
+        buffer_size=67_108_864,
+        se_mask="0x1",
+        simd_select="0xf",
+        iteration_range=["2", "3", "4"],
+        out_dir="rocprof_att",
+        decoder_lib_dir="/opt/rocm/lib",
+        script_path="rocprof_att.sh",
+        write=False,
+        command=[],
+    )
+    assert "--kernel-iteration-range 2 3 4" in out
+
+
+def test_cmd_plan_can_write_the_command_to_a_script(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    script_path = tmp_path / "job.sh"
     _run(
         cmd_plan,
         arch="gfx942",
         kernel="gemm.*",
         target_cu=2,
-        buffer_size="0xC000000",
-        se_mask="0xf",
+        buffer_size=134_217_728,
+        se_mask="0x1",
         simd_select="0xf",
-        iteration_range="[1, [2-4]]",
+        iteration_range=None,
         out_dir=str(tmp_path / "out"),
-        yaml_path=str(yaml_path),
+        decoder_lib_dir="/opt/rocm/lib",
+        script_path=str(script_path),
         write=True,
         command=[],
     )
-    assert yaml_path.is_file()
-    assert "att_target_cu: 2" in yaml_path.read_text()
+    assert script_path.is_file()
+    assert "--att-target-cu 2" in script_path.read_text()

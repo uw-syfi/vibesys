@@ -6,21 +6,30 @@ ATT gives per-instruction stall/latency timing but no cache counters (use
 rocprofv3 job -- capture them in separate passes.
 
 Usage:
-    python att.py plan --arch gfx90a --kernel REGEX
+    python att.py plan --arch gfx90a --kernel REGEX --decoder-lib-dir <dir>
     python att.py hotspots <dispatch_dir> [--top 15]
 
-``plan`` prints a rocprofv3 ATT job config (rocprofv3's ATT options are only
-exposed through ``-i <input.yaml>``, unlike PMC's ``--pmc`` CLI flag) plus the
-prerequisites: a matching ``rocprof-trace-decoder`` shared library findable by
-rocprofv3 (via ``$ROCM_PATH/lib`` or ``ROCPROF_TRACE_DECODER_PATH``).
+``plan`` prints a rocprofv3 ATT command line -- all ATT options (target CU,
+buffer size, SE/SIMD masks, the decoder library path) are plain CLI flags on
+``rocprofv3`` itself, verified on ROCm 7.2.0's ``rocprofv3 --help``; no
+``-i <input.yaml>`` job config is needed for ATT. Prerequisites: ROCm's
+``rocprofv3`` must be >= 7.1 (6.x has no ``--att`` flag at all) and the
+separate ``rocprof-trace-decoder`` shared library (not part of any ROCm
+module) must be extracted somewhere and passed via ``--att-library-path
+<dir containing librocprof-trace-decoder.so>`` -- verified working on an
+MI210/gfx90a cluster with the decoder's ``0.1.6`` GitHub release tarball.
 
 ``hotspots`` reads the decoder's per-dispatch output directory (conventionally
-named ``ui_output_agent_<PID>_dispatch_<N>``), specifically ``code.json``:
-each row is documented as
-``[asm, _, pc_index, source_loc, _, pc_addr, exec_count, total_cycles,
-stall_cycles, issue_cycles]``. It prints the top instructions and top source
-lines by stall cycles, plus stall-category totals, and fails with a clear
-message when ``code.json`` is missing (decoder not run, or wrong directory).
+named ``ui_output_agent_<PID>_dispatch_<N>``), specifically ``code.json``.
+Verified against real MI210 captures: each row is
+``[asm, _, pc_index, source_loc, codeobj_id, pc_addr, exec_count,
+total_cycles, stall_cycles, idle_cycles]`` -- ``code.json``'s own ``header``
+field documents this as ``"ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit,
+Latency, Stall, Idle"``, confirmed independently by the sibling
+``stats_ui_output_agent_<PID>_dispatch_<N>.csv``. It prints the top
+instructions and top source lines by stall cycles, plus stall-category
+totals, and fails with a clear message when ``code.json`` is missing (decoder
+not run, or wrong directory).
 """  # noqa: EXE001  # tracked: #288
 
 from __future__ import annotations
@@ -35,10 +44,11 @@ from pathlib import Path
 
 CODE_JSON_NAME = "code.json"
 DEFAULT_TARGET_CU = 1
-DEFAULT_BUFFER_SIZE = "0x6000000"  # 96MB/SE; raise to 0xC000000 if traces truncate
-DEFAULT_SE_MASK = "0xf"
+# Plain decimal integer byte count -- verified. Unit-suffixed strings ("64MB") fail with a
+# Python `ValueError: invalid literal for int()` inside rocprofv3; raise if traces truncate.
+DEFAULT_BUFFER_SIZE = 67_108_864  # 64MB
+DEFAULT_SE_MASK = "0x1"
 DEFAULT_SIMD_SELECT = "0xf"
-DEFAULT_ITERATION_RANGE = "[1, [2-4]]"  # skip warmup (iteration 0), trace 2-4
 
 STALL_CATEGORIES: tuple[tuple[str, str], ...] = (
     ("s_barrier", "barrier"),
@@ -80,7 +90,7 @@ class Instruction:
     exec_count: int
     total_cycles: int
     stall_cycles: int
-    issue_cycles: int
+    idle_cycles: int
 
     @property
     def stall_pct(self) -> float:
@@ -108,7 +118,7 @@ def _instruction_from_row(row: list) -> Instruction | None:  # tracked: #288
         exec_count=_int_or_zero(row[6]),
         total_cycles=_int_or_zero(row[7]),
         stall_cycles=_int_or_zero(row[8]),
-        issue_cycles=_int_or_zero(row[9]),
+        idle_cycles=_int_or_zero(row[9]),
     )
 
 
@@ -251,59 +261,84 @@ def cmd_hotspots(ns: argparse.Namespace) -> None:
         )
 
 
-def _plan_yaml(ns: argparse.Namespace) -> str:
-    lines = [
-        "jobs:",
-        "  -",
-        f"      kernel_include_regex: {ns.kernel!r}",
-        f"      kernel_iteration_range: {ns.iteration_range!r}",
-        "      output_file: att_out",
-        f"      output_directory: {ns.out_dir}",
-        "      output_format: [csv]",
-        "      truncate_kernels: true",
-        "      sys_trace: true",
-        "      advanced_thread_trace: true",
-        f"      att_target_cu: {ns.target_cu}",
-        f"      att_shader_engine_mask: {ns.se_mask!r}",
-        f"      att_simd_select: {ns.simd_select!r}",
-        f"      att_buffer_size: {ns.buffer_size!r}",
+def _plan_command_tokens(ns: argparse.Namespace) -> list[str]:
+    """Build the rocprofv3 ATT invocation as a token list.
+
+    All flags, verified on rocprofv3 (ROCm 7.2.0) --help: ATT has no separate
+    `-i <input.yaml>` job-config path.
+    """
+    tokens = [
+        "rocprofv3",
+        "--att",
+        "--att-target-cu",
+        str(ns.target_cu),
+        "--att-simd-select",
+        str(ns.simd_select),
+        "--att-shader-engine-mask",
+        str(ns.se_mask),
+        "--att-buffer-size",
+        str(ns.buffer_size),
+        "--att-library-path",
+        ns.decoder_lib_dir or "<dir containing librocprof-trace-decoder.so>",
+        "--kernel-include-regex",
+        ns.kernel,
     ]
-    return "\n".join(lines)
+    if ns.iteration_range:
+        tokens += ["--kernel-iteration-range", *ns.iteration_range]
+    tokens += [
+        "-d",
+        ns.out_dir,
+        "--output-format",
+        "csv",
+        "json",
+        "--",
+    ]
+    return tokens
 
 
 def cmd_plan(ns: argparse.Namespace) -> None:
-    """Print a rocprofv3 ATT job config and the invocation to run it."""
-    yaml_path = ns.yaml_path
+    """Print a rocprofv3 ATT command line and the prerequisites to run it."""
     command_tokens = [t for t in ns.command if t != "--"]
     command = shlex.join(command_tokens) if command_tokens else "<your_command_and_args>"
 
-    print(f"# ATT job config for {ns.arch} ({yaml_path}):")  # noqa: T201  # tracked: #288
-    print(_plan_yaml(ns))  # noqa: T201  # tracked: #288
-    if ns.write:
-        Path(yaml_path).write_text(_plan_yaml(ns) + "\n", encoding="utf-8")
-        print(f"\n# wrote {yaml_path}")  # noqa: T201  # tracked: #288
+    full_command = shlex.join(_plan_command_tokens(ns)) + f" {command}"
 
+    print(f"# ATT capture command for {ns.arch}:")  # noqa: T201  # tracked: #288
     print(  # noqa: T201  # tracked: #288
-        "\n# Run (build/compile the kernel with debug info enabled first -- whatever your "
-        "toolchain's flag for embedding DWARF source-to-assembly mapping is -- or code.json's "
-        "source_loc will come back empty):"
+        "# (build/compile the kernel with debug info enabled first -- whatever your toolchain's "
+        "flag for embedding DWARF source-to-assembly mapping is, e.g. `hipcc -g` -- or "
+        "code.json's source_loc will come back empty):"
     )
-    print(f"rocprofv3 -i {yaml_path} -- {command}")  # noqa: T201  # tracked: #288
+    print(full_command)  # noqa: T201  # tracked: #288
+    if ns.write:
+        Path(ns.script_path).write_text("#!/bin/bash\nset -eux\n" + full_command + "\n", encoding="utf-8")
+        print(f"\n# wrote {ns.script_path}")  # noqa: T201  # tracked: #288
 
     print("\n# Prerequisites:")  # noqa: T201  # tracked: #288
     print(  # noqa: T201  # tracked: #288
-        f"#  - {ns.arch}: the ATT job options (target CU, buffer size, SE/SIMD masks) below are "
-        "generic across CDNA gfx9 and are not varied by architecture here; confirm the decoder "
-        "and ROCm build both match this GPU."
+        f"#  - {ns.arch}: rocprofv3 >= ROCm 7.1 -- 6.x has no --att/--advanced-thread-trace flag "
+        "at all. The ATT flags themselves (target CU, buffer size, SE/SIMD masks) are generic "
+        "across CDNA gfx9; confirm the decoder release and ROCm build both match this GPU."
     )
-    print("#  - rocprof-trace-decoder shared library installed and discoverable: place it under")  # noqa: T201  # tracked: #288
-    print("#    $ROCM_PATH/lib, or point ROCPROF_TRACE_DECODER_PATH at it. Without it, ATT jobs")  # noqa: T201  # tracked: #288
-    print("#    produce raw trace data but no decoded code.json (see `hotspots` for the error).")  # noqa: T201  # tracked: #288
-    print("#  - att_target_cu keeps output to one CU; raise att_buffer_size (e.g. 0xC000000) if")  # noqa: T201  # tracked: #288
-    print("#    the decoded trace reports truncation.")  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # tracked: #288
+        "#  - rocprof-trace-decoder shared library: a separate release, not part of any ROCm "
+        "module (github.com/ROCm/rocprof-trace-decoder). Extract librocprof-trace-decoder.so "
+        "from a release tarball (no build needed) and pass its containing DIRECTORY via "
+        "--att-library-path -- verified working; without it, ATT jobs fail immediately with "
+        "'rocprof-trace-decoder library path not found', not a partial/undecoded result."
+    )
+    print(  # noqa: T201  # tracked: #288
+        "#  - --att-buffer-size takes a PLAIN DECIMAL INTEGER byte count only -- a unit-suffixed "
+        "string ('64MB') fails with `ValueError: invalid literal for int()`. --att-simd-select "
+        "and --att-shader-engine-mask accept hex ('0xf') or decimal; both verified."
+    )
+    print("#  - att_target_cu keeps output to one CU; raise att_buffer_size if the decoded")  # noqa: T201  # tracked: #288
+    print("#    trace reports truncation.")  # noqa: T201  # tracked: #288
     print(  # noqa: T201  # tracked: #288
         f"#  - Output lands under {ns.out_dir}/ in a ui_output_agent_<PID>_dispatch_<N> directory "
-        "per matched dispatch; pass that directory (or its parent) to `hotspots`."
+        "per matched dispatch that the decoder could resolve (a kernel can match "
+        "--kernel-include-regex and still produce no code.json, e.g. degenerate fill kernels); "
+        "pass that directory (or its parent) to `hotspots`."
     )
 
 
@@ -314,19 +349,36 @@ def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    plan = sub.add_parser("plan", help="print a rocprofv3 ATT job config and invocation")
+    plan = sub.add_parser("plan", help="print a rocprofv3 ATT command line and prerequisites")
     plan.add_argument(
         "--arch", required=True, help="e.g. gfx90a, mi210, gfx942, mi300x, gfx950, mi355x"
     )
-    plan.add_argument("--kernel", required=True, help="kernel_include_regex value")
+    plan.add_argument("--kernel", required=True, help="--kernel-include-regex value")
     plan.add_argument("--target-cu", type=int, default=DEFAULT_TARGET_CU)
-    plan.add_argument("--buffer-size", default=DEFAULT_BUFFER_SIZE)
+    plan.add_argument(
+        "--buffer-size",
+        type=int,
+        default=DEFAULT_BUFFER_SIZE,
+        help="plain decimal byte count -- unit-suffixed strings ('64MB') are rejected",
+    )
     plan.add_argument("--se-mask", default=DEFAULT_SE_MASK)
     plan.add_argument("--simd-select", default=DEFAULT_SIMD_SELECT)
-    plan.add_argument("--iteration-range", default=DEFAULT_ITERATION_RANGE)
+    plan.add_argument(
+        "--iteration-range",
+        nargs="*",
+        default=None,
+        help="values passed through to --kernel-iteration-range, e.g. --iteration-range 2 3 4",
+    )
     plan.add_argument("--out-dir", default="rocprof_att")
-    plan.add_argument("--yaml-path", default="rocprof_att.yaml")
-    plan.add_argument("--write", action="store_true", help="also write the config to --yaml-path")
+    plan.add_argument(
+        "--decoder-lib-dir",
+        default=None,
+        help="directory containing librocprof-trace-decoder.so (--att-library-path)",
+    )
+    plan.add_argument("--script-path", default="rocprof_att.sh")
+    plan.add_argument(
+        "--write", action="store_true", help="also write the command to --script-path"
+    )
     plan.add_argument("command", nargs=argparse.REMAINDER, help="the program to profile, after --")
     plan.set_defaults(fn=cmd_plan)
 
