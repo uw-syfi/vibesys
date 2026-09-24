@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 if TYPE_CHECKING:
@@ -380,6 +380,104 @@ def test_format_result_is_compact_and_mentions_status(tmp_path: Path) -> None:
 
 
 # -- capture store ---------------------------------------------------------------
+
+
+def test_profiles_root_absolute_with_relative_env_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``new_capture``'s directory is passed both to a profiled subprocess
+
+    (launched with ``cwd=lifecycle.cwd``, an arbitrary agent-supplied
+    directory) as its ``-d``-style output argument, and used directly by
+    this process's own analysis code afterward. If it resolves to a
+    relative path, the two sides can disagree on where it actually is: the
+    subprocess resolves it against ``lifecycle.cwd``, this process resolves
+    it against its own launch directory. Any capture whose ``cwd`` differs
+    from the server's own launch directory (the common case for a real
+    profiling target) then writes its whole output tree somewhere the
+    analyzer never looks, and every downstream ``summary``/analyzer call
+    sees an empty capture. ``$VIBESYS_PROFILE_DIR`` unset (the documented
+    default, ``./.profiles``) is exactly this relative case.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("VIBESYS_PROFILE_DIR", raising=False)
+
+    root = cr.profiles_root()
+
+    assert root.is_absolute()
+    assert root == (tmp_path / ".profiles").resolve()
+
+
+@given(relative_env=st.sampled_from(["./.profiles", ".profiles", "out/profiles", "./a/b/.profiles"]))
+@settings(max_examples=5, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_profiles_root_absolute_for_any_relative_env_value(
+    relative_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Generalizes the fixed bug over any relative ``$VIBESYS_PROFILE_DIR`` value.
+
+    Whatever relative form the env var takes, the resolved root must always
+    be absolute and anchored to this process's own cwd -- never left
+    relative for a profiled subprocess (launched with a different cwd) to
+    resolve differently.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VIBESYS_PROFILE_DIR", relative_env)
+
+    root = cr.profiles_root()
+
+    assert root.is_absolute()
+    assert root == (tmp_path / relative_env).resolve()
+
+
+def test_new_capture_out_dir_matches_what_a_subprocess_with_different_cwd_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end regression: a profiler subprocess launched with a *different*
+
+    ``lifecycle.cwd`` than this process's own cwd, given ``new_capture``'s
+    directory as its output argument (exactly how every ``profile_*`` tool
+    in ``capture.py`` calls it), must write into the same directory this
+    process reads back from -- not a directory relative to its own cwd
+    instead. Mirrors the real symptom: a real ``profile_timeline`` capture
+    with a different ``cwd`` completed with ``target_rc=0`` and rocprofv3's
+    own log confirming files were written, but the analyzer discovered zero
+    CSVs because it looked in a different (wrongly relative) directory.
+    """
+    server_cwd = tmp_path / "server_launch_dir"
+    server_cwd.mkdir()
+    target_cwd = tmp_path / "target_cwd"
+    target_cwd.mkdir()
+    monkeypatch.chdir(server_cwd)
+    monkeypatch.setenv("VIBESYS_PROFILE_DIR", "./.profiles")
+
+    _capture_id, out_dir = cr.new_capture("timeline")
+
+    # A profiler that receives out_dir as a *relative* argument the way a
+    # real rocprofv3 invocation's "-d <out_dir>" would if the bug were
+    # still present would resolve it against its own cwd (lifecycle.cwd).
+    # out_dir is passed here exactly as capture.py's profile_* tools pass
+    # it to their profiler_prefix, i.e. an absolute Path once resolved.
+    fake_profiler = tmp_path / "fake_profiler.py"
+    fake_profiler.write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        "d = Path(sys.argv[sys.argv.index('-d') + 1])\n"
+        "d.mkdir(parents=True, exist_ok=True)\n"
+        "(d / 'marker.csv').write_text('ok\\n')\n"
+    )
+    lifecycle = cr.Lifecycle(command="true", cwd=str(target_cwd), timeout_s=10.0)
+
+    result = cr.run_capture(
+        [sys.executable, str(fake_profiler), "-d", str(out_dir)],
+        lifecycle,
+        kind="timeline",
+        out_dir=out_dir,
+        meta={},
+    )
+
+    assert result.status is cr.CaptureStatus.OK
+    assert (result.out_dir / "marker.csv").is_file()
+    assert out_dir.is_absolute()
 
 
 def test_new_capture_id_format_and_directory(profiles_dir: Path) -> None:

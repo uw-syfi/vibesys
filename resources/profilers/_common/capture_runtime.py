@@ -161,8 +161,24 @@ class _ManifestContext:
 
 
 def _profiles_root() -> Path:
+    """The capture store root, always resolved to an absolute path.
+
+    ``new_capture``'s returned directory is passed both to the profiled
+    subprocess (as the profiler's ``-d`` output-directory argument, a
+    process started with ``cwd=lifecycle.cwd``) and used directly by this
+    process's own analysis code afterward. A relative default
+    (``./.profiles``) is ambiguous between those two: the subprocess
+    resolves it against ``lifecycle.cwd`` while this process resolves it
+    against its own cwd, and those differ whenever a capture tool's
+    ``cwd`` argument names anything other than the server's own launch
+    directory -- the profiler then writes its whole output tree somewhere
+    this process never looks, and every downstream ``summary``/analyzer
+    call sees an empty capture. Resolving here, once, before the path is
+    handed to either side, keeps both sides pointed at the same directory
+    regardless of ``lifecycle.cwd``.
+    """
     raw = os.environ.get("VIBESYS_PROFILE_DIR", "./.profiles")
-    return Path(raw).expanduser()
+    return Path(raw).expanduser().resolve()
 
 
 def profiles_root() -> Path:
