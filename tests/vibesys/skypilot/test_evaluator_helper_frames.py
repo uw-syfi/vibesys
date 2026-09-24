@@ -45,11 +45,12 @@ def _artifact_frame(
 @pytest.mark.parametrize(
     ("payload", "message"),
     [
-        (b'{"version":2}', "invalid frame"),
-        (b"x" * (_MAX_FRAME_BYTES + 1) + b"\n", "invalid frame"),
-        (b"{not json\n", "invalid JSON"),
-        (b"[1]\n", "protocol version mismatch"),
-        (b'{"version":1}\n', "protocol version mismatch"),
+        pytest.param(b'{"version":2}', "invalid frame", id="missing-newline"),
+        # An explicit id keeps the 1 MiB payload out of the generated test id.
+        pytest.param(b"x" * (_MAX_FRAME_BYTES + 1) + b"\n", "invalid frame", id="oversized"),
+        pytest.param(b"{not json\n", "invalid JSON", id="not-json"),
+        pytest.param(b"[1]\n", "protocol version mismatch", id="not-an-object"),
+        pytest.param(b'{"version":1}\n', "protocol version mismatch", id="old-version"),
     ],
 )
 def test_decode_frame_rejects_malformed_payloads(payload: bytes, message: str) -> None:
