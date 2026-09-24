@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -22,7 +23,11 @@ from vibesys.api import (
     open_run_store,
 )
 from vibesys.api._dispatch import dispatch_loop
+from vibesys.api._orchestrations.agent import AgentOrchestration
 from vibesys.api._orchestrations.contracts import RunDescription
+from vibesys.api._orchestrations.evolve import EvolveOrchestration
+from vibesys.api._orchestrations.plain import PlainOrchestration
+from vibesys.api._orchestrations.profile_guided import ProfileGuidedOrchestration
 from vibesys.api.contracts import LoopKind, RunRequest, RunResult, RunStatus, RunView
 from vibesys.api.entry import default_request
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
@@ -86,9 +91,66 @@ def test_dispatch_uses_injected_registry_without_built_in_loop_calls() -> None:
 def test_builtin_ids_resolve_to_their_own_implementations() -> None:
     registry = built_in_orchestrations()
 
-    assert registry.resolve(LoopKind.AGENT) is registry.resolve(LoopKind.PROFILE_GUIDED)
-    assert registry.resolve(LoopKind.PLAIN) is not registry.resolve(LoopKind.EVOLVE)
-    assert registry.resolve(LoopKind.AGENT) is not registry.resolve(LoopKind.PLAIN)
+    expected = {
+        LoopKind.AGENT: AgentOrchestration,
+        LoopKind.PROFILE_GUIDED: ProfileGuidedOrchestration,
+        LoopKind.PLAIN: PlainOrchestration,
+        LoopKind.EVOLVE: EvolveOrchestration,
+    }
+    for kind, implementation_type in expected.items():
+        implementation = registry.resolve(kind)
+        assert type(implementation) is implementation_type
+        assert isinstance(implementation, Orchestration)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        (LoopKind.AGENT, "multi-agent", "vibesys.loops.agent.loop", "agent"),
+        (LoopKind.AGENT, "single-agent", "vibesys.loops.agent.loop", "agent"),
+        (LoopKind.PROFILE_GUIDED, "multi-agent", "vibesys.loops.agent.loop", "profile-guided"),
+        (LoopKind.PROFILE_GUIDED, "single-agent", "vibesys.loops.agent.loop", "profile-guided"),
+        (LoopKind.PLAIN, "multi-agent", "vibesys.loops.plain.loop", None),
+        (LoopKind.EVOLVE, "multi-agent", "vibesys.loops.evolve.loop", None),
+    ],
+)
+def test_builtin_execute_dispatches_directly_through_registered_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: tuple[LoopKind, str, str, str | None],
+) -> None:
+    kind, inner_loop, loop_module, expected_outer = case
+    request = _custom_request(tmp_path).model_copy(
+        update={
+            "loop": kind,
+            "orchestration": None,
+            "inner_loop": inner_loop,
+            "objective": "Improve the queue.",
+        }
+    )
+    integration = LocalRunIntegration()
+    runtime = cast("VibeSysRuntime", SimpleNamespace(legacy_integration=integration))
+    calls: list[dict[str, object]] = []
+
+    def fake_loop(**kwargs: object) -> bool:
+        calls.append(kwargs)
+        return True
+
+    entrypoint = {
+        LoopKind.AGENT: "run_agent_loop",
+        LoopKind.PROFILE_GUIDED: "run_agent_loop",
+        LoopKind.PLAIN: "run_plain_loop",
+        LoopKind.EVOLVE: "run_evolve_loop",
+    }[kind]
+    monkeypatch.setattr(f"{loop_module}.{entrypoint}", fake_loop)
+
+    implementation = built_in_orchestrations().resolve(kind)
+    assert implementation.execute(request, runtime)
+    assert len(calls) == 1
+    assert calls[0]["integration"] is integration
+    if expected_outer is not None:
+        assert calls[0]["outer_loop"] == expected_outer
+        assert calls[0]["inner_loop"] == inner_loop
 
 
 def _custom_request(tmp_path: Path) -> RunRequest:

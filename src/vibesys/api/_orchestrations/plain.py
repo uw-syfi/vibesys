@@ -5,24 +5,27 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.api._orchestrations._common import built_in_description, resolved_run_id
+from vibesys.api._orchestrations.legacy_bridge import (
+    LegacyBuiltinDefaults,
+    legacy_integration,
+    legacy_request,
+)
 
 if TYPE_CHECKING:
     from vibesys.api._orchestrations.contracts import RunDescription
-    from vibesys.api._orchestrations.legacy_request import RunRequest
+    from vibesys.api.run_request import RunRequestLike
     from vibesys.orchestration import ResumeProjection
-    from vibesys.run.integration import LocalRunIntegration
+    from vibesys.runtime import VibeSysRuntime
     from vs_project.api import OrchestrationRunManifest
 
 
-class PlainOrchestration:
+class PlainOrchestration(LegacyBuiltinDefaults):
     """Preserve the existing plain loop call contract."""
 
-    def history_namespaces(self) -> tuple[str, ...]:
-        """Expose this policy's portable state to run history queries."""
-        return ("plain",)
+    namespace = "plain"
 
-    def describe(self, request: RunRequest) -> RunDescription:
-        return built_in_description(request, round_budget=True)
+    def describe(self, request: RunRequestLike) -> RunDescription:
+        return built_in_description(legacy_request(request), round_budget=True)
 
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
         """Project the plain-owned descriptor without constructing v3 settings."""
@@ -30,9 +33,11 @@ class PlainOrchestration:
 
         return resume_projection(manifest)
 
-    def execute(self, request: RunRequest, integration: LocalRunIntegration) -> bool:
+    def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool:
+        """Execute the plain issue policy through the shared runtime contract."""
         from vibesys.loops.plain.loop import run_plain_loop  # noqa: PLC0415  # tracked: #288
 
+        request = legacy_request(request)
         bundle = request.input_bundle
         resuming = request.resume is not None
         return run_plain_loop(
@@ -61,5 +66,5 @@ class PlainOrchestration:
             domain=bundle.domain,
             remote_repo=request.remote_repo,
             repo_visibility=request.repo_visibility,
-            integration=integration,
+            integration=legacy_integration(runtime),
         )

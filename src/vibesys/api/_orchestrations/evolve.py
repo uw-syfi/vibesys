@@ -9,33 +9,38 @@ from vibesys.api._orchestrations._common import (
     built_in_description,
     resolved_run_id,
 )
+from vibesys.api._orchestrations.legacy_bridge import (
+    LegacyBuiltinDefaults,
+    legacy_integration,
+    legacy_request,
+)
 from vibesys.loops.evolve.orchestration import resume_projection
 
 if TYPE_CHECKING:
     from vibesys.api._orchestrations.contracts import RunDescription
-    from vibesys.api._orchestrations.legacy_request import RunRequest
+    from vibesys.api.run_request import RunRequestLike
     from vibesys.orchestration import ResumeProjection
-    from vibesys.run.integration import LocalRunIntegration
+    from vibesys.runtime import VibeSysRuntime
     from vs_project.api import OrchestrationRunManifest
 
 
-class EvolveOrchestration:
+class EvolveOrchestration(LegacyBuiltinDefaults):
     """Preserve the existing evolve loop call contract."""
 
-    def history_namespaces(self) -> tuple[str, ...]:
-        """Expose this policy's portable state to run history queries."""
-        return ("evolve",)
+    namespace = "evolve"
 
-    def describe(self, request: RunRequest) -> RunDescription:
-        return built_in_description(request, round_budget=False)
+    def describe(self, request: RunRequestLike) -> RunDescription:
+        return built_in_description(legacy_request(request), round_budget=False)
 
     def resume_projection(self, manifest: OrchestrationRunManifest) -> ResumeProjection:
         """Project evolve-owned settings without constructing v3 configuration."""
         return resume_projection(manifest)
 
-    def execute(self, request: RunRequest, integration: LocalRunIntegration) -> bool:
+    def execute(self, request: RunRequestLike, runtime: VibeSysRuntime) -> bool:
+        """Execute evolutionary search through the shared runtime contract."""
         from vibesys.loops.evolve.loop import run_evolve_loop  # noqa: PLC0415  # tracked: #288
 
+        request = legacy_request(request)
         bundle = request.input_bundle
         resuming = request.resume is not None
         return run_evolve_loop(
@@ -80,5 +85,5 @@ class EvolveOrchestration:
             openevolve_config=request.openevolve_config,
             remote_repo=request.remote_repo,
             repo_visibility=request.repo_visibility,
-            integration=integration,
+            integration=legacy_integration(runtime),
         )

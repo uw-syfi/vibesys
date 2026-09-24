@@ -13,6 +13,16 @@ The framework's internal registered contract has two parts:
 `Orchestration`, is used by the registry and runner. Only `execute` is required
 of a custom policy; the registry supplies defaults for the other hooks.
 
+The built-in registry resolves four distinct implementations directly:
+`AgentOrchestration`, `ProfileGuidedOrchestration`, `PlainOrchestration`, and
+`EvolveOrchestration`. Each implements `execute(request, runtime)` and the
+internal lifecycle contract. The legacy CLI still uses the `agent` ID with an
+`inner_loop` option; the agent implementations select `MultiAgentExecution` or
+`SingleAgentExecution` inside their own `execute` methods. Those inner classes
+also expose `execute(request, runtime)`. `legacy_bridge.py` confines conversion
+to the older run integration to the built-in adapters. Generic framework
+dispatch contains no built-in policy branch.
+
 | Hook | When called | Input and output |
 | --- | --- | --- |
 | `describe` | Before `RUN_STARTED` and runtime setup | `RunRequestLike` to `RunDescription` (round budget and expected roles for the start event) |

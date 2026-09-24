@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from vibesys.api._orchestrations.contracts import RunDescription
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -10,7 +10,7 @@ from vibesys.loops.roles import expected_agent_roles
 from vibesys.profilers import ProfilerKind
 
 if TYPE_CHECKING:
-    from vibesys.api._orchestrations.legacy_request import LoopKind, RunRequest
+    from vibesys.api._orchestrations.legacy_request import RunRequest
     from vibesys.api.run_request import RunRequestLike
 
 
@@ -38,24 +38,6 @@ def _required_objective(request: RunRequest) -> str:
             )
         )
     return request.objective
-
-
-def _agent_outer_loop(loop: LoopKind | None) -> Literal["agent", "profile-guided"]:
-    """Narrow `loop` to the two values registered for the agent adapter.
-
-    The registry maps `LoopKind.AGENT` and `LoopKind.PROFILE_GUIDED` to the
-    same adapter; this makes that
-    invariant explicit here instead of letting `loop.value`'s plain `str`
-    widen silently past `run_agent_loop`'s `outer_loop` literal.
-    """
-    from vibesys.api._orchestrations.legacy_request import LoopKind  # noqa: PLC0415
-
-    if loop is LoopKind.PROFILE_GUIDED:
-        return "profile-guided"
-    assert loop is LoopKind.AGENT, (  # noqa: S101  # dispatch_loop only routes these two here
-        f"agent adapter called with unsupported loop kind: {loop!r}"
-    )
-    return "agent"
 
 
 def resolved_run_id(request: RunRequestLike) -> str:
