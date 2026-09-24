@@ -267,6 +267,56 @@ def parallel_enabled(max_parallelism: int, *, supported: bool) -> bool:
     return max_parallelism > 1 and supported
 
 
+@dataclass(frozen=True, slots=True)
+class BootstrapAttemptResult:
+    """Recorded attempt whose checkpoint and report are still pending."""
+
+    seed: Individual | None
+    message: str
+
+
+class BootstrapEffects(Protocol):
+    """One bootstrap attempt and its run-scoped reporting effects."""
+
+    def begin(self, max_attempts: int) -> None:
+        """Open bootstrap logs before the first attempt."""
+        ...
+
+    def attempt(self, number: int, max_attempts: int) -> BootstrapAttemptResult:
+        """Evaluate and save one attempt without checkpointing it."""
+        ...
+
+    def checkpoint(self, label: str) -> None:
+        """Commit the just-recorded attempt's durable state."""
+        ...
+
+    def report(self, message: str) -> None:
+        """Report an attempt after its checkpoint succeeds."""
+        ...
+
+    def exhausted(self, max_attempts: int) -> None:
+        """Report that the budget produced no passing seed."""
+        ...
+
+
+def retry_bootstrap(max_attempts: int, effects: BootstrapEffects) -> Individual | None:
+    """Retry bootstrap until one recorded seed passes or the budget is exhausted."""
+    effects.begin(max_attempts)
+    for number in range(1, max_attempts + 1):
+        result = effects.attempt(number, max_attempts)
+        label = (
+            f"evolve: record bootstrap seed {result.seed.id}"
+            if result.seed is not None
+            else f"evolve: record failed bootstrap {number}"
+        )
+        effects.checkpoint(label)
+        effects.report(result.message)
+        if result.seed is not None:
+            return result.seed
+    effects.exhausted(max_attempts)
+    return None
+
+
 class EvolveRunEffects(Protocol):
     """Concrete work and reporting required by the run-level scheduler."""
 

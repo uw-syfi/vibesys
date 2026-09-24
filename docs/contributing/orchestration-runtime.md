@@ -126,7 +126,8 @@ use the existing shared context rather than `VibeSysRuntime.spawn_agent`.
 The evolve policy in `src/vibesys/loops/evolve/policy_flow.py` selects parents,
 records outcomes, and chooses the final candidate. `EvolveRunScheduler`
 schedules bootstrap, serial or parallel generations, checkpoints, and final
-selection. `evaluate_candidate` orders mutation, review, framework gates,
+selection. `retry_bootstrap` owns first-seed retry numbering and stop-on-pass or
+exhaustion through `BootstrapEffects`. `evaluate_candidate` orders mutation, review, framework gates,
 measurement, and snapshotting through typed `CandidateEffects`. The loop
 adapter binds these effects to agents, task gates, Git, and the run environment.
 The concrete bootstrap attempt body and candidate workers remain there.

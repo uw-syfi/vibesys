@@ -34,6 +34,7 @@ import random
 import threading
 from collections.abc import Sequence  # noqa: TC003  # tracked: #288
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import Any, Literal, cast
 
@@ -62,6 +63,7 @@ from vibesys.loops.evolve.orchestration import (
     legacy_configuration_from_options,
 )
 from vibesys.loops.evolve.policy_flow import (
+    BootstrapAttemptResult,
     CandidateFitness,
     CandidateIdentity,
     CandidateJudgement,
@@ -70,6 +72,7 @@ from vibesys.loops.evolve.policy_flow import (
     EvolveSearch,
     SelectionSettings,
     evaluate_candidate,
+    retry_bootstrap,
 )
 from vibesys.loops.evolve.population import (
     Individual,
@@ -1097,7 +1100,221 @@ def _run_generation_parallel(  # noqa: PLR0913  # tracked: #288
 # ---------------------------------------------------------------------------
 
 
-def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
+@dataclass(frozen=True, slots=True)
+class _BootstrapPassingEvidence:
+    summary: str
+    feedback: str
+    benchmark: FrameworkBenchmarkOutcome | None
+    runtime_notes: str
+
+
+@dataclass(slots=True)
+class _BootstrapAdapter:
+    """Bind one bootstrap attempt to the run's agents, gates, and state."""
+
+    ctx: LoopContext
+    objective: str
+    space: MetricSpace
+    modality: str | None
+    domain_definition: DomainDefinition
+    pass_criteria: str
+    population: Population
+    state_store: EvolutionStateStore
+    search_policy: SearchPolicy
+    keep_deployments: bool
+    accuracy_timeout_seconds: int | None
+    benchmark_contract: BenchmarkContract
+
+    def begin(self, max_attempts: int) -> None:
+        """Open the bootstrap log before any candidate is attempted."""
+        self.ctx.switch_log_file("bootstrap")
+        self.ctx.lprint(
+            f"\n{'=' * 60}\n  Bootstrap — first passing seed "
+            f"(up to {max_attempts} attempt(s))\n{'=' * 60}\n"
+        )
+
+    def attempt(self, number: int, max_attempts: int) -> BootstrapAttemptResult:
+        """Run and record one implementer, judge, gate, and profile attempt."""
+        ctx = self.ctx
+        ctx.lprint(f"\n--- bootstrap attempt {number}/{max_attempts} ---\n")
+        wip_seed = self._repair_seed()
+        cand_notes, cand_deployment = _candidate_runtime_notes(ctx, 0, number)
+        failed_lessons = _recent_failure_lessons(self.population)
+        num_failed_attempts = sum(1 for individual in self.population.all if not individual.passed)
+        base_desc = "reference" if wip_seed is None else f"repair-seed #{wip_seed.id}"
+        ctx.lprint(
+            f"bootstrap base={base_desc}"
+            + (f" deployment={cand_deployment}" if cand_deployment else "")
+        )
+        try:
+            ctx.reselect_gpu()
+            mutator = _run_mutator(
+                ctx,
+                generation=0,
+                child_idx=number,
+                objective=self.objective,
+                parent=None,
+                inspirations=[],
+                modality=self.modality,
+                domain_definition=self.domain_definition,
+                is_cold_start=True,
+                space=self.space,
+                failed_lessons=failed_lessons,
+                num_failed_attempts=num_failed_attempts,
+                repair_seed=wip_seed is not None,
+                runtime_notes=cand_notes,
+            )
+            ctx.reselect_gpu()
+            verdict = _run_judge(
+                ctx,
+                generation=0,
+                child_idx=number,
+                modality=self.modality,
+                domain_definition=self.domain_definition,
+                objective=self.objective,
+                pass_criteria=self.pass_criteria,
+                runtime_notes=cand_notes,
+            )
+            benchmark = None
+            if verdict.verdict == Verdict.PASS:
+                failure_feedback, benchmark = _run_candidate_gates(
+                    ctx,
+                    generation=0,
+                    child_idx=number,
+                    contract=self.benchmark_contract,
+                    space=self.space,
+                    accuracy_timeout_seconds=self.accuracy_timeout_seconds,
+                )
+            else:
+                failure_feedback = verdict.feedback
+            if failure_feedback is not None:
+                return self._record_failure(number, mutator.summary, failure_feedback)
+            return self._record_seed(
+                number,
+                _BootstrapPassingEvidence(mutator.summary, verdict.feedback, benchmark, cand_notes),
+            )
+        finally:
+            _teardown_candidate_deployment(ctx, cand_deployment, keep=self.keep_deployments)
+
+    def exhausted(self, max_attempts: int) -> None:
+        """Report that no passing generation-zero seed was found."""
+        self.ctx.lprint(f"[bootstrap] exhausted {max_attempts} attempt(s) without a passing seed.")
+
+    def checkpoint(self, label: str) -> None:
+        """Commit a fully recorded bootstrap attempt."""
+        _persist_evolve_state(self.ctx, self.state_store, label=label)
+
+    def report(self, message: str) -> None:
+        """Report a candidate after its state checkpoint succeeds."""
+        self.ctx.lprint(message)
+
+    def _repair_seed(self) -> Individual | None:
+        """Return the latest WIP seed if its tree can be checked out."""
+        wip_seed = _latest_wip_seed(self.population)
+        if wip_seed is not None and wip_seed.commit:  # noqa: SIM102  # tracked: #288
+            if not self.ctx.git.checkout_tree(wip_seed.commit, clean=True):
+                output_sink().framework_warning(
+                    f"could not check out WIP seed {wip_seed.id} "
+                    f"(commit {wip_seed.commit[:8]}); starting from reference",
+                    source=FrameworkSource.LOOP,
+                )
+                wip_seed = None
+        return wip_seed
+
+    def _snapshot_wip(self, number: int) -> str | None:
+        """Retain a failed tree only when the snapshot created a new commit."""
+        try:
+            sha_before = self.ctx.git.current_sha()
+            self.ctx.snapshot_workspace(f"wip-seed-bootstrap{number}")
+            sha_after = self.ctx.git.current_sha()
+        except Exception as exc:  # noqa: BLE001  # tracked: #288
+            output_sink().framework_warning(
+                "wip-seed snapshot failed",
+                detail=str(exc),
+                source=FrameworkSource.LOOP,
+            )
+            return None
+        else:
+            return sha_after if sha_after and sha_after != sha_before else None
+
+    def _record_failure(self, number: int, summary: str, feedback: str) -> BootstrapAttemptResult:
+        """Record one failed attempt and checkpoint its optional WIP seed."""
+        failed = Individual(
+            id=self.population.next_id(),
+            generation=0,
+            parent_id=None,
+            inspiration_ids=[],
+            commit=self._snapshot_wip(number),
+            perf_metric=None,
+            perf_unit=None,
+            passed=False,
+            summary=summary,
+            feedback=feedback,
+        )
+        self.population.add(failed)
+        self.state_store.save_population(self.population)
+        return BootstrapAttemptResult(
+            seed=None,
+            message=(
+                f"[bootstrap {number}] FAILED — feedback: "
+                f"{feedback.splitlines()[0][:120] if feedback else ''}"
+            ),
+        )
+
+    def _record_seed(
+        self, number: int, evidence: _BootstrapPassingEvidence
+    ) -> BootstrapAttemptResult:
+        """Profile and checkpoint the first passing generation-zero seed."""
+        ctx = self.ctx
+        ctx.reselect_gpu()
+        profile = _run_profiler(
+            ctx,
+            generation=0,
+            child_idx=number,
+            modality=self.modality,
+            domain_definition=self.domain_definition,
+            objective=self.objective,
+            space=self.space,
+            runtime_notes=evidence.runtime_notes,
+        )
+        ctx.snapshot_workspace("gen-0-seed")
+        commit = ctx.git.current_sha()
+        perf_metric, perf_unit, metrics = _candidate_fitness(profile, evidence.benchmark)
+        seed = Individual(
+            id=self.population.next_id(),
+            generation=0,
+            parent_id=None,
+            inspiration_ids=[],
+            commit=commit,
+            perf_metric=perf_metric,
+            perf_unit=perf_unit,
+            metrics=metrics,
+            passed=True,
+            summary=evidence.summary,
+            feedback=evidence.feedback,
+        )
+        self.population.add(seed)
+        self.state_store.save_population(self.population)
+        if commit:
+            self.search_policy.record(
+                seed,
+                code=_candidate_code(ctx, commit) if self.search_policy.requires_code else "",
+                policy_parent_id=None,
+                target_island=None,
+                space=self.space,
+            )
+            ctx.git.retain_candidate(f"individual-{seed.id}", commit)
+        return BootstrapAttemptResult(
+            seed=seed,
+            message=(
+                f"[bootstrap {number}] PASSED — seed #{seed.id} "
+                f"perf={seed.perf_metric} {seed.perf_unit or ''} "
+                f"(commit {commit[:8] if commit else 'n/a'})"
+            ),
+        )
+
+
+def _bootstrap_seed(  # noqa: PLR0913  # tracked: #288
     ctx: LoopContext,
     *,
     objective: str,
@@ -1114,197 +1331,24 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
     accuracy_timeout_seconds: int | None = None,
     benchmark_contract: BenchmarkContract = _NO_BENCHMARK_CONTRACT,
 ) -> Individual | None:
-    """Iterate implementer → judge → accuracy until a first passing seed exists.
-
-    Runs BEFORE the generation loop so the search never cold-starts. Attempt 1
-    writes a server from scratch; later attempts repair-forward the most-recent
-    failed WIP seed (fix-forward, not restart). On PASS: profile, snapshot, and
-    record a passing generation-0 ``Individual`` (``parent_id=None``), then
-    return it. On FAIL: snapshot the WIP tree and record a failed generation-0
-    ``Individual`` so the next attempt can repair it in place. Returns ``None``
-    if every attempt fails — the caller aborts the run.
-
-    ``rng`` is accepted for signature parity with the generation loop (bootstrap
-    does no parent/inspiration sampling) and forward-compatibility.
-    """
-    ctx.switch_log_file("bootstrap")
-    ctx.lprint(
-        f"\n{'=' * 60}\n  Bootstrap — first passing seed "
-        f"(up to {max_attempts} attempt(s))\n{'=' * 60}\n"
+    """Retry generation-zero attempts, preserving bootstrap's existing effects."""
+    return retry_bootstrap(
+        max_attempts,
+        _BootstrapAdapter(
+            ctx=ctx,
+            objective=objective,
+            space=space,
+            modality=modality,
+            domain_definition=domain_definition,
+            pass_criteria=pass_criteria,
+            population=population,
+            state_store=state_store,
+            search_policy=search_policy,
+            keep_deployments=keep_deployments,
+            accuracy_timeout_seconds=accuracy_timeout_seconds,
+            benchmark_contract=benchmark_contract,
+        ),
     )
-
-    for attempt in range(1, max_attempts + 1):
-        ctx.lprint(f"\n--- bootstrap attempt {attempt}/{max_attempts} ---\n")
-
-        # Fix-forward from the most-recent failed WIP seed, if one was
-        # snapshotted; otherwise the workspace stays as the framework seeded it
-        # (the bare reference tree).
-        wip_seed = _latest_wip_seed(population)
-        if wip_seed is not None and wip_seed.commit:  # noqa: SIM102  # tracked: #288
-            if not ctx.git.checkout_tree(wip_seed.commit, clean=True):
-                output_sink().framework_warning(
-                    f"could not check out WIP seed {wip_seed.id} "
-                    f"(commit {wip_seed.commit[:8]}); starting from reference",
-                    source=FrameworkSource.LOOP,
-                )
-                wip_seed = None
-
-        # Use an environment-owned candidate deployment so a failed attempt's
-        # cumulative state never poisons the next attempt's judge.
-        cand_notes, cand_deployment = _candidate_runtime_notes(ctx, 0, attempt)
-        failed_lessons = _recent_failure_lessons(population)
-        num_failed_attempts = sum(1 for i in population.all if not i.passed)
-        base_desc = "reference" if wip_seed is None else f"repair-seed #{wip_seed.id}"
-        ctx.lprint(
-            f"bootstrap base={base_desc}"
-            + (f" deployment={cand_deployment}" if cand_deployment else "")
-        )
-
-        # Stop the attempt's deployment after mutate/judge/profile on every
-        # exit path.
-        try:
-            # 1. Implementer (the mutator in cold-start / from-scratch mode).
-            ctx.reselect_gpu()
-            mutator = _run_mutator(
-                ctx,
-                generation=0,
-                child_idx=attempt,
-                objective=objective,
-                parent=None,
-                inspirations=[],
-                modality=modality,
-                domain_definition=domain_definition,
-                is_cold_start=True,
-                space=space,
-                failed_lessons=failed_lessons,
-                num_failed_attempts=num_failed_attempts,
-                repair_seed=wip_seed is not None,
-                runtime_notes=cand_notes,
-            )
-
-            # 2. Judge.
-            ctx.reselect_gpu()
-            verdict = _run_judge(
-                ctx,
-                generation=0,
-                child_idx=attempt,
-                modality=modality,
-                domain_definition=domain_definition,
-                objective=objective,
-                pass_criteria=pass_criteria,
-                runtime_notes=cand_notes,
-            )
-
-            benchmark = None
-            if verdict.verdict == Verdict.PASS:
-                failure_feedback, benchmark = _run_candidate_gates(
-                    ctx,
-                    generation=0,
-                    child_idx=attempt,
-                    contract=benchmark_contract,
-                    space=space,
-                    accuracy_timeout_seconds=accuracy_timeout_seconds,
-                )
-            else:
-                failure_feedback = verdict.feedback
-
-            if failure_feedback is not None:
-                # Snapshot the failed tree so the next attempt repairs it in place.
-                # Only tag a WIP repair-seed when the snapshot actually committed new
-                # work (the tree changed); an unedited tree is nothing to fix-forward.
-                wip_commit = None
-                try:
-                    sha_before = ctx.git.current_sha()
-                    ctx.snapshot_workspace(f"wip-seed-bootstrap{attempt}")
-                    sha_after = ctx.git.current_sha()
-                    if sha_after and sha_after != sha_before:
-                        wip_commit = sha_after
-                except Exception as exc:  # noqa: BLE001  # tracked: #288
-                    output_sink().framework_warning(
-                        "wip-seed snapshot failed",
-                        detail=str(exc),
-                        source=FrameworkSource.LOOP,
-                    )
-                failed = Individual(
-                    id=population.next_id(),
-                    generation=0,
-                    parent_id=None,
-                    inspiration_ids=[],
-                    commit=wip_commit,
-                    perf_metric=None,
-                    perf_unit=None,
-                    passed=False,
-                    summary=mutator.summary,
-                    feedback=failure_feedback,
-                )
-                population.add(failed)
-                state_store.save_population(population)
-                _persist_evolve_state(
-                    ctx,
-                    state_store,
-                    label=f"evolve: record failed bootstrap {attempt}",
-                )
-                ctx.lprint(
-                    f"[bootstrap {attempt}] FAILED — feedback: "
-                    f"{failure_feedback.splitlines()[0][:120] if failure_feedback else ''}"
-                )
-                continue
-
-            # 4. Both gates passed → profile and record the generation-0 seed.
-            ctx.reselect_gpu()
-            summary = _run_profiler(
-                ctx,
-                generation=0,
-                child_idx=attempt,
-                modality=modality,
-                domain_definition=domain_definition,
-                objective=objective,
-                space=space,
-                runtime_notes=cand_notes,
-            )
-            ctx.snapshot_workspace("gen-0-seed")
-            commit = ctx.git.current_sha()
-            seed_perf_metric, seed_perf_unit, seed_metrics = _candidate_fitness(summary, benchmark)
-            seed = Individual(
-                id=population.next_id(),
-                generation=0,
-                parent_id=None,
-                inspiration_ids=[],
-                commit=commit,
-                perf_metric=seed_perf_metric,
-                perf_unit=seed_perf_unit,
-                metrics=seed_metrics,
-                passed=True,
-                summary=mutator.summary,
-                feedback=verdict.feedback,
-            )
-            population.add(seed)
-            state_store.save_population(population)
-            if commit:
-                search_policy.record(
-                    seed,
-                    code=_candidate_code(ctx, commit) if search_policy.requires_code else "",
-                    policy_parent_id=None,
-                    target_island=None,
-                    space=space,
-                )
-                ctx.git.retain_candidate(f"individual-{seed.id}", commit)
-            _persist_evolve_state(
-                ctx,
-                state_store,
-                label=f"evolve: record bootstrap seed {seed.id}",
-            )
-            ctx.lprint(
-                f"[bootstrap {attempt}] PASSED — seed #{seed.id} "
-                f"perf={seed.perf_metric} {seed.perf_unit or ''} "
-                f"(commit {commit[:8] if commit else 'n/a'})"
-            )
-            return seed
-        finally:
-            _teardown_candidate_deployment(ctx, cand_deployment, keep=keep_deployments)
-
-    ctx.lprint(f"[bootstrap] exhausted {max_attempts} attempt(s) without a passing seed.")
-    return None
 
 
 # ---------------------------------------------------------------------------

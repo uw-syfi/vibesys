@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from vibesys.loops.evolve.policy_flow import (
+    BootstrapAttemptResult,
     CandidateFitness,
     CandidateIdentity,
     CandidateJudgement,
@@ -17,6 +18,7 @@ from vibesys.loops.evolve.policy_flow import (
     SelectionSettings,
     evaluate_candidate,
     parallel_enabled,
+    retry_bootstrap,
 )
 from vibesys.loops.evolve.population import Individual, Population
 from vibesys.loops.evolve.search_policy import SearchSelection
@@ -412,3 +414,119 @@ def test_run_scheduler_sends_frontier_and_scalar_choice_to_finalizer() -> None:
     assert effects.final_frontier == [high]
     assert effects.final_best is high
     assert timeline == ["finalize"]
+
+
+@dataclass
+class FakeBootstrapEffects:
+    results: list[Individual | None]
+    events: list[str] = field(default_factory=list)
+
+    def begin(self, max_attempts: int) -> None:
+        self.events.append(f"begin:{max_attempts}")
+
+    def attempt(self, number: int, max_attempts: int) -> BootstrapAttemptResult:
+        self.events.append(f"attempt:{number}/{max_attempts}")
+        return BootstrapAttemptResult(self.results[number - 1], f"report:{number}")
+
+    def checkpoint(self, label: str) -> None:
+        self.events.append(f"checkpoint:{label}")
+
+    def report(self, message: str) -> None:
+        self.events.append(message)
+
+    def exhausted(self, max_attempts: int) -> None:
+        self.events.append(f"exhausted:{max_attempts}")
+
+
+def test_bootstrap_retry_stops_on_first_passing_seed() -> None:
+    seed = Individual(id=1, generation=0, parent_id=None, passed=True, commit="seed")
+    effects = FakeBootstrapEffects([seed])
+
+    assert retry_bootstrap(3, effects) is seed
+    assert effects.events == [
+        "begin:3",
+        "attempt:1/3",
+        "checkpoint:evolve: record bootstrap seed 1",
+        "report:1",
+    ]
+
+
+def test_bootstrap_retry_continues_after_failure_then_stops() -> None:
+    seed = Individual(id=2, generation=0, parent_id=None, passed=True, commit="seed")
+    effects = FakeBootstrapEffects([None, seed])
+
+    assert retry_bootstrap(3, effects) is seed
+    assert effects.events == [
+        "begin:3",
+        "attempt:1/3",
+        "checkpoint:evolve: record failed bootstrap 1",
+        "report:1",
+        "attempt:2/3",
+        "checkpoint:evolve: record bootstrap seed 2",
+        "report:2",
+    ]
+
+
+def test_bootstrap_retry_reports_exhaustion_without_extra_attempt() -> None:
+    effects = FakeBootstrapEffects([None, None])
+
+    assert retry_bootstrap(2, effects) is None
+    assert effects.events == [
+        "begin:2",
+        "attempt:1/2",
+        "checkpoint:evolve: record failed bootstrap 1",
+        "report:1",
+        "attempt:2/2",
+        "checkpoint:evolve: record failed bootstrap 2",
+        "report:2",
+        "exhausted:2",
+    ]
+
+
+def test_bootstrap_retry_only_profiles_after_fake_gates_pass() -> None:
+    class GateEffects(FakeBootstrapEffects):
+        def attempt(self, number: int, max_attempts: int) -> BootstrapAttemptResult:
+            super().attempt(number, max_attempts)
+            candidate = FakeCandidateEffects(
+                CandidateJudgement(passed=True, feedback="reviewed"),
+                gate_feedback="accuracy failed" if number == 1 else None,
+                events=self.events,
+            )
+            outcome = evaluate_candidate(candidate, CandidateIdentity(1, []))
+            if not outcome.passed:
+                return BootstrapAttemptResult(None, f"report:{number}")
+            return BootstrapAttemptResult(
+                Individual(
+                    id=number,
+                    generation=0,
+                    parent_id=None,
+                    passed=True,
+                    commit=outcome.commit,
+                ),
+                f"report:{number}",
+            )
+
+    effects = GateEffects([None, None])
+    seed = retry_bootstrap(3, effects)
+
+    assert seed is not None
+    assert seed.id == 2
+    assert effects.events == [
+        "begin:3",
+        "attempt:1/3",
+        "mutate",
+        "judge",
+        "gates",
+        "close",
+        "checkpoint:evolve: record failed bootstrap 1",
+        "report:1",
+        "attempt:2/3",
+        "mutate",
+        "judge",
+        "gates",
+        "measure",
+        "snapshot",
+        "close",
+        "checkpoint:evolve: record bootstrap seed 2",
+        "report:2",
+    ]
