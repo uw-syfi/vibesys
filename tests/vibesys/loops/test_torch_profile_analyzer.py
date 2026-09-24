@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _REPO = Path(__file__).resolve().parents[3]
+_TORCH_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "torch"
 
 
 def _load_analyzer():  # noqa: ANN202  # tracked: #288
@@ -149,10 +150,24 @@ def _gemm_call(i: int, *, ts: int, cpu_dur: int = 200, gpu_dur: int = 300) -> li
     ]
 
 
-def _trace(events: list[dict], *, device_name: str = "AMD Instinct MI210") -> dict:
+def _trace(
+    events: list[dict],
+    *,
+    device_name: str = "AMD Instinct MI210",
+    device_props: dict | None = None,
+) -> dict:
+    """A minimal Chrome-trace dict. ``device_props`` overrides/extends the
+
+    single ``deviceProperties`` entry (e.g. to fuzz ``computeMajor``,
+    ``numSms``, ``totalGlobalMem`` for the name-blank AMD fallback path real
+    ROCm 7.2.3 traces hit -- see ``_detect_device_key``).
+    """
+    props = {"id": 0, "name": device_name}
+    if device_props is not None:
+        props.update(device_props)
     return {
         "schemaVersion": 1,
-        "deviceProperties": [{"id": 0, "name": device_name}],
+        "deviceProperties": [props],
         "traceEvents": events,
     }
 
@@ -300,6 +315,44 @@ class TestChromeTraceIndexing:
             analyzer._detect_device_key(_trace([], device_name="NVIDIA H100 80GB HBM3")) == "h100"
         )
         assert analyzer._detect_device_key(_trace([], device_name="Unknown Accelerator")) is None
+
+    def test_detects_mi210_from_real_trace_device_properties_with_blank_name(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+        """Regression: real ROCm 7.2.3/torch 2.12 MI210 captures ship
+        ``deviceProperties[].name == ""`` -- confirmed on an actual
+        vLLM/Qwen3.5-9B torch.profiler trace off an AMD HPC Fund MI210 node
+        (gfx90a, 104 CUs, 64GiB HBM2e). The name-hint match alone can never
+        detect this device; auto-detection must fall back to the
+        (compute capability, CU count, HBM capacity) signature instead.
+        """
+        real_mi210_props = {
+            "computeMajor": 9,
+            "computeMinor": 0,
+            "numSms": 104,
+            "totalGlobalMem": 68702699520,
+        }
+        trace = _trace([], device_name="", device_props=real_mi210_props)
+        assert analyzer._detect_device_key(trace) == "mi210"
+
+    def test_signature_fallback_does_not_fire_for_unrecognized_amd_signature(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+        trace = _trace(
+            [],
+            device_name="",
+            device_props={
+                "computeMajor": 9,
+                "computeMinor": 0,
+                "numSms": 999,
+                "totalGlobalMem": 68702699520,
+            },
+        )
+        assert analyzer._detect_device_key(trace) is None
+
+    def test_signature_fallback_never_raises_on_missing_or_malformed_fields(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+        for props in (
+            {},
+            {"computeMajor": "not-a-number"},
+            {"computeMajor": 9, "computeMinor": 0, "numSms": None, "totalGlobalMem": 68702699520},
+        ):
+            assert analyzer._detect_device_key_from_signature(props) is None
 
 
 class TestCorrelation:
@@ -452,6 +505,38 @@ class TestGemmShapeExtraction:
         index = analyzer._index_trace(_trace([op]))
         shapes = analyzer._extract_gemm_shapes(index, {})
         assert shapes == []
+
+    def test_skips_gemm_family_wrapper_ops_with_no_correlated_kernel(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+        """Regression: real vLLM/torch traces nest a GEMM call several
+        levels deep -- e.g. ``vllm::rocm_unquantized_gemm`` ->
+        ``aten::linear`` -> ``aten::matmul`` -> ``aten::mm`` -- with the
+        *same* "Input Dims" at every level, but Kineto only stamps the
+        "External id" -> correlation link that reaches a real kernel on the
+        innermost op (``aten::mm`` here). ``aten::linear``/``aten::matmul``
+        are also GEMM-family ops (``_GEMM_OPS``), so without a correlation
+        check they produced phantom zero-GPU-time duplicate shape entries
+        for every real GEMM call -- 3x the true shape count on a real trace.
+        """
+        dims = ([[104, 4096], [4096, 12288]], ["c10::BFloat16", "c10::BFloat16"])
+        linear_op = _op(ts=0, dur=1443, name="aten::linear", dims=dims)
+        matmul_op = _op(ts=5, dur=1423, name="aten::matmul", dims=dims)
+        mm_op = _op(ts=10, dur=1416, name="aten::mm", dims=dims)
+        external_id = mm_op["args"]["External id"]
+        events = [
+            linear_op,
+            matmul_op,
+            mm_op,
+            _launch(ts=15, external_id=external_id, correlation=9001),
+            _kernel(ts=20, dur=1400, correlation=9001),
+        ]
+        index = analyzer._index_trace(_trace(events))
+        op_to_kernels = analyzer._build_op_to_kernels(index)
+
+        shapes = analyzer._extract_gemm_shapes(index, op_to_kernels)
+
+        assert [s.op for s in shapes] == ["mm"]
+        assert shapes[0].call_count == 1
+        assert shapes[0].total_gpu_time_us == 1400.0
 
 
 class TestCertify:
@@ -613,6 +698,22 @@ class TestChromeTraceSummaryConversion:
         assert "aten::addmm" in names
         assert "Cijk_Ailk_Bljk_HHS_BH" in names
 
+    def test_operator_events_carry_correlated_cuda_time_not_a_flat_zero(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+        """Regression: the "operators" table's CUDA-time column always
+        printed 0.0 us against a raw Kineto trace, because ``cpu_op``
+        events were hardcoded to ``cuda_time_us: 0.0`` in the chrome-trace
+        conversion, even for GEMM ops that had a real correlated kernel
+        (correlation info the conversion already had from
+        ``_build_op_to_kernels``, just unused for this field).
+        """
+        events = _gemm_call(0, ts=0, cpu_dur=200, gpu_dur=300)
+        summary = analyzer._summarize_chrome_trace(_trace(events))
+
+        addmm = next(e for e in summary["events"] if e["name"] == "aten::addmm")
+        assert addmm["cuda_time_us"] == 300.0
+        # Not double-counted against the kernel-category total.
+        assert summary["total_cuda_time_us"] == 300.0
+
     def test_load_auto_detects_a_raw_trace_and_a_summarized_report(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
         trace_path = tmp_path / "trace.pt.trace.json"
         trace_path.write_text(json.dumps(_trace(_gemm_call(0, ts=0))))
@@ -684,6 +785,33 @@ class TestCliCommands:
 
         assert "Trace Certification" in out
         assert out.index("Trace Certification") < out.index("Top GPU Kernels")
+
+    def test_cmd_summary_reads_the_trace_file_exactly_once(self, analyzer, tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+        """Regression: ``cmd_summary`` used to call ``cmd_cpu_overhead``/
+        ``cmd_kernels``/``cmd_operators``/``cmd_memory`` as subroutines,
+        each of which independently re-read and re-parsed the whole trace
+        file from disk via ``_load`` -> ``_read_json_maybe_gz`` -- 5 full
+        read+decompress+index passes for one ``summary`` call. On a real
+        ~26MB gzipped Kineto trace (1.2M events) that turned a ~10s analysis
+        into ~50s for no benefit. ``summary`` must read the file once.
+        """
+        trace_path = tmp_path / "trace.pt.trace.json"
+        trace_path.write_text(json.dumps(_trace(_gemm_call(0, ts=0))))
+
+        calls = 0
+        real_read = analyzer._read_json_maybe_gz
+
+        def _counting_read(path: str) -> dict:
+            nonlocal calls
+            calls += 1
+            return real_read(path)
+
+        monkeypatch.setattr(analyzer, "_read_json_maybe_gz", _counting_read)
+
+        args = argparse.Namespace(report=str(trace_path))
+        _run_capturing_stdout(analyzer.cmd_summary, args)
+
+        assert calls == 1
 
 
 # ---------------------------------------------------------------------------
@@ -895,3 +1023,222 @@ class TestRooflineFlopsBytesGeneralization:
         assert row.achieved_tflops == 0.0
         assert row.achieved_gbps == 0.0
         assert row.pct_of_peak == 0.0
+
+
+class TestGemmShapeCorrelationGeneralization:
+    """Property: gemm-shapes counts only cpu_ops with a real correlated GPU
+    kernel. Generalizes ``test_skips_gemm_family_wrapper_ops_with_no_correlated_kernel``
+    (the vllm::rocm_unquantized_gemm -> aten::linear -> aten::matmul ->
+    aten::mm nesting bug) across arbitrary mixes of correlated/uncorrelated
+    GEMM-family ops and arbitrary op counts, rather than one hand-built
+    4-deep nesting example.
+    """
+
+    @given(
+        # Each op independently gets a real correlated kernel or not.
+        correlated_flags=st.lists(st.booleans(), min_size=1, max_size=10),
+        gpu_dur=st.integers(min_value=1, max_value=10_000),
+    )
+    @FAST
+    def test_only_correlated_ops_contribute_shapes(self, analyzer, correlated_flags, gpu_dur):  # noqa: ANN001, ANN201  # tracked: #288
+        dims = ([[8, 4096], [4096, 12288]], ["c10::BFloat16", "c10::BFloat16"])
+        events: list[dict] = []
+        n_correlated = 0
+        for i, is_correlated in enumerate(correlated_flags):
+            op = _op(ts=i * 100, dur=10, name="aten::mm", dims=dims)
+            events.append(op)
+            if is_correlated:
+                n_correlated += 1
+                external_id = op["args"]["External id"]
+                corr = 20000 + i
+                events.append(_launch(ts=i * 100 + 1, external_id=external_id, correlation=corr))
+                events.append(_kernel(ts=i * 100 + 2, dur=gpu_dur, correlation=corr))
+
+        index = analyzer._index_trace(_trace(events))
+        op_to_kernels = analyzer._build_op_to_kernels(index)
+        shapes = analyzer._extract_gemm_shapes(index, op_to_kernels)
+
+        if n_correlated == 0:
+            assert shapes == []
+        else:
+            assert len(shapes) == 1
+            assert shapes[0].call_count == n_correlated
+            assert shapes[0].total_gpu_time_us == n_correlated * gpu_dur
+            # The defining regression: no phantom zero-time entry sneaks in.
+            assert shapes[0].total_gpu_time_us > 0
+
+
+class TestDeviceDetectionGeneralization:
+    """Property: the (gfx arch, CU count, HBM capacity) fallback used when
+    ``deviceProperties[].name`` is blank (real ROCm 7.2.3 MI210 captures --
+    see ``test_detects_mi210_from_real_trace_device_properties_with_blank_name``)
+    never raises regardless of what junk is in ``deviceProperties``, and any
+    key it does return is always a real, roofline-usable device.
+    """
+
+    @given(
+        major=st.one_of(st.integers(min_value=0, max_value=20), st.none()),
+        minor=st.one_of(st.integers(min_value=0, max_value=20), st.none()),
+        num_sms=st.one_of(st.integers(min_value=0, max_value=1024), st.none(), st.just("bogus")),
+        mem_bytes=st.one_of(
+            st.integers(min_value=0, max_value=2**40), st.none(), st.floats(allow_nan=True)
+        ),
+    )
+    @FAST
+    def test_never_raises_and_only_returns_known_devices(self, analyzer, major, minor, num_sms, mem_bytes):  # noqa: ANN001, ANN201  # tracked: #288
+        props: dict = {}
+        if major is not None:
+            props["computeMajor"] = major
+        if minor is not None:
+            props["computeMinor"] = minor
+        if num_sms is not None:
+            props["numSms"] = num_sms
+        if mem_bytes is not None:
+            props["totalGlobalMem"] = mem_bytes
+
+        key = analyzer._detect_device_key_from_signature(props)
+
+        assert key is None or key in analyzer._DEVICE_PEAKS
+
+    @given(extra_sms=st.integers(min_value=1, max_value=500))
+    @FAST
+    def test_exact_signature_always_resolves_the_documented_mi210(self, analyzer, extra_sms):  # noqa: ANN001, ANN201  # tracked: #288
+        """The one signature this fallback is required to resolve
+        (gfx90a/104 CUs/64GiB -> mi210, from real hardware) must always
+        match regardless of unrelated fields (mem within the tolerance
+        band, any other extra deviceProperties keys) -- and a CU count
+        that doesn't match must never silently resolve to mi210 anyway.
+        """
+        exact = {
+            "computeMajor": 9,
+            "computeMinor": 0,
+            "numSms": 104,
+            "totalGlobalMem": 68702699520,
+        }
+        assert analyzer._detect_device_key_from_signature(exact) == "mi210"
+
+        wrong_sms = {**exact, "numSms": 104 + extra_sms}
+        assert analyzer._detect_device_key_from_signature(wrong_sms) != "mi210"
+
+
+class TestRealTraceFixtures:
+    """Regression tests against trimmed real-hardware Kineto traces.
+
+    ``fixtures/torch/{eager,graph}_trimmed.pt.trace.json`` are down-sampled
+    from actual ``vLLM(Qwen/Qwen3.5-9B)`` + ``torch.profiler`` captures off
+    an AMD HPC Fund MI210 node (ROCm 7.2.3, torch 2.12; see
+    ``resources/profilers/torch/analyze_torch_profile.py``'s module
+    docstring and ``<samples-dir>/FINDINGS.md``
+    section 5 for the capture recipe). Each fixture keeps ``deviceProperties``
+    verbatim (the real, blank ``name`` field this device ships -- see
+    ``test_detects_mi210_from_real_trace_device_properties_with_blank_name``)
+    and a representative slice of correlated cpu_op/runtime/kernel triples
+    (preserving "External id"/"correlation" links and "Input Dims") plus
+    step-marker annotations, rather than a contiguous window: a real
+    contiguous window at this file-size budget ("a few hundred events")
+    would only span a few ms and catch one or two GEMM shapes.
+
+    One consequence of picking correlated ops spread across the *whole*
+    original capture (to get shape diversity) while dropping the ~99% of
+    kernels in between: the trimmed files' own ``gpu_busy`` fraction is far
+    below the source captures' real value (eager: 17.9%, graph: 78.0%, both
+    reproduced directly against the full trace files during development --
+    see this change's PR description). That's a sampling artifact of
+    trimming for repo size, not a claim about the source capture's actual
+    GPU utilization, so the eager fixture's certify verdict is FAIL on
+    `gpu_busy` where the source trace WARNs. Every other check below
+    (kernel/op presence, record_shapes, step_markers, graph_replay,
+    GEMM shapes, roofline) is preserved by construction and asserted here.
+    """
+
+    def _fixture(self, name: str) -> str:
+        path = _TORCH_FIXTURES / name
+        assert path.is_file(), f"missing fixture {path}"
+        return str(path)
+
+    def test_certify_eager_trace(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+        raw = json.loads(Path(self._fixture("eager_trimmed.pt.trace.json")).read_text())
+        index = analyzer._index_trace(raw)
+        op_to_kernels = analyzer._build_op_to_kernels(index)
+        items = analyzer._certify(index, op_to_kernels)
+        by_check = {i.check: i.status for i in items}
+
+        assert by_check["gpu_kernels"] == "PASS"
+        assert by_check["cpu_ops"] == "PASS"
+        assert by_check["record_shapes"] == "PASS"
+        assert by_check["step_markers"] == "PASS"
+        assert by_check["graph_replay"] == "PASS"  # eager mode: no graph launches
+        # See class docstring: this FAIL is a trimming artifact, not a claim
+        # about the source capture (which measured 17.9% busy, a WARN).
+        assert by_check["gpu_busy"] == "FAIL"
+
+    def test_certify_graph_trace_flags_attribution_degraded(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+        """Hand-check from the task: graph mode must be flagged as
+        attribution-degraded (HIP-graph replay breaks cpu_op -> kernel
+        correlation for most launches)."""
+        raw = json.loads(Path(self._fixture("graph_trimmed.pt.trace.json")).read_text())
+        index = analyzer._index_trace(raw)
+        op_to_kernels = analyzer._build_op_to_kernels(index)
+        items = analyzer._certify(index, op_to_kernels)
+        by_check = {i.check: i.status for i in items}
+
+        assert by_check["graph_replay"] == "WARN"
+        assert by_check["record_shapes"] == "PASS"
+        assert by_check["step_markers"] == "PASS"
+
+    def test_gemm_shapes_match_qwen3_5_9b_projection_dims(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+        """Hand-check from the task: GEMM K (contraction) dim should be the
+        model's hidden size (~4096 for Qwen3.5-9B -- confirmed independently
+        from this same capture's ``aten::embedding`` weight shape,
+        ``[248320, 4096]``), and decode-step M should equal the request
+        batch size (8 prompts were driven concurrently for this capture).
+        """
+        raw = json.loads(Path(self._fixture("eager_trimmed.pt.trace.json")).read_text())
+        index = analyzer._index_trace(raw)
+        op_to_kernels = analyzer._build_op_to_kernels(index)
+        shapes = analyzer._extract_gemm_shapes(index, op_to_kernels)
+
+        assert shapes  # the fixture must actually carry correlated GEMMs
+        assert all(s.op == "mm" for s in shapes)
+        assert all(s.total_gpu_time_us > 0 for s in shapes)  # no phantom wrapper-op rows
+        # 4096 is the hidden size: every shape's K (contraction dim) or N
+        # (output dim, for the hidden_size -> intermediate_size down_proj)
+        # must be exactly 4096 -- there is no other plausible dim here.
+        assert all(s.k == 4096 or s.n == 4096 for s in shapes), shapes
+        decode_shapes = [s for s in shapes if s.m == 8]  # batch-size-8 decode step
+        assert decode_shapes, [s.m for s in shapes]
+        prefill_shapes = [s for s in shapes if s.m > 8]  # prefill: M = token count, not batch
+        assert prefill_shapes, [s.m for s in shapes]
+
+    def test_roofline_auto_detects_mi210_and_reports_sane_percentages(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+        """Hand-check from the task: device auto-detection must pick MI210
+        from ``deviceProperties`` (this fixture's is verbatim from real
+        hardware, blank ``name`` included), FLOPs must be 2*M*N*K, and
+        achieved-%-of-peak must land in [0, 100] against MI210's published
+        181 TFLOP/s (bf16 dense) / 1600 GB/s spec.
+        """
+        raw = json.loads(Path(self._fixture("eager_trimmed.pt.trace.json")).read_text())
+        peak_tflops, peak_gbps, label = analyzer._resolve_peaks(
+            argparse.Namespace(device=None, peak_tflops=None, peak_gbps=None), raw
+        )
+        assert label == "AMD Instinct MI210"
+        assert peak_tflops == 181.0
+        assert peak_gbps == 1600.0
+
+        index = analyzer._index_trace(raw)
+        op_to_kernels = analyzer._build_op_to_kernels(index)
+        rows = analyzer._extract_roofline_rows(index, op_to_kernels, peak_tflops, peak_gbps)
+
+        assert rows
+        for row in rows:
+            m, n, k = (int(x) for x in row.shape.split("x"))
+            assert row.flops == 2.0 * m * n * k
+            assert 0.0 <= row.pct_of_peak <= 100.0
+            assert row.bound in ("compute", "memory")
+
+    def test_cmd_summary_runs_on_both_fixtures_without_raising(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+        for fixture in ("eager_trimmed.pt.trace.json", "graph_trimmed.pt.trace.json"):
+            args = argparse.Namespace(report=self._fixture(fixture))
+            out = _run_capturing_stdout(analyzer.cmd_summary, args)
+            assert "TORCH PROFILER SUMMARY" in out
+            assert "Device:   mi210" in out
