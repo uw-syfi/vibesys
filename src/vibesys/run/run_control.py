@@ -6,8 +6,8 @@ loop, the sole writer of run state (see `vibesys.api.session.RunControl`).
 `request_pause`, `resume`, `request_stop`) queue a request and emit its
 request-time `CoreEventType`, unconditionally, from whatever thread issues
 it. Reader-side methods (`raise_if_stopped`, `wait_while_paused`,
-`take_pending_steer`), called only from `_RunContext.invoke` on the run's
-own thread, consume that state and emit the matching boundary-consume-time
+`take_pending_steer`), called by `RunContext.control` and agent turns,
+consume that state and emit the matching boundary-consume-time
 event only when landing it actually changes something. Emission is
 synchronous (`EventJournal.emit` calls subscribers before returning), so a
 server projecting these events onto its own status machine sees them in the
@@ -45,8 +45,8 @@ class RunControlChannel:
     thread, for example) and always emit their request-time event, whether
     or not the request changes anything -- a repeated pause request still
     gets a distinct audit entry, matching what `RunController` did before
-    this state moved here. Reader methods run on the run loop's own thread,
-    inside `_RunContext.invoke`.
+    this state moved here. Reader methods run at policy and agent turn
+    boundaries.
     """
 
     def __init__(self, events: EventJournal) -> None:

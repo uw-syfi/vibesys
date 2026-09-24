@@ -44,22 +44,26 @@ registry.register("my-policy", MyOrchestrator)
 # Pass registry to create_session(request, sink=..., registry=registry).
 ```
 
-`RunSetup` declares the policy's durable state namespace and Pydantic model,
-resume descriptor comparator, and whether it needs the default agent. It may
-also carry `RunStartHints(max_rounds=..., expected_roles=(...))`. The generic
+`RunSetup` declares the policy's durable state namespace and named Pydantic
+state slots, plus its resume descriptor comparator and optional recovery hook.
+It may also carry `RunStartHints(max_rounds=..., expected_roles=(...))`. The generic
 session emits those hints in `run_started` without inspecting the policy ID;
 custom policies can omit them. The host uses setup data during recovery. A
-policy with durable state calls
-`ctx.state.load(Model)` and `ctx.state.checkpoint(state, sequence=...)`.
-Checkpoint retains the Git revision, persists the state transition, then
-publishes the committed view. `ctx.control.boundary()` is the cooperative
+policy with durable state declares, for example,
+`RunSetup(state_namespace="my_policy", state_slots={"state.json": MyState})`,
+then calls `await ctx.state.slot("state.json", MyState).load()` and
+`await ctx.state.checkpoint(sequence=1, writes={"state.json": state})`.
+The checkpoint journals typed writes and candidate changes, commits Git,
+then publishes the committed view. A state-only checkpoint uses
+`candidate=False` to leave candidate edits pending. `ctx.control.boundary()` is the cooperative
 pause and stop boundary between host operations.
 
 The host owns agent client and sandbox cleanup. `ctx.agents.spawn(definition,
 scope=scope)` returns a handle with awaitable text and structured turns in the
-selected workspace. Omit `scope` to use the parent workspace. Each agent gets
-its own environment session, backend and provider settings, and host resource
-grants. `ctx.workspaces` forks, snapshots, adopts, and discards candidate
+selected workspace. Omit `scope` to use the parent workspace. Each role has
+its own agent client and declared resource grants. Environments can share a
+run-owned session where the backend requires it. `ctx.workspaces` forks,
+snapshots, adopts, and discards candidate
 scopes. A fork opens an isolated run environment session when that environment
 supports parallel candidate evaluation. Discard drains its agents and trusted
 gates before removing the worktree. Parent Git mutations, including checkpoints,
@@ -80,7 +84,7 @@ try:
         "candidate-1", scope=scope, options=MeasurementOptions(objectives=axes)
     )
 finally:
-    await ctx.workspaces.discard(scope)
+    await scope.discard()
 ```
 
 `check` also accepts an event label and execution command override. `measure`
@@ -88,11 +92,8 @@ accepts `MeasurementOptions` with objective axes, an event label, and a
 benchmark command override. Both use the input bundle's trusted commands,
 result contract, and timeouts. Their implementations live in
 `vibesys.evaluators.gates` and `vibesys.evaluators.metrics`; policy packages
-decide when to call them. Synchronous policy helpers can use
-`await ctx.run_blocking(function, *args, **kwargs)`; cancellation waits for the
-worker before host resources close. A temporary `ctx.run_context` property
-supports built-in migration helpers and must not become a custom policy
-interface.
+decide when to call them. Agent turns and host operations drain before their
+resources close on cancellation.
 
 The projector is registered separately from execution. It derives a `RunView`
 from durable state for live and historical reads and projects committed state

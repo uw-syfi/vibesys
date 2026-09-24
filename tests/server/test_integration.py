@@ -287,7 +287,7 @@ def test_track_started_does_not_double_track_a_repeated_start_event(
     """`ExecutionTracker.track_started` is idempotent for a repeated start event.
 
     Core now mints the execution id and emits `AGENT_EXECUTION_STARTED`
-    itself, at the entry to `_RunContext.invoke`; `project_event` projects it
+    itself, at the entry to an agent turn; `project_event` projects it
     onto both the wire journal and `ExecutionTracker`. Redelivering the same
     start event (e.g. from an at-least-once subscriber) must not double-track
     the execution or double-emit the wire event.

@@ -1,10 +1,10 @@
 """Integration tests for the evolutionary search loop.
 
 Mocks the agent runner so the LLM-driven mutator/judge/profiler return
-scripted responses. The real ``_RunContext`` is built on a tmp_path
+scripted responses. The public run context is built on a tmp_path
 workspace (so git tracking, snapshots, and population persistence are
 exercised end-to-end), but the model + sandbox + agent-runner factories
-are patched out, the same pattern as ``tests/vibesys/loops/agent/test_orchestrate.py``.
+are patched out, the same pattern as ``tests/vibesys/loops/multi/test_orchestrate.py``.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import json
 import shlex
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, Unpack, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from vibesys.constants import ComputeBackend
     from vibesys.evaluators.input_manifest import BenchmarkResult, WorkspaceSource
     from vibesys.loops.evolve.search_policy import SearchPolicyName
+    from vibesys.orchestration.runtime import RunContext
     from vibesys.run import RepositoryVisibility
 
 _LLM_SERVING_DOMAIN = resolve_domain(DomainName.LLM_SERVING)
@@ -132,7 +133,15 @@ def _discard_log(_message: str) -> None:
     """Drop log output emitted by a helper under test."""
 
 
-class _FakeLoopContext:
+class _CandidateEnvironment(Protocol):
+    def candidate_runtime(
+        self, view: object, generation: int, child_idx: int
+    ) -> CandidateRuntime: ...
+
+    def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> object: ...
+
+
+class _FakeRunContext:
     """A small host-capability fake for evolve's focused helper assertions."""
 
     def __init__(  # noqa: PLR0913  # tracked: #288
@@ -140,7 +149,7 @@ class _FakeLoopContext:
         *,
         git: GitTracker | None = None,
         state: RunState | None = None,
-        run_environment: object | None = None,
+        run_environment: _CandidateEnvironment | None = None,
         run_environment_view: object | None = None,
         events: EventJournal | None = None,
         log: Callable[[str], None] = _discard_log,
@@ -159,21 +168,33 @@ class _FakeLoopContext:
         if run_environment_view is not None:
             self.run_environment_view = run_environment_view
         if run_environment is not None:
+            active_environment = run_environment
             self.environment = SimpleNamespace(
-                candidate_runtime=lambda generation, child_idx, scope=None: (
-                    run_environment.candidate_runtime(  # noqa: ARG005
+                candidate_runtime=lambda generation, child_idx, _scope=None: (
+                    active_environment.candidate_runtime(
                         self.run_environment_view, generation, child_idx
                     )
                 ),
                 teardown_deployment=AsyncMock(
-                    side_effect=lambda name: run_environment.teardown_deployment(name, log=log)
+                    side_effect=lambda name: active_environment.teardown_deployment(name, log=log)
                 ),
             )
         self._log = log
+        self.judge_accuracy_command: str | None = None
+        self.judge_benchmark_command: str | None = None
+        self.judge_backend = MagicMock()
 
     def log(self, text: str) -> None:
         """Record a log line the same way the real context would emit it."""
         self._log(text)
+
+    def trusted_input_changes(self) -> list[str]:
+        return []
+
+
+def _as_run_context(fake: _FakeRunContext) -> RunContext:
+    """Type the focused capability fake as the host accepted by evolve helpers."""
+    return cast("RunContext", fake)
 
 
 class _SharedFakeClient:
@@ -1039,7 +1060,7 @@ def test_candidate_code_is_multi_file_but_excludes_framework_state(tmp_path):  #
     commit = tracker.current_sha()
 
     assert commit is not None
-    code = asyncio.run(_candidate_code(_FakeLoopContext(git=tracker), commit))
+    code = asyncio.run(_candidate_code(_as_run_context(_FakeRunContext(git=tracker)), commit))
     assert "src/lib.rs" in code
     assert "src/ffi.rs" in code
     assert "population.json" not in code
@@ -1051,7 +1072,7 @@ def test_programmatic_openevolve_config_infers_policy(tmp_path):  # noqa: ANN001
 
     name, policy = asyncio.run(
         _initialize_search_policy(
-            ctx,
+            _as_run_context(ctx),
             Population(),
             state_store,
             requested=None,
@@ -1072,7 +1093,7 @@ def test_programmatic_openevolve_config_rejects_vibesys_policy(tmp_path):  # noq
     with pytest.raises(ValueError, match="requires the OpenEvolve search policy"):
         asyncio.run(
             _initialize_search_policy(
-                ctx,
+                _as_run_context(ctx),
                 Population(),
                 state_store,
                 requested="vibesys",
@@ -1138,34 +1159,34 @@ def test_latest_wip_seed_none_when_no_snapshotted_failure():  # noqa: ANN201  # 
 
 def test_candidate_runtime_notes_delegates_deployment_naming_to_environment():  # noqa: ANN201  # tracked: #288
     base = "run-20260720-abcd1234-llama3"
-    ctx = _FakeLoopContext(
+    ctx = _FakeRunContext(
         run_environment_view=SimpleNamespace(
             deployment_namespace=base,
             prompt_notes=f"Deploy to Modal app {base}; endpoint {base}-web.",
         ),
-        run_environment=SimpleNamespace(
+        run_environment=MagicMock(
             candidate_runtime=lambda view, generation, child_idx: CandidateRuntime(  # noqa: ARG005  # tracked: #288
                 prompt_notes="provider-owned candidate instructions",
                 deployment_name=f"candidate-{generation}-{child_idx}",
             )
         ),
     )
-    notes, app = _candidate_runtime_notes(ctx, generation=3, child_idx=2)
+    notes, app = _candidate_runtime_notes(_as_run_context(ctx), generation=3, child_idx=2)
     assert app == "candidate-3-2"
     assert notes == "provider-owned candidate instructions"
 
 
 def test_candidate_runtime_notes_noop_without_named_deployment():  # noqa: ANN201  # tracked: #288
     notes_in = "Local run; no named deployment."
-    ctx = _FakeLoopContext(
+    ctx = _FakeRunContext(
         run_environment_view=SimpleNamespace(deployment_namespace=None, prompt_notes=notes_in),
-        run_environment=SimpleNamespace(
+        run_environment=MagicMock(
             candidate_runtime=lambda view, generation, child_idx: CandidateRuntime(  # noqa: ARG005  # tracked: #288
                 prompt_notes=view.prompt_notes
             )
         ),
     )
-    notes, app = _candidate_runtime_notes(ctx, generation=1, child_idx=1)
+    notes, app = _candidate_runtime_notes(_as_run_context(ctx), generation=1, child_idx=1)
     assert app is None
     assert notes == notes_in
 
@@ -1179,21 +1200,23 @@ def test_teardown_candidate_deployment_delegates_to_run_environment():  # noqa: 
     """The loop stays backend-agnostic: it hands the deployment name to the run
     environment, which decides how to release it."""
     run_env = MagicMock()
-    ctx = _FakeLoopContext(run_environment=run_env)
+    ctx = _FakeRunContext(run_environment=run_env)
 
-    asyncio.run(_teardown_candidate_deployment(ctx, "vibesys-run-g1c2", keep=False))
+    asyncio.run(
+        _teardown_candidate_deployment(_as_run_context(ctx), "vibesys-run-g1c2", keep=False)
+    )
 
     assert run_env.teardown_deployment.call_args.args[0] == "vibesys-run-g1c2"
 
 
 def test_teardown_candidate_deployment_noop_when_kept_or_absent():  # noqa: ANN201  # tracked: #288
     run_env = MagicMock()
-    ctx = _FakeLoopContext(run_environment=run_env)
+    ctx = _FakeRunContext(run_environment=run_env)
 
     # Opt-out: keep the app for post-hoc inspection.
-    asyncio.run(_teardown_candidate_deployment(ctx, "vibesys-run-g1c2", keep=True))
+    asyncio.run(_teardown_candidate_deployment(_as_run_context(ctx), "vibesys-run-g1c2", keep=True))
     # No per-candidate deployment (non-Modal env).
-    asyncio.run(_teardown_candidate_deployment(ctx, None, keep=False))
+    asyncio.run(_teardown_candidate_deployment(_as_run_context(ctx), None, keep=False))
 
     run_env.teardown_deployment.assert_not_called()
 
@@ -1206,7 +1229,7 @@ def test_teardown_candidate_deployment_noop_when_kept_or_absent():  # noqa: ANN2
 def _stateful_context(
     tmp_path: Path,
     log=None,  # noqa: ANN001  # tracked: #288
-) -> tuple[_FakeLoopContext, EvolutionStateStore]:
+) -> tuple[_FakeRunContext, EvolutionStateStore]:
     project = Project.open(tmp_path)
     project.state.create_project("test")
     run = project.state.new_run_manifest(
@@ -1222,7 +1245,7 @@ def _stateful_context(
     project.state.create_run(run)
     git = MagicMock(history_root=project.root, run_id=run.run_id)
     state = RunState(project, git, run.run_id)
-    ctx = _FakeLoopContext(git=git, state=state, log=log or _discard_log)
+    ctx = _FakeRunContext(git=git, state=state, log=log or _discard_log)
     return ctx, EvolutionStateStore(state.portable(RunStateNamespace.EVOLVE))
 
 
@@ -1234,7 +1257,7 @@ def _stateful_context(
 def test_evaluate_in_subcontext_skips_parent_without_commit():  # noqa: ANN201  # tracked: #288
     """A parent with no commit can't seed a worktree — folded into a failed
     outcome without ever building a sub-context."""
-    parent_ctx = _FakeLoopContext(log=lambda _line: None)
+    parent_ctx = _FakeRunContext(log=lambda _line: None)
     parentless = Individual(id=3, generation=1, parent_id=1, commit=None, passed=True, summary="x")
 
     seen = []
@@ -1242,7 +1265,7 @@ def test_evaluate_in_subcontext_skips_parent_without_commit():  # noqa: ANN201  
     try:
         outcome = asyncio.run(
             _evaluate_in_subcontext(
-                parent_ctx,
+                _as_run_context(parent_ctx),
                 generation=2,
                 child_idx=1,
                 parent=parentless,
@@ -1345,7 +1368,7 @@ def test_benchmark_gate_extends_timeout_by_environment_setup_allowance():  # noq
     """Environment-owned deployment/readiness time must not eat the benchmark
     command's declared budget: the evolve gate forwards setup + contract, the
     same setup-aware policy the agent path uses."""
-    ctx = _FakeLoopContext(
+    ctx = _FakeRunContext(
         run_environment_view=SimpleNamespace(framework_setup_timeout_seconds=90),
         events=MagicMock(),
     )
@@ -1354,7 +1377,7 @@ def test_benchmark_gate_extends_timeout_by_environment_setup_allowance():  # noq
 
 def test_benchmark_gate_timeout_unchanged_without_setup_allowance():  # noqa: ANN201  # tracked: #288
     """With no setup allowance the forwarded budget is exactly the contract's."""
-    ctx = _FakeLoopContext(
+    ctx = _FakeRunContext(
         run_environment_view=SimpleNamespace(framework_setup_timeout_seconds=0),
         events=MagicMock(),
     )
@@ -1523,7 +1546,7 @@ def test_evolve_accuracy_gate_extends_timeout_by_environment_setup_allowance(): 
     does; otherwise a Modal/SkyPilot deployment eats the accuracy command's
     declared budget and the candidate fails on a timeout it was never given
     the time to avoid."""
-    ctx = _FakeLoopContext(
+    ctx = _FakeRunContext(
         run_environment_view=SimpleNamespace(framework_setup_timeout_seconds=90),
     )
     assert framework_command_timeout(ctx, 120) == 210

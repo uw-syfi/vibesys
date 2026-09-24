@@ -5,8 +5,30 @@ from __future__ import annotations
 import shlex
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
+from vibesys.agent_run import issue_board
+from vibesys.agent_run.attempts import (
+    AttemptDecision,
+    AttemptState,
+    JudgeReviewed,
+    PerformanceProjection,
+)
+from vibesys.agent_run.evidence import (
+    _FAILED_HYPOTHESIS_OUTCOMES,
+    CarryOver,
+    _detect_plateau,
+    _format_metric_row,
+    _pareto_archive_summary,
+    _pareto_frontier_records,
+    _provisional_candidates_since_official,
+    _record_candidate_metrics,
+    _select_final_candidate,
+    _terminal_workspace_notice,
+)
+from vibesys.agent_run.hypotheses import adopt_metric_space, update_active_hypothesis
+from vibesys.agent_run.record import RecordInput, build_round_record
+from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.gates import (
     GATE_RECORD_TAIL_CHARS,
     AccuracyGateResult,
@@ -19,38 +41,8 @@ from vibesys.events import (
     ExperimentsChangedData,
     RoundFinishedData,
 )
-from vibesys.loops.agent import issue_board
-from vibesys.loops.agent.hypotheses import adopt_metric_space, update_active_hypothesis
-from vibesys.loops.agent.hypothesis_controller import HypothesisEngine, ProfileGuidanceOutcome
-from vibesys.loops.agent.policy_attempts import (
-    AttemptDecision,
-    AttemptRequest,
-    AttemptState,
-    JudgeReviewed,
-    PerformanceProjection,
-)
-from vibesys.loops.agent.policy_scheduler import (
-    PlanRequest,
-    RoundSelection,
-    TerminalRequest,
-    transition_round,
-)
-from vibesys.loops.agent.policy_support import (
-    _FAILED_HYPOTHESIS_OUTCOMES,
-    _CarryOver,
-    _detect_plateau,
-    _format_metric_row,
-    _official_evaluation_reason,
-    _pareto_archive_summary,
-    _pareto_frontier_records,
-    _provisional_candidates_since_official,
-    _record_candidate_metrics,
-    _select_final_candidate,
-    _terminal_workspace_notice,
-)
-from vibesys.loops.agent.record import RecordInput, build_round_record
-from vibesys.loops.agent.state import AgentRunState
 from vibesys.loops.profile_single.attribution import run_attribution
+from vibesys.loops.profile_single.hypothesis import HypothesisEngine, ProfileGuidanceOutcome
 from vibesys.loops.profile_single.turns import ProfileSingleTurns
 from vibesys.orchestration.runtime import MeasurementOptions
 from vibesys.render.sink import output_sink
@@ -58,14 +50,62 @@ from vibesys.schemas import ProfilerSummary, Verdict
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 
+_MAX_CONTINUATION_ROUNDS = 2
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from vibesys.agent_run.options import AgentOrchestrationOptions
+    from vibesys.agent_run.state import Hypothesis
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.events import ExperimentsChangeReason
-    from vibesys.loops.agent.orchestration import AgentOrchestrationOptions
-    from vibesys.loops.agent.policy_profile import ProfileOutcomeInput, ProfilePreparation
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.schemas import OrchestratorPlan
+    from vs_loop_state.api import RoundRecord
+
+
+class PlanGuidance(Protocol):
+    """Prompt data exposed by this strategy's hypothesis selection."""
+
+    def plan_prompt_context(self) -> dict[str, object]:
+        """Return optional plan template variables."""
+        ...
+
+
+@dataclass(frozen=True)
+class PlanRequest:
+    """Evidence supplied to this strategy's designer role."""
+
+    round_number: int
+    state: AgentRunState
+    records: list[RoundRecord]
+    carry: CarryOver
+    profiler_summary: ProfilerSummary | None
+    plateau_warning: str | None
+    provisional_candidates: int
+    profile_guidance: PlanGuidance
+
+
+@dataclass(frozen=True)
+class RoundSelection:
+    """The hypothesis and plan chosen for one round."""
+
+    state: AgentRunState
+    hypothesis: Hypothesis
+    plan: OrchestratorPlan
+    planned_official_reason: str | None
+
+
+@dataclass(frozen=True)
+class AttemptRequest:
+    """The selected plan and evidence for one combined role turn."""
+
+    round_number: int
+    plan: OrchestratorPlan
+    planned_official_reason: str | None
+    records: list[RoundRecord]
+    active_hypothesis: Hypothesis
+    last_profile_focus: str
 
 
 class ProfileSingleSessionError(RuntimeError):
@@ -152,17 +192,6 @@ class _TerminalPolicy:
             next_single_response=response,
         )
 
-    def reviewed(self, _state: AttemptState) -> bool:
-        return True
-
-    def keeps_hypothesis_active(self, _state: AttemptState, _continuation_rounds: int) -> bool:
-        return False
-
-    def terminal_success_needs_parent_choice(
-        self, _state: AttemptState, _continuation_rounds: int
-    ) -> bool:
-        return False
-
 
 class _ProfilePolicy:
     """Component measurement and advancement decisions for this strategy."""
@@ -170,21 +199,11 @@ class _ProfilePolicy:
     def __init__(self, config: ProfileGuidedInput) -> None:
         self.config = config
 
-    def prepare(self, request: ProfilePreparation) -> tuple[HypothesisEngine, AgentRunState]:
-        """Preparation runs asynchronously in ``select_hypothesis``."""
-        return request.engine, request.state
-
     def official_reason(self, reason: str | None, engine: HypothesisEngine) -> str | None:
         """Measure an active component even when the regular cadence defers."""
         if engine.controller.guidance.active_component:
             return reason or "profile-guided component measurement"
         return reason
-
-    def outcome(self, request: ProfileOutcomeInput) -> ProfileGuidanceOutcome:
-        """Advance the component cursor only with official measured improvement."""
-        return ProfileGuidanceOutcome.from_round(
-            request.round_number, request.passed, request.official, request.delta_pct
-        )
 
 
 class ProfileSingleSession:
@@ -236,7 +255,7 @@ class ProfileSingleSession:
         self.state = state
         self.records = state.rounds
         self.history = RoundHistory(records=self.records)
-        self.carry = _CarryOver(regression_info=_terminal_workspace_notice(self.records))
+        self.carry = CarryOver(regression_info=_terminal_workspace_notice(self.records))
         self.round_number = len(self.records) + 1
         self.last_response = None
         self.last_profile_focus = "general latency hotspots on /v1/completions"
@@ -342,18 +361,10 @@ class ProfileSingleSession:
         self.engine = engine
         self.state = state
         reason = self.profile.official_reason(
-            _official_evaluation_reason(
-                records=self.records,
-                round_number=number,
-                max_rounds=self.options.max_rounds,
-                official_eval_every=self.options.official_eval_every,
-                requested=plan.request_official_evaluation,
-                candidate_ready=True,
-            ),
+            self._official_reason(requested=plan.request_official_evaluation),
             engine,
         )
         selected = RoundSelection(
-            engine=engine,
             state=state,
             hypothesis=hypothesis,
             plan=plan,
@@ -366,7 +377,6 @@ class ProfileSingleSession:
             planned_official_reason=reason,
             records=self.records,
             active_hypothesis=hypothesis,
-            engine=self.engine,
             last_profile_focus=self.last_profile_focus,
         )
         attempt = AttemptState(
@@ -387,6 +397,19 @@ class ProfileSingleSession:
             perf_metric=response.perf_metric,
             perf_unit=response.perf_unit,
         )
+
+    def _official_reason(self, *, requested: bool) -> str | None:
+        """Apply this strategy's accepted-candidate evaluation cadence."""
+        if self.round_number == self.options.max_rounds:
+            return "final_round"
+        if requested:
+            return "orchestrator_request"
+        if (
+            _provisional_candidates_since_official(self.records) + 1
+            >= self.options.official_eval_every
+        ):
+            return "cadence"
+        return None
 
     async def _apply_rollback(self, selection: RoundSelection) -> None:
         parent_round = selection.plan.revert_to_round
@@ -462,17 +485,7 @@ class ProfileSingleSession:
             selected.request.active_hypothesis.feedback = response.feedback
             await self._checkpoint_active(selected)
             return AttemptDecision.RETRY
-        reason = self.profile.official_reason(
-            _official_evaluation_reason(
-                records=self.records,
-                round_number=self.round_number,
-                max_rounds=self.options.max_rounds,
-                official_eval_every=self.options.official_eval_every,
-                requested=selected.request.plan.request_official_evaluation,
-                candidate_ready=True,
-            ),
-            self.engine,
-        )
+        reason = self._official_reason(requested=selected.request.plan.request_official_evaluation)
         if reason is None:
             self._record_official_decision(selected, run=False, reason="cadence_not_due")
             self.ctx.log("[official-evaluation] deferred; candidate retained as provisional")
@@ -666,40 +679,26 @@ class ProfileSingleSession:
                 model=worker.model,
             )
         )
-        terminal = transition_round(
-            self.terminal_policy,
-            self.profile,
-            TerminalRequest(
-                engine=self.engine,
-                state=attempt.agent_run_state,
-                hypothesis=selected.selection.hypothesis,
-                attempt=attempt,
-                record=record,
-                records=self.records,
-                carry=self.carry,
-                reviewed=True,
-                max_retries_per_round=self.options.max_retries_per_round,
-            ),
-        )
-        if terminal.exhaustion_feedback is not None:
+        engine, carry, exhaustion_feedback = self._complete_policy_round(selected, record)
+        if exhaustion_feedback is not None:
             issue_board.append_exhaustion_note(
                 self.turns.progress_path,
                 self.round_number,
                 self.options.max_retries_per_round,
-                terminal.exhaustion_feedback,
+                exhaustion_feedback,
             )
         await self.ctx.state.checkpoint(
             sequence=self.round_number,
-            writes={"state.json": terminal.state},
-            publish=terminal.state,
+            writes={"state.json": engine.state},
+            publish=engine.state,
         )
-        self.engine = terminal.engine
-        self.state = terminal.state
-        self.records = terminal.state.rounds
+        self.engine = engine
+        self.state = engine.state
+        self.records = engine.state.rounds
         self.history = RoundHistory(records=self.records)
-        self.carry = terminal.carry
+        self.carry = carry
         self.round_number += 1
-        self._announce_experiments("round_persisted", terminal.state)
+        self._announce_experiments("round_persisted", engine.state)
         self.ctx.events.emit(
             CoreEventType.ROUND_FINISHED,
             status=EventStatus.COMPLETED if attempt.passed else EventStatus.FAILED,
@@ -712,6 +711,49 @@ class ProfileSingleSession:
                 profile_skipped=projection.profile_skipped,
             ),
         )
+
+    def _complete_policy_round(
+        self, selected: ProfileSingleRound, record: RoundRecord
+    ) -> tuple[HypothesisEngine, CarryOver, str | None]:
+        """Advance a reviewed component hypothesis and the next designer handoff."""
+        attempt = selected.attempt
+        next_active = selected.selection.hypothesis.clone()
+        if attempt.passed:
+            active = None
+        elif next_active.continuation_rounds < _MAX_CONTINUATION_ROUNDS:
+            next_active.feedback = attempt.feedback
+            next_active.next_step = None
+            next_active.continuation_rounds += 1
+            active = next_active
+        else:
+            active = None
+        profile_outcome = ProfileGuidanceOutcome.from_round(
+            round_number=record.round_number,
+            passed=attempt.passed,
+            official=record.official_evaluation,
+            delta_pct=record.perf_delta_pct,
+        )
+        engine = self.engine.replace_state(attempt.agent_run_state).complete_round(
+            record, next_active=active, profile_outcome=profile_outcome
+        )
+        carry = CarryOver()
+        exhaustion_feedback: str | None = None
+        if not attempt.passed:
+            exhaustion_feedback = attempt.feedback or ""
+            carry.exhaustion_info = (
+                f"Round {record.round_number} did not pass after "
+                f"{self.options.max_retries_per_round} attempts. Last judge feedback: "
+                f"{attempt.feedback or '(empty)'}"
+            )
+        elif record.official_evaluation and record.candidate_retained is False:
+            carry.regression_info = (
+                f"Round {record.round_number}'s official candidate was not retained: "
+                f"{record.perf_metric}"
+                f"{(' ' + record.perf_unit) if record.perf_unit else ''}. "
+                "Use its recorded parent and objective directions when choosing "
+                "the next checkpoint."
+            )
+        return engine, carry, exhaustion_feedback
 
     def _announce_experiments(self, reason: ExperimentsChangeReason, state: AgentRunState) -> None:
         self.ctx.events.emit(

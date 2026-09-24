@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator, EvolveProjector
 from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator, IssueQueueProjector
-from vibesys.loops.multi.entrypoint import MultiAgentOrchestrator
-from vibesys.loops.multi.projection import MultiProjector
-from vibesys.loops.profile_multi.entrypoint import ProfileGuidedMultiAgentOrchestrator
-from vibesys.loops.profile_multi.projection import ProfileMultiProjector
-from vibesys.loops.profile_single.entrypoint import ProfileGuidedSingleAgentOrchestrator
-from vibesys.loops.profile_single.projection import ProfileSingleProjector
-from vibesys.loops.single.entrypoint import SingleAgentOrchestrator
-from vibesys.loops.single.projection import SingleProjector
+from vibesys.loops.multi.orchestration import MultiAgentOrchestrator, MultiProjector
+from vibesys.loops.profile_multi.orchestration import (
+    ProfileGuidedMultiAgentOrchestrator,
+    ProfileMultiProjector,
+)
+from vibesys.loops.profile_single.orchestration import (
+    ProfileGuidedSingleAgentOrchestrator,
+    ProfileSingleProjector,
+)
+from vibesys.loops.single.orchestration import SingleAgentOrchestrator, SingleProjector
 from vibesys.orchestration.contracts import OrchestrationRegistry
 
 
@@ -39,6 +41,7 @@ def built_in_orchestrations() -> OrchestrationRegistry:
             orchestrator,
             projector=projector,
             portable_namespaces=(namespace,),
+            state_family="agent",
         )
     registry.register(
         "plain",

@@ -1,14 +1,6 @@
-"""The three outer loops + their shared infra.
+"""Independent built-in orchestration strategies.
 
-Each subpackage corresponds to one ``--outer-loop`` value:
-
-  - ``loops.agent``   — orchestrator-driven, roadmap.md as issue board
-  - ``loops.plain``   — deterministic queue drain, IssueBoard (issues.json)
-  - ``loops.evolve``  — population-based mutation/selection
-
-``loops.profiler`` is the shared profiler invocation helper used by
-``agent`` and ``evolve`` (``plain`` does not run a profiler step today).
-
-This package's ``__init__.py`` is intentionally empty so importing one
-policy does not import the others or their optional dependencies.
+The six peer packages own multi, single, profile-guided multi,
+profile-guided single, issue queue, and evolutionary policies. Importing this
+package does not import any strategy or its optional dependencies.
 """

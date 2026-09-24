@@ -51,6 +51,7 @@ class OrchestrationRegistration:
     orchestrator: type[Orchestrator]
     projector: OrchestrationProjector | None = None
     portable_namespaces: tuple[str, ...] = ()
+    state_family: str | None = None
 
 
 def empty_run_view(*, run_id: str, status: RunStatus, loop: str) -> RunView:
@@ -89,6 +90,7 @@ class OrchestrationRegistry:
         *,
         projector: OrchestrationProjector | None = None,
         portable_namespaces: tuple[str, ...] = (),
+        state_family: str | None = None,
     ) -> None:
         """Register the policy constructor and its explicit read projection."""
         try:
@@ -103,6 +105,7 @@ class OrchestrationRegistry:
             orchestrator=orchestrator,
             projector=projector,
             portable_namespaces=portable_namespaces,
+            state_family=state_family,
         )
 
     def resolve(self, kind: str) -> OrchestrationRegistration:

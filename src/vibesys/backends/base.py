@@ -37,7 +37,7 @@ class SandboxKind(StrEnum):
 
 
 class Device(Protocol):
-    """Minimum device interface ``_RunContext`` consumes for logging and pinning."""
+    """Minimum device interface run resources consume for logging and pinning."""
 
     index: int
     name: str

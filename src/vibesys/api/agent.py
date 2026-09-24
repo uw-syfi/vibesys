@@ -6,15 +6,39 @@ when an application explicitly handles the built-in agent policy.
 
 from __future__ import annotations
 
-from vibesys.loops.agent.issue_board import framework_memory_paths
-from vibesys.loops.agent.readmodel import (
+from typing import TYPE_CHECKING
+
+from vibesys.agent_run.issue_board import framework_memory_paths
+from vibesys.agent_run.options import options_from_descriptor
+from vibesys.agent_run.readmodel import (
     AgentRunProjection,
     HypothesisRoundView,
     HypothesisView,
     RoundView,
     agent_projection,
 )
-from vibesys.loops.agent.state import agent_run_objectives, is_agent_run_manifest
+from vibesys.loops.registry import built_in_orchestrations
+
+if TYPE_CHECKING:
+    from vs_project.api import OrchestrationRunManifest
+
+
+def is_agent_run_manifest(manifest: OrchestrationRunManifest) -> bool:
+    """Identify runs whose registered projection uses agent-run state."""
+    try:
+        registration = built_in_orchestrations().resolve(manifest.orchestration.id)
+    except ValueError:
+        return False
+    return registration.state_family == "agent"
+
+
+def agent_run_objectives(manifest: OrchestrationRunManifest) -> tuple[str, ...] | None:
+    """Return the directed axes for a registered agent-run descriptor."""
+    if not is_agent_run_manifest(manifest):
+        return None
+    space = options_from_descriptor(manifest.orchestration).metric_space
+    return tuple(f"{axis.name}:{axis.direction}" for axis in space.objectives)
+
 
 __all__ = [
     "AgentRunProjection",

@@ -7,56 +7,22 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.evaluators.gates import (
-    GATE_RECORD_TAIL_CHARS,
-    AccuracyGateResult,
-    BenchmarkGateResult,
-    FrameworkBenchmarkOutcome,
-    GATE_LOG_TAIL_CHARS,
-    emit_gate_started,
-    emit_gate_finished,
-)
-from vibesys.events import (
-    GateKind,
-    CoreEventType,
-    EventStatus,
-    ExperimentsChangedData,
-    RoundFinishedData,
-)
-from vibesys.loops.agent import issue_board
-from vibesys.loops.agent.hypotheses import adopt_metric_space, update_active_hypothesis
-from vibesys.loops.agent.hypothesis_controller import HypothesisEngine
-from vibesys.loops.agent.policy_attempts import (
+from vibesys.agent_run import issue_board
+from vibesys.agent_run.attempts import (
     AttemptDecision,
-    AttemptRequest,
     AttemptState,
     JudgeReviewed,
     JudgeSkipped,
     JudgeSkipReason,
-    attempt_was_reviewed,
     PerformanceProjection,
+    attempt_was_reviewed,
 )
-from vibesys.loops.agent.policy_profile import PlainProfilePolicy
-from vibesys.loops.agent.policy_scheduler import (
-    PlanRequest,
-    RoundSelection,
-    TerminalRequest,
-    transition_round,
-)
-from vibesys.loops.agent.policy_support import (
+from vibesys.agent_run.evidence import (
     _FAILED_HYPOTHESIS_OUTCOMES,
-    _CarryOver,
+    CarryOver,
     _detect_plateau,
-    _candidate_evidence_is_fresh,
-    _implementation_keeps_hypothesis_active,
-    _implementation_requests_continuation,
-    _pareto_archive_conflict,
-    _review_due,
-    _load_validation_recipes,
-    _validation_input_digest,
-    _reusable_validation_result,
     _format_metric_row,
-    _official_evaluation_reason,
+    _pareto_archive_conflict,
     _pareto_archive_summary,
     _pareto_frontier_records,
     _provisional_candidates_since_official,
@@ -64,20 +30,61 @@ from vibesys.loops.agent.policy_support import (
     _select_final_candidate,
     _terminal_workspace_notice,
 )
-from vibesys.loops.agent.record import RecordInput, build_round_record
-from vibesys.loops.agent.state import AgentRunState
+from vibesys.agent_run.hypotheses import adopt_metric_space, update_active_hypothesis
+from vibesys.agent_run.record import RecordInput, build_round_record
+from vibesys.agent_run.state import AgentRunState
+from vibesys.evaluators.gates import (
+    GATE_LOG_TAIL_CHARS,
+    GATE_RECORD_TAIL_CHARS,
+    AccuracyGateResult,
+    BenchmarkGateResult,
+    FrameworkBenchmarkOutcome,
+    emit_gate_finished,
+    emit_gate_started,
+)
+from vibesys.events import (
+    CoreEventType,
+    EventStatus,
+    ExperimentsChangedData,
+    GateKind,
+    RoundFinishedData,
+)
+from vibesys.loops.multi.decisions import (
+    AttemptRequest,
+    HypothesisEngine,
+    PlanRequest,
+    RoundSelection,
+    TerminalRequest,
+    candidate_evidence_is_fresh,
+    implementation_keeps_hypothesis_active,
+    implementation_requests_continuation,
+    official_evaluation_reason,
+    review_due,
+    transition_round,
+)
 from vibesys.loops.multi.turns import MultiAgentTurns
+from vibesys.loops.multi.validation import (
+    _load_validation_recipes,
+    _reusable_validation_result,
+    _validation_input_digest,
+)
 from vibesys.orchestration.runtime import MeasurementOptions
 from vibesys.render.sink import output_sink
-from vibesys.schemas import CandidateDisposition, FrameworkValidationResult, HypothesisOutcome, ProfilerSummary, Verdict
+from vibesys.schemas import (
+    CandidateDisposition,
+    FrameworkValidationResult,
+    HypothesisOutcome,
+    ProfilerSummary,
+    Verdict,
+)
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from vibesys.agent_run.options import AgentOrchestrationOptions
     from vibesys.events import ExperimentsChangeReason
-    from vibesys.loops.agent.orchestration import AgentOrchestrationOptions
     from vibesys.orchestration.runtime import RunContext
 
 
@@ -110,6 +117,11 @@ class MultiSessionError(RuntimeError):
     def missing_gate_reason(cls) -> MultiSessionError:
         """Report an invalid official gate transition."""
         return cls("official gate requested without a reason")
+
+    @classmethod
+    def missing_implementation(cls) -> MultiSessionError:
+        """Report a review step without parsed implementer evidence."""
+        return cls("review requires an implementer response")
 
     @classmethod
     def missing_baseline(cls) -> MultiSessionError:
@@ -192,7 +204,7 @@ class _TerminalPolicy:
 
     def keeps_hypothesis_active(self, state: AttemptState, continuation_rounds: int) -> bool:
         """A reviewed or provisional implementation may retain its lease."""
-        return _implementation_keeps_hypothesis_active(
+        return implementation_keeps_hypothesis_active(
             state.implementation, continuation_rounds=continuation_rounds
         )
 
@@ -209,7 +221,7 @@ class _TerminalPolicy:
 
 
 class MultiSession:
-    """Own the single strategy's state, roles, attempts, and checkpoints."""
+    """Own the multi strategy's state, roles, attempts, and checkpoints."""
 
     def __init__(self, ctx: RunContext, options: AgentOrchestrationOptions) -> None:
         """Bind one host; resource opening occurs in ``open``."""
@@ -218,7 +230,6 @@ class MultiSession:
         self.workspace = ctx.workspaces.root
         self.turns = MultiAgentTurns(ctx, options)
         self.terminal_policy = _TerminalPolicy()
-        self.profile = PlainProfilePolicy()
         self.framework_benchmark_configured = (
             ctx.request.input_bundle.benchmark_result is not None
             or ctx.request.input_bundle.benchmark_result_protocol is not None
@@ -252,10 +263,10 @@ class MultiSession:
         self.state = state
         self.records = state.rounds
         self.history = RoundHistory(records=self.records)
-        self.carry = _CarryOver(regression_info=_terminal_workspace_notice(self.records))
+        self.carry = CarryOver(regression_info=_terminal_workspace_notice(self.records))
         self.round_number = len(self.records) + 1
         self.last_profile_focus = "general latency hotspots on /v1/completions"
-        self.engine = HypothesisEngine.create(state, config=None)
+        self.engine = HypothesisEngine.create(state)
         if previous != state:
             await self._save_state(state, label="multi: initialize policy state")
 
@@ -309,7 +320,11 @@ class MultiSession:
             )
             parent_round = plan.revert_to_round or (number - 1 if number > 1 else None)
             parent = next(
-                (record for record in reversed(self.records) if record.round_number == parent_round),
+                (
+                    record
+                    for record in reversed(self.records)
+                    if record.round_number == parent_round
+                ),
                 None,
             )
             engine = engine.replace_state(state).start(
@@ -342,7 +357,7 @@ class MultiSession:
             )
         self.engine = engine
         self.state = state
-        reason = _official_evaluation_reason(
+        reason = official_evaluation_reason(
             records=self.records,
             round_number=number,
             max_rounds=self.options.max_rounds,
@@ -376,7 +391,8 @@ class MultiSession:
 
     async def _pre_round_profile(self) -> ProfilerSummary | None:
         decision = await self.turns.pre_round_decision(
-            self.round_number, self.carry,
+            self.round_number,
+            self.carry,
             has_history=not (self.round_number == 1 and not self.records),
         )
         if not decision.need_profile:
@@ -408,7 +424,9 @@ class MultiSession:
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback
         state = update_active_hypothesis(selection.state, hypothesis)
-        await self._save_state(state, label=f"multi: set hypothesis {hypothesis.hypothesis_id} parent")
+        await self._save_state(
+            state, label=f"multi: set hypothesis {hypothesis.hypothesis_id} parent"
+        )
         self.state = state
         self.engine = self.engine.replace_state(state)
         if failed_child is None:
@@ -432,7 +450,7 @@ class MultiSession:
         return range(first, limit + 1)
 
     async def begin_attempt(self, selected: MultiRound, retry: int) -> None:
-        """Persist a paid turn marker before invoking the implementer."""
+        """Prepare attempt state and device before the paid implementer turn."""
         self.ctx.log(f"\n--- attempt {retry}/{self.options.max_retries_per_round} ---\n")
         attempt = selected.attempt
         attempt.retry = retry
@@ -442,10 +460,6 @@ class MultiSession:
             attempt.agent_run_state,
             label=f"multi: start round {self.round_number} attempt {retry}",
         )
-        issue_board.write_implementer_start_marker(
-            self.turns.progress_path, self.round_number, retry
-        )
-        await self.workspace.snapshot(f"round-{self.round_number}-retry-{retry}-paid-marker")
         await self.ctx.environment.reselect_device()
 
     async def implement(self, selected: MultiRound) -> bool:
@@ -466,17 +480,20 @@ class MultiSession:
         request, state = selected.request, selected.attempt
         implementation = state.implementation
         if implementation is None:
-            raise MultiSessionError("review requires an implementer response")
-        due = _review_due(
-            round_number=request.round_number, max_rounds=self.options.max_rounds,
-            judge_every=self.options.judge_every, outcome=implementation.hypothesis_outcome,
-            candidate_evidence_fresh=_candidate_evidence_is_fresh(implementation, request.records),
+            raise MultiSessionError.missing_implementation()
+        due = review_due(
+            round_number=request.round_number,
+            max_rounds=self.options.max_rounds,
+            judge_every=self.options.judge_every,
+            outcome=implementation.hypothesis_outcome,
+            candidate_evidence_fresh=candidate_evidence_is_fresh(implementation, request.records),
         )
-        if state.review_started and not _implementation_requests_continuation(implementation):
+        if state.review_started and not implementation_requests_continuation(implementation):
             due = True
         if (
-            state.review_started and request.round_number != self.options.max_rounds
-            and _implementation_requests_continuation(implementation)
+            state.review_started
+            and request.round_number != self.options.max_rounds
+            and implementation_requests_continuation(implementation)
             and implementation.candidate_disposition is not CandidateDisposition.PARETO_FRONTIER
             and not state.revalidation_required
         ):
@@ -484,8 +501,10 @@ class MultiSession:
         if not due:
             state.judge = JudgeSkipped(JudgeSkipReason.SPARSE_REVIEW_POLICY)
             issue_board.append_judge_skipped(
-                self.turns.progress_path, request.round_number,
-                outcome=implementation.hypothesis_outcome.value, judge_every=self.options.judge_every,
+                self.turns.progress_path,
+                request.round_number,
+                outcome=implementation.hypothesis_outcome.value,
+                judge_every=self.options.judge_every,
             )
             self.ctx.log("[judge] deferred by sparse-review policy; official gates were not run")
             return AttemptDecision.FINISH
@@ -493,7 +512,8 @@ class MultiSession:
         state.revalidation_required = False
         conflict = _pareto_archive_conflict(
             candidate_disposition=implementation.candidate_disposition,
-            candidate_metrics=dict(implementation.candidate_metrics), records=request.records,
+            candidate_metrics=dict(implementation.candidate_metrics),
+            records=request.records,
             space=state.agent_run_state.metrics,
         )
         verdict = await self.turns.review(request, state, conflict)
@@ -503,21 +523,27 @@ class MultiSession:
             request.active_hypothesis.feedback = verdict.feedback
             await self._checkpoint_active(selected)
             return AttemptDecision.RETRY
-        validation_feedback = await self._validate_local(selected, implementation.validation_recipe_artifact)
+        validation_feedback = await self._validate_local(
+            selected, implementation.validation_recipe_artifact
+        )
         if validation_feedback is not None:
             state.feedback = validation_feedback
             request.active_hypothesis.feedback = validation_feedback
             await self._checkpoint_active(selected)
             return AttemptDecision.RETRY
-        self._approve_candidate(selected)
+        await self._approve_candidate(selected)
         candidate_ready = (
-            implementation.hypothesis_outcome in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
+            implementation.hypothesis_outcome
+            in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
             or implementation.candidate_disposition is CandidateDisposition.PARETO_FRONTIER
         )
-        reason = _official_evaluation_reason(
-            records=request.records, round_number=request.round_number,
-            max_rounds=self.options.max_rounds, official_eval_every=self.options.official_eval_every,
-            requested=request.plan.request_official_evaluation, candidate_ready=candidate_ready,
+        reason = official_evaluation_reason(
+            records=request.records,
+            round_number=request.round_number,
+            max_rounds=self.options.max_rounds,
+            official_eval_every=self.options.official_eval_every,
+            requested=request.plan.request_official_evaluation,
+            candidate_ready=candidate_ready,
         )
         if reason is None:
             if candidate_ready:
@@ -525,22 +551,34 @@ class MultiSession:
                 self.ctx.log("[official-evaluation] deferred; candidate retained as provisional")
             state.passed = True
             return AttemptDecision.FINISH
-        self._approve_perf(selected)
+        await self._approve_perf(selected)
         state.official_reason = reason
         return AttemptDecision.OFFICIAL
 
-    def _approve_candidate(self, selected: MultiRound) -> None:
+    async def _approve_candidate(self, selected: MultiRound) -> None:
         implementation = selected.attempt.implementation
-        if implementation is None or implementation.candidate_disposition is not CandidateDisposition.PARETO_FRONTIER:
+        if (
+            implementation is None
+            or implementation.candidate_disposition is not CandidateDisposition.PARETO_FRONTIER
+        ):
             return
         hypothesis = selected.request.active_hypothesis
         hypothesis.gate_approved_candidate_disposition = implementation.candidate_disposition.value
         hypothesis.gate_approved_candidate_metrics = dict(implementation.candidate_metrics)
-        hypothesis.gate_approved_candidate_evaluation_artifact = implementation.candidate_evaluation_artifact
-        hypothesis.gate_approved_candidate_operating_point = implementation.candidate_operating_point
-        hypothesis.gate_approved_candidate_retention_reason = implementation.candidate_retention_reason
+        hypothesis.gate_approved_candidate_evaluation_artifact = (
+            implementation.candidate_evaluation_artifact
+        )
+        hypothesis.gate_approved_candidate_operating_point = (
+            implementation.candidate_operating_point
+        )
+        hypothesis.gate_approved_candidate_retention_reason = (
+            implementation.candidate_retention_reason
+        )
+        await self._checkpoint_active(selected)
 
-    async def _validate_local(self, selected: MultiRound, recipe_artifact: str | None) -> str | None:
+    async def _validate_local(  # noqa: C901  # bounded framework recipe gate
+        self, selected: MultiRound, recipe_artifact: str | None
+    ) -> str | None:
         """Run judge approved local recipes against an immutable candidate revision."""
         if recipe_artifact is None:
             return None
@@ -553,42 +591,75 @@ class MultiSession:
         names = [recipe.name for recipe in recipes]
         if len(names) != len(set(names)):
             return "Framework local validation recipes contain duplicate names."
-        revision = await self.workspace.snapshot(f"round-{number}-retry-{retry}-framework-validation-input")
+        revision = await self.workspace.snapshot(
+            f"round-{number}-retry-{retry}-framework-validation-input"
+        )
         results: list[FrameworkValidationResult] = []
         restore_required = False
         for recipe in recipes:
             try:
                 digest = _validation_input_digest(self.workspace.path, recipe)
             except (OSError, ValueError) as error:
-                results.append(FrameworkValidationResult(recipe=recipe, input_digest="", passed=False, error=str(error)))
+                results.append(
+                    FrameworkValidationResult(
+                        recipe=recipe, input_digest="", passed=False, error=str(error)
+                    )
+                )
                 break
             reused = _reusable_validation_result(self.turns.progress_path, recipe, digest)
-            emit_gate_started(GateKind.VALIDATION, recipe=recipe.name, command=recipe.command, round_label=f"round-{number}")
+            emit_gate_started(
+                GateKind.VALIDATION,
+                recipe=recipe.name,
+                command=recipe.command,
+                round_label=f"round-{number}",
+            )
             if reused is not None:
                 results.append(reused)
-                emit_gate_finished(GateKind.VALIDATION, passed=True, recipe=recipe.name, reused=True, round_label=f"round-{number}")
+                emit_gate_finished(
+                    GateKind.VALIDATION,
+                    passed=True,
+                    recipe=recipe.name,
+                    reused=True,
+                    round_label=f"round-{number}",
+                )
                 continue
             try:
-                execution = await self.ctx.environment.execute(recipe.command, timeout_seconds=recipe.timeout_seconds)
+                execution = await self.ctx.environment.execute(
+                    recipe.command, timeout_seconds=recipe.timeout_seconds
+                )
                 output = execution.output.strip()
                 result = FrameworkValidationResult(
-                    recipe=recipe, input_digest=digest, passed=execution.exit_code == 0,
-                    exit_code=execution.exit_code, output=output[-GATE_RECORD_TAIL_CHARS:],
+                    recipe=recipe,
+                    input_digest=digest,
+                    passed=execution.exit_code == 0,
+                    exit_code=execution.exit_code,
+                    output=output[-GATE_RECORD_TAIL_CHARS:],
                     error=None if execution.exit_code == 0 else "command exited nonzero",
                 )
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001  # report execution failure as gate feedback
                 result = FrameworkValidationResult(
-                    recipe=recipe, input_digest=digest, passed=False,
+                    recipe=recipe,
+                    input_digest=digest,
+                    passed=False,
                     error=f"command could not be executed: {error}",
                 )
             changes = await self.workspace.pending_changes()
             if changes:
                 restore_required = True
-                result = result.model_copy(update={"passed": False, "error": f"validation command mutated the workspace: {', '.join(changes[:8])}"})
+                result = result.model_copy(
+                    update={
+                        "passed": False,
+                        "error": f"validation command mutated the workspace: {', '.join(changes[:8])}",
+                    }
+                )
             results.append(result)
-            failure = None if result.passed else (result.error or result.output or "unknown failure")
+            failure = (
+                None if result.passed else (result.error or result.output or "unknown failure")
+            )
             emit_gate_finished(
-                GateKind.VALIDATION, passed=result.passed, recipe=recipe.name,
+                GateKind.VALIDATION,
+                passed=result.passed,
+                recipe=recipe.name,
                 output_tail=None if failure is None else failure[-GATE_LOG_TAIL_CHARS:],
                 round_label=f"round-{number}",
             )
@@ -596,10 +667,16 @@ class MultiSession:
                 break
         if restore_required:
             await self.workspace.restore(revision, clean=True)
-        artifact = issue_board.write_validation_result_artifact(self.turns.progress_path, number, retry, results)
+        artifact = issue_board.write_validation_result_artifact(
+            self.turns.progress_path, number, retry, results
+        )
         location = issue_board.display_path(artifact, self.workspace.path)
         issue_board.append_framework_validation_gate(
-            self.turns.progress_path, number, retry, artifact=location, results=results,
+            self.turns.progress_path,
+            number,
+            retry,
+            artifact=location,
+            results=results,
         )
         await self.workspace.snapshot(f"round-{number}-retry-{retry}-framework-validation")
         failed = next((result for result in results if not result.passed), None)
@@ -608,7 +685,7 @@ class MultiSession:
         detail = failed.error or failed.output or "unknown failure"
         return f"Framework local validation failed for {failed.recipe.name!r}: {detail}. Inspect `{location}` and repair only the affected local contract."
 
-    def _approve_perf(self, selected: MultiRound) -> None:
+    async def _approve_perf(self, selected: MultiRound) -> None:
         implementation = selected.attempt.implementation
         if implementation is None or implementation.perf_metric is None:
             return
@@ -617,9 +694,10 @@ class MultiSession:
         hypothesis.gate_approved_perf_unit = implementation.perf_unit
         hypothesis.gate_approved_metrics = dict(implementation.metrics)
         hypothesis.gate_approved_evaluation_artifact = implementation.evaluation_artifact
+        await self._checkpoint_active(selected)
 
     async def official_gates(self, selected: MultiRound) -> bool:
-        """Evaluate a candidate only after the combined role passes itself."""
+        """Evaluate a candidate only after independent review passes."""
         return await self._official_gates(selected)
 
     async def _checkpoint_active(self, selected: MultiRound) -> None:
@@ -718,10 +796,9 @@ class MultiSession:
             )
             return await self.ctx.evaluator.reuse_accuracy(label=f"round-{number}")
         release = (
-            (self.ctx.request.input_bundle.benchmark_result is None
-             and self.ctx.request.input_bundle.benchmark_result_protocol is None)
-            or not view.paths.benchmark_command
-        )
+            self.ctx.request.input_bundle.benchmark_result is None
+            and self.ctx.request.input_bundle.benchmark_result_protocol is None
+        ) or not view.paths.benchmark_command
         execution = self._command(
             command,
             commit,
@@ -779,7 +856,6 @@ class MultiSession:
         """Commit the completed round and publish its observable record."""
         attempt = selected.attempt
         projection = self.terminal_policy.project_performance(selected.request, attempt)
-        self.last_response = projection.next_single_response
         candidate_commit = await self.workspace.snapshot(f"round-{self.round_number}-record-input")
         worker = self.turns.worker
         record = build_round_record(
@@ -803,7 +879,6 @@ class MultiSession:
         )
         terminal = transition_round(
             self.terminal_policy,
-            self.profile,
             TerminalRequest(
                 engine=self.engine,
                 state=attempt.agent_run_state,
@@ -837,20 +912,24 @@ class MultiSession:
         self._announce_experiments("round_persisted", terminal.state)
         self.ctx.events.emit(
             CoreEventType.ROUND_FINISHED,
-            status=EventStatus.COMPLETED if attempt.passed or not record.reviewed else EventStatus.FAILED,
+            status=EventStatus.COMPLETED
+            if attempt.passed or not record.reviewed
+            else EventStatus.FAILED,
             round_label=f"round-{record.round_number}",
             data=RoundFinishedData(
                 attempts=attempt.retry,
-                judge_verdict="pass" if attempt.passed else "fail" if record.reviewed else "skipped",
+                judge_verdict="pass"
+                if attempt.passed
+                else "fail"
+                if record.reviewed
+                else "skipped",
                 perf_metric=projection.metric,
                 perf_unit=projection.unit,
                 profile_skipped=projection.profile_skipped,
             ),
         )
 
-    def _announce_experiments(
-        self, reason: ExperimentsChangeReason, state: AgentRunState
-    ) -> None:
+    def _announce_experiments(self, reason: ExperimentsChangeReason, state: AgentRunState) -> None:
         self.ctx.events.emit(
             CoreEventType.EXPERIMENTS_CHANGED,
             data=ExperimentsChangedData(reason=reason, revision=state.experiment_revision),
@@ -858,7 +937,9 @@ class MultiSession:
 
     def _memory_paths(self) -> tuple[str, ...]:
         root = self.workspace.path
-        return tuple(str(path.relative_to(root)) for path in issue_board.framework_memory_paths(root))
+        return tuple(
+            str(path.relative_to(root)) for path in issue_board.framework_memory_paths(root)
+        )
 
     async def finish(self) -> bool:
         """Restore the best trusted candidate or the trusted input baseline."""

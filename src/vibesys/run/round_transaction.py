@@ -1,9 +1,9 @@
-"""Recoverable transaction for one completed optimization round.
+"""Recoverable checkpoint for a policy's portable state namespace.
 
-A v4 write-ahead log (WAL) records the exact typed state transition before
-candidate or framework state is committed. Completing or recovering the
-transaction applies that transition and commits it atomically with candidate
-edits.
+A v4 write-ahead log records exact typed state transitions and other namespace
+files before candidate or framework state is committed. Completing or
+recovering the checkpoint applies those bytes and commits the namespace with
+candidate edits when requested.
 
 Only version 4 journals are accepted. Older journals need an older VibeSys
 release to recover them.
@@ -29,7 +29,7 @@ from pydantic import (
 )
 
 from vibesys.run.git_tracker import FrameworkSnapshotStatus
-from vs_project.api import ProjectStateError, StateSlot, StateTransition
+from vs_project.api import ProjectStateError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -70,28 +70,6 @@ class _StrictJournal(BaseModel):
         return value
 
 
-class _RoundJournal(_StrictJournal):
-    """Exact transition for the canonical portable agent run state."""
-
-    schema_version: Literal[4]
-    state_transition_base64: str
-    state_transition_sha256: Annotated[str, Field(pattern=_SHA256_PATTERN)]
-
-    @field_validator("state_transition_base64")
-    @classmethod
-    def _validate_base64(cls, value: str) -> str:
-        _decode_base64(value)
-        return value
-
-    def state_transition[StateT: BaseModel](self, slot: StateSlot[StateT]) -> StateTransition:
-        """Decode the portable state transition through its typed slot."""
-        return slot.deserialize_transition(_decode_base64(self.state_transition_base64))
-
-    def transition_payload(self) -> bytes:
-        """Return the serialized typed transition bytes."""
-        return _decode_base64(self.state_transition_base64)
-
-
 class _MultiSlotJournal(_StrictJournal):
     """Exact typed replacements for one portable policy namespace."""
 
@@ -124,218 +102,6 @@ class CompletedRound:
     """Durable outputs produced by a successful round transaction."""
 
     checkpoint: str
-
-
-class RoundTransaction[StateT: BaseModel]:
-    """A prepared round transition obtained from ``coordinator.begin``."""
-
-    def __init__(self, coordinator: RoundTransactionCoordinator[StateT], round_number: int) -> None:
-        """Bind this handle to one coordinator and round number."""
-        self._coordinator = coordinator
-        self.round_number = round_number
-        self._closed = False
-
-    def complete(self) -> CompletedRound:
-        """Apply and commit the prepared state transition."""
-        if self._closed:
-            raise RoundTransactionError(
-                f"Round {self.round_number} transaction has already completed"
-            )
-        result = self._coordinator._complete(  # noqa: SLF001
-            self.round_number
-        )
-        self._closed = True
-        return result
-
-
-class RoundTransactionCoordinator[StateT: BaseModel]:
-    """Coordinate crash-safe typed state and candidate Git commits.
-
-    ``begin(round_number, state_transition=...)`` durably journals an exact
-    typed transition for the supplied portable slot. ``complete()`` applies
-    and commits that transition with the candidate worktree. ``recover()`` is
-    idempotent and rolls any journaled transition forward.
-    """
-
-    def __init__(
-        self,
-        project: Project,
-        git: GitTracker,
-        run_id: str,
-        *,
-        state_slot: StateSlot[StateT],
-    ) -> None:
-        """Validate and bind the project, Git tracker, and run identity."""
-        project_root = project.root.resolve()
-        if git.root.resolve() != project_root:
-            raise RoundTransactionError(
-                "Round transaction project and Git tracker must use the same project root"
-            )
-        if git.run_id != run_id:
-            raise RoundTransactionError(
-                f"Round transaction run {run_id!r} does not match Git tracker run {git.run_id!r}"
-            )
-
-        project.state.load_run(run_id)
-        self._git = git
-        self.run_id = run_id
-        self._state_slot = state_slot
-        self._journal_slot = project.state.local_namespace(run_id, "transaction").slot(
-            "round.json",
-            _RoundJournal,
-        )
-
-    def begin(
-        self,
-        round_number: int,
-        *,
-        state_transition: StateTransition,
-    ) -> RoundTransaction[StateT]:
-        """Durably prepare an exact typed state transition."""
-        if round_number < 1:
-            raise RoundTransactionError(f"Round number must be positive, got {round_number}")
-        if self._load_optional_journal() is not None:
-            raise RoundTransactionError(
-                "An unfinished round transaction already exists; recover it before starting another"
-            )
-
-        pre_commit = self._git.current_sha()
-        if pre_commit is None:
-            raise RoundTransactionError("Round transactions require an initialized Git HEAD")
-        self._require_clean_index()
-        self._validate_state_transition(state_transition)
-
-        transition_payload = self._state_slot.serialize_transition(state_transition)
-        journal = _RoundJournal(
-            schema_version=_JOURNAL_SCHEMA_VERSION,
-            run_id=self.run_id,
-            round_number=round_number,
-            pre_commit=pre_commit,
-            state_transition_base64=base64.b64encode(transition_payload).decode("ascii"),
-            state_transition_sha256=_sha256(transition_payload),
-        )
-        self._journal_slot.save(journal)
-        return RoundTransaction(self, round_number)
-
-    def recover(self) -> RoundRecoveryOutcome:
-        """Commit any journaled transition and restore its working-tree state."""
-        journal = self._load_optional_journal()
-        if journal is None:
-            return RoundRecoveryOutcome.NO_TRANSACTION
-
-        if not self._pre_commit_is_ancestor(journal.pre_commit):
-            raise RoundTransactionError(
-                "Cannot recover round transaction after Git history moved away from "
-                f"its starting commit {journal.pre_commit}"
-            )
-        self._commit_state(journal)
-        self._clear_journal()
-        return RoundRecoveryOutcome.COMMITTED
-
-    def _complete(self, round_number: int) -> CompletedRound:
-        journal = self._load_journal()
-        if journal.round_number != round_number:
-            raise RoundTransactionError(
-                f"Journal is for round {journal.round_number}, not round {round_number}"
-            )
-        if not self._pre_commit_is_ancestor(journal.pre_commit):
-            raise RoundTransactionError(
-                "Cannot complete round transaction after Git history moved away from "
-                f"its starting commit {journal.pre_commit}"
-            )
-
-        completed = self._commit_state(journal)
-        self._clear_journal()
-        return completed
-
-    def _commit_state(self, journal: _RoundJournal) -> CompletedRound:
-        transition = journal.state_transition(self._state_slot)
-        self._validate_state_transition(transition)
-        snapshot = self._state_slot.snapshot_transition(transition)
-        status = self._git.framework_snapshot_status(snapshot)
-        current_sha = self._git.current_sha()
-
-        # An unchanged cursor may already be exact while other run files are
-        # still dirty. The pre-commit HEAD means this transaction has not
-        # snapshotted those files yet.
-        if current_sha == journal.pre_commit:
-            self._state_slot.apply(transition)
-            self._git.snapshot_with_framework_metadata(
-                f"vibesys(round {journal.round_number}): record result",
-                snapshot,
-            )
-        elif status is FrameworkSnapshotStatus.EXACT:
-            self._state_slot.apply(transition)
-        else:
-            raise RoundTransactionError("Committed state differs from the transaction journal")
-
-        if self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
-            raise RoundTransactionError("Git snapshot did not commit the exact state")
-        checkpoint = self._git.current_sha()
-        if checkpoint is None:
-            raise RoundTransactionError("Git snapshot completed without an accessible HEAD")
-        return CompletedRound(checkpoint=checkpoint)
-
-    def _load_journal(self) -> _RoundJournal:
-        journal = self._load_optional_journal()
-        if journal is None:
-            raise RoundTransactionError("Round transaction journal does not exist")
-        return journal
-
-    def _load_optional_journal(self) -> _RoundJournal | None:
-        """Load and validate the WAL while preserving the coordinator error API."""
-        try:
-            envelope = self._journal_slot.load_optional()
-        except ProjectStateError as exc:
-            raise RoundTransactionError(f"Invalid round transaction journal: {exc}") from exc
-        if envelope is None:
-            return None
-        journal = envelope
-        if journal.run_id != self.run_id:
-            raise RoundTransactionError(
-                f"Round transaction journal belongs to run {journal.run_id!r}, not {self.run_id!r}"
-            )
-        self._validate_journal(journal)
-        return journal
-
-    def _validate_journal(self, journal: _RoundJournal) -> None:
-        payload = journal.transition_payload()
-        if _sha256(payload) != journal.state_transition_sha256:
-            raise RoundTransactionError(
-                "Round transaction journal state-transition digest does not match"
-            )
-        try:
-            self._validate_state_transition(journal.state_transition(self._state_slot))
-        except (TypeError, ValueError, ProjectStateError, RoundTransactionError) as exc:
-            raise RoundTransactionError(
-                f"Invalid state transition in round transaction journal: {exc}"
-            ) from exc
-
-    def _pre_commit_is_ancestor(self, pre_commit: str) -> bool:
-        result = self._git.run(
-            ["git", "merge-base", "--is-ancestor", pre_commit, "HEAD"],
-            check=False,
-        )
-        return result.returncode == 0
-
-    def _require_clean_index(self) -> None:
-        result = self._git.run(["git", "diff", "--cached", "--quiet"], check=False)
-        if result.returncode != 0:
-            raise RoundTransactionError(
-                "Cannot begin round transaction while the Git index contains staged changes"
-            )
-
-    def _validate_state_transition(self, transition: StateTransition) -> None:
-        try:
-            self._state_slot.validate_transition(transition)
-            self._state_slot.snapshot_transition(transition)
-        except ProjectStateError as exc:
-            raise RoundTransactionError(
-                f"Invalid round transaction state transition: {exc}"
-            ) from exc
-
-    def _clear_journal(self) -> None:
-        self._journal_slot.save(None)
 
 
 class MultiSlotRoundTransaction:
@@ -399,7 +165,7 @@ class MultiSlotRoundTransactionCoordinator:
         """Validate all requested writes, then durably journal their transitions."""
         if sequence < 1:
             raise RoundTransactionError(f"Checkpoint sequence must be positive, got {sequence}")
-        if self._journal_slot.load_optional() is not None:
+        if self._load_journal() is not None:
             raise RoundTransactionError("An unfinished checkpoint already exists; recover it first")
         if not writes:
             raise RoundTransactionError("Checkpoint writes must not be empty")
@@ -570,7 +336,3 @@ def _decode_base64(value: str) -> bytes:
         return base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ValueError("must contain canonical base64-encoded bytes") from exc
-
-
-def _sha256(contents: bytes) -> str:
-    return hashlib.sha256(contents).hexdigest()

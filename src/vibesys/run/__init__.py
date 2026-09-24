@@ -1,4 +1,4 @@
-"""Run-lifecycle components extracted from ``_RunContext``.
+"""Run-lifecycle components owned by the concrete run host.
 
 These are experiment-lifecycle concerns (per-run paths, git snapshot
 tracking) rather than reusable standalone libraries, so they live under
@@ -14,18 +14,15 @@ from vibesys.run.git_tracker import GitTracker
 from vibesys.run.integration import LocalRunIntegration, RunResourceHandoff
 from vibesys.run.legacy_namespaces import RunStateNamespace
 from vibesys.run.logger import RunLogger
-from vibesys.run.paths import RunCommands, RunPaths
+from vibesys.run.paths import RunPaths
 from vibesys.run.project import (
     ProjectProvisioningError,
     ProjectProvisioningSpec,
     provision_project,
 )
-from vibesys.run.protocol import LoopContext
 from vibesys.run.round_transaction import (
     CompletedRound,
     RoundRecoveryOutcome,
-    RoundTransaction,
-    RoundTransactionCoordinator,
     RoundTransactionError,
 )
 from vibesys.run.run_control import RunControlChannel, RunStopped, splice_steering
@@ -50,15 +47,11 @@ __all__ = [
     "GitTracker",
     "InputProjectSpec",
     "LocalRunIntegration",
-    "LoopContext",
     "ProjectProvisioningError",
     "ProjectProvisioningSpec",
     "RepositoryVisibility",
     "RoundRecoveryOutcome",
-    "RoundTransaction",
-    "RoundTransactionCoordinator",
     "RoundTransactionError",
-    "RunCommands",
     "RunControlChannel",
     "RunLogger",
     "RunPaths",

@@ -8,14 +8,12 @@ root, and provides access to generated run state. Applications should use one
 `Project` per root rather than assemble paths or state stores themselves.
 
 Orchestration-specific settings, resume rules, agent roles, and round-history
-interpretation belong in `src/vibesys/loops/agent` or
-`src/vibesys/orchestration`, not in `vs_project`. New run manifests use a
+interpretation belong in the owning `src/vibesys/loops/<strategy>` package or
+`src/vibesys/orchestration`, not in `vs_project`. Run manifests use a
 versioned `OrchestrationDescriptor`; this package validates its portable JSON
 envelope, while the owning orchestration validates the options and decides
-whether a resumed run may change them. The version 3 loop configuration types,
-resume comparator, and agent round methods remain available for old runs but
-are deprecated for new code. No deprecation warning is emitted when reading
-or resuming an old run.
+whether a resumed run may change them. Version 4 is the only supported run
+manifest format; older schemas fail explicitly.
 
 ## Usage
 

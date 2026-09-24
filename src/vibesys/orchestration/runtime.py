@@ -1,5 +1,8 @@
 """Local host for the public custom-orchestration agent capabilities."""
 
+# Capabilities in this module share one private owner for resource lifetime.
+# ruff: noqa: SLF001
+
 from __future__ import annotations
 
 import asyncio
@@ -19,13 +22,13 @@ from pydantic import BaseModel
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.context import (
     RunSetup,
-    WorkspaceContextSpec,
+    WorkspaceResourceSpec,
     _execution_status,
-    create_workspace_context,
-    open_run_context,
+    borrow_run_agent_environment,
+    create_workspace_resources,
+    open_run_resources,
     open_scoped_agent_environment,
 )
-from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.gates import (
     AccuracyGateResult,
     BenchmarkGateResult,
@@ -49,7 +52,6 @@ from vibesys.events import (
 )
 from vibesys.render.sink import output_sink
 from vibesys.run.agent_sessions import SynchronizedSessionStore
-from vibesys.run.round_transaction import MultiSlotRoundTransactionCoordinator
 from vibesys.run.run_control import splice_steering
 from vibesys.runtime import AgentDefinition, AgentHandle, WorkspaceScope
 from vibesys.sandbox.model_requests import (
@@ -73,18 +75,19 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
-    from vibesys.context import _RunContext
+    from vibesys.context import _RunResources
     from vibesys.evaluators.input_manifest import WorkspaceSource
     from vibesys.evaluators.metrics import Objective
     from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.request import RunRequest
     from vibesys.profilers import ProfilerKind
     from vibesys.run.event_journal import EventJournal
+    from vibesys.run.git_tracker import GitTracker
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentView
     from vs_agent.api import AgentClientProtocol, MCPServerSpec
     from vs_project.api import StateNamespace, StateSlot
-    from vs_sandbox.api import SandboxExecutionResult
+    from vs_sandbox.api import Sandbox, SandboxExecutionResult
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -174,7 +177,7 @@ class _LocalAgentHandle:
     def __init__(  # noqa: PLR0913  # independently owned agent resources
         self,
         definition: AgentDefinition,
-        context: _RunContext,
+        context: _RunResources,
         client: AgentClientProtocol,
         resources: ExitStack,
         executor: ThreadPoolExecutor,
@@ -183,7 +186,7 @@ class _LocalAgentHandle:
         use_docker: bool,
     ) -> None:
         self._definition = definition
-        self._context = context
+        self._resource_owner = context
         self._client = client
         self._resources = resources
         self._executor = executor
@@ -227,7 +230,7 @@ class _LocalAgentHandle:
         def invoke(routed: str, execution_id: str) -> str:
             return self._client.invoke_text(
                 kind=kind,
-                workspace=self._context.workspace,
+                workspace=self._resource_owner.workspace,
                 system_prompt=system_prompt,
                 user_prompt=routed,
                 round_label=label,
@@ -265,7 +268,7 @@ class _LocalAgentHandle:
         def invoke(routed: str, execution_id: str) -> T:
             return self._client.invoke(
                 kind=kind,
-                workspace=self._context.workspace,
+                workspace=self._resource_owner.workspace,
                 system_prompt=system_prompt,
                 user_prompt=routed,
                 response_cls=response_cls,
@@ -287,7 +290,7 @@ class _LocalAgentHandle:
         )
 
     def _agent_env(self) -> dict[str, str]:
-        context = self._context
+        context = self._resource_owner
         return {} if self._use_docker else context.device.gpu_env()
 
     def _run_turn[Result](
@@ -300,7 +303,7 @@ class _LocalAgentHandle:
     ) -> Result:
         if self._closed:
             raise _AgentClosedError(self._definition.id)
-        context = self._context
+        context = self._resource_owner
         self._client.set_log_file(context.run_log_file)
         control = context.integration.control
         control.raise_if_stopped()
@@ -439,7 +442,7 @@ class _Agents:
         self, definition: AgentDefinition, *, scope: WorkspaceScope | WorkspaceHandle | None = None
     ) -> AgentHandle:
         """Open a thread-affine client and sandbox for a named role."""
-        return await self._host.spawn(definition, scope=self._host.workspaces.scope_of(scope))
+        return await self._host._spawn(definition, scope=self._host.workspaces._scope_of(scope))
 
     @contextmanager
     def progress(self, value: AgentProgress) -> Generator[None]:
@@ -460,7 +463,7 @@ class _TypedRunStateSlot[T: BaseModel]:
 
     async def load(self) -> T | None:
         """Load and validate the last staged or committed model."""
-        return await self._host.run_blocking(self._slot.load_optional)
+        return await self._host._run_blocking(self._slot.load_optional)
 
 
 class _RunState:
@@ -472,19 +475,19 @@ class _RunState:
     @property
     def namespace(self) -> StateNamespace:
         """Return the policy's portable namespace for existing paid-work journals."""
-        setup = self._host.setup
+        setup = self._host._setup
         if setup.state_namespace is None:
             raise TypeError("policy did not declare a portable state namespace")  # noqa: TRY003
-        context = self._host.run_context
+        context = self._host._resources
         return context.state.portable(setup.state_namespace)
 
     @property
     def local_namespace(self) -> StateNamespace:
         """Return machine-local state for uncommitted paid-work cursors."""
-        setup = self._host.setup
+        setup = self._host._setup
         if setup.state_namespace is None:
             raise TypeError("policy did not declare a state namespace")  # noqa: TRY003
-        return self._host.run_context.state.local(setup.state_namespace)
+        return self._host._resources.state.local(setup.state_namespace)
 
     def local_path(self, name: str) -> Path:
         """Return a validated machine-local file path owned by this run."""
@@ -503,10 +506,8 @@ class _RunState:
 
     def slot(self, name: str, model: type[T]) -> _TypedRunStateSlot[T]:
         """Bind one declared typed portable file."""
-        setup = self._host.setup
-        declared = setup.state_slots or (
-            {"state.json": setup.state_model} if setup.state_model is not None else {}
-        )
+        setup = self._host._setup
+        declared = setup.state_slots or {}
         if declared.get(name) is not model:
             raise TypeError(f"policy state slot {name!r} is not declared with {model.__name__}")  # noqa: TRY003
         return _TypedRunStateSlot(self._host, self.namespace.slot(name, model))
@@ -517,19 +518,14 @@ class _RunState:
 
     async def checkpoint(
         self,
-        state: T | None = None,
         *,
         sequence: int,
-        writes: Mapping[str, BaseModel] | None = None,
+        writes: Mapping[str, BaseModel],
         **options: Unpack[_CheckpointOptions],
     ) -> str:
         """Journal and commit typed writes with candidate edits, then publish."""
-        if writes is None:
-            if state is None:
-                raise TypeError("checkpoint requires typed writes")  # noqa: TRY003
-            writes = {"state.json": state}
-        async with self._host.parent_mutation_lock:
-            return await self._host.run_blocking(
+        async with self._host._parent_mutation_lock:
+            return await self._host._run_blocking(
                 self._checkpoint,
                 sequence,
                 writes,
@@ -547,20 +543,14 @@ class _RunState:
         candidate: bool,
         label: str | None,
     ) -> str:
-        context = self._host.run_context
-        namespace = self._host.setup.state_namespace
+        context = self._host._resources
+        namespace = self._host._setup.state_namespace
         if namespace is None:
             raise TypeError("policy did not declare a durable state slot")  # noqa: TRY003
-        coordinator = context._round_transaction_coordinator  # noqa: SLF001
-        if isinstance(coordinator, MultiSlotRoundTransactionCoordinator):
-            coordinator.begin(sequence, writes=writes, candidate=candidate, label=label).complete()
-        else:
-            if len(writes) != 1 or "state.json" not in writes:
-                raise TypeError("legacy checkpoint supports only state.json")  # noqa: TRY003
-            state = writes["state.json"]
-            transition = self.namespace.slot("state.json", type(state)).transition(state)
-            context.begin_completed_round(sequence, state_transition=transition)
-            context.persist_completed_round()
+        coordinator = context._round_transaction_coordinator
+        if coordinator is None:
+            raise TypeError("policy did not declare checkpoint slots")  # noqa: TRY003
+        coordinator.begin(sequence, writes=writes, candidate=candidate, label=label).complete()
         committed = publish or writes.get("state.json")
         if committed is not None:
             context.publish_committed_state(namespace, committed)
@@ -582,6 +572,34 @@ class MeasurementOptions:
 _DEFAULT_MEASUREMENT_OPTIONS = MeasurementOptions()
 
 
+@dataclass(frozen=True)
+class _GateInputs:
+    """Bind trusted gate inputs from one workspace's owned resources."""
+
+    events: EventJournal
+    judge_backend: Sandbox
+    judge_accuracy_command: str | None
+    judge_benchmark_command: str | None
+    run_environment_view: RunEnvironmentView
+    git: GitTracker
+
+    @classmethod
+    def from_resources(cls, context: _RunResources) -> _GateInputs:
+        """Read the selected environment's immutable command paths."""
+        return cls(
+            events=context.events,
+            judge_backend=context.run_environment_session.sandbox,
+            judge_accuracy_command=context.run_environment_view.paths.accuracy_command,
+            judge_benchmark_command=context.run_environment_view.paths.benchmark_command,
+            run_environment_view=context.run_environment_view,
+            git=context.git,
+        )
+
+    def trusted_input_changes(self) -> list[str]:
+        """Detect edits to evaluator-owned project inputs."""
+        return self.git.trusted_input_changes()
+
+
 class _Evaluator:
     """Trusted checks and measurements in the parent run workspace."""
 
@@ -589,7 +607,7 @@ class _Evaluator:
         self._host = host
         self._locks: dict[str | None, asyncio.Lock] = {None: asyncio.Lock()}
 
-    def lock(self, scope: WorkspaceScope | WorkspaceHandle | None) -> asyncio.Lock:
+    def _lock_for(self, scope: WorkspaceScope | WorkspaceHandle | None) -> asyncio.Lock:
         """Serialize gates only within the workspace they inspect."""
         key = scope.id if scope is not None else None
         lock = self._locks.get(key)
@@ -598,7 +616,7 @@ class _Evaluator:
             self._locks[key] = lock
         return lock
 
-    def forget(self, scope: WorkspaceScope) -> None:
+    def _forget(self, scope: WorkspaceScope) -> None:
         """Release a discarded scope's synchronization state."""
         self._locks.pop(scope.id, None)
 
@@ -611,12 +629,12 @@ class _Evaluator:
         scope: WorkspaceScope | WorkspaceHandle | None = None,
     ) -> AccuracyGateResult:
         """Run the bundle's trusted accuracy command and reject input tampering."""
-        async with self.lock(scope):
-            context = self._host.workspaces.context(scope)
+        async with self._lock_for(scope):
+            context = _GateInputs.from_resources(self._host.workspaces._resources_for(scope))
             timeout = framework_command_timeout(
                 context, self._host.request.input_bundle.manifest.accuracy.timeout_seconds
             )
-            return await self._host.run_blocking(
+            return await self._host._run_blocking(
                 run_accuracy_gate,
                 context,
                 process_id=process_id,
@@ -627,7 +645,7 @@ class _Evaluator:
 
     async def reuse_accuracy(self, *, label: str | None = None) -> AccuracyGateResult:
         """Publish a paired accuracy PASS reused for an exact candidate revision."""
-        return await self._host.run_blocking(self._reuse_accuracy, label)
+        return await self._host._run_blocking(self._reuse_accuracy, label)
 
     def _reuse_accuracy(self, label: str | None) -> AccuracyGateResult:
         command = self._host.environment.view.paths.accuracy_command
@@ -649,11 +667,11 @@ class _Evaluator:
         options: MeasurementOptions = _DEFAULT_MEASUREMENT_OPTIONS,
     ) -> BenchmarkGateResult:
         """Run and parse the bundle's declared trusted benchmark contract."""
-        async with self.lock(scope):
-            context = self._host.workspaces.context(scope)
+        async with self._lock_for(scope):
+            context = _GateInputs.from_resources(self._host.workspaces._resources_for(scope))
             bundle = self._host.request.input_bundle
             timeout = framework_command_timeout(context, bundle.manifest.benchmark.timeout_seconds)
-            return await self._host.run_blocking(
+            return await self._host._run_blocking(
                 run_benchmark_gate,
                 context,
                 result_spec=bundle.benchmark_result,
@@ -684,24 +702,24 @@ class WorkspaceHandle:
     def path(self) -> Path:
         """Return this workspace's host path."""
         if self._scope is None:
-            return self._owner._host.run_context.workspace  # noqa: SLF001
-        return self._owner._require_scope(self._scope).path  # noqa: SLF001
+            return self._owner._host._resources.workspace
+        return self._owner._require_scope(self._scope).path
 
     @property
     def revision(self) -> str | None:
         """Return the retained revision of a fork or current root HEAD."""
         if self._scope is None:
-            return self._owner._host.run_context.git.current_sha()  # noqa: SLF001
-        return self._owner._require_scope(self._scope).revision  # noqa: SLF001
+            return self._owner._host._resources.git.current_sha()
+        return self._owner._require_scope(self._scope).revision
 
     @property
     def trusted_input_baseline(self) -> str | None:
         """Return the run's immutable trusted-input Git baseline."""
-        return self._owner._host.run_context.git.trusted_input_baseline  # noqa: SLF001
+        return self._owner._host._resources.git.trusted_input_baseline
 
     async def snapshot(self, label: str) -> str:
         """Commit this workspace's changes and retain its revision."""
-        return await self._owner._snapshot(label, scope=self._scope)  # noqa: SLF001
+        return await self._owner._snapshot(label, scope=self._scope)
 
     async def restore(
         self,
@@ -711,31 +729,31 @@ class WorkspaceHandle:
         preserve_paths: tuple[str, ...] = (),
     ) -> None:
         """Restore this workspace to a retained revision."""
-        await self._owner._restore(  # noqa: SLF001
+        await self._owner._restore(
             revision, scope=self._scope, clean=clean, preserve_paths=preserve_paths
         )
 
     async def retain(self, name: str, revision: str) -> str:
         """Keep a revision reachable under a policy-owned name."""
-        return await self._owner._retain(name, revision)  # noqa: SLF001
+        return await self._owner._retain(name, revision)
 
     async def pending_changes(self) -> list[str]:
         """List uncommitted candidate changes in this workspace."""
-        return await self._owner._pending_changes(scope=self._scope)  # noqa: SLF001
+        return await self._owner._pending_changes(scope=self._scope)
 
     async def candidate_patch(self, revision: str) -> str:
         """Return a candidate diff against the trusted baseline."""
-        return await self._owner._candidate_patch(revision, scope=self._scope)  # noqa: SLF001
+        return await self._owner._candidate_patch(revision, scope=self._scope)
 
     async def trusted_input_changes(self) -> list[str]:
         """List changed evaluator-owned files."""
-        return await self._owner._trusted_input_changes(scope=self._scope)  # noqa: SLF001
+        return await self._owner._trusted_input_changes(scope=self._scope)
 
     async def discard(self) -> None:
         """Close an isolated workspace and all of its agent handles."""
         if self._scope is None:
             raise ValueError("the run root cannot be discarded")  # noqa: TRY003
-        await self._owner._discard_scope(self._scope)  # noqa: SLF001
+        await self._owner._discard_scope(self._scope)
 
 
 class _Workspaces:
@@ -744,35 +762,35 @@ class _Workspaces:
     def __init__(self, host: RunContext) -> None:
         self._host = host
         self._scopes: dict[str, WorkspaceScope] = {}
-        self._contexts: dict[str, _RunContext] = {}
+        self._scoped_resources: dict[str, _RunResources] = {}
         self._scope_locks: dict[str, asyncio.Lock] = {}
         self.root = WorkspaceHandle(self, None)
 
-    def scope_of(self, scope: WorkspaceScope | WorkspaceHandle | None) -> WorkspaceScope | None:
+    def _scope_of(self, scope: WorkspaceScope | WorkspaceHandle | None) -> WorkspaceScope | None:
         """Resolve a public handle to its internal scope identity."""
         if isinstance(scope, WorkspaceHandle):
-            if scope._owner is not self:  # noqa: SLF001
+            if scope._owner is not self:
                 raise ValueError("workspace handle belongs to another run")  # noqa: TRY003
-            return scope._scope  # noqa: SLF001
+            return scope._scope
         return scope
 
     async def fork(self, revision: str | None = None) -> WorkspaceHandle:
         """Open an isolated worktree at a committed parent revision."""
-        async with self._host.parent_mutation_lock:
-            scope = await self._host.run_blocking(self._fork, revision)
+        async with self._host._parent_mutation_lock:
+            scope = await self._host._run_blocking(self._fork, revision)
             return WorkspaceHandle(self, scope)
 
     def _fork(self, revision: str | None) -> WorkspaceScope:
-        parent = self._host.run_context
+        parent = self._host._resources
         base = revision or parent.git.current_sha()
         if base is None:
             raise RuntimeError("cannot fork a workspace without a committed revision")  # noqa: TRY003
         if not parent.run_environment_view.supports_parallel_candidate_evaluation:
             raise RuntimeError("run environment cannot open isolated candidate sandboxes")  # noqa: TRY003
         scope_id = f"s{uuid.uuid4().hex}"
-        context = create_workspace_context(
+        context = create_workspace_resources(
             parent,
-            WorkspaceContextSpec(
+            WorkspaceResourceSpec(
                 scope_id=scope_id,
                 revision=base,
                 config=self._host.request.config,
@@ -782,25 +800,25 @@ class _Workspaces:
         )
         scope = WorkspaceScope(id=scope_id, path=context.workspace, revision=base)
         self._scopes[scope_id] = scope
-        self._contexts[scope_id] = context
+        self._scoped_resources[scope_id] = context
         return scope
 
     async def _snapshot(
         self, label: str, scope: WorkspaceScope | WorkspaceHandle | None = None
     ) -> str:
         """Commit candidate edits and retain a fork's revision for later adoption."""
-        scope = self.scope_of(scope)
+        scope = self._scope_of(scope)
         if scope is None:
-            async with self._host.parent_mutation_lock:
-                return await self._host.run_blocking(self._snapshot_parent, label)
+            async with self._host._parent_mutation_lock:
+                return await self._host._run_blocking(self._snapshot_parent, label)
         lock = self._scope_lock(scope)
         async with lock:
-            revision = await self._host.run_blocking(self._snapshot_scoped, label, scope)
-            async with self._host.parent_mutation_lock:
-                return await self._host.run_blocking(self._retain_scoped, scope, revision)
+            revision = await self._host._run_blocking(self._snapshot_scoped, label, scope)
+            async with self._host._parent_mutation_lock:
+                return await self._host._run_blocking(self._retain_scoped, scope, revision)
 
     def _snapshot_parent(self, label: str) -> str:
-        parent = self._host.run_context
+        parent = self._host._resources
         parent.git.snapshot(label)
         revision = parent.git.current_sha()
         if revision is None:
@@ -809,7 +827,7 @@ class _Workspaces:
 
     def _snapshot_scoped(self, label: str, scope: WorkspaceScope) -> str:
         current = self._require_scope(scope)
-        git = self._contexts[current.id].git
+        git = self._scoped_resources[current.id].git
         git.snapshot(label)
         revision = git.current_sha()
         if revision is None:
@@ -818,7 +836,7 @@ class _Workspaces:
 
     def _retain_scoped(self, scope: WorkspaceScope, revision: str) -> str:
         current = self._require_scope(scope)
-        self._host.run_context.git.retain_candidate(current.id, revision)
+        self._host._resources.git.retain_candidate(current.id, revision)
         current.revision = revision
         return revision
 
@@ -830,9 +848,9 @@ class _Workspaces:
         preserve_paths: tuple[str, ...] = (),
     ) -> None:
         """Materialize a retained candidate revision in the parent workspace."""
-        async with self._host.parent_mutation_lock:
-            adopted = await self._host.run_blocking(
-                self._host.run_context.git.checkout_tree,
+        async with self._host._parent_mutation_lock:
+            adopted = await self._host._run_blocking(
+                self._host._resources.git.checkout_tree,
                 revision,
                 clean=clean,
                 preserve_paths=preserve_paths,
@@ -849,13 +867,13 @@ class _Workspaces:
         preserve_paths: tuple[str, ...] = (),
     ) -> None:
         """Restore a root or scoped workspace to a committed tree."""
-        scope = self.scope_of(scope)
+        scope = self._scope_of(scope)
         if scope is None:
             await self.adopt(revision, clean=clean, preserve_paths=preserve_paths)
             return
         async with self._scope_lock(scope):
-            context = self.context(scope)
-            restored = await self._host.run_blocking(
+            context = self._resources_for(scope)
+            restored = await self._host._run_blocking(
                 context.git.checkout_tree,
                 revision,
                 clean=clean,
@@ -867,38 +885,38 @@ class _Workspaces:
 
     async def _retain(self, name: str, revision: str) -> str:
         """Keep a candidate revision reachable from the parent repository."""
-        async with self._host.parent_mutation_lock:
-            return await self._host.run_blocking(
-                self._host.run_context.git.retain_candidate, name, revision
+        async with self._host._parent_mutation_lock:
+            return await self._host._run_blocking(
+                self._host._resources.git.retain_candidate, name, revision
             )
 
     async def _pending_changes(
         self, *, scope: WorkspaceScope | WorkspaceHandle | None = None
     ) -> list[str]:
         """List uncommitted changes in one workspace."""
-        context = self.context(self.scope_of(scope))
-        return await self._host.run_blocking(context.git.pending_changes)
+        context = self._resources_for(self._scope_of(scope))
+        return await self._host._run_blocking(context.git.pending_changes)
 
     async def _candidate_patch(
         self, revision: str, *, scope: WorkspaceScope | WorkspaceHandle | None = None
     ) -> str:
         """Return a candidate patch using this workspace's Git tracker."""
-        context = self.context(self.scope_of(scope))
-        return await self._host.run_blocking(context.git.candidate_patch, revision)
+        context = self._resources_for(self._scope_of(scope))
+        return await self._host._run_blocking(context.git.candidate_patch, revision)
 
     async def _trusted_input_changes(
         self, *, scope: WorkspaceScope | WorkspaceHandle | None = None
     ) -> list[str]:
         """Detect edits to evaluator-owned inputs in one workspace."""
-        context = self.context(self.scope_of(scope))
-        return await self._host.run_blocking(context.git.trusted_input_changes)
+        context = self._resources_for(self._scope_of(scope))
+        return await self._host._run_blocking(context.git.trusted_input_changes)
 
     async def _discard_scope(self, scope: WorkspaceScope | WorkspaceHandle) -> None:
         """Drain scoped agents and gates before removing their worktree."""
-        async with self._host._spawn_lock:  # noqa: SLF001  # shared lifecycle lock
+        async with self._host._spawn_lock:  # shared lifecycle lock
             scope = self._require_scope(scope)
             errors: list[BaseException] = []
-            for agent in tuple(self._host._agents.values()):  # noqa: SLF001
+            for agent in tuple(self._host._agents.values()):
                 if agent.scope_id != scope.id:
                     continue
                 try:
@@ -906,25 +924,25 @@ class _Workspaces:
                 except Exception as exc:  # noqa: BLE001  # finish scope cleanup
                     errors.append(exc)
             async with (
-                self._host.evaluator.lock(scope),
+                self._host.evaluator._lock_for(scope),
                 self._scope_lock(scope),
-                self._host.parent_mutation_lock,
+                self._host._parent_mutation_lock,
             ):
                 try:
-                    await self._host.run_blocking(self._discard, scope)
+                    await self._host._run_blocking(self._discard, scope)
                 except Exception as exc:  # noqa: BLE001  # report all cleanup errors
                     errors.append(exc)
                 finally:
                     if scope.id not in self._scopes:
-                        self._host.evaluator.forget(scope)
+                        self._host.evaluator._forget(scope)
             if errors:
                 raise BaseExceptionGroup("scoped agent cleanup failed", errors)  # noqa: TRY003
 
     def _discard(self, scope: WorkspaceScope) -> None:
         current = self._require_scope(scope)
-        self._contexts[current.id].close()
+        self._scoped_resources[current.id].close()
         del self._scopes[current.id]
-        del self._contexts[current.id]
+        del self._scoped_resources[current.id]
         self._scope_locks.pop(current.id, None)
 
     def _scope_lock(self, scope: WorkspaceScope) -> asyncio.Lock:
@@ -932,7 +950,7 @@ class _Workspaces:
         return self._scope_locks.setdefault(current.id, asyncio.Lock())
 
     def _require_scope(self, scope: WorkspaceScope | WorkspaceHandle) -> WorkspaceScope:
-        resolved = self.scope_of(scope)
+        resolved = self._scope_of(scope)
         if resolved is None:
             raise ValueError("expected an isolated workspace scope")  # noqa: TRY003
         current = self._scopes.get(resolved.id)
@@ -940,13 +958,13 @@ class _Workspaces:
             raise ValueError("workspace scope is closed or belongs to another run")  # noqa: TRY003
         return current
 
-    def context(self, scope: WorkspaceScope | WorkspaceHandle | None) -> _RunContext:
+    def _resources_for(self, scope: WorkspaceScope | WorkspaceHandle | None) -> _RunResources:
         """Resolve the sandbox-backed context for a live workspace scope."""
-        scope = self.scope_of(scope)
+        scope = self._scope_of(scope)
         if scope is None:
-            return self._host.run_context
+            return self._host._resources
         current = self._require_scope(scope)
-        return self._contexts[current.id]
+        return self._scoped_resources[current.id]
 
     async def close(self) -> None:
         """Discard all remaining worktrees in reverse creation order."""
@@ -954,9 +972,9 @@ class _Workspaces:
         for scope in reversed(tuple(self._scopes.values())):
             try:
                 async with (
-                    self._host.evaluator.lock(scope),
+                    self._host.evaluator._lock_for(scope),
                     self._scope_lock(scope),
-                    self._host.parent_mutation_lock,
+                    self._host._parent_mutation_lock,
                 ):
                     await asyncio.to_thread(self._discard, scope)
             except BaseException as exc:  # noqa: BLE001
@@ -978,42 +996,42 @@ class _Environment:
 
     def view_for(self, scope: WorkspaceScope | WorkspaceHandle | None = None) -> RunEnvironmentView:
         """Return environment facts for one live workspace."""
-        return self._host.workspaces.context(scope).run_environment_view
+        return self._host.workspaces._resources_for(scope).run_environment_view
 
     @property
     def reference_path(self) -> str:
         """Return the prompt-visible reference path."""
-        return self._host.run_context.ref_name
+        return self._host._resources.ref_name
 
     @property
     def workspace_sources(self) -> tuple[WorkspaceSource, ...]:
         """Return materialized workspace sources for prompt context."""
-        return self._host.run_context.workspace_sources
+        return self._host._resources.workspace_sources
 
     @property
     def skill_source_paths(self) -> tuple[Path, ...]:
         """Return the resolved skill source directories for this run."""
-        return tuple(self._host.run_context.skill_source_paths)
+        return tuple(self._host._resources.skill_source_paths)
 
     @property
     def profiler_kind(self) -> ProfilerKind:
         """Return the profiler selected after environment preflight."""
-        return self._host.run_context.profiler_kind
+        return self._host._resources.profiler_kind
 
     @property
     def model_name(self) -> str:
         """Return the resolved default model name."""
-        return self._host.run_context.model_name
+        return self._host._resources.model_name
 
     @property
     def run_log_path(self) -> Path:
         """Return the current run log file path."""
-        return self._host.run_context.run_log_path
+        return self._host._resources.run_log_path
 
     @property
     def log_dir(self) -> Path:
         """Return this run's machine-local log directory."""
-        return self._host.run_context.log_dir
+        return self._host._resources.log_dir
 
     def candidate_runtime(
         self,
@@ -1023,15 +1041,15 @@ class _Environment:
         scope: WorkspaceScope | WorkspaceHandle | None = None,
     ) -> CandidateRuntime:
         """Resolve candidate prompt notes and deployment identity."""
-        context = self._host.workspaces.context(scope)
+        context = self._host.workspaces._resources_for(scope)
         return context.run_environment.candidate_runtime(
             context.run_environment_view, generation, child_idx
         )
 
     async def teardown_deployment(self, name: str) -> None:
         """Release a candidate deployment through the selected environment."""
-        context = self._host.run_context
-        await self._host.run_blocking(
+        context = self._host._resources
+        await self._host._run_blocking(
             context.run_environment.teardown_deployment, name, log=context.lprint
         )
 
@@ -1039,13 +1057,13 @@ class _Environment:
         self, *, scope: WorkspaceScope | WorkspaceHandle | None = None
     ) -> str | None:
         """Stage candidate-declared Modal model weights before trusted gates."""
-        context = self._host.workspaces.context(scope)
+        context = self._host.workspaces._resources_for(scope)
         if context.run_environment_view.env_kind != "modal":
             return None
-        return await self._host.run_blocking(self._stage_model_requests, context)
+        return await self._host._run_blocking(self._stage_model_requests, context)
 
     @staticmethod
-    def _stage_model_requests(context: _RunContext) -> str | None:
+    def _stage_model_requests(context: _RunResources) -> str | None:
         try:
             volumes = stage_model_requests(context.workspace, log=context.lprint)
         except ModelRequestError as exc:
@@ -1061,8 +1079,8 @@ class _Environment:
         self, *, scope: WorkspaceScope | WorkspaceHandle | None = None
     ) -> None:
         """Rebalance the device assigned to a workspace before a paid turn."""
-        context = self._host.workspaces.context(scope)
-        await self._host.run_blocking(context.reselect_gpu)
+        context = self._host.workspaces._resources_for(scope)
+        await self._host._run_blocking(context.reselect_gpu)
 
     async def execute(
         self,
@@ -1072,9 +1090,9 @@ class _Environment:
         scope: WorkspaceScope | WorkspaceHandle | None = None,
     ) -> SandboxExecutionResult:
         """Execute a policy-selected command in the selected run environment."""
-        context = self._host.workspaces.context(scope)
-        return await self._host.run_blocking(
-            context.judge_backend.execute, command, timeout=timeout_seconds
+        context = self._host.workspaces._resources_for(scope)
+        return await self._host._run_blocking(
+            context.run_environment_session.sandbox.execute, command, timeout=timeout_seconds
         )
 
 
@@ -1091,14 +1109,14 @@ class RunContext:
     ) -> None:
         """Bind request, policy setup, and the application control channel."""
         self.request = request
-        self.setup = setup
+        self._setup = setup
         self._integration = integration
         self._open_agent_environment = open_agent_environment
-        self._context: _RunContext | None = None
+        self._resource_owner: _RunResources | None = None
         self._session_store: SynchronizedSessionStore | None = None
         self._agents: dict[tuple[str | None, str], _LocalAgentHandle] = {}
         self._spawn_lock = asyncio.Lock()
-        self.parent_mutation_lock = asyncio.Lock()
+        self._parent_mutation_lock = asyncio.Lock()
         self._blocking: set[asyncio.Task] = set()
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
@@ -1116,16 +1134,16 @@ class RunContext:
 
     def log(self, message: str) -> None:
         """Write one line to the active run log."""
-        self.run_context.lprint(message)
+        self._resources.lprint(message)
 
     def switch_log(self, label: int | str) -> None:
         """Select a policy phase log for subsequent output and agent turns."""
-        self.run_context.switch_log_file(label)
-        writer = self.run_context.run_log_file
+        self._resources.switch_log_file(label)
+        writer = self._resources.run_log_file
         for agent in self._agents.values():
             agent.set_log_file(writer)
 
-    async def run_blocking[**P, Result](
+    async def _run_blocking[**P, Result](
         self, operation: Callable[P, Result], *args: P.args, **kwargs: P.kwargs
     ) -> Result:
         """Run synchronous policy or host work without racing resource teardown."""
@@ -1161,7 +1179,7 @@ class RunContext:
             open_agent_environment=open_agent_environment,
         )
         try:
-            prepare = asyncio.create_task(asyncio.to_thread(host.prepare))
+            prepare = asyncio.create_task(asyncio.to_thread(host._prepare))
             try:
                 await asyncio.shield(prepare)
             except asyncio.CancelledError:
@@ -1176,46 +1194,25 @@ class RunContext:
         finally:
             await _close_runtime(host, sys.exception())
 
-    def _validate_capabilities(self) -> None:
-        request = self.request
-        if request.run_environment is not None and request.run_environment.name == "skypilot":
-            raise ConfigurationError(
-                ConfigurationDiagnostic(
-                    code="custom_orchestration_skypilot_unsupported",
-                    stage="agent_capability_validation",
-                    message=(
-                        "custom orchestration agents are not supported on SkyPilot "
-                        "until per-agent bridge ownership is implemented"
-                    ),
-                )
-            )
-
     @property
-    def workspace(self) -> Path:
-        """Return the run's writable workspace."""
-        return self.run_context.workspace
-
-    @property
-    def run_context(self) -> _RunContext:
-        """Expose the current core context to policy-owned migration helpers."""
-        if self._context is None:
+    def _resources(self) -> _RunResources:
+        """Return the host-owned resource assembly after preparation."""
+        if self._resource_owner is None:
             raise _RuntimeClosedError
-        return self._context
+        return self._resource_owner
 
-    def prepare(self) -> None:
+    def _prepare(self) -> None:
         """Open the canonical run context once."""
-        if not self.setup.use_default_agent:
-            self._validate_capabilities()
-        self._ensure_context()
+        self._ensure_resources()
 
-    async def spawn(
+    async def _spawn(
         self, definition: AgentDefinition, *, scope: WorkspaceScope | None = None
     ) -> _LocalAgentHandle:
         """Open one independently configured agent in a live workspace."""
         async with self._spawn_lock:
             if self._closed:
                 raise _RuntimeClosedError
-            context = self.workspaces.context(scope)
+            context = self.workspaces._resources_for(scope)
             executor = ThreadPoolExecutor(
                 max_workers=1, thread_name_prefix=f"vs-agent-{definition.id}"
             )
@@ -1247,7 +1244,7 @@ class RunContext:
     def _spawn_agent(
         self,
         definition: AgentDefinition,
-        context: _RunContext,
+        context: _RunResources,
         executor: ThreadPoolExecutor,
         *,
         scope_id: str | None,
@@ -1262,9 +1259,15 @@ class RunContext:
             raise _UnsupportedAgentExecutionPolicyError
         if scope_id is None and self._open_agent_environment is None:
             raise _MissingAgentHostError
-        self._validate_capabilities()
         with ExitStack() as resources:
-            if scope_id is None:
+            if context.run_environment_view.share_agent_session:
+                opened = borrow_run_agent_environment(
+                    context,
+                    mounts=definition.resources,
+                    agent_backend=definition.spec.backend.value,
+                    cli_provider=definition.spec.provider,
+                )
+            elif scope_id is None:
                 opener = self._open_agent_environment
                 if opener is None:
                     raise _MissingAgentHostError
@@ -1311,17 +1314,17 @@ class RunContext:
         self._agents[key] = handle
         return handle
 
-    def _ensure_context(self) -> _RunContext:
+    def _ensure_resources(self) -> _RunResources:
         if self._closed:
             raise _RuntimeClosedError
-        if self._context is not None:
-            return self._context
-        self._context = open_run_context(self.request, self.setup, self._integration)
+        if self._resource_owner is not None:
+            return self._resource_owner
+        self._resource_owner = open_run_resources(self.request, self._setup, self._integration)
         self._session_store = SynchronizedSessionStore(
-            self._context.state.local("agent").slot("sessions.json", AgentSessionState),
-            log=self._context.logger.lprint,
+            self._resource_owner.state.local("agent").slot("sessions.json", AgentSessionState),
+            log=self._resource_owner.logger.lprint,
         )
-        return self._context
+        return self._resource_owner
 
     async def close(self) -> None:
         """Release agents in reverse spawn order, then the run context."""
@@ -1347,9 +1350,9 @@ class RunContext:
                 await self.workspaces.close()
             except BaseException as exc:  # noqa: BLE001
                 errors.append(exc)
-        if self._context is not None:
+        if self._resource_owner is not None:
             try:
-                await asyncio.to_thread(self._context.close)
+                await asyncio.to_thread(self._resource_owner.close)
             except BaseException as exc:  # noqa: BLE001
                 errors.append(exc)
         if errors:

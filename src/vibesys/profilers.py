@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from vibesys.constants import DomainName
+from vs_agent.api import MCPServerSpec
 
 
 class ProfilerKind(StrEnum):
@@ -21,6 +22,19 @@ class ProfilerKind(StrEnum):
     MACOS_CPU = "macos_cpu"
     LINUX_CPU = "linux_cpu"
     HEADROOM = "headroom"
+
+
+def mcp_spec(profiler_kind: ProfilerKind) -> MCPServerSpec | None:
+    """Build the analysis server grant for a selected profiler."""
+    kind = require_profiler_kind(profiler_kind)
+    if kind is ProfilerKind.NONE:
+        return None
+    definition = profiler_definition(kind)
+    return MCPServerSpec(
+        name=definition.mcp_name,
+        command="python",
+        args=(definition.server_path,),
+    )
 
 
 @dataclass(frozen=True)

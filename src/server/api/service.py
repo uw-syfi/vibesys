@@ -226,7 +226,7 @@ class RunApi:
         Routes through `self._session_provider()` (a `vibesys.api.RunControl`)
         rather than a channel this class owns: once a session's
         `vibesys.run.run_control.RunControlChannel` is private to that
-        session (`vibesys.context._RunContext.invoke` reads it at each
+        session (`vibesys.orchestration.runtime` reads it at each agent
         invocation boundary; the controller's status/journal mirror its
         events, see `server.integration.RunIntegrationAdapter
         ._project_control_event`), there is no run-scoped channel to hold

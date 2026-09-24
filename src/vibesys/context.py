@@ -1,23 +1,21 @@
 """Shared lifecycle context for one canonical VibeSys project run."""
 
 import asyncio
-import re
 import shutil
 import time
-import uuid
-from collections.abc import Callable, Generator, Mapping
-from contextlib import ExitStack, contextmanager
+from collections.abc import Callable, Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import Any, TextIO, TypeVar, overload
+from typing import TextIO, overload
 
 from pydantic import BaseModel
 
 from vibesys import backends, boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config, resolve_agent_driver
-from vibesys.backends.base import ComputeBackendImpl, ContentionMonitor
+from vibesys.backends.base import ComputeBackendImpl
 from vibesys.config import Config, as_config
 from vibesys.constants import (
     PROJECT_ROOT,
@@ -36,16 +34,9 @@ from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators import load_evaluator_package, tool_install_root
 from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.events import (
-    AgentExecutionActivityData,
-    AgentExecutionFinishedData,
-    AgentExecutionStartedData,
     CoreEventType,
     EventStatus,
     ExperimentsChangedData,
-    InvocationFinishedData,
-    InvocationStartedData,
-    PhaseData,
-    json_value,
 )
 from vibesys.orchestration import OrchestrationResumeDecision
 from vibesys.orchestration.request import RunRequest
@@ -65,14 +56,12 @@ from vibesys.run import (
     ExperimentRepository,
     GitTracker,
     ProjectProvisioningSpec,
-    RunCommands,
     RunLogger,
     RunPaths,
     RunResourceHandoff,
     RunStateNamespace,
     Workspace,
     provision_project,
-    splice_steering,
 )
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration
@@ -84,8 +73,6 @@ from vibesys.run.recovery import RecoveryWorkspace
 from vibesys.run.round_transaction import (
     MultiSlotRoundTransactionCoordinator,
     RoundRecoveryOutcome,
-    RoundTransaction,
-    RoundTransactionCoordinator,
 )
 from vibesys.run.state import RunState
 from vibesys.sandbox.run_environment import (
@@ -100,12 +87,7 @@ from vibesys.sandbox.run_environment import (
 from vibesys.skills import SkillSelection, platform_skill_selection
 from vs_agent.api import (
     AgentBackend,
-    AgentClientProtocol,
-    AgentProgress,
-    AgentSessionState,
-    DurableSessionStore,
     agent_driver_supports_mcp_servers,
-    build_agent_client,
     task_agent_host_resources,
 )
 from vs_project.api import (
@@ -113,12 +95,9 @@ from vs_project.api import (
     OrchestrationRunManifest,
     Project,
     RunExecutionRecord,
-    StateTransition,
     generate_run_id,
 )
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy, Sandbox
-
-T = TypeVar("T", bound=BaseModel)
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,41 +113,22 @@ class RunSetup:
     """Policy-owned facts needed before the shared run context can open."""
 
     state_namespace: str | None = None
-    state_model: type[BaseModel] | None = None
     state_slots: Mapping[str, type[BaseModel]] | None = None
     resume_policy: (
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
     ) = None
     resume_recovery: Callable[[RecoveryWorkspace], None] | None = None
-    use_default_agent: bool = False
     start_hints: RunStartHints | None = None
 
     def __post_init__(self) -> None:
         """Reject incomplete policy-owned state slot declarations."""
-        if self.state_namespace is None and (self.state_model is not None or self.state_slots):
+        if self.state_namespace is None and self.state_slots:
             raise ValueError("RunSetup state slots require state_namespace")  # noqa: TRY003
-        if self.state_namespace is not None and self.state_model is None and not self.state_slots:
+        if self.state_namespace is not None and not self.state_slots:
             raise ValueError("RunSetup requires at least one state slot")  # noqa: TRY003
-        if self.state_model is not None and self.state_slots:
-            raise ValueError("RunSetup cannot mix legacy state_model with state_slots")  # noqa: TRY003
         if self.state_namespace == "":
             raise ValueError("RunSetup.state_namespace must be nonempty")  # noqa: TRY003
-
-
-class _MissingDefaultAgentClientError(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("this run has no built-in agent client")
-
-
-class _MissingDefaultAgentSpecError(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("built-in agent client requires an agent specification")
-
-
-def _attempt_from_label(round_label: str) -> int | None:
-    match = re.search(r"retry-(\d+)", round_label)
-    return int(match.group(1)) if match else None
 
 
 def _execution_status(error: BaseException | None) -> EventStatus:
@@ -295,58 +255,31 @@ def _exact_resume_descriptor(
 
 def _round_transaction_for_setup(
     setup: RunSetup,
-) -> (
-    Callable[
-        [Project, GitTracker, str],
-        RoundTransactionCoordinator | MultiSlotRoundTransactionCoordinator,
-    ]
-    | None
-):
+) -> Callable[[Project, GitTracker, str], MultiSlotRoundTransactionCoordinator] | None:
     namespace = setup.state_namespace
-    model = setup.state_model
     models = setup.state_slots
     if namespace is None:
         return None
-
-    if models is not None:
-
-        def open_multi_coordinator(
-            project: Project, git: GitTracker, run_id: str
-        ) -> MultiSlotRoundTransactionCoordinator:
-            # A resumed v4 run can still have a journal written before the
-            # policy adopted multi-slot checkpoints. Replay it through its
-            # original typed slot before opening the new journal.
-            legacy_model = models.get("state.json")
-            if legacy_model is not None:
-                legacy_slot = project.state.portable_namespace(run_id, namespace).slot(
-                    "state.json", legacy_model
-                )
-                RoundTransactionCoordinator(project, git, run_id, state_slot=legacy_slot).recover()
-            return MultiSlotRoundTransactionCoordinator(
-                project, git, run_id, namespace=namespace, models=models
-            )
-
-        return open_multi_coordinator
-
-    if model is None:
-        return None
+    if models is None:
+        raise TypeError("RunSetup requires declared state slots")  # noqa: TRY003
 
     def open_coordinator(
         project: Project, git: GitTracker, run_id: str
-    ) -> RoundTransactionCoordinator[BaseModel]:
-        slot = project.state.portable_namespace(run_id, namespace).slot("state.json", model)
-        return RoundTransactionCoordinator(project, git, run_id, state_slot=slot)
+    ) -> MultiSlotRoundTransactionCoordinator:
+        return MultiSlotRoundTransactionCoordinator(
+            project, git, run_id, namespace=namespace, models=models
+        )
 
     return open_coordinator
 
 
-def open_run_context(
+def open_run_resources(
     request: RunRequest, setup: RunSetup, integration: LocalRunIntegration
-) -> "_RunContext":
+) -> "_RunResources":
     """Open the one project context from a canonical request and policy setup."""
     teardown_stack = ExitStack()
     try:
-        return _assemble_run_context(
+        return _assemble_run_resources(
             teardown_stack=teardown_stack,
             request=request,
             setup=setup,
@@ -370,13 +303,13 @@ def _close_after_construction_failure(
         )
 
 
-def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
+def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
     *,
     teardown_stack: ExitStack,
     request: RunRequest,
     setup: RunSetup,
     integration: LocalRunIntegration,
-) -> "_RunContext":
+) -> "_RunResources":
     bundle = request.input_bundle
     exp_name = request.resume.run_id if request.resume is not None else request.exp_name
     if exp_name is None:
@@ -409,7 +342,6 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
     remote_repo = request.remote_repo
     repo_visibility = request.repo_visibility
     round_transaction_factory = _round_transaction_for_setup(setup)
-    build_default_agent_client = setup.use_default_agent
     context_start = time.perf_counter()
     # Boot spans recorded before this function ran (the dispatch preamble)
     # come first, so the run log reads in the order the work happened once
@@ -484,16 +416,6 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
             resolved_backend = str(agent_backend or config.agent.backend or AgentBackend.CLI)
             resolved_cli_provider = cli_provider or config.agent.cli_provider or "codex"
             model_name = config.model.name
-            agent_spec = (
-                agent_spec_from_config(
-                    config,
-                    backend=agent_backend,
-                    provider=cli_provider,
-                    model=model_name,
-                )
-                if build_default_agent_client
-                else None
-            )
         with boot_trace.span("profiler_preflight"):
             resolved_profiler_kind = resolve_profiler_kind(
                 profiler_kind,
@@ -502,24 +424,28 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
                 environment_default_profiler_kind=environment.default_profiler_kind,
                 environment_supported_profiler_kinds=environment.supported_profiler_kinds,
             )
-            driver_supports_mcp = (
-                agent_driver_supports_mcp_servers(agent_spec) if agent_spec is not None else None
-            )
-            if resolved_profiler_kind in ACTIVE_PROFILER_KINDS and driver_supports_mcp is False:
-                driver_name = resolve_agent_driver(config)
-                definition = profiler_definition(resolved_profiler_kind)
-                raise ConfigurationError(
-                    ConfigurationDiagnostic(
-                        code="agent_profiler_incompatible",
-                        stage="agent_capability_validation",
-                        message=(
-                            f"Profiler {resolved_profiler_kind.value!r} requires session MCP server "
-                            f"{definition.mcp_name!r}, but agent driver {driver_name.value!r} does not "
-                            "support session MCP servers. Select agent.driver='agentshim' or "
-                            "disable profiling with --profiler none."
-                        ),
-                    )
+            if resolved_profiler_kind in ACTIVE_PROFILER_KINDS:
+                agent_spec = agent_spec_from_config(
+                    config,
+                    backend=agent_backend,
+                    provider=cli_provider,
+                    model=model_name,
                 )
+                if not agent_driver_supports_mcp_servers(agent_spec):
+                    driver_name = resolve_agent_driver(config)
+                    definition = profiler_definition(resolved_profiler_kind)
+                    raise ConfigurationError(
+                        ConfigurationDiagnostic(
+                            code="agent_profiler_incompatible",
+                            stage="agent_capability_validation",
+                            message=(
+                                f"Profiler {resolved_profiler_kind.value!r} requires session MCP server "
+                                f"{definition.mcp_name!r}, but agent driver {driver_name.value!r} does not "
+                                "support session MCP servers. Select agent.driver='agentshim' or "
+                                "disable profiling with --profiler none."
+                            ),
+                        )
+                    )
             profiler_preflight = preflight_profiler_kind(resolved_profiler_kind)
             if not profiler_preflight.usable:
                 raise ConfigurationError(
@@ -684,9 +610,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
             git.init(existing, trusted_input_baseline=trusted_input_baseline)
         with boot_trace.span("project_state_resume"):
             effective_orchestration = orchestration_descriptor
-            round_transaction_coordinator: (
-                RoundTransactionCoordinator | MultiSlotRoundTransactionCoordinator | None
-            ) = None
+            round_transaction_coordinator: MultiSlotRoundTransactionCoordinator | None = None
             if existing:
                 project_state.load_project()
                 run_manifest = project_state.load_run(run_id)
@@ -956,15 +880,6 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
             )
             session = teardown_stack.enter_context(environment.open(run_environment_request))
         with boot_trace.span("device_monitor_start"):
-            # Snapshot the agent-facing commands once the session is open; the
-            # view's paths are fixed for the session lifetime.
-            commands = RunCommands(
-                judge_accuracy_command=session.view.paths.accuracy_command,
-                judge_benchmark_command=session.view.paths.benchmark_command,
-                profiler_support_agent_path=session.view.paths.profiler_support,
-                profiler_benchmark_command=session.view.paths.benchmark_command,
-            )
-
             # Start backend-specific background monitoring (CUDA: nvidia-smi).
             device = DeviceLease(backend_impl, log_dir=log_dir, run_environment_view=session.view)
             teardown_stack.callback(device.close)
@@ -983,42 +898,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
 
         run_state = RunState(project, git, run_id)
 
-        agent_client: AgentClientProtocol | None = None
-        if build_default_agent_client:
-            if agent_spec is None:
-                raise _MissingDefaultAgentSpecError
-            with boot_trace.span("agent_client_build"):
-                # Provider session IDs for built-in roles remain machine-local.
-                agent_session_store = DurableSessionStore(
-                    run_state.local(RunStateNamespace.AGENT).slot(
-                        "sessions.json", AgentSessionState
-                    ),
-                    log=logger.lprint,
-                )
-                # Existing loops share this client and its role sandbox map.
-                agent_client = build_agent_client(
-                    spec=agent_spec,
-                    session_store=agent_session_store,
-                    backends={
-                        "implementer": session.sandbox,
-                        "judge": session.sandbox,
-                        "perf_eval": session.sandbox,
-                        "profiler": session.sandbox,
-                        "orchestrator": session.sandbox,
-                    },
-                    skill_source_dirs=skill_source_paths,
-                    skill_selection=platform_skill_selection(backend),
-                    run_log_file=logger.writer,
-                    use_docker=session.view.cli_sandboxed,
-                    log_dir=log_dir,
-                    project_path_policy=project_path_policy,
-                    require_host_sandbox=not session.view.cli_sandboxed,
-                    host_resources=agent_host_resources,
-                    events=output_sink(),
-                )
-            teardown_stack.callback(agent_client.close)
-
-        result = _RunContext(
+        result = _RunResources(
             backend=backend,
             run_environment=environment,
             integration=integration,
@@ -1050,9 +930,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
             teardown_stack=teardown_stack,
             environment_request=run_environment_request,
             run_environment_session=session,
-            commands=commands,
             device=device,
-            agent_client=agent_client,
             project=project,
             state=run_state,
             run_id=run_id,
@@ -1093,7 +971,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
 
 
 @dataclass(frozen=True, slots=True)
-class WorkspaceContextSpec:
+class WorkspaceResourceSpec:
     """One isolated workspace's identity and environment settings."""
 
     scope_id: str
@@ -1103,12 +981,11 @@ class WorkspaceContextSpec:
     log_directory: str = "workspaces"
     agent_backend: str | None = None
     cli_provider: str | None = None
-    use_default_agent: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class ScopedAgentEnvironment:
-    """One agent sandbox opened over an isolated workspace context."""
+    """One agent's view of a workspace sandbox."""
 
     session: RunEnvironmentSession
     skill_source_dirs: tuple[Path, ...]
@@ -1117,20 +994,71 @@ class ScopedAgentEnvironment:
     host_resources: tuple[HostResource, ...]
     backends: dict[str, Sandbox] | None
     use_docker: bool
+    owns_session: bool = True
 
     def close(self) -> None:
         """Release this agent's environment session."""
-        self.session.close()
+        if self.owns_session:
+            self.session.close()
+
+
+def borrow_run_agent_environment(
+    context: "_RunResources",
+    *,
+    mounts: tuple[HostResource, ...] = (),
+    agent_backend: str | None = None,
+    cli_provider: str | None = None,
+) -> ScopedAgentEnvironment:
+    """Share an already-opened workspace session with an agent client.
+
+    SkyPilot's evaluator bridge and editor sandbox have one owner per workspace.
+    Opening another environment for each role would bind the same bridge socket
+    and let an agent close a bridge still used by the run.
+    """
+    base = context.environment_request
+    if (
+        mounts
+        or (agent_backend is not None and agent_backend != base.agent_backend)
+        or (cli_provider is not None and cli_provider != base.cli_provider)
+    ):
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="skypilot_agent_environment_conflict",
+                stage="agent_capability_validation",
+                message=(
+                    "SkyPilot agents sharing a workspace must use its configured backend, "
+                    "provider, and mounts"
+                ),
+            )
+        )
+    session = context.run_environment_session
+    return ScopedAgentEnvironment(
+        session=session,
+        skill_source_dirs=tuple(context.skill_source_paths),
+        skill_selection=platform_skill_selection(context.backend),
+        project_path_policy=base.project_path_policy,
+        host_resources=context.agent_host_resources,
+        backends={"chat": session.sandbox} if session.view.cli_sandboxed else None,
+        use_docker=session.view.cli_sandboxed,
+        owns_session=False,
+    )
 
 
 def open_scoped_agent_environment(
-    context: "_RunContext",
+    context: "_RunResources",
     *,
     mounts: tuple[HostResource, ...] = (),
     agent_backend: str | None = None,
     cli_provider: str | None = None,
 ) -> ScopedAgentEnvironment:
     """Open an independently configured agent in this context's workspace."""
+    if context.run_environment_view.share_agent_session:
+        return borrow_run_agent_environment(
+            context,
+            mounts=mounts,
+            agent_backend=agent_backend,
+            cli_provider=cli_provider,
+        )
     base = context.environment_request
     request = replace(
         base,
@@ -1161,65 +1089,26 @@ def open_scoped_agent_environment(
     )
 
 
-def create_workspace_context(parent: "_RunContext", spec: WorkspaceContextSpec) -> "_RunContext":
-    """Open an isolated Git tree, run environment, and optional agent client."""
+def create_workspace_resources(
+    parent: "_RunResources", spec: WorkspaceResourceSpec
+) -> "_RunResources":
+    """Open an isolated Git tree and run environment."""
     teardown_stack = ExitStack()
     try:
-        return _assemble_workspace_context(teardown_stack=teardown_stack, parent=parent, spec=spec)
+        return _assemble_workspace_resources(
+            teardown_stack=teardown_stack, parent=parent, spec=spec
+        )
     except BaseException as construction_error:
         _close_after_construction_failure(teardown_stack, construction_error)
         raise
 
 
-def create_candidate_context(  # noqa: PLR0913  # tracked: #288
-    parent: "_RunContext",
-    *,
-    config: Config,
-    generation: int,
-    child_idx: int,
-    parent_commit: str,
-    agent_backend: str | None = None,
-    cli_provider: str | None = None,
-) -> "_RunContext":
-    """Build an isolated sub-context for evaluating one candidate concurrently.
-
-    The sub-context shares the parent run's identity, model, compute backend,
-    run-environment policy, and — crucially — the parent workspace's **git
-    object store**, so a candidate's commit lands in the one evolutionary
-    lineage. Everything that would collide under concurrency is its own:
-
-    - a **git worktree** checked out at ``parent_commit`` (isolated working
-      tree / index / detached HEAD; edits never touch the shared tree);
-    - a fresh **run-environment session** (its own isolated editor sandbox);
-    - its own **agent client** (the CLI session is not thread-safe);
-    - a **no-tee ``RunLogger``** writing only to the candidate's log file — only
-      the top-level run logger may own the process ``sys.stderr``.
-
-    The caller gates this path on the selected environment's parallel-candidate
-    capability. Close the returned context (or use it as a context manager) to
-    stop environment-owned resources and remove the worktree.
-    """
-    return create_workspace_context(
-        parent,
-        WorkspaceContextSpec(
-            scope_id=f"g{generation}c{child_idx}",
-            revision=parent_commit,
-            config=config,
-            log_namespace=RunStateNamespace.EVOLVE,
-            log_directory="candidates",
-            agent_backend=agent_backend,
-            cli_provider=cli_provider,
-            use_default_agent=True,
-        ),
-    )
-
-
-def _assemble_workspace_context(
+def _assemble_workspace_resources(
     *,
     teardown_stack: ExitStack,
-    parent: "_RunContext",
-    spec: WorkspaceContextSpec,
-) -> "_RunContext":
+    parent: "_RunResources",
+    spec: WorkspaceResourceSpec,
+) -> "_RunResources":
     config = as_config(spec.config)
     workspace = parent.project.state.candidate_worktree_directory(parent.run_id, spec.scope_id)
     log_dir = parent.state.local(spec.log_namespace).external_directory(
@@ -1298,54 +1187,13 @@ def _assemble_workspace_context(
     session = teardown_stack.enter_context(
         parent.run_environment.open(workspace_environment_request)
     )
-    commands = RunCommands(
-        judge_accuracy_command=session.view.paths.accuracy_command,
-        judge_benchmark_command=session.view.paths.benchmark_command,
-        profiler_support_agent_path=session.view.paths.profiler_support,
-        profiler_benchmark_command=session.view.paths.benchmark_command,
-    )
-
-    # No session store: an evolve candidate names no conversation narrower than
-    # an agent role, so every one of its turns lands on a role-scoped key, and
-    # role-scoped conversations are never checkpointed (they belong to one
-    # process). Candidates also share the parent's run ID and local namespace
-    # and run concurrently, so a single per-run map would alias them anyway.
-    agent_client = None
-    if spec.use_default_agent:
-        agent_spec = agent_spec_from_config(
-            config,
-            backend=spec.agent_backend,
-            provider=spec.cli_provider,
-            model=parent.model_name,
-        )
-        agent_client = build_agent_client(
-            spec=agent_spec,
-            backends={
-                "implementer": session.sandbox,
-                "judge": session.sandbox,
-                "perf_eval": session.sandbox,
-                "profiler": session.sandbox,
-                "orchestrator": session.sandbox,
-            },
-            skill_source_dirs=parent.skill_source_paths,
-            skill_selection=platform_skill_selection(parent.backend),
-            run_log_file=logger.writer,
-            use_docker=session.view.cli_sandboxed,
-            log_dir=log_dir,
-            project_path_policy=project_path_policy,
-            require_host_sandbox=not session.view.cli_sandboxed,
-            host_resources=parent.agent_host_resources,
-            events=output_sink(),
-        )
-        teardown_stack.callback(agent_client.close)
-
     paths = RunPaths(
         project_root=workspace,
         log_dir=log_dir,
         run_log_path=logger.path,
     )
 
-    return _RunContext(
+    return _RunResources(
         backend=parent.backend,
         run_environment=parent.run_environment,
         integration=parent.integration,
@@ -1379,9 +1227,7 @@ def _assemble_workspace_context(
         teardown_stack=teardown_stack,
         environment_request=workspace_environment_request,
         run_environment_session=session,
-        commands=commands,
         device=parent.device,  # shared under the environment's parallel contract
-        agent_client=agent_client,
         project=parent.project,
         state=parent.state,
         run_id=parent.run_id,
@@ -1389,20 +1235,12 @@ def _assemble_workspace_context(
     )
 
 
-class _RunContext:
-    """Experiment lifecycle owner shared by simple, orchestrate, and issue loops.
+class _RunResources:
+    """Private owner of one workspace's assembled resources and teardown stack.
 
-    ``_RunContext`` sits above the run-environment abstraction:
-
-        loop -> _RunContext -> RunEnvironment -> ComputeBackendImpl.make_sandbox -> Sandbox
-
-    Instances are assembled by :func:`open_run_context`, which owns every
-    construction side effect (project state, log files, candidate worktree,
-    model, compute backend, copied helper inputs, Git snapshot tracking,
-    run-environment session, agent client, GPU monitor). Environment-specific
-    setup should stay in ``vibesys.sandbox.run_environment``; this class only
-    asks the selected run environment for policy decisions and the opened
-    sandbox session.
+    ``RunContext`` exposes focused policy capabilities. This object keeps the
+    Git tracker, environment session, logger, state namespace, and device lease
+    together so setup failure and run closure unwind them in construction order.
     """
 
     def __init__(  # noqa: ANN204, PLR0913  # tracked: #288
@@ -1439,15 +1277,11 @@ class _RunContext:
         teardown_stack: ExitStack,
         environment_request: RunEnvironmentRequest,
         run_environment_session: RunEnvironmentSession,
-        commands: RunCommands,
         device: DeviceLease,
-        agent_client: AgentClientProtocol | None,
         project: Project,
         state: RunState,
         run_id: str,
-        round_transaction_coordinator: (
-            RoundTransactionCoordinator | MultiSlotRoundTransactionCoordinator | None
-        ) = None,
+        round_transaction_coordinator: (MultiSlotRoundTransactionCoordinator | None) = None,
         agent_host_resources: tuple[HostResource, ...] = (),
     ):
         self.backend = backend
@@ -1488,21 +1322,13 @@ class _RunContext:
         self.state = state
         self.run_id = run_id
         self._round_transaction_coordinator = round_transaction_coordinator
-        self._pending_round_transaction: RoundTransaction | None = None
         self._experiment_repository = experiment_repository
         self._teardown_stack = teardown_stack
         self.environment_request = environment_request
         self.run_environment_session = run_environment_session
         self.run_environment_view = run_environment_session.view
-        self.implementer_backend = run_environment_session.sandbox
-        self.judge_backend = run_environment_session.sandbox
-        self.commands = commands
         self.device = device
-        # Expose the picked device for legacy callers (gpu monitor tests etc).
-        self.selected_gpu = device.selected_device
-        self._agent_client = agent_client
         self._closed = False
-        self._progress_stack: list[AgentProgress] = []
 
     # -- path passthroughs ----------------------------------------------------
     # Canonical values live in the frozen ``RunPaths`` record.
@@ -1512,51 +1338,12 @@ class _RunContext:
         return self._paths.project_root
 
     @property
-    def agent_client(self) -> AgentClientProtocol:
-        """Return the built-in loop client when this context has one."""
-        if self._agent_client is None:
-            raise _MissingDefaultAgentClientError
-        return self._agent_client
-
-    @agent_client.setter
-    def agent_client(self, client: AgentClientProtocol) -> None:
-        self._agent_client = client
-
-    @property
     def log_dir(self) -> Path:
         return self._paths.log_dir
 
     @property
     def workspace(self) -> Path:
         return self._paths.workspace
-
-    def begin_completed_round(
-        self,
-        round_number: int,
-        *,
-        state_transition: StateTransition,
-    ) -> None:
-        """Journal a completed project round before mutating local state."""
-        if self._round_transaction_coordinator is None:
-            return
-        if isinstance(self._round_transaction_coordinator, MultiSlotRoundTransactionCoordinator):
-            raise TypeError
-        if self._pending_round_transaction is not None:
-            raise RuntimeError("a completed-round transaction is already active")  # noqa: TRY003  # tracked: #288
-        self._pending_round_transaction = self._round_transaction_coordinator.begin(
-            round_number,
-            state_transition=state_transition,
-        )
-
-    def persist_completed_round(self) -> None:
-        """Commit one completed project round and its active-state transition."""
-        if self._round_transaction_coordinator is None:
-            return
-        transaction = self._pending_round_transaction
-        if transaction is None:
-            raise RuntimeError("begin_completed_round must precede project round persistence")  # noqa: TRY003  # tracked: #288
-        transaction.complete()
-        self._pending_round_transaction = None
 
     def publish_committed_state(
         self,
@@ -1586,198 +1373,6 @@ class _RunContext:
         """Skill source directories copied into the workspace for agents."""
         return self._skill_source_paths
 
-    @property
-    def gpu_monitor(self) -> "ContentionMonitor | None":
-        """The active device monitor (owned by ``DeviceLease``)."""
-        return self.device.monitor
-
-    @gpu_monitor.setter
-    def gpu_monitor(self, monitor: "ContentionMonitor | None") -> None:
-        self.device.monitor = monitor
-
-    def gpu_env(self) -> dict[str, str]:
-        """Env vars for the CLI agent, empty when that agent runs in a container.
-
-        The pin names a *host* device index (see :meth:`DeviceLease.gpu_env`).
-        An editor container is started with ``--gpus device=N``, so inside it
-        the selected GPU is device 0 and the container env already says so;
-        forwarding the host index there would point the agent at a device the
-        container cannot see. Keeping the pin out of the session spec also
-        keeps a mid-run device reselect from changing the session fingerprint
-        and evicting the live conversation.
-        """
-        if self.agent_client.capabilities.container_execution:
-            return {}
-        return self.device.gpu_env()
-
-    @contextmanager
-    def progress(self, progress: AgentProgress) -> Generator[None]:
-        """Temporarily attach loop progress to agent invocations in this context."""
-        self._progress_stack.append(progress)
-        try:
-            yield
-        finally:
-            self._progress_stack.pop()
-
-    def current_progress(self) -> AgentProgress | None:
-        """Return the active loop progress, if a loop has scoped one."""
-        if not self._progress_stack:
-            return None
-        return self._progress_stack[-1]
-
-    def invoke(  # noqa: PLR0913  # tracked: #288
-        self,
-        *,
-        kind: str,
-        system_prompt: str,
-        user_prompt: str,
-        response_cls: type[T],
-        fallback_factory: Callable[[], T],
-        round_label: str = "",
-        progress: AgentProgress | None = None,
-        **extra: Any,  # noqa: ANN401  # tracked: #288
-    ) -> T:
-        """Invoke an agent through ``self.agent_client`` with workspace+env defaults.
-
-        Wraps ``self.agent_client.invoke(...)`` so the per-call boilerplate
-        (``workspace=self.workspace``, ``env=self.gpu_env()``) doesn't have
-        to be repeated at every call site.  Extra kwargs are forwarded to
-        ``agent_client.invoke`` unchanged so loop-specific options
-        (e.g. ``iteration=`` for plain-loop runner extensions) still work.
-        """
-        client = self.agent_client
-        driver = client.driver_name
-        provider = client.provider
-        model = client.model_for_kind(kind)
-        control = self.integration.control
-        control.raise_if_stopped()
-        control.wait_while_paused()
-        steer_texts = control.take_pending_steer()
-        user_prompt = splice_steering(user_prompt, steer_texts)
-        execution_id = uuid.uuid4().hex
-        if steer_texts:
-            control.notify_steer_consumed(
-                agent_kind=kind, round_label=round_label, execution_id=execution_id
-            )
-        event_fields: dict[str, Any] = {
-            "agent_kind": kind,
-            "round_label": round_label,
-            "execution_id": execution_id,
-        }
-        attempt = _attempt_from_label(round_label)
-        self.events.emit(
-            CoreEventType.AGENT_EXECUTION_STARTED,
-            status=EventStatus.ACTIVE,
-            data=AgentExecutionStartedData(
-                stage=kind,
-                attempt=attempt,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                activity=AgentExecutionActivityData(
-                    mode="thinking",
-                    summary=f"{kind.replace('_', ' ').title()} is working",
-                ),
-                driver=driver,
-                provider=provider,
-                model=model,
-            ),
-            **event_fields,
-        )
-        self.events.emit(
-            CoreEventType.PHASE_STARTED,
-            status=EventStatus.ACTIVE,
-            data=PhaseData(phase=kind, attempt=attempt),
-            **event_fields,
-        )
-        self.events.emit(
-            CoreEventType.INVOCATION_STARTED,
-            status=EventStatus.ACTIVE,
-            data=InvocationStartedData(system_prompt=system_prompt, user_prompt=user_prompt),
-            **event_fields,
-        )
-        result: T | None = None
-        error: BaseException | None = None
-        try:
-            result = self.agent_client.invoke(
-                kind=kind,
-                workspace=self.workspace,
-                system_prompt=system_prompt,
-                env=self.gpu_env(),
-                user_prompt=user_prompt,
-                response_cls=response_cls,
-                fallback_factory=fallback_factory,
-                round_label=round_label,
-                invocation_id=execution_id,
-                progress=progress if progress is not None else self.current_progress(),
-                **extra,
-            )
-            return result  # noqa: RET504, TRY300  # tracked: #288
-        except BaseException as exc:
-            error = exc
-            raise
-        finally:
-            status = _execution_status(error)
-            error_text = f"{type(error).__name__}: {error}" if error is not None else None
-            self.events.emit(
-                CoreEventType.AGENT_EXECUTION_FINISHED,
-                status=status,
-                data=AgentExecutionFinishedData(result=json_value(result), error=error_text),
-                **event_fields,
-            )
-            self.events.emit(
-                CoreEventType.INVOCATION_FINISHED,
-                status=status,
-                data=InvocationFinishedData(result=json_value(result), error=error_text),
-                **event_fields,
-            )
-            self.events.emit(
-                CoreEventType.PHASE_FINISHED,
-                status=status,
-                data=PhaseData(phase=kind, attempt=attempt),
-                **event_fields,
-            )
-
-    def wait_for_debug(self, step: str) -> None:
-        if self.debug:
-            input(f"\n[debug] {step}. Press Enter to continue...")
-
-    def snapshot_workspace(self, label: str) -> None:
-        self.git.snapshot(label)
-
-    def trusted_input_changes(self) -> list[str]:
-        """Return evaluator-owned paths changed since the trusted baseline."""
-        return self.git.trusted_input_changes()
-
-    # -- command passthroughs -------------------------------------------------
-    # Canonical values live in the frozen ``RunCommands`` snapshot; these
-    # properties keep existing ``ctx.judge_accuracy_command``-style call
-    # sites working.
-
-    @property
-    def objective_location(self) -> str:
-        """Return the framework-owned effective objective path seen by agents."""
-        return self.run_environment_view.paths.objective
-
-    @property
-    def judge_accuracy_command(self) -> str | None:
-        """Return the accuracy command as seen by the judge agent."""
-        return self.commands.judge_accuracy_command
-
-    @property
-    def judge_benchmark_command(self) -> str | None:
-        """Return the benchmark command as seen by the judge agent."""
-        return self.commands.judge_benchmark_command
-
-    @property
-    def profiler_support_agent_path(self) -> str | None:
-        """Return the selected profiler support path as seen by its agent."""
-        return self.commands.profiler_support_agent_path
-
-    @property
-    def profiler_benchmark_command(self) -> str | None:
-        """Return the benchmark command as seen by the profiler agent."""
-        return self.commands.profiler_benchmark_command
-
     def lprint(self, text: str) -> None:
         self.logger.lprint(text)
 
@@ -1785,16 +1380,10 @@ class _RunContext:
         """Switch to a per-phase log file — see :meth:`RunLogger.switch`."""
         self.logger.switch(label)
         self._paths = replace(self._paths, run_log_path=self.logger.path)
-        # Update the agent client's log file handle so subsequent
-        # invoke() calls write to the new step log.
-        if self._agent_client is not None:
-            self._agent_client.set_log_file(self.logger.writer)
 
     def reselect_gpu(self) -> None:
         """Delegate mid-run device rebalance — see :meth:`DeviceLease.reselect`."""
         self.device.reselect()
-        # Mirror backend state on _RunContext for legacy callers/tests.
-        self.selected_gpu = self.device.selected_device
 
     def close(self) -> None:
         if self._closed:
@@ -1804,7 +1393,7 @@ class _RunContext:
         # environment teardown, run-environment exit, and log closure.
         self._teardown_stack.close()
 
-    def __enter__(self) -> "_RunContext":
+    def __enter__(self) -> "_RunResources":
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:

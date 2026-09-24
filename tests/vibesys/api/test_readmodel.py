@@ -10,10 +10,9 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict, Unpack
 
-from vibesys.api.agent import AgentRunProjection, agent_projection
-from vibesys.api.contracts import RunStatus
-from vibesys.loops.agent.hypotheses import measurement_delta_reason
-from vibesys.loops.agent.state import (
+from vibesys.agent_run.hypotheses import measurement_delta_reason
+from vibesys.agent_run.readmodel import project_run_view as _project_run_view
+from vibesys.agent_run.state import (
     AgentRunState,
     Hypothesis,
     HypothesisMeasurement,
@@ -21,7 +20,8 @@ from vibesys.loops.agent.state import (
     HypothesisReview,
     HypothesisStrategy,
 )
-from vibesys.loops.agent.readmodel import project_run_view as _project_run_view
+from vibesys.api.agent import AgentRunProjection, agent_projection
+from vibesys.api.contracts import RunStatus
 from vibesys.schemas import CandidateDisposition, OrchestratorPlan, derive_hypothesis_title
 from vs_loop_state.api import RoundRecord
 

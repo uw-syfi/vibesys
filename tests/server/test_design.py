@@ -12,10 +12,9 @@ from tests.support.run_execution import run_execution_record
 from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
 from server.api.workspace_git import WorkspacePatchReader
+from vibesys.agent_run.readmodel import project_run_view
+from vibesys.agent_run.state import AgentRunState, AgentRunStateStore, Hypothesis
 from vibesys.api.contracts import RunStatus
-from vibesys.loops.agent.state import AgentRunState, Hypothesis
-from vibesys.loops.agent.readmodel import project_run_view
-from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vibesys.schemas import OrchestratorPlan

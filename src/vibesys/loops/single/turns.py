@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys import constants
+from vibesys.agent_run import issue_board
+from vibesys.agent_run.evidence import _pareto_archive_conflict
+from vibesys.agent_run.hypotheses import apply_strategy_updates
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.events import FrameworkSource
-from vibesys.loops.agent import issue_board
-from vibesys.loops.agent.hypotheses import apply_strategy_updates
-from vibesys.loops.agent.policy_support import _pareto_archive_conflict
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
@@ -31,10 +31,10 @@ from vibesys.skills import build_skill_catalog, resolve_skill_selections
 from vs_agent.api import AgentSessionKey, SessionScope
 
 if TYPE_CHECKING:
-    from vibesys.loops.agent.orchestration import AgentOrchestrationOptions
-    from vibesys.loops.agent.policy_attempts import AttemptRequest, AttemptState
-    from vibesys.loops.agent.policy_scheduler import PlanRequest
-    from vibesys.loops.agent.state import AgentRunState
+    from vibesys.agent_run.attempts import AttemptState
+    from vibesys.agent_run.options import AgentOrchestrationOptions
+    from vibesys.agent_run.state import AgentRunState
+    from vibesys.loops.single.session import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
     from vibesys.skills import ResolvedSkillSelection
 

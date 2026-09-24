@@ -1,21 +1,27 @@
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
+from io import StringIO
 from pathlib import Path  # noqa: TC003
+from types import SimpleNamespace
 from typing import Any, cast
 
 from pydantic import BaseModel
 
-from vibesys.context import _RunContext
 from vibesys.events import (
     AgentExecutionStartedData,
     AgentOutputChunkData,
     CoreEventType,
     EventStatus,
 )
+from vibesys.orchestration.runtime import _LocalAgentHandle
 from vibesys.render import output_sink
 from vibesys.run.event_journal import EventJournal
 from vibesys.run.integration import LocalRunIntegration
-from vibesys.run.paths import RunPaths
+from vibesys.runtime import AgentDefinition
+from vs_agent.api import AgentBackend, AgentSpec
 from vs_agent.api.testing import FakeAgentClient
 
 
@@ -96,34 +102,45 @@ def test_journal_separates_valid_final_record_without_newline(tmp_path: Path) ->
     assert [event.sequence for event in resumed.read()] == [1, 2]
 
 
-def test_run_context_records_complete_invocation_lifecycle(tmp_path: Path) -> None:
+def test_agent_handle_records_complete_invocation_lifecycle(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
     try:
         integration.attach(tmp_path, run_id="run-1")
-        context = object.__new__(_RunContext)
-        uninitialized = cast("Any", context)
-        uninitialized.integration = integration
-        uninitialized.events = integration.events
         client = FakeAgentClient(driver_name="mock", provider="test")
         client.set_model_for_kind({"implementer": "model-for-implementer"})
         client.enqueue("implementer", _Answer(value="done"))
-        uninitialized.agent_client = client
-        uninitialized._paths = RunPaths(  # noqa: SLF001
-            project_root=tmp_path,
-            log_dir=tmp_path,
-            run_log_path=tmp_path / "run.log",
+        context = cast(
+            "Any",
+            SimpleNamespace(
+                integration=integration,
+                events=integration.events,
+                workspace=tmp_path,
+                run_log_file=StringIO(),
+            ),
         )
-        uninitialized._progress_stack = []  # noqa: SLF001
-        uninitialized.gpu_env = dict
 
-        answer = context.invoke(
-            kind="implementer",
-            system_prompt="system",
-            user_prompt="task",
-            response_cls=_Answer,
-            fallback_factory=lambda: _Answer(value="fallback"),
-            round_label="round-1-retry-2",
-        )
+        async def invoke() -> _Answer:
+            handle = _LocalAgentHandle(
+                AgentDefinition("implementer", AgentSpec(backend=AgentBackend.STUB)),
+                context,
+                client,
+                ExitStack(),
+                ThreadPoolExecutor(max_workers=1),
+                None,
+                use_docker=True,
+            )
+            try:
+                return await handle.turn_structured(
+                    "task",
+                    system_prompt="system",
+                    response_cls=_Answer,
+                    fallback_factory=lambda: _Answer(value="fallback"),
+                    label="round-1-retry-2",
+                )
+            finally:
+                await handle.close()
+
+        answer = asyncio.run(invoke())
 
         assert answer == _Answer(value="done")
         assert client.calls_for("implementer")[0].invocation_id

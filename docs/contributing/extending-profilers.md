@@ -38,10 +38,11 @@ necessary.
 
 ## Add the profiler prompt
 
-Create `src/vibesys/prompts/loops/agent/profilers/<kind>.j2`. Explain how the
-agent should collect and interpret evidence, which limitations it must report, and how it
-should produce the shared `ProfilerSummary`. The agent and evolve loops resolve this prompt
-by convention.
+Add `<kind>.j2` under each strategy that uses the profiler, currently
+`src/vibesys/prompts/loops/{multi,profile_multi,evolve}/profilers/`. Explain how
+that strategy's agent should collect and interpret evidence, which limitations
+it must report, and how it should produce `ProfilerSummary`. Review each
+strategy's prompt separately; there is no cross-strategy fallback.
 
 ## Validate the implementation
 

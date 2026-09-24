@@ -53,7 +53,7 @@ class _ThreeAgentPolicy:
     async def run(self, ctx: RunContext) -> bool:
         rounds = self.rounds
         assert isinstance(rounds, int)
-        type(self).workspace = ctx.workspace
+        type(self).workspace = ctx.workspaces.root.path
         planner = await ctx.agents.spawn(
             AgentDefinition("planner", AgentSpec(backend=AgentBackend.STUB, model="planner-model"))
         )
@@ -144,7 +144,9 @@ class _UnsupportedExecutionPolicy:
                 "worker",
                 AgentSpec(
                     backend=AgentBackend.STUB,
-                    execution=AgentExecutionPolicy(host_resources=(HostResource(ctx.workspace),)),
+                    execution=AgentExecutionPolicy(
+                        host_resources=(HostResource(ctx.workspaces.root.path),)
+                    ),
                 ),
             )
         )

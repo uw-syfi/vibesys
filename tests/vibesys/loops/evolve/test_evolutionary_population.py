@@ -1,6 +1,6 @@
 """Unit tests for vibesys.loops.evolve.population.
 
-Pure-logic tests — no agent runner, no _RunContext, no GPU. The
+Pure-logic tests: no agent runner, run context, or GPU. The
 ``Population`` and ``Individual`` classes are intentionally free of
 runtime imports so this file runs in isolation.
 """

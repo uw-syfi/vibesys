@@ -22,13 +22,13 @@ from vibesys.api import (
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.context import RunSetup
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
-from vibesys.loops.multi.entrypoint import MultiAgentOrchestrator
-from vibesys.loops.profile_multi.entrypoint import ProfileGuidedMultiAgentOrchestrator
-from vibesys.loops.profile_single.entrypoint import ProfileGuidedSingleAgentOrchestrator
-from vibesys.loops.single.entrypoint import SingleAgentOrchestrator
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
 from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
+from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
+from vibesys.loops.profile_multi.orchestration import ProfileGuidedMultiAgentOrchestrator
+from vibesys.loops.profile_single.orchestration import ProfileGuidedSingleAgentOrchestrator
 from vibesys.loops.registry import built_in_orchestrations
+from vibesys.loops.single.orchestration import SingleAgentOrchestrator
 from vs_project.api import OrchestrationDescriptor, Project
 
 if TYPE_CHECKING:
@@ -156,10 +156,10 @@ class _Evidence(BaseModel):
 class _EvidencePolicy(_StubOrchestrator):
     def __init__(self, descriptor: OrchestrationDescriptor) -> None:
         super().__init__(descriptor)
-        self.setup = RunSetup(state_namespace="evidence", state_model=_Evidence)
+        self.setup = RunSetup(state_namespace="evidence", state_slots={"state.json": _Evidence})
 
     async def run(self, ctx: RunContext) -> bool:
-        await ctx.state.checkpoint(_Evidence(revision=4), sequence=1)
+        await ctx.state.checkpoint(sequence=1, writes={"state.json": _Evidence(revision=4)})
         return await super().run(ctx)
 
 

@@ -15,8 +15,7 @@ from types import ModuleType
 
 import pytest
 
-from vibesys.loops.profiler import mcp_spec
-from vibesys.profilers import ProfilerKind
+from vibesys.profilers import ProfilerKind, mcp_spec
 
 
 # The servers live under resources/ (co-located with the analysis scripts) so

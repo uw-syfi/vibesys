@@ -9,12 +9,16 @@ from tests.support.run_execution import run_execution_record
 
 from server.api.performance import build_performance_context, summarize_objective
 from server.api.protocol import PerformanceQuery
+from vibesys.agent_run.hypotheses import reproject_run_evidence
+from vibesys.agent_run.readmodel import project_run_view
+from vibesys.agent_run.state import (
+    AgentRunState,
+    AgentRunStateStore,
+    Hypothesis,
+    HypothesisMeasurement,
+)
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.loops.agent.hypotheses import reproject_run_evidence
-from vibesys.loops.agent.state import AgentRunState, Hypothesis, HypothesisMeasurement
-from vibesys.loops.agent.readmodel import project_run_view
-from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.schemas import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord

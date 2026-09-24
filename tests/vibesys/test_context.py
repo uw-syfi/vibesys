@@ -1,24 +1,27 @@
 import subprocess
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pydantic import BaseModel
 
 from vibesys import boot_trace
+from vibesys.agent_run.options import (
+    AgentOrchestrationOptions,
+    compare_resume_descriptors,
+    descriptor_from_options,
+)
+from vibesys.agent_run.state import AgentRunState
 from vibesys.api import open_run_store
 from vibesys.api.agent import is_agent_run_manifest
-from vibesys.backends.cuda import CudaBackend
-from vibesys.backends.cuda.gpu_monitor import GpuInfo
 from vibesys.config import Config
 from vibesys.context import (
     RunSetup,
-    _RunContext,
-    create_candidate_context,
-    open_run_context,
+    WorkspaceResourceSpec,
+    _RunResources,
+    create_workspace_resources,
+    open_run_resources,
 )
 from vibesys.domains.environment import EnvironmentPatch, NoopEnvironmentHooks
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
@@ -35,31 +38,15 @@ from vibesys.evaluators.input_manifest import (
     load_project_task,
 )
 from vibesys.events import CoreEventType
-from vibesys.loops.agent.state import AgentRunState
-from vibesys.loops.agent.orchestration import (
-    AgentOrchestrationOptions,
-    compare_resume_descriptors,
-    descriptor_from_options,
-)
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.run import (
-    DeviceLease,
     LocalRunIntegration,
     RunLogger,
     RunPaths,
     RunStateNamespace,
 )
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
-from vs_agent.api import (
-    AgentCapabilities,
-    AgentClient,
-    AgentSessionKey,
-    DurableSessionStore,
-    SessionScope,
-)
-from vs_agent.api.testing import FakeAgentClient
-from vs_agent.contracts import AgentTurnRequest, AgentTurnResult
 from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationRunManifest, Project
 from vs_sandbox.api import HostResourceAccess, SandboxLifecycle
@@ -97,9 +84,6 @@ class _RecordingHooks:
 @pytest.fixture(autouse=True)
 def context_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("vibesys.context.backends.get", lambda *_args, **_kwargs: _FakeBackend())
-    monkeypatch.setattr(
-        "vibesys.context.build_agent_client", lambda *_args, **_kwargs: FakeAgentClient()
-    )
     monkeypatch.setattr(
         "vibesys.context.preflight_profiler_kind",
         lambda kind: ProfilerPreflightResult(kind, True),  # noqa: FBT003
@@ -190,7 +174,7 @@ def _create_context(  # noqa: PLR0913
     profiler_kind: ProfilerKind = ProfilerKind.NONE,
     workspace_sources: tuple[WorkspaceSource, ...] = (),
     agent_backend: str | None = "stub",
-) -> _RunContext:
+) -> _RunResources:
     if task_root is not None:
         selected_project = Project.open(project)
         bundle = load_project_task(selected_project, selected_project.select_task(task_name))
@@ -223,16 +207,15 @@ def _create_context(  # noqa: PLR0913
         remote_repo=remote_repo,
     )
     setup = RunSetup(
-        state_namespace="agent",
-        state_model=AgentRunState,
+        state_namespace="multi",
+        state_slots={"state.json": AgentRunState},
         resume_policy=compare_resume_descriptors,
-        use_default_agent=True,
     )
     with patch(
         "vibesys.context.resolve_domain",
         return_value=SimpleNamespace(environment_hooks=hooks or NoopEnvironmentHooks()),
     ):
-        return open_run_context(request, setup, integration or LocalRunIntegration())
+        return open_run_resources(request, setup, integration or LocalRunIntegration())
 
 
 def _git(project: Path, *args: str) -> str:
@@ -255,32 +238,28 @@ def _git(project: Path, *args: str) -> str:
 def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path):  # noqa: ANN001, ANN201
     project = tmp_path / "queue"
     evaluator = _write_project(project)
-    runner = FakeAgentClient()
+    with _create_context(project, evaluator=evaluator) as ctx:
+        assert ctx.project_root == project
+        assert ctx.workspace == project
+        assert ctx.project.root == project
+        assert ctx.log_dir == ctx.project.state.log_directory(ctx.run_id)
+        assert (
+            not ctx.state.local(RunStateNamespace.AGENT)
+            .external_directory()
+            .is_relative_to(project)
+        )
+        objective_path = Path(ctx.run_environment_view.paths.objective)
+        assert objective_path == (
+            ctx.project.state.portable_namespace(ctx.run_id, "runtime").external_directory()
+            / "effective-objective.md"
+        )
+        assert objective_path.read_text() == "Make the queue faster.\n"
+        assert objective_path.is_relative_to(ctx.workspace)
 
-    with patch("vibesys.context.build_agent_client", return_value=runner) as build_runner:
-        with _create_context(project, evaluator=evaluator) as ctx:
-            assert ctx.project_root == project
-            assert ctx.workspace == project
-            assert ctx.project.root == project
-            assert ctx.log_dir == ctx.project.state.log_directory(ctx.run_id)
-            assert (
-                not ctx.state.local(RunStateNamespace.AGENT)
-                .external_directory()
-                .is_relative_to(project)
-            )
-            objective_path = Path(ctx.objective_location)
-            assert objective_path == (
-                ctx.project.state.portable_namespace(ctx.run_id, "runtime").external_directory()
-                / "effective-objective.md"
-            )
-            assert objective_path.read_text() == "Make the queue faster.\n"
-            assert objective_path.is_relative_to(ctx.workspace)
-
-        policy = build_runner.call_args.kwargs["project_path_policy"]
-        state_paths = Project.open(project).state.sandbox_paths()
+        policy = ctx.environment_request.project_path_policy
+        state_paths = ctx.project.state.sandbox_paths()
         assert state_paths.read_only_path in policy.read_only_paths
         assert state_paths.hidden_path is None
-        assert runner.closed
 
     manifest = Project.open(project).state.load_run(ctx.run_id)
     assert manifest.branch == f"vibesys-runs/{ctx.run_id}"
@@ -355,7 +334,7 @@ def test_context_assembly_logs_stage_timings(tmp_path):  # noqa: ANN001, ANN201
     """Every assembly span up to and past the experiments gate reaches the run log.
 
     This is a regression guard for the diagnostic used to find where
-    ``open_run_context`` spends time before the TUI's hypothesis screen
+    ``open_run_resources`` spends time before the TUI's hypothesis screen
     can leave "loading experiments..." (the gate flips when the second
     ``LocalRunIntegration.attach`` records ``EXPERIMENTS_CHANGED``).
     """
@@ -377,7 +356,6 @@ def test_context_assembly_logs_stage_timings(tmp_path):  # noqa: ANN001, ANN201
         "workspace_setup",
         "environment_open",
         "device_monitor_start",
-        "agent_client_build",
     ):
         assert f"boot span context.{stage}: " in log_text, f"missing span timing for {stage!r}"
     # The enclosing span is assembly's total, recorded after its children.
@@ -386,11 +364,11 @@ def test_context_assembly_logs_stage_timings(tmp_path):  # noqa: ANN001, ANN201
 
 
 def test_dispatch_preamble_spans_reach_run_log(tmp_path):  # noqa: ANN001, ANN201
-    """Spans closed before ``open_run_context`` land in the run log, first.
+    """Spans closed before ``open_run_resources`` land in the run log, first.
 
     ``_dispatch`` and ``_run_agent`` (main.py) do substantial work before a
     ``RunLogger`` exists and record ``boot_trace`` spans as they go.
-    ``_assemble_run_context`` must drain that buffer at entry, so the
+    ``_assemble_run_resources`` must drain that buffer at entry, so the
     preamble's spans reach the persistent run log ahead of assembly's own.
     """
     project = tmp_path / "queue"
@@ -503,7 +481,7 @@ def test_copied_repository_task_materializes_model_outside_authored_inputs(
             assert not (reference / "model").exists()
             assert not (copied_reference / "model").exists()
             assert runtime_model.resolve() == downloaded
-            assert ctx.trusted_input_changes() == []
+            assert ctx.git.trusted_input_changes() == []
 
         assert _git(ctx.project_root, "status", "--porcelain") == ""
 
@@ -528,7 +506,7 @@ def test_direct_repository_task_materializes_model_in_local_state(tmp_path: Path
 
             assert not (reference / "model").exists()
             assert runtime_model.resolve() == downloaded
-            assert ctx.trusted_input_changes() == []
+            assert ctx.git.trusted_input_changes() == []
 
         assert _git(project, "status", "--porcelain") == ""
 
@@ -772,20 +750,23 @@ def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path):  # noqa: 
     assert portable.agent_visible_path("old.json") not in tree
 
 
-def test_candidate_context_uses_project_worktree_directory(tmp_path):  # noqa: ANN001, ANN201
+def test_candidate_resources_use_project_worktree_directory(tmp_path):  # noqa: ANN001, ANN201
     project = tmp_path / "queue"
     evaluator = _write_project(project)
 
     with _create_context(project, evaluator=evaluator) as parent:
         parent_commit = parent.git.current_sha()
         assert parent_commit is not None
-        candidate = create_candidate_context(
+        candidate = create_workspace_resources(
             parent,
-            config=Config.model_validate({"model": {"name": "gpt-test"}}),
-            generation=2,
-            child_idx=3,
-            parent_commit=parent_commit,
-            agent_backend="stub",
+            WorkspaceResourceSpec(
+                scope_id="g2c3",
+                revision=parent_commit,
+                config=Config.model_validate({"model": {"name": "gpt-test"}}),
+                log_namespace=RunStateNamespace.EVOLVE,
+                log_directory="candidates",
+                agent_backend="stub",
+            ),
         )
         candidate_root = candidate.workspace
         assert candidate_root == parent.project.state.candidate_worktree_directory(
@@ -795,7 +776,9 @@ def test_candidate_context_uses_project_worktree_directory(tmp_path):  # noqa: A
         assert candidate.log_dir == (
             parent.state.local(RunStateNamespace.EVOLVE).external_directory("candidates/g2c3/logs")
         )
-        assert Path(candidate.objective_location).read_text() == parent.effective_objective
+        assert Path(candidate.run_environment_view.paths.objective).read_text() == (
+            parent.effective_objective
+        )
         candidate.close()
         assert not candidate_root.exists()
 
@@ -807,8 +790,8 @@ def test_construction_failure_removes_new_copy_and_tears_down_hooks(tmp_path):  
     hooks = _RecordingHooks()
 
     with (
-        patch("vibesys.context.build_agent_client", side_effect=RuntimeError("runner failed")),
-        pytest.raises(RuntimeError, match="runner failed"),
+        patch("vibesys.context.RunState", side_effect=RuntimeError("state failed")),
+        pytest.raises(RuntimeError, match="state failed"),
     ):
         _create_context(source, runs_dir=runs_dir, evaluator=evaluator, hooks=hooks)
 
@@ -833,7 +816,7 @@ def test_hook_teardown_runs_when_provisioning_fails(tmp_path):  # noqa: ANN001, 
 
 
 def test_log_switch_retargets_stderr_tee(tmp_path):  # noqa: ANN001, ANN201
-    ctx = object.__new__(_RunContext)
+    ctx = object.__new__(_RunResources)
     original_stderr = sys.stderr
     ctx.logger = RunLogger(tmp_path)
     ctx._paths = RunPaths(  # noqa: SLF001
@@ -842,194 +825,11 @@ def test_log_switch_retargets_stderr_tee(tmp_path):  # noqa: ANN001, ANN201
         run_log_path=ctx.logger.path,
     )
     original_file = ctx.logger.file
-    client = FakeAgentClient()
-    ctx.agent_client = client
-
     ctx.switch_log_file("round001")
 
     assert original_file.closed
-    assert client.log_files == [ctx.logger.writer]
     print("\033[31mcolored diagnostic\033[0m", file=sys.stderr)  # noqa: T201
     ctx.logger.close()
     assert sys.stderr is original_stderr
     assert "colored diagnostic" in ctx.run_log_path.read_text()
     assert "\033[31m" not in ctx.run_log_path.read_text()
-
-
-def test_agent_client_gets_a_machine_local_provider_session_store(tmp_path):  # noqa: ANN001, ANN201
-    """The run's agent client checkpoints provider sessions outside the repo.
-
-    Provider transcripts are host-local, so the map must live in the run's
-    machine-local namespace, never in the portable snapshot that travels
-    between machines.
-    """
-    project = tmp_path / "queue"
-    evaluator = _write_project(project)
-
-    with (
-        patch("vibesys.context.build_agent_client", return_value=FakeAgentClient()) as build_runner,
-        _create_context(project, evaluator=evaluator) as ctx,
-    ):
-        store = build_runner.call_args.kwargs["session_store"]
-        assert isinstance(store, DurableSessionStore)
-        store.record(
-            AgentSessionKey(SessionScope.HYPOTHESIS, "H-01"),
-            spec_fingerprint="fingerprint",
-            provider="codex",
-            model="gpt-test",
-            session_id="thread-1",
-        )
-        local_dir = ctx.state.local(RunStateNamespace.AGENT).external_directory()
-
-    assert (local_dir / "sessions.json").is_file()
-    assert not local_dir.is_relative_to(project)
-
-
-def test_evolve_candidate_clients_get_no_provider_session_store(tmp_path):  # noqa: ANN001, ANN201
-    """Candidates never name a durable conversation, so they checkpoint nothing."""
-    project = tmp_path / "queue"
-    evaluator = _write_project(project)
-
-    with _create_context(project, evaluator=evaluator) as parent:
-        parent_commit = parent.git.current_sha()
-        assert parent_commit is not None
-        with patch(
-            "vibesys.context.build_agent_client", return_value=FakeAgentClient()
-        ) as build_runner:
-            candidate = create_candidate_context(
-                parent,
-                config=Config.model_validate({"model": {"name": "gpt-test"}}),
-                generation=2,
-                child_idx=3,
-                parent_commit=parent_commit,
-                agent_backend="stub",
-            )
-            assert "session_store" not in build_runner.call_args.kwargs
-            candidate.close()
-
-
-# ---------------------------------------------------------------------------
-# The device pin and the agent execution mode
-# ---------------------------------------------------------------------------
-
-
-class _PinResponse(BaseModel):
-    answer: str
-
-
-@dataclass
-class _PinSession:
-    """One turn that answers whatever the schema asked for."""
-
-    turns: list[AgentTurnRequest] = field(default_factory=list)
-
-    def run_turn(self, request, observer=None):  # noqa: ANN001, ANN202
-        del observer
-        self.turns.append(request)
-        return AgentTurnResult('{"answer":"ok"}')
-
-    def resume_provider_session(self, session_id: str) -> bool:
-        del session_id
-        return False
-
-    def cancel(self) -> None: ...
-
-    def close(self) -> None: ...
-
-
-@dataclass
-class _PinDriver:
-    """Records the session specs the client builds, and its execution mode."""
-
-    containerized: bool
-    specs: list = field(default_factory=list)
-
-    @property
-    def capabilities(self):  # noqa: ANN202
-        return AgentCapabilities(container_execution=self.containerized)
-
-    def create_session(self, spec):  # noqa: ANN001, ANN202
-        self.specs.append(spec)
-        return _PinSession()
-
-    def close(self) -> None: ...
-
-
-def _pin_context(
-    tmp_path: Path,
-    request: pytest.FixtureRequest,
-    *,
-    containerized: bool,
-    device_index: int = 3,
-) -> tuple[_RunContext, _PinDriver]:
-    """A context whose only real parts are the device lease and agent client."""
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir(exist_ok=True)
-    backend = CudaBackend(log_dir=log_dir, log=lambda _message: None)
-    backend.selected_device = GpuInfo(
-        index=device_index,
-        uuid=f"GPU-{device_index}",
-        name="test-gpu",
-        memory_used_mib=0,
-        memory_total_mib=1,
-        utilization_pct=0,
-    )
-    driver = _PinDriver(containerized=containerized)
-
-    ctx = object.__new__(_RunContext)
-    ctx.integration = LocalRunIntegration()
-    request.addfinalizer(ctx.integration.close)
-    ctx.events = ctx.integration.events
-    ctx._progress_stack = []  # noqa: SLF001
-    ctx._paths = RunPaths(  # noqa: SLF001
-        project_root=tmp_path,
-        log_dir=log_dir,
-        run_log_path=tmp_path / "run.log",
-    )
-    ctx.device = DeviceLease(backend, log_dir=log_dir)
-    ctx.agent_client = AgentClient(driver, provider="claude", model_name="m", log_dir=log_dir)
-    return ctx, driver
-
-
-def test_a_host_agent_is_pinned_to_the_selected_device(
-    tmp_path: Path,
-    request: pytest.FixtureRequest,
-) -> None:
-    ctx, driver = _pin_context(tmp_path, request, containerized=False)
-
-    assert ctx.gpu_env() == {"CUDA_VISIBLE_DEVICES": "3"}
-
-    ctx.invoke(
-        kind="judge",
-        system_prompt="system",
-        user_prompt="user",
-        response_cls=_PinResponse,
-        fallback_factory=lambda: _PinResponse(answer="fallback"),
-    )
-
-    assert driver.specs[0].environment == (("CUDA_VISIBLE_DEVICES", "3"),)
-
-
-def test_a_container_agent_carries_no_host_device_pin(
-    tmp_path: Path,
-    request: pytest.FixtureRequest,
-) -> None:
-    """``--gpus device=N`` already makes the chosen GPU device 0 inside.
-
-    A host index forwarded into the container would name a device that is not
-    there, and re-pinning it mid-run would change the session fingerprint and
-    evict the live conversation.
-    """
-    ctx, driver = _pin_context(tmp_path, request, containerized=True)
-
-    assert ctx.gpu_env() == {}
-
-    ctx.invoke(
-        kind="judge",
-        system_prompt="system",
-        user_prompt="user",
-        response_cls=_PinResponse,
-        fallback_factory=lambda: _PinResponse(answer="fallback"),
-    )
-
-    assert driver.specs[0].environment == ()

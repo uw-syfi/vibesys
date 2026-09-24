@@ -26,7 +26,7 @@ Where the lines go
 
 Recorded lines always land in the persistent run log: they buffer here, and
 each consumer drains them with :func:`drain_log_lines` once it has a logger
-(``_assemble_run_context`` drains the preamble's lines at entry, ahead of its
+(``_assemble_run_resources`` drains the preamble's lines at entry, ahead of its
 own, so the log reads in the order the work happened). They reach stderr only
 when ``VIBESYS_BOOT_TRACE=1`` (see :func:`trace_enabled`), because stderr is
 the operator's terminal, not a diagnostics channel::

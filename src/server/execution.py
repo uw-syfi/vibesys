@@ -339,7 +339,7 @@ class ExecutionTracker:
         """Track a core-minted execution start; no-op if already tracked.
 
         Core mints the execution id and emits ``AGENT_EXECUTION_STARTED``
-        itself (see ``vibesys.context._RunContext.invoke``); this projects
+        itself (see ``vibesys.orchestration.runtime``); this projects
         that event into the same ``ActiveAgentExecution`` checkpoint
         ``start_locked`` builds. The guard against an already-active id
         covers a caller (``RunController.start_agent_execution``) that has

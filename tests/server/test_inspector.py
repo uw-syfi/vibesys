@@ -8,8 +8,7 @@ from tests.support.run_execution import run_execution_record
 from server.diagnostics import DiagnosticScope
 from server.events import ConfigurationFailedData, EventStatus, EventType
 from server.read_model import RunInspector
-from vibesys.loops.agent.state import AgentRunState, Hypothesis
-from vibesys.loops.agent.state import AgentRunStateStore
+from vibesys.agent_run.state import AgentRunState, AgentRunStateStore, Hypothesis
 from vibesys.schemas import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord

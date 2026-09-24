@@ -59,9 +59,8 @@ from vibesys.loops.evolve.search_policy import (
     SearchPolicyName,
     VibeSysSearchPolicy,
 )
-from vibesys.loops.profiler import mcp_spec
 from vibesys.orchestration.runtime import MeasurementOptions
-from vibesys.profilers import ProfilerKind, profiler_definition
+from vibesys.profilers import ProfilerKind, mcp_spec, profiler_definition
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.render.sink import output_sink
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
