@@ -1194,7 +1194,7 @@ def _outlier_family_note(ordered: list[tuple[str, dict]]) -> str | None:
     top_fam, top_avg = avgs[0]
     rest = sorted(avg for _fam, avg in avgs[1:])
     median_rest = rest[len(rest) // 2]
-    if median_rest <= 0 or top_avg < median_rest * _OUTLIER_AVG_MULTIPLE:
+    if median_rest <= 0 or top_avg <= median_rest * _OUTLIER_AVG_MULTIPLE:
         return None
     return (
         f"\n*** Finding: '{top_fam}' averages {_fmt_ns(top_avg)}/call, "

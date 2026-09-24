@@ -1137,6 +1137,23 @@ def test_outlier_family_note_never_fires_when_every_family_is_within_the_thresho
     assert _outlier_family_note(ordered) is None
 
 
+def test_outlier_family_note_silent_exactly_at_the_threshold_multiple():  # noqa: ANN201
+    """Deterministic pin of the boundary the property test above only sometimes explores.
+
+    A top family averaging *exactly* 20x (``_OUTLIER_AVG_MULTIPLE``) the
+    median of the rest is still "within" the threshold, not past it: a
+    strict ``<`` comparison against the threshold fired the note here
+    (``20.0 < 20.0`` is False, so the early-return was skipped), disagreeing
+    with the property test's "within the threshold stays silent" contract
+    at the one point that contract cares about most.
+    """
+    ordered = [
+        ("family_0", {"calls": 1, "total_ns": 1.0}),
+        ("family_1", {"calls": 1, "total_ns": 20.0}),
+    ]
+    assert _outlier_family_note(ordered) is None
+
+
 @given(
     base_ns=st.floats(min_value=1.0, max_value=1e6, allow_nan=False, allow_infinity=False),
     multiple=st.floats(min_value=21.0, max_value=1e6, allow_nan=False, allow_infinity=False),
