@@ -268,11 +268,33 @@ def _looks_like_triton_kernel(name: str) -> bool:
     return "_kernel" in lname or lname.startswith("_")
 
 
+def _boundary_pattern(sub: str) -> str:
+    """Build a regex fragment matching ``sub`` only at an identifier boundary.
+
+    Plain substring matching lets a marker land inside an unrelated
+    identifier: ``topk_kernel`` (a ``PyTorch native`` marker) is a substring
+    of the Triton-JIT kernel name ``atopk_kernel_kernel``, so naive ``in``
+    matching misattributes it. Require that the character immediately before
+    the match not be a lowercase letter or digit. Start-of-string, ``_``
+    (the snake_case token separator), and structural characters such as
+    ``::``, ``<``, `` ``, ``(``, ``,`` are all valid boundaries and still
+    match; only a marker glued directly onto preceding letters/digits (no
+    boundary) is rejected.
+    """
+    return rf"(?<![a-z0-9]){re.escape(sub)}"
+
+
+_FAMILY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (family, re.compile("|".join(_boundary_pattern(sub) for sub in subs)))
+    for family, subs in _FAMILY_RULES
+)
+
+
 def _classify_family(name: str) -> str:
     """Classify a kernel name into a library family (best-effort, name-only)."""
     lname = name.lower()
-    for family, subs in _FAMILY_RULES:
-        if any(s in lname for s in subs):
+    for family, pattern in _FAMILY_PATTERNS:
+        if pattern.search(lname):
             return family
     if _looks_like_triton_kernel(name):
         return "Triton (JIT)"
