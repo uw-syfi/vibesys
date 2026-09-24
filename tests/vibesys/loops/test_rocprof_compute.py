@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 _MODULE_NAME = "rocprof_compute_under_test"
 _MODULE_PATH = (
-    Path(__file__).resolve().parents[2] / "resources" / "profilers" / "rocprof" / "compute.py"
+    Path(__file__).resolve().parents[3] / "resources" / "profilers" / "rocprof" / "compute.py"
 )
 
 
