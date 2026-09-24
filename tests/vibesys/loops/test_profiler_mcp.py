@@ -810,6 +810,7 @@ class TestTorchMcpServer:
         server = torch_server_mod.build_server()
         names = asyncio.run(_list_tool_names(server))
         assert names == {
+            "profile_ops",
             "tables",
             "kernels",
             "operators",
