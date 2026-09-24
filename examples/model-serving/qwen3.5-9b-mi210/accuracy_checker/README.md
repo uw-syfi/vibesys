@@ -93,9 +93,22 @@ state the previous round computed), which shows whether a caching server
 actually resumed. A hit larger than that is not an error: another request
 (for example an earlier gate run) may have cached a longer prefix.
 
-The check reuses the base thresholds and golden data unchanged; it has no
-calibration run of its own on MI210 yet. It adds 48 requests and 768 decoded
-tokens (about 40 s on the reference engine at ~20 tok/s).
+A hit smaller than `resumable_tokens` is not an error either: caches are
+block-granular (vLLM's hybrid attention/GDN block is 528 tokens on this model,
+so only the two ledger prompts hit), and an engine that parks GDN state only
+at request ends cannot resume in the middle of a previous output.
+
+The check reuses the base thresholds and golden data unchanged. Measured on
+one MI210, 2026-09-23 (second run of each against the same warm server gave
+the same verdicts):
+
+| Server | Cache-hit rounds | cached / resumable tokens | Non-tie div. | Mean round prefix frac. | Gate time | Result |
+|:--|--:|--:|--:|--:|--:|:--|
+| Reference engine (no prefix cache) | 0/48 | 0 / 18472 | 0 | 0.961 | 102 s | PASS |
+| Tuned vLLM (`benchmark/vllm_baseline.sh`) | 6/48 | 15840 / 18473 | 0 | 0.961 | 31 s | PASS |
+| Campaign engine (prefix cache + MTP) | 34/48 | 18285 / 18452 | 0 | 0.939 | 17 s | PASS |
+
+Gate time is the whole checker run (base, resume, and stream checks).
 
 ## Calibration evidence
 
