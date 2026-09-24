@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import dataclasses
 import importlib
 import io
 import os
@@ -94,6 +95,33 @@ _STATUS_SEVERITY: dict[capture_runtime.CaptureStatus, int] = {
     capture_runtime.CaptureStatus.TIMED_OUT: 4,
     capture_runtime.CaptureStatus.KILLED_AFTER_GRACE: 5,
 }
+
+# rocprofv3 injects itself into every process in the launched tree, not only
+# the top-level target: a real capture observed this corrupt a value a
+# `command`/`load_command` picked up via `$(...)` command substitution (e.g.
+# a port number), because the small helper subprocess spawned just to
+# compute that value inherited rocprofv3's tool library too, and the library
+# printed a one-time diagnostic line ("Streaming Performance Monitor (SPM) is
+# not supported on gfx90a devices") to that subprocess's stdout the moment
+# it loaded -- landing inside the command-substitution result together with
+# the real value. These are candidate env vars for quieting rocprofv3's own
+# diagnostic output (best-effort, not confirmed against a live rocprofv3:
+# no GPU/ROCm is available in this dev sandbox); setting them is harmless if
+# rocprofv3 doesn't recognize a given name, and `Lifecycle.env` always wins
+# over these (see `_quiet_rocprofv3_lifecycle`) so a caller can override.
+# This is a mitigation for the injection side of the incident; the
+# `profiling-serving-engines.md` skill doc also tells agents to avoid
+# `$(...)` for values the launch needs in the first place, which is the more
+# robust fix since it doesn't depend on knowing the right env var name.
+_ROCPROFV3_QUIET_ENV: dict[str, str] = {
+    "ROCPROFILER_LOG_LEVEL": "fatal",
+    "ROCPROF_LOG_LEVEL": "fatal",
+}
+
+
+def _quiet_rocprofv3_lifecycle(lifecycle: capture_runtime.Lifecycle) -> capture_runtime.Lifecycle:
+    """Merge best-effort rocprofv3-quieting env into ``lifecycle``, caller wins on conflict."""
+    return dataclasses.replace(lifecycle, env={**_ROCPROFV3_QUIET_ENV, **lifecycle.env})
 
 
 def run_cli(fn: Callable[[types.SimpleNamespace], None], **kwargs: object) -> str:
@@ -502,16 +530,21 @@ def profile_timeline(
     ``--hip-runtime-trace`` when ``hip_api=True``, and ``--collection-period``
     when both ``collection_delay_s``/``collection_duration_s`` are given, to
     skip a warmup window) through the shared capture lifecycle, then runs
-    ``host_idle`` and ``summary`` against the result automatically. Next:
-    ``kernels``, ``families``, ``idle_gaps``, ``cpu_overhead``, ``memory``,
-    ``graphs``, ``host_idle``, ``summary``, or ``compare`` against another
-    timeline capture.
+    ``host_idle`` and ``summary`` against the result automatically. A server
+    capture (``load_command`` given) can include a long startup (weight
+    load, warmup, KV init) ahead of the actual benchmarked load; the
+    auto-summary defaults to the recorded load-phase window rather than the
+    whole run, same as every drill-down below unless you pass
+    ``window='all'``. Next: ``kernels``, ``families``, ``idle_gaps``,
+    ``cpu_overhead``, ``memory``, ``graphs``, ``host_idle``, ``summary``, or
+    ``compare`` against another timeline capture.
     """
     if (collection_delay_s is None) != (collection_duration_s is None):
         raise ValueError(  # noqa: TRY003  # tracked: #288
             "collection_delay_s and collection_duration_s must both be given, or neither "
             "(rocprofv3's --collection-period needs a start_delay:collection_time:repeat triplet)"
         )
+    lifecycle = _quiet_rocprofv3_lifecycle(lifecycle)
     _capture_id, out_dir = capture_runtime.new_capture("timeline")
     prefix = ["rocprofv3", "--kernel-trace"]
     if hip_api:
@@ -531,6 +564,53 @@ def profile_timeline(
         meta={"hip_api": hip_api, "kernel_include": kernel_include},
     )
     return _format_timeline_result(result)
+
+
+# Keyword heuristics for suggesting a profile_counters drill-down from a
+# timeline's top kernel by name only (best-effort; a kernel matching neither
+# gets no set suggestion, just the drill-down pointer). GEMM-family kernels
+# are compute-bound on the matrix core and HBM feed; attention-family
+# kernels are compute-bound on the matrix core and L2/KV-cache reuse -- see
+# counters.py's per-arch catalogues for what "mfma"/"hbm"/"l2" cover.
+_GEMM_KERNEL_NAME_RE = re.compile(
+    r"gemm|matmul|hipblaslt|rocblas|cutlass|\bmm\b|wmma", re.IGNORECASE
+)
+_ATTENTION_KERNEL_NAME_RE = re.compile(
+    r"attn|attention|flash|fmha|paged.?kv|decode.?kv", re.IGNORECASE
+)
+_COUNTER_SETS_BY_KERNEL_FAMILY = {
+    "gemm": ["mfma", "hbm"],
+    "attention": ["mfma", "l2"],
+}
+
+
+def _suggest_counter_drilldown(out_dir: Path) -> str | None:
+    """Suggest a concrete ``profile_counters`` call for the timeline's top kernel.
+
+    Uses the same load-phase window as the rest of this auto-summary (see
+    ``kernel_time_totals``'s default), so the suggestion targets whatever
+    dominates steady-state GPU time, not one-time startup kernels. Returns
+    ``None`` when there's no kernel data to suggest from.
+    """
+    try:
+        totals = analyze_rocprof.kernel_time_totals(str(out_dir))
+    except (OSError, ValueError):
+        return None
+    if not totals:
+        return None
+    top_kernel = max(totals, key=lambda name: totals[name])
+    if _GEMM_KERNEL_NAME_RE.search(top_kernel):
+        family = "gemm"
+    elif _ATTENTION_KERNEL_NAME_RE.search(top_kernel):
+        family = "attention"
+    else:
+        family = None
+    sets = _COUNTER_SETS_BY_KERNEL_FAMILY.get(family, ["mfma"]) if family else ["mfma"]
+    sets_repr = ", ".join(repr(s) for s in sets)
+    return (
+        f"Top kernel by GPU time: {top_kernel!r}. Suggested drill-down: "
+        f"profile_counters(sets=[{sets_repr}], kernel={re.escape(top_kernel)!r})."
+    )
 
 
 def _format_timeline_result(result: capture_runtime.CaptureResult) -> str:
@@ -560,6 +640,9 @@ def _format_timeline_result(result: capture_runtime.CaptureResult) -> str:
     lines.append(run_cli(analyze_rocprof.cmd_host_idle, report=str(result.out_dir)))
     lines.append("")
     lines.append(run_cli(analyze_rocprof.cmd_summary, report=str(result.out_dir), top=15))
+    suggestion = _suggest_counter_drilldown(result.out_dir)
+    if suggestion:
+        lines.append(f"\n{suggestion}")
     lines.append(
         f"\nNext: kernels/families/idle_gaps/cpu_overhead/memory/graphs(report={result.capture_id!r}), "
         "or compare(a, b) against another timeline capture."
@@ -610,6 +693,7 @@ def profile_counters(
         known = ", ".join(sorted(catalogue))
         raise ValueError(f"unknown counter set(s) {unknown} for {family}; known sets: {known}")  # noqa: TRY003  # tracked: #288
 
+    lifecycle = _quiet_rocprofv3_lifecycle(lifecycle)
     capture_id, out_dir = capture_runtime.new_capture("counters")
     pass_results: list[capture_runtime.CaptureResult] = []
     set_dirs: dict[str, Path] = {}
@@ -847,6 +931,7 @@ def profile_instructions(
         needed = ".".join(map(str, _ATT_MIN_ROCPROFV3_VERSION))
         return f"error: rocprofv3 {found} does not support --att (needs >= {needed}); see profiling_capabilities."
 
+    lifecycle = _quiet_rocprofv3_lifecycle(lifecycle)
     _capture_id, out_dir = capture_runtime.new_capture("instructions")
     prefix = [
         "rocprofv3",
@@ -1130,10 +1215,14 @@ def _delta_rows(
 
 
 def _compare_timeline(dir_a: Path, dir_b: Path) -> str:
-    kernels_a = analyze_rocprof.kernel_time_totals(str(dir_a))
-    kernels_b = analyze_rocprof.kernel_time_totals(str(dir_b))
-    families_a = analyze_rocprof.family_time_totals(str(dir_a))
-    families_b = analyze_rocprof.family_time_totals(str(dir_b))
+    # Both sides compare against their own recorded load phase (falling
+    # back to the whole run when a capture has none / can't be aligned --
+    # see analyze_rocprof.resolve_window): comparing a's steady-state
+    # numbers against b's startup-polluted ones would be meaningless.
+    kernels_a = analyze_rocprof.kernel_time_totals(str(dir_a), window="load")
+    kernels_b = analyze_rocprof.kernel_time_totals(str(dir_b), window="load")
+    families_a = analyze_rocprof.family_time_totals(str(dir_a), window="load")
+    families_b = analyze_rocprof.family_time_totals(str(dir_b), window="load")
 
     lines = ["Family time deltas (b - a, nanoseconds):"]
     for name, va, vb, delta in _delta_rows(families_a, families_b)[:_TOP_DELTA_ROWS]:

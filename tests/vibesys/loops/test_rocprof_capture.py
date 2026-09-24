@@ -454,6 +454,12 @@ def test_profile_timeline_ok_runs_auto_summary(profiles_dir: Path, bin_dir: Path
     assert "): ok" in out
     assert "flash_attn_decode_kernel" in out
     assert "Next:" in out
+    # The auto-summary suggests a concrete counters drill-down against the
+    # top kernel by GPU time, addressing the eval gap where the agent never
+    # descended to profile_counters. "attn" in the name selects the
+    # attention-family counter sets (mfma, l2).
+    assert "Suggested drill-down: profile_counters(sets=['mfma', 'l2'], kernel=" in out
+    assert "flash_attn_decode_kernel" in out.split("Suggested drill-down:")[1]
 
 
 def test_profile_timeline_records_hip_api_and_kernel_include_in_manifest(
@@ -469,6 +475,73 @@ def test_profile_timeline_records_hip_api_and_kernel_include_in_manifest(
     manifest = cr.load_manifest(summary.dir)
     assert manifest["meta"]["hip_api"] is True
     assert manifest["meta"]["kernel_include"] == "foo.*"
+
+
+def _install_fake_diag_helper(bin_dir: Path) -> Path:
+    """A helper mimicking real rocprofv3's own SPM diagnostic banner.
+
+    Models the real incident this branch fixes: rocprofv3 injects its tool
+    library into every process in the launched tree (inherited env), and
+    that library prints a one-time diagnostic line to stdout the moment it
+    loads into a process -- independent of whether that process does any
+    profiled work. A small helper invoked via ``$(...)`` command
+    substitution to compute a value (e.g. picking a free port) has that
+    banner land in the substitution result together with the real value,
+    because both go to the same stdout. Real rocprofv3 has an actual env
+    knob for this (candidate names are unconfirmed without a live rocprofv3
+    -- see ``capture.py``'s ``_ROCPROFV3_QUIET_ENV``); this fake checks the
+    same candidate names capture.py sets, so the test exercises exactly the
+    mechanism the fix relies on: the value reaching this subprocess via
+    ordinary env inheritance down the whole process tree, not a rocprofv3-
+    specific channel.
+    """
+    path = bin_dir / "diag_helper"
+    _write_script(
+        path,
+        textwrap.dedent(
+            """
+            import os
+            import sys
+
+            quiet = os.environ.get("ROCPROFILER_LOG_LEVEL") == "fatal" or (
+                os.environ.get("ROCPROF_LOG_LEVEL") == "fatal"
+            )
+            if not quiet:
+                sys.stdout.write(
+                    "Streaming Performance Monitor (SPM) is not supported on gfx90a devices\\n"
+                )
+            sys.stdout.write("54321\\n")
+            """
+        ),
+    )
+    return path
+
+
+def test_profile_timeline_quiets_rocprofv3_diagnostic_leaking_into_command_substitution(
+    profiles_dir: Path, bin_dir: Path, tmp_path: Path
+) -> None:
+    """Regression test for the real observed incident (see grade.md / transcript).
+
+    A ``command`` that captures a helper's stdout via ``$(...)`` (e.g. a
+    port-picker) must get back a clean value even though it's launched
+    under rocprofv3, which would otherwise leak its own diagnostic banner
+    into that same stdout. ``capture.py`` must default
+    ``ROCPROFILER_LOG_LEVEL``/``ROCPROF_LOG_LEVEL`` into the lifecycle env
+    it hands to ``run_capture`` for exactly this reason.
+    """
+    del profiles_dir
+    _install_fake_rocprofv3(bin_dir)
+    _install_fake_diag_helper(bin_dir)
+    marker = tmp_path / "captured_value.txt"
+    lifecycle = cr.Lifecycle(
+        command=f'VALUE=$(diag_helper)\nprintf %s "$VALUE" > {shlex.quote(str(marker))}\n',
+        timeout_s=10.0,
+    )
+
+    out = capture.profile_timeline(lifecycle)
+
+    assert "): ok" in out
+    assert marker.read_text() == "54321"
 
 
 def _install_fake_rocprofv3_flushes_on_sigint_then_hangs(bin_dir: Path) -> Path:
@@ -1154,6 +1227,73 @@ def test_compare_timeline_reports_deltas_and_new_kernels(profiles_dir: Path) -> 
     assert "delta=" in out
     assert "New kernels in b (not in a): 1" in out
     assert "brand_new_kernel" in out
+
+
+def _stamp(ns: int) -> dict[str, int]:
+    return {"monotonic_ns": ns, "clock_monotonic_ns": ns, "realtime_ns": ns}
+
+
+def test_compare_timeline_uses_the_load_window_for_both_captures(profiles_dir: Path) -> None:
+    """``compare`` must exclude each capture's own startup-phase kernels.
+
+    Diffing a's steady-state numbers against b's startup-polluted ones (or
+    vice versa) would be meaningless: a server capture's startup (weight
+    load, warmup, ...) is one-time setup work, not what the two runs are
+    actually being compared on. Each capture here has its own distinct
+    startup-only kernel; if window filtering weren't applied, b's would show
+    up as a "new kernel" (it's genuinely absent from a's trace) -- its
+    absence from ``compare``'s output is what proves the load window was
+    used for both sides, not just one.
+    """
+    del profiles_dir
+    id_a, dir_a = cr.new_capture("timeline")
+    id_b, dir_b = cr.new_capture("timeline")
+
+    header = "Kernel_Name,Dispatch_Id,Start_Timestamp,End_Timestamp"
+    (dir_a / "out_kernel_trace.csv").write_text(
+        f"{header}\nstartup_kernel_a_only,1,0,500\nsteady_kernel,2,10500,10600\n"
+    )
+    cr.write_manifest(
+        dir_a,
+        {
+            "kind": "timeline",
+            "capture_id": id_a,
+            "capture_start": _stamp(0),
+            "capture_end": _stamp(25000),
+            "load_window": {
+                "ready": _stamp(9000),
+                "start": _stamp(10000),
+                "end": _stamp(20000),
+            },
+        },
+    )
+
+    # b: a *different* startup-only kernel (would show up as brand-new if
+    # the whole trace were diffed unfiltered) plus the same steady kernel
+    # running longer.
+    (dir_b / "out_kernel_trace.csv").write_text(
+        f"{header}\nstartup_kernel_b_only,1,0,500\nsteady_kernel,2,10500,11600\n"
+    )
+    cr.write_manifest(
+        dir_b,
+        {
+            "kind": "timeline",
+            "capture_id": id_b,
+            "capture_start": _stamp(0),
+            "capture_end": _stamp(25000),
+            "load_window": {
+                "ready": _stamp(9000),
+                "start": _stamp(10000),
+                "end": _stamp(20000),
+            },
+        },
+    )
+
+    out = capture.compare(id_a, id_b)
+
+    assert "startup_kernel" not in out
+    assert "steady_kernel" in out
+    assert "delta=" in out
 
 
 def test_compare_counters_reports_per_kernel_metric_deltas(profiles_dir: Path) -> None:
