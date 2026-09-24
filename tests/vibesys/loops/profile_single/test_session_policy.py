@@ -1,4 +1,4 @@
-"""Single strategy terminal decisions over completed round evidence."""
+"""Profile single policy decisions over completed round evidence."""
 
 from __future__ import annotations
 
@@ -11,15 +11,16 @@ import pytest
 from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState
 from vibesys.agent_run.options import AgentOrchestrationOptions
-from vibesys.agent_run.state import AgentRunState
+from vibesys.agent_run.state import AgentRunState, ProfileBottleneck
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
-from vibesys.loops.single.hypothesis import HypothesisEngine
-from vibesys.loops.single.session import (
+from vibesys.evaluators.input_manifest import ProfileGuidedInput
+from vibesys.loops.profile_single.hypothesis import HypothesisEngine
+from vibesys.loops.profile_single.session import (
     AttemptRequest,
+    ProfileSingleRound,
+    ProfileSingleSession,
+    ProfileSingleSessionError,
     RoundSelection,
-    SingleRound,
-    SingleSession,
-    SingleSessionError,
 )
 from vibesys.schemas import OrchestratorPlan, SingleAgentRoundResponse, Verdict
 from vs_loop_state.api import RoundRecord
@@ -38,12 +39,14 @@ def _plan() -> OrchestratorPlan:
     )
 
 
-def _session() -> tuple[SingleSession, SingleRound]:
+def _session() -> tuple[ProfileSingleSession, ProfileSingleRound]:
     plan = _plan()
-    engine = HypothesisEngine.create(AgentRunState()).start(plan, started_round=1)
+    engine = HypothesisEngine.create(
+        AgentRunState(), config=ProfileGuidedInput(command=("true",))
+    ).start(plan, started_round=1)
     hypothesis = engine.state.active_hypothesis
     assert hypothesis is not None
-    session = SingleSession.__new__(SingleSession)
+    session = ProfileSingleSession.__new__(ProfileSingleSession)
     session.engine = engine
     session.options = AgentOrchestrationOptions(
         interface="inprocess",
@@ -52,11 +55,12 @@ def _session() -> tuple[SingleSession, SingleRound]:
         judge_every=1,
         official_eval_every=2,
         memory_layout="files",
+        profile_guided=ProfileGuidedInput(command=("true",)),
     )
     selection = RoundSelection(engine.state, hypothesis, plan, None)
     request = AttemptRequest(1, plan, None, [], hypothesis, "latency")
     attempt = AttemptState(agent_run_state=engine.state, feedback=None)
-    return session, SingleRound(selection, request, attempt)
+    return session, ProfileSingleRound(selection, request, attempt)
 
 
 def test_review_failure_retains_bounded_claim_and_sets_exhaustion_carry() -> None:
@@ -73,7 +77,7 @@ def test_review_failure_retains_bounded_claim_and_sets_exhaustion_carry() -> Non
         hypothesis_outcome="rejected",
     )
 
-    engine, carry, exhaustion = session.complete_policy_round(selected, record)
+    engine, carry, exhaustion = session._complete_policy_round(selected, record)  # noqa: SLF001
 
     active = engine.state.active_hypothesis
     assert active is not None
@@ -98,7 +102,7 @@ def test_terminal_success_releases_claim_and_reports_discarded_official_candidat
         perf_unit="ops",
     )
 
-    engine, carry, exhaustion = session.complete_policy_round(selected, record)
+    engine, carry, exhaustion = session._complete_policy_round(selected, record)  # noqa: SLF001
 
     assert engine.state.active_hypothesis is None
     assert exhaustion is None
@@ -167,6 +171,29 @@ async def test_passing_review_defers_official_gate_until_cadence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, selected = _session()
+    controller = session.engine.controller.prepare_round(
+        round_number=1,
+        attribution=(ProfileBottleneck(name="decode", cost=100, share=0.5, evidence=["sample"]),),
+    )
+    session.engine = HypothesisEngine(controller)
+    assert session.engine.controller.guidance.active_component == "decode"
+    selected = ProfileSingleRound(
+        RoundSelection(
+            selected.selection.state,
+            selected.selection.hypothesis,
+            selected.selection.plan,
+            "profile-guided component measurement",
+        ),
+        AttemptRequest(
+            1,
+            selected.request.plan,
+            "profile-guided component measurement",
+            [],
+            selected.request.active_hypothesis,
+            "decode",
+        ),
+        selected.attempt,
+    )
     session.round_number = 1
     session.records = []
     monkeypatch.setattr(session, "ctx", SimpleNamespace(log=lambda _message: None), raising=False)
@@ -234,10 +261,10 @@ def test_retry_cursor_and_official_command_keep_policy_boundaries(
     assert session._official_reason(requested=True) == "orchestrator_request"  # noqa: SLF001
     session.round_number = 3
     assert session._official_reason(requested=False) == "final_round"  # noqa: SLF001
-    assert SingleSession._command("run benchmark", "a b", "RELEASE") == (  # noqa: SLF001
+    assert ProfileSingleSession._command("run benchmark", "a b", "RELEASE") == (  # noqa: SLF001
         "env VIBESYS_CANDIDATE_REVISION='a b' RELEASE=1 run benchmark"
     )
-    assert SingleSession._command(None, "revision", "RELEASE") is None  # noqa: SLF001
+    assert ProfileSingleSession._command(None, "revision", "RELEASE") is None  # noqa: SLF001
     session.options = session.options.model_copy(update={"max_retries_per_round": 0})
-    with pytest.raises(SingleSessionError, match="exhausting"):
+    with pytest.raises(ProfileSingleSessionError, match="exhausting"):
         session.remaining_attempts(selected)

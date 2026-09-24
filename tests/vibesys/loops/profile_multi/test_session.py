@@ -1,0 +1,395 @@
+"""Profile multi durable decisions with fake host capabilities."""
+
+# ruff: noqa: SLF001  # These tests exercise the strategy's owned decision seams.
+
+from __future__ import annotations
+
+import asyncio
+import json
+from contextlib import nullcontext
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, cast
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeSkipped
+from vibesys.agent_run.evidence import CarryOver
+from vibesys.agent_run.state import AgentRunState
+from vibesys.evaluators.gates import (
+    AccuracyGateResult,
+    BenchmarkGateResult,
+    FrameworkBenchmarkOutcome,
+)
+from vibesys.evaluators.input_manifest import ProfileGuidedInput
+from vibesys.loops.profile_multi.controller import HypothesisEngine
+from vibesys.loops.profile_multi.decisions import AttemptRequest, RoundSelection
+from vibesys.loops.profile_multi.session import (
+    ProfileMultiRound,
+    ProfileMultiSession,
+    ProfileMultiSessionError,
+    _ProfilePolicy,
+    _TerminalPolicy,
+)
+from vibesys.schemas import (
+    HypothesisOutcome,
+    ImplementerResponse,
+    JudgeResponse,
+    OrchestratorPlan,
+    ValidationRecipeArtifact,
+    Verdict,
+)
+from vs_loop_state.api import RoundHistory
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+def _config() -> ProfileGuidedInput:
+    return ProfileGuidedInput(command=("profile",))
+
+
+def _plan(*, hypothesis_id: str = "h1") -> OrchestratorPlan:
+    return OrchestratorPlan(
+        hypothesis_id=hypothesis_id,
+        hypothesis="Cache decode",
+        task="Implement cache",
+        pass_criteria="Candidate behaves correctly",  # noqa: S106
+        reasoning="The profile identifies decode overhead",
+    )
+
+
+def _selected() -> ProfileMultiRound:
+    plan = _plan()
+    engine = HypothesisEngine.create(AgentRunState(), config=_config()).start(
+        plan, started_round=1, parent_commit="a" * 40
+    )
+    hypothesis = engine.state.active_hypothesis
+    assert hypothesis is not None
+    selection = RoundSelection(engine, engine.state, hypothesis, plan, "final_round")
+    request = AttemptRequest(1, plan, "final_round", [], hypothesis, engine, "decode")
+    return ProfileMultiRound(
+        selection, request, AttemptState(agent_run_state=engine.state, feedback=None)
+    )
+
+
+def _session(tmp_path: Path) -> ProfileMultiSession:
+    session = cast("Any", ProfileMultiSession.__new__(ProfileMultiSession))
+    config = _config()
+    state = AgentRunState()
+    session.options = SimpleNamespace(
+        max_rounds=3,
+        max_retries_per_round=2,
+        judge_every=1,
+        official_eval_every=3,
+        metric_space=state.metrics,
+    )
+    session.profile = _ProfilePolicy(config)
+    session.state = state
+    session.engine = HypothesisEngine.create(state, config=config)
+    session.records = []
+    session.history = RoundHistory(records=[])
+    session.carry = CarryOver()
+    session.round_number = 1
+    session.last_profile_focus = "decode"
+    session.framework_benchmark_configured = False
+    session.terminal_policy = _TerminalPolicy()
+    session.workspace = SimpleNamespace(
+        path=tmp_path,
+        revision="a" * 40,
+        trusted_input_baseline="b" * 40,
+        snapshot=AsyncMock(return_value="a" * 40),
+        restore=AsyncMock(),
+        retain=AsyncMock(),
+        pending_changes=AsyncMock(return_value=[]),
+    )
+    progress = tmp_path / "progress.md"
+    progress.write_text("# Progress\n")
+    session.turns = SimpleNamespace(
+        progress_path=progress,
+        roadmap_path=tmp_path / "roadmap.md",
+        objective="Improve throughput",
+        worker=SimpleNamespace(
+            backend_name="cli",
+            driver_name="fake",
+            provider="test",
+            model="test-model",
+        ),
+        pre_round_decision=AsyncMock(),
+        profile=AsyncMock(),
+        plan=AsyncMock(return_value=_plan()),
+        implement=AsyncMock(),
+        review=AsyncMock(),
+        close=AsyncMock(),
+    )
+    environment = SimpleNamespace(
+        run_log_path=tmp_path / "run.log",
+        view=SimpleNamespace(
+            paths=SimpleNamespace(
+                accuracy_command="python check.py",
+                benchmark_command="python bench.py",
+            ),
+            deployment_release_env_var="RELEASE_DEPLOYMENT",
+        ),
+        reselect_device=AsyncMock(),
+        reconcile_model_requests=AsyncMock(return_value=None),
+        execute=AsyncMock(return_value=SimpleNamespace(output="ok", exit_code=0)),
+    )
+    session.ctx = SimpleNamespace(
+        log=MagicMock(),
+        switch_log=MagicMock(),
+        events=SimpleNamespace(emit=MagicMock()),
+        agents=SimpleNamespace(progress=lambda _progress: nullcontext()),
+        state=SimpleNamespace(load=AsyncMock(return_value=None), checkpoint=AsyncMock()),
+        environment=environment,
+        evaluator=SimpleNamespace(
+            check=AsyncMock(), measure=AsyncMock(), reuse_accuracy=AsyncMock()
+        ),
+        request=SimpleNamespace(
+            project_root=tmp_path,
+            input_bundle=SimpleNamespace(benchmark_result=None, benchmark_result_protocol=None),
+        ),
+    )
+    return session
+
+
+def test_profile_policy_keeps_prompt_reason_separate_from_gate_cadence() -> None:
+    engine = HypothesisEngine.create(AgentRunState(), config=_config())
+    policy = _ProfilePolicy(_config())
+    assert policy.official_reason(None, engine) is None
+    assert policy.official_reason("final_round", engine) == "final_round"
+
+
+def test_initialize_and_pre_round_cursor_checkpoint_before_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = cast("Any", _session(tmp_path))
+    asyncio.run(session._initialize())
+    assert session.round_number == 1
+    assert session.ctx.state.checkpoint.await_count == 1
+    assert session.has_next_round
+
+    order: list[str] = []
+
+    async def attribution(_ctx: object, _config: ProfileGuidedInput, *, round_number: int):  # noqa: ANN202
+        order.append(f"attribution:{round_number}")
+        return ()
+
+    async def checkpoint(_state: AgentRunState, *, label: str) -> None:
+        order.append(f"checkpoint:{label}")
+
+    async def plan(_request: object) -> OrchestratorPlan:
+        order.append("plan")
+        return _plan()
+
+    monkeypatch.setattr("vibesys.loops.profile_multi.session.run_attribution", attribution)
+    session._save_state = checkpoint
+    session._pre_round_profile = AsyncMock(return_value=None)
+    session._apply_rollback = AsyncMock()
+    session.turns.plan = plan
+
+    selected = asyncio.run(session.select_hypothesis())
+    assert selected.request.plan.hypothesis_id == "h1"
+    assert order[0] == "attribution:1"
+    assert order[1].startswith("checkpoint:profile-guided: prepare round 1")
+    assert order.index("plan") < order.index("checkpoint:profile_multi: start hypothesis h1")
+    assert session.state.active_hypothesis is not None
+
+    monkeypatch.setattr(
+        "vibesys.loops.profile_multi.session.issue_board.append_hypothesis_continuation",
+        MagicMock(),
+    )
+    session.turns.plan = AsyncMock(side_effect=AssertionError("designer must be skipped"))
+    continued = asyncio.run(session.select_hypothesis())
+    assert continued.request.plan.hypothesis_id == "h1"
+    session.turns.plan.assert_not_awaited()
+
+
+def test_attempt_preflight_and_unparseable_implementation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = cast("Any", _session(tmp_path))
+    selected = _selected()
+    monkeypatch.setattr(
+        "vibesys.loops.profile_multi.session.issue_board.next_implementer_attempt",
+        lambda _path, _round: 2,
+    )
+    assert list(session.remaining_attempts(selected)) == [2]
+    session._save_state = AsyncMock()
+    asyncio.run(session.begin_attempt(selected, 2))
+    assert selected.attempt.retry == 2
+    assert isinstance(selected.attempt.judge, JudgeSkipped)
+    session._save_state.assert_awaited_once()
+    session.ctx.environment.reselect_device.assert_awaited_once()
+
+    response = ImplementerResponse(summary="unparseable", expected_behavior="unknown")
+    session.turns.implement = AsyncMock(return_value=(response, True))
+    assert not asyncio.run(session.implement(selected))
+    assert selected.attempt.implementation == response
+
+    monkeypatch.setattr(
+        "vibesys.loops.profile_multi.session.issue_board.next_implementer_attempt",
+        lambda _path, _round: 3,
+    )
+    with pytest.raises(ProfileMultiSessionError, match="exhausting"):
+        session.remaining_attempts(selected)
+
+
+def test_review_retries_rejection_and_validation_before_official_gate(tmp_path: Path) -> None:
+    session = cast("Any", _session(tmp_path))
+    selected = _selected()
+    session._checkpoint_active = AsyncMock()
+    session._validate_local = AsyncMock(return_value=None)
+    session._approve_candidate = AsyncMock()
+    session._approve_perf = AsyncMock()
+    session.options.max_rounds = 1
+
+    with pytest.raises(ProfileMultiSessionError, match="review requires"):
+        asyncio.run(session.review(selected))
+
+    selected.attempt.implementation = ImplementerResponse(
+        summary="changed",
+        expected_behavior="faster",
+        hypothesis_outcome=HypothesisOutcome.SUPPORTED,
+    )
+    session.turns.review = AsyncMock(
+        return_value=JudgeResponse(analysis="bad", feedback="repair", verdict=Verdict.FAIL)
+    )
+    assert asyncio.run(session.review(selected)) is AttemptDecision.RETRY
+    assert selected.attempt.feedback == "repair"
+    session._checkpoint_active.assert_awaited()
+
+    session.turns.review.return_value = JudgeResponse(
+        analysis="good", feedback="", verdict=Verdict.PASS
+    )
+    session._validate_local.return_value = "local recipe failed"
+    assert asyncio.run(session.review(selected)) is AttemptDecision.RETRY
+    assert selected.attempt.feedback == "local recipe failed"
+
+    session._validate_local.return_value = None
+    assert asyncio.run(session.review(selected)) is AttemptDecision.OFFICIAL
+    assert selected.attempt.official_reason is not None
+    session._approve_perf.assert_awaited_once()
+
+
+def test_sparse_review_defers_gates_and_records_provisional_decision(tmp_path: Path) -> None:
+    session = cast("Any", _session(tmp_path))
+    selected = _selected()
+    selected.attempt.implementation = ImplementerResponse(
+        summary="continue",
+        expected_behavior="faster",
+        hypothesis_outcome=HypothesisOutcome.CONTINUE,
+        next_step="Finish cache",
+    )
+    session.options.judge_every = 3
+    assert asyncio.run(session.review(selected)) is AttemptDecision.FINISH
+    session.turns.review.assert_not_awaited()
+
+    selected.attempt.implementation = ImplementerResponse(
+        summary="candidate",
+        expected_behavior="faster",
+        hypothesis_outcome=HypothesisOutcome.SUPPORTED,
+    )
+    session.turns.review = AsyncMock(
+        return_value=JudgeResponse(analysis="good", feedback="", verdict=Verdict.PASS)
+    )
+    session._validate_local = AsyncMock(return_value=None)
+    session._approve_candidate = AsyncMock()
+    session._record_official_decision = MagicMock()
+    assert asyncio.run(session.review(selected)) is AttemptDecision.FINISH
+    assert selected.attempt.passed
+    session._record_official_decision.assert_called_once_with(
+        selected, run=False, reason="cadence_not_due"
+    )
+
+
+def test_official_gate_feedback_is_checkpointed_and_success_passes(tmp_path: Path) -> None:
+    session = cast("Any", _session(tmp_path))
+    selected = _selected()
+    selected.attempt.official_reason = "final_round"
+    selected.attempt.retry = 1
+    session._record_official_decision = MagicMock()
+    session._checkpoint_active = AsyncMock()
+    benchmark = FrameworkBenchmarkOutcome(metric_name="throughput", metric_value=42.0)
+    session._run_gates = AsyncMock(return_value=("benchmark failed", benchmark, True))
+
+    assert not asyncio.run(session.official_gates(selected))
+    assert selected.request.active_hypothesis.gate_revalidation_pending
+    assert selected.request.active_hypothesis.gate_accuracy_passed
+    assert selected.attempt.framework_perf_metric == 42.0
+    session._checkpoint_active.assert_awaited_once()
+
+    session._run_gates.return_value = (None, benchmark, True)
+    assert asyncio.run(session.official_gates(selected))
+    assert selected.attempt.passed
+
+
+def test_gate_pipeline_handles_resource_accuracy_and_benchmark_outcomes(tmp_path: Path) -> None:
+    session = cast("Any", _session(tmp_path))
+    session.turns.worker.backend_name = "stub"
+    assert asyncio.run(session._run_gates(1, "a" * 40, reuse_accuracy=False))[0] is None
+    session.turns.worker.backend_name = "cli"
+
+    session.ctx.environment.reconcile_model_requests.return_value = "model unavailable"
+    assert (
+        asyncio.run(session._run_gates(1, "a" * 40, reuse_accuracy=False))[0] == "model unavailable"
+    )
+    session.ctx.environment.reconcile_model_requests.return_value = None
+    session._accuracy_gate = AsyncMock(
+        return_value=AccuracyGateResult(
+            command="check", passed=False, output="bad", feedback="accuracy failed", executed=True
+        )
+    )
+    assert (
+        asyncio.run(session._run_gates(1, "a" * 40, reuse_accuracy=False))[0] == "accuracy failed"
+    )
+
+    session._accuracy_gate.return_value = AccuracyGateResult(
+        command="check", passed=True, output="ok", feedback=None, executed=True
+    )
+    session._benchmark_gate = AsyncMock(
+        return_value=BenchmarkGateResult(
+            command="bench",
+            output="ok",
+            executed=True,
+            outcome=FrameworkBenchmarkOutcome(metric_value=5.0),
+        )
+    )
+    feedback, outcome, accuracy_passed = asyncio.run(
+        session._run_gates(1, "a" * 40, reuse_accuracy=True)
+    )
+    assert feedback is None
+    assert outcome.metric_value == 5.0
+    assert accuracy_passed
+
+
+def test_local_validation_rejects_mutating_command_and_restores_snapshot(tmp_path: Path) -> None:
+    session = cast("Any", _session(tmp_path))
+    selected = _selected()
+    selected.attempt.retry = 1
+    (tmp_path / "candidate.py").write_text("candidate = 1\n")
+    recipe = {
+        "name": "focused",
+        "command": "python check.py",
+        "input_paths": ["candidate.py"],
+        "purpose": "Check candidate",
+    }
+    (tmp_path / "recipes.json").write_text(
+        ValidationRecipeArtifact.model_validate({"recipes": [recipe]}).model_dump_json()
+    )
+    session.workspace.pending_changes.return_value = ["candidate.py"]
+    feedback = asyncio.run(session._validate_local(selected, "recipes.json"))
+    assert feedback is not None
+    assert "mutated the workspace" in feedback
+    session.workspace.restore.assert_awaited_once()
+    artifact = tmp_path / "progress-artifacts" / "validation" / "round-0001-attempt-01.json"
+    assert json.loads(artifact.read_text())["results"][0]["passed"] is False
+
+
+def test_finalization_restores_baseline_when_no_candidate(tmp_path: Path) -> None:
+    session = cast("Any", _session(tmp_path))
+    assert asyncio.run(session.finish())
+    session.workspace.restore.assert_awaited_once()
+    assert session.workspace.restore.call_args.args[0] == "b" * 40
+    assert asyncio.run(session.close()) is None
+    session.turns.close.assert_awaited_once()
