@@ -35,142 +35,155 @@ The benchmark command is `{{ benchmark_command }}`.
 
 {% endif %}
 
+## Start with `profiling_capabilities`
+
+Call `profiling_capabilities()` first, every round. It reports what this
+host actually supports: rocprofv3/ROCm version, whether the ATT trace
+decoder is installed, the PMC counter-set catalogue for the detected
+architecture, and whether `rocprof-compute`'s Python dependency set is
+importable. Use it to rule out an altitude up front (e.g. no ATT decoder
+means go straight to `profile_counters`/`profile_kernel_deep` for
+hardware-ceiling evidence instead), not to discover this by a failed
+capture.
+
 ## Altitudes: which tool answers which question
 
 Start at the system timeline unless you already have strong evidence the
 bottleneck is kernel-local or library-selection. Descend only as far as the
 evidence demands; each altitude below costs more overhead than the last.
 
-| Altitude | Answers | Tools |
-| -------- | ------- | ----- |
-| System timeline | host/device overlap, idle gaps, launch cost, HIP graph coverage, library selection (AITER/CK/hipBLASLt/Triton/torch-native) | `files`, `kernels`, `families`, `idle_gaps`, `cpu_overhead`, `memory`, `graphs`, `host_idle`, `query`, `summary` |
-| Counters (PMC) | which hardware ceiling one specific kernel is against | `counter_sets`, `counter_plan`, `counter_report`, `counter_triage` |
-| Kernel-internal | full Speed-of-Light + roofline for one targeted kernel | `compute_doctor`, `compute_analyze` (capture via shell, see below) |
-| Instruction-level | per-instruction stalls inside one kernel, one compute unit (version-gated, see Pitfalls) | `att_plan`, `att_hotspots` |
-| Paired A/B | did a change actually move the needle, same session, drift-controlled | `bench_parse`, `bench_compare`, `bench_verdict` |
+| Altitude | Answers | Capture tool | Drill-downs |
+| -------- | ------- | ------------- | ----------- |
+| System timeline | host/device overlap, idle gaps, launch cost, HIP graph coverage, library selection (AITER/CK/hipBLASLt/Triton/torch-native) | `profile_timeline` | `kernels`, `families`, `idle_gaps`, `cpu_overhead`, `memory`, `graphs`, `host_idle`, `query`, `summary`, `captures` |
+| Counters (PMC) | which hardware ceiling one specific kernel is against | `profile_counters` | `counter_report`, `counter_triage` |
+| Kernel-internal | full Speed-of-Light + roofline for one targeted kernel | `profile_kernel_deep` | `compute_analyze` |
+| Instruction-level | per-instruction stalls inside one kernel, one compute unit (version-gated, see Pitfalls) | `profile_instructions` | `att_hotspots` |
+| Paired A/B | did a change actually move the needle, same session, drift-controlled | (compare two captures) | `compare`, `bench_verdict` |
 
-## Analysis toolkit: `{{ profiler_mcp_name }}` MCP tools OR shell
+Every `profile_*` capture tool shares the same lifecycle arguments
+(`command`, `env`, `cwd`, `ready_command`, `load_command`, `stop_signal`,
+`grace_s`, `timeout_s`), plus arguments scoped to what it captures (counter
+sets, target kernel regex, target CU, ...). **What goes into those
+arguments is engine-specific, not a ROCm concern**: see
+`serving-systems/references/tooling/profiling-serving-engines.md` for the
+index of what each argument is for, and the linked per-engine file (under
+`serving-systems/references/engines/`) for the engine actually in play:
+single-process launch settings, graceful-shutdown behavior, and any
+torch.profiler contract differences. This template covers only the
+ROCm-specific mechanics below.
 
-If the `{{ profiler_mcp_name }}` MCP server is attached to this round, call its tools directly (argument names shown). Otherwise, shell out to the matching subcommand on `python {{ profiler_support_name }}/<module>.py`.
+## `{{ profiler_mcp_name }}` MCP tools OR shell
 
-### System trace (`analyze_rocprof.py`)
+If the `{{ profiler_mcp_name }}` MCP server is attached to this round, call its tools directly (argument names shown). Without it, run the equivalent `rocprofv3`/`rocprof-compute` command yourself (see `serving-systems/references/platforms/rocm/profiler.md` for exact flags) and shell out to the matching drill-down subcommand on `python {{ profiler_support_name }}/<module>.py` against its output.
 
-| MCP tool | Shell equivalent | Purpose |
-| -------- | ---------------- | ------- |
-| `files(report)` | `... analyze_rocprof.py files <report>` | Discover captured files, processes, agents; start here. |
-| `kernels(report, top=15)` | `... kernels <report> --top 15` | Top GPU kernels by total time, with a library-family column. |
-| `families(report)` | `... families <report>` | GPU time grouped by kernel library family (AITER/CK/hipBLASLt/Triton/torch-native). A fallback share where a fused-library share was expected means a silent fallback, not a hardware limit. |
-| `idle_gaps(report, top=10)` | `... idle_gaps <report> --top 10` | Largest GPU idle gaps between kernel launches. |
-| `cpu_overhead(report)` | `... cpu_overhead <report>` | HIP API launch overhead and launch-bound heuristic. |
-| `memory(report)` | `... memory <report>` | Memory copies by direction, bytes, bandwidth. |
-| `graphs(report)` | `... graphs <report>` | HIP graph launches and attribution-degradation check. |
-| `host_idle(report)` | `... host_idle <report>` | Validity check: detects a mostly host-idle / load-missed capture. |
-| `query(report, sql)` | `... query <report> "<SQL>"` | Arbitrary SQL against a rocpd SQLite export, if present (ROCm 7+). |
-| `summary(report, top=15)` | `... summary <report>` | All-in-one: kernels + families + idle_gaps + cpu_overhead + memory + graphs. |
+### System trace: `profile_timeline` + drill-downs (`analyze_rocprof.py`)
+
+`profile_timeline` runs an `rocprofv3` system-trace capture end to end
+(launch, wait for `ready_command` if given, run `load_command` if given,
+stop with `stop_signal` after `grace_s`, wait out the post-exit flush) and
+returns a capture id.
+
+| Drill-down | Purpose |
+| ---------- | ------- |
+| `kernels(capture, top=15)` | Top GPU kernels by total time, with a library-family column. |
+| `families(capture)` | GPU time grouped by kernel library family (AITER/CK/hipBLASLt/Triton/torch-native). A fallback share where a fused-library share was expected means a silent fallback, not a hardware limit. |
+| `idle_gaps(capture, top=10)` | Largest GPU idle gaps between kernel launches. |
+| `cpu_overhead(capture)` | HIP API launch overhead and launch-bound heuristic. |
+| `memory(capture)` | Memory copies by direction, bytes, bandwidth. |
+| `graphs(capture)` | HIP graph launches and attribution-degradation check. |
+| `host_idle(capture)` | Validity check: detects a mostly host-idle / load-missed capture. |
+| `query(capture, sql)` | Arbitrary SQL against a rocpd SQLite export, if present (ROCm 7+). |
+| `summary(capture, top=15)` | All-in-one: kernels + families + idle_gaps + cpu_overhead + memory + graphs. |
+| `captures()` | List captures already taken this session. |
 
 **Validity first.** Before trusting any bottleneck read, check `host_idle` (a
-mostly-idle capture usually means you profiled the wrong process: the API
+mostly-idle capture usually means the wrong process was captured: the API
 server/driver, not the worker issuing HIP kernels) and `graphs` (confirms
 whether decode is running under a captured HIP graph or eager; the two need
 different follow-up: replay timing and inter-replay gaps for graphed decode,
 `idle_gaps`/`cpu_overhead` for eager).
 
-### PMC counters (`counters.py`): one hardware ceiling for one hot kernel
+### PMC counters: `profile_counters` + drill-downs (`counters.py`): one hardware ceiling for one hot kernel
 
-| MCP tool | Shell equivalent | Purpose |
-| -------- | ---------------- | ------- |
-| `counter_sets(arch=None)` | `... counters.py list-sets --arch <arch>` | Print the counter-set catalogue for an architecture (or all). |
-| `counter_plan(arch, sets, kernel=None, out_dir="rocprof_pmc", command=None)` | `... plan --arch <arch> --sets <s1,s2> --kernel <regex> -- <command>` | Print one `rocprofv3 --pmc` command line per requested counter set. |
-| `counter_report(dirs, kernel=None, top=15, arch=None)` | `... report <dir1> <dir2> ...` | Merge PMC passes per kernel; print resource usage + derived metrics (L2 hit rate, HBM bandwidth, MFMA issue rate, LDS bank-conflict rate). |
-| `counter_triage(dirs, arch, kernel=None, top=15)` | `... triage <dir1> <dir2> ... --arch <arch>` | Classify each hot kernel's bottleneck (occupancy/bandwidth/compute/LDS/launch/latency) with evidence and a next lever. |
-
-**Use `counter_plan`; never hand-write a `--pmc` list.** Keep each pass to
-**at most 4 counters**; a job that forces multi-pass collection has been
-reported to trigger a GPU hang on CDNA hardware. Give each requested counter
-set **its own output directory**; never reuse an output directory across
-passes, and never combine sets into one `--pmc` invocation. Target one
+`profile_counters` captures one hardware pass per requested counter set (at
+most **4 counters per pass**; a job that forces multi-pass collection has
+been reported to trigger a GPU hang on CDNA hardware). Give each requested
+counter set its own output; never combine sets into one pass. Target one
 already-identified hot kernel; this is not a whole-run tool.
 
-### Kernel-internal (`compute.py`, rocprof-compute)
+| Drill-down | Purpose |
+| ---------- | ------- |
+| `counter_report(dirs, kernel=None, top=15, arch=None)` | Merge PMC passes per kernel; print resource usage + derived metrics (L2 hit rate, HBM bandwidth, MFMA issue rate, LDS bank-conflict rate). |
+| `counter_triage(dirs, arch, kernel=None, top=15)` | Classify each hot kernel's bottleneck (occupancy/bandwidth/compute/LDS/launch/latency) with evidence and a next lever. |
 
-| MCP tool | Shell equivalent | Purpose |
-| -------- | ---------------- | ------- |
-| `compute_doctor()` | `... compute.py doctor` | Diagnose the rocprof-compute install (binary, deps interpreter, pandas version, the deprecated legacy `rocprof` it actually shells out to, aqlprofile) before spending a capture on it. |
-| `compute_analyze(workload_dir, blocks=..., max_stat=10, kernel="", timeout=300)` | `... analyze <workload_dir>` | Run `rocprof-compute analyze`; falls back to a summarized read of the raw CSVs (top kernels by time, a couple of rough counter ratios) if it fails. |
+### Kernel-internal: `profile_kernel_deep` + drill-down (`compute.py`, rocprof-compute)
 
-`compute.py profile` (the capture step) is long-running and stays **shell
-command, not an MCP tool**, same reasoning as `rocprofv3` capture itself. Run
-`compute_doctor` first: `rocprof-compute` refuses to run unless its Python
-dependency set is importable in whichever interpreter runs it, an
-all-or-nothing preflight you want to hit before, not during, a capture. Then
-capture with a hard timeout, targeted at one already-identified kernel, never
-a whole run:
+`profile_kernel_deep` runs `rocprof-compute profile` against one targeted
+kernel and returns a capture id. Check `profiling_capabilities` first:
+`rocprof-compute` refuses to run at all unless its Python dependency set is
+importable in whichever interpreter runs it, an all-or-nothing preflight
+better hit before a capture than during one.
 
-```
-python {{ profiler_support_name }}/compute.py profile --name <workload> --out /tmp/rocprof_compute \
-  --kernel <regex> --timeout 900 -- <command>
-```
-
-**`--kernel` matches a literal substring, not a friendly name: verify it
-first.** Confirmed on a real capture: torch GEMMs dispatch through
-rocBLAS/hipBLASLt as Tensile kernels named like
+**The target-kernel argument matches a literal substring, not a friendly
+name: verify it first.** Confirmed on a real capture: torch GEMMs dispatch
+through rocBLAS/hipBLASLt as Tensile kernels named like
 `Cijk_Ailk_Bljk_BBS_BH_..._MT256x128x32_...`, which does **not** contain the
-substring `"gemm"`: a naive `--kernel gemm` filter matches zero dispatches,
-and `profile` here now fails loudly with the fix (list real kernel names with
-`rocprofv3 --kernel-trace --stats` first) instead of forwarding rocprof-
-compute's own confusing `KeyError: 'Grid_Size'` crash.
+substring `"gemm"`: a naive `"gemm"` filter matches zero dispatches. List
+real kernel names with `profile_timeline` + `kernels` first, rather than
+guessing and hitting rocprof-compute's own confusing `KeyError: 'Grid_Size'`
+crash several steps later.
 
-### Instruction-level (`att.py`, Advanced Thread Trace): version-gated
+| Drill-down | Purpose |
+| ---------- | ------- |
+| `compute_analyze(workload_dir, blocks=..., max_stat=10, kernel="", timeout=300)` | Run `rocprof-compute analyze`; falls back to a summarized read of the raw CSVs (top kernels by time, a couple of rough counter ratios) if it fails. |
 
-| MCP tool | Shell equivalent | Purpose |
-| -------- | ---------------- | ------- |
-| `att_plan(arch, kernel, target_cu=1, ..., command=None)` | `... att.py plan --arch <arch> --kernel <regex> -- <command>` | Print a rocprofv3 ATT job config and the invocation to run it. |
-| `att_hotspots(dispatch_dir, top=15)` | `... hotspots <dispatch_dir>` | Top stall hotspots (instructions + source lines) from a decoded ATT dispatch directory. |
+### Instruction-level: `profile_instructions` + drill-down (`att.py`, Advanced Thread Trace): version-gated
 
-ATT needs a `rocprofv3` >= ROCm 7.1 (the `--att`/thread-trace flag doesn't
-exist before that) and the separate `rocprof-trace-decoder` shared library,
-which ships as its own GitHub release, not inside any ROCm module. Run
-`att_plan` early: it prints the exact working command line, including
-`--att-library-path`, once you know where the decoder `.so` is. A decoder-path
-error means it isn't installed or isn't pointed at yet: the library is a
-single small `.so` extractable from the release tarball with no build step
-and no root, so try installing it into a scratch directory before giving up
-on ATT for the session; if that isn't practical in the time available, treat
-the error as "ATT unavailable on this host," not a usage bug, and fall back
-to `counters.py`/`compute.py` for hardware-ceiling evidence instead. Only
-reach for ATT after counters already point at a specific stall class; it
-attributes per-instruction stalls inside one kernel, one compute unit, and
-costs the most overhead of any tool here.
+`profile_instructions` runs an `rocprofv3 --att` capture and decode against
+one targeted kernel and returns a decoded dispatch directory (or a clear
+error if the decoder isn't available). ATT needs `rocprofv3` >= ROCm 7.1
+(the `--att`/thread-trace flag doesn't exist before that) and the separate
+`rocprof-trace-decoder` shared library, which ships as its own GitHub
+release, not inside any ROCm module; `profiling_capabilities` reports
+whether it's installed and where. A missing-decoder error means it isn't
+installed or isn't pointed at yet: the library is a single small `.so`
+extractable from the release tarball with no build step and no root, so try
+installing it into a scratch directory before giving up on ATT for the
+session; if that isn't practical in the time available, treat the error as
+"ATT unavailable on this host," not a usage bug, and fall back to
+`profile_counters`/`profile_kernel_deep` for hardware-ceiling evidence
+instead. Only reach for ATT after counters already point at a specific
+stall class; it attributes per-instruction stalls inside one kernel, one
+compute unit, and costs the most overhead of any tool here.
 
-### Paired A/B (`kernel_bench.py`): did the change actually help
+| Drill-down | Purpose |
+| ---------- | ------- |
+| `att_hotspots(dispatch_dir, top=15)` | Top stall hotspots (instructions + source lines) from a decoded ATT dispatch directory. |
 
-| MCP tool | Shell equivalent | Purpose |
-| -------- | ---------------- | ------- |
-| `bench_parse(log)` | `... kernel_bench.py parse <log>` | Extract `wall_ms: <float>` lines from a driver log into `{"wall_ms": [...]}`. |
-| `bench_compare(file_a, file_b, threshold_pct=3.0)` | `... compare <file_a> <file_b>` | Unpaired median comparison of two recorded (non-interleaved) sample files. |
-| `bench_verdict(samples, threshold_pct=3.0)` | `... verdict <samples>` | Paired A/B verdict from a file of genuinely interleaved recorded pairs, the preferred shape for "did this help." |
+### Paired A/B: `compare` / `bench_verdict`: did the change actually help
 
 This verifies; it does not diagnose. Use it to confirm a hypothesis already
 localized by the tools above, same session, drift-controlled (alternate
 reference/candidate reps, never compare across sessions or boxes).
 
-## Capturing a profile (shell)
+| Tool | Purpose |
+| ---- | ------- |
+| `compare(a, b, threshold_pct=3.0)` | Unpaired median comparison of two recorded (non-interleaved) sample sets. |
+| `bench_verdict(samples, threshold_pct=3.0)` | Paired A/B verdict from a file of genuinely interleaved recorded pairs, the preferred shape for "did this help." |
 
-Capture is a long-running shell step; do it before calling the MCP tools.
+## Capturing a profile
+
+Capture is a long-running step; call the appropriate `profile_*` tool
+before calling any drill-down.
 
 1. Read the objective, candidate contract, manifest, build/startup commands, and benchmark `--help` output to understand which implementation and process the workload exercises{% if benchmark_command is defined and benchmark_command %}: `{{ benchmark_command }} --help`{% endif %}. Do not assume a filename, language, or launcher.
 2. Stop any stale candidate processes from previous attempts.
-3. Pre-warm under load (CRITICAL on ROCm: first-time AITER/Triton JIT resolution and any `TunableOp`/AITER online tuning take minutes and must not land inside the captured window). This is also where HIP-graph capture happens for graph-mode serving; keep it outside the traced window so the trace holds only steady-state replay kernels, not one-time capture kernels.
-4. Identify the process that actually issues HIP kernels. vLLM's engine core and SGLang's per-TP-rank workers run in a process separate from the API server/driver; a driver-only capture shows near-zero GPU activity by construction: that is "wrong process," not "the GPU is idle." For tensor-parallel serving, capture each worker independently. **`rocprofv3` only flushes its trace buffers on a clean process exit**: killing a wrapped server (SIGTERM/SIGKILL) loses the trace even though the run otherwise looked fine, because the engine-core subprocess vLLM/SGLang forks for serving does not exit cleanly on an external kill of the parent. Prefer an offline single-process script (e.g. `vllm.LLM(...).generate(...)` / SGLang's equivalent) that exits on its own once the workload finishes, over wrapping the long-running server. For vLLM specifically, set `VLLM_ENABLE_V1_MULTIPROCESSING=0` so the engine runs in-process (no forked `EngineCore` that can fail to exit cleanly). If a server must be captured, shut it down through its own graceful path, never a hard kill of the process tree.
-5. Profile under representative load, with CSV output and enough trace kinds for every analysis above (kernel- and memory-copy-level events, plus aggregated stats):
-   ```
-   rocprofv3 --kernel-trace --memory-copy-trace --stats --output-format csv \
-     -d /tmp/rocprof_profile -o capture \
-     -- <offline script or server command>
-   ```
-   Use `--output-format csv` only: adding `json` duplicates every CSV's content inside one JSON blob and can reach GB scale at serving-workload row counts for zero extra information. Add `--hip-runtime-trace` only when `cpu_overhead`/`graphs`/launch-bound analysis is actually needed: it traces one HIP runtime API call per kernel launch/memcpy/event, so on a batched-decode workload it typically runs 2-4x the size of the kernel trace it's paired with; do not enable it by default on a large capture. Constrain the collection window to representative load: a multi-minute full trace is unreadable and wastes capture overhead. Bound every capture with a hard timeout, sized generously: the post-exit flush to disk can itself take minutes and scales with `--hip-runtime-trace` volume, not with capture duration, so a capture that exits promptly can still take a few minutes longer to finish writing files; do not treat "no output yet" right after exit as failure. Kill the whole process tree (not just the top PID) only on a genuine timeout, so a stuck worker does not orphan a HIP context for the next round. On a shared node, use a port scoped to this job rather than a fixed default, to avoid colliding with another concurrent run.
-6. Wait for the trace files to appear before treating capture as done. Stop any other background candidate process you started.
-7. Call `files` (or any analysis tool; they auto-discover) against the output directory `-d` names.
+3. Fill `command`/`env`/`ready_command`/`load_command`/`stop_signal`/`grace_s` from the candidate's declared startup contract and, where the candidate is a known serving engine, that engine's file under `serving-systems/references/engines/` (start from the index at `serving-systems/references/tooling/profiling-serving-engines.md`). **Prefer a single-process, non-serving `command`** that exits on its own once the workload finishes over wrapping a long-running server: `rocprofv3` only flushes its trace buffers on a clean process exit, so a server that gets killed instead of exiting cleanly can silently lose the trace even though the run otherwise looked fine. If a server capture is unavoidable, set `stop_signal` to a graceful signal (never a hard kill of the process tree) and give `grace_s` a generous value: the post-exit flush to disk can itself take minutes and scales with how much was traced, not with how long the run took.
+4. Pre-warm under load before the traced window starts (CRITICAL on ROCm: first-time AITER/Triton JIT resolution and any `TunableOp`/AITER online tuning take minutes and must not land inside the captured window). This is also where HIP-graph capture happens for graph-mode serving; keep it outside the traced window so the trace holds only steady-state replay kernels, not one-time capture kernels. Use `load_command` for a separate untraced warmup phase if the tool supports one, or bake a warmup step into `command` itself.
+5. Identify the process that actually issues HIP kernels before scoping the capture. A serving engine's request-handling worker commonly runs in a process separate from its API server/driver; a driver-only capture shows near-zero GPU activity by construction: that is "wrong process," not "the GPU is idle." For tensor-parallel serving, capture each worker independently.
+6. Keep the traced window representative and request CSV-only output where the tool exposes that choice: a multi-minute full trace is unreadable, and JSON output duplicates every CSV's content inside one blob and can reach GB scale at serving-workload row counts for zero extra information. Request the extra HIP-runtime-trace kind only when `cpu_overhead`/`graphs`/launch-bound analysis is actually needed: it traces one HIP runtime API call per kernel launch/memcpy/event, so on a batched-decode workload it typically runs 2-4x the size of the kernel trace it's paired with.
+7. Wait for the `profile_*` call to return a capture id before treating capture as done; it already waits out the post-exit flush. Stop any other background candidate process you started.
+8. Call `summary(capture)` or a specific drill-down against the returned capture id.
 
 **Eager vs. HIP-graph attribution.** Check `graphs` before reading per-op
 timing as ground truth: a small number of large graph-launch entries covering
@@ -184,12 +197,15 @@ and call the result graph-era throughput.
 ## ROCm knowledge
 
 `serving-systems/references/platforms/rocm/profiler.md` has the full
-altitude/tool map, capture recipes, and the pitfalls list this template
+altitude/tool map, capture mechanics, and the pitfalls list this template
 summarizes. See also, in the same directory: `measurement-protocol.md`
 (warmup, repeats, clock locking, the paired-A/B discipline), `counter-triage.md`
 (turning a counter capture into a bottleneck verdict), `roofline.md` (per-arch
 peaks and ridges), and `aiter-engagement.md` (proving which kernel library
-actually ran, for the "present but slower" fallback finding).
+actually ran, for the "present but slower" fallback finding). For what to
+put in a capture tool's `command`/`env`/`ready_command`/`stop_signal` for a
+specific serving engine, see
+`serving-systems/references/tooling/profiling-serving-engines.md`.
 
 {% include "profilers/_observer_effect.j2" %}
 
