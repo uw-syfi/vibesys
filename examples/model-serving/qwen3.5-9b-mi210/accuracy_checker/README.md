@@ -12,9 +12,10 @@ uv run python accuracy_checker/checker.py --target inproc
 ```
 
 The HTTP target needs `/v1/completions` with `ignore_eos`, `return_token_ids`,
-and `echo` + `logprobs` + `return_tokens_as_token_ids` (vLLM-compatible). It
-also checks that a streamed response yields the same token ids and a correct
-usage chunk.
+and `echo` + `logprobs` + `return_tokens_as_token_ids` (vLLM-compatible), and
+`usage.prompt_tokens_details.cached_tokens` on non-streamed responses. It also
+runs the cache-resume check below and checks that a streamed response yields
+the same token ids and a correct usage chunk.
 
 ## Golden data
 
@@ -55,9 +56,46 @@ distribution, measured two ways:
 | Teacher-forced p99 \|Δlogprob\| | <= 0.25 |
 | Free-run mean matched-prefix fraction | >= 0.5 |
 
-Thresholds are fixed in `checker.Thresholds` and were set from the calibration
-below, before any optimized engine existed. Do not retune them to admit a
-candidate.
+Thresholds are fixed in `thresholds.Thresholds` and were set from the
+calibration below, before any optimized engine existed. Do not retune them to
+admit a candidate.
+
+## Cache-resume check
+
+The checks above never hit a prefix cache: servers compute `echo` + `logprobs`
+requests without it, and each free-run prompt is sent once. On this workload
+most tokens are served by resuming a session from the previous round's cached
+KV and GDN state, so a resume bug (stale or wrong GDN state, an off-by-one
+resume position, KV reused without the matching state) would pass them. The
+HTTP target therefore also runs `resume.py` (before the checks above, so it
+resumes from the end of a finished request):
+
+- Each case's 64 golden tokens are generated as 4 chained rounds of 16. Round
+  k's prompt is the case prompt plus the golden tokens before round k. When
+  round k-1 matched golden, that is exactly round k-1's prompt plus its
+  output, as in a session replay, and the resume position is not aligned to
+  a 64-token GDN chunk. Anchoring on golden rather than on the server's own
+  output keeps later rounds checkable after a near-tie divergence.
+- Each round is judged by the free-run policy: its first divergence from
+  golden must be at a near-tie (HF margin < 0.5 nats), and the mean matched
+  fraction over all rounds must be >= 0.5. A non-tie divergence fails the
+  gate whether or not the round reported a cache hit; the report lists the
+  ones with `cached_tokens > 0` separately
+  (`cache_hit_non_tie_divergences`), since those point at the resume path.
+- Every round must report `usage.prompt_tokens_details.cached_tokens` with
+  `0 <= cached_tokens <= prompt tokens`.
+
+A server without prefix caching reports `cached_tokens: 0`, recomputes every
+round, and passes on correctness alone; the report then notes that the resume
+path was not exercised. The report also gives, per round, the reported
+`cached_tokens` against `resumable_tokens` (the tokens of that prompt whose
+state the previous round computed), which shows whether a caching server
+actually resumed. A hit larger than that is not an error: another request
+(for example an earlier gate run) may have cached a longer prefix.
+
+The check reuses the base thresholds and golden data unchanged; it has no
+calibration run of its own on MI210 yet. It adds 48 requests and 768 decoded
+tokens (about 40 s on the reference engine at ~20 tok/s).
 
 ## Calibration evidence
 
