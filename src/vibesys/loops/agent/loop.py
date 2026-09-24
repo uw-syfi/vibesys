@@ -29,8 +29,6 @@ from vibesys.events import (
 )
 from vibesys.loops.agent import issue_board
 from vibesys.loops.agent.attempt import (
-    JudgeSkipped,
-    JudgeSkipReason,
     recorded_judge_verdict,
 )
 from vibesys.loops.agent.hypotheses import (
@@ -61,13 +59,13 @@ from vibesys.loops.agent.orchestration import (
     recorded_objectives,
 )
 from vibesys.loops.agent.policy_attempts import (
-    AttemptDecision,
     AttemptRequest,
     AttemptServices,
     AttemptState,
-    run_official_gates,
+    execute_attempts,
 )
 from vibesys.loops.agent.policy_flow import control_flow_for, validate_control_flow
+from vibesys.loops.agent.policy_local import _LocalAgentPolicyIO
 from vibesys.loops.agent.policy_profile import (
     ProfileOutcomeInput,
     ProfilePreparation,
@@ -384,17 +382,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
     # A policy may carry the previous combined response into the next plan.
     last_single_agent_response: SingleAgentRoundResponse | None = None
     last_profile_focus: str = "general latency hotspots on /v1/completions"
-    round_services = RoundPreparationServices(
-        ctx=ctx,
-        agents=agents,
-        objective=objective,
-        modality=modality,
-        interface=interface,
-        domain_definition=domain_definition,
-        progress_path=progress_path,
-        progress_location=progress_location,
-    )
-    attempt_services = AttemptServices(
+    policy_io = _LocalAgentPolicyIO(
         ctx=ctx,
         agents=agents,
         state_store=state_store,
@@ -411,6 +399,15 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         objectives=objectives,
         accuracy_timeout_seconds=accuracy_timeout_seconds,
         benchmark_timeout_seconds=benchmark_timeout_seconds,
+        judge_every=judge_every,
+        official_eval_every=official_eval_every,
+    )
+    round_services = RoundPreparationServices(
+        turns=policy_io, profiler_enabled=ctx.profiler_kind is not ProfilerKind.NONE
+    )
+    attempt_services = AttemptServices(
+        turns=policy_io,
+        effects=policy_io,
         max_rounds=max_rounds,
         max_retries_per_round=max_retries_per_round,
         judge_every=judge_every,
@@ -440,9 +437,8 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 if active_hypothesis is None:
                     engine, agent_run_state = flow.prepare_profile(
                         ProfilePreparation(
-                            ctx=ctx,
+                            effects=policy_io,
                             engine=engine,
-                            state_store=state_store,
                             state=agent_run_state,
                             round_number=round_number,
                         )
@@ -614,31 +610,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                     feedback=active_hypothesis.feedback,
                     revalidation_required=active_hypothesis.gate_revalidation_pending,
                 )
-                first_retry = issue_board.next_implementer_attempt(progress_path, round_number)
-                if first_retry > max_retries_per_round:
-                    raise RuntimeError(  # noqa: TRY003  # tracked: #288
-                        f"Round {round_number} already persisted "
-                        f"{first_retry - 1} implementer attempts, exhausting "
-                        f"max_retries_per_round={max_retries_per_round}; refusing "
-                        "to overwrite or replay paid work."
-                    )
-                if first_retry > 1:
-                    ctx.lprint(
-                        f"[resume] round {round_number} continues at durable "
-                        f"attempt {first_retry}/{max_retries_per_round}"
-                    )
-                for retry in range(first_retry, max_retries_per_round + 1):
-                    ctx.lprint(f"\n--- attempt {retry}/{max_retries_per_round} ---\n")
-                    attempt_state.retry = retry
-                    attempt_state.judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
-                    attempt_state.official_reason = None
-                    decision = flow.run_attempt(attempt_request, attempt_state)
-                    if decision is AttemptDecision.FINISH:
-                        break
-                    if decision is AttemptDecision.OFFICIAL and run_official_gates(
-                        attempt_services, attempt_request, attempt_state
-                    ):
-                        break
+                execute_attempts(flow, attempt_services, attempt_request, attempt_state)
                 agent_run_state = attempt_state.agent_run_state
                 feedback = attempt_state.feedback
                 passed = attempt_state.passed
@@ -1040,7 +1012,7 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                     ),
                     round_label=f"round-{round_number}",
                     data=RoundFinishedData(
-                        attempts=retry,
+                        attempts=attempt_state.retry,
                         judge_verdict=(
                             "pass" if passed else "fail" if records[-1].reviewed else "skipped"
                         ),

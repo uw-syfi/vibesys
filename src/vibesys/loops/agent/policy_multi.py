@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from vibesys.loops.agent import issue_board
 from vibesys.loops.agent.attempt import (
     JudgeReviewed,
     JudgeSkipped,
@@ -18,7 +17,6 @@ from vibesys.loops.agent.policy_attempts import (
     AttemptState,
     PerformanceProjection,
 )
-from vibesys.loops.agent.policy_gates import _run_framework_validation_gate
 from vibesys.loops.agent.policy_support import (
     _candidate_evidence_is_fresh,
     _implementation_keeps_hypothesis_active,
@@ -26,12 +24,7 @@ from vibesys.loops.agent.policy_support import (
     _is_fresh_cold_start,
     _pareto_archive_conflict,
     _review_due,
-    _run_implementer,
-    _run_judge,
-    _run_pre_round_decision,
-    _run_profiler,
 )
-from vibesys.profilers import ProfilerKind
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -54,28 +47,13 @@ class MultiAgentRoundPreparation:
     def profiler_summary(self, request: RoundPreparationRequest) -> ProfilerSummary | None:
         """Run the pre-round decision and its optional profiler turn."""
         services = self.services
-        decision = _run_pre_round_decision(
-            services.ctx,
-            agent=services.agents.orchestrator,
-            round_number=request.round_number,
-            objective=services.objective,
-            carry=request.carry,
-            progress_path=services.progress_path,
-            progress_location=services.progress_location,
-            has_history=not _is_fresh_cold_start(request.round_number, request.records),
+        decision = services.turns.pre_round_decision(
+            request, has_history=not _is_fresh_cold_start(request.round_number, request.records)
         )
-        if not decision.need_profile or services.ctx.profiler_kind is ProfilerKind.NONE:
+        if not decision.need_profile or not services.profiler_enabled:
             return None
-        return _run_profiler(
-            services.ctx,
-            agent=services.agents.profiler,
-            round_number=request.round_number,
-            profile_focus=decision.profile_focus or "general steady-state benchmark hotspots",
-            modality=services.modality,
-            interface=services.interface,
-            domain_definition=services.domain_definition,
-            progress_path=services.progress_path,
-            objective=services.objective,
+        return services.turns.profile(
+            request, decision.profile_focus or "general steady-state benchmark hotspots"
         )
 
 
@@ -88,48 +66,12 @@ class MultiAgentAttemptPolicy:
 
     def _implement(self, request: AttemptRequest, state: AttemptState) -> bool:
         services = self.services
-        ctx = services.ctx
-        hypothesis = request.active_hypothesis
-        artifacts = tuple(
-            issue_board.display_path(path, ctx.workspace)
-            for path in issue_board.implementer_artifact_paths(
-                services.progress_path, request.round_number
-            )
-        )
-        ctx.reselect_gpu()
-        attempt = _run_implementer(
-            ctx,
-            agent=services.agents.implementer,
-            round_number=request.round_number,
-            retry=state.retry,
-            plan=request.plan,
-            objective=services.objective,
-            modality=services.modality,
-            interface=services.interface,
-            domain_definition=services.domain_definition,
-            feedback=state.feedback,
-            continuation_step=hypothesis.next_step,
-            framework_revert_applied=hypothesis.revert_applied,
-            framework_revert_round=hypothesis.parent_round,
-            framework_revert_commit=hypothesis.revert_commit,
-            gate_revalidation_pending=hypothesis.gate_revalidation_pending,
-            gate_approved_perf_metric=hypothesis.gate_approved_perf_metric,
-            gate_approved_perf_unit=hypothesis.gate_approved_perf_unit,
-            gate_approved_evaluation_artifact=hypothesis.gate_approved_evaluation_artifact,
-            progress_path=services.progress_path,
-            progress_location=services.progress_location,
-            pareto_archive_location=services.pareto_archive_location,
-            framework_benchmark_enabled=services.framework_benchmark_configured,
-            official_evaluation_due=request.planned_official_reason is not None,
-            official_evaluation_reason=request.planned_official_reason,
-            prior_attempt_artifact_locations=artifacts,
-            profile_guidance=request.engine.controller.guidance,
-        )
+        attempt = services.turns.implement(request, state)
         state.implementation = attempt.response
         if not attempt.synthesized:
             return True
         state.judge = JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
-        ctx.lprint(
+        services.effects.log(
             f"[implementer] attempt {state.retry} returned no parseable structured response; "
             "the framework synthesized a fail-closed one. "
             + (
@@ -163,18 +105,14 @@ class MultiAgentAttemptPolicy:
         if due:
             return True
         state.judge = JudgeSkipped(JudgeSkipReason.SPARSE_REVIEW_POLICY)
-        issue_board.append_judge_skipped(
-            services.progress_path,
-            request.round_number,
-            outcome=implementation.hypothesis_outcome.value,
-            judge_every=services.judge_every,
+        services.effects.record_judge_skipped(request, implementation.hypothesis_outcome.value)
+        services.effects.log(
+            "[judge] deferred by sparse-review policy; official gates were not run"
         )
-        services.ctx.lprint("[judge] deferred by sparse-review policy; official gates were not run")
         return False
 
     def _judge(self, request: AttemptRequest, state: AttemptState) -> Verdict:
         services = self.services
-        hypothesis = request.active_hypothesis
         implementation = cast("ImplementerResponse", state.implementation)
         state.review_started = True
         state.revalidation_required = False
@@ -184,34 +122,7 @@ class MultiAgentAttemptPolicy:
             records=request.records,
             space=state.agent_run_state.metrics,
         )
-        services.ctx.reselect_gpu()
-        verdict = _run_judge(
-            services.ctx,
-            agent=services.agents.judge,
-            round_number=request.round_number,
-            retry=state.retry,
-            plan=request.plan,
-            implementation=implementation,
-            modality=services.modality,
-            interface=services.interface,
-            domain_definition=services.domain_definition,
-            progress_path=services.progress_path,
-            progress_location=services.progress_location,
-            pareto_archive_location=services.pareto_archive_location,
-            objective=services.objective,
-            framework_revert_applied=hypothesis.revert_applied,
-            framework_revert_round=hypothesis.parent_round,
-            framework_revert_commit=hypothesis.revert_commit,
-            gate_revalidation_pending=hypothesis.gate_revalidation_pending,
-            gate_approved_perf_metric=hypothesis.gate_approved_perf_metric,
-            gate_approved_perf_unit=hypothesis.gate_approved_perf_unit,
-            gate_approved_metrics=hypothesis.gate_approved_metrics,
-            gate_approved_evaluation_artifact=hypothesis.gate_approved_evaluation_artifact,
-            framework_benchmark_enabled=services.framework_benchmark_configured,
-            official_evaluation_due=request.planned_official_reason is not None,
-            official_evaluation_reason=request.planned_official_reason,
-            pareto_archive_conflict=conflict,
-        )
+        verdict = services.turns.judge(request, state, conflict)
         state.judge = JudgeReviewed(verdict.verdict)
         if verdict.verdict is not Verdict.PASS:
             state.feedback = verdict.feedback
@@ -251,12 +162,8 @@ class MultiAgentAttemptPolicy:
     def _passed_review(self, request: AttemptRequest, state: AttemptState) -> AttemptDecision:
         services = self.services
         implementation = cast("ImplementerResponse", state.implementation)
-        validation_feedback = _run_framework_validation_gate(
-            services.ctx,
-            recipe_artifact=implementation.validation_recipe_artifact,
-            round_number=request.round_number,
-            retry=state.retry,
-            progress_path=services.progress_path,
+        validation_feedback = services.effects.validate(
+            request, state, implementation.validation_recipe_artifact
         )
         if validation_feedback is not None:
             state.feedback = validation_feedback
@@ -278,7 +185,7 @@ class MultiAgentAttemptPolicy:
                 services.record_official_decision(
                     request, state, run=False, reason="cadence_not_due"
                 )
-                services.ctx.lprint(
+                services.effects.log(
                     "[official-evaluation] deferred; candidate retained as a provisional working checkpoint"
                 )
             state.passed = True

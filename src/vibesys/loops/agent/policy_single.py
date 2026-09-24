@@ -12,10 +12,7 @@ from vibesys.loops.agent.policy_attempts import (
     AttemptState,
     PerformanceProjection,
 )
-from vibesys.loops.agent.policy_support import (
-    _profiler_summary_from_single_agent,
-    _run_single_agent_round,
-)
+from vibesys.loops.agent.policy_support import _profiler_summary_from_single_agent
 from vibesys.schemas import ProfilerSummary, Verdict
 
 if TYPE_CHECKING:
@@ -43,28 +40,7 @@ class SingleAgentAttemptPolicy:
     def run_attempt(self, request: AttemptRequest, state: AttemptState) -> AttemptDecision:
         """Run one combined turn, then ask the executor for official gates if due."""
         services = self.services
-        services.ctx.reselect_gpu()
-        response = _run_single_agent_round(
-            services.ctx,
-            agent=services.agents.implementer,
-            round_number=request.round_number,
-            retry=state.retry,
-            plan=request.plan,
-            modality=services.modality,
-            interface=services.interface,
-            domain_definition=services.domain_definition,
-            feedback=state.feedback,
-            progress_path=services.progress_path,
-            progress_location=services.progress_location,
-            pareto_archive_location=services.pareto_archive_location,
-            objective=services.objective,
-            profile_focus=request.last_profile_focus,
-            official_evaluation_due=request.planned_official_reason is not None,
-            official_evaluation_reason=request.planned_official_reason,
-            framework_benchmark_enabled=services.framework_benchmark_configured,
-            pareto_records=request.records,
-            space=state.agent_run_state.metrics,
-        )
+        response = services.turns.combined(request, state)
         state.single_agent_response = response
         state.judge = JudgeReviewed(response.verdict)
         if response.verdict is not Verdict.PASS:
@@ -75,7 +51,7 @@ class SingleAgentAttemptPolicy:
         reason = services.official_reason(request, candidate_ready=True)
         if reason is None:
             services.record_official_decision(request, state, run=False, reason="cadence_not_due")
-            services.ctx.lprint(
+            services.effects.log(
                 "[official-evaluation] deferred; candidate retained as a provisional working checkpoint"
             )
             state.passed = True

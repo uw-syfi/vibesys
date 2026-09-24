@@ -8,23 +8,20 @@ from typing import TYPE_CHECKING, Protocol
 from vibesys.loops.agent.hypothesis_controller import (
     HypothesisEngine,
     ProfileGuidanceOutcome,
-    persist_agent_run_state,
 )
 
 if TYPE_CHECKING:
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent.model import AgentRunState
-    from vibesys.loops.agent.state import AgentRunStateStore
-    from vibesys.run import LoopContext
+    from vibesys.loops.agent.policy_ports import ProfileEffect
 
 
 @dataclass(frozen=True)
 class ProfilePreparation:
     """Framework context for one outer-policy pre-plan step."""
 
-    ctx: LoopContext
+    effects: ProfileEffect
     engine: HypothesisEngine
-    state_store: AgentRunStateStore
     state: AgentRunState
     round_number: int
 
@@ -94,16 +91,9 @@ class ProfileGuidedPolicy:
 
     def prepare(self, request: ProfilePreparation) -> tuple[HypothesisEngine, AgentRunState]:
         """Profile the selected component and durably record its guidance."""
-        prepared = request.engine.replace_state(request.state).prepare_profile(
-            request.ctx, self.settings, round_number=request.round_number
+        return request.effects.prepare_profile(
+            request.engine, request.state, self.settings, request.round_number
         )
-        persist_agent_run_state(
-            request.ctx,
-            request.state_store,
-            prepared.state,
-            label=f"profile-guided: prepare round {request.round_number}",
-        )
-        return prepared, prepared.state
 
     def official_reason(self, reason: str | None, engine: HypothesisEngine) -> str | None:
         """Measure an active component even when ordinary cadence defers."""

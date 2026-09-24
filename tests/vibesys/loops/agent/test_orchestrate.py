@@ -2095,7 +2095,7 @@ def test_loop_runs_local_validation_only_after_judge_pass(tmp_path, ref_file):  
     fake.enqueue("judge", _judge_response("pass"))
 
     with patch(
-        "vibesys.loops.agent.policy_multi._run_framework_validation_gate",
+        "vibesys.loops.agent.policy_local._run_framework_validation_gate",
         return_value=None,
     ) as validation_gate:
         _invoke_orchestrate(

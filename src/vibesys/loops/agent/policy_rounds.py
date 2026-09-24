@@ -11,27 +11,17 @@ from vibesys.loops.agent.policy_support import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from vibesys.domains.base import DomainDefinition
-    from vibesys.loops.agent.roles import BuiltInAgentRoles
-    from vibesys.run import LoopContext
+    from vibesys.loops.agent.policy_ports import AgentTurns
     from vibesys.schemas import ProfilerSummary, SingleAgentRoundResponse
     from vs_loop_state.api import RoundRecord
 
 
 @dataclass(frozen=True)
 class RoundPreparationServices:
-    """Resources shared by the built-in round preparation policies."""
+    """Turn port and selection facts for built-in round preparation."""
 
-    ctx: LoopContext
-    agents: BuiltInAgentRoles
-    objective: str
-    modality: str | None
-    interface: str
-    domain_definition: DomainDefinition
-    progress_path: Path
-    progress_location: str
+    turns: AgentTurns
+    profiler_enabled: bool
 
 
 @dataclass(frozen=True)

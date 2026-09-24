@@ -4,16 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
-from vibesys.loops.agent import issue_board
 from vibesys.loops.agent.attempt import (
     JudgeOutcome,
     JudgeSkipped,
     JudgeSkipReason,
 )
-from vibesys.loops.agent.hypothesis_controller import HypothesisEngine, persist_active_hypothesis
-from vibesys.loops.agent.policy_gates import _run_framework_gates
 from vibesys.loops.agent.policy_support import (
     _official_evaluation_reason,
     _provisional_candidates_since_official,
@@ -21,15 +18,9 @@ from vibesys.loops.agent.policy_support import (
 from vibesys.loops.gates import FrameworkBenchmarkOutcome
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from vibesys.domains.base import DomainDefinition
-    from vibesys.evaluators.input_manifest import BenchmarkResult
+    from vibesys.loops.agent.hypothesis_controller import HypothesisEngine
     from vibesys.loops.agent.model import AgentRunState, Hypothesis
-    from vibesys.loops.agent.roles import BuiltInAgentRoles
-    from vibesys.loops.agent.state import AgentRunStateStore
-    from vibesys.loops.metrics import Objective
-    from vibesys.run import LoopContext
+    from vibesys.loops.agent.policy_ports import AgentTurns, RoundEffects
     from vibesys.schemas import (
         ImplementerResponse,
         OrchestratorPlan,
@@ -48,24 +39,10 @@ class AttemptDecision(StrEnum):
 
 @dataclass(frozen=True)
 class AttemptServices:
-    """Run resources used by both built-in attempt policies."""
+    """Turn and effect ports plus scalar policy settings."""
 
-    ctx: LoopContext
-    agents: BuiltInAgentRoles
-    state_store: AgentRunStateStore
-    domain_definition: DomainDefinition
-    objective: str
-    modality: str | None
-    interface: str
-    progress_path: Path
-    progress_location: str
-    pareto_archive_location: str
-    framework_benchmark_configured: bool
-    benchmark_result: BenchmarkResult | None
-    benchmark_result_protocol: Literal[2] | None
-    objectives: list[Objective]
-    accuracy_timeout_seconds: int | None
-    benchmark_timeout_seconds: int | None
+    turns: AgentTurns
+    effects: RoundEffects
     max_rounds: int
     max_retries_per_round: int
     judge_every: int
@@ -73,13 +50,7 @@ class AttemptServices:
 
     def checkpoint(self, request: AttemptRequest, state: AttemptState) -> None:
         """Durably retain feedback and gate state before another paid turn."""
-        state.agent_run_state = persist_active_hypothesis(
-            self.ctx,
-            self.state_store,
-            state.agent_run_state,
-            request.active_hypothesis,
-            label=f"agent: checkpoint hypothesis {request.plan.hypothesis_id}",
-        )
+        self.effects.checkpoint(request, state)
 
     def official_reason(self, request: AttemptRequest, *, candidate_ready: bool) -> str | None:
         """Apply the framework's official evaluation cadence."""
@@ -96,13 +67,11 @@ class AttemptServices:
         self, request: AttemptRequest, state: AttemptState, *, run: bool, reason: str
     ) -> None:
         """Record cadence decisions beside the durable attempt marker."""
-        issue_board.append_official_evaluation_decision(
-            self.progress_path,
-            request.round_number,
-            state.retry,
+        self.effects.record_official_decision(
+            request,
+            state,
             run=run,
             reason=reason,
-            official_eval_every=self.official_eval_every,
             provisional_candidates=_provisional_candidates_since_official(request.records),
         )
 
@@ -181,13 +150,21 @@ class AttemptPolicy(Protocol):
         ...
 
 
+class AttemptRunner(Protocol):
+    """Minimum policy operation needed by the shared retry executor."""
+
+    def run_attempt(self, request: AttemptRequest, state: AttemptState, /) -> AttemptDecision:
+        """Execute one paid attempt and select its next framework action."""
+        ...
+
+
 def run_official_gates(
     services: AttemptServices, request: AttemptRequest, state: AttemptState
 ) -> bool:
     """Run framework-owned gates and retain enough state to resume a failed gate."""
     reason = cast("str", state.official_reason)
     services.record_official_decision(request, state, run=True, reason=reason)
-    candidate_commit = services.ctx.git.current_sha()
+    candidate_commit = services.effects.current_commit()
     hypothesis = request.active_hypothesis
     reuse_accuracy_pass = bool(
         hypothesis.gate_revalidation_pending
@@ -195,18 +172,11 @@ def run_official_gates(
         and hypothesis.gate_candidate_commit == candidate_commit
         and hypothesis.gate_accuracy_passed
     )
-    gate_feedback, state.framework_benchmark, accuracy_passed = _run_framework_gates(
-        services.ctx,
-        benchmark_result=services.benchmark_result,
-        benchmark_result_protocol=services.benchmark_result_protocol,
-        objectives=services.objectives,
-        round_number=request.round_number,
-        retry=state.retry,
-        progress_path=services.progress_path,
-        accuracy_timeout_seconds=services.accuracy_timeout_seconds,
-        benchmark_timeout_seconds=services.benchmark_timeout_seconds,
+    gate_feedback, state.framework_benchmark, accuracy_passed = services.effects.official_gates(
+        request,
+        state,
         reuse_accuracy_pass=reuse_accuracy_pass,
-        candidate_revision=candidate_commit,
+        candidate_commit=candidate_commit,
     )
     state.framework_perf_metric = state.framework_benchmark.metric_value
     if gate_feedback is None:
@@ -220,3 +190,35 @@ def run_official_gates(
     hypothesis.feedback = state.feedback
     services.checkpoint(request, state)
     return False
+
+
+def execute_attempts(
+    flow: AttemptRunner,
+    services: AttemptServices,
+    request: AttemptRequest,
+    state: AttemptState,
+) -> None:
+    """Resume at the first unpaid attempt and run the bounded retry sequence."""
+    first_retry = services.effects.next_attempt(request.round_number)
+    if first_retry > services.max_retries_per_round:
+        raise RuntimeError(  # noqa: TRY003  # tracked: #288
+            f"Round {request.round_number} already persisted "
+            f"{first_retry - 1} implementer attempts, exhausting "
+            f"max_retries_per_round={services.max_retries_per_round}; refusing "
+            "to overwrite or replay paid work."
+        )
+    if first_retry > 1:
+        services.effects.log(
+            f"[resume] round {request.round_number} continues at durable "
+            f"attempt {first_retry}/{services.max_retries_per_round}"
+        )
+    for retry in range(first_retry, services.max_retries_per_round + 1):
+        services.effects.log(f"\n--- attempt {retry}/{services.max_retries_per_round} ---\n")
+        state.retry = retry
+        state.judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
+        state.official_reason = None
+        decision = flow.run_attempt(request, state)
+        if decision is AttemptDecision.FINISH:
+            break
+        if decision is AttemptDecision.OFFICIAL and run_official_gates(services, request, state):
+            break
