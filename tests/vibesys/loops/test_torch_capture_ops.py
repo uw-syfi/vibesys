@@ -442,6 +442,21 @@ def test_profile_ops_server_load_sigint_lifecycle(
     manifest = json.loads((captures[0] / "manifest.json").read_text())
     assert manifest["primary_trace"] is not None
     assert manifest["status"] == "ok"
+    # capture_runtime.run_capture records these generically for every
+    # profile_* tool, not just rocprof's -- profile_ops inherits them "for
+    # free" through the same lifecycle, even though its own op-level
+    # analyses don't slice by them yet (see capture_ops.py's profile_ops
+    # docstring).
+    assert manifest["capture_start"]["clock_monotonic_ns"] > 0
+    assert (
+        manifest["capture_end"]["clock_monotonic_ns"]
+        >= manifest["capture_start"]["clock_monotonic_ns"]
+    )
+    assert manifest["load_window"]["start"]["clock_monotonic_ns"] > 0
+    assert (
+        manifest["load_window"]["end"]["clock_monotonic_ns"]
+        >= manifest["load_window"]["start"]["clock_monotonic_ns"]
+    )
 
 
 if __name__ == "__main__":

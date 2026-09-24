@@ -288,6 +288,16 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
     trace's certify verdict, and its top ops/kernels/GEMM shapes. The full
     manifest (every trace path, which one was primary) is written to
     ``manifest.json`` in the capture directory.
+
+    ``capture_runtime.run_capture`` records the same ``load_window``/
+    ``capture_start``/``capture_end`` timestamps here as it does for every
+    other ``profile_*`` tool (a server capture's steady-state window vs. its
+    startup), since that's a lifecycle-level concern, not a rocprof one. The
+    op-level analyses above (certify/top ops/top kernels/GEMM shapes) do not
+    yet slice their input by that window -- a startup-polluted server
+    capture's op/kernel tables can still include one-time setup work. Left
+    for a follow-up: TODO slice ``_analyze_primary`` by ``load_window`` the
+    way ``analyze_rocprof.py``'s timeline subcommands do.
     """
     _capture_id, out_dir = capture_runtime.new_capture("ops")
     lifecycle = capture_runtime.Lifecycle(
