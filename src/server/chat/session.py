@@ -13,7 +13,6 @@ from server.chat.prompts import (
     experiment_chat_system_prompt,
 )
 from server.execution import AgentExecutionRequest
-from vs_agent.api import AgentSelection
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -158,11 +157,9 @@ class ExperimentChatSession:
                 user_prompt=question,
                 system_prompt=system_prompt,
                 participates_in_run_control=False,
-                agent_selection=AgentSelection(
-                    driver=self._driver,
-                    provider=self._provider,
-                    model=self._model,
-                ),
+                driver=self._driver,
+                provider=self._provider,
+                model=self._model,
             ),
         )
         answer: str | None = None

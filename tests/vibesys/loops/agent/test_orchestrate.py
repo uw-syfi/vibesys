@@ -34,6 +34,7 @@ from vibesys.events import (
     GateStartedData,
 )
 from vibesys.loops.agent import issue_board
+from vibesys.loops.agent._archive import _trusted_candidate_records
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.loop import (
     FrameworkBenchmarkOutcome,
@@ -53,7 +54,6 @@ from vibesys.loops.agent.loop import (
     _run_framework_validation_gate,
     _select_final_candidate,
     _terminal_workspace_notice,
-    _trusted_candidate_records,
     run_agent_loop,
 )
 from vibesys.loops.agent.loop import (

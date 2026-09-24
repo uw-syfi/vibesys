@@ -38,7 +38,6 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from server.journal import EventJournal
-    from vs_agent.api import AgentSelection
 
 
 @dataclass(frozen=True)
@@ -59,7 +58,9 @@ class AgentExecutionRequest:
     system_prompt: str = ""
     participates_in_run_control: bool = True
     emit_lifecycle: bool = True
-    agent_selection: AgentSelection | None = None
+    driver: str | None = None
+    provider: str | None = None
+    model: str | None = None
 
 
 class ActiveAgentExecution(BaseModel):
@@ -191,9 +192,6 @@ class ExecutionTracker:
         """
         execution_id = execution_id or uuid.uuid4().hex
         attempt = _attempt_from_label(request.round_label)
-        driver = request.agent_selection.driver if request.agent_selection is not None else None
-        provider = request.agent_selection.provider if request.agent_selection is not None else None
-        model = request.agent_selection.model if request.agent_selection is not None else None
         activity = AgentExecutionActivityData(
             mode="thinking", summary=_initial_activity_summary(request.kind)
         )
@@ -206,9 +204,9 @@ class ExecutionTracker:
             assignment=request.user_prompt,
             started_at=datetime.now(UTC),
             activity=activity,
-            driver=driver,
-            provider=provider,
-            model=model,
+            driver=request.driver,
+            provider=request.provider,
+            model=request.model,
         )
         if request.emit_lifecycle:
             self._journal.record(
@@ -223,9 +221,9 @@ class ExecutionTracker:
                     system_prompt=request.system_prompt,
                     user_prompt=request.user_prompt,
                     activity=activity,
-                    driver=driver,
-                    provider=provider,
-                    model=model,
+                    driver=request.driver,
+                    provider=request.provider,
+                    model=request.model,
                 ),
             )
             self._journal.record(

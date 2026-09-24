@@ -88,7 +88,9 @@ class ServerParts:
                 system_prompt=system_prompt,
                 participates_in_run_control=participates_in_run_control,
                 emit_lifecycle=emit_lifecycle,
-                agent_selection=agent_selection,
+                driver=agent_selection.driver if agent_selection is not None else None,
+                provider=agent_selection.provider if agent_selection is not None else None,
+                model=agent_selection.model if agent_selection is not None else None,
             )
         )
 

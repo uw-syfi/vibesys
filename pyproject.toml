@@ -168,15 +168,12 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 # recorded count fails, and an entry that drops back to 2000 or below is stale.
 # These counts record the existing debt on 2026-09-13.
 [tool.vibesys.file_length.allowlist]
-# The agent loop: round orchestration, agent invocation, and result handling in
-# one module. The largest single refactor target in the repo. Grew +2 when the
-# agent-library refactor swapped DEFAULT_AGENT_BACKEND/resolve_agent_driver for
-# the AgentBackend/Driver enums (ruff re-wrapped the affected lines). +3 when the
-# vs_agent imports were consolidated into one parenthesized `vs_agent.api` block.
-"src/vibesys/loops/agent/loop.py" = 3710
+# The agent loop: round orchestration, agent invocation, and result handling.
+# Candidate archive selection/rendering now lives in its own module.
+"src/vibesys/loops/agent/loop.py" = 3578
 # Sandbox run environment: setup, execution, and teardown across strategies.
-# Grew +1 from the agent-library refactor's AgentBackend enum swap.
-"src/vibesys/sandbox/run_environment.py" = 2240
+# Semantic command-argument translation now lives in its own module.
+"src/vibesys/sandbox/run_environment.py" = 2150
 
 [tool.ruff]
 line-length = 100
