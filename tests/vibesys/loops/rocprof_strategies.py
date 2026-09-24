@@ -113,3 +113,60 @@ def buffer_size_input() -> st.SearchStrategy[object]:
         st.integers(min_value=1, max_value=4096).map(lambda n: f"{n}MB"),
         st.integers(min_value=1, max_value=16).map(lambda n: f"{n}G"),
     )
+
+
+# Starts with a letter -- real Python identifiers do, and this keeps a
+# leading-underscore prefix (added below) from ever producing a "__"-prefixed
+# name, which ``_looks_like_triton_kernel`` deliberately treats as *not*
+# Triton (it is the real ``__amd_rocclr_*`` ROCr-runtime naming shape).
+_TRITON_WORD = st.text(alphabet=string.ascii_lowercase, min_size=1, max_size=1).flatmap(
+    lambda first: st.text(
+        alphabet=string.ascii_lowercase + "_0123456789", min_size=0, max_size=19
+    ).map(lambda rest: first + rest)
+)
+
+
+def triton_jit_style_kernel_name() -> st.SearchStrategy[str]:
+    """A snake_case Triton-JIT kernel name with no torch.inductor ``triton_*`` prefix.
+
+    Modeled on real vLLM/SGLang/FLA kernels observed on hardware --
+    ``fused_recurrent_gated_delta_rule_packed_decode_kernel``,
+    ``chunk_gated_delta_rule_fwd_kernel_h_blockdim64``, ``_topk_topp_kernel``,
+    ``rotary_kernel`` -- compiled straight from ``@triton.jit`` so the kernel
+    keeps the Python function name verbatim. Used to check
+    ``_looks_like_triton_kernel``/``_classify_family`` classify these as
+    Triton even without a ``triton_`` prefix.
+    """
+
+    @st.composite
+    def _build(draw: st.DrawFn) -> str:
+        words = draw(st.lists(_TRITON_WORD, min_size=1, max_size=4))
+        suffix = draw(st.sampled_from(("_kernel", "_kernel_h_blockdim64", "_kernel_o")))
+        name = "_".join(words) + suffix
+        if draw(st.booleans()):
+            name = "_" + name
+        return name
+
+    return _build()
+
+
+def cpp_template_kernel_name() -> st.SearchStrategy[str]:
+    """A hand-written HIP/C++ kernel name with template args -- not Triton.
+
+    Modeled on real non-Triton kernels that would otherwise look
+    Triton-shaped by naming convention alone, e.g.
+    ``wvSplitK_hf_sml_<__hip_bfloat16, 64, 4, 16, 8, 2, 2>(int, int, ...)``.
+    Used as a negative example for ``_looks_like_triton_kernel``: template
+    angle brackets must rule out the Triton fallback regardless of any
+    leading underscore or ``_kernel`` substring in the base name.
+    """
+    ident = st.text(alphabet=string.ascii_letters + "_", min_size=1, max_size=12)
+    arg = st.text(alphabet=string.ascii_letters + string.digits + "_", min_size=1, max_size=8)
+
+    @st.composite
+    def _build(draw: st.DrawFn) -> str:
+        base = draw(ident)
+        args = ", ".join(draw(st.lists(arg, min_size=1, max_size=4)))
+        return f"void {base}_kernel_<{args}>(int, int)"
+
+    return _build()

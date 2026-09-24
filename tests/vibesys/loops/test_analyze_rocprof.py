@@ -19,10 +19,10 @@ import csv
 import io
 import sqlite3
 import string
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import assume, given
 from hypothesis import strategies as st
 from resources.profilers.rocprof import analyze_rocprof
 from resources.profilers.rocprof.analyze_rocprof import (
@@ -34,6 +34,7 @@ from resources.profilers.rocprof.analyze_rocprof import (
     _classify_family,
     _gaps_for_key,
     _get,
+    _looks_like_triton_kernel,
     _normalize_direction,
     _short_name,
     _union_duration,
@@ -54,14 +55,15 @@ from tests.vibesys.loops.rocprof_strategies import (
     FEWER,
     case_variant,
     column_order,
+    cpp_template_kernel_name,
     huge_kernel_name,
     intervals,
     permuted_csv,
+    triton_jit_style_kernel_name,
     wrap_with_namespace_and_template_noise,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
+_REAL_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "rocprof" / "rocprofv3_real"
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
@@ -630,6 +632,14 @@ _MARKER_FAMILY: dict[str, str] = {
 def test_classify_family_is_invariant_to_short_name_and_namespace_noise(marker, data):  # noqa: ANN001, ANN201  # tracked: #288
     name = data.draw(wrap_with_namespace_and_template_noise(marker))
     expected = _MARKER_FAMILY[marker]
+    # The random namespace-noise prefix can occasionally spell out a
+    # *different* marker (e.g. a "ck" prefix segment in front of "cijk_"
+    # produces "ck::cijk_", which legitimately classifies as Composable
+    # Kernel since that rule is checked first) -- ordered first-match-wins
+    # behavior, not an invariance violation. Skip that rare collision rather
+    # than asserting an ordering `_classify_family` never promised.
+    other_markers = [m for m in _MARKER_FAMILY if m != marker]
+    assume(not any(m in name.lower() for m in other_markers))
 
     family_from_full = _classify_family(name)
     family_from_shortened = _classify_family(_short_name(name))
@@ -805,3 +815,186 @@ def test_cmd_kernels_and_idle_gaps_bound_line_width_for_huge_kernel_names(tmp_pa
     assert out
     for line in out.splitlines():
         assert len(line) <= 200
+
+
+# ---------------------------------------------------------------------------
+# Regression: GDN / generic-Triton kernels were misclassified as "other"
+#
+# Validated against a real vLLM Qwen3.5-9B/MI210 rocprofv3 capture
+# (`amd-profiler-samples/rocprofv3_trace_{eager,graph}`): rocprofv3 only
+# renames a kernel with a `triton_*` prefix when it comes through
+# torch.inductor. A kernel compiled directly from `@triton.jit` -- every
+# GDN (gated-delta-net) kernel vLLM/SGLang dispatch for Qwen3.5, plus most of
+# vLLM's own sampling/mamba Triton kernels -- keeps its Python function name
+# verbatim and fell through every `_FAMILY_RULES` entry to "other" before
+# this fix (confirmed by reverting `_classify_family`'s `_looks_like_triton_kernel`
+# fallback: the real-trace `families` cross-check below then shows "other" at
+# ~6% of GPU time with these kernels as its top entry instead of "Triton (JIT)").
+# ---------------------------------------------------------------------------
+
+
+def test_classify_family_recognizes_gdn_and_generic_triton_kernels_without_a_triton_prefix() -> (
+    None
+):
+    assert (
+        _classify_family("fused_recurrent_gated_delta_rule_packed_decode_kernel") == "Triton (JIT)"
+    )
+    assert _classify_family("chunk_gated_delta_rule_fwd_kernel_h_blockdim64") == "Triton (JIT)"
+    assert _classify_family("_topk_topp_kernel") == "Triton (JIT)"
+    assert _classify_family("rotary_kernel") == "Triton (JIT)"
+
+
+def test_classify_family_does_not_misclassify_templated_or_mangled_names_as_triton() -> None:
+    """A hand-written HIP/C++ kernel must not be swept into Triton by the
+    underscore/``_kernel``-suffix heuristic: template args (``<...>``) and an
+    un-demangled Itanium ``_Z...`` symbol both rule it out.
+    """
+    assert (
+        _classify_family("void wvSplitK_hf_sml_<__hip_bfloat16, 64, 4, 16, 8, 2, 2>(int, int, int)")
+        == "vLLM/SGLang custom ops"
+    )
+    assert not _looks_like_triton_kernel(
+        "void some_other_op_<__hip_bfloat16, 64>(int, int, int, int)"
+    )
+    assert not _looks_like_triton_kernel("_ZN4vllm18act_and_mul_kernelIN3c108BFloat16EEEvv")
+    assert not _looks_like_triton_kernel("__amd_rocclr_copyBuffer")
+
+
+@given(name=triton_jit_style_kernel_name())
+@FAST
+def test_classify_family_matches_triton_jit_style_names(name):  # noqa: ANN001, ANN201  # tracked: #288
+    assert _classify_family(name) == "Triton (JIT)"
+
+
+@given(name=cpp_template_kernel_name())
+@FAST
+def test_classify_family_never_matches_templated_names_via_the_triton_fallback(name):  # noqa: ANN001, ANN201  # tracked: #288
+    # The base name is deliberately built to look Triton-shaped (leading
+    # underscore chance, "_kernel" substring); only the "<...>" template args
+    # should rule out the fallback, regardless of what _FAMILY_RULES pattern
+    # (if any) the random base name happens to also dodge.
+    assert not _looks_like_triton_kernel(name)
+
+
+# ---------------------------------------------------------------------------
+# Regression: memory_copy_trace.csv with no Bytes/Size column used to print
+# a misleading "Total memory copy: 0.00 GB" / "0.0GB/s" instead of saying so
+#
+# Confirmed on the real vLLM captures in amd-profiler-samples: rocprofv3's
+# `*_memory_copy_trace.csv` there has no Bytes/Size column at all
+# (`Kind,Direction,Stream_Id,Source_Agent_Id,Destination_Agent_Id,
+# Correlation_Id,Start_Timestamp,End_Timestamp`), even though 18k real HtoD
+# copies happened. The old code silently defaulted missing bytes to 0 and
+# printed it as if it were a real (zero) measurement.
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_memory_reports_bytes_unavailable_instead_of_a_misleading_zero(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+    d = _process_dir(tmp_path)
+    _write(
+        d / "out_memory_copy_trace.csv",
+        "Direction,Start_Timestamp,End_Timestamp",
+        "HostToDevice,0,1000",
+        "HostToDevice,2000,2500",
+    )
+
+    cmd_memory(_ns(str(tmp_path)))
+    out = capsys.readouterr().out
+
+    assert "0.00 GB" not in out
+    assert "GB/s" not in out
+    assert "byte counts not available" in out
+    assert "Total memory copy time" in out
+    assert "HtoD" in out
+
+
+@given(byte_counts=st.lists(st.integers(min_value=0, max_value=10_000_000), min_size=1, max_size=6))
+@FAST
+def test_cmd_memory_bytes_available_never_prints_unavailable_note(tmp_path_factory, byte_counts):  # noqa: ANN001, ANN201  # tracked: #288
+    root = tmp_path_factory.mktemp("mem-bytes")
+    d = _process_dir(root)
+    rows = [f"HostToDevice,{i * 10000},{i * 10000 + 500},{b}" for i, b in enumerate(byte_counts)]
+    _write(d / "out_memory_copy_trace.csv", "Direction,Start_Timestamp,End_Timestamp,Bytes", *rows)
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_memory(_ns(str(root)))
+    out = buf.getvalue()
+
+    assert "byte counts not available" not in out
+    assert "Bandwidth" in out
+
+
+# ---------------------------------------------------------------------------
+# Real-trace fixtures: trimmed excerpts of the real vLLM Qwen3.5-9B/MI210
+# rocprofv3 captures (kernel names, correlation ids, and timestamps copied
+# verbatim from amd-profiler-samples/rocprofv3_trace_{eager,graph}), laid out
+# the way rocprofv3 itself writes a <hostname>/<pid>/ capture directory. See
+# fixtures/rocprof/rocprofv3_real/ for the generation source.
+# ---------------------------------------------------------------------------
+
+
+def test_families_on_the_real_eager_trace_classifies_every_sampled_family_correctly() -> None:
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_families(_ns(str(_REAL_FIXTURE_ROOT / "eager")))
+    out = buf.getvalue()
+
+    assert "Composable Kernel (ck::/ck_tile)" in out
+    assert "hipBLASLt / Tensile (Cijk_*)" in out
+    assert "Triton (JIT)" in out
+    assert "vLLM/SGLang custom ops" in out
+    assert "PyTorch native (at::native)" in out
+    # The real bug: GDN/wvSplitK kernels must not land in a generic bucket.
+    assert not out.splitlines()[-1].startswith("other")
+
+
+def test_families_on_the_real_graph_trace_classifies_the_replayed_kernels_too() -> None:
+    """The kernels replayed under the real ``hipGraphLaunch`` fan-out (a
+    Triton pointwise op and three hipBLASLt/Tensile GEMM variants) must be
+    classified the same as their direct-launch counterparts.
+    """
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_families(_ns(str(_REAL_FIXTURE_ROOT / "graph")))
+    out = buf.getvalue()
+
+    assert "Composable Kernel (ck::/ck_tile)" in out
+    assert "hipBLASLt / Tensile (Cijk_*)" in out
+    assert "Triton (JIT)" in out
+    assert "vLLM/SGLang custom ops" in out
+
+
+def test_graphs_on_the_real_eager_trace_does_not_flag_degraded_attribution() -> None:
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_graphs(_ns(str(_REAL_FIXTURE_ROOT / "eager")))
+    out = buf.getvalue()
+
+    assert "hipGraphLaunch calls: 0" in out
+    assert "DEGRADED" not in out
+    assert "should be reliable" in out
+
+
+def test_graphs_on_the_real_graph_trace_flags_degraded_attribution() -> None:
+    """The real ``hipGraphLaunch`` call (Correlation_Id 3945805 in the source
+    capture) replays 6 kernels; the analyzer must detect and flag this.
+    """
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_graphs(_ns(str(_REAL_FIXTURE_ROOT / "graph")))
+    out = buf.getvalue()
+
+    assert "hipGraphLaunch calls: 1" in out
+    assert "DEGRADED" in out
+    assert "matched kernels (by Correlation_Id): 1" in out
+
+
+def test_kernels_on_the_real_eager_trace_matches_the_hand_computed_total() -> None:
+    """Cross-check against the sum of (End - Start) for every sampled row."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_kernels(_ns(str(_REAL_FIXTURE_ROOT / "eager"), top=20))
+    out = buf.getvalue()
+
+    assert "Total kernel launches: 14" in out
