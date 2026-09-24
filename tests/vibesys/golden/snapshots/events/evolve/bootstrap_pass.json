@@ -1,0 +1,886 @@
+[
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": "<SHA>",
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys: initialize run <RUN_ID>",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "experiments_changed",
+      "reason": "project_attached",
+      "revision": null
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "experiments_changed"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys: record effective objective",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "benchmark_contract": false,
+      "kind": "run_configured",
+      "model": null,
+      "objective": "Maximize tok/s throughput.",
+      "pareto_objectives": null,
+      "project_root": "<WORKSPACE>/<TEST_DIR>/exp_env/<RUN_ID>",
+      "run_log_path": "<WORKSPACE>/.vibesys-state-<TEST_DIR>/projects/<RUN_ID>/runs/<RUN_ID>/logs/run-<TIMESTAMP>.log",
+      "search_policy": "vibesys",
+      "source": "loop"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "run_configured"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "implementer is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "implementer",
+      "system_prompt": "<text len=5068 sha256=53daa8eb43f4c7a5>",
+      "user_prompt": "Edit the workspace to produce an offspring of the parent. Then return one JSON object matching the schema above."
+    },
+    "round_label": "gen-0-cand-1-mutator",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "implementer"
+    },
+    "round_label": "gen-0-cand-1-mutator",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "<text len=5068 sha256=53daa8eb43f4c7a5>",
+      "user_prompt": "Edit the workspace to produce an offspring of the parent. Then return one JSON object matching the schema above."
+    },
+    "round_label": "gen-0-cand-1-mutator",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "candidate_disposition": "unassessed",
+        "candidate_evaluation_artifact": null,
+        "candidate_metrics": {},
+        "candidate_operating_point": "",
+        "candidate_retention_reason": "",
+        "evaluation_artifact": null,
+        "evidence": "ran checks",
+        "expected_behavior": "higher steady-state throughput",
+        "hypothesis_outcome": "nominated",
+        "metrics": {},
+        "next_step": "",
+        "perf_metric": null,
+        "perf_unit": null,
+        "skill_context_updates": [],
+        "summary": "bootstrap seed",
+        "validation_recipe_artifact": null
+      }
+    },
+    "round_label": "gen-0-cand-1-mutator",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "candidate_disposition": "unassessed",
+        "candidate_evaluation_artifact": null,
+        "candidate_metrics": {},
+        "candidate_operating_point": "",
+        "candidate_retention_reason": "",
+        "evaluation_artifact": null,
+        "evidence": "ran checks",
+        "expected_behavior": "higher steady-state throughput",
+        "hypothesis_outcome": "nominated",
+        "metrics": {},
+        "next_step": "",
+        "perf_metric": null,
+        "perf_unit": null,
+        "skill_context_updates": [],
+        "summary": "bootstrap seed",
+        "validation_recipe_artifact": null
+      }
+    },
+    "round_label": "gen-0-cand-1-mutator",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "implementer"
+    },
+    "round_label": "gen-0-cand-1-mutator",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "judge is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "judge",
+      "system_prompt": "<text len=5198 sha256=030d43d9a15da6e1>",
+      "user_prompt": "Review the offspring per the criteria above. Return only the JSON verdict."
+    },
+    "round_label": "gen-0-cand-1-judge",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "judge"
+    },
+    "round_label": "gen-0-cand-1-judge",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "<text len=5198 sha256=030d43d9a15da6e1>",
+      "user_prompt": "Review the offspring per the criteria above. Return only the JSON verdict."
+    },
+    "round_label": "gen-0-cand-1-judge",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "analysis": "reviewed the candidate",
+        "feedback": "",
+        "skills_used": [],
+        "verdict": "pass"
+      }
+    },
+    "round_label": "gen-0-cand-1-judge",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "analysis": "reviewed the candidate",
+        "feedback": "",
+        "skills_used": [],
+        "verdict": "pass"
+      }
+    },
+    "round_label": "gen-0-cand-1-judge",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "judge"
+    },
+    "round_label": "gen-0-cand-1-judge",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "profiler is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "profiler",
+      "system_prompt": "<text len=9070 sha256=722647a7ea989d0d>",
+      "user_prompt": "Profile the server and return exactly one JSON object matching the schema above."
+    },
+    "round_label": "gen-0-cand-1-profiler",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "profiler"
+    },
+    "round_label": "gen-0-cand-1-profiler",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "<text len=9070 sha256=722647a7ea989d0d>",
+      "user_prompt": "Profile the server and return exactly one JSON object matching the schema above."
+    },
+    "round_label": "gen-0-cand-1-profiler",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "analysis": "ok",
+        "bottlenecks": "none",
+        "metrics": {},
+        "perf_metric": 10.0,
+        "perf_unit": "tok/s",
+        "suggestions": "none"
+      }
+    },
+    "round_label": "gen-0-cand-1-profiler",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "analysis": "ok",
+        "bottlenecks": "none",
+        "metrics": {},
+        "perf_metric": 10.0,
+        "perf_unit": "tok/s",
+        "suggestions": "none"
+      }
+    },
+    "round_label": "gen-0-cand-1-profiler",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "profiler"
+    },
+    "round_label": "gen-0-cand-1-profiler",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "gen-0-seed",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "implementer is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "implementer",
+      "system_prompt": "<text len=5003 sha256=bedd4f1005f9e8a8>",
+      "user_prompt": "Edit the workspace to produce an offspring of the parent. Then return one JSON object matching the schema above."
+    },
+    "round_label": "gen-1-cand-1-mutator",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "implementer"
+    },
+    "round_label": "gen-1-cand-1-mutator",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "<text len=5003 sha256=bedd4f1005f9e8a8>",
+      "user_prompt": "Edit the workspace to produce an offspring of the parent. Then return one JSON object matching the schema above."
+    },
+    "round_label": "gen-1-cand-1-mutator",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "candidate_disposition": "unassessed",
+        "candidate_evaluation_artifact": null,
+        "candidate_metrics": {},
+        "candidate_operating_point": "",
+        "candidate_retention_reason": "",
+        "evaluation_artifact": null,
+        "evidence": "ran checks",
+        "expected_behavior": "higher steady-state throughput",
+        "hypothesis_outcome": "nominated",
+        "metrics": {},
+        "next_step": "",
+        "perf_metric": null,
+        "perf_unit": null,
+        "skill_context_updates": [],
+        "summary": "gen-1 child",
+        "validation_recipe_artifact": null
+      }
+    },
+    "round_label": "gen-1-cand-1-mutator",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "candidate_disposition": "unassessed",
+        "candidate_evaluation_artifact": null,
+        "candidate_metrics": {},
+        "candidate_operating_point": "",
+        "candidate_retention_reason": "",
+        "evaluation_artifact": null,
+        "evidence": "ran checks",
+        "expected_behavior": "higher steady-state throughput",
+        "hypothesis_outcome": "nominated",
+        "metrics": {},
+        "next_step": "",
+        "perf_metric": null,
+        "perf_unit": null,
+        "skill_context_updates": [],
+        "summary": "gen-1 child",
+        "validation_recipe_artifact": null
+      }
+    },
+    "round_label": "gen-1-cand-1-mutator",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "implementer"
+    },
+    "round_label": "gen-1-cand-1-mutator",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "judge is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "judge",
+      "system_prompt": "<text len=5198 sha256=030d43d9a15da6e1>",
+      "user_prompt": "Review the offspring per the criteria above. Return only the JSON verdict."
+    },
+    "round_label": "gen-1-cand-1-judge",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "judge"
+    },
+    "round_label": "gen-1-cand-1-judge",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "<text len=5198 sha256=030d43d9a15da6e1>",
+      "user_prompt": "Review the offspring per the criteria above. Return only the JSON verdict."
+    },
+    "round_label": "gen-1-cand-1-judge",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "analysis": "reviewed the candidate",
+        "feedback": "",
+        "skills_used": [],
+        "verdict": "pass"
+      }
+    },
+    "round_label": "gen-1-cand-1-judge",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "analysis": "reviewed the candidate",
+        "feedback": "",
+        "skills_used": [],
+        "verdict": "pass"
+      }
+    },
+    "round_label": "gen-1-cand-1-judge",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "judge",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "judge"
+    },
+    "round_label": "gen-1-cand-1-judge",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "profiler is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "profiler",
+      "system_prompt": "<text len=9070 sha256=722647a7ea989d0d>",
+      "user_prompt": "Profile the server and return exactly one JSON object matching the schema above."
+    },
+    "round_label": "gen-1-cand-1-profiler",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "profiler"
+    },
+    "round_label": "gen-1-cand-1-profiler",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "<text len=9070 sha256=722647a7ea989d0d>",
+      "user_prompt": "Profile the server and return exactly one JSON object matching the schema above."
+    },
+    "round_label": "gen-1-cand-1-profiler",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "analysis": "ok",
+        "bottlenecks": "none",
+        "metrics": {},
+        "perf_metric": 11.0,
+        "perf_unit": "tok/s",
+        "suggestions": "none"
+      }
+    },
+    "round_label": "gen-1-cand-1-profiler",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "analysis": "ok",
+        "bottlenecks": "none",
+        "metrics": {},
+        "perf_metric": 11.0,
+        "perf_unit": "tok/s",
+        "suggestions": "none"
+      }
+    },
+    "round_label": "gen-1-cand-1-profiler",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "profiler",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "profiler"
+    },
+    "round_label": "gen-1-cand-1-profiler",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "gen-1-child-1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "evolve: select individual 2",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  }
+]
