@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -60,12 +62,19 @@ def _load_module(name: str, path: Path) -> ModuleType:
 _load_module(_MODULE_NAME, _MODULE_PATH)
 
 from rocprof_kernel_bench_under_test import (  # noqa: E402  (module must load first)
+    DEFAULT_THRESHOLD_PCT,
+    MIN_PAIRS_FOR_VERDICT,
+    MIN_SAMPLES_FOR_TREND,
+    MIN_SAMPLES_FOR_VERDICT,
     _is_monotonic_increasing,
     _is_valid_pair,
     _load_pairs,
     _load_wall_ms,
     _percentile,
     _print_verdict,
+    assess_paired,
+    assess_unpaired,
+    summarize_series,
 )
 
 
@@ -434,3 +443,183 @@ def test_main_dispatches_verdict_with_threshold_flag(tmp_path, capsys, kb):  # n
 def test_main_requires_a_subcommand(kb):  # noqa: ANN001, ANN201
     with pytest.raises(SystemExit):
         kb.main([])
+
+
+# ---------------------------------------------------------------------------
+# Property tests -- decision logic invariants over the plain-float series
+# these functions work on (never CSV/rocprof-specific data).
+# ---------------------------------------------------------------------------
+
+_POS = st.floats(min_value=0.01, max_value=1_000.0, allow_nan=False, allow_infinity=False)
+_SELF_PAIR_MIN = max(MIN_SAMPLES_FOR_VERDICT, MIN_PAIRS_FOR_VERDICT)
+
+
+def _cumulative_increasing(increments: list[float]) -> list[float]:
+    """A strictly increasing series built from positive increments."""
+    total = 1.0
+    out = []
+    for inc in increments:
+        total += inc
+        out.append(total)
+    return out
+
+
+_MONOTONIC_SERIES = st.lists(_POS, min_size=MIN_SAMPLES_FOR_TREND, max_size=15).map(
+    _cumulative_increasing
+)
+
+
+# 1. Symmetric verdict: swapping A/B flips faster/slower.
+
+
+@settings(max_examples=25, deadline=None)
+@given(
+    direction=st.sampled_from((1, -1)),
+    magnitude=st.floats(min_value=DEFAULT_THRESHOLD_PCT + 2.0, max_value=90.0),
+    a_values=st.lists(_POS, min_size=MIN_PAIRS_FOR_VERDICT, max_size=15),
+)
+def test_assess_paired_swap_flips_faster_and_slower(direction, magnitude, a_values):  # noqa: ANN001, ANN201
+    # Every pair shares the exact same signed delta -- decisively away from
+    # the threshold and never sign-disagreeing -- so the verdict is
+    # deterministic by construction instead of relying on `assume()` to
+    # reject the (common) indecisive cases from fully independent A/B draws.
+    pairs = [(a, a * (1 + direction * magnitude / 100.0)) for a in a_values]
+    a_series = [a for a, _ in pairs]
+    b_series = [b for _, b in pairs]
+    assume(not _is_monotonic_increasing(a_series))
+    assume(not _is_monotonic_increasing(b_series))
+
+    forward = assess_paired(pairs)
+    assert forward.decisive
+    assert forward.reason == ("slower" if direction > 0 else "faster")
+
+    backward = assess_paired([(b, a) for a, b in pairs])
+
+    assert backward.decisive
+    assert backward.reason == ("faster" if direction > 0 else "slower")
+    assert (forward.median_delta_pct > 0) != (backward.median_delta_pct > 0)
+
+
+@settings(max_examples=25, deadline=None)
+@given(
+    direction=st.sampled_from((1, -1)),
+    magnitude=st.floats(min_value=DEFAULT_THRESHOLD_PCT + 2.0, max_value=90.0),
+    samples_a=st.lists(_POS, min_size=MIN_SAMPLES_FOR_VERDICT, max_size=15),
+)
+def test_assess_unpaired_swap_flips_faster_and_slower(direction, magnitude, samples_a):  # noqa: ANN001, ANN201
+    # `assess_unpaired` compares medians, so scaling every A sample by the
+    # same factor scales the median by the same factor -- deterministically
+    # decisive, same rationale as the paired version above.
+    samples_b = [a * (1 + direction * magnitude / 100.0) for a in samples_a]
+    assume(not _is_monotonic_increasing(samples_a))
+    assume(not _is_monotonic_increasing(samples_b))
+
+    forward = assess_unpaired(samples_a, samples_b)
+    assert forward.decisive
+    assert forward.reason == ("slower" if direction > 0 else "faster")
+
+    backward = assess_unpaired(samples_b, samples_a)
+
+    assert backward.decisive
+    assert backward.reason == ("faster" if direction > 0 else "slower")
+    assert (forward.median_delta_pct > 0) != (backward.median_delta_pct > 0)
+
+
+# 2. within_noise for identical distributions.
+
+
+@settings(max_examples=25, deadline=None)
+@given(samples=st.lists(_POS, min_size=_SELF_PAIR_MIN, max_size=15))
+def test_assess_paired_within_noise_when_pairing_each_value_with_itself(samples):  # noqa: ANN001, ANN201
+    assume(not _is_monotonic_increasing(samples))
+
+    verdict = assess_paired([(x, x) for x in samples])
+
+    assert verdict.decisive
+    assert verdict.reason == "within_noise"
+    assert verdict.median_delta_pct == 0.0
+    assert all(delta == 0.0 for delta in verdict.deltas_pct)
+
+
+@settings(max_examples=25, deadline=None)
+@given(samples=st.lists(_POS, min_size=_SELF_PAIR_MIN, max_size=15))
+def test_assess_unpaired_within_noise_for_a_series_against_itself(samples):  # noqa: ANN001, ANN201
+    assume(not _is_monotonic_increasing(samples))
+
+    verdict = assess_unpaired(samples, samples)
+
+    assert verdict.decisive
+    assert verdict.reason == "within_noise"
+    assert verdict.median_delta_pct == 0.0
+
+
+# 3. sign_disagreement when pair deltas' signs are genuinely mixed.
+
+
+@settings(max_examples=25, deadline=None)
+@given(
+    threshold_pct=st.floats(min_value=0.1, max_value=30.0, allow_nan=False, allow_infinity=False),
+    epsilon=st.floats(min_value=0.01, max_value=0.5, allow_nan=False, allow_infinity=False),
+    n_slower=st.integers(min_value=1, max_value=5),
+    n_faster=st.integers(min_value=1, max_value=5),
+)
+def test_assess_paired_sign_disagreement_from_mixed_pair_signs(  # noqa: ANN201
+    threshold_pct,  # noqa: ANN001
+    epsilon,  # noqa: ANN001
+    n_slower,  # noqa: ANN001
+    n_faster,  # noqa: ANN001
+):
+    base = 100.0
+    fraction = threshold_pct / 100.0 + epsilon
+    assume(fraction < 1.0)  # keep the "faster" side's candidate time positive
+
+    slower_pairs = [(base, base * (1 + fraction))] * n_slower
+    faster_pairs = [(base, base * (1 - fraction))] * n_faster
+    pairs = slower_pairs + faster_pairs
+
+    verdict = assess_paired(pairs, threshold_pct=threshold_pct)
+
+    assert not verdict.decisive
+    assert verdict.reason == "sign_disagreement"
+
+
+# 4. not_converged for a monotonic series.
+
+
+@settings(max_examples=20, deadline=None)
+@given(series=_MONOTONIC_SERIES)
+def test_summarize_series_flags_strictly_increasing_series_as_not_converged(series):  # noqa: ANN001, ANN201
+    result = summarize_series(series, warmup=0)
+
+    assert result.converged is False
+    assert result.reason == "monotonic_increasing"
+
+
+@settings(max_examples=20, deadline=None)
+@given(data=st.data())
+def test_assess_paired_not_converged_when_either_side_is_monotonic(data):  # noqa: ANN001, ANN201
+    monotonic = data.draw(_MONOTONIC_SERIES)
+    other = data.draw(st.lists(_POS, min_size=len(monotonic), max_size=len(monotonic)))
+
+    monotonic_is_a = assess_paired(list(zip(monotonic, other, strict=True)))
+    monotonic_is_b = assess_paired(list(zip(other, monotonic, strict=True)))
+
+    assert not monotonic_is_a.decisive
+    assert monotonic_is_a.reason == "not_converged"
+    assert not monotonic_is_b.decisive
+    assert monotonic_is_b.reason == "not_converged"
+
+
+@settings(max_examples=20, deadline=None)
+@given(data=st.data())
+def test_assess_unpaired_not_converged_when_either_side_is_monotonic(data):  # noqa: ANN001, ANN201
+    monotonic = data.draw(_MONOTONIC_SERIES)
+    other = data.draw(st.lists(_POS, min_size=MIN_SAMPLES_FOR_VERDICT, max_size=15))
+
+    monotonic_is_a = assess_unpaired(monotonic, other)
+    monotonic_is_b = assess_unpaired(other, monotonic)
+
+    assert not monotonic_is_a.decisive
+    assert monotonic_is_a.reason == "not_converged"
+    assert not monotonic_is_b.decisive
+    assert monotonic_is_b.reason == "not_converged"
