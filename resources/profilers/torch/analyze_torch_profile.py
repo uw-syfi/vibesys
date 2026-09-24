@@ -1309,10 +1309,19 @@ def _extract_gemm_shapes(
         shape = _shape_for_gemm_op(name, dims)
         if shape is None:
             continue
+        gpu_time = sum(float(kv.get("dur") or 0) for kv in op_to_kernels.get(i, ()))
+        if gpu_time <= 0:
+            # No correlated GPU kernel: this cpu_op is a wrapper around an
+            # inner GEMM op (e.g. aten::linear/matmul wrapping the aten::mm
+            # that actually issues the kernel launch -- Kineto only stamps
+            # "External id" -> correlation on the innermost op on the
+            # call stack at launch time). Counting it here would inflate
+            # call_count with phantom zero-GPU-time duplicates of the real
+            # (correlated) entry for the same logical GEMM.
+            continue
         m, n, k, batch = shape
         dtype = _dtype_for_gemm_op(name, args.get("Input type"))
         key = (_GEMM_OPS[name], m, n, k, batch, dtype)
-        gpu_time = sum(float(kv.get("dur") or 0) for kv in op_to_kernels.get(i, ()))
         entry = demand.setdefault(key, {"call_count": 0, "gpu_time_us": 0.0})
         entry["call_count"] += 1
         entry["gpu_time_us"] += gpu_time
