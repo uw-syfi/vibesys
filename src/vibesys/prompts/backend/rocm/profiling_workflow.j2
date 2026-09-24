@@ -5,17 +5,21 @@ A ROCm profiling toolkit is available at `rocprof_profiler/analyze_rocprof.py`, 
    kernel resolution and any TunableOp search take minutes and will otherwise
    dominate the capture):
    ```
-   <declared server command> > /tmp/prewarm.log 2>&1 &
+   VLLM_ENABLE_V1_MULTIPROCESSING=0 <declared server command> > /tmp/prewarm.log 2>&1 &
    PID=$!
    for i in $(seq 1 120); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
    curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
      -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
    kill $PID 2>/dev/null; wait $PID 2>/dev/null; sleep 2
    ```
+   `VLLM_ENABLE_V1_MULTIPROCESSING=0` keeps vLLM's engine in the server
+   process instead of forking a separate `EngineCore` — needed for step 2's
+   clean-exit requirement, and harmless here too. SGLang: use its equivalent
+   single-process/non-multiprocessing flag if the manifest names one.
 
 2. Profile under a representative benchmark load (pick the load level closest to saturation from your earlier runs). If the server is tensor-parallel, profile the worker process that actually issues HIP kernels, not the API-server/driver process — a driver-only capture reads as idle by construction:
    ```
-   rocprofv3 --kernel-trace --hip-runtime-trace --memory-copy-trace --stats --output-format csv \
+   VLLM_ENABLE_V1_MULTIPROCESSING=0 rocprofv3 --kernel-trace --memory-copy-trace --stats --output-format csv \
      -d /tmp/profile -o capture \
      -- <declared server command> &
    ROCPROF_PID=$!
@@ -23,8 +27,24 @@ A ROCm profiling toolkit is available at `rocprof_profiler/analyze_rocprof.py`, 
    curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
      -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
    {% if benchmark_command is defined and benchmark_command %}{{ benchmark_command }}{% else %}<manifest benchmark command>{% endif %} --url http://localhost:8077 --rate <chosen_rate> --duration 10 --max-tokens 64
-   kill -INT $ROCPROF_PID 2>/dev/null; wait $ROCPROF_PID 2>/dev/null; sleep 3
+   kill -INT $ROCPROF_PID 2>/dev/null
+   # rocprofv3 only flushes its trace buffers on a clean process exit -- a hard
+   # kill (or a server whose forked worker doesn't exit cleanly on an external
+   # kill of the parent) silently loses the trace even though the run otherwise
+   # looked fine. VLLM_ENABLE_V1_MULTIPROCESSING=0 above removes that fork for
+   # vLLM. Give the exit+flush a generous bounded wait: the post-exit flush to
+   # disk can itself take minutes on a large capture, scaling with the amount
+   # traced (see --hip-runtime-trace below), not with how long the run took.
+   for i in $(seq 1 60); do kill -0 $ROCPROF_PID 2>/dev/null || break; sleep 5; done
+   wait $ROCPROF_PID 2>/dev/null
    ```
+   Use `--output-format csv` only — adding `json` duplicates every CSV's
+   content inside one JSON blob and can reach GB scale at serving-workload row
+   counts for no extra information. Add `--hip-runtime-trace` only when
+   `cpu_overhead`/`graphs`/launch-bound analysis is actually needed: it traces
+   one HIP runtime API call per kernel launch/memcpy/event, so on a
+   batched-decode workload it typically runs 2-4x the size of the kernel trace
+   it's paired with — do not enable it by default on a large capture.
 
 3. Analyze:
    ```
