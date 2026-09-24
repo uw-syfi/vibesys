@@ -28,8 +28,10 @@ class TestRocmRegistry:
         impl = backends.get(ComputeBackend.ROCM, log_dir=tmp_path)
         assert isinstance(impl, RocmBackend)
         assert impl.name is ComputeBackend.ROCM
-        # torch.profiler works on ROCm, so no dedicated profiler kind is needed.
-        assert impl.profiler_kind is ProfilerKind.TORCH
+        # rocprofv3 / rocprof-compute is the dedicated system- and
+        # kernel-altitude toolkit for ROCm; torch.profiler is still
+        # selectable via --profiler torch.
+        assert impl.profiler_kind is ProfilerKind.ROCPROF
 
 
 class TestRocmSandbox:
