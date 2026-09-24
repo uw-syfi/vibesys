@@ -254,6 +254,12 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 # its trace-indexing, correlation, and shape/roofline math directly means
 # calling its underscore-prefixed helpers; there is no other entry point.
 "tests/vibesys/loops/test_torch_profile_analyzer.py" = ["SLF001"]
+# This file unit-tests resources/profilers/rocprof/capture.py, a standalone
+# module (no public library API) loaded by file path. Exercising its pure
+# diff primitive for the compare() property test, and monkeypatching its
+# module-level _HERE for profile_ops delegation tests, means touching its
+# underscore-prefixed names directly; there is no other entry point.
+"tests/vibesys/loops/test_rocprof_capture.py" = ["SLF001"]
 # capture_runtime.py is staged standalone (stdlib only) into arbitrary agent
 # workspaces and must run under Python 3.10+, so it avoids enum.StrEnum,
 # added in 3.11.
