@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from typing import TYPE_CHECKING
 
 from vibesys.run.event_journal import EventJournal
@@ -69,7 +70,7 @@ class LocalRunIntegration:
         """Compose a durable journal with direct invocation control."""
         self.events = EventJournal()
         self.control = RunControlChannel(self.events)
-        from vibesys.render import output_sink
+        output_sink = import_module("vibesys.render").output_sink
 
         self._unsubscribe_output = output_sink().subscribe(self.events.record)
         self._closed = False

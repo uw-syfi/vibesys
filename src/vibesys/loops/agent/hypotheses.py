@@ -231,12 +231,15 @@ def start_hypothesis(
 ) -> AgentRunState:
     """Start a new hypothesis after applying its strategic updates."""
     if state.active_hypothesis_id is not None:
-        raise ValueError("cannot start a hypothesis while another is active")
+        message = "cannot start a hypothesis while another is active"
+        raise ValueError(message)
     identifier = plan.hypothesis_id.strip()
     if not identifier:
-        raise ValueError("hypothesis ID must not be blank")
+        _exception_message = "hypothesis ID must not be blank"
+        raise ValueError(_exception_message)
     if state.by_id(identifier) is not None:
-        raise ValueError(f"hypothesis ID {identifier!r} already exists")
+        _exception_message_2 = f"hypothesis ID {identifier!r} already exists"
+        raise ValueError(_exception_message_2)
     updated = apply_strategy_updates(state, plan.hypothesis_updates)
     updated.hypotheses.append(
         Hypothesis(
@@ -262,9 +265,11 @@ def update_active_hypothesis(
     """Replace the active hypothesis with an updated restart checkpoint."""
     identifier = state.active_hypothesis_id
     if identifier is None:
-        raise ValueError("cannot update an active hypothesis when none is active")
+        message = "cannot update an active hypothesis when none is active"
+        raise ValueError(message)
     if hypothesis.hypothesis_id != identifier:
-        raise ValueError("updated hypothesis must preserve the active hypothesis ID")
+        _exception_message = "updated hypothesis must preserve the active hypothesis ID"
+        raise ValueError(_exception_message)
     updated = state.clone()
     index = next(
         index for index, item in enumerate(updated.hypotheses) if item.hypothesis_id == identifier
@@ -282,11 +287,14 @@ def append_round(
     """Append one completed round to the active hypothesis."""
     active = state.active_hypothesis
     if active is None:
-        raise ValueError("cannot append a round when no hypothesis is active")
+        message = "cannot append a round when no hypothesis is active"
+        raise ValueError(message)
     if record.hypothesis_id != active.hypothesis_id:
-        raise ValueError("round hypothesis_id must match the active hypothesis")
+        _exception_message = "round hypothesis_id must match the active hypothesis"
+        raise ValueError(_exception_message)
     if any(item.round_number == record.round_number for item in state.rounds):
-        raise ValueError(f"round {record.round_number} already exists")
+        _exception_message_2 = f"round {record.round_number} already exists"
+        raise ValueError(_exception_message_2)
 
     updated = state.clone()
     projected = project_round_evidence(
@@ -327,7 +335,8 @@ def apply_strategy_updates(
     seen: set[str] = set()
     for change in updates:
         if change.hypothesis_id in seen:
-            raise ValueError(f"duplicate strategy update for hypothesis {change.hypothesis_id!r}")
+            message = f"duplicate strategy update for hypothesis {change.hypothesis_id!r}"
+            raise ValueError(message)
         seen.add(change.hypothesis_id)
         index = next(
             (
@@ -338,14 +347,19 @@ def apply_strategy_updates(
             None,
         )
         if index is None:
-            raise ValueError(f"strategy update names unknown hypothesis {change.hypothesis_id!r}")
+            _exception_message = (
+                f"strategy update names unknown hypothesis {change.hypothesis_id!r}"
+            )
+            raise ValueError(_exception_message)
         item = updated.hypotheses[index]
         if updated.active_hypothesis_id == change.hypothesis_id:
-            raise ValueError(
+            _exception_message_2 = (
                 f"cannot {change.disposition} active hypothesis {change.hypothesis_id!r}"
             )
+            raise ValueError(_exception_message_2)
         if not item.rounds:
-            raise ValueError(f"cannot update incomplete hypothesis {change.hypothesis_id!r}")
+            _exception_message_3 = f"cannot update incomplete hypothesis {change.hypothesis_id!r}"
+            raise ValueError(_exception_message_3)
         item.strategy = HypothesisStrategy(change.disposition)
         item.strategy_reason = change.reason.strip()
     return _validated_state(updated)
@@ -367,9 +381,11 @@ def project_round_evidence(
     the best prior official reading.
     """
     if record.hypothesis_id != hypothesis.hypothesis_id:
-        raise ValueError("round hypothesis_id must match its owning hypothesis")
+        message = "round hypothesis_id must match its owning hypothesis"
+        raise ValueError(message)
     if any(item.round_number == record.round_number for item in hypothesis.rounds):
-        raise ValueError(f"round {record.round_number} already belongs to hypothesis")
+        _exception_message = f"round {record.round_number} already belongs to hypothesis"
+        raise ValueError(_exception_message)
     updated = hypothesis.clone()
     updated.rounds.append(record)
     updated.declared_outcome = _declared_outcome(record.hypothesis_declared_outcome)
@@ -512,9 +528,10 @@ def reproject_run_evidence(state: AgentRunState) -> AgentRunState:
             None,
         )
         if index is None:
-            raise ValueError(
+            message = (
                 f"round {record.round_number} names unknown hypothesis {record.hypothesis_id!r}"
             )
+            raise ValueError(message)
         updated.hypotheses[index] = project_round_evidence(
             updated.hypotheses[index],
             record,

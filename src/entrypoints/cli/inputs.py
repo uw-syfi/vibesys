@@ -74,7 +74,8 @@ def _load_selected_input(project_root: Path, task_name: str | None) -> InputBund
     if project.is_initialized():
         return load_project_task(project, project.select_task(task_name))
     if task_name is not None:
-        raise ValueError("--task requires a project with .vibesys/tasks")
+        message = "--task requires a project with .vibesys/tasks"
+        raise ValueError(message)
     return load_input_bundle(project_root)
 
 

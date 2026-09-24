@@ -15,6 +15,7 @@ from vibesys.loops.evolve.population import Individual, Population
 from vibesys.loops.evolve.search_policy import (
     OpenEvolveSearchConfig,
     OpenEvolveSearchPolicy,
+    SearchSelectionParameters,
 )
 from vibesys.loops.metrics import MetricSpace, Objective
 
@@ -78,6 +79,19 @@ def _config(**overrides: object) -> OpenEvolveSearchConfig:
     return OpenEvolveSearchConfig(**values)
 
 
+def _selection_parameters(
+    *, k_top_inspirations: int = 0, k_random_inspirations: int = 0
+) -> SearchSelectionParameters:
+    return SearchSelectionParameters(
+        rng=_UnusedRandom(),
+        k_top_inspirations=k_top_inspirations,
+        k_random_inspirations=k_random_inspirations,
+        selection_temperature=0.5,
+        space=MetricSpace(),
+        frontier_bias=0.7,
+    )
+
+
 def _persisted_dir(state_dir: Path) -> Path:
     return state_dir / "snapshots" / (state_dir / "CURRENT").read_text()
 
@@ -120,12 +134,7 @@ def test_openevolve_selection_maps_programs_back_to_vibesys_individuals(tmp_path
 
     selection = policy.select(
         population,
-        rng=_UnusedRandom(),
-        k_top_inspirations=1,
-        k_random_inspirations=1,
-        selection_temperature=0.5,
-        space=MetricSpace(),
-        frontier_bias=0.7,
+        _selection_parameters(k_top_inspirations=1, k_random_inspirations=1),
     )
 
     assert selection is not None
@@ -167,12 +176,7 @@ def test_migrants_keep_vibesys_identity_and_state_resumes(tmp_path: Path) -> Non
     for _ in range(2):
         selection = resumed.select(
             population,
-            rng=_UnusedRandom(),
-            k_top_inspirations=0,
-            k_random_inspirations=0,
-            selection_temperature=0.5,
-            space=MetricSpace(),
-            frontier_bias=0.7,
+            _selection_parameters(),
         )
         if selection is not None and selection.target_island == 1:
             break
@@ -355,12 +359,7 @@ def test_empty_island_copy_resolves_through_vibesys_ancestry(tmp_path: Path) -> 
     for _ in range(2):
         selection = policy.select(
             population,
-            rng=_UnusedRandom(),
-            k_top_inspirations=0,
-            k_random_inspirations=0,
-            selection_temperature=0.5,
-            space=MetricSpace(),
-            frontier_bias=0.7,
+            _selection_parameters(),
         )
         if selection is not None and selection.target_island == 1:
             break
@@ -382,20 +381,13 @@ def test_empty_island_copy_has_same_identity_after_resume(tmp_path: Path) -> Non
     policy = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=2, config=config, space=MetricSpace())
     policy.record(seed, code="seed", policy_parent_id=None, target_island=0, space=MetricSpace())
     resumed = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=999, config=None, space=MetricSpace())
-    selection_args = {
-        "rng": _UnusedRandom(),
-        "k_top_inspirations": 0,
-        "k_random_inspirations": 0,
-        "selection_temperature": 0.5,
-        "space": MetricSpace(),
-        "frontier_bias": 0.7,
-    }
+    selection_parameters = _selection_parameters()
 
     island_selections = []
     for candidate in (policy, resumed):
         selection = None
         for _ in range(2):
-            selection = candidate.select(population, **selection_args)
+            selection = candidate.select(population, selection_parameters)
             if selection is not None and selection.target_island == 1:
                 break
         island_selections.append(selection)
@@ -468,15 +460,8 @@ def test_resume_continues_upstream_random_stream_without_touching_global_rng(
         )
 
     global_state = random.getstate()
-    selection_args = {
-        "rng": _UnusedRandom(),
-        "k_top_inspirations": 0,
-        "k_random_inspirations": 0,
-        "selection_temperature": 0.5,
-        "space": MetricSpace(),
-        "frontier_bias": 0.7,
-    }
-    policy.select(population, **selection_args)
+    selection_parameters = _selection_parameters()
+    policy.select(population, selection_parameters)
     resumed = OpenEvolveSearchPolicy(state_dir=tmp_path, seed=19, config=None, space=MetricSpace())
     program_ids = sorted(_persisted_adapter(tmp_path)["active_program_ids"])
     policy._database.islands[0] = _IterationOrderSet(  # noqa: SLF001  # LW-010048; injects unstable upstream set order because the public adapter exposes no ordering hook
@@ -487,8 +472,8 @@ def test_resume_continues_upstream_random_stream_without_touching_global_rng(
         program_ids,
         program_ids[1:] + program_ids[:1],
     )
-    uninterrupted_next = policy.select(population, **selection_args)
-    resumed_next = resumed.select(population, **selection_args)
+    uninterrupted_next = policy.select(population, selection_parameters)
+    resumed_next = resumed.select(population, selection_parameters)
 
     assert uninterrupted_next is not None
     assert resumed_next is not None
@@ -512,12 +497,7 @@ def test_selection_uses_lightweight_checkpoint_without_rewriting_programs(tmp_pa
 
     selection = policy.select(
         population,
-        rng=_UnusedRandom(),
-        k_top_inspirations=0,
-        k_random_inspirations=0,
-        selection_temperature=0.5,
-        space=MetricSpace(),
-        frontier_bias=0.7,
+        _selection_parameters(),
     )
 
     assert selection is not None

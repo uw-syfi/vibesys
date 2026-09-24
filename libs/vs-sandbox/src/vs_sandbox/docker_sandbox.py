@@ -261,7 +261,7 @@ class DockerSandbox(WorkspaceSandbox):
         group_add: list[str] | None = None,
         entrypoint: str | None = None,
         shm_size: str | None = None,
-        auto_remove: bool = False,  # noqa: FBT001, FBT002  # lint-waiver: LW-009061 [FBT001, FBT002]; keep the legacy positional constructor option stable.
+        auto_remove: bool = False,
         default_timeout: int = 300,
         start_timeout: int = 120,
         max_output_bytes: int = 100_000,

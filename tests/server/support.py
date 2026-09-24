@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from server.api.service import RunApi
 from server.chat.manager import ChatManager
 from server.controller import RunController
-from server.execution import ExecutionTracker
+from server.execution import AgentExecutionRequest, ExecutionHandle, ExecutionTracker
 from server.integration import RunIntegrationAdapter
 from server.journal import EventJournal
 from server.read_model import RunInspector
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from server.chat.factory import ChatAgentBuilder
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunView
+    from vs_agent.api import AgentSelection
     from vs_project.api import Project
 
 
@@ -65,6 +66,31 @@ class ServerParts:
     api: RunApi
     core_events: CoreEventJournal
     control: RunControlChannel
+
+    def start_execution(
+        self,
+        *args: str,
+        participates_in_run_control: bool = True,
+        emit_lifecycle: bool = True,
+        agent_selection: AgentSelection | None = None,
+    ) -> ExecutionHandle:
+        """Build a lifecycle request for terse controller-focused tests."""
+        if len(args) not in (3, 4):
+            message = "start_execution expects kind, round, prompt, and optional system prompt"
+            raise TypeError(message)
+        kind, round_label, user_prompt = args[:3]
+        system_prompt = args[3] if len(args) == 4 else ""
+        return self.controller.start_agent_execution(
+            AgentExecutionRequest(
+                kind=kind,
+                round_label=round_label,
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                participates_in_run_control=participates_in_run_control,
+                emit_lifecycle=emit_lifecycle,
+                agent_selection=agent_selection,
+            )
+        )
 
     def attach(
         self,

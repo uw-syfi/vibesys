@@ -219,7 +219,7 @@ class SubprocessDockerBuildRunner:
         timeout: float,
     ) -> subprocess.CompletedProcess[str]:
         """Run one Docker command without invoking a shell."""
-        return subprocess.run(
+        return subprocess.run(  # noqa: S603  # lint-waiver: LW-010239 [S603]; Docker commands are constructed by the sandbox adapter and never use a shell.
             tuple(argv),
             cwd=cwd,
             capture_output=True,
@@ -278,7 +278,7 @@ def build_task_image(
     return _build_and_inspect(target, extra_build_args, runner=runner, timeout=timeout)
 
 
-def agent_image(
+def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task image, toolchains, pip extras, injected runner, and timeout independently affect build layers or execution; callers use this public builder directly.
     base_image: str,
     *,
     task_dockerfile: Path | None = None,

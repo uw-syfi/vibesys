@@ -43,6 +43,8 @@ from typing import TYPE_CHECKING
 
 from vibesys.loops.metrics import Measurement, MetricSpace, Objective
 
+_SCORE_SPAN_EPSILON = 1e-12
+
 if TYPE_CHECKING:
     import random
 __all__ = [
@@ -112,6 +114,7 @@ class Individual:
 
 class Population:
     """A flat archive of individuals with fitness-weighted parent sampling.
+
     Sampling inspiration is diversity-aware.
 
     Failed individuals (``passed=False``) are kept but excluded from
@@ -235,7 +238,7 @@ class Population:
             return ranked[0]
         scores = [space.signed_primary(i.perf_metric) for i in ranked if i.perf_metric is not None]
         lo, hi = min(scores), max(scores)
-        if hi - lo < 1e-12:
+        if hi - lo < _SCORE_SPAN_EPSILON:
             return rng.choice(ranked)
         normed = [(score - lo) / (hi - lo) for score in scores]
         t = max(temperature, 1e-6)
@@ -330,7 +333,9 @@ def _headline_space(space: MetricSpace) -> MetricSpace:
 def _headline_reading(individual: Individual, headline: MetricSpace) -> Measurement | None:
     """Read *individual* on the headline axis of an already-resolved space."""
     primary = headline.primary
-    assert primary is not None  # guaranteed by _headline_space
+    if primary is None:
+        message = "headline metric space has no primary objective"
+        raise RuntimeError(message)
     value = individual.metrics.get(primary.name, individual.perf_metric)
     if value is None:
         return None
@@ -341,4 +346,5 @@ def _require_finite_metric(value: float | None, field_name: str) -> None:
     if value is None:
         return
     if isinstance(value, bool) or not math.isfinite(value):
-        raise ValueError(f"{field_name} must be a finite number")
+        message = f"{field_name} must be a finite number"
+        raise ValueError(message)

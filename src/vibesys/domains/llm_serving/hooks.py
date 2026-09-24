@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from importlib import import_module
 from typing import TYPE_CHECKING
 
 from vibesys.domains.environment import (
@@ -38,19 +39,18 @@ def _ensure_model_weights(
 
     meta_path = ref_dir / "meta.json"
     if not meta_path.exists():
-        raise FileNotFoundError(
-            f"Model weights not found at {model_path} and no meta.json to download from. "
-            f"Either create a model/ directory/symlink or add a meta.json with model_id."
-        )
+        message = f"Model weights not found at {model_path} and no meta.json to download from. Either create a model/ directory/symlink or add a meta.json with model_id."
+        raise FileNotFoundError(message)
 
     meta = json.loads(meta_path.read_text())
     model_id = meta.get("model_id")
     if not model_id:
-        raise ValueError(f"meta.json at {meta_path} missing required 'model_id' field")
+        _exception_message = f"meta.json at {meta_path} missing required 'model_id' field"
+        raise ValueError(_exception_message)
 
     revision = meta.get("revision")
     log(f"[model] Weights not found at {model_path}. Downloading {model_id} to {cache_dir}...")
-    from huggingface_hub import snapshot_download
+    snapshot_download = import_module("huggingface_hub").snapshot_download
 
     downloaded_path = snapshot_download(model_id, revision=revision, cache_dir=str(cache_dir))
     model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,11 +82,13 @@ class LLMServingEnvironmentHooks:
 
         bind_mounts: list[EnvironmentBindMount] = []
         if model_path.is_dir() or model_path.is_symlink():
-            bind_mounts.append(EnvironmentBindMount(model_path, "/model", True))
+            bind_mounts.append(EnvironmentBindMount(model_path, "/model", read_only=True))
 
         draft_model_path = ref_path / "draft_model"
         if draft_model_path.is_dir() or draft_model_path.is_symlink():
-            bind_mounts.append(EnvironmentBindMount(draft_model_path, "/draft_model", True))
+            bind_mounts.append(
+                EnvironmentBindMount(draft_model_path, "/draft_model", read_only=True)
+            )
 
         return EnvironmentPatch(
             copy_excludes=self._MODEL_ARTIFACT_NAMES
@@ -97,4 +99,4 @@ class LLMServingEnvironmentHooks:
 
     def teardown(self, ctx: EnvironmentContext) -> None:
         """Perform no cleanup because model preparation owns no live resources."""
-        return None
+        del ctx

@@ -29,6 +29,6 @@ def provider_profile(provider: str) -> ProviderProfile:
         ValueError: if agentshim does not register *provider*. The message
             names the provider and the registered alternatives.
     """
-    import agentshim
+    import agentshim  # noqa: PLC0415  # lint-waiver: LW-010181 [PLC0415]; Keep agentshim lazy in provider_profile so unused providers and import cycles stay unloaded.
 
     return agentshim.get_provider(provider).profile

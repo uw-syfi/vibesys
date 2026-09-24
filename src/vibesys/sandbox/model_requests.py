@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -160,7 +161,7 @@ def reconcile_model_requests(
     if not requests:
         return []
 
-    from vs_sandbox.api import ensure_model_volume
+    ensure_model_volume = import_module("vs_sandbox.api").ensure_model_volume
 
     allow = _allow_prefixes()
     volumes: list[str] = []

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 import socketserver
 import threading
@@ -59,11 +58,11 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                             self._stream(request)
                         except (BrokenPipeError, ConnectionResetError):
                             pass
-                        except Exception as exc:
+                        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010252 [BLE001]; arbitrary event serialization failures are returned as protocol stream errors.
                             self._write_stream_error(request.request_id, exc)
                     return
                 response = api.execute(request)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010253 [BLE001]; the socket boundary converts request failures into typed protocol responses.
                 response = Response.from_exception(
                     request_id,
                     exc,
@@ -229,7 +228,7 @@ class UnixJsonlServer:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.unlink(missing_ok=True)
         self._server = _JsonlUnixServer(self.path, self.api, self._subscriptions)
-        os.chmod(self.path, 0o600)
+        self.path.chmod(0o600)
         self._thread = threading.Thread(
             target=self._server.serve_forever,
             kwargs={"poll_interval": _SHUTDOWN_POLL_SECONDS},

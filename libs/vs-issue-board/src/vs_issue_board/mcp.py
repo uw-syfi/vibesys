@@ -18,16 +18,18 @@ def _parse_allowed_types(value: str) -> frozenset[IssueType]:
     """Argparse type= callable for ``--allowed-types``."""
     parts = [p.strip() for p in value.split(",") if p.strip()]
     if not parts:
-        raise argparse.ArgumentTypeError(
+        message = (
             "--allowed-types may not be empty; pass a comma-separated subset of {bug,feature,perf}"
         )
+        raise argparse.ArgumentTypeError(message)
     try:
         return frozenset(IssueType(p) for p in parts)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(
+        message = (
             f"--allowed-types must be a comma-separated subset of "
             f"{{bug,feature,perf}}; got {value!r}"
-        ) from exc
+        )
+        raise argparse.ArgumentTypeError(message) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -127,7 +129,11 @@ def build_server(args: argparse.Namespace) -> FastMCP:
     if not args.read_only:
 
         @mcp.tool()
-        def create_issue(type: str, title: str, description: str) -> str:
+        def create_issue(
+            type: str,  # noqa: A002  # lint-waiver: LW-010103 [A002]; MCP schema must retain its established `type` argument.
+            title: str,
+            description: str,
+        ) -> str:
             """Create a new issue.
 
             Args:

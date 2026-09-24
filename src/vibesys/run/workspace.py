@@ -97,7 +97,7 @@ WorkspaceStep = CopySpec | InputProjectSpec | GitSourceSpec
 class Workspace:
     """The canonical project root and every rule for populating it."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-011124 [PLR0913]; Root/project-root, run environment, backend, logger, excluded dirs, and optional compute-backend override are owned by separate run-context services.
         self,
         root: Path,
         *,
@@ -135,7 +135,24 @@ class Workspace:
 
     # -- setup planning -------------------------------------------------------
 
-    def plan_setup(
+    def _skill_refresh_steps(self, skill_sources: list[Path]) -> list[WorkspaceStep]:
+        """Plan fresh skill copies for the workspace and configured CLIs.
+
+        Refreshing these tiny sources on resume prevents stale skill metadata
+        from being uploaded to a fresh sandbox after a CLI upgrade.
+        """
+        steps: list[WorkspaceStep] = []
+        for src in skill_sources:
+            rel = src.name
+            if (self.root / rel).exists():
+                steps.append(CopySpec(src=src, dest=self.root / rel, prune_platforms=True))
+            for cli_rel in _CLI_SKILL_DIRS:
+                cli_target = self.root / cli_rel / rel
+                if cli_target.exists():
+                    steps.append(CopySpec(src=src, dest=cli_target, prune_platforms=True))
+        return steps
+
+    def plan_setup(  # noqa: PLR0913  # lint-waiver: LW-011125 [PLR0913]; The plan combines manifest sources, skills, profiler support, resume state, and hook copy exclusions from separate owners; wrapping them would duplicate those inputs.
         self,
         *,
         existing: bool,
@@ -155,23 +172,7 @@ class Workspace:
         copy is skipped: only the always-refresh and ensure-present steps
         below are planned.
         """
-        steps: list[WorkspaceStep] = []
-
-        # Always refresh skills into the project (even on --resume). Skill
-        # source is tiny (MB) and copying is cheap; without this, an
-        # interrupted run leaves stale skills from the previous CLI version
-        # in the host project, which Modal then uploads verbatim into the
-        # fresh sandbox volume at start, and codex-cli fails to load them
-        # (e.g. skill description exceeds a newer CLI's length limit).
-        # Mirrors materialize_skills destinations in agents.cli_common.
-        for src in skill_sources:
-            rel = src.name
-            if (self.root / rel).exists():
-                steps.append(CopySpec(src=src, dest=self.root / rel, prune_platforms=True))
-            for cli_rel in _CLI_SKILL_DIRS:
-                cli_target = self.root / cli_rel / rel
-                if cli_target.exists():
-                    steps.append(CopySpec(src=src, dest=cli_target, prune_platforms=True))
+        steps = self._skill_refresh_steps(skill_sources)
 
         if not existing:
             steps.extend(GitSourceSpec(source=source) for source in workspace_sources)
@@ -245,7 +246,7 @@ class Workspace:
                     step.project_dir,
                     self.root,
                     project_root=self._project_root,
-                    copy_dir=self.copy_dir,
+                    copy_dir=lambda src, dst: self.copy_dir(CopySpec(src=src, dest=dst)),
                     log=self._log,
                 )
                 continue
@@ -256,14 +257,7 @@ class Workspace:
                 step.require_absent.exists() or step.require_absent.is_symlink()
             ):
                 raise ValueError(step.require_absent_message)
-            self.copy_dir(
-                step.src,
-                step.dest,
-                extra_excludes=step.extra_excludes,
-                respect_source_gitignore=step.respect_gitignore,
-                reject_collisions=step.reject_collisions,
-                prune_platforms=step.prune_platforms,
-            )
+            self.copy_dir(step)
 
     def materialize_git_source(self, source: WorkspaceSource) -> None:
         """Clone a pinned git source into the workspace and optionally strip ``.git``."""
@@ -320,8 +314,9 @@ class Workspace:
 
     @staticmethod
     def _run_git(args: list[str], *, cwd: Path) -> str:
-        result = subprocess.run(
-            ["git", *args],
+        git = shutil.which("git") or "git"
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010237 [S603]; workspace Git arguments are built by internal repository operations and use no shell.
+            [git, *args],
             cwd=cwd,
             check=False,
             capture_output=True,
@@ -362,17 +357,86 @@ class Workspace:
                     path.unlink()
                     marker.write_text(str(target))
 
+    def _prepare_copy_destination(
+        self,
+        children: list[Path],
+        dst: Path,
+        skip: set[str],
+        *,
+        reject_collisions: bool,
+    ) -> None:
+        """Validate collisions or clear replaceable destination children."""
+        if reject_collisions:
+            collisions = sorted(
+                child.name
+                for child in children
+                if (dst / child.name).exists() or (dst / child.name).is_symlink()
+            )
+            if collisions:
+                paths = ", ".join(collisions)
+                message = f"workspace source and input bundle contain the same paths: {paths}"
+                raise ValueError(message)
+        if not dst.exists() or reject_collisions:
+            return
+        # Remove children individually so we can skip mount points and
+        # tolerate permission errors (e.g. root-owned dirs left by Docker).
+        for child in list(dst.iterdir()):
+            if child.name in skip:
+                continue
+            try:
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+            except PermissionError:
+                if not self._run_environment.remove_workspace_child(
+                    dst,
+                    child.name,
+                    backend=self._backend,
+                ):
+                    self._log(f"[warn] copy_dir: could not remove {child.name} from {dst}")
+
+    def _copy_workspace_child(
+        self,
+        child: Path,
+        dst: Path,
+        ignore: Callable[[str, list[str]], list[str]],
+    ) -> None:
+        """Replace one destination child with its source counterpart."""
+        child_dst = dst / child.name
+        if child_dst.exists() or child_dst.is_symlink():
+            # Stale leftover — try once more to remove before copying.
+            try:
+                if child_dst.is_dir() and not child_dst.is_symlink():
+                    shutil.rmtree(child_dst)
+                else:
+                    child_dst.unlink()
+            except PermissionError:
+                self._log(
+                    f"[warn] copy_dir: {child.name} in {dst} is stale and could not be replaced"
+                )
+                return
+        try:
+            if child.is_symlink():
+                child_dst.symlink_to(child.readlink())
+            elif child.is_dir():
+                shutil.copytree(child, child_dst, symlinks=True, ignore=ignore)
+            else:
+                shutil.copy2(child, child_dst)
+        except PermissionError:
+            self._log(f"[warn] copy_dir: could not copy {child.name} to {dst}")
+
     def copy_dir(
         self,
-        src: Path,
-        dst: Path,
-        *,
-        extra_excludes: frozenset[str] = frozenset(),
-        respect_source_gitignore: bool = False,
-        reject_collisions: bool = False,
-        prune_platforms: bool = False,
+        spec: CopySpec,
     ) -> None:
         """Copy a source tree into the workspace under configured exclusions."""
+        src = spec.src
+        dst = spec.dest
+        extra_excludes = spec.extra_excludes
+        respect_source_gitignore = spec.respect_gitignore
+        reject_collisions = spec.reject_collisions
+        prune_platforms = spec.prune_platforms
         skip = self.excluded_dirs | {"_mounts"} | set(extra_excludes)
         foreign_platforms = (
             foreign_platform_names(self._compute_backend) if prune_platforms else frozenset()
@@ -408,59 +472,15 @@ class Workspace:
             child for child in src.iterdir() if child.name not in skip and not _is_ignored(child)
         ]
 
-        if reject_collisions:
-            collisions = sorted(
-                child.name
-                for child in children
-                if (dst / child.name).exists() or (dst / child.name).is_symlink()
-            )
-            if collisions:
-                paths = ", ".join(collisions)
-                message = f"workspace source and input bundle contain the same paths: {paths}"
-                raise ValueError(message)
-
-        if dst.exists() and not reject_collisions:
-            # Remove children individually so we can skip mount points and
-            # tolerate permission errors (e.g. root-owned dirs left by Docker).
-            for child in list(dst.iterdir()):
-                if child.name in skip:
-                    continue
-                try:
-                    if child.is_dir() and not child.is_symlink():
-                        shutil.rmtree(child)
-                    else:
-                        child.unlink()
-                except PermissionError:
-                    if not self._run_environment.remove_workspace_child(
-                        dst,
-                        child.name,
-                        backend=self._backend,
-                    ):
-                        self._log(f"[warn] copy_dir: could not remove {child.name} from {dst}")
+        self._prepare_copy_destination(
+            children,
+            dst,
+            skip,
+            reject_collisions=reject_collisions,
+        )
         dst.mkdir(parents=True, exist_ok=True)
         for child in children:
-            child_dst = dst / child.name
-            if child_dst.exists() or child_dst.is_symlink():
-                # Stale leftover — try once more to remove before copying
-                try:
-                    if child_dst.is_dir() and not child_dst.is_symlink():
-                        shutil.rmtree(child_dst)
-                    else:
-                        child_dst.unlink()
-                except PermissionError:
-                    self._log(
-                        f"[warn] copy_dir: {child.name} in {dst} is stale and could not be replaced"
-                    )
-                    continue
-            try:
-                if child.is_symlink():
-                    child_dst.symlink_to(child.readlink())
-                elif child.is_dir():
-                    shutil.copytree(child, child_dst, symlinks=True, ignore=_ignore)
-                else:
-                    shutil.copy2(child, child_dst)
-            except PermissionError:
-                self._log(f"[warn] copy_dir: could not copy {child.name} to {dst}")
+            self._copy_workspace_child(child, dst, _ignore)
         if self._run_environment.isolated:
             # In containerized mode, external symlinks become bind mounts
             # (Docker) or volume uploads (Modal). Remove the broken symlinks
@@ -472,9 +492,10 @@ class Workspace:
     @staticmethod
     def _source_gitignored_paths(src: Path) -> frozenset[tuple[str, ...]]:
         """Return untracked paths ignored by Git below ``src``."""
-        result = subprocess.run(
+        git = shutil.which("git") or "git"
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010238 [S603]; this fixed Git query inspects ignored workspace paths without a shell.
             [
-                "git",
+                git,
                 "-C",
                 str(src),
                 "ls-files",

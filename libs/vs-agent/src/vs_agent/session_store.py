@@ -92,7 +92,7 @@ class SessionStore(Protocol):
         """Return the checkpoint for ``key``, or ``None``."""
         ...
 
-    def record(
+    def record(  # noqa: PLR0913  # lint-waiver: LW-011102 [PLR0913]; the runtime-checkable SessionStore protocol exposes each checkpoint field as a separate keyword.
         self,
         key: AgentSessionKey,
         *,
@@ -120,9 +120,10 @@ class NullSessionStore:
 
     def get(self, key: AgentSessionKey) -> ProviderSessionRecord | None:
         """Return no record because this store never persists sessions."""
+        del key
         return None
 
-    def record(
+    def record(  # noqa: PLR0913  # lint-waiver: LW-011103 [PLR0913]; the no-op implementation must match SessionStore's runtime-checkable method signature.
         self,
         key: AgentSessionKey,
         *,
@@ -137,7 +138,7 @@ class NullSessionStore:
 
     def clear(self, key: AgentSessionKey) -> None:
         """Ignore clears because this store has no persisted records."""
-        return
+        del key
 
 
 def _ignore_diagnostic(_message: str) -> None:
@@ -174,7 +175,7 @@ class DurableSessionStore:
             return None
         return self._load().sessions.get(str(key))
 
-    def record(
+    def record(  # noqa: PLR0913  # lint-waiver: LW-011104 [PLR0913]; durable storage must match SessionStore's checkpoint method contract.
         self,
         key: AgentSessionKey,
         *,

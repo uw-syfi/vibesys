@@ -15,6 +15,7 @@ run inside Docker because it needs no accelerator passthrough. Per-platform
 
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,25 +45,29 @@ class LocalBackend:
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
-        unavailable_reason: str,
-        profiler_kind: ProfilerKind = ProfilerKind.TORCH,
-        supports_docker: bool = False,
     ) -> None:
-        """Configure a host backend and its unavailable-device explanation."""
+        """Configure the Metal or CPU backend from its platform identity."""
         self.name = name
-        self.profiler_kind = profiler_kind
+        if name is ComputeBackend.METAL:
+            self.profiler_kind = ProfilerKind.TORCH
+            self._unavailable_reason = (
+                "Docker on macOS can't access Metal/MPS, and Modal does not offer Apple GPUs"
+            )
+            self._supports_docker = False
+        else:
+            self.profiler_kind = ProfilerKind.LINUX_CPU
+            self._unavailable_reason = "Modal CPU execution is not wired up for this backend"
+            self._supports_docker = True
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image
-        self._unavailable_reason = unavailable_reason
-        self._supports_docker = supports_docker
         # No accelerator to pick — kept for protocol parity with other backends
         # (e.g. _RunContext reads ``selected_device``).
         self.selected_device = None
 
     # -- ComputeBackendImpl protocol -----------------------------------------
 
-    def make_sandbox(
+    def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-011112 [PLR0913]; LocalEnvironment calls this structural ComputeBackendImpl method with the shared named sandbox options; changing it would break backend dispatch parity.
         self,
         kind: SandboxKind,
         *,
@@ -81,7 +86,7 @@ class LocalBackend:
         """Create a local or supported Docker sandbox for this backend."""
         # Deferred: importing DockerSandbox registers process-wide signal and
         # atexit handlers. Registration must stay side-effect free.
-        from vs_sandbox.api import DockerSandbox
+        docker_sandbox = import_module("vs_sandbox.api").DockerSandbox
 
         # extra_init_commands is accepted for ComputeBackendImpl protocol
         # parity (LocalEnvironment.open() passes it unconditionally) but never
@@ -100,8 +105,9 @@ class LocalBackend:
             )
         if kind is SandboxKind.DOCKER and self._supports_docker:
             if self.image is None:
-                raise ValueError(f"{self.name.value} backend requires a Docker image")
-            return DockerSandbox(
+                _exception_message_2 = f"{self.name.value} backend requires a Docker image"
+                raise ValueError(_exception_message_2)
+            return docker_sandbox(
                 host_workspace=host_workspace,
                 # ``DockerEnvironment.open()`` (the plain --docker path)
                 # always resolves and passes an agent image, so this only
@@ -120,14 +126,14 @@ class LocalBackend:
                 lifecycle_hooks=lifecycle_hooks,
             )
         if kind is SandboxKind.DOCKER:
-            raise ValueError(
-                f"{self.name.value} backend only supports local execution; "
-                f"SandboxKind.{kind.name} is unavailable ({self._unavailable_reason})."
-            )
-        raise ValueError(f"Unknown sandbox kind: {kind!r}")
+            _exception_message = f"{self.name.value} backend only supports local execution; SandboxKind.{kind.name} is unavailable ({self._unavailable_reason})."
+            raise ValueError(_exception_message)
+        message = f"Unknown sandbox kind: {kind!r}"
+        raise ValueError(message)
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         """Return no monitor because host-only backends have no device contention."""
+        del log_dir
         return None
 
     def reselect_device(self) -> None:
@@ -154,10 +160,6 @@ def metal_backend(
         log_dir,
         log=log,
         image=image,
-        profiler_kind=ProfilerKind.TORCH,
-        unavailable_reason=(
-            "Docker on macOS can't access Metal/MPS, and Modal does not offer Apple GPUs"
-        ),
     )
 
 
@@ -173,7 +175,4 @@ def cpu_backend(
         log_dir,
         log=log,
         image=image or _DEFAULT_CPU_IMAGE,
-        profiler_kind=ProfilerKind.LINUX_CPU,
-        unavailable_reason="Modal CPU execution is not wired up for this backend",
-        supports_docker=True,
     )

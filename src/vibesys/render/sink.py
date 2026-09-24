@@ -71,7 +71,7 @@ class OutputSink:
 
         return unsubscribe
 
-    def emit(
+    def emit(  # noqa: PLR0913  # lint-waiver: LW-011118 [PLR0913]; The sink creates the timestamped CoreEvent and accepts its type, text, payload, status, and routing labels directly; callers do not construct envelopes.
         self,
         event_type: CoreEventType,
         text: str = "",
@@ -98,7 +98,7 @@ class OutputSink:
             handler(event)
         return event
 
-    def agent_output(
+    def agent_output(  # noqa: PLR0913  # lint-waiver: LW-011119 [PLR0913]; Preserve the structurally shared AgentEventSink.agent_output protocol used by vs-agent callbacks.
         self,
         content: str,
         *,
@@ -119,7 +119,7 @@ class OutputSink:
             execution_id=invocation_id,
         )
 
-    def tool_call(
+    def tool_call(  # noqa: PLR0913  # lint-waiver: LW-011120 [PLR0913]; Preserve the structurally shared AgentEventSink.tool_call protocol used by vs-agent callbacks.
         self,
         tool: str,
         args: dict[str, Any],
@@ -139,7 +139,7 @@ class OutputSink:
             execution_id=invocation_id,
         )
 
-    def tool_result(
+    def tool_result(  # noqa: PLR0913  # lint-waiver: LW-011121 [PLR0913]; Preserve the structurally shared AgentEventSink.tool_result protocol used by vs-agent callbacks.
         self,
         tool: str,
         content: str,
@@ -208,40 +208,22 @@ class OutputSink:
             round_label=round_label,
         )
 
-    def run_configured(
-        self,
-        *,
-        run_log_path: str,
-        project_root: str,
-        model: str | None = None,
-        objective: str | None = None,
-        search_policy: str | None = None,
-        benchmark_contract: bool = False,
-        pareto_objectives: str | None = None,
-    ) -> None:
+    def run_configured(self, data: RunConfiguredData) -> None:
         """Publish the one-per-run resolved loop configuration event.
 
         ``objective`` is reduced to its first non-empty line; the full text is
         run state, not an event payload.
         """
         first_line = next(
-            (line for line in (objective or "").splitlines() if line.strip()),
+            (line for line in (data.objective or "").splitlines() if line.strip()),
             None,
         )
         self.emit(
             CoreEventType.RUN_CONFIGURED,
-            data=RunConfiguredData(
-                run_log_path=run_log_path,
-                project_root=project_root,
-                model=model,
-                objective=first_line,
-                search_policy=search_policy,
-                benchmark_contract=benchmark_contract,
-                pareto_objectives=pareto_objectives,
-            ),
+            data=data.model_copy(update={"objective": first_line}),
         )
 
-    def usage_update(
+    def usage_update(  # noqa: PLR0913  # lint-waiver: LW-011122 [PLR0913]; Preserve the structurally shared AgentEventSink.usage_update protocol used by vs-agent callbacks.
         self,
         input_tokens: int,
         *,

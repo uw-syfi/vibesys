@@ -48,6 +48,7 @@ def _feature_flag_overrides(config: object | None) -> Mapping[FeatureFlag, bool]
     if raw_overrides is None:
         raw_overrides = {}
     if not isinstance(raw_overrides, Mapping):
-        raise ValueError("config.feature_flags must be a mapping")
+        message = "config.feature_flags must be a mapping"
+        raise ValueError(message)  # noqa: TRY004  # lint-waiver: LW-010201 [TRY004]; callers and configuration validation tests rely on ValueError for malformed feature settings.
 
     return raw_overrides

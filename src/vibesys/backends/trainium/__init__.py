@@ -22,7 +22,7 @@ is a no-op (parity with :class:`LocalBackend`).
 
 from __future__ import annotations
 
-import glob
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -69,8 +69,10 @@ def _discover_neuron_devices() -> list[str]:
     Matches the numbered device nodes (``/dev/neuron0`` …) and skips the
     control node ``/dev/neuron_*`` if present.
     """
-    devs = [d for d in glob.glob("/dev/neuron*") if d[len("/dev/neuron") :].isdigit()]
-    return sorted(devs)
+    prefix = "neuron"
+    return sorted(
+        str(path) for path in Path("/dev").glob("neuron*") if path.name[len(prefix) :].isdigit()
+    )
 
 
 class TrainiumBackend:
@@ -106,7 +108,7 @@ class TrainiumBackend:
 
     # -- ComputeBackendImpl protocol ---------------------------------------
 
-    def make_sandbox(
+    def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-011114 [PLR0913]; RunEnvironment dispatches this structural ComputeBackendImpl method with shared named sandbox options; changing it would break backend parity.
         self,
         kind: SandboxKind,
         *,
@@ -125,7 +127,7 @@ class TrainiumBackend:
         """Create a local or Trainium-enabled Docker sandbox."""
         # Deferred: importing DockerSandbox registers process-wide signal and
         # atexit handlers. Registration must stay side-effect free.
-        from vs_sandbox.api import DockerSandbox
+        docker_sandbox = import_module("vs_sandbox.api").DockerSandbox
 
         bind_mounts = list(bind_mounts or [])
         extra_env = dict(extra_env or {})
@@ -174,7 +176,7 @@ class TrainiumBackend:
             host_tmp.mkdir(parents=True, exist_ok=True)
             bind_mounts.append((str(host_tmp), _TMP_CONTAINER_PATH, False))
 
-            return DockerSandbox(
+            return docker_sandbox(
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=None,  # Neuron uses --device, not --gpus
@@ -196,10 +198,12 @@ class TrainiumBackend:
                 lifecycle_hooks=lifecycle_hooks,
             )
 
-        raise ValueError(f"Unknown sandbox kind: {kind!r}")
+        message = f"Unknown sandbox kind: {kind!r}"
+        raise ValueError(message)
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         """Return no monitor until Trainium contention handling is available."""
+        del log_dir
         # neuron-monitor exists, but shared-device contention handling
         # isn't wired up yet; skip rather than fake it.
         return None

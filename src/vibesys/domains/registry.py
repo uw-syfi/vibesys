@@ -26,11 +26,13 @@ def registered_domains() -> list[str]:
 def resolve_domain(name: DomainName) -> DomainDefinition:
     """Resolve a registered domain enum to its definition."""
     if not isinstance(name, DomainName):
-        raise TypeError(f"domain must be a DomainName, got {type(name).__name__}.")
+        message = f"domain must be a DomainName, got {type(name).__name__}."
+        raise TypeError(message)
 
     domain = DOMAINS[name]
     if not domain.prompt_dir.is_dir():
-        raise ValueError(
+        _exception_message = (
             f"Registered domain {name.value!r} has no prompt directory: {domain.prompt_dir}"
         )
+        raise ValueError(_exception_message)
     return domain

@@ -55,7 +55,8 @@ class GitHubCLI:
         result = self._run(["api", "user", "--jq", ".login"])
         login = result.stdout.strip()
         if not login:
-            raise GitHubCLIError("GitHub CLI returned an empty authenticated user.")
+            message = "GitHub CLI returned an empty authenticated user."
+            raise GitHubCLIError(message)
         return login
 
     def create_repository(
@@ -98,13 +99,15 @@ class GitHubCLI:
         try:
             result = self._runner(command, cwd=cwd, capture_output=True, text=True)
         except FileNotFoundError as exc:
-            raise GitHubCLIUnavailableError(
+            message = (
                 "GitHub CLI (`gh`) is required for remote experiment repositories. "
                 "Install it from https://cli.github.com/ and retry."
-            ) from exc
+            )
+            raise GitHubCLIUnavailableError(message) from exc
         if check and result.returncode != 0:
             detail = _command_detail(result) or "unknown error"
-            raise GitHubCLIError(f"GitHub CLI command failed ({' '.join(command)}): {detail}")
+            message = f"GitHub CLI command failed ({' '.join(command)}): {detail}"
+            raise GitHubCLIError(message)
         return result
 
 

@@ -9,27 +9,26 @@ behaviour of the drain-and-perf-eval outer loop in
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, NotRequired, TypedDict, Unpack
 from unittest.mock import Mock, patch
 
 import pytest
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Sequence
 
     from vibesys.evaluators.input_manifest import WorkspaceSource
-    from vibesys.profilers import ProfilerKind
-    from vibesys.repository import RepositoryVisibility
     from vibesys.sandbox.run_environment import RunEnvironmentSpec
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-    from pathlib import Path
 
+from vibesys.api.contracts import LoopKind, ResumeRef, RunRequest
 from vibesys.config import Config
-from vibesys.constants import DomainName
+from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.loops.plain.loop import PlainLoopState
 from vibesys.loops.plain.loop import run_plain_loop as _run_plain_loop
 from vibesys.loops.plain.state import PlainStateStore
+from vibesys.profilers import ProfilerKind
+from vibesys.repository import RepositoryVisibility
 from vibesys.schemas import (
     IssueImplementerResponse,
     IssueJudgeResponse,
@@ -74,7 +73,29 @@ class _PlainLoopOptions(TypedDict):
 def run_plain_loop(config: Config | dict[str, object], **kwargs: Unpack[_PlainLoopOptions]) -> bool:
     """Run the plain loop with this module's LLM-serving fixture domain."""
     typed_config = config if isinstance(config, Config) else Config.model_validate(config)
-    return _run_plain_loop(config=typed_config, domain=DomainName.LLM_SERVING, **kwargs)
+    bundle = load_input_bundle(Path(kwargs["input_path"]))
+    exp_name = kwargs["exp_name"]
+    request = RunRequest(
+        project_root=bundle.root,
+        loop=LoopKind.PLAIN,
+        config=typed_config,
+        input_bundle=bundle,
+        exp_name=exp_name,
+        resume=ResumeRef(run_id=exp_name) if kwargs.get("existing", False) else None,
+        runs_dir=kwargs["runs_dir"],
+        max_rounds=kwargs.get("max_rounds", 5),
+        max_attempts_per_issue=kwargs.get("max_attempts_per_issue", 3),
+        max_issues_per_perf_eval=kwargs.get("max_issues_per_perf_eval", 3),
+        profiler_kind=kwargs.get("profiler_kind", ProfilerKind.AUTO),
+        skills_dirs=kwargs.get("skills_dirs"),
+        run_environment=kwargs.get("run_environment"),
+        agent_backend=kwargs.get("agent_backend"),
+        cli_provider=kwargs.get("cli_provider"),
+        remote_repo=kwargs.get("remote_repo"),
+        repo_visibility=kwargs.get("repo_visibility", RepositoryVisibility.PRIVATE),
+        debug=False,
+    )
+    return _run_plain_loop(request=request)
 
 
 def _make_impl_resp(issue_id: int, summary: str = "Done.") -> IssueImplementerResponse:

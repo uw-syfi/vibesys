@@ -17,7 +17,8 @@ async def poisson(n: int, rate: float, *, seed: int = 42) -> AsyncIterator[int]:
 
     ``rate`` is the mean arrival rate in requests per second.
     """
-    rng = random.Random(seed)
+    # lint-waiver: LW-011002 [S311]; The seeded generator controls reproducible benchmark timing and is not used for security.
+    rng = random.Random(seed)  # noqa: S311
     for i in range(n):
         yield i
         if i < n - 1:

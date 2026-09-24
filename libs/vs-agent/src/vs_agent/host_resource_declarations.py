@@ -281,7 +281,7 @@ def _provider_state(ctx: HostResourceContext) -> Iterable[HostResource]:
 #: workloads bind-mount capture directories from here, and Docker resolves a
 #: bind source in the daemon's namespace rather than the agent's, so the path
 #: only works when it names the same directory inside and outside confinement.
-TASK_SCRATCH_ROOT = Path("/tmp")
+TASK_SCRATCH_ROOT = Path("/tmp")  # noqa: S108  # lint-waiver: LW-010108 [S108]; container workloads require this shared host scratch path in both mount namespaces.
 
 
 def task_scratch_dir(task_name: str) -> Path:
@@ -315,7 +315,7 @@ def container_runtime_resources(env: Mapping[str, str] | None = None) -> tuple[H
     )
 
 
-def task_agent_host_resources(
+def task_agent_host_resources(  # noqa: PLR0913  # lint-waiver: LW-011101 [PLR0913]; preserve the public keyword options that independently declare task agent host resource access.
     *,
     container_topology: bool,
     cli_sandboxed: bool,

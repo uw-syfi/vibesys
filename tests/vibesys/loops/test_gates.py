@@ -11,8 +11,8 @@ import contextlib
 import os
 import re
 import sys
-from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,11 +29,15 @@ from vibesys.events import (
 )
 from vibesys.loops.gates import (
     _BENCHMARK_OUTPUT_PREFIX,
+    BenchmarkContract,
     read_protocol_benchmark,
     run_accuracy_gate,
     run_benchmark_gate,
 )
-from vibesys.loops.metrics import Objective
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.render.sink import output_sink
 from vs_sandbox.api import SandboxExecutionResult
 
@@ -137,7 +141,8 @@ def test_benchmark_gate_fails_instead_of_reporting_a_stale_result() -> None:
     try:
         result = run_benchmark_gate(
             _gate_ctx("true"),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug=slug,
         )
@@ -159,7 +164,11 @@ def test_benchmark_gate_removes_its_transport_artifact(tmp_path: Path) -> None:
     """
     ctx = _gate_ctx(_writer_command('{"tok_per_sec": 42.0}', tmp_path))
     result = run_benchmark_gate(
-        ctx, result_spec=_SCALAR_SPEC, process_id="benchmark", output_slug="9-2"
+        ctx,
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="9-2",
     )
     assert result.passed
     assert result.outcome.metric_value == 42.0
@@ -167,14 +176,22 @@ def test_benchmark_gate_removes_its_transport_artifact(tmp_path: Path) -> None:
 
     ctx = _gate_ctx(_writer_command("this is not json", tmp_path))
     result = run_benchmark_gate(
-        ctx, result_spec=_SCALAR_SPEC, process_id="benchmark", output_slug="9-2"
+        ctx,
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="9-2",
     )
     assert not result.passed
     assert not _transport_artifact(ctx.judge_backend.commands[0]).exists()
 
     ctx = _gate_ctx(_writer_command('{"tok_per_sec": 42.0}', tmp_path, fail_after_write=True))
     result = run_benchmark_gate(
-        ctx, result_spec=_SCALAR_SPEC, process_id="benchmark", output_slug="9-2"
+        ctx,
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="9-2",
     )
     assert not result.passed
     assert not _transport_artifact(ctx.judge_backend.commands[0]).exists()
@@ -215,7 +232,8 @@ def test_a_timed_out_benchmarks_late_result_cannot_be_read_by_the_next_run() -> 
     try:
         first = run_benchmark_gate(
             _gate_ctx_with(_TimingOutBackend()),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="7-0",
         )
@@ -225,7 +243,8 @@ def test_a_timed_out_benchmarks_late_result_cannot_be_read_by_the_next_run() -> 
 
         second = run_benchmark_gate(
             _gate_ctx("true"),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="7-0",
         )
@@ -242,7 +261,8 @@ def test_benchmark_gate_rejects_an_output_slug_that_is_not_one_segment(slug: str
     with pytest.raises(ValueError, match="output_slug"):
         run_benchmark_gate(
             _gate_ctx("true"),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug=slug,
         )
@@ -266,9 +286,8 @@ def test_benchmark_gate_keeps_the_evaluator_declared_direction(tmp_path: Path) -
     )
     result = run_benchmark_gate(
         _gate_ctx(_writer_command(stream, tmp_path)),
-        result_spec=None,
-        result_protocol=2,
-        objectives=(),
+        contract=BenchmarkContract(result_protocol=2),
+        space=MetricSpace(),
         process_id="benchmark",
         output_slug="4-0",
     )
@@ -393,7 +412,8 @@ def test_benchmark_gate_pass_emits_the_metric_and_no_benchmark_result(tmp_path: 
     with _captured_events() as seen:
         result = run_benchmark_gate(
             _gate_ctx(_writer_command('{"tok_per_sec": 42.0}', tmp_path)),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="9-2",
             round_label="round-9",
@@ -425,9 +445,8 @@ def test_benchmark_gate_protocol_pass_reports_the_declared_unit(tmp_path: Path) 
     with _captured_events() as seen:
         result = run_benchmark_gate(
             _gate_ctx(_writer_command(stream, tmp_path)),
-            result_spec=None,
-            result_protocol=2,
-            objectives=(),
+            contract=BenchmarkContract(result_protocol=2),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="4-0",
         )
@@ -443,7 +462,8 @@ def test_benchmark_gate_failure_emits_a_failed_gate_finished(tmp_path: Path) -> 
     with _captured_events() as seen:
         result = run_benchmark_gate(
             _gate_ctx(_writer_command("this is not json", tmp_path)),
-            result_spec=_SCALAR_SPEC,
+            contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="9-3",
         )
@@ -461,7 +481,8 @@ def test_benchmark_gate_undeclared_contract_emits_nothing() -> None:
     with _captured_events() as seen:
         result = run_benchmark_gate(
             _gate_ctx("true"),
-            result_spec=None,
+            contract=BenchmarkContract(),
+            space=MetricSpace(),
             process_id="benchmark",
             output_slug="1-0",
         )

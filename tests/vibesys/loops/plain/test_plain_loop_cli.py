@@ -10,6 +10,7 @@ import pytest
 
 from entrypoints.cli import _build_plain_parser as build_parser
 from entrypoints.headless import main
+from vibesys.api.contracts import LoopKind, RunResult
 from vibesys.constants import (
     DEFAULT_COMPUTE_BACKEND,
 )
@@ -84,10 +85,14 @@ class TestBuildParser:
 class TestMain:
     _BASE_ARGV: ClassVar[list[str]] = ["vibesys", "--outer-loop", "plain", "--local", *TARGET_ARGS]
 
+    @staticmethod
+    def _result(*, succeeded: bool) -> RunResult:
+        return RunResult(run_id="test", loop=LoopKind.PLAIN, succeeded=succeeded)
+
     def _patch_run(self, *, return_value: bool) -> AbstractContextManager[MagicMock]:
         return patch(
-            "vibesys.loops.plain.loop.run_plain_loop",
-            return_value=return_value,
+            "entrypoints.cli.loops.headless_run",
+            return_value=self._result(succeeded=return_value),
         )
 
     def _patch_config(self) -> AbstractContextManager[MagicMock]:
@@ -143,16 +148,16 @@ class TestMain:
             ),
             self._patch_config(),
             patch(
-                "vibesys.loops.plain.loop.run_plain_loop",
-                return_value=True,
+                "entrypoints.cli.loops.headless_run",
+                return_value=self._result(succeeded=True),
             ) as mock_run,
         ):
             main()
-            kwargs = mock_run.call_args.kwargs
-            assert kwargs["max_rounds"] == 7
-            assert kwargs["max_attempts_per_issue"] == 4
-            assert kwargs["max_issues_per_perf_eval"] == 2
-            assert kwargs["runs_dir"] == Path("runs").resolve()
+            request = mock_run.call_args.args[0]
+            assert request.max_rounds == 7
+            assert request.max_attempts_per_issue == 4
+            assert request.max_issues_per_perf_eval == 2
+            assert request.runs_dir == Path("runs").resolve()
 
     def test_main_forwards_agent_backend_and_cli_provider(self) -> None:
         with (
@@ -168,28 +173,28 @@ class TestMain:
             ),
             self._patch_config(),
             patch(
-                "vibesys.loops.plain.loop.run_plain_loop",
-                return_value=True,
+                "entrypoints.cli.loops.headless_run",
+                return_value=self._result(succeeded=True),
             ) as mock_run,
         ):
             main()
-            kwargs = mock_run.call_args.kwargs
-            assert kwargs["agent_backend"] == "cli"
-            assert kwargs["cli_provider"] == "claude"
+            request = mock_run.call_args.args[0]
+            assert request.agent_backend == "cli"
+            assert request.cli_provider == "claude"
 
     def test_main_defaults_agent_backend_and_cli_provider_to_none(self) -> None:
         with (
             patch("sys.argv", list(self._BASE_ARGV)),
             self._patch_config(),
             patch(
-                "vibesys.loops.plain.loop.run_plain_loop",
-                return_value=True,
+                "entrypoints.cli.loops.headless_run",
+                return_value=self._result(succeeded=True),
             ) as mock_run,
         ):
             main()
-            kwargs = mock_run.call_args.kwargs
-            assert kwargs["agent_backend"] is None
-            assert kwargs["cli_provider"] is None
+            request = mock_run.call_args.args[0]
+            assert request.agent_backend is None
+            assert request.cli_provider is None
 
     @pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
     def test_main_accepts_all_cli_providers(self, provider: str) -> None:
@@ -207,11 +212,11 @@ class TestMain:
             ),
             self._patch_config(),
             patch(
-                "vibesys.loops.plain.loop.run_plain_loop",
-                return_value=True,
+                "entrypoints.cli.loops.headless_run",
+                return_value=self._result(succeeded=True),
             ) as mock_run,
         ):
             main()
-            kwargs = mock_run.call_args.kwargs
-            assert kwargs["agent_backend"] == "cli"
-            assert kwargs["cli_provider"] == provider
+            request = mock_run.call_args.args[0]
+            assert request.agent_backend == "cli"
+            assert request.cli_provider == provider

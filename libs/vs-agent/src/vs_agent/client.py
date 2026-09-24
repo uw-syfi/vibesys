@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
+from vs_agent.callbacks import AgentLogger
 from vs_agent.cli_common import agent_label, materialize_skills
 from vs_agent.contracts import (
     AgentCapabilities,
@@ -39,7 +40,6 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
-    from vs_agent.callbacks import AgentLogger
     from vs_agent.events import AgentOutputChannel
     from vs_agent.progress import AgentProgress
     from vs_agent.sink import AgentEventSink
@@ -178,7 +178,7 @@ class AgentClient:
 
     backend_name = "cli"
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-010119 [PLR0913]; Preserve AgentClient.__init__'s named-argument contract because callers pass these independent settings directly.
         self,
         driver: AgentDriver,
         *,
@@ -258,7 +258,7 @@ class AgentClient:
         if self._driver_log is not None:
             self._driver_log.stream = stream
 
-    def invoke(
+    def invoke(  # noqa: PLR0913  # lint-waiver: LW-010120 [PLR0913]; Preserve AgentClient.invoke's named-argument contract because callers pass these independent settings directly.
         self,
         *,
         kind: str,
@@ -315,7 +315,7 @@ class AgentClient:
         _emit_and_log(self._sink, parsed.model_dump_json(indent=2), self._run_log_file)
         return parsed
 
-    def invoke_text(
+    def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-010121 [PLR0913]; Preserve AgentClient.invoke_text's named-argument contract because callers pass these independent settings directly.
         self,
         *,
         kind: str,
@@ -364,7 +364,7 @@ class AgentClient:
             )
         return result.text
 
-    def _invoke_turn(
+    def _invoke_turn(  # noqa: PLR0913  # lint-waiver: LW-010122 [PLR0913]; Preserve AgentClient._invoke_turn's named-argument contract because callers pass these independent settings directly.
         self,
         *,
         kind: str,
@@ -408,8 +408,6 @@ class AgentClient:
             invocation_id=invocation_id,
             label=round_label,
         )
-        from vs_agent.callbacks import AgentLogger
-
         logger = AgentLogger(
             log_file=self._run_log_file,
             model_name=model,
@@ -469,7 +467,9 @@ class AgentClient:
                 reasoning_effort=reasoning_effort,
                 usage=result.usage if result is not None else AgentUsage(),
             )
-        assert result is not None  # assigned or the exception propagated
+        if result is None:
+            message = "successful invocation did not produce a result"
+            raise AssertionError(message)
         return result, logger
 
     def _write_usage_record(
@@ -543,7 +543,7 @@ class AgentClient:
             # unusable reports RESET_REQUIRED instead of raising.
             try:
                 self._evict(session_key)
-            except Exception as cleanup_error:  # preserve the turn failure
+            except Exception as cleanup_error:  # preserve the turn failure  # noqa: BLE001  # lint-waiver: LW-010123 [BLE001]; AgentClient.run must evict a failed provider session while re-raising the driver's original failure.
                 error.add_note(f"agent session cleanup also failed: {cleanup_error}")
             raise
 
@@ -640,12 +640,12 @@ class AgentClient:
         for key in tuple(self._sessions):
             try:
                 self._evict(key)
-            except Exception as error:  # cleanup must continue
+            except Exception as error:  # cleanup must continue  # noqa: BLE001  # lint-waiver: LW-010124 [BLE001]; AgentClient.close must evict a failed provider session while re-raising the driver's original failure.
                 if first_error is None:
                     first_error = error
         try:
             self._driver.close()
-        except Exception as error:  # preserve earlier cleanup failures
+        except Exception as error:  # preserve earlier cleanup failures  # noqa: BLE001  # lint-waiver: LW-010125 [BLE001]; AgentClient.close must evict a failed provider session while re-raising the driver's original failure.
             if first_error is None:
                 first_error = error
         if first_error is not None:

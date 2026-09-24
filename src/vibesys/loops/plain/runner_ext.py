@@ -16,7 +16,7 @@ tools are needed there.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TextIO, TypeVar
+from typing import TYPE_CHECKING, Generic, TextIO, TypedDict, TypeVar, Unpack
 
 from pydantic import BaseModel
 
@@ -32,8 +32,22 @@ from vs_agent.api import (
 from vs_issue_board.api import IssueType
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 T = TypeVar("T", bound=BaseModel)
+
+
+class _InvokeOptions(TypedDict, Generic[T], total=False):
+    workspace: Path
+    system_prompt: str
+    user_prompt: str
+    fallback_factory: Callable[[], T]
+    round_label: str
+    env: dict[str, str] | None
+    invocation_id: str | None
+    progress: AgentProgress | None
+    reuse_session: bool | None
+    session_key: AgentSessionKey | None
 
 
 # Per-phase policy. Frozen at module load — these don't change at runtime.
@@ -105,7 +119,7 @@ class PlainLoopAgentClient(AgentClient):
         """Report where the inner client's last turn on ``session_key`` ran."""
         return self._inner.last_turn_provider_session_id(session_key)
 
-    def invoke_text(
+    def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-011117 [PLR0913]; This forwarding adapter preserves the underlying AgentClientProtocol keyword contract exactly.
         self,
         *,
         kind: str,
@@ -142,15 +156,13 @@ class PlainLoopAgentClient(AgentClient):
         response_cls: type[T],
         iteration: int | None = None,
         mcp_servers: list[MCPServerSpec] | None = None,
-        **kwargs: Any,
+        **kwargs: Unpack[_InvokeOptions[T]],
     ) -> T:
         """Invoke the inner client with the wrapper's performance-eval limit."""
         if kind in ("judge", "perf_eval"):
             if iteration is None:
-                raise ValueError(
-                    f"PlainLoopAgentClient.invoke(kind={kind!r}) requires "
-                    "iteration= so the cap can be scoped per-iteration"
-                )
+                message = f"PlainLoopAgentClient.invoke(kind={kind!r}) requires iteration= so the cap can be scoped per-iteration"
+                raise ValueError(message)
             if kind == "judge":
                 mcp_servers = [
                     self._issue_mcp_spec(
@@ -190,9 +202,8 @@ class PlainLoopAgentClient(AgentClient):
         Cap and type-allowlist enforcement live in :mod:`vs_issue_board.policy`.
         """
         if not self._inner.capabilities.mcp_servers:
-            raise RuntimeError(
-                f"agent backend {self._inner.backend_name!r} cannot expose issue-board tools"
-            )
+            message = f"agent backend {self._inner.backend_name!r} cannot expose issue-board tools"
+            raise RuntimeError(message)
         return build_issue_mcp_spec(
             store_relpath="issues.json",
             creator=creator,

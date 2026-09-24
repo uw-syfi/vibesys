@@ -107,7 +107,7 @@ class LoopContext(Protocol):
         """Switch the active run log to a named phase or round."""
         ...
 
-    def invoke(
+    def invoke(  # noqa: PLR0913  # lint-waiver: LW-011123 [PLR0913]; LoopContext.invoke is the shared typed invocation protocol implemented by every run context.
         self,
         *,
         kind: str,
@@ -117,7 +117,7 @@ class LoopContext(Protocol):
         fallback_factory: Callable[[], T],
         round_label: str = "",
         progress: AgentProgress | None = None,
-        **extra: Any,
+        **extra: object,
     ) -> T:
         """Invoke the configured agent with typed response validation."""
         ...

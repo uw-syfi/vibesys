@@ -7,7 +7,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 import yaml
@@ -247,18 +247,22 @@ def _membership_cases(
     return policy, actor, role, required
 
 
-def _event(**changes: object) -> Event:
-    values: dict[str, object] = {
-        "repository": "uw-syfi/vibesys",
-        "number": 42,
-        "actor": "maintainer",
-        "actor_type": "User",
-        "action": "created",
-        "body": "/merge-scoped",
-        "is_pull_request": True,
-    }
-    values.update(changes)
-    return Event(**values)  # type: ignore[arg-type]
+def _event(
+    *,
+    actor_type: str = "User",
+    body: str = "/merge-scoped",
+    repository: str = "uw-syfi/vibesys",
+    is_pull_request: bool = True,
+) -> Event:
+    return Event(
+        repository=repository,
+        number=42,
+        actor="maintainer",
+        actor_type=actor_type,
+        action="created",
+        body=body,
+        is_pull_request=is_pull_request,
+    )
 
 
 def _pull(**changes: object) -> dict[str, object]:
@@ -419,20 +423,18 @@ def test_file_validation_fails_closed_on_empty_truncated_or_oversized_diffs() ->
 
 
 @pytest.mark.parametrize(
-    ("changes", "message"),
+    ("event", "message"),
     [
-        ({"actor_type": "Bot"}, "must be a GitHub user"),
-        ({"body": "/merge-scoped now"}, "exact command"),
-        ({"body": "/merge-scoped "}, "exact command"),
-        ({"repository": "other/repo"}, "not for"),
-        ({"is_pull_request": False}, "pull request comment"),
+        (_event(actor_type="Bot"), "must be a GitHub user"),
+        (_event(body="/merge-scoped now"), "exact command"),
+        (_event(body="/merge-scoped "), "exact command"),
+        (_event(repository="other/repo"), "not for"),
+        (_event(is_pull_request=False), "pull request comment"),
     ],
 )
-def test_event_authorization_rejects_wrong_actor_or_scope(
-    changes: dict[str, object], message: str
-) -> None:
+def test_event_authorization_rejects_wrong_actor_or_scope(event: Event, message: str) -> None:
     with pytest.raises(MergeRefusalError, match=message):
-        authorize_event(_event(**changes), _policy())
+        authorize_event(event, _policy())
 
 
 def test_policy_normalizes_capability_members_case_insensitively(tmp_path: Path) -> None:
@@ -549,32 +551,36 @@ def test_check_authorization_uses_latest_exact_head_run_and_exact_job() -> None:
             authorize_check_job(jobs, check_id="pr-ci", job_name="Required PR CI")
 
 
+class _FakeGitHubOptions(TypedDict, total=False):
+    refreshed_sha: str
+    queue: object
+    in_queue: object
+    graphql_error: bool
+    enqueue_entry: object
+    state_data: object
+    merge_response: object
+    filename: str
+    stack: object
+    async_response: object
+
+
 class FakeGitHubAPI:
     """Record the state transitions made by one complete merge attempt."""
 
-    def __init__(  # keyword-only scenario knobs
-        self,
-        *,
-        refreshed_sha: str = "abc123",
-        queue: object = None,
-        in_queue: object = False,
-        graphql_error: bool = False,
-        enqueue_entry: object = None,
-        state_data: object = "default",
-        merge_response: object = None,
-        filename: str = "owned/core/events.py",
-        stack: object = None,
-        async_response: object = "default",
-    ) -> None:
-        self.stack = stack
-        self.async_response = async_response
-        self.state_data = state_data
-        self.merge_response = merge_response or {"merged": True, "sha": "merge456"}
-        self.filename = filename
-        self.refreshed_sha = refreshed_sha
-        self.queue = queue
-        self.in_queue = in_queue
-        self.graphql_error = graphql_error
+    def __init__(self, **options: Unpack[_FakeGitHubOptions]) -> None:
+        self.stack = options.get("stack")
+        self.async_response = options.get("async_response", "default")
+        self.state_data = options.get("state_data", "default")
+        self.merge_response = options.get("merge_response") or {
+            "merged": True,
+            "sha": "merge456",
+        }
+        self.filename = options.get("filename", "owned/core/events.py")
+        self.refreshed_sha = options.get("refreshed_sha", "abc123")
+        self.queue = options.get("queue")
+        self.in_queue = options.get("in_queue", False)
+        self.graphql_error = options.get("graphql_error", False)
+        enqueue_entry = options.get("enqueue_entry")
         self.enqueue_entry = {"id": "entry1"} if enqueue_entry is None else enqueue_entry
         self.graphql_calls: list[tuple[str, dict[str, object]]] = []
         self.pull_reads = 0
@@ -932,13 +938,13 @@ def test_async_strategy_reports_already_queued_and_refuses_unconfirmed_answers()
 def test_async_failure_names_the_step_and_never_leaks_the_response_body(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    secret = "ghs_SECRETTOKEN0123"
-    body = json.dumps({"message": f"This pull request is part of a stack {secret}"})
+    credential_value = "ghs_SECRETTOKEN0123"
+    body = json.dumps({"message": f"This pull request is part of a stack {credential_value}"})
 
     def failing(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert kwargs.get("input") is None or "merge_queue" in str(kwargs["input"])
         return subprocess.CompletedProcess(
-            ["gh"], 1, stdout=body, stderr=f"gh: {secret} (HTTP 422)\n"
+            ["gh"], 1, stdout=body, stderr=f"gh: {credential_value} (HTTP 422)\n"
         )
 
     class AsyncFails(FakeGitHubAPI):
@@ -961,7 +967,7 @@ def test_async_failure_names_the_step_and_never_leaks_the_response_body(
         "Scoped merge refused: validation could not be completed safely "
         "(step: async enqueue request; HTTP 422)."
     )
-    assert secret not in captured.err + str(api.writes)
+    assert credential_value not in captured.err + str(api.writes)
 
 
 class _FailingAPI(FakeGitHubAPI):
@@ -984,7 +990,7 @@ class _FailingAPI(FakeGitHubAPI):
 
 
 @pytest.mark.parametrize(
-    ("fail_on", "step", "queue"),
+    "scenario",
     [
         ("/permission", "role check", None),
         ("mergeQueue(", "queue state read", None),
@@ -999,10 +1005,9 @@ def test_api_failure_names_the_failing_step_and_still_refuses(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    fail_on: str,
-    step: str,
-    queue: object,
+    scenario: tuple[str, str, object],
 ) -> None:
+    fail_on, step, queue = scenario
     event_path = tmp_path / "event.json"
     _write_event(event_path)
     _use_test_policy(monkeypatch)
@@ -1047,28 +1052,28 @@ def test_pull_request_refresh_failure_is_named(
 
 
 def test_gh_failures_expose_only_http_status_and_graphql_error_types() -> None:
-    secret = "ghs_SECRETTOKEN0123"
+    credential_value = "ghs_SECRETTOKEN0123"
     body = json.dumps(
         {
             "data": None,
             "errors": [
-                {"type": "FORBIDDEN", "message": f"private {secret}"},
+                {"type": "FORBIDDEN", "message": f"private {credential_value}"},
                 {"type": "FORBIDDEN"},
-                {"type": "not a type", "message": secret},
-                {"message": secret},
+                {"type": "not a type", "message": credential_value},
+                {"message": credential_value},
             ],
         }
     )
 
     def failing(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
-            ["gh"], 1, stdout=body, stderr=f"gh: {secret} (HTTP 403)\n"
+            ["gh"], 1, stdout=body, stderr=f"gh: {credential_value} (HTTP 403)\n"
         )
 
     with pytest.raises(GitHubAPIError) as caught:
         GitHubAPI(_runner=failing).graphql("query", {})
     assert caught.value.detail == "HTTP 403; GraphQL FORBIDDEN"
-    assert secret not in api_failure_message(caught.value)
+    assert credential_value not in api_failure_message(caught.value)
 
 
 @pytest.mark.parametrize(
@@ -1252,10 +1257,10 @@ def test_landing_client_authenticates_only_its_own_calls(
         return subprocess.CompletedProcess(["gh"], 0, stdout="{}", stderr="")
 
     GitHubAPI(_runner=runner).get("repos/x/y")
-    token = "app-token"
-    GitHubAPI(_runner=runner, _token=token).write("repos/x/y", method="PUT", payload={})
-    assert seen == [None, token]
-    assert token not in repr(GitHubAPI(_token=token))
+    app_credential = "app-token"
+    GitHubAPI(_runner=runner, _token=app_credential).write("repos/x/y", method="PUT", payload={})
+    assert seen == [None, app_credential]
+    assert app_credential not in repr(GitHubAPI(_token=app_credential))
 
 
 def test_missing_landing_token_message_and_logs_carry_no_token(

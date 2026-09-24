@@ -40,10 +40,8 @@ def agent_spec_from_config(
     resolved_driver = Driver(driver) if driver is not None else resolve_agent_driver(config)
 
     if resolved_backend != AgentBackend.CLI and agent_cfg.driver is not None:
-        raise SystemExit(
-            f"agent driver {agent_cfg.driver!r} is valid only with backend='cli', "
-            f"not {resolved_backend.value!r}"
-        )
+        message = f"agent driver {agent_cfg.driver!r} is valid only with backend='cli', not {resolved_backend.value!r}"
+        raise SystemExit(message)
 
     resolved_provider = provider or agent_cfg.cli_provider or DEFAULT_CLI_PROVIDER
     return AgentSpec(

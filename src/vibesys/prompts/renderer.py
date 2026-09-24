@@ -96,6 +96,7 @@ def render_string(source: str, **kwargs: object) -> str:
 
 class ComputeBackendFragment(ABC):
     """Provides backend-specific Jinja fragments.
+
     Fragments live under ``vibesys/prompts/backend/<backend>/``.
 
     Subclasses must set ``backend = ComputeBackend.<X>``. The default
@@ -144,6 +145,7 @@ class ComputeBackendFragment(ABC):
     @classmethod
     def validate(cls) -> None:
         """Verify a ``.j2`` file exists for every fragment in :attr:`NAMES`.
+
         Raises ``ValueError`` listing missing files.
         """
         FragmentFamily(root=_BACKEND_FRAGMENTS_ROOT, names=cls.NAMES).validate([cls.backend.value])
@@ -191,15 +193,14 @@ _FRAGMENT_IMPLS: dict[ComputeBackend, type[ComputeBackendFragment]] = {
 def get_backend_fragment(backend: ComputeBackend, env: TemplateRenderer) -> ComputeBackendFragment:
     """Construct the :class:`ComputeBackendFragment` impl for the given backend."""
     if backend not in _FRAGMENT_IMPLS:
-        raise ValueError(
-            f"No ComputeBackendFragment registered for {backend!r}. "
-            f"Registered: {sorted(_FRAGMENT_IMPLS.keys(), key=lambda b: b.value)}"
-        )
+        message = f"No ComputeBackendFragment registered for {backend!r}. Registered: {sorted(_FRAGMENT_IMPLS.keys(), key=lambda b: b.value)}"
+        raise ValueError(message)
     return _FRAGMENT_IMPLS[backend](env)
 
 
 class Prompt:
     """Render templates from a per-mode directory with backend fragments.
+
     Fragments are auto-injected as kwargs.
 
     Construction validates the bound backend's fragment files exist

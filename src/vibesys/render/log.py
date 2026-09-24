@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TextIO
+from typing import TYPE_CHECKING, Protocol, TextIO, cast
 
 from vibesys.render.sink import output_sink
 
@@ -10,7 +10,27 @@ if TYPE_CHECKING:
     from vibesys.events import AgentOutputChannel
 
 
-def log_agent_config(agent: Any, label: str, log_file: TextIO | None) -> None:
+class _ToolCollection(Protocol):
+    tools_by_name: dict[str, object]
+
+
+class _ToolRunnable(Protocol):
+    runnable: _ToolCollection
+
+
+class _AgentBuilder(Protocol):
+    nodes: dict[str, _ToolRunnable]
+
+
+class _AgentWithBuilder(Protocol):
+    builder: _AgentBuilder
+
+
+def log_agent_config(
+    agent: object,
+    label: str,
+    log_file: TextIO | None,
+) -> None:
     """Write agent configuration (tools list) to log file."""
     if not log_file:
         return
@@ -20,7 +40,8 @@ def log_agent_config(agent: Any, label: str, log_file: TextIO | None) -> None:
 
     # Extract tools
     try:
-        tools_node = agent.builder.nodes["tools"]
+        agent_with_builder = cast("_AgentWithBuilder", agent)
+        tools_node = agent_with_builder.builder.nodes["tools"]
         tools_dict = tools_node.runnable.tools_by_name
         log_file.write(f"\n  Tools ({len(tools_dict)}):\n")
         for name, tool in sorted(tools_dict.items()):

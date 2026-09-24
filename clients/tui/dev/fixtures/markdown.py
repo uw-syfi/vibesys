@@ -16,6 +16,7 @@ synthetic fixture is worth reading in a diff.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -157,7 +158,8 @@ EXECUTION_FINISHED = {
 }
 
 
-def event(
+# lint-waiver: LW-011001 [PLR0913]; This fixture builder mirrors independent fields in the serialized event contract, and bundling them would obscure fixture call sites.
+def event(  # noqa: PLR0913
     sequence: int,
     offset_ms: int,
     kind: str,
@@ -322,7 +324,7 @@ def main() -> None:
     target = Path(__file__).with_name("markdown.jsonl")
     lines = [json.dumps(item, separators=(",", ":")) for item in build()]
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"wrote {len(lines)} events to {target}")
+    sys.stdout.write(f"wrote {len(lines)} events to {target}\n")
 
 
 if __name__ == "__main__":

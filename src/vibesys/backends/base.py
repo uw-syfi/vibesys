@@ -62,7 +62,7 @@ class ComputeBackendImpl(Protocol):
     name: ComputeBackend
     profiler_kind: ProfilerKind  # picks profiler support, MCP, and prompt template
 
-    def make_sandbox(
+    def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-011111 [PLR0913]; Runtime-checkable ComputeBackendImpl exposes these sandbox controls as protocol keywords; a config object would break every backend implementation and caller.
         self,
         kind: SandboxKind,
         *,
@@ -118,6 +118,7 @@ class ComputeBackendImpl(Protocol):
 
     def reselect_device(self) -> None:
         """Re-pick the optimal device for this backend and restart sandboxes.
+
         For example, migrate from a less-loaded GPU and restart affected
         sandboxes in place.
 

@@ -23,7 +23,6 @@ The caller is responsible for passing the right paths.
 
 from __future__ import annotations
 
-import os
 import re
 import unicodedata
 from typing import TYPE_CHECKING, Any
@@ -104,7 +103,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    tmp.replace(path)
 
 
 # ---------------------------------------------------------------------------
@@ -129,8 +128,7 @@ def _render_implementer_payload(payload: dict[str, Any]) -> str:
     files_touched = payload.get("files_touched") or []
     if files_touched:
         lines.append("**Files touched**:")
-        for fp in files_touched:
-            lines.append(f"- `{fp}`")
+        lines.extend(f"- `{fp}`" for fp in files_touched)
         lines.append("")
     self_check = payload.get("self_check", "").strip()
     if self_check:
@@ -200,8 +198,7 @@ def render_issue_markdown(issue: Issue) -> str:
     # Timeline
     parts.append("## Timeline\n")
     if issue.history:
-        for evt in issue.history:
-            parts.append(_render_event_bullet(evt))
+        parts.extend(_render_event_bullet(evt) for evt in issue.history)
     else:
         parts.append("_(no events recorded)_")
     parts.append("")

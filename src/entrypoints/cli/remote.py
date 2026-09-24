@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -210,11 +211,13 @@ def _checkout_remote_run_branch(project_root: Path, selected: _RemoteRunBranch) 
 
 def _resume_git(project_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     """Run a non-shell Git command during remote resume resolution."""
-    return subprocess.run(
-        ["git", *arguments],
+    git = shutil.which("git") or "git"
+    return subprocess.run(  # noqa: S603  # lint-waiver: LW-010225 [S603]; only fixed Git operations reach this non-shell resume helper.
+        [git, *arguments],
         cwd=project_root,
         capture_output=True,
         text=True,
+        check=False,
     )
 
 

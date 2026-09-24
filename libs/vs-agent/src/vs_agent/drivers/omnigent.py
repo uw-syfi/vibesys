@@ -38,6 +38,13 @@ from vs_agent.host_resource_declarations import (
     declare_active_rust_toolchain_resources,
     resolve_active_rust_toolchain,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from omnigent.inner.datamodel import OSEnvSpec
+    from omnigent.inner.os_env import OSEnvironment
+    from omnigent.tools.base import ToolContext
 from vs_agent.omnigent.providers import (
     OMNIGENT_PROVIDER_EXECUTORS,
     OmnigentExecutorSpec,
@@ -214,6 +221,10 @@ class OmnigentDependencyError(OmnigentDriverError):
 class _SchemaTool(Protocol):
     def get_schema(self) -> dict[str, Any]: ...
 
+    def name(self) -> str: ...
+
+    def invoke(self, arguments: str, ctx: ToolContext, /) -> object: ...
+
 
 def _cleanup_after_failure(
     error: BaseException,
@@ -224,8 +235,19 @@ def _cleanup_after_failure(
     """Run setup cleanup without replacing the error that triggered it."""
     try:
         cleanup()
-    except BaseException as cleanup_error:
+    except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-010140 [BLE001]; _cleanup_after_failure must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
         error.add_note(f"{description} also failed: {cleanup_error}")
+
+
+def _cleanup_error(
+    first_error: BaseException | None, cleanup: Callable[[], None]
+) -> BaseException | None:
+    """Run one cleanup action and retain the earliest failure."""
+    try:
+        cleanup()
+    except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-010141 [BLE001]; _cleanup_error must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
+        return first_error if first_error is not None else error
+    return first_error
 
 
 @dataclass
@@ -247,11 +269,44 @@ class _OwnedOSTools:
         for environment in environments:
             try:
                 environment.close()
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010142 [BLE001]; _OwnedOSTools.close must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
                 if first_error is None:
                     first_error = exc
         if first_error is not None:
             raise first_error
+
+
+@dataclass
+class _OSToolBuilder:
+    """Build base and shell tools while tracking acquired environments."""
+
+    create_environment: Callable[[OSEnvSpec | None], OSEnvironment | None]
+    build_tools: Callable[[OSEnvironment], Sequence[_SchemaTool]]
+    workspace: Path
+    environment: dict[str, str]
+    environments: list[Any]
+
+    def build(self, os_env: OSEnvironment, shell_spec: OSEnvSpec | None) -> Sequence[_SchemaTool]:
+        if shell_spec is None:
+            _adapt_helper_environment(os_env, self.environment)
+            return self.build_tools(os_env)
+        return self._build_with_shell(os_env, shell_spec)
+
+    def _build_with_shell(
+        self, os_env: OSEnvironment, shell_spec: OSEnvSpec
+    ) -> Sequence[_SchemaTool]:
+        shell_os_env = self.create_environment(shell_spec)
+        if shell_os_env is None:
+            raise OmnigentDriverError.shell_environment_unavailable(self.workspace)
+        self.environments.append(shell_os_env)
+        _adapt_helper_environment(os_env, {})
+        _adapt_helper_environment(shell_os_env, self.environment)
+        tools = self.build_tools(os_env)
+        shell_tools = self.build_tools(shell_os_env)
+        shell_tool = next((tool for tool in shell_tools if tool.name() == "sys_os_shell"), None)
+        if shell_tool is None:  # pragma: no cover - guarded against Omnigent API drift
+            raise OmnigentDriverError.shell_tool_missing()
+        return [shell_tool if tool.name() == "sys_os_shell" else tool for tool in tools]
 
 
 @dataclass
@@ -274,16 +329,36 @@ class _ExecutorResources:
         if os_tools is not None:
             try:
                 os_tools.close()
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010143 [BLE001]; _ExecutorResources.close must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
                 first_error = exc
         if scratch is not None:
             try:
                 scratch.cleanup()
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010144 [BLE001]; _ExecutorResources.close must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
                 if first_error is None:
                     first_error = exc
         if first_error is not None:
             raise first_error
+
+
+@dataclass(frozen=True)
+class _ExecutorBuildContext:
+    """Inputs shared by executor setup phases."""
+
+    spec: AgentSessionSpec
+    os_env_spec: Any
+    shell_os_env_spec: Any
+    tool_environment: dict[str, str]
+    resources: _ExecutorResources
+
+
+@dataclass
+class _SessionTools:
+    """Tool schemas and resources transferred to one provider session."""
+
+    schemas: list[dict[str, Any]]
+    mcp_tools: _OmnigentMCPTools | None
+    resources: _ExecutorResources
 
 
 def _is_top_level_dot_path(path: Path) -> bool:
@@ -339,7 +414,7 @@ def _install_helper_environment_hook() -> None:
 
         # Parameter names match Omnigent's own ``build_helper_env`` so callers
         # that pass them by keyword keep working through the patch.
-        def build_helper_env(parent_env: Any, sandbox: Any) -> dict[str, str]:
+        def build_helper_env(parent_env: Any, sandbox: Any) -> dict[str, str]:  # noqa: ANN401  # lint-waiver: LW-010145 [ANN401]; _install_helper_environment_hook.build_helper_env crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
             explicit = getattr(sandbox, _EXPLICIT_HELPER_ENV_ATTR, None)
             source = explicit if isinstance(explicit, MappingProxyType) else parent_env
             return cast("dict[str, str]", original(source, sandbox))
@@ -348,7 +423,7 @@ def _install_helper_environment_hook() -> None:
         _helper_environment_hook_installed.set()
 
 
-def _adapt_helper_environment(os_environment: Any, environment: dict[str, str]) -> None:
+def _adapt_helper_environment(os_environment: Any, environment: dict[str, str]) -> None:  # noqa: ANN401  # lint-waiver: LW-010146 [ANN401]; _adapt_helper_environment crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
     """Bind an immutable parent environment to one Omnigent 0.10 helper."""
     helper = getattr(os_environment, _OS_ENV_HELPER_ATTR, None)
     sandbox = getattr(helper, _HELPER_SANDBOX_ATTR, None)
@@ -363,7 +438,7 @@ def _adapt_helper_environment(os_environment: Any, environment: dict[str, str]) 
 
 
 def _adapt_provider_environment(
-    executor: Any,
+    executor: Any,  # noqa: ANN401  # lint-waiver: LW-010147 [ANN401]; _adapt_provider_environment crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
     *,
     provider: str,
     environment: dict[str, str],
@@ -377,10 +452,10 @@ def _adapt_provider_environment(
 
 
 def _build_os_tools(  # construction cleans every partially-created helper
-    os_env_spec: Any,
+    os_env_spec: Any,  # noqa: ANN401  # lint-waiver: LW-010148 [ANN401]; _build_os_tools crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
     workspace: Path,
     environment: dict[str, str] | None = None,
-    shell_os_env_spec: Any | None = None,
+    shell_os_env_spec: Any | None = None,  # noqa: ANN401  # lint-waiver: LW-010149 [ANN401]; _build_os_tools crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
 ) -> _OwnedOSTools:
     """Build Omnigent's sandboxed filesystem tools and their dispatcher."""
     try:
@@ -401,23 +476,17 @@ def _build_os_tools(  # construction cleans every partially-created helper
         raise OmnigentDriverError.os_environment_unavailable(workspace)
 
     environments = [os_env]
+
+    tool_builder = _OSToolBuilder(
+        create_environment=create_os_environment,
+        build_tools=build_os_env_tools,
+        workspace=workspace,
+        environment=environment or {},
+        environments=environments,
+    )
+
     try:
-        if shell_os_env_spec is not None:
-            shell_os_env = create_os_environment(shell_os_env_spec)
-            if shell_os_env is None:
-                raise OmnigentDriverError.shell_environment_unavailable(workspace)
-            environments.append(shell_os_env)
-            _adapt_helper_environment(os_env, {})
-            _adapt_helper_environment(shell_os_env, environment or {})
-            tools = build_os_env_tools(os_env)
-            shell_tools = build_os_env_tools(shell_os_env)
-            shell_tool = next((tool for tool in shell_tools if tool.name() == "sys_os_shell"), None)
-            if shell_tool is None:  # pragma: no cover - guarded against Omnigent API drift
-                raise OmnigentDriverError.shell_tool_missing()
-            tools = [shell_tool if tool.name() == "sys_os_shell" else tool for tool in tools]
-        else:
-            _adapt_helper_environment(os_env, environment or {})
-            tools = build_os_env_tools(os_env)
+        tools = tool_builder.build(os_env, shell_os_env_spec)
         by_name = {tool.name(): tool for tool in tools}
         schemas = [_flatten_tool_schema(tool) for tool in tools]
         context = tool_context_class(task_id="vibesys", agent_id="vibesys", workspace=workspace)
@@ -427,12 +496,12 @@ def _build_os_tools(  # construction cleans every partially-created helper
                 resource.close()
         raise
 
-    async def dispatch(name: str, args: dict[str, Any]) -> Any:
+    async def dispatch(name: str, args: dict[str, Any]) -> Any:  # noqa: ANN401  # lint-waiver: LW-010150 [ANN401]; _build_os_tools.dispatch crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
         tool = by_name.get(name)
         if tool is None:
             return {"error": f"unknown tool {name!r}"}
 
-        def invoke() -> Any:
+        def invoke() -> Any:  # noqa: ANN401  # lint-waiver: LW-010151 [ANN401]; _build_os_tools.dispatch.invoke crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
             return tool.invoke(json.dumps(args), context)
 
         return await asyncio.to_thread(invoke)
@@ -457,7 +526,7 @@ def _emit(observer: AgentObserver | None, event: AgentEvent) -> None:
 
 
 def _tool_result_payload(
-    result: Any,
+    result: Any,  # noqa: ANN401  # lint-waiver: LW-010152 [ANN401]; _tool_result_payload crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
     error: str | None,
     duration: float,
 ) -> ToolResultPayload:
@@ -479,7 +548,7 @@ def _tool_result_payload(
 
 
 async def _drive_turn(
-    executor: Any,
+    executor: Any,  # noqa: ANN401  # lint-waiver: LW-010153 [ANN401]; _drive_turn crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
     *,
     request: AgentTurnRequest,
     reasoning_effort: str | None,
@@ -561,18 +630,16 @@ class OmnigentSession:
         *,
         driver: OmnigentDriver,
         spec: AgentSessionSpec,
-        executor: Any,
-        tool_schemas: list[dict[str, Any]],
-        mcp_tools: _OmnigentMCPTools | None = None,
-        resources: _ExecutorResources | None = None,
+        executor: Any,  # noqa: ANN401  # lint-waiver: LW-010154 [ANN401]; OmnigentSession.__init__ crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
+        tools: _SessionTools,
     ) -> None:
         """Own ``executor`` until this session is closed."""
         self._driver = driver
         self._spec = spec
         self._executor = executor
-        self._tool_schemas = tool_schemas
-        self._mcp_tools = mcp_tools
-        self._resources: _ExecutorResources | None = resources or _ExecutorResources()
+        self._tool_schemas = tools.schemas
+        self._mcp_tools = tools.mcp_tools
+        self._resources: _ExecutorResources | None = tools.resources
         self._lifecycle = threading.Condition()
         self._close_lifecycle = _CloseLifecycle(self._lifecycle)
         self._turn_lock = threading.Lock()
@@ -591,17 +658,13 @@ class OmnigentSession:
         # sessions submit independent tasks to the driver runtime and can overlap.
         with self._turn_lock:
             with self._lifecycle:
-                if self._close_lifecycle.state is not _LifecycleState.OPEN:
-                    message = "Omnigent session is closed"
-                    raise RuntimeError(message)
+                self._ensure_open()
                 if self._failed:
                     message = "Omnigent session must be reset after a failed turn"
                     raise RuntimeError(message)
             try:
                 with self._lifecycle:
-                    if self._close_lifecycle.state is not _LifecycleState.OPEN:
-                        message = "Omnigent session is closed"
-                        raise RuntimeError(message)
+                    self._ensure_open()
                     task = self._driver.start_task(self._run_turn(request, observer))
                     self._active_turn = task
                 try:
@@ -617,6 +680,12 @@ class OmnigentSession:
                 with self._lifecycle:
                     self._failed = True
                 raise
+
+    def _ensure_open(self) -> None:
+        """Raise when the session has begun closing."""
+        if self._close_lifecycle.state is not _LifecycleState.OPEN:
+            message = "Omnigent session is closed"
+            raise RuntimeError(message)
 
     def resume_provider_session(self, session_id: str) -> bool:
         """Refuse the checkpoint: Omnigent executors have no resume entry point.
@@ -664,7 +733,7 @@ class OmnigentSession:
         first_error: BaseException | None = None
         try:
             first_error = self._close_resources(active)
-        except BaseException as exc:  # completion must still be signaled
+        except BaseException as exc:  # completion must still be signaled  # noqa: BLE001  # lint-waiver: LW-010155 [BLE001]; OmnigentSession.close must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
             first_error = exc
         finally:
             self._close_lifecycle.finish_close(first_error)
@@ -688,14 +757,14 @@ class OmnigentSession:
             cleanup = self._driver.submit(self._shutdown())
             try:
                 first_error = cleanup.result()
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010156 [BLE001]; OmnigentSession._close_resources must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
                 first_error = exc
                 cleanup.cancel()
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010157 [BLE001]; OmnigentSession._close_resources must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
             first_error = exc
         try:
             self._driver.release_session(self)
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010158 [BLE001]; OmnigentSession._close_resources must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
             if first_error is None:
                 first_error = exc
         resources, self._resources = self._resources, None
@@ -705,7 +774,7 @@ class OmnigentSession:
                     resources.close()
                 else:
                     self._driver.defer_resources(resources)
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010159 [BLE001]; OmnigentSession._close_resources must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
                 if first_error is None:
                     first_error = exc
         return first_error
@@ -731,7 +800,7 @@ class OmnigentSession:
             return await turn, None
         except asyncio.CancelledError:
             raise
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010160 [BLE001]; OmnigentSession._run_turn must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
             # asyncio deliberately re-raises KeyboardInterrupt/SystemExit out
             # of tasks. Encode it so it is re-raised on the invoking thread
             # without terminating this session's loop thread.
@@ -746,13 +815,13 @@ class OmnigentSession:
                 result = close()
                 if asyncio.iscoroutine(result):
                     await result
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010161 [BLE001]; OmnigentSession._shutdown must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
             first_error = exc
         mcp_tools = self._mcp_tools
         if mcp_tools is not None:
             try:
                 await mcp_tools.close()
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010162 [BLE001]; OmnigentSession._shutdown must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
                 if first_error is None:
                     first_error = exc
             else:
@@ -791,9 +860,11 @@ class OmnigentDriver:
                 driver=self,
                 spec=spec,
                 executor=executor,
-                tool_schemas=schemas,
-                mcp_tools=mcp_tools,
-                resources=resources,
+                tools=_SessionTools(
+                    schemas,
+                    mcp_tools,
+                    resources or _ExecutorResources(),
+                ),
             )
             with self._lifecycle:
                 closed = self._close_lifecycle.state is not _LifecycleState.OPEN
@@ -819,35 +890,29 @@ class OmnigentDriver:
             return
         first_error: BaseException | None = None
         try:
-            with self._lifecycle:
-                while self._creating_sessions > 0:
-                    self._lifecycle.wait()
-                sessions = tuple(self._sessions)
-            for session in sessions:
-                try:
-                    session.close()
-                except BaseException as exc:
-                    if first_error is None:
-                        first_error = exc
-            try:
-                self._runtime.close()
-            except BaseException as exc:
-                if first_error is None:
-                    first_error = exc
-            with self._lifecycle:
-                deferred, self._deferred_resources = self._deferred_resources, []
-            for resources in deferred:
-                try:
-                    resources.close()
-                except BaseException as exc:
-                    if first_error is None:
-                        first_error = exc
-        except BaseException as exc:  # completion must still be signaled
+            first_error = self._close_owned_resources()
+        except BaseException as exc:  # completion must still be signaled  # noqa: BLE001  # lint-waiver: LW-010163 [BLE001]; OmnigentDriver.close must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
             first_error = exc
         finally:
             self._close_lifecycle.finish_close(first_error)
         if first_error is not None:
             raise first_error
+
+    def _close_owned_resources(self) -> BaseException | None:
+        """Close sessions, runtime, and deferred resources in dependency order."""
+        with self._lifecycle:
+            while self._creating_sessions > 0:
+                self._lifecycle.wait()
+            sessions = tuple(self._sessions)
+        first_error: BaseException | None = None
+        for session in sessions:
+            first_error = _cleanup_error(first_error, session.close)
+        first_error = _cleanup_error(first_error, self._runtime.close)
+        with self._lifecycle:
+            deferred, self._deferred_resources = self._deferred_resources, []
+        for resources in deferred:
+            first_error = _cleanup_error(first_error, resources.close)
+        return first_error
 
     def _validate_spec(self, spec: AgentSessionSpec) -> None:
         _resolve_executor_spec(spec.provider)
@@ -910,7 +975,7 @@ class OmnigentDriver:
         additional_write_paths: tuple[Path, ...] = (),
         env_passthrough: tuple[str, ...] = (),
         include_toolchain: bool = False,
-    ) -> Any:
+    ) -> Any:  # noqa: ANN401  # lint-waiver: LW-010164 [ANN401]; OmnigentDriver._build_os_env crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
         try:
             datamodel = import_module("omnigent.inner.datamodel")
         except ImportError as exc:
@@ -956,6 +1021,76 @@ class OmnigentDriver:
             cwd=str(workspace),
             sandbox=sandbox,
         )
+
+    def _install_tools(
+        self,
+        executor: object,
+        context: _ExecutorBuildContext,
+    ) -> tuple[list[dict[str, Any]], _OmnigentMCPTools | None]:
+        """Attach sandbox and MCP tools, closing the executor on setup failure."""
+        spec = context.spec
+        resources = context.resources
+        mcp_tools: _OmnigentMCPTools | None = None
+        os_tools: _OwnedOSTools
+        try:
+            os_tools = _build_os_tools(
+                context.os_env_spec,
+                spec.workspace,
+                context.tool_environment,
+                context.shell_os_env_spec,
+            )
+            resources.os_tools = os_tools
+            executor_spec = _resolve_executor_spec(spec.provider)
+            mcp_tools = _OmnigentMCPTools.build(
+                servers=spec.mcp_servers,
+                workspace=spec.workspace,
+                harness=executor_spec.harness,
+                session_id=lambda: cast("str | None", getattr(executor, "thread_id", None)),
+            )
+            if mcp_tools is not None:
+                self.run_awaitable(mcp_tools.initialize())
+
+            async def dispatch(name: str, args: dict[str, Any]) -> Any:  # noqa: ANN401  # lint-waiver: LW-010165 [ANN401]; OmnigentDriver._install_tools.dispatch crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
+                if mcp_tools is not None and mcp_tools.handles(name):
+                    return await mcp_tools.dispatch(name, args)
+                if os_tools.handles(name):
+                    return await os_tools.dispatch(name, args)
+                return {"error": f"unknown tool {name!r}"}
+
+            setattr(executor, _TOOL_EXECUTOR_ATTR, dispatch)
+        except BaseException as error:
+            if mcp_tools is not None:
+                try:
+                    self.run_awaitable(mcp_tools.close())
+                except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-010166 [BLE001]; OmnigentDriver._install_tools must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
+                    error.add_note(f"Omnigent MCP cleanup also failed: {cleanup_error}")
+            _cleanup_after_failure(
+                error,
+                lambda: self.close_executor(executor, resources=resources),
+                description="Omnigent executor cleanup",
+            )
+            raise
+
+        mcp_schemas = [] if mcp_tools is None else mcp_tools.schemas
+        duplicate_names = {schema["name"] for schema in os_tools.schemas} & {
+            schema["name"] for schema in mcp_schemas
+        }
+        if duplicate_names and mcp_tools is not None:
+            error = OmnigentDriverError(
+                f"Omnigent MCP tools conflict with OS tools: {sorted(duplicate_names)}"
+            )
+            _cleanup_after_failure(
+                error,
+                lambda: self.run_awaitable(mcp_tools.close()),
+                description="Omnigent MCP cleanup",
+            )
+            _cleanup_after_failure(
+                error,
+                lambda: self.close_executor(executor, resources=resources),
+                description="Omnigent executor cleanup",
+            )
+            raise error
+        return [*os_tools.schemas, *mcp_schemas], mcp_tools
 
     def _build_executor(
         self, spec: AgentSessionSpec
@@ -1050,64 +1185,15 @@ class OmnigentDriver:
                 description="Omnigent executor cleanup",
             )
             raise
-        mcp_tools: _OmnigentMCPTools | None = None
-        try:
-            os_tools = _build_os_tools(
-                os_env_spec,
-                spec.workspace,
-                tool_environment,
-                shell_os_env_spec,
-            )
-            resources.os_tools = os_tools
-            mcp_tools = _OmnigentMCPTools.build(
-                servers=spec.mcp_servers,
-                workspace=spec.workspace,
-                harness=executor_spec.harness,
-                session_id=lambda: cast("str | None", getattr(executor, "thread_id", None)),
-            )
-            if mcp_tools is not None:
-                self.run_awaitable(mcp_tools.initialize())
-
-            async def dispatch(name: str, args: dict[str, Any]) -> Any:
-                if mcp_tools is not None and mcp_tools.handles(name):
-                    return await mcp_tools.dispatch(name, args)
-                if os_tools.handles(name):
-                    return await os_tools.dispatch(name, args)
-                return {"error": f"unknown tool {name!r}"}
-
-            setattr(executor, _TOOL_EXECUTOR_ATTR, dispatch)
-        except BaseException as error:
-            if mcp_tools is not None:
-                try:
-                    self.run_awaitable(mcp_tools.close())
-                except BaseException as cleanup_error:
-                    error.add_note(f"Omnigent MCP cleanup also failed: {cleanup_error}")
-            _cleanup_after_failure(
-                error,
-                lambda: self.close_executor(executor, resources=resources),
-                description="Omnigent executor cleanup",
-            )
-            raise
-        mcp_schemas = [] if mcp_tools is None else mcp_tools.schemas
-        duplicate_names = {schema["name"] for schema in os_tools.schemas} & {
-            schema["name"] for schema in mcp_schemas
-        }
-        if duplicate_names and mcp_tools is not None:
-            error = OmnigentDriverError(
-                f"Omnigent MCP tools conflict with OS tools: {sorted(duplicate_names)}"
-            )
-            _cleanup_after_failure(
-                error,
-                lambda: self.run_awaitable(mcp_tools.close()),
-                description="Omnigent MCP cleanup",
-            )
-            _cleanup_after_failure(
-                error,
-                lambda: self.close_executor(executor, resources=resources),
-                description="Omnigent executor cleanup",
-            )
-            raise error
-        return executor, [*os_tools.schemas, *mcp_schemas], mcp_tools, resources
+        context = _ExecutorBuildContext(
+            spec=spec,
+            os_env_spec=os_env_spec,
+            shell_os_env_spec=shell_os_env_spec,
+            tool_environment=tool_environment,
+            resources=resources,
+        )
+        schemas, mcp_tools = self._install_tools(executor, context)
+        return executor, schemas, mcp_tools, resources
 
     def release_session(self, session: OmnigentSession) -> None:
         """Forget a closed session after it has released its owned resources."""
@@ -1116,7 +1202,7 @@ class OmnigentDriver:
 
     def close_executor(
         self,
-        executor: Any,
+        executor: Any,  # noqa: ANN401  # lint-waiver: LW-010167 [ANN401]; OmnigentDriver.close_executor crosses the pinned Omnigent SDK boundary, whose runtime callback values lack a local protocol type.
         *,
         run_awaitable: Callable[[Any], Any] | None = None,
         resources: _ExecutorResources | None = None,
@@ -1129,12 +1215,12 @@ class OmnigentDriver:
                 result = close()
                 if asyncio.iscoroutine(result):
                     (run_awaitable or self.run_awaitable)(result)
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010168 [BLE001]; OmnigentDriver.close_executor must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
             first_error = exc
         if resources is not None:
             try:
                 resources.close()
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010169 [BLE001]; OmnigentDriver.close_executor must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
                 if first_error is None:
                     first_error = exc
         if first_error is not None:

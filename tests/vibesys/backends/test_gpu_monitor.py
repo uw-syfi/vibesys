@@ -392,6 +392,7 @@ class TestReselectGpu:
         del mock_pick
         ctx = self._make_ctx(tmp_path, selected_gpu=_gpu(0, GPU_A))
         ctx.reselect_gpu()
+        assert ctx.selected_gpu is not None
         assert ctx.selected_gpu.index == 0  # unchanged
 
     @patch("vibesys.backends.cuda.pick_gpu")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -24,7 +25,6 @@ from vs_sandbox.api import DockerSandbox, HostResource, HostResourceAccess, Loca
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-    from pathlib import Path
 
     import pytest
 
@@ -191,14 +191,15 @@ class TestRocmSandbox:
 class TestRocmDeviceDiscovery:
     def test_no_kfd_means_no_devices(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A host without /dev/kfd yields an empty list rather than raising."""
-        monkeypatch.setattr("vibesys.backends.rocm.os.path.exists", lambda _p: False)
+        monkeypatch.setattr(Path, "exists", lambda _self: False)
         assert _discover_rocm_devices() == []
 
     def test_kfd_leads_and_render_nodes_follow(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("vibesys.backends.rocm.os.path.exists", lambda _p: True)
+        monkeypatch.setattr(Path, "exists", lambda _self: True)
         monkeypatch.setattr(
-            "vibesys.backends.rocm.glob.glob",
-            lambda _pat: ["/dev/dri/renderD129", "/dev/dri/renderD128"],
+            Path,
+            "glob",
+            lambda _self, _pattern: [Path("/dev/dri/renderD129"), Path("/dev/dri/renderD128")],
         )
         assert _discover_rocm_devices() == [
             "/dev/kfd",

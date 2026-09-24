@@ -17,6 +17,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vibesys.schemas import (
     FrameworkValidationResult,
@@ -28,6 +29,9 @@ from vibesys.schemas import (
     SingleAgentRoundResponse,
     ValidationRecipeArtifact,
 )
+
+if TYPE_CHECKING:
+    from vibesys.loops.gates import AccuracyGateResult, BenchmarkGateResult
 
 MEMORY_LAYOUTS = ("files", "directories")
 #: Workspace-relative roots of the loop's durable memory, layout aside.
@@ -41,17 +45,15 @@ _RECENT_PROGRESS_ROUNDS = 4
 def resolve_paths(workspace: Path, layout: str) -> tuple[Path, Path]:
     """Resolve both memory locations, preserving the layout of resumed runs."""
     if layout not in MEMORY_LAYOUTS:
-        raise ValueError(
-            f"Unknown memory layout {layout!r}; choose from {', '.join(MEMORY_LAYOUTS)}"
-        )
+        message = f"Unknown memory layout {layout!r}; choose from {', '.join(MEMORY_LAYOUTS)}"
+        raise ValueError(message)
 
     def resolve(name: str) -> Path:
         legacy = workspace / f"{name}.md"
         directory = workspace / name
         if legacy.exists() and directory.exists():
-            raise ValueError(
-                f"Both {legacy.name} and {directory.name}/ exist; keep only one {name} layout"
-            )
+            message = f"Both {legacy.name} and {directory.name}/ exist; keep only one {name} layout"
+            raise ValueError(message)
         if legacy.exists():
             return legacy
         if directory.exists():
@@ -587,7 +589,7 @@ def append_judge_skipped(
     _append(progress_path, block, round_number)
 
 
-def append_official_evaluation_decision(
+def append_official_evaluation_decision(  # noqa: PLR0913  # lint-waiver: LW-011115 [PLR0913]; This formatter writes round/attempt plus the already-computed run/reason and cadence counts; a new decision object would only repack values for one Markdown block.
     progress_path: Path,
     round_number: int,
     retry: int,
@@ -650,17 +652,15 @@ def append_framework_accuracy_gate(
     round_number: int,
     retry: int,
     *,
-    command: str,
-    passed: bool,
-    output: str,
+    result: AccuracyGateResult,
 ) -> None:
     """Append the framework accuracy-gate result."""
-    verdict = "pass" if passed else "fail"
+    verdict = "pass" if result.passed else "fail"
     block = (
         f"## Round {round_number} — Framework accuracy gate (attempt {retry})\n"
         f"- **verdict**: {verdict}\n"
-        f"- **command**: `{command}`\n\n"
-        f"### Output\n{output or '(no output)'}\n"
+        f"- **command**: `{result.command or '(not configured)'}`\n\n"
+        f"### Output\n{result.output or '(no output)'}\n"
     )
     _append(progress_path, block, round_number)
 
@@ -694,25 +694,22 @@ def append_framework_benchmark(
     round_number: int,
     retry: int,
     *,
-    command: str,
-    passed: bool,
+    result: BenchmarkGateResult,
     metric_name: str | None,
-    metric_value: float | None,
-    output: str,
 ) -> None:
     """Append framework benchmark metrics and diagnostics."""
-    verdict = "pass" if passed else "fail"
+    verdict = "pass" if result.passed else "fail"
     metric_line = (
-        f"- **{metric_name}**: {metric_value}\n"
-        if metric_name is not None and metric_value is not None
+        f"- **{metric_name}**: {result.outcome.metric_value}\n"
+        if metric_name is not None and result.outcome.metric_value is not None
         else ""
     )
     block = (
         f"## Round {round_number} — Framework benchmark (attempt {retry})\n"
         f"- **verdict**: {verdict}\n"
-        f"- **command**: `{command}`\n"
+        f"- **command**: `{result.command or '(not configured)'}`\n"
         f"{metric_line}\n"
-        f"### Output\n{output or '(no output)'}\n"
+        f"### Output\n{result.output or '(no output)'}\n"
     )
     _append(progress_path, block, round_number)
 

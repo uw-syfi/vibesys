@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from vs_agent.contracts import MCPServerSpec
@@ -50,11 +50,21 @@ class _NativeMCPAPI:
     validate: Callable[[Any], Any]
 
 
+def _raise_connection_failures(
+    failures: Mapping[str, object], servers: tuple[MCPServerSpec, ...]
+) -> None:
+    """Raise a redacted error when any configured MCP server failed."""
+    details = "; ".join(f"{name}: {error}" for name, error in sorted(failures.items()))
+    raise OmnigentMCPError.connection_failed(_redact_environment_values(details, servers))
+
+
 def _native_mcp_api() -> _NativeMCPAPI:
     """Load the pinned Omnigent MCP API only when the extra is selected."""
     try:
-        from omnigent.runner.mcp_manager import RunnerMcpManager
-        from omnigent.spec import (
+        from omnigent.runner.mcp_manager import (  # noqa: PLC0415  # lint-waiver: LW-010130 [PLC0415]; Keep RunnerMcpManager lazy in _native_mcp_api so unused providers and import cycles stay unloaded.
+            RunnerMcpManager,
+        )
+        from omnigent.spec import (  # noqa: PLC0415  # lint-waiver: LW-010131 [PLC0415]; Keep this dependency lazy in _native_mcp_api so unused providers and import cycles stay unloaded.
             AgentSpec,
             ExecutorSpec,
             MCPServerConfig,
@@ -185,19 +195,14 @@ class OmnigentMCPTools:
         try:
             result = await self._manager.schemas_for(self._agent_spec)
             if result.failures:
-                details = "; ".join(
-                    f"{name}: {error}" for name, error in sorted(result.failures.items())
-                )
-                raise OmnigentMCPError.connection_failed(
-                    _redact_environment_values(details, self._servers)
-                )
+                _raise_connection_failures(result.failures, self._servers)
             self.schemas = list(result.schemas)
             self._tool_names = frozenset(result.tool_names)
             self._initialized = True
         except BaseException as error:
             try:
                 await self.close()
-            except BaseException as cleanup_error:
+            except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-010132 [BLE001]; OmnigentMCPTools.initialize must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
                 error.add_note(f"Omnigent MCP cleanup also failed: {cleanup_error}")
             raise
 

@@ -747,9 +747,8 @@ def _watchdog_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
     empty list means the session never had one.
     """
     watched: list[tuple[str, ...]] = []
-    real = docker_executor.CodexRolloutWatchdogExecutor
 
-    class _Recording(real):  # type: ignore[misc, valid-type]
+    class _Recording(docker_executor.CodexRolloutWatchdogExecutor):
         def run(
             self,
             request: agentshim.CommandRequest,
@@ -758,7 +757,7 @@ def _watchdog_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
             watched.append(tuple(request.argv))
             return super().run(request, sink)
 
-    monkeypatch.setattr(docker_executor, "CodexRolloutWatchdogExecutor", _Recording)
+    monkeypatch.setattr(subject, "CodexRolloutWatchdogExecutor", _Recording)
     return watched
 
 
@@ -806,7 +805,7 @@ def test_the_watchdog_rollout_root_comes_from_the_sandbox_home(
             log=log,
         )
 
-    monkeypatch.setattr(docker_executor, "CodexRolloutWatchdogExecutor", _spy)
+    monkeypatch.setattr(subject, "CodexRolloutWatchdogExecutor", _spy)
     sandbox = _FakeDockerSandbox(workspace=tmp_path, home="/home/somebody-else")
     driver, _fake = _driver(
         "codex", scripted_turn("codex", text="ok"), docker_sandboxes={"implementer": sandbox}

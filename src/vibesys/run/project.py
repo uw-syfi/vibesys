@@ -322,8 +322,9 @@ def _should_copy_project_entry(relative_path: Path) -> bool:
 
 
 def _is_git_worktree(path: Path) -> bool:
-    result = subprocess.run(
-        ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+    git = shutil.which("git") or "git"
+    result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010236 [S603]; this checks the supplied project path using a fixed non-shell Git command.
+        [git, "-C", str(path), "rev-parse", "--is-inside-work-tree"],
         check=False,
         capture_output=True,
         text=True,

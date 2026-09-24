@@ -61,10 +61,10 @@ class FeatureRegistry(Generic[FlagT]):
     def _validate_definitions(self) -> None:
         for flag in self._definitions:
             if not isinstance(flag, self._flag_type):
-                raise TypeError(
-                    f"Feature definition key {flag!r} is not a {self._flag_type.__name__}"
-                )
+                message = f"Feature definition key {flag!r} is not a {self._flag_type.__name__}"
+                raise TypeError(message)
 
         missing = [flag.value for flag in self._flag_type if flag not in self._definitions]
         if missing:
-            raise ValueError(f"Missing feature definitions for: {', '.join(missing)}")
+            message = f"Missing feature definitions for: {', '.join(missing)}"
+            raise ValueError(message)

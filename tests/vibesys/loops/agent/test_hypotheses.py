@@ -1,7 +1,8 @@
 """Tests for the unified hypothesis aggregate and its pure transitions."""
 
 from dataclasses import replace
-from typing import Literal
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Literal, Required, TypedDict, Unpack, cast
 
 import pytest
 from pydantic import ValidationError
@@ -22,6 +23,8 @@ from vibesys.loops.agent.hypotheses import (
     start_hypothesis,
     update_active_hypothesis,
 )
+from vibesys.loops.agent.hypothesis_controller import HypothesisEngine
+from vibesys.loops.agent.loop import _complete_hypothesis_round, _RoundAttemptOutcome
 from vibesys.loops.agent.model import (
     AgentRunState,
     Hypothesis,
@@ -36,6 +39,28 @@ from vibesys.schemas import (
     PerfDeltaReason,
 )
 from vs_loop_state.api import PerfProvenance, RoundRecord
+
+if TYPE_CHECKING:
+    from vibesys.loops.request import LoopRunRequest
+
+
+class _RoundOptions(TypedDict, total=False):
+    hypothesis_id: Required[str]
+    parent_round: int | None
+    parent_commit: str | None
+    outcome: str
+    declared: str | None
+    direction: Literal["max", "min"]
+    retained: bool | None
+    comparison: MetricComparison | None
+    provenance: PerfProvenance | None
+
+
+class _DerivedRoundOptions(TypedDict, total=False):
+    unit: Required[str]
+    metrics: Required[dict[str, float]]
+    parent_round: int | None
+    parent_commit: str | None
 
 
 def _plan(
@@ -54,17 +79,17 @@ def _plan(
 def _round(
     number: int,
     metric: float | None,
-    *,
-    hypothesis_id: str,
-    parent_round: int | None = None,
-    parent_commit: str | None = None,
-    outcome: str = "proven",
-    declared: str | None = "nominated",
-    direction: Literal["max", "min"] = "max",
-    retained: bool | None = True,
-    comparison: MetricComparison | None = None,
-    provenance: PerfProvenance | None = "framework",
+    **options: Unpack[_RoundOptions],
 ) -> RoundRecord:
+    hypothesis_id = options["hypothesis_id"]
+    parent_round = options.get("parent_round")
+    parent_commit = options.get("parent_commit")
+    outcome = options.get("outcome", "proven")
+    declared = options.get("declared", "nominated")
+    direction = options.get("direction", "max")
+    retained = options.get("retained", True)
+    comparison = options.get("comparison")
+    provenance = options.get("provenance", "framework")
     return RoundRecord(
         round_number=number,
         commit=f"{number:040x}",
@@ -109,6 +134,54 @@ def _legacy_evidence_round(
         hypothesis_parent_round=parent_round,
         official_evaluation=True,
     )
+
+
+def test_completed_review_keeps_hypothesis_with_bounded_feedback() -> None:
+    hypothesis_id = "repair-after-review"
+    hypothesis = Hypothesis(
+        hypothesis_id=hypothesis_id,
+        plan=_plan(hypothesis_id),
+        started_round=1,
+        continuation_rounds=1,
+    )
+    engine = HypothesisEngine.create(
+        AgentRunState(
+            active_hypothesis_id=hypothesis_id,
+            hypotheses=[hypothesis],
+        ),
+        config=None,
+    )
+    record = RoundRecord(
+        round_number=2,
+        commit="2" * 40,
+        perf_metric=None,
+        perf_unit=None,
+        passed=False,
+        reviewed=True,
+        judge_verdict="fail",
+        hypothesis_id=hypothesis_id,
+    )
+    request = cast(
+        "LoopRunRequest",
+        SimpleNamespace(inner_loop="multi-agent", loop=SimpleNamespace(value="agent")),
+    )
+
+    updated = _complete_hypothesis_round(
+        engine,
+        hypothesis,
+        record,
+        request,
+        _RoundAttemptOutcome(
+            passed=False,
+            feedback="address the missing check",
+            implementation=None,
+        ),
+    )
+
+    active = updated.state.active_hypothesis
+    assert active is not None
+    assert active.feedback == "address the missing check"
+    assert active.continuation_rounds == 2
 
 
 def test_hypothesis_owns_all_of_its_rounds_and_active_is_only_a_pointer() -> None:
@@ -893,11 +966,7 @@ def test_an_unfindable_parent_commit_with_no_round_bound_fails_closed() -> None:
 def _derived_round(
     number: int,
     metric: float,
-    *,
-    unit: str,
-    metrics: dict[str, float],
-    parent_round: int | None = None,
-    parent_commit: str | None = None,
+    **options: Unpack[_DerivedRoundOptions],
 ) -> RoundRecord:
     """A round whose retention the framework must derive rather than read.
 
@@ -909,7 +978,7 @@ def _derived_round(
         round_number=number,
         commit=f"{number:040x}",
         perf_metric=metric,
-        perf_unit=unit,
+        perf_unit=options["unit"],
         passed=True,
         reviewed=True,
         hypothesis_id=f"H-{number}",
@@ -917,9 +986,9 @@ def _derived_round(
         hypothesis_outcome="proven",
         hypothesis_claim=f"claim H-{number}",
         hypothesis_task=f"implement H-{number}",
-        hypothesis_parent_round=parent_round,
-        hypothesis_parent_commit=parent_commit,
-        metrics=metrics,
+        hypothesis_parent_round=options.get("parent_round"),
+        hypothesis_parent_commit=options.get("parent_commit"),
+        metrics=options["metrics"],
         official_evaluation=True,
         perf_direction="max",
     )

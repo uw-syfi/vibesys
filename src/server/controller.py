@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
 from server.events import EventStatus, EventType, RunStatusChangedData
+from server.execution import AgentExecutionRequest
 from server.run_lifecycle import RunStatus, RunTrigger, transition
 
 if TYPE_CHECKING:
@@ -69,7 +70,8 @@ class RunController:
     ) -> None:
         """Attach durable run storage and optional canonical project state."""
         if project is not None and run_id is None:
-            raise ValueError("run_id is required when project is provided")
+            message = "run_id is required when project is provided"
+            raise ValueError(message)
         with self._condition:
             if project is not None and run_id is not None:
                 self._project_run = ProjectRunState(project, run_id)
@@ -132,16 +134,7 @@ class RunController:
 
     def start_agent_execution(
         self,
-        kind: str,
-        round_label: str,
-        user_prompt: str,
-        system_prompt: str = "",
-        *,
-        participates_in_run_control: bool = True,
-        emit_lifecycle: bool = True,
-        driver: str | None = None,
-        provider: str | None = None,
-        model: str | None = None,
+        request: AgentExecutionRequest,
     ) -> ExecutionHandle:
         """Allocate an invocation's identity and track it.
 
@@ -152,17 +145,7 @@ class RunController:
         already applied any entry-side run control to `user_prompt`.
         """
         with self._condition:
-            return self._executions.start_locked(
-                kind,
-                round_label,
-                user_prompt,
-                system_prompt,
-                participates_in_run_control=participates_in_run_control,
-                emit_lifecycle=emit_lifecycle,
-                driver=driver,
-                provider=provider,
-                model=model,
-            )
+            return self._executions.start_locked(request)
 
     def before_agent(
         self, kind: str, round_label: str, user_prompt: str, system_prompt: str = ""
@@ -174,7 +157,14 @@ class RunController:
         is not part of. Callers that need pause/stop/steering applied must
         go through the core invocation path instead.
         """
-        execution = self.start_agent_execution(kind, round_label, user_prompt, system_prompt)
+        execution = self.start_agent_execution(
+            AgentExecutionRequest(
+                kind=kind,
+                round_label=round_label,
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+            )
+        )
         self._executions.remember_legacy(execution.execution_id)
         return execution.user_prompt
 
@@ -183,7 +173,7 @@ class RunController:
         kind: str,
         round_label: str,
         *,
-        result: Any = None,
+        result: object | None = None,
         error: BaseException | None = None,
         execution_id: str | None = None,
     ) -> None:

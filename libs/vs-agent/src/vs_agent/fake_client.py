@@ -123,7 +123,7 @@ class FakeAgentClient:
 
     backend_name = "fake"
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-010177 [PLR0913]; Preserve FakeAgentClient.__init__'s named-argument contract because callers pass these independent settings directly.
         self,
         *,
         backend_name: str = "fake",
@@ -335,7 +335,7 @@ class FakeAgentClient:
 
     # -- AgentClientProtocol: turns ------------------------------------------
 
-    def invoke(
+    def invoke(  # noqa: PLR0913  # lint-waiver: LW-010178 [PLR0913]; Preserve FakeAgentClient.invoke's named-argument contract because callers pass these independent settings directly.
         self,
         *,
         kind: str,
@@ -373,7 +373,7 @@ class FakeAgentClient:
         self._emit_stream(kind, invocation)
         return self._resolve_response(kind, invocation, response_cls, fallback_factory)
 
-    def invoke_text(
+    def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-010179 [PLR0913]; Preserve FakeAgentClient.invoke_text's named-argument contract because callers pass these independent settings directly.
         self,
         *,
         kind: str,
@@ -411,7 +411,7 @@ class FakeAgentClient:
 
     # -- internals ------------------------------------------------------------
 
-    def _record(
+    def _record(  # noqa: PLR0913  # lint-waiver: LW-010180 [PLR0913]; Preserve FakeAgentClient._record's named-argument contract because callers pass these independent settings directly.
         self,
         *,
         method: Literal["invoke", "invoke_text"],

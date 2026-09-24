@@ -26,7 +26,7 @@ def test_kv_store_input_bundle_loads() -> None:
 
 
 def test_kv_store_judge_prompt_mentions_resp2_not_http() -> None:
-    pass_criteria = "PC"
+    criteria_text = "PC"
     output = render_template(
         "judge_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -35,7 +35,7 @@ def test_kv_store_judge_prompt_mentions_resp2_not_http() -> None:
         domain_judge="",
         accuracy_command="uv run python accuracy_checker/checker.py",
         benchmark_command="uv run python benchmark/benchmark.py",
-        pass_criteria=pass_criteria,
+        pass_criteria=criteria_text,
         retry=1,
         runtime_notes="",
         profile_execution="local",

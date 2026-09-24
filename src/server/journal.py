@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 from server.diagnostics import (
     Diagnostic,
@@ -148,7 +148,7 @@ class EventJournal:
         text: str = "",
         *,
         data: EventData | None = None,
-        **fields: Any,
+        **fields: object,
     ) -> RunEvent:
         """Construct and append one server wire event."""
         _require_failure_diagnostic(event_type, fields.get("status"), fields.get("diagnostic"))
@@ -174,7 +174,7 @@ class EventJournal:
                 return event
             return self._apply_recorded(store.append(event))
 
-    def record_failure(
+    def record_failure(  # noqa: PLR0913  # lint-waiver: LW-011108 [PLR0913]; The nonterminal API accepts event-specific payload/text and optional prebuilt diagnostics while deriving defaults from error, scope, and operation.
         self,
         event_type: EventType,
         error: BaseException,
@@ -187,11 +187,12 @@ class EventJournal:
         severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
         status: EventStatus = EventStatus.FAILED,
         diagnostic: Diagnostic | None = None,
-        **fields: Any,
+        **fields: object,
     ) -> RunEvent:
         """Record a nonterminal operation failure with stable diagnostics."""
         if event_type not in _NONTERMINAL_FAILURE_EVENTS:
-            raise ValueError(f"Cannot record {event_type.value} without owning run termination")
+            message = f"Cannot record {event_type.value} without owning run termination"
+            raise ValueError(message)
         return self.record_terminal_failure(
             event_type,
             error,
@@ -206,7 +207,7 @@ class EventJournal:
             **fields,
         )
 
-    def record_terminal_failure(
+    def record_terminal_failure(  # noqa: PLR0913  # lint-waiver: LW-011109 [PLR0913]; Terminal event callers choose event-specific payload/text, status/severity, or a diagnostic override; these are distinct wire-event fields.
         self,
         event_type: EventType,
         error: BaseException,
@@ -219,11 +220,12 @@ class EventJournal:
         severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
         status: EventStatus = EventStatus.FAILED,
         diagnostic: Diagnostic | None = None,
-        **fields: Any,
+        **fields: object,
     ) -> RunEvent:
         """Record an allowed failure event with stable diagnostics."""
         if event_type not in DIAGNOSTIC_FAILURE_EVENTS:
-            raise ValueError(f"{event_type.value} is not an operational failure event")
+            message = f"{event_type.value} is not an operational failure event"
+            raise ValueError(message)
         diagnostic = diagnostic or self.diagnostic_for(error, scope, operation=operation)
         if diagnostic.severity is not severity:
             diagnostic = diagnostic.model_copy(update={"severity": severity})
@@ -238,7 +240,7 @@ class EventJournal:
         )
 
     @contextmanager
-    def capture_failure(
+    def capture_failure(  # noqa: PLR0913  # lint-waiver: LW-011110 [PLR0913]; This context manager must carry the same event-specific payload, diagnostic factory, text, severity, and event fields as record_failure while re-raising.
         self,
         *,
         event_type: EventType,
@@ -248,14 +250,17 @@ class EventJournal:
         data_factory: Callable[[Diagnostic], EventData] | None = None,
         text: str | None = None,
         severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
-        **fields: Any,
+        **fields: object,
     ) -> Generator[None]:
         """Record and re-raise an exception from a nonterminal operation."""
         if event_type not in _NONTERMINAL_FAILURE_EVENTS:
-            raise ValueError(f"Cannot capture {event_type.value} without owning run termination")
+            message = f"Cannot capture {event_type.value} without owning run termination"
+            raise ValueError(message)
         try:
             yield
         except BaseException as error:
+            status = cast("EventStatus", fields.pop("status", EventStatus.FAILED))
+            diagnostic = cast("Diagnostic | None", fields.pop("diagnostic", None))
             self.record_failure(
                 event_type,
                 error,
@@ -265,6 +270,8 @@ class EventJournal:
                 data_factory=data_factory,
                 text=text,
                 severity=severity,
+                status=status,
+                diagnostic=diagnostic,
                 **fields,
             )
             raise
@@ -412,7 +419,7 @@ class EventJournal:
 def _require_failure_diagnostic(
     event_type: EventType,
     status: object,
-    diagnostic: Diagnostic | None,
+    diagnostic: object,
 ) -> None:
     """Reject a FAILED operational event that carries no diagnostic.
 
@@ -424,7 +431,8 @@ def _require_failure_diagnostic(
         and status in {EventStatus.FAILED, EventStatus.FAILED.value}
         and diagnostic is None
     ):
-        raise ValueError(f"Failed {event_type.value} events must include a diagnostic")
+        message = f"Failed {event_type.value} events must include a diagnostic"
+        raise ValueError(message)
 
 
 def _header_from_event(event: RunEvent) -> EventHeader:

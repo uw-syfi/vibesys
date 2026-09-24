@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tomllib
+from importlib import import_module
 from typing import TYPE_CHECKING
 
 from vibesys.config import load_config as _load_config
@@ -32,13 +33,13 @@ def validate(request: RunRequest) -> list[ConfigurationDiagnostic]:
     pydantic model, so field-shape errors already surface as a
     `pydantic.ValidationError` at construction time and never reach here.
     """
-    from vibesys.errors import ConfigurationDiagnostic
+    configuration_diagnostic = import_module("vibesys.errors").ConfigurationDiagnostic
 
     diagnostics: list[ConfigurationDiagnostic] = []
     bundle = request.input_bundle
     if not bundle.root.exists():
         diagnostics.append(
-            ConfigurationDiagnostic(
+            configuration_diagnostic(
                 code="missing_input",
                 stage="input_validation",
                 message=f"Input bundle root does not exist: {bundle.root}",
@@ -46,7 +47,7 @@ def validate(request: RunRequest) -> list[ConfigurationDiagnostic]:
         )
     if bundle.evaluator_path is not None and not bundle.evaluator_path.exists():
         diagnostics.append(
-            ConfigurationDiagnostic(
+            configuration_diagnostic(
                 code="missing_evaluator",
                 stage="input_validation",
                 message=f"Evaluator path does not exist: {bundle.evaluator_path}",
@@ -62,16 +63,16 @@ def default_request(project: Project, loop: LoopKind) -> RunRequest:
     its `agent.toml`, if any, else the built-in defaults. Loop-specific fields
     are left at their `RunRequest` defaults.
     """
-    from vibesys.api.contracts import Config, RunRequest
+    contracts = import_module("vibesys.api.contracts")
 
     config_path = project.root / "agent.toml"
     config = (
         load_config(config_path)
         if config_path.is_file()
-        else Config.model_validate(tomllib.loads(_DEFAULT_CONFIG_TEXT))
+        else contracts.Config.model_validate(tomllib.loads(_DEFAULT_CONFIG_TEXT))
     )
     bundle = load_input_bundle(project.root)
-    return RunRequest(
+    return contracts.RunRequest(
         project_root=project.root,
         loop=loop,
         config=config,

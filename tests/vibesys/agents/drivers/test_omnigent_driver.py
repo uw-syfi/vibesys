@@ -12,17 +12,15 @@ import os
 import shutil
 import sys
 import threading
-from collections.abc import AsyncIterator, Coroutine
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from unittest.mock import patch
 
 import pytest
 from omnigent.inner import os_env as omnigent_os_env
-from omnigent.inner.executor import ExecutorConfig
 from omnigent.inner.sandbox import (
     SandboxPolicy,
 )
@@ -44,10 +42,16 @@ from vs_agent.drivers.omnigent import (
     OmnigentDriverError,
     OmnigentSession,
     _build_os_tools,
-    _LifecycleState,
 )
 from vs_agent.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
 from vs_sandbox.api import HostResource, ProjectPathPolicy
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Coroutine
+
+    from omnigent.inner.executor import ExecutorConfig
+
+    from vs_agent.drivers.omnigent import _OwnedOSTools
 
 omnigent = pytest.importorskip("omnigent")
 TextChunk = omnigent.TextChunk
@@ -72,6 +76,30 @@ requires_sandbox_backend = pytest.mark.skipif(
 )
 
 
+def _dispatch_os_tools_concurrently(
+    tools: list[_OwnedOSTools], environment_ready: threading.Barrier, environment_key: str
+) -> tuple[list[str], str]:
+    def unrelated_subprocess() -> str:
+        environment_ready.wait(timeout=2)
+        return run_test_command(
+            [sys.executable, "-c", f"import os; print(os.environ[{environment_key!r}])"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        futures: list[concurrent.futures.Future[Any]] = [
+            pool.submit(
+                asyncio.run,
+                os_tools.dispatch("sys_os_shell", {"command": "cargo test"}),
+            )
+            for os_tools in tools
+        ]
+        inherited = pool.submit(unrelated_subprocess)
+        return [future.result(timeout=2) for future in futures], inherited.result(timeout=2)
+
+
 def _registered_executor_class(provider: str) -> type[Any]:
     spec = OMNIGENT_PROVIDER_EXECUTORS[provider]
     module = importlib.import_module(spec.module)
@@ -82,7 +110,6 @@ def _registered_executor_class(provider: str) -> type[Any]:
 
 @pytest.mark.parametrize("provider", ["claude", "codex"])
 def test_registered_executor_matches_pinned_omnigent_api(provider: str) -> None:
-    driver = OmnigentDriver()
     executor_spec = OMNIGENT_PROVIDER_EXECUTORS[provider]
 
     executor_class = _registered_executor_class(provider)
@@ -196,8 +223,16 @@ def test_provider_environment_is_applied_during_session_creation_without_mutatin
         def __init__(self, **_kwargs: object) -> None:
             super().__init__([])
             environment = {"BASE": "preserved"}
-            setattr(self, attribute, environment)
+            self._set_provider_environment(environment, attribute)
             provider_environments.append(environment)
+
+        def _set_provider_environment(
+            self, environment: dict[str, str], attribute_name: str
+        ) -> None:
+            if attribute_name == "_env":
+                self._env = environment
+            else:
+                self._extra_env = environment
 
     driver = OmnigentDriver()
     monkeypatch.setattr(driver, "_executor_class", lambda _spec: Executor)
@@ -241,12 +276,15 @@ def test_distinct_tool_helpers_snapshot_their_own_environment_without_command_re
     class Resource:
         def __init__(self) -> None:
             self.close_calls = 0
+            resources.append(self)
             helper = Helper()
-            setattr(self, "_helper", helper)
+            self._helper = helper
             self.start_helper = helper.start
 
         def close(self) -> None:
             self.close_calls += 1
+
+    resources: list[Resource] = []
 
     class Helper:
         def __init__(self) -> None:
@@ -287,14 +325,7 @@ def test_distinct_tool_helpers_snapshot_their_own_environment_without_command_re
             self.resource.start_helper()
             return arguments
 
-    resources: list[Resource] = []
-
-    def create_environment(_spec: object) -> Resource:
-        resource = Resource()
-        resources.append(resource)
-        return resource
-
-    monkeypatch.setattr(omnigent_os_env, "create_os_environment", create_environment)
+    monkeypatch.setattr(omnigent_os_env, "create_os_environment", lambda _spec: Resource())
     monkeypatch.setattr(
         omnigent_os_tools,
         "build_os_env_tools",
@@ -306,30 +337,11 @@ def test_distinct_tool_helpers_snapshot_their_own_environment_without_command_re
         for cargo_home in cargo_homes
     ]
 
-    def dispatch_together() -> tuple[list[str], str]:
-        def unrelated_subprocess() -> str:
-            environment_ready.wait(timeout=2)
-            return run_test_command(
-                [sys.executable, "-c", f"import os; print(os.environ[{key!r}])"],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            futures: list[concurrent.futures.Future[Any]] = [
-                pool.submit(
-                    asyncio.run,
-                    os_tools.dispatch("sys_os_shell", {"command": "cargo test"}),
-                )
-                for os_tools in built
-            ]
-            inherited = pool.submit(unrelated_subprocess)
-            return [future.result(timeout=2) for future in futures], inherited.result(timeout=2)
-
-    commands, first_inherited = dispatch_together()
+    commands, first_inherited = _dispatch_os_tools_concurrently(built, environment_ready, key)
     monkeypatch.setenv(key, "new ambient")
-    restarted_commands, second_inherited = dispatch_together()
+    restarted_commands, second_inherited = _dispatch_os_tools_concurrently(
+        built, environment_ready, key
+    )
 
     assert commands == ['{"command": "cargo test"}', '{"command": "cargo test"}']
     assert restarted_commands == commands

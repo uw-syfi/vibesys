@@ -1,11 +1,12 @@
 """Tests for vibesys.loops.agent — orchestrator-driven build loop."""
 
 import json
+import shlex
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Literal, TypedDict, Unpack, cast
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, Unpack, cast
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -16,6 +17,7 @@ from entrypoints.cli import (
     _load_objective,
     _validate_agent,
 )
+from vibesys.api.contracts import LoopKind, ResumeRef, RunRequest
 from vibesys.config import Config, as_config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationError
@@ -48,14 +50,20 @@ from vibesys.loops.agent.loop import (
     _pareto_frontier_records,
     _provisional_candidates_since_official,
     _review_due,
-    _run_framework_accuracy_gate,
-    _run_framework_benchmark,
-    _run_framework_gates,
     _run_framework_validation_gate,
     _select_final_candidate,
     _terminal_workspace_notice,
     _trusted_candidate_records,
     run_agent_loop,
+)
+from vibesys.loops.agent.loop import (
+    _run_framework_accuracy_gate as _run_framework_accuracy_gate_impl,
+)
+from vibesys.loops.agent.loop import (
+    _run_framework_benchmark as _run_framework_benchmark_impl,
+)
+from vibesys.loops.agent.loop import (
+    _run_framework_gates as _run_framework_gates_impl,
 )
 from vibesys.loops.agent.model import Hypothesis, HypothesisResolution, HypothesisReview
 from vibesys.loops.agent.state import AgentRunStateStore
@@ -87,7 +95,7 @@ from vibesys.schemas import (
     ValidationRecipeArtifact,
     Verdict,
 )
-from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionScope
+from vs_agent.api import AgentClientProtocol, AgentSessionKey, RoundProgress, SessionScope
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_agent.stub_runner import StubAgentClient
 from vs_loop_state.api import RoundRecord
@@ -105,6 +113,142 @@ if TYPE_CHECKING:
 def _exec_result(*, exit_code: int, output: str) -> SandboxExecutionResult:
     """Build a judge-backend result whose stdout is the whole output."""
     return SandboxExecutionResult(output=output, exit_code=exit_code, stdout=output)
+
+
+def _gate_test_request(
+    *,
+    result_spec: BenchmarkResult | None = None,
+    result_protocol: Literal[2] | None = None,
+    objectives: list[Objective] | None = None,
+    accuracy_timeout: int | None = None,
+    benchmark_timeout: int | None = None,
+) -> SimpleNamespace:
+    bundle = SimpleNamespace(
+        benchmark_result=result_spec,
+        benchmark_result_protocol=result_protocol,
+        manifest=SimpleNamespace(
+            accuracy=SimpleNamespace(timeout_seconds=accuracy_timeout),
+            benchmark=SimpleNamespace(timeout_seconds=benchmark_timeout),
+        ),
+    )
+    return SimpleNamespace(
+        input_bundle=bundle,
+        metrics=SimpleNamespace(objectives=objectives or []),
+        memory_layout="files",
+    )
+
+
+class _AccuracyGateOptions(TypedDict):
+    round_number: int
+    retry: int
+    progress_path: Path
+    timeout_seconds: NotRequired[int | None]
+    candidate_revision: NotRequired[str | None]
+    release_deployment_after: NotRequired[bool]
+
+
+class _BenchmarkGateOptions(TypedDict):
+    result_spec: BenchmarkResult | None
+    round_number: int
+    retry: int
+    progress_path: Path
+    result_protocol: NotRequired[Literal[2] | None]
+    objectives: NotRequired[list[Objective] | None]
+    timeout_seconds: NotRequired[int | None]
+    candidate_revision: NotRequired[str | None]
+
+
+class _FrameworkGatesOptions(TypedDict):
+    benchmark_result: BenchmarkResult | None
+    round_number: int
+    retry: int
+    progress_path: Path
+    benchmark_result_protocol: NotRequired[Literal[2] | None]
+    objectives: NotRequired[list[Objective] | None]
+    reuse_accuracy_pass: NotRequired[bool]
+
+
+def _run_framework_accuracy_gate(
+    ctx: MagicMock,
+    **kwargs: Unpack[_AccuracyGateOptions],
+) -> str | None:
+    round_number = kwargs["round_number"]
+    retry = kwargs["retry"]
+    progress_path = kwargs["progress_path"]
+    timeout_seconds = kwargs.get("timeout_seconds")
+    candidate_revision = kwargs.get("candidate_revision")
+    release_deployment_after = kwargs.get("release_deployment_after", False)
+    ctx.workspace = progress_path.parent
+    if candidate_revision is not None:
+        ctx.git.current_sha.return_value = candidate_revision
+    request = _gate_test_request(
+        result_spec=None
+        if release_deployment_after
+        else BenchmarkResult(json_argument="--output-json", metric="metric"),
+        accuracy_timeout=timeout_seconds,
+    )
+    return _run_framework_accuracy_gate_impl(
+        ctx, request, RoundProgress(round_number, round_number), retry, progress_path
+    )
+
+
+def _run_framework_benchmark(
+    ctx: MagicMock,
+    **kwargs: Unpack[_BenchmarkGateOptions],
+) -> FrameworkBenchmarkOutcome:
+    result_spec = kwargs["result_spec"]
+    result_protocol = kwargs.get("result_protocol")
+    objectives = kwargs.get("objectives")
+    round_number = kwargs["round_number"]
+    retry = kwargs["retry"]
+    progress_path = kwargs["progress_path"]
+    timeout_seconds = kwargs.get("timeout_seconds")
+    candidate_revision = kwargs.get("candidate_revision")
+    ctx.workspace = progress_path.parent
+    if candidate_revision is not None:
+        ctx.git.current_sha.return_value = candidate_revision
+    request = _gate_test_request(
+        result_spec=result_spec,
+        result_protocol=result_protocol,
+        objectives=objectives,
+        benchmark_timeout=timeout_seconds,
+    )
+    return _run_framework_benchmark_impl(
+        ctx, request, RoundProgress(round_number, round_number), retry, progress_path
+    )
+
+
+def _run_framework_gates(
+    ctx: MagicMock,
+    **kwargs: Unpack[_FrameworkGatesOptions],
+) -> tuple[str | None, FrameworkBenchmarkOutcome, bool]:
+    benchmark_result = kwargs["benchmark_result"]
+    benchmark_result_protocol = kwargs.get("benchmark_result_protocol")
+    objectives = kwargs.get("objectives")
+    round_number = kwargs["round_number"]
+    retry = kwargs["retry"]
+    progress_path = kwargs["progress_path"]
+    reuse_accuracy_pass = kwargs.get("reuse_accuracy_pass", False)
+    ctx.workspace = progress_path.parent
+    ctx.git.current_sha.return_value = "test-revision"
+    request = _gate_test_request(
+        result_spec=benchmark_result,
+        result_protocol=benchmark_result_protocol,
+        objectives=objectives,
+    )
+    hypothesis = SimpleNamespace(
+        gate_revalidation_pending=reuse_accuracy_pass,
+        gate_candidate_commit="test-revision",
+        gate_accuracy_passed=reuse_accuracy_pass,
+    )
+    feedback, outcome, evaluated, _candidate_revision = _run_framework_gates_impl(
+        ctx,
+        request,
+        RoundProgress(round_number, round_number),
+        retry,
+        cast("Hypothesis", hypothesis),
+    )
+    return feedback, outcome, evaluated
 
 
 def test_missing_implementer_response_fails_closed() -> None:
@@ -339,7 +483,7 @@ def _orchestrator_turns(
 
 
 class _AgentLoopArguments(TypedDict, total=False):
-    """The keyword surface of :func:`run_agent_loop`, mirrored for the harness."""
+    """Legacy convenience inputs accepted by the test harness."""
 
     config: Config
     exp_name: str
@@ -380,6 +524,7 @@ class _AgentLoopArguments(TypedDict, total=False):
     interface: str
     remote_repo: str | None
     repo_visibility: RepositoryVisibility
+    outer_loop: Literal["agent", "profile-guided"]
 
 
 _THROUGHPUT_LATENCY = MetricSpace(
@@ -413,6 +558,69 @@ def _invoke_orchestrate(
         "metrics": MetricSpace(),
     }
     defaults.update(kwargs)
+    bundle = load_input_bundle(Path(defaults["input_path"]))
+    agent = bundle.manifest.agent.model_copy(
+        update={"domain": defaults.get("domain", bundle.domain)}
+    )
+    accuracy = bundle.manifest.accuracy.model_copy(
+        update={"timeout_seconds": defaults.get("accuracy_timeout_seconds")}
+    )
+    benchmark = bundle.manifest.benchmark.model_copy(
+        update={
+            "result": defaults.get("benchmark_result"),
+            "result_protocol": defaults.get("benchmark_result_protocol"),
+            "timeout_seconds": defaults.get("benchmark_timeout_seconds"),
+        }
+    )
+    bundle = bundle.model_copy(
+        update={
+            "manifest": bundle.manifest.model_copy(
+                update={"agent": agent, "accuracy": accuracy, "benchmark": benchmark}
+            ),
+            "resolved_accuracy_command": tuple(shlex.split(defaults["accuracy_command"])),
+            "resolved_benchmark_command": tuple(shlex.split(defaults["benchmark_command"])),
+            "workspace_sources": defaults.get("workspace_sources", bundle.workspace_sources),
+            "evaluator_path": defaults.get("evaluator_path", bundle.evaluator_path),
+            "evaluator_package_root": defaults.get(
+                "evaluator_package_root", bundle.evaluator_package_root
+            ),
+        }
+    )
+    exp_name = defaults["exp_name"]
+    is_resuming = defaults.get("existing", False)
+    request = RunRequest(
+        project_root=bundle.root,
+        loop=(
+            LoopKind.PROFILE_GUIDED
+            if defaults.get("outer_loop") == "profile-guided"
+            else LoopKind.AGENT
+        ),
+        config=defaults["config"],
+        input_bundle=bundle,
+        objective=defaults.get("objective", bundle.objective),
+        resume=ResumeRef(run_id=exp_name) if is_resuming else None,
+        exp_name=None if is_resuming else exp_name,
+        runs_dir=defaults["runs_dir"],
+        metrics=defaults.get("metrics", MetricSpace()),
+        operator_constraints=defaults.get("operator_constraints", ()),
+        debug=defaults.get("debug", False),
+        profiler_kind=defaults.get("profiler_kind", ProfilerKind.HEADROOM),
+        skills_dirs=defaults.get("skills_dirs"),
+        run_environment=defaults.get("run_environment"),
+        agent_backend=defaults.get("agent_backend"),
+        cli_provider=defaults.get("cli_provider"),
+        backend=defaults.get("backend", ComputeBackend.CPU),
+        modality=defaults.get("modality"),
+        interface=defaults.get("interface", "inprocess"),
+        inner_loop=defaults.get("inner_loop", "multi-agent"),
+        remote_repo=defaults.get("remote_repo"),
+        repo_visibility=defaults.get("repo_visibility", RepositoryVisibility.PRIVATE),
+        max_rounds=defaults.get("max_rounds", 24),
+        max_retries_per_round=defaults.get("max_retries_per_round", 3),
+        judge_every=defaults.get("judge_every", 3),
+        official_eval_every=defaults.get("official_eval_every", 3),
+        memory_layout=defaults.get("memory_layout", "files"),
+    )
     with (
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
         patch("vibesys.context.build_agent_client", return_value=runner),
@@ -423,7 +631,7 @@ def _invoke_orchestrate(
             return_value=None,
         ),
     ):
-        return run_agent_loop(**defaults)
+        return run_agent_loop(request, start_round=defaults.get("start_round"))
 
 
 def _created_project(tmp_path: Path) -> Path:
@@ -465,6 +673,52 @@ def _active_hypothesis(tmp_path: Path) -> Hypothesis | None:
 
 
 def test_project_configuration_captures_effective_agent_behavior(tmp_path: Path) -> None:
+    project = tmp_path / "input"
+    project.mkdir()
+    (project / "OBJECTIVE.md").write_text("Optimize the queue.\n")
+    (project / "vibesys.input.toml").write_text(
+        'version = 1\n\n[agent]\ndomain = "generic"\n'
+        '[accuracy]\ncommand = ["check"]\n'
+        '[benchmark]\ncommand = ["benchmark"]\n'
+    )
+    bundle = load_input_bundle(project)
+    request = RunRequest(
+        project_root=project,
+        loop=LoopKind.AGENT,
+        config=as_config(
+            {
+                "model": {"name": "gpt-default"},
+                "thinking": {"level": "high"},
+                "agent": {
+                    "backend": "cli",
+                    "cli_provider": "codex",
+                    "cli_timeout": 900,
+                    "outer": {"model": "gpt-outer", "reasoning_effort": "xhigh"},
+                    "inner": {"model": "gpt-inner", "reasoning_effort": "medium"},
+                },
+            }
+        ),
+        input_bundle=bundle,
+        objective="Optimize the queue",
+        exp_name="queue",
+        runs_dir=tmp_path / "projects",
+        metrics=MetricSpace(),
+        backend=ComputeBackend.CUDA,
+        inner_loop="single-agent",
+        interface="service",
+        modality="messages",
+        max_rounds=7,
+        max_retries_per_round=4,
+        judge_every=2,
+        official_eval_every=5,
+        memory_layout="directories",
+        operator_constraints=("Preserve ordering",),
+        run_environment=make_run_environment_spec(
+            use_modal=True,
+            modal_gpu="A100-80GB",
+            modal_model_volume="weights",
+        ),
+    )
     with (
         patch(
             "vibesys.loops.agent.loop.create_run_context",
@@ -472,43 +726,7 @@ def test_project_configuration_captures_effective_agent_behavior(tmp_path: Path)
         ) as create_context,
         pytest.raises(RuntimeError, match="captured project configuration"),
     ):
-        run_agent_loop(
-            config=as_config(
-                {
-                    "model": {"name": "gpt-default"},
-                    "thinking": {"level": "high"},
-                    "agent": {
-                        "backend": "cli",
-                        "cli_provider": "codex",
-                        "cli_timeout": 900,
-                        "outer": {"model": "gpt-outer", "reasoning_effort": "xhigh"},
-                        "inner": {"model": "gpt-inner", "reasoning_effort": "medium"},
-                    },
-                }
-            ),
-            exp_name="queue",
-            input_path=str(tmp_path),
-            accuracy_command="check",
-            benchmark_command="benchmark",
-            objective="Optimize the queue",
-            runs_dir=tmp_path / "projects",
-            inner_loop="single-agent",
-            interface="service",
-            modality="messages",
-            max_rounds=7,
-            max_retries_per_round=4,
-            judge_every=2,
-            official_eval_every=5,
-            memory_layout="directories",
-            operator_constraints=("Preserve ordering",),
-            domain=DomainName.GENERIC,
-            metrics=MetricSpace(),
-            run_environment=make_run_environment_spec(
-                use_modal=True,
-                modal_gpu="A100-80GB",
-                modal_model_volume="weights",
-            ),
-        )
+        run_agent_loop(request)
 
     configuration = create_context.call_args.kwargs["project_configuration"]
     assert configuration.model_dump() == {
@@ -764,8 +982,7 @@ def test_official_evaluation_cadence_counts_candidate_checkpoints_not_rounds() -
     assert (
         _official_evaluation_reason(
             records=records,
-            round_number=5,
-            max_rounds=20,
+            progress=RoundProgress(5, 20),
             official_eval_every=3,
             requested=False,
             candidate_ready=True,
@@ -1369,8 +1586,7 @@ def test_official_evaluation_cadence_resets_at_verified_checkpoint() -> None:
     assert (
         _official_evaluation_reason(
             records=records,
-            round_number=3,
-            max_rounds=20,
+            progress=RoundProgress(3, 20),
             official_eval_every=3,
             requested=False,
             candidate_ready=True,
@@ -4563,6 +4779,7 @@ def test_loop_generic_auto_profiler_resolves_to_macos_cpu(tmp_path: Path, ref_fi
             fake,
             max_rounds=2,
             domain=DomainName.GENERIC,
+            profiler_kind=ProfilerKind.AUTO,
         )
 
     assert result is True

@@ -28,12 +28,13 @@ from server.events import (
     ToolCallData,
     ToolResultData,
 )
+from vs_agent.api import AgentSelection
 
 
 def test_explicit_executions_are_independent_and_finish_idempotently(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    first = parts.controller.start_agent_execution("implementer", "round-1", "first")
-    second = parts.controller.start_agent_execution("implementer", "round-1-retry-2", "second")
+    first = parts.start_execution("implementer", "round-1", "first")
+    second = parts.start_execution("implementer", "round-1-retry-2", "second")
 
     assert {item.execution_id for item in parts.api.snapshot().active_executions} == {
         first.execution_id,
@@ -78,13 +79,19 @@ def test_execution_identity_is_recorded_in_events_and_checkpoints(
     expected: tuple[str | None, str | None, str | None],
 ) -> None:
     parts = build_server_parts(tmp_path)
-    parts.controller.start_agent_execution(
+    parts.start_execution(
         "implementer",
         "round-1",
         "work",
-        driver=identity.get("driver"),
-        provider=identity.get("provider"),
-        model=identity.get("model"),
+        agent_selection=(
+            AgentSelection(
+                driver=identity["driver"],
+                provider=identity["provider"],
+                model=identity["model"],
+            )
+            if identity
+            else None
+        ),
     )
 
     started = next(
@@ -100,7 +107,7 @@ def test_execution_identity_is_recorded_in_events_and_checkpoints(
 
 def test_activity_tracks_todos_and_parallel_tools(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
+    execution = parts.start_execution("implementer", "round-1", "work")
     publish = parts.executions.publish_presentation
     publish(
         EventType.TODO_UPDATE,
@@ -137,7 +144,7 @@ def test_activity_tracks_todos_and_parallel_tools(tmp_path: Path) -> None:
 @pytest.mark.parametrize("terminal_todo_status", ["pending", "completed"])
 def test_terminal_todo_clears_stale_summary(tmp_path: Path, terminal_todo_status: str) -> None:
     parts = build_server_parts(tmp_path)
-    execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
+    execution = parts.start_execution("implementer", "round-1", "work")
     parts.executions.publish_presentation(
         EventType.TODO_UPDATE,
         TodoUpdateData(todos=[TodoItemData(content="Run tests", status="in_progress")]),
@@ -155,7 +162,7 @@ def test_terminal_todo_clears_stale_summary(tmp_path: Path, terminal_todo_status
 
 def test_terminal_todo_preserves_active_tool(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
+    execution = parts.start_execution("implementer", "round-1", "work")
     parts.executions.publish_presentation(
         EventType.TOOL_CALL,
         ToolCallData(tool="Bash", args={}),
@@ -173,7 +180,7 @@ def test_terminal_todo_preserves_active_tool(tmp_path: Path) -> None:
 
 def test_checkpoint_watermark_and_active_state_are_consistent(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    execution = parts.controller.start_agent_execution("judge", "round-2", "review")
+    execution = parts.start_execution("judge", "round-2", "review")
 
     checkpoint = parts.api.subscription_checkpoint(0)
     assert all(event.sequence <= checkpoint.through_sequence for event in checkpoint.events)
@@ -234,7 +241,7 @@ def test_attach_merges_bootstrap_and_durable_execution_history(tmp_path: Path) -
 
 def test_streamed_text_does_not_override_active_tool(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
+    execution = parts.start_execution("implementer", "round-1", "work")
     parts.executions.publish_presentation(
         EventType.TOOL_CALL,
         ToolCallData(tool="Bash", args={}),
@@ -248,9 +255,9 @@ def test_streamed_text_does_not_override_active_tool(tmp_path: Path) -> None:
 
 def test_chat_execution_is_isolated_from_run_control(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    main = parts.controller.start_agent_execution("implementer", "round-1", "work")
+    main = parts.start_execution("implementer", "round-1", "work")
     parts.controller.pause_after_call()
-    chat = parts.controller.start_agent_execution(
+    chat = parts.start_execution(
         "chat",
         "experiment-chat",
         "status?",
@@ -265,7 +272,7 @@ def test_chat_execution_is_isolated_from_run_control(tmp_path: Path) -> None:
     parts.controller.after_agent("implementer", "round-1", execution_id=main.execution_id)
     assert parts.api.snapshot().status == "paused"
 
-    paused_chat = parts.controller.start_agent_execution(
+    paused_chat = parts.start_execution(
         "chat",
         "experiment-chat",
         "status?",
@@ -276,7 +283,7 @@ def test_chat_execution_is_isolated_from_run_control(tmp_path: Path) -> None:
 
 
 def _chat_execution(parts: ServerParts, thread_id: str | None) -> AbstractContextManager[None]:
-    execution = parts.controller.start_agent_execution(
+    execution = parts.start_execution(
         "chat",
         "experiment-chat",
         "status?",
@@ -334,7 +341,7 @@ def test_default_chat_presentation_matches_its_terminal_answer(tmp_path: Path) -
 
 def test_presentation_events_outside_chat_carry_no_thread(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
+    execution = parts.start_execution("implementer", "round-1", "work")
 
     with parts.executions.presentation_scope(
         agent_kind="implementer",
@@ -380,14 +387,14 @@ def test_presentation_scope_restores_the_enclosing_scope(tmp_path: Path) -> None
 
 def test_cancellation_and_run_finish_terminalize_activity(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    cancelled = parts.controller.start_agent_execution("implementer", "round-1", "work")
+    cancelled = parts.start_execution("implementer", "round-1", "work")
     parts.controller.after_agent(
         "implementer",
         "round-1",
         error=asyncio.CancelledError(),
         execution_id=cancelled.execution_id,
     )
-    dangling = parts.controller.start_agent_execution("judge", "round-1", "review")
+    dangling = parts.start_execution("judge", "round-1", "review")
     parts.controller.finish()
 
     terminal = {
@@ -451,11 +458,11 @@ def test_failed_lifecycle_append_does_not_advance_active_state(
 
     monkeypatch.setattr(EventStore, "append", fail_start)
     with pytest.raises(OSError, match="disk full"):
-        parts.controller.start_agent_execution("implementer", "round-1", "work")
+        parts.start_execution("implementer", "round-1", "work")
     assert parts.api.snapshot().active_executions == []
 
     monkeypatch.setattr(EventStore, "append", append)
-    execution = parts.controller.start_agent_execution("implementer", "round-1", "work")
+    execution = parts.start_execution("implementer", "round-1", "work")
 
     def fail_finish(store: EventStore, event: RunEvent) -> RunEvent:
         if store.path == journal_path and event.type is EventType.AGENT_EXECUTION_FINISHED:

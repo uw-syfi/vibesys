@@ -9,7 +9,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from server.journal import EventJournal
+    from vs_agent.api import AgentSelection
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,19 @@ class ExecutionHandle:
 
     execution_id: str
     user_prompt: str
+
+
+@dataclass(frozen=True)
+class AgentExecutionRequest:
+    """One lifecycle request shared by the controller and execution tracker."""
+
+    kind: str
+    round_label: str
+    user_prompt: str
+    system_prompt: str = ""
+    participates_in_run_control: bool = True
+    emit_lifecycle: bool = True
+    agent_selection: AgentSelection | None = None
 
 
 class ActiveAgentExecution(BaseModel):
@@ -164,16 +178,8 @@ class ExecutionTracker:
 
     def start_locked(
         self,
-        kind: str,
-        round_label: str,
-        effective_prompt: str,
-        system_prompt: str,
+        request: AgentExecutionRequest,
         *,
-        participates_in_run_control: bool,
-        emit_lifecycle: bool,
-        driver: str | None,
-        provider: str | None,
-        model: str | None,
         execution_id: str | None = None,
     ) -> ExecutionHandle:
         """Allocate and track an execution while the shared lock is held.
@@ -184,35 +190,38 @@ class ExecutionTracker:
         here.
         """
         execution_id = execution_id or uuid.uuid4().hex
-        attempt = _attempt_from_label(round_label)
+        attempt = _attempt_from_label(request.round_label)
+        driver = request.agent_selection.driver if request.agent_selection is not None else None
+        provider = request.agent_selection.provider if request.agent_selection is not None else None
+        model = request.agent_selection.model if request.agent_selection is not None else None
         activity = AgentExecutionActivityData(
-            mode="thinking", summary=_initial_activity_summary(kind)
+            mode="thinking", summary=_initial_activity_summary(request.kind)
         )
         active = ActiveAgentExecution(
             execution_id=execution_id,
-            agent_kind=kind,
-            round_label=round_label,
-            stage=kind,
+            agent_kind=request.kind,
+            round_label=request.round_label,
+            stage=request.kind,
             attempt=attempt,
-            assignment=effective_prompt,
+            assignment=request.user_prompt,
             started_at=datetime.now(UTC),
             activity=activity,
             driver=driver,
             provider=provider,
             model=model,
         )
-        if emit_lifecycle:
+        if request.emit_lifecycle:
             self._journal.record(
                 EventType.AGENT_EXECUTION_STARTED,
                 status=EventStatus.ACTIVE,
-                agent_kind=kind,
-                round_label=round_label,
+                agent_kind=request.kind,
+                round_label=request.round_label,
                 execution_id=execution_id,
                 data=AgentExecutionStartedData(
-                    stage=kind,
+                    stage=request.kind,
                     attempt=attempt,
-                    system_prompt=system_prompt,
-                    user_prompt=effective_prompt,
+                    system_prompt=request.system_prompt,
+                    user_prompt=request.user_prompt,
                     activity=activity,
                     driver=driver,
                     provider=provider,
@@ -222,36 +231,36 @@ class ExecutionTracker:
             self._journal.record(
                 EventType.PHASE_STARTED,
                 status=EventStatus.ACTIVE,
-                agent_kind=kind,
-                round_label=round_label,
+                agent_kind=request.kind,
+                round_label=request.round_label,
                 execution_id=execution_id,
-                data=PhaseData(phase=kind, attempt=attempt),
+                data=PhaseData(phase=request.kind, attempt=attempt),
             )
             self._journal.record(
                 EventType.INVOCATION_STARTED,
                 status=EventStatus.ACTIVE,
-                agent_kind=kind,
-                round_label=round_label,
+                agent_kind=request.kind,
+                round_label=request.round_label,
                 execution_id=execution_id,
                 data=InvocationStartedData(
-                    system_prompt=system_prompt,
-                    user_prompt=effective_prompt,
+                    system_prompt=request.system_prompt,
+                    user_prompt=request.user_prompt,
                 ),
             )
-        if participates_in_run_control:
-            self._current_kind, self._current_round = kind, round_label
+        if request.participates_in_run_control:
+            self._current_kind, self._current_round = request.kind, request.round_label
         self._active[execution_id] = active
-        if participates_in_run_control:
+        if request.participates_in_run_control:
             self._controlled_ids.add(execution_id)
-        if emit_lifecycle:
+        if request.emit_lifecycle:
             self._emitted_lifecycle_ids.add(execution_id)
-        return ExecutionHandle(execution_id=execution_id, user_prompt=effective_prompt)
+        return ExecutionHandle(execution_id=execution_id, user_prompt=request.user_prompt)
 
     def finish_locked(
         self,
         execution_id: str,
         *,
-        result: Any = None,
+        result: object | None = None,
         error: BaseException | None = None,
     ) -> tuple[ActiveAgentExecution | None, bool]:
         """Finish a tracked execution while the shared lock is held."""
@@ -479,46 +488,61 @@ class ExecutionTracker:
         self, event_type: EventType, data: EventData, execution_id: str
     ) -> AgentExecutionActivityData | None:
         if event_type is EventType.AGENT_OUTPUT_CHUNK and isinstance(data, AgentOutputChunkData):
-            with self._condition:
-                if self._active_tools.get(execution_id):
-                    return None
-            return _text_activity(data)
+            return self._output_activity(data, execution_id)
         if event_type is EventType.TOOL_CALL and isinstance(data, ToolCallData):
-            with self._condition:
-                self._active_tools.setdefault(execution_id, []).append(data.tool)
-            return AgentExecutionActivityData(
-                mode="tool", summary=f"Using {data.tool}", tool=data.tool
-            )
+            return self._tool_call_activity(data, execution_id)
         if event_type is EventType.TODO_UPDATE and isinstance(data, TodoUpdateData):
-            current = next(
-                (todo.content for todo in data.todos if todo.status == "in_progress"),
-                None,
-            )
-            with self._condition:
-                if current is None:
-                    self._todo_summaries.pop(execution_id, None)
-                    if self._active_tools.get(execution_id):
-                        return None
-                    return AgentExecutionActivityData(mode="thinking", summary="Thinking")
-                self._todo_summaries[execution_id] = current
+            return self._todo_activity(data, execution_id)
+        if event_type is EventType.TOOL_RESULT and isinstance(data, ToolResultData):
+            return self._tool_result_activity(data, execution_id)
+        return None
+
+    def _output_activity(
+        self, data: AgentOutputChunkData, execution_id: str
+    ) -> AgentExecutionActivityData | None:
+        with self._condition:
+            if self._active_tools.get(execution_id):
+                return None
+        return _text_activity(data)
+
+    def _tool_call_activity(
+        self, data: ToolCallData, execution_id: str
+    ) -> AgentExecutionActivityData:
+        with self._condition:
+            self._active_tools.setdefault(execution_id, []).append(data.tool)
+        return AgentExecutionActivityData(mode="tool", summary=f"Using {data.tool}", tool=data.tool)
+
+    def _todo_activity(
+        self, data: TodoUpdateData, execution_id: str
+    ) -> AgentExecutionActivityData | None:
+        current = next((todo.content for todo in data.todos if todo.status == "in_progress"), None)
+        with self._condition:
+            if current is None:
+                self._todo_summaries.pop(execution_id, None)
                 if self._active_tools.get(execution_id):
                     return None
-            return AgentExecutionActivityData(mode="thinking", summary=current)
-        if event_type is EventType.TOOL_RESULT and isinstance(data, ToolResultData):
-            with self._condition:
-                if execution_id not in self._active:
-                    return None
-                tools = self._active_tools.get(execution_id, [])
-                if data.tool in tools:
-                    tools.remove(data.tool)
-                remaining_tool = tools[-1] if tools else None
-                todo_summary = self._todo_summaries.get(execution_id)
-            if remaining_tool is not None:
-                return AgentExecutionActivityData(
-                    mode="tool", summary=f"Using {remaining_tool}", tool=remaining_tool
-                )
-            return AgentExecutionActivityData(mode="thinking", summary=todo_summary or "Thinking")
-        return None
+                return AgentExecutionActivityData(mode="thinking", summary="Thinking")
+            self._todo_summaries[execution_id] = current
+            if self._active_tools.get(execution_id):
+                return None
+        return AgentExecutionActivityData(mode="thinking", summary=current)
+
+    def _tool_result_activity(
+        self, data: ToolResultData, execution_id: str
+    ) -> AgentExecutionActivityData | None:
+        with self._condition:
+            if execution_id not in self._active:
+                return None
+            tools = self._active_tools.get(execution_id, [])
+            if data.tool in tools:
+                tools.remove(data.tool)
+            remaining_tool = tools[-1] if tools else None
+            todo_summary = self._todo_summaries.get(execution_id)
+        if remaining_tool is not None:
+            return AgentExecutionActivityData(
+                mode="tool", summary=f"Using {remaining_tool}", tool=remaining_tool
+            )
+        return AgentExecutionActivityData(mode="thinking", summary=todo_summary or "Thinking")
 
 
 def _attempt_from_label(round_label: str) -> int | None:

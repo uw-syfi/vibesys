@@ -73,11 +73,10 @@ def _expected_resolved(
         return requested
     if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
         system = platform.system()
-        if system == "Darwin":
-            return ProfilerKind.MACOS_CPU
-        if system == "Linux":
-            return ProfilerKind.LINUX_CPU
-        return ProfilerKind.NONE
+        return {
+            "Darwin": ProfilerKind.MACOS_CPU,
+            "Linux": ProfilerKind.LINUX_CPU,
+        }.get(system, ProfilerKind.NONE)
     if domain is DomainName.MICROSERVICES:
         return ProfilerKind.NONE
     if allowed == frozenset({ProfilerKind.NONE}):
@@ -110,7 +109,7 @@ def test_profiler_auto_resolution_exhaustive(
     try:
         expected = _expected_resolved(requested, **kwargs)
     except ValueError:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="not supported"):
             resolve_profiler_kind(requested, **kwargs)
     else:
         assert resolve_profiler_kind(requested, **kwargs) is expected
@@ -198,7 +197,7 @@ def test_profiler_resolution_invariants(
     }
     allowed = allowed_profiler_kinds(domain)
     if requested is not ProfilerKind.AUTO and requested not in allowed:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="not supported"):
             resolve_profiler_kind(requested, **kwargs)
         return
 

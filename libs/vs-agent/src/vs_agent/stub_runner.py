@@ -66,7 +66,7 @@ class StubAgentClient:
         """Accept log retargeting; the deterministic stub emits no file logs."""
         del stream
 
-    def invoke(
+    def invoke(  # noqa: PLR0913  # lint-waiver: LW-010191 [PLR0913]; Preserve StubAgentClient.invoke's named-argument contract because callers pass these independent settings directly.
         self,
         *,
         kind: str,
@@ -97,7 +97,7 @@ class StubAgentClient:
         )
         return response_cls.model_validate(response) if response is not None else fallback_factory()
 
-    def invoke_text(
+    def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-010192 [PLR0913]; Preserve StubAgentClient.invoke_text's named-argument contract because callers pass these independent settings directly.
         self,
         *,
         kind: str,

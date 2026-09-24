@@ -35,16 +35,20 @@ def agent_driver_supports_mcp_servers(spec: AgentSpec) -> bool | None:
 
     driver_name = spec.driver
     if driver_name is Driver.OMNIGENT:
-        from vs_agent.drivers.omnigent import OMNIGENT_CAPABILITIES
+        from vs_agent.drivers.omnigent import (  # noqa: PLC0415  # lint-waiver: LW-010170 [PLC0415]; Keep OMNIGENT_CAPABILITIES lazy in agent_driver_supports_mcp_servers so unused providers and import cycles stay unloaded.
+            OMNIGENT_CAPABILITIES,
+        )
 
         return OMNIGENT_CAPABILITIES.mcp_servers
 
-    from vs_agent.drivers.agentshim import AGENTSHIM_CAPABILITIES
+    from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # lint-waiver: LW-010171 [PLC0415]; Keep AGENTSHIM_CAPABILITIES lazy in agent_driver_supports_mcp_servers so unused providers and import cycles stay unloaded.
+        AGENTSHIM_CAPABILITIES,
+    )
 
     return AGENTSHIM_CAPABILITIES.mcp_servers
 
 
-def build_agent_client(
+def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Preserve build_agent_client's named-argument contract because callers pass these independent settings directly.
     *,
     spec: AgentSpec,
     backends: dict[str, Any] | None,
@@ -71,7 +75,9 @@ def build_agent_client(
         raise SystemExit(message)
 
     if backend is AgentBackend.STUB:
-        from vs_agent.stub_runner import StubAgentClient
+        from vs_agent.stub_runner import (  # noqa: PLC0415  # lint-waiver: LW-010173 [PLC0415]; Keep StubAgentClient lazy in build_agent_client so unused providers and import cycles stay unloaded.
+            StubAgentClient,
+        )
 
         return StubAgentClient(event_sink=events)
 
@@ -89,7 +95,7 @@ def build_agent_client(
         raise SystemExit(message)
 
     if driver_name == Driver.OMNIGENT:
-        from vs_agent.drivers.omnigent import (
+        from vs_agent.drivers.omnigent import (  # noqa: PLC0415  # lint-waiver: LW-010174 [PLC0415]; Keep this dependency lazy in build_agent_client so unused providers and import cycles stay unloaded.
             OmnigentDriver,
             OmnigentDriverError,
         )
@@ -103,7 +109,9 @@ def build_agent_client(
     else:
         docker_sandboxes = None
         if use_docker:
-            from vs_agent.cli_docker import DOCKER_PROVIDER_ENV
+            from vs_agent.cli_docker import (  # noqa: PLC0415  # lint-waiver: LW-010175 [PLC0415]; Keep DOCKER_PROVIDER_ENV lazy in build_agent_client so unused providers and import cycles stay unloaded.
+                DOCKER_PROVIDER_ENV,
+            )
 
             if provider not in DOCKER_PROVIDER_ENV:
                 message = (
@@ -112,7 +120,9 @@ def build_agent_client(
                 )
                 raise SystemExit(message)
             docker_sandboxes = backends
-        from vs_agent.drivers.agentshim import AgentShimDriver
+        from vs_agent.drivers.agentshim import (  # noqa: PLC0415  # lint-waiver: LW-010176 [PLC0415]; Keep AgentShimDriver lazy in build_agent_client so unused providers and import cycles stay unloaded.
+            AgentShimDriver,
+        )
 
         driver = AgentShimDriver(
             provider=provider,

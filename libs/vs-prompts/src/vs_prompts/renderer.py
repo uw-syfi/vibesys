@@ -41,7 +41,7 @@ class TemplateRenderer:
         self.root = root
         self.fallback_roots = tuple(fallback_roots)
         self._loader = FileSystemLoader([str(root), *(str(p) for p in self.fallback_roots)])
-        self._env = Environment(
+        self._env = Environment(  # noqa: S701  # lint-waiver: LW-010110 [S701]; this renderer emits plain-text prompts, so HTML autoescaping would corrupt template content.
             loader=self._loader,
             keep_trailing_newline=True,
             trim_blocks=True,

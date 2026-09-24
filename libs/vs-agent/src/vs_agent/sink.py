@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 class AgentEventSink(Protocol):
     """The subset of ``OutputSink`` that agent-package code may call."""
 
-    def agent_output(
+    def agent_output(  # noqa: PLR0913  # lint-waiver: LW-010182 [PLR0913]; Preserve AgentEventSink.agent_output's named-argument contract because callers pass these independent settings directly.
         self,
         content: str,
         *,
@@ -41,7 +41,7 @@ class AgentEventSink(Protocol):
         """Publish one text chunk from an agent."""
         ...
 
-    def tool_call(
+    def tool_call(  # noqa: PLR0913  # lint-waiver: LW-010183 [PLR0913]; Preserve AgentEventSink.tool_call's named-argument contract because callers pass these independent settings directly.
         self,
         tool: str,
         args: dict[str, Any],
@@ -55,7 +55,7 @@ class AgentEventSink(Protocol):
         """Publish an agent tool call and its arguments."""
         ...
 
-    def tool_result(
+    def tool_result(  # noqa: PLR0913  # lint-waiver: LW-010184 [PLR0913]; Preserve AgentEventSink.tool_result's named-argument contract because callers pass these independent settings directly.
         self,
         tool: str,
         content: str,
@@ -81,7 +81,7 @@ class AgentEventSink(Protocol):
         """Publish the agent's current todo list."""
         ...
 
-    def usage_update(
+    def usage_update(  # noqa: PLR0913  # lint-waiver: LW-010185 [PLR0913]; Preserve AgentEventSink.usage_update's named-argument contract because callers pass these independent settings directly.
         self,
         input_tokens: int,
         *,
@@ -104,7 +104,7 @@ class NullAgentEventSink:
 
     __slots__ = ()
 
-    def agent_output(
+    def agent_output(  # noqa: PLR0913  # lint-waiver: LW-010186 [PLR0913]; Preserve NullAgentEventSink.agent_output's named-argument contract because callers pass these independent settings directly.
         self,
         content: str,
         *,
@@ -117,7 +117,7 @@ class NullAgentEventSink:
         """Ignore agent output when no event sink was injected."""
         del content, channel, status, agent_kind, round_label, invocation_id
 
-    def tool_call(
+    def tool_call(  # noqa: PLR0913  # lint-waiver: LW-010187 [PLR0913]; Preserve NullAgentEventSink.tool_call's named-argument contract because callers pass these independent settings directly.
         self,
         tool: str,
         args: dict[str, Any],
@@ -131,7 +131,7 @@ class NullAgentEventSink:
         """Ignore tool calls when no event sink was injected."""
         del tool, args, call_id, status, agent_kind, round_label, invocation_id
 
-    def tool_result(
+    def tool_result(  # noqa: PLR0913  # lint-waiver: LW-010188 [PLR0913]; Preserve NullAgentEventSink.tool_result's named-argument contract because callers pass these independent settings directly.
         self,
         tool: str,
         content: str,
@@ -157,7 +157,7 @@ class NullAgentEventSink:
         """Ignore todo updates when no event sink was injected."""
         del todos, agent_kind, round_label, invocation_id
 
-    def usage_update(
+    def usage_update(  # noqa: PLR0913  # lint-waiver: LW-010189 [PLR0913]; Preserve NullAgentEventSink.usage_update's named-argument contract because callers pass these independent settings directly.
         self,
         input_tokens: int,
         *,

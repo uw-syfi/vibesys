@@ -188,7 +188,7 @@ class TestPassThrough:
             response_cls=_Resp,
             kind="judge",
             iteration=1,
-            workspace="/workspace",
+            workspace=Path("/workspace"),
             system_prompt="sys",
             user_prompt="user",
             round_label="r",
@@ -196,7 +196,7 @@ class TestPassThrough:
         )
 
         call = inner.calls_for("judge")[0]
-        assert call.workspace == "/workspace"
+        assert call.workspace == Path("/workspace")
         assert call.system_prompt == "sys"
         assert call.user_prompt == "user"
         assert call.round_label == "r"

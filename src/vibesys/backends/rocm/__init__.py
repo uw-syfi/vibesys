@@ -30,9 +30,10 @@ backend).
 
 from __future__ import annotations
 
-import glob
 import os
+import shutil
 import subprocess
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -83,20 +84,24 @@ def _discover_rocm_devices() -> list[str]:
     host has no AMD GPU, in which case the container starts without an
     accelerator (parity with the Trainium backend's behaviour).
     """
-    if not os.path.exists(_KFD_DEVICE):
+    if not Path(_KFD_DEVICE).exists():
         return []
-    render_nodes = sorted(glob.glob("/dev/dri/render*"))
+    render_nodes = sorted(str(path) for path in Path("/dev/dri").glob("render*"))
     return [_KFD_DEVICE, *render_nodes]
 
 
 def _query_rocm_gpu_count() -> int | None:
     """Return the number of GPUs ``rocm-smi`` reports, or None if unavailable."""
+    rocm_smi = shutil.which("rocm-smi")
+    if rocm_smi is None:
+        return None
     try:
-        result = subprocess.run(
-            ["rocm-smi", "--showid", "--csv"],
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010233 [S603]; run the resolved ROCm status utility with fixed read-only arguments.
+            [rocm_smi, "--showid", "--csv"],
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return None
@@ -147,7 +152,7 @@ class RocmBackend:
 
     # -- ComputeBackendImpl protocol ---------------------------------------
 
-    def make_sandbox(
+    def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-011113 [PLR0913]; RunEnvironment dispatches this structural ComputeBackendImpl method with shared named sandbox options; changing it would break backend parity.
         self,
         kind: SandboxKind,
         *,
@@ -166,7 +171,7 @@ class RocmBackend:
         """Create a local or ROCm-enabled Docker sandbox."""
         # Deferred: importing DockerSandbox registers process-wide signal and
         # atexit handlers. Registration must stay side-effect free.
-        from vs_sandbox.api import DockerSandbox
+        docker_sandbox = import_module("vs_sandbox.api").DockerSandbox
 
         bind_mounts = list(bind_mounts or [])
         extra_env = dict(extra_env or {})
@@ -186,7 +191,7 @@ class RocmBackend:
             )
 
         if kind is SandboxKind.DOCKER:
-            return DockerSandbox(
+            return docker_sandbox(
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=None,  # ROCm uses --device, not --gpus
@@ -201,10 +206,12 @@ class RocmBackend:
                 lifecycle_hooks=lifecycle_hooks,
             )
 
-        raise ValueError(f"Unknown sandbox kind: {kind!r}")
+        message = f"Unknown sandbox kind: {kind!r}"
+        raise ValueError(message)
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         """Return no monitor until ROCm contention handling is available."""
+        del log_dir
         # rocm-smi can report utilization, but shared-device contention
         # handling isn't wired up yet; skip rather than fake it.
         return None

@@ -80,6 +80,7 @@ def _extract(
 
 def _from_todos_arg(args: Mapping[str, Any]) -> list[TodoItemData] | None:
     """Coerce Claude Code, opencode, or Gemini todo tool arguments.
+
     The providers use ``TodoWrite``, ``todowrite``, and ``write_todos`` with
     a ``todos`` array.
     """
@@ -93,6 +94,7 @@ def _from_plan_arg(args: Mapping[str, Any]) -> list[TodoItemData] | None:
 
 def _from_items_arg(args: Mapping[str, Any]) -> list[TodoItemData] | None:
     """Coerce Codex ``exec --json`` todo list stream items.
+
     The stream uses an ``items`` array with text and completion fields.
     """
     return _extract(args, "items", ("text",))

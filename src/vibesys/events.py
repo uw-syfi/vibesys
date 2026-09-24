@@ -413,13 +413,15 @@ class CoreEvent(BaseModel):
 def make_core_event(
     event_type: CoreEventType,
     text: str = "",
-    **fields: Any,
+    **fields: object,
 ) -> CoreEvent:
     """Create an unrecorded event using the current UTC time."""
-    return CoreEvent(timestamp=datetime.now(UTC), type=event_type, text=text, **fields)
+    return CoreEvent.model_validate(
+        {"timestamp": datetime.now(UTC), "type": event_type, "text": text, **fields}
+    )
 
 
-def json_value(value: Any) -> Any:
+def json_value(value: object) -> object:
     """Return a JSON-compatible value without losing useful diagnostics."""
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")

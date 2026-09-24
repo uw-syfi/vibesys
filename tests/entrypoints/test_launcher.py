@@ -339,7 +339,7 @@ def test_source_checkout_old_node_errors(
     monkeypatch.setattr(
         cli.shutil,
         "which",
-        lambda name: {"bun": "/usr/bin/bun", "node": "/usr/bin/node"}.get(name),
+        {"bun": "/usr/bin/bun", "node": "/usr/bin/node"}.get,
     )
     monkeypatch.setattr(
         cli.subprocess,
@@ -372,7 +372,7 @@ def test_source_checkout_uses_bun_from_path_and_node_version_from_process(
     monkeypatch.setattr(
         cli.shutil,
         "which",
-        lambda name: {"bun": "/opt/bun/bin/bun", "node": "/usr/bin/node"}.get(name),
+        {"bun": "/opt/bun/bin/bun", "node": "/usr/bin/node"}.get,
     )
     monkeypatch.setattr(
         cli.subprocess,
@@ -443,12 +443,13 @@ def test_source_checkout_rejects_unusable_node_version(
     monkeypatch.setattr(
         cli.shutil,
         "which",
-        lambda name: {"bun": "/usr/bin/bun", "node": "/usr/bin/node"}.get(name),
+        {"bun": "/usr/bin/bun", "node": "/usr/bin/node"}.get,
     )
 
     def run(*_args: object, **_kwargs: object) -> SimpleNamespace:
         if failure == "execution":
-            raise OSError("node could not execute")
+            message = "node could not execute"
+            raise OSError(message)
         return SimpleNamespace(stdout="not-a-version\n")
 
     monkeypatch.setattr(cli.subprocess, "run", run)
@@ -589,7 +590,8 @@ def test_source_launcher_installs_and_runs_pnpm_steps(
 
     assert set(cwds) == {str(root / "clients")}
     assert (root / "clients" / "node_modules" / ".vibesys-install-stamp").is_file()
-    assert launcher_calls and "launcher.js" in launcher_calls[0][1]
+    assert launcher_calls
+    assert "launcher.js" in launcher_calls[0][1]
     assert "installing JS dependencies" in capsys.readouterr().err
 
 

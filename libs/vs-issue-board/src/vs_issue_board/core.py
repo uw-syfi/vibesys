@@ -8,10 +8,9 @@ derived views such as markdown mirrors.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import traceback
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from threading import RLock
@@ -168,15 +167,12 @@ class IssueBoard:
     def _save_locked(self) -> None:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(self._data.model_dump_json(indent=2), encoding="utf-8")
-        os.replace(tmp, self.path)
+        tmp.replace(self.path)
         if self._on_change is not None:
             try:
                 self._on_change()
-            except Exception:
-                print(
-                    "[IssueBoard] on_change callback raised; ignoring:",
-                    file=sys.stderr,
-                )
+            except Exception:  # noqa: BLE001  # lint-waiver: LW-010100 [BLE001]; callbacks are caller code, and persistence must survive any callback failure.
+                sys.stderr.write("[IssueBoard] on_change callback raised; ignoring:\n")
                 traceback.print_exc(file=sys.stderr)
 
     def reload(self) -> None:
@@ -194,20 +190,19 @@ class IssueBoard:
     def create(
         self,
         *,
-        type: IssueType | str,
+        type: IssueType | str,  # noqa: A002  # lint-waiver: LW-010101 [A002]; `type` is the established public create keyword and serialized issue field name.
         title: str,
         description: str,
         created_by: str,
         iteration: int,
     ) -> Issue:
         """Create and persist a new open issue with its initial history event."""
-        if not isinstance(type, IssueType):
-            type = IssueType(type)
+        issue_type = IssueType(type) if not isinstance(type, IssueType) else type
         with self._lock:
-            now = datetime.now().isoformat()
+            now = datetime.now(UTC).isoformat()
             issue = Issue(
                 id=self._data.next_id,
-                type=type,
+                type=issue_type,
                 title=title.strip(),
                 description=description.strip(),
                 status=IssueStatus.OPEN,
@@ -238,7 +233,7 @@ class IssueBoard:
                     return issue.model_copy(deep=True)
         return None
 
-    def update_status(
+    def update_status(  # noqa: PLR0913  # lint-waiver: LW-010193 [PLR0913]; Preserve IssueBoard.update_status's named-argument contract because callers pass these independent settings directly.
         self,
         issue_id: int,
         status: IssueStatus | str,
@@ -255,7 +250,7 @@ class IssueBoard:
             issue = self.get(issue_id)
             if issue is None:
                 raise _issue_not_found(issue_id)
-            now = datetime.now().isoformat()
+            now = datetime.now(UTC).isoformat()
             old_status = issue.status
             issue.status = status
             issue.updated_at = now
@@ -288,7 +283,7 @@ class IssueBoard:
             for issue in self._data.issues:
                 if issue.status is not IssueStatus.BLOCKED:
                     continue
-                now = datetime.now().isoformat()
+                now = datetime.now(UTC).isoformat()
                 issue.status = IssueStatus.OPEN
                 issue.attempts = 0
                 issue.closed_iter = None
@@ -321,7 +316,7 @@ class IssueBoard:
             issue = self.get(issue_id)
             if issue is None:
                 raise _issue_not_found(issue_id)
-            now = datetime.now().isoformat()
+            now = datetime.now(UTC).isoformat()
             issue.attempts += 1
             issue.updated_at = now
             issue.history.append(
@@ -345,19 +340,20 @@ class IssueBoard:
         self,
         *,
         status: IssueStatus | str | None = None,
-        type: IssueType | str | None = None,
+        type: IssueType | str | None = None,  # noqa: A002  # lint-waiver: LW-010102 [A002]; preserve the public issue-type filter keyword used by callers.
     ) -> builtins.list[Issue]:
         """Return detached issue copies filtered by optional status and type."""
         if status is not None and not isinstance(status, IssueStatus):
             status = IssueStatus(status)
-        if type is not None and not isinstance(type, IssueType):
-            type = IssueType(type)
+        issue_type = (
+            type if isinstance(type, IssueType) else IssueType(type) if type is not None else None
+        )
         with self._lock:
             out: list[Issue] = []
             for issue in self._data.issues:
                 if status is not None and issue.status != status:
                     continue
-                if type is not None and issue.type != type:
+                if issue_type is not None and issue.type != issue_type:
                     continue
                 out.append(issue.model_copy(deep=True))
         return out

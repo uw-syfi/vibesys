@@ -15,10 +15,8 @@ def _coerce_role(role: DomainRole | str) -> DomainRole:
     try:
         return role if isinstance(role, DomainRole) else DomainRole(role)
     except ValueError as exc:
-        raise ValueError(
-            f"Unknown domain role {role!r}. Choose from: "
-            f"{', '.join(domain_role.value for domain_role in DOMAIN_ROLES)}."
-        ) from exc
+        message = f"Unknown domain role {role!r}. Choose from: {', '.join(domain_role.value for domain_role in DOMAIN_ROLES)}."
+        raise ValueError(message) from exc
 
 
 def _load_role_file(domain_dir: Path, role: DomainRole) -> str | None:

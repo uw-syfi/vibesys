@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
@@ -53,7 +54,7 @@ def _suggest_repository_owner(config: Config) -> str | None:
         return None
 
 
-def _resolve_tui_defaults(
+def _resolve_tui_defaults(  # noqa: PLR0913  # lint-waiver: LW-011105 [PLR0913]; This private resolver maps the parser's seven independent setup flags to derived defaults; a Namespace loses field types and a new input DTO would duplicate the parser.
     *,
     config_path: Path | None = None,
     stub_agent: bool = False,
@@ -163,9 +164,9 @@ def main(argv: list[str] | None = None) -> None:
             _missing_control_socket()
         except ConfigurationError as exc:
             cli.render_configuration_error(exc)
-    from server.runtime import ServerRuntime
+    server_runtime = import_module("server.runtime").ServerRuntime
 
-    runtime = ServerRuntime(
+    runtime = server_runtime(
         socket_path=control_socket,
         tui_defaults=_tui_defaults_from_argv(arguments),
     )

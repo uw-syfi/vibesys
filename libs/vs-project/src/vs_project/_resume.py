@@ -29,7 +29,8 @@ def compare_resume_configurations(
 ) -> ResumeConfigurationComparison:
     """Compare same-loop configurations under the persisted resume policy."""
     if recorded.outer_loop != requested.outer_loop:
-        raise ValueError("resume configuration outer loops must match")
+        message = "resume configuration outer loops must match"
+        raise ValueError(message)
 
     limit_field, recorded_limit = _resume_limit(recorded)
     _, requested_limit = _resume_limit(requested)

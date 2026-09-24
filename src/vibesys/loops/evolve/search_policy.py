@@ -49,6 +49,18 @@ class SearchSelection:
 
 
 @dataclass(frozen=True)
+class SearchSelectionParameters:
+    """Independent controls shared by the registered search policies."""
+
+    rng: random.Random
+    k_top_inspirations: int
+    k_random_inspirations: int
+    selection_temperature: float
+    space: MetricSpace
+    frontier_bias: float
+
+
+@dataclass(frozen=True)
 class OpenEvolveSearchConfig:
     """Supported OpenEvolve database knobs, pinned to v0.3.1 semantics."""
 
@@ -143,16 +155,10 @@ class SearchPolicy(Protocol):
         """Whether selections require candidate source code."""
         ...
 
-    def select(  # noqa: PLR0913  # lint-waiver: LW-009039 [PLR0913]; the shared selection protocol must pass each independent search control to either policy.
+    def select(
         self,
         population: Population,
-        *,
-        rng: random.Random,
-        k_top_inspirations: int,
-        k_random_inspirations: int,
-        selection_temperature: float,
-        space: MetricSpace,
-        frontier_bias: float,
+        parameters: SearchSelectionParameters,
     ) -> SearchSelection | None:
         """Select a parent and optional inspirations for the next candidate."""
         ...
@@ -182,30 +188,24 @@ class VibeSysSearchPolicy:
         """Scalar/Pareto selection uses persisted individuals, not source."""
         return False
 
-    def select(  # noqa: PLR0913  # lint-waiver: LW-009046 [PLR0913]; this concrete policy implements the shared selection signature with all independent search controls.
+    def select(
         self,
         population: Population,
-        *,
-        rng: random.Random,
-        k_top_inspirations: int,
-        k_random_inspirations: int,
-        selection_temperature: float,
-        space: MetricSpace,
-        frontier_bias: float,
+        parameters: SearchSelectionParameters,
     ) -> SearchSelection | None:
         """Select a parent and inspiration set from the current population."""
         parent = population.select_parent(
-            rng=rng,
-            temperature=selection_temperature,
-            space=space,
-            frontier_bias=frontier_bias,
+            rng=parameters.rng,
+            temperature=parameters.selection_temperature,
+            space=parameters.space,
+            frontier_bias=parameters.frontier_bias,
         )
         inspirations = population.select_inspirations(
             parent_id=parent.id if parent else None,
-            k_top=k_top_inspirations,
-            k_random=k_random_inspirations,
-            rng=rng,
-            space=space,
+            k_top=parameters.k_top_inspirations,
+            k_random=parameters.k_random_inspirations,
+            rng=parameters.rng,
+            space=parameters.space,
         )
         if parent is None:
             passers = population.passed
@@ -477,25 +477,18 @@ class OpenEvolveSearchPolicy:
                 if prompts is not None:
                     self._database.prompts_by_program[canonical_id] = prompts
 
-    def select(  # noqa: PLR0913  # lint-waiver: LW-009047 [PLR0913]; this adapter implements the shared selection signature with all independent search controls.
+    def select(
         self,
         population: Population,
-        *,
-        rng: random.Random,
-        k_top_inspirations: int,
-        k_random_inspirations: int,
-        selection_temperature: float,
-        space: MetricSpace,
-        frontier_bias: float,
+        parameters: SearchSelectionParameters,
     ) -> SearchSelection | None:
         """Select a parent program and inspirations from the active island."""
-        del rng, selection_temperature, space, frontier_bias
         if not self._database.programs:
             return None
 
         island = self._database.current_island
         program_ids_before = set(self._database.programs)
-        inspiration_count = k_top_inspirations + k_random_inspirations
+        inspiration_count = parameters.k_top_inspirations + parameters.k_random_inspirations
         with self._upstream_random():
             self._normalize_upstream_collections()
             parent_program, inspiration_programs = self._database.sample_from_island(

@@ -527,7 +527,7 @@ class RunEvent(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _execution_identity_compatibility(cls, value: Any) -> Any:
+    def _execution_identity_compatibility(cls, value: object) -> object:
         """Expose legacy invocation identity through the canonical field."""
         if not isinstance(value, dict):
             return value
@@ -1040,7 +1040,7 @@ def _scan_header_fields(line: bytes) -> tuple[int, EventType, str | None, str | 
     return sequence, event_type, execution_id, chat_thread_id
 
 
-def _is_optional_str(value: Any) -> bool:  # scanning untyped JSON
+def _is_optional_str(value: object) -> bool:  # scanning untyped JSON
     return value is None or isinstance(value, str)
 
 
@@ -1124,17 +1124,24 @@ def _repair_legacy_sequences(events: list[RunEvent]) -> list[RunEvent]:
     return repaired
 
 
-def make_event(event_type: EventType, text: str = "", **fields: Any) -> RunEvent:
+def make_event(
+    event_type: EventType,
+    text: str = "",
+    **fields: object,
+) -> RunEvent:
     """Build a timestamped event from its type, text, and payload fields."""
-    return RunEvent(timestamp=datetime.now(UTC), type=event_type, text=text, **fields)
+    return RunEvent.model_validate(
+        {"timestamp": datetime.now(UTC), "type": event_type, "text": text, **fields}
+    )
 
 
-def json_value(value: Any) -> Any:
+def json_value(value: object) -> object:
     """Return a JSON-compatible representation, falling back to ``repr``."""
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     try:
         json.dumps(value)
-        return value
     except TypeError:
         return repr(value)
+    else:
+        return value

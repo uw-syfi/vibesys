@@ -7,11 +7,11 @@ import time
 import uuid
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import Any, TextIO, TypeVar, cast, overload
+from typing import TYPE_CHECKING, Any, TextIO, TypeVar, cast, overload
 
 from pydantic import BaseModel
 
@@ -112,6 +112,9 @@ from vs_project.api import (
     generate_run_id,
 )
 from vs_sandbox.api import HostResource
+
+if TYPE_CHECKING:
+    from vs_agent.api import AgentSpec
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -231,6 +234,41 @@ def _coerce_skills_dirs(raw_dirs: list[str] | None) -> list[Path]:
     return result
 
 
+@dataclass(frozen=True, slots=True)
+class _RunContextOptions:
+    """Inputs needed to assemble a run after the public factory validates them."""
+
+    config: Config
+    exp_name: str
+    input_path: str
+    accuracy_command: str
+    benchmark_command: str
+    runs_dir: Path | None
+    task_name: str | None
+    task_root: Path | None
+    workspace_sources: tuple[WorkspaceSource, ...]
+    evaluator_path: Path | None
+    evaluator_package_root: Path | None
+    benchmark_output_argument: str | None
+    objective: str | None
+    existing: bool
+    project_configuration: RunConfiguration
+    trusted_input_baseline: str | None
+    debug: bool
+    profiler_kind: ProfilerKind
+    profiler_domain: DomainName
+    skills_dirs: list[str] | None
+    run_environment: RunEnvironmentSpec | None
+    agent_backend: str | None
+    cli_provider: str | None
+    backend: ComputeBackend
+    environment_hooks: EnvironmentHooks | None
+    remote_repo: str | None
+    repo_visibility: RepositoryVisibility
+    agent_state_model_type: type[BaseModel] | None
+    integration: LocalRunIntegration | None
+
+
 def create_run_context(  # noqa: PLR0913  # lint-waiver: LW-008202 [PLR0913]; the CLI factory preserves its named setup options as a stable caller interface.
     config: Config,
     exp_name: str,
@@ -275,35 +313,37 @@ def create_run_context(  # noqa: PLR0913  # lint-waiver: LW-008202 [PLR0913]; th
     try:
         return _assemble_run_context(
             teardown_stack=teardown_stack,
-            config=config,
-            exp_name=exp_name,
-            input_path=input_path,
-            accuracy_command=accuracy_command,
-            benchmark_command=benchmark_command,
-            runs_dir=runs_dir,
-            task_name=task_name,
-            task_root=task_root,
-            workspace_sources=workspace_sources,
-            evaluator_path=evaluator_path,
-            evaluator_package_root=evaluator_package_root,
-            benchmark_output_argument=benchmark_output_argument,
-            objective=objective,
-            existing=existing,
-            project_configuration=project_configuration,
-            trusted_input_baseline=trusted_input_baseline,
-            debug=debug,
-            profiler_kind=profiler_kind,
-            profiler_domain=profiler_domain,
-            skills_dirs=skills_dirs,
-            run_environment=run_environment,
-            agent_backend=agent_backend,
-            cli_provider=cli_provider,
-            backend=backend,
-            environment_hooks=environment_hooks,
-            remote_repo=remote_repo,
-            repo_visibility=repo_visibility,
-            agent_state_model_type=agent_state_model_type,
-            integration=integration,
+            options=_RunContextOptions(
+                config=config,
+                exp_name=exp_name,
+                input_path=input_path,
+                accuracy_command=accuracy_command,
+                benchmark_command=benchmark_command,
+                runs_dir=runs_dir,
+                task_name=task_name,
+                task_root=task_root,
+                workspace_sources=workspace_sources,
+                evaluator_path=evaluator_path,
+                evaluator_package_root=evaluator_package_root,
+                benchmark_output_argument=benchmark_output_argument,
+                objective=objective,
+                existing=existing,
+                project_configuration=project_configuration,
+                trusted_input_baseline=trusted_input_baseline,
+                debug=debug,
+                profiler_kind=profiler_kind,
+                profiler_domain=profiler_domain,
+                skills_dirs=skills_dirs,
+                run_environment=run_environment,
+                agent_backend=agent_backend,
+                cli_provider=cli_provider,
+                backend=backend,
+                environment_hooks=environment_hooks,
+                remote_repo=remote_repo,
+                repo_visibility=repo_visibility,
+                agent_state_model_type=agent_state_model_type,
+                integration=integration,
+            ),
         )
     except BaseException as construction_error:
         _close_after_construction_failure(teardown_stack, construction_error)
@@ -323,39 +363,38 @@ def _close_after_construction_failure(
         )
 
 
-def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered resource setup and ExitStack rollback share mutable lifecycle state, which helper boundaries would obscure.
-    *,
-    teardown_stack: ExitStack,
-    config: Config,
-    exp_name: str,
-    input_path: str,
-    accuracy_command: str,
-    benchmark_command: str,
-    runs_dir: Path | None,
-    task_name: str | None,
-    task_root: Path | None,
-    workspace_sources: tuple[WorkspaceSource, ...],
-    evaluator_path: Path | None,
-    evaluator_package_root: Path | None,
-    benchmark_output_argument: str | None,
-    objective: str | None,
-    existing: bool,
-    project_configuration: RunConfiguration,
-    trusted_input_baseline: str | None,
-    debug: bool,
-    profiler_kind: ProfilerKind,
-    profiler_domain: DomainName,
-    skills_dirs: list[str] | None,
-    run_environment: RunEnvironmentSpec | None,
-    agent_backend: str | None,
-    cli_provider: str | None,
-    backend: ComputeBackend,
-    environment_hooks: EnvironmentHooks | None,
-    remote_repo: str | None,
-    repo_visibility: RepositoryVisibility,
-    agent_state_model_type: type[BaseModel] | None,
-    integration: LocalRunIntegration | None,
+def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0915]; ordered resource setup and ExitStack rollback share mutable lifecycle state, which helper boundaries would obscure.
+    *, teardown_stack: ExitStack, options: _RunContextOptions
 ) -> "_RunContext":
+    config = options.config
+    exp_name = options.exp_name
+    input_path = options.input_path
+    accuracy_command = options.accuracy_command
+    benchmark_command = options.benchmark_command
+    runs_dir = options.runs_dir
+    task_name = options.task_name
+    task_root = options.task_root
+    workspace_sources = options.workspace_sources
+    evaluator_path = options.evaluator_path
+    evaluator_package_root = options.evaluator_package_root
+    benchmark_output_argument = options.benchmark_output_argument
+    objective = options.objective
+    existing = options.existing
+    project_configuration = options.project_configuration
+    trusted_input_baseline = options.trusted_input_baseline
+    debug = options.debug
+    profiler_kind = options.profiler_kind
+    profiler_domain = options.profiler_domain
+    skills_dirs = options.skills_dirs
+    run_environment = options.run_environment
+    agent_backend = options.agent_backend
+    cli_provider = options.cli_provider
+    backend = options.backend
+    environment_hooks = options.environment_hooks
+    remote_repo = options.remote_repo
+    repo_visibility = options.repo_visibility
+    agent_state_model_type = options.agent_state_model_type
+    integration = options.integration
     context_start = time.perf_counter()
     # Boot spans recorded before this function ran (the dispatch preamble)
     # come first, so the run log reads in the order the work happened once
@@ -444,7 +483,10 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiv
                 environment_default_profiler_kind=environment.default_profiler_kind,
                 environment_supported_profiler_kinds=environment.supported_profiler_kinds,
             )
-            driver_supports_mcp = agent_driver_supports_mcp_servers(agent_spec)
+            supports_mcp_servers = cast(
+                "Callable[[AgentSpec], bool | None]", agent_driver_supports_mcp_servers
+            )
+            driver_supports_mcp = supports_mcp_servers(agent_spec)
             if resolved_profiler_kind in ACTIVE_PROFILER_KINDS and driver_supports_mcp is False:
                 driver_name = resolve_agent_driver(config)
                 definition = profiler_definition(resolved_profiler_kind)

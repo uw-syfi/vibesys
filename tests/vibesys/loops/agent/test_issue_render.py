@@ -1,6 +1,7 @@
 """Tests for the per-issue markdown renderer (vibesys/plain/render.py)."""
 
 from pathlib import Path
+from typing import Required, TypedDict, Unpack
 
 from vibesys.loops.plain.render import (
     issue_md_filename,
@@ -20,34 +21,45 @@ from vs_issue_board.api import (
 )
 
 
-def _make_issue(
-    *,
-    id: int = 1,
-    title: str = "Test issue",
-    description: str = "A test issue.",
-    type: IssueType = IssueType.FEATURE,
-    status: IssueStatus = IssueStatus.OPEN,
-    attempts: int = 0,
-    created_by: str = "loop:bootstrap",
-    history: list[IssueEvent] | None = None,
-) -> Issue:
+class _IssueOptions(TypedDict, total=False):
+    id: int
+    title: str
+    description: str
+    type: IssueType
+    status: IssueStatus
+    attempts: int
+    created_by: str
+    history: list[IssueEvent] | None
+
+
+class _EventOptions(TypedDict, total=False):
+    actor: Required[str]
+    action: Required[str]
+    iteration: int
+    note: str
+    payload: dict | None
+    timestamp: str
+
+
+def _make_issue(**options: Unpack[_IssueOptions]) -> Issue:
     now = "2026-04-08T12:00:00"
+    creator = options.get("created_by", "loop:bootstrap")
     return Issue(
-        id=id,
-        type=type,
-        title=title,
-        description=description,
-        status=status,
-        created_by=created_by,
+        id=options.get("id", 1),
+        type=options.get("type", IssueType.FEATURE),
+        title=options.get("title", "Test issue"),
+        description=options.get("description", "A test issue."),
+        status=options.get("status", IssueStatus.OPEN),
+        created_by=creator,
         created_iter=1,
         created_at=now,
         updated_at=now,
-        attempts=attempts,
-        history=history
+        attempts=options.get("attempts", 0),
+        history=options.get("history")
         or [
             IssueEvent(
                 timestamp=now,
-                actor=created_by,
+                actor=creator,
                 action="create",
                 iteration=1,
             )
@@ -55,22 +67,14 @@ def _make_issue(
     )
 
 
-def _make_event(
-    *,
-    actor: str,
-    action: str,
-    iteration: int = 1,
-    note: str = "",
-    payload: dict | None = None,
-    timestamp: str = "2026-04-08T12:01:00",
-) -> IssueEvent:
+def _make_event(**options: Unpack[_EventOptions]) -> IssueEvent:
     return IssueEvent(
-        timestamp=timestamp,
-        actor=actor,
-        action=action,
-        iteration=iteration,
-        note=note,
-        payload=payload,
+        timestamp=options.get("timestamp", "2026-04-08T12:01:00"),
+        actor=options["actor"],
+        action=options["action"],
+        iteration=options.get("iteration", 1),
+        note=options.get("note", ""),
+        payload=options.get("payload"),
     )
 
 

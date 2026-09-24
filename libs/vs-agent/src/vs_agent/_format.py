@@ -12,14 +12,17 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from vs_agent.events import AgentStatusData
 
+_THOUSAND = 1_000
+_MILLION = 1_000_000
+
 
 def format_token_count(n: int) -> str:
     """Format a token count compactly: ``999`` / ``20k`` / ``1.0M``."""
-    if n < 1_000:
+    if n < _THOUSAND:
         return str(n)
-    if n < 1_000_000:
+    if n < _MILLION:
         return f"{n // 1000}k"
-    return f"{n / 1_000_000:.1f}M"
+    return f"{n / _MILLION:.1f}M"
 
 
 def format_status_prefix(status: AgentStatusData | None) -> str:

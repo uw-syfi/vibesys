@@ -282,7 +282,7 @@ def _render_implementer(domain: DomainName) -> str:
         reference_path="/ref",
         workspace_sources=(),
     )
-    pass_criteria = "PC"
+    criteria_text = "PC"
     return render_template(
         "implementer_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -290,7 +290,7 @@ def _render_implementer(domain: DomainName) -> str:
         interface="inprocess",
         domain_implementer=section,
         task="TASK",
-        pass_criteria=pass_criteria,
+        pass_criteria=criteria_text,
         reference_path="/ref",
         runtime_notes="",
         feedback=None,
@@ -333,7 +333,6 @@ def test_orchestrator_is_a_domain_role() -> None:
 
 
 def _render_orchestrator(domain: DomainName) -> str:
-    pass_criteria = "PC"
     section = render_domain_section(
         resolve_domain(domain),
         DomainRole.ORCHESTRATOR,

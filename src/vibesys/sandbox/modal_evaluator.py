@@ -29,6 +29,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -38,7 +39,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -56,6 +57,8 @@ _CANDIDATE_REVISION_ENV = "VIBESYS_CANDIDATE_REVISION"
 _RELEASE_DEPLOYMENT_ENV = "VIBESYS_RELEASE_MODAL_DEPLOYMENT"
 _MAX_DIAGNOSTIC_CHARS = 20_000
 _HTTP_OK_STATUS = 200
+
+
 _EXEC_RC_MARKER = "__VIBESYS_EXEC_RC__="
 _OUTPUT_FILE_MARKER = "__VIBESYS_OUTPUT_FILE__"
 _OUTPUT_END_MARKER = "__VIBESYS_OUTPUT_END__"
@@ -228,6 +231,14 @@ def extract_modal_web_url(output: str) -> str:
     return matches[-1]
 
 
+def _modal_health_url(base_url: str) -> str:
+    """Validate a persisted deployment URL before making a readiness request."""
+    if _MODAL_WEB_URL.fullmatch(base_url) is None:
+        message = "Modal deployment lease contains an invalid web URL"
+        raise ValueError(message)
+    return f"{base_url}/health"
+
+
 def extract_modal_app_identifier(output: str) -> str:
     """Return the deployed Modal app name printed by ``modal deploy``."""
     compact = _compact_rich_output(output)
@@ -241,9 +252,9 @@ def extract_modal_app_identifier(output: str) -> str:
 def recent_modal_logs(app_identifier: str, *, workspace: str) -> str:
     """Fetch a bounded recent-log excerpt for a failed readiness check."""
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010240 [S603]; Modal logs uses a resolved CLI and fixed read-only argv with a parsed app identifier.
             [
-                "uv",
+                shutil.which("uv") or "uv",
                 "run",
                 "modal",
                 "app",
@@ -275,11 +286,11 @@ def recent_modal_logs(app_identifier: str, *, workspace: str) -> str:
 def wait_for_health(base_url: str, *, timeout_seconds: float) -> None:
     """Wait until the deployed candidate returns HTTP 200 from ``/health``."""
     deadline = time.monotonic() + timeout_seconds
-    health_url = f"{base_url.rstrip('/')}/health"
+    health_url = _modal_health_url(base_url)
     last_error = "no response"
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(health_url, timeout=10) as response:
+            with urllib.request.urlopen(health_url, timeout=10) as response:  # noqa: S310  # lint-waiver: LW-010210 [S310]; the endpoint is restricted to a verified Modal HTTPS host.
                 if response.status == _HTTP_OK_STATUS:
                     return
                 last_error = f"HTTP {response.status}"
@@ -293,9 +304,9 @@ def wait_for_health(base_url: str, *, timeout_seconds: float) -> None:
 def _healthy_now(base_url: str) -> bool:
     """Return whether an existing deployment is immediately reusable."""
     try:
-        with urllib.request.urlopen(f"{base_url.rstrip('/')}/health", timeout=5) as response:
+        with urllib.request.urlopen(_modal_health_url(base_url), timeout=5) as response:  # noqa: S310  # lint-waiver: LW-010211 [S310]; readiness probes only contact a verified Modal HTTPS host.
             return response.status == _HTTP_OK_STATUS
-    except (OSError, urllib.error.URLError):
+    except (OSError, urllib.error.URLError, ValueError):
         return False
 
 
@@ -347,8 +358,8 @@ def _release_requested() -> bool:
 def _stop_modal_app(app_identifier: str, *, workspace: str) -> bool:
     """Stop a deployed app without prompting, returning whether it succeeded."""
     try:
-        result = subprocess.run(
-            ["uv", "run", "modal", "app", "stop", app_identifier, "--yes"],
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010241 [S603]; stop receives a parsed deployment identifier and fixed non-shell argv.
+            [shutil.which("uv") or "uv", "run", "modal", "app", "stop", app_identifier, "--yes"],
             cwd=workspace,
             capture_output=True,
             text=True,
@@ -356,16 +367,16 @@ def _stop_modal_app(app_identifier: str, *, workspace: str) -> bool:
             timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        print(
+        print(  # noqa: T201  # lint-waiver: LW-000212 [T201]; Modal CLI teardown failure is reported to the user.
             f"Could not stop Modal app {app_identifier}: {type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
         return False
     if result.returncode == 0:
-        print(f"Stopped Modal app {app_identifier}.", file=sys.stderr)
+        print(f"Stopped Modal app {app_identifier}.", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000213 [T201]; Modal CLI stop confirmation is user-facing status output.
         return True
     output = f"{result.stdout}\n{result.stderr}".strip()
-    print(
+    print(  # noqa: T201  # lint-waiver: LW-000214 [T201]; Modal CLI stop diagnostics include the subprocess failure output.
         f"Could not stop Modal app {app_identifier} (exit {result.returncode}): {output[-2000:]}",
         file=sys.stderr,
     )
@@ -436,19 +447,19 @@ def _plan_command_transfer(command: Sequence[str], workspace: str) -> _CommandTr
     framework_go_cwd = _uses_trusted_go_package_cwd(command)
     staged: list[str] = []
     outputs: list[str] = []
-    for token in command:
-        if not token or token.startswith("-"):
+    for argument in command:
+        if not argument or argument.startswith("-"):
             continue
-        if token.startswith("/"):
-            path = Path(token)
-            if not path.exists() and path.parent.is_dir() and token not in outputs:
-                outputs.append(token)
+        if argument.startswith("/"):
+            path = Path(argument)
+            if not path.exists() and path.parent.is_dir() and argument not in outputs:
+                outputs.append(argument)
             continue
-        if framework_go_cwd and token == ".":
+        if framework_go_cwd and argument == ".":
             # ``go -C <trusted-package> run .`` resolves the dot below the
             # separately staged evaluator package, not the candidate root.
             continue
-        candidate = workspace_root / token
+        candidate = workspace_root / argument
         try:
             resolved = candidate.resolve(strict=True)
             resolved.relative_to(workspace_root)
@@ -544,8 +555,8 @@ def _find_app_container(
     last_error = "no container listed"
     while True:
         try:
-            result = subprocess.run(
-                ["uv", "run", "modal", "container", "list", "--json"],
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010242 [S603]; list is a fixed read-only Modal CLI operation with no user command string.
+                [shutil.which("uv") or "uv", "run", "modal", "container", "list", "--json"],
                 cwd=workspace,
                 capture_output=True,
                 text=True,
@@ -715,12 +726,12 @@ def _execute_colocated(
     command: Sequence[str],
     *,
     workspace: str,
-    app_identifier: str,
-    base_url: str,
+    deployment: tuple[str, str],
     setup_command: Sequence[str] | None = None,
     evaluator_package_root: str | None = None,
 ) -> int:
     """Run the trusted command inside the app's serving container."""
+    base_url, app_identifier = deployment
     plan = _plan_command_transfer(command, workspace)
     archive = _build_stage_archive(
         workspace,
@@ -743,9 +754,9 @@ def _execute_colocated(
         setup_command=setup_command,
     )
     with _DeploymentKeepWarm(base_url):
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010243 [S603]; the in-container command is explicitly composed and passed after `sh -c` inside Modal's container API.
             [
-                "uv",
+                shutil.which("uv") or "uv",
                 "run",
                 "modal",
                 "container",
@@ -765,14 +776,14 @@ def _execute_colocated(
         )
     exit_code, files, passthrough = _parse_exec_output(result.stdout)
     if passthrough:
-        print(passthrough)
+        print(passthrough)  # noqa: T201  # lint-waiver: LW-000215 [T201]; candidate evaluator stdout is passed through to the invoking CLI.
     if result.stderr:
-        print(result.stderr, file=sys.stderr, end="")
+        print(result.stderr, file=sys.stderr, end="")  # noqa: T201  # lint-waiver: LW-000216 [T201]; candidate evaluator stderr is passed through to the invoking CLI.
     for path, payload in files.items():
         Path(path).write_bytes(payload)
     if exit_code is None:
         tail = result.stdout[-_MAX_DIAGNOSTIC_CHARS:]
-        print(
+        print(  # noqa: T201  # lint-waiver: LW-000217 [T201]; candidate evaluator exit diagnostics are shown to the invoking CLI.
             "Modal evaluator exec did not report an exit code "
             f"(modal exit {result.returncode}); output tail:\n{tail}",
             file=sys.stderr,
@@ -781,7 +792,7 @@ def _execute_colocated(
     return exit_code
 
 
-def run_evaluator(
+def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This installed CLI helper accepts argv, workspace, entrypoint, readiness timeout, trusted setup argv, and evaluator package root as separate caller controls.
     command: Sequence[str],
     *,
     workspace: str = "/workspace",
@@ -817,54 +828,58 @@ def run_evaluator(
         )
 
 
-def _run_evaluator_unlocked(
+def _execute_reused_candidate(
     command: Sequence[str],
     *,
     workspace: str,
-    entrypoint: str,
-    readiness_timeout_seconds: float,
     setup_command: Sequence[str] | None,
     evaluator_package_root: str | None,
-) -> int:
+) -> int | None:
     candidate_revision = os.environ.get(_CANDIDATE_REVISION_ENV)
-    if candidate_revision:
-        lease = _read_deployment_lease()
-        if lease is not None:
-            if (
-                lease.candidate_revision == candidate_revision
-                and lease.app_identifier is not None
-                and _healthy_now(lease.base_url)
-            ):
-                print(
-                    "Reusing healthy Modal deployment for candidate revision "
-                    f"{candidate_revision}.",
-                    file=sys.stderr,
-                )
-                try:
-                    return _execute_colocated(
-                        command,
-                        workspace=workspace,
-                        app_identifier=lease.app_identifier,
-                        base_url=lease.base_url,
-                        setup_command=setup_command,
-                        evaluator_package_root=evaluator_package_root,
-                    )
-                except (TimeoutError, ValueError) as exc:
-                    print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)
-                    return 1
-                finally:
-                    if _release_requested():
-                        _retire_deployment(lease, workspace=workspace)
+    if not candidate_revision:
+        return None
+    lease = _read_deployment_lease()
+    if lease is None:
+        return None
+    if (
+        lease.candidate_revision != candidate_revision
+        or lease.app_identifier is None
+        or not _healthy_now(lease.base_url)
+    ):
+        _retire_deployment(lease, workspace=workspace)
+        return None
+
+    print(  # noqa: T201  # lint-waiver: LW-000218 [T201]; reusing a healthy deployment is reported to the invoking CLI.
+        f"Reusing healthy Modal deployment for candidate revision {candidate_revision}.",
+        file=sys.stderr,
+    )
+    try:
+        return _execute_colocated(
+            command,
+            workspace=workspace,
+            deployment=(lease.base_url, lease.app_identifier),
+            setup_command=setup_command,
+            evaluator_package_root=evaluator_package_root,
+        )
+    except (TimeoutError, ValueError) as exc:
+        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000219 [T201]; setup failure diagnostics are reported to the invoking CLI.
+        return 1
+    finally:
+        if _release_requested():
             _retire_deployment(lease, workspace=workspace)
 
+
+def _deploy_and_wait_for_health(
+    *, workspace: str, entrypoint: str, readiness_timeout_seconds: float
+) -> tuple[str, str] | int:
     try:
         deployment_path = _deployment_path(workspace, entrypoint)
     except (FileNotFoundError, ValueError) as exc:
-        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)
+        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000220 [T201]; setup failure diagnostics are reported to the invoking CLI.
         return 1
 
-    deploy = subprocess.run(
-        ["uv", "run", "modal", "deploy", str(deployment_path)],
+    deploy = subprocess.run(  # noqa: S603  # lint-waiver: LW-010244 [S603]; deploy runs the generated trusted deployment file through a resolved Modal CLI.
+        [shutil.which("uv") or "uv", "run", "modal", "deploy", str(deployment_path)],
         cwd=workspace,
         capture_output=True,
         text=True,
@@ -872,7 +887,7 @@ def _run_evaluator_unlocked(
     )
     deploy_output = f"{deploy.stdout}\n{deploy.stderr}".strip()
     if deploy_output:
-        print(deploy_output, file=sys.stderr)
+        print(deploy_output, file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000221 [T201]; Modal deployment output is passed through to the invoking CLI.
     if deploy.returncode != 0:
         return deploy.returncode
 
@@ -882,19 +897,47 @@ def _run_evaluator_unlocked(
         app_identifier = extract_modal_app_identifier(deploy_output)
         wait_for_health(base_url, timeout_seconds=readiness_timeout_seconds)
     except (TimeoutError, ValueError) as exc:
-        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)
+        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000222 [T201]; setup failure diagnostics are reported to the invoking CLI.
         if app_identifier is None:
-            try:
+            with suppress(ValueError):
                 app_identifier = extract_modal_app_identifier(deploy_output)
-            except ValueError:
-                pass
         if app_identifier is not None:
-            print(
+            print(  # noqa: T201  # lint-waiver: LW-000223 [T201]; recent Modal logs are shown to the invoking CLI after readiness failure.
                 f"Recent Modal logs:\n{recent_modal_logs(app_identifier, workspace=workspace)}",
                 file=sys.stderr,
             )
             _stop_modal_app(app_identifier, workspace=workspace)
         return 1
+    return base_url, app_identifier
+
+
+def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913]; This phase shares the validated argv/path/setup values across fresh and reused deployments; another request wrapper would duplicate run_evaluator's CLI options.
+    command: Sequence[str],
+    *,
+    workspace: str,
+    entrypoint: str,
+    readiness_timeout_seconds: float,
+    setup_command: Sequence[str] | None,
+    evaluator_package_root: str | None,
+) -> int:
+    candidate_revision = os.environ.get(_CANDIDATE_REVISION_ENV)
+    reused_result = _execute_reused_candidate(
+        command,
+        workspace=workspace,
+        setup_command=setup_command,
+        evaluator_package_root=evaluator_package_root,
+    )
+    if reused_result is not None:
+        return reused_result
+
+    deployed = _deploy_and_wait_for_health(
+        workspace=workspace,
+        entrypoint=entrypoint,
+        readiness_timeout_seconds=readiness_timeout_seconds,
+    )
+    if isinstance(deployed, int):
+        return deployed
+    base_url, app_identifier = deployed
 
     if candidate_revision:
         _write_deployment_lease(candidate_revision, base_url, app_identifier)
@@ -903,13 +946,12 @@ def _run_evaluator_unlocked(
         return _execute_colocated(
             command,
             workspace=workspace,
-            app_identifier=app_identifier,
-            base_url=base_url,
+            deployment=deployed,
             setup_command=setup_command,
             evaluator_package_root=evaluator_package_root,
         )
     except (TimeoutError, ValueError) as exc:
-        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)
+        print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000224 [T201]; setup failure diagnostics are reported to the invoking CLI.
         return 1
     finally:
         if _release_requested():

@@ -68,7 +68,8 @@ class ThinkingCfg(_Strict):
     @model_validator(mode="after")
     def _one_thinking_control(self) -> Self:
         if self.level is not None and self.budget is not None:
-            raise ValueError("thinking.level and thinking.budget are mutually exclusive")
+            message = "thinking.level and thinking.budget are mutually exclusive"
+            raise ValueError(message)
         return self
 
 
@@ -245,7 +246,8 @@ class RepositoryCfg(_Strict):
             return None
         owner = value.strip()
         if not REPOSITORY_COMPONENT.fullmatch(owner):
-            raise ValueError("repository owner must be one GitHub user or organization name")
+            message = "repository owner must be one GitHub user or organization name"
+            raise ValueError(message)
         return owner
 
 
@@ -340,7 +342,7 @@ def load_config(path: Path, *, ignored_sections: frozenset[str] = frozenset()) -
     """
     _load_dotenv_file()
     path = Path(path)
-    with open(path, "rb") as f:
+    with path.open("rb") as f:
         raw = {key: value for key, value in tomllib.load(f).items() if key not in ignored_sections}
 
     return Config.model_validate(raw)

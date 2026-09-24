@@ -11,7 +11,7 @@ import sys
 import tarfile
 from importlib.util import module_from_spec, spec_from_file_location
 from types import ModuleType, SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -19,8 +19,18 @@ from tests.support import run_test_command
 
 from vibesys.sandbox import modal_evaluator
 
+_UV_EXECUTABLE = modal_evaluator.shutil.which("uv") or "uv"
+
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+class _EvaluatorOptions(TypedDict, total=False):
+    evaluator_package_root: Path | None
+    setup_command: list[str] | None
+    container_listing: SimpleNamespace | None
+    exec_stdout: str
+
 
 _DEPLOY_STDOUT = (
     "Web Function URL: https://workspace--candidate.modal.run\n"
@@ -86,12 +96,12 @@ def _run_public_evaluator(
     command: list[str],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    *,
-    evaluator_package_root: Path | None = None,
-    setup_command: list[str] | None = None,
-    container_listing: SimpleNamespace | None = None,
-    exec_stdout: str = "__VIBESYS_EXEC_RC__=0\n",
+    **options: Unpack[_EvaluatorOptions],
 ) -> tuple[int, list[list[str]]]:
+    evaluator_package_root = options.get("evaluator_package_root")
+    setup_command = options.get("setup_command")
+    container_listing = options.get("container_listing")
+    exec_stdout = options.get("exec_stdout", "__VIBESYS_EXEC_RC__=0\n")
     calls: list[list[str]] = []
 
     def run(command: list[str], **_options: object) -> SimpleNamespace:
@@ -980,7 +990,7 @@ def test_evaluator_execs_in_container_and_returns_sentinel_rc(
 
     exec_argv = next(call for call in calls if call[3:5] == ["container", "exec"])
     assert result == 3
-    assert exec_argv[:6] == ["uv", "run", "modal", "container", "exec", "ta-123"]
+    assert exec_argv[:6] == [_UV_EXECUTABLE, "run", "modal", "container", "exec", "ta-123"]
     assert exec_argv[6:9] == ["--", "sh", "-c"]
     assert "python checker.py" in exec_argv[9]
 
@@ -1076,7 +1086,7 @@ def test_run_evaluator_deploys_waits_and_runs_colocated(monkeypatch: pytest.Monk
     assert result == 0
     assert run.call_args_list == [
         call(
-            ["uv", "run", "modal", "deploy", "/workspace/main.py"],
+            [_UV_EXECUTABLE, "run", "modal", "deploy", "/workspace/main.py"],
             cwd="/workspace",
             capture_output=True,
             text=True,
@@ -1090,8 +1100,7 @@ def test_run_evaluator_deploys_waits_and_runs_colocated(monkeypatch: pytest.Monk
     colocated.assert_called_once_with(
         ["uv", "run", "python", "checker.py"],
         workspace="/workspace",
-        app_identifier="candidate-app",
-        base_url="https://workspace--candidate.modal.run",
+        deployment=("https://workspace--candidate.modal.run", "candidate-app"),
         setup_command=None,
         evaluator_package_root=None,
     )
@@ -1120,8 +1129,7 @@ def test_run_evaluator_threads_trusted_setup_and_package(
     colocated.assert_called_once_with(
         ["python", ".vibesys-evaluator-package/adapter.py"],
         workspace="/workspace",
-        app_identifier="candidate-app",
-        base_url="https://workspace--candidate.modal.run",
+        deployment=("https://workspace--candidate.modal.run", "candidate-app"),
         setup_command=("installer", "--locked"),
         evaluator_package_root=str(package.resolve()),
     )
@@ -1197,7 +1205,7 @@ def test_run_evaluator_deploys_custom_entrypoint(monkeypatch: pytest.MonkeyPatch
     assert result == 0
     assert run.call_args_list[0] == call(
         [
-            "uv",
+            _UV_EXECUTABLE,
             "run",
             "modal",
             "deploy",
@@ -1242,8 +1250,7 @@ def test_run_evaluator_reuses_healthy_deployment_for_exact_revision(
     colocated.assert_called_once_with(
         ["uv", "run", "python", "checker.py"],
         workspace="/workspace",
-        app_identifier="candidate-app",
-        base_url="https://workspace--candidate.modal.run",
+        deployment=("https://workspace--candidate.modal.run", "candidate-app"),
         setup_command=None,
         evaluator_package_root=None,
     )
@@ -1277,7 +1284,7 @@ def test_run_evaluator_redeploys_when_lease_lacks_app_identifier(
     )
 
     assert result == 0
-    assert run.call_args_list[0].args[0][:4] == ["uv", "run", "modal", "deploy"]
+    assert run.call_args_list[0].args[0][:4] == [_UV_EXECUTABLE, "run", "modal", "deploy"]
     colocated.assert_called_once()
 
 
@@ -1311,7 +1318,7 @@ def test_run_evaluator_releases_reused_deployment_after_final_gate(
 
     assert result == 0
     assert run.call_args_list[-1] == call(
-        ["uv", "run", "modal", "app", "stop", "candidate-app", "--yes"],
+        [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
         cwd="/workspace",
         capture_output=True,
         text=True,
@@ -1343,7 +1350,7 @@ def test_run_evaluator_releases_new_deployment_after_final_gate(
 
     assert result == 0
     assert run.call_args_list[-1] == call(
-        ["uv", "run", "modal", "app", "stop", "candidate-app", "--yes"],
+        [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
         cwd="/workspace",
         capture_output=True,
         text=True,
@@ -1383,7 +1390,7 @@ def test_run_evaluator_stops_mismatched_leased_app_before_redeploy(
 
     assert result == 0
     assert run.call_args_list[0] == call(
-        ["uv", "run", "modal", "app", "stop", "old-app", "--yes"],
+        [_UV_EXECUTABLE, "run", "modal", "app", "stop", "old-app", "--yes"],
         cwd="/workspace",
         capture_output=True,
         text=True,
@@ -1451,7 +1458,7 @@ def test_run_evaluator_prints_modal_logs_when_readiness_fails(
     assert "RuntimeError: CUDA toolkit mismatch" in capsys.readouterr().err
     assert (
         call(
-            ["uv", "run", "modal", "app", "stop", "candidate-app", "--yes"],
+            [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
             cwd="/workspace",
             capture_output=True,
             text=True,

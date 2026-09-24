@@ -64,7 +64,7 @@ def test_inspector_answers_round_and_failure_queries(tmp_path: Path) -> None:
 
 def test_inspector_explains_latest_failed_execution(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    execution = parts.controller.start_agent_execution("implementer", "round 5", "prompt")
+    execution = parts.start_execution("implementer", "round 5", "prompt")
     parts.controller.after_agent(
         "implementer",
         "round 5",

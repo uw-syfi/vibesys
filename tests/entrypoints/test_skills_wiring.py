@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 import re
-from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 
@@ -29,6 +29,17 @@ from vibesys.skills import (
     validate_skill_tree,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+
+class _ArgsOptions(TypedDict, total=False):
+    no_skills: bool
+    skills_dir: list[Path] | None
+    extra_skills: list[Path] | None
+    default_presets: bool
+
+
 NKI_WRAPPER_DIR = PROJECT_ROOT / "resources" / "skills" / "neuron-agentic-development"
 NKI_SKILL_NAMES = {
     "neuron-nki-debugging",
@@ -42,12 +53,12 @@ NKI_SKILL_NAMES = {
 def _args(
     tmp_path: Path,
     backend: ComputeBackend,
-    *,
-    no_skills: bool = False,
-    skills_dir: list[Path] | None = None,
-    extra_skills: list[Path] | None = None,
-    default_presets: bool = True,
+    **options: Unpack[_ArgsOptions],
 ) -> argparse.Namespace:
+    no_skills = options.get("no_skills", False)
+    skills_dir = options.get("skills_dir")
+    extra_skills = options.get("extra_skills")
+    default_presets = options.get("default_presets", True)
     cfg = tmp_path / "agent.toml"
     cfg.write_text('[model]\nname = "gpt-5.5"\n')
     # By default emulate "presets only" by pointing --skills-dir at the repo

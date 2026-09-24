@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import itertools
 import json
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -12,6 +11,7 @@ import pytest
 from tests.server.support import build_server_parts
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 from server.diagnostics import (
@@ -204,7 +204,7 @@ def test_modern_phase_events_replay_unchanged(tmp_path: Path) -> None:
 def test_invocation_and_terminal_failure_share_diagnostic_identity(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     error = RuntimeError("token=super-secret agent process exited")
-    execution = parts.controller.start_agent_execution("implementer", "round 5", "prompt")
+    execution = parts.start_execution("implementer", "round 5", "prompt")
     parts.controller.after_agent(
         "implementer", "round 5", error=error, execution_id=execution.execution_id
     )
@@ -337,6 +337,7 @@ def test_nonterminal_failure_helpers_reject_wrong_event_owners(tmp_path: Path) -
             operation="Judge",
         )
     for event_type in (EventType.CONFIGURATION_FAILED, EventType.RUN_FAILED):
+        error = RuntimeError("worker failed")
         with (
             pytest.raises(ValueError, match="without owning run termination"),
             parts.journal.capture_failure(
@@ -345,15 +346,14 @@ def test_nonterminal_failure_helpers_reject_wrong_event_owners(tmp_path: Path) -
                 operation="Background maintenance",
             ),
         ):
-            _failure_message = "worker failed"
-            raise RuntimeError(_failure_message)
+            raise error
     assert parts.journal.read() == before
 
 
 def test_terminal_wrapper_reuses_cause_diagnostic(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     cause = RuntimeError("token=super-secret agent process exited")
-    execution = parts.controller.start_agent_execution("implementer", "round 5", "prompt")
+    execution = parts.start_execution("implementer", "round 5", "prompt")
     parts.controller.after_agent(
         "implementer", "round 5", error=cause, execution_id=execution.execution_id
     )

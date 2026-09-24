@@ -14,12 +14,14 @@ import pytest
 
 import vibesys.domains.base as domain
 from entrypoints.cli import parse_cli_invocation
+from vibesys.api.contracts import LoopKind, RunRequest
 from vibesys.config import as_config
-from vibesys.constants import DomainName
+from vibesys.constants import ComputeBackend, DomainName
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError
+from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.loops.agent.loop import (
     _INTERFACES,
     DEFAULT_INTERFACE,
@@ -82,17 +84,22 @@ def test_loop_constants_and_rejects_unknown_interface(tmp_path: Path) -> None:
 
     assert DEFAULT_INTERFACE == "inprocess"
     assert _INTERFACES == ("inprocess", "service")
+    project = _write_input_project(tmp_path)
+    bundle = load_input_bundle(project)
     with pytest.raises(ValueError, match="interface"):
         run_agent_loop(
-            config=as_config({"model": {"name": "test-model"}}),
-            exp_name="e",
-            input_path="/x",
-            accuracy_command="accuracy-checker",
-            benchmark_command="benchmark",
-            objective="o",
-            runs_dir=tmp_path,
-            metrics=MetricSpace(),
-            interface="native",
+            RunRequest(
+                project_root=project,
+                loop=LoopKind.AGENT,
+                config=as_config({"model": {"name": "test-model"}}),
+                input_bundle=bundle,
+                objective="o",
+                exp_name="e",
+                runs_dir=tmp_path,
+                metrics=MetricSpace(),
+                backend=ComputeBackend.CPU,
+                interface="native",
+            )
         )
 
 

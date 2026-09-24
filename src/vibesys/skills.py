@@ -335,13 +335,16 @@ def coerce_skill_root(raw: str | Path, *, project_root: Path = PROJECT_ROOT) -> 
         path = project_root / path
     path = path.resolve()
     if not path.exists():
-        raise ValueError(f"skill source path does not exist: {raw}")
+        message = f"skill source path does not exist: {raw}"
+        raise ValueError(message)
     if path.is_file():
         if path.name != "SKILL.md":
-            raise ValueError(f"skill source file must be a SKILL.md file: {raw}")
+            _exception_message_2 = f"skill source file must be a SKILL.md file: {raw}"
+            raise ValueError(_exception_message_2)
         return path.parent
     if not path.is_dir():
-        raise ValueError(f"skill source path is not a directory or SKILL.md file: {raw}")
+        _exception_message = f"skill source path is not a directory or SKILL.md file: {raw}"
+        raise ValueError(_exception_message)
     return path
 
 
@@ -374,22 +377,30 @@ def build_skill_catalog(skill_dirs: Iterable[str | Path]) -> dict[str, SkillCata
     return catalog
 
 
+def _skill_resource_parts(resource: str) -> PurePosixPath | str:
+    """Parse a safe skill-relative path, returning its diagnostic if invalid."""
+    if not resource:
+        return "resource path must be a non-empty string"
+    if "\\" in resource:
+        return "resource path must use POSIX separators"
+
+    relative = PurePosixPath(resource)
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        return "resource path must be relative and stay within the skill"
+    if any(part in _MATERIALIZATION_EXCLUDED_NAMES for part in relative.parts):
+        return "resource path is excluded from agent skill materialization"
+    return relative
+
+
 def _resolve_skill_resource(
     entry: SkillCatalogEntry,
     raw_resource: str,
 ) -> tuple[str | None, str | None]:
     """Resolve one skill-relative file to its agent-visible path and diagnostic."""
-    resource = raw_resource.strip()
-    if not resource:
-        return None, "resource path must be a non-empty string"
-    if "\\" in resource:
-        return None, "resource path must use POSIX separators"
-
-    relative = PurePosixPath(resource)
-    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
-        return None, "resource path must be relative and stay within the skill"
-    if any(part in _MATERIALIZATION_EXCLUDED_NAMES for part in relative.parts):
-        return None, "resource path is excluded from agent skill materialization"
+    parsed = _skill_resource_parts(raw_resource.strip())
+    if isinstance(parsed, str):
+        return None, parsed
+    relative = parsed
 
     source_root = entry.source_dir.resolve()
     lexical_path = entry.source_dir.joinpath(*relative.parts)
@@ -437,7 +448,9 @@ def resolve_skill_selections(
                     f"selection #{index} skill {skill!r} resource {raw_resource!r}: {error}"
                 )
                 continue
-            assert workspace_path is not None
+            if workspace_path is None:
+                message = "skill resource resolver returned no path or diagnostic"
+                raise RuntimeError(message)
             if workspace_path == entry.router_path or workspace_path in resources:
                 continue
             resources.append(workspace_path)

@@ -68,7 +68,7 @@ class TodoDisplay:
         top = f"┌─ Todo {'─' * (width - 8)}┐"
         bot = f"└{'─' * (width - 1)}┘"
         padded = [line + " " * (width - len(self._strip_ansi(line)) - 1) + "│" for line in items]
-        box = [top] + padded + [bot]
+        box = [top, *padded, bot]
 
         out = self._out
         # Clear previous block

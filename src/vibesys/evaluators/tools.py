@@ -580,7 +580,7 @@ def _run_cargo(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
         cargo_environment["CARGO_HOME"] = cargo_home
         if "RUSTUP_HOME" in os.environ:
             cargo_environment["RUSTUP_HOME"] = os.environ["RUSTUP_HOME"]
-        return subprocess.run(
+        return subprocess.run(  # noqa: S603  # lint-waiver: LW-010234 [S603]; the trusted evaluator command is passed as argv without a host shell.
             list(arguments),
             capture_output=True,
             check=False,

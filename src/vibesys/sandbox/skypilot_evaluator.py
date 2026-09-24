@@ -13,12 +13,177 @@ import socket
 import sys
 import tempfile
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import BinaryIO, TextIO
 
 _PROTOCOL_VERSION = 2
 _MAX_FRAME_BYTES = 1024 * 1024
 _FRAMEWORK_ARGUMENT_COUNT = 2
+
+
+@dataclass(frozen=True)
+class _BridgeSession:
+    client: socket.socket
+    reader: BinaryIO
+    invocation_id: str
+    pending_path: Path
+
+
+def _decode_frame(payload: bytes, stderr: TextIO) -> dict[str, object] | None:
+    if len(payload) > _MAX_FRAME_BYTES or not payload.endswith(b"\n"):
+        print("SkyPilot bridge returned an invalid frame", file=stderr)
+        return None
+    try:
+        frame = json.loads(payload)
+    except json.JSONDecodeError:
+        print("SkyPilot bridge returned invalid JSON", file=stderr)
+        return None
+    if not isinstance(frame, dict) or frame.get("version") != _PROTOCOL_VERSION:
+        print("SkyPilot bridge protocol version mismatch", file=stderr)
+        return None
+    return frame
+
+
+def _relay_output(frame: dict[str, object], stdout: TextIO, stderr: TextIO) -> bool | None:
+    frame_type = frame.get("type")
+    if frame_type not in {"stdout", "stderr"}:
+        return None
+    stream = stdout if frame_type == "stdout" else stderr
+    data = frame.get("data")
+    if set(frame) != {"version", "type", "data"} or not isinstance(data, str):
+        print("SkyPilot bridge returned an invalid frame", file=stderr)
+        return False
+    stream.write(data)
+    stream.flush()
+    return True
+
+
+def _validate_result(
+    frame: dict[str, object],
+    artifacts: tuple[str, ...],
+    *,
+    artifact_received: bool,
+    stderr: TextIO,
+) -> str | None:
+    status = frame.get("status")
+    if (
+        set(frame) != {"version", "type", "status", "sky_exit_code", "remote_job_id"}
+        or not isinstance(status, str)
+        or status not in {"COMPLETED", "APPLICATION_FAILED", "CANCELLED"}
+        or not _strict_int(frame.get("sky_exit_code"))
+        or not _strict_int(frame.get("remote_job_id"))
+        or (status == "COMPLETED" and bool(artifacts) != artifact_received)
+    ):
+        print("SkyPilot bridge returned an invalid result", file=stderr)
+        return None
+    return status
+
+
+def _receive_artifact(
+    frame: dict[str, object],
+    artifacts: tuple[str, ...],
+    *,
+    artifact_received: bool,
+    stderr: TextIO,
+) -> bool | None:
+    path = frame.get("path")
+    data = frame.get("data_base64")
+    if (
+        set(frame) != {"version", "type", "path", "size", "sha256", "data_base64"}
+        or not isinstance(path, str)
+        or path not in artifacts
+        or not isinstance(data, str)
+        or not _strict_int(frame.get("size"))
+        or not isinstance(frame.get("sha256"), str)
+        or artifact_received
+    ):
+        print("SkyPilot bridge returned an invalid artifact", file=stderr)
+        return None
+    try:
+        decoded = base64.b64decode(data, validate=True)
+    except binascii.Error:
+        print("SkyPilot bridge returned an invalid artifact", file=stderr)
+        return None
+    if len(decoded) != frame["size"] or hashlib.sha256(decoded).hexdigest() != frame["sha256"]:
+        print("SkyPilot bridge returned an invalid artifact", file=stderr)
+        return None
+    try:
+        _atomic_write(Path(path), decoded)
+    except OSError:
+        print("SkyPilot bridge returned an invalid artifact", file=stderr)
+        return None
+    return True
+
+
+def _acknowledge_result(session: _BridgeSession) -> bool:
+    client = session.client
+    client.sendall(
+        json.dumps(
+            {
+                "version": _PROTOCOL_VERSION,
+                "type": "ack",
+                "invocation_id": session.invocation_id,
+            },
+            separators=(",", ":"),
+        ).encode()
+        + b"\n"
+    )
+    acknowledgement = session.reader.readline(_MAX_FRAME_BYTES + 1)
+    try:
+        acked = json.loads(acknowledgement)
+    except json.JSONDecodeError:
+        return False
+    return acked == {
+        "version": _PROTOCOL_VERSION,
+        "type": "acked",
+        "invocation_id": session.invocation_id,
+    }
+
+
+def _process_stream_frame(
+    frame: dict[str, object],
+    artifacts: tuple[str, ...],
+    *,
+    artifact_received: bool,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> bool:
+    output_result = _relay_output(frame, stdout, stderr)
+    if output_result is not None:
+        return output_result
+    if frame.get("type") == "artifact":
+        return (
+            _receive_artifact(frame, artifacts, artifact_received=artifact_received, stderr=stderr)
+            is True
+        )
+    if frame.get("type") == "error":
+        error = frame.get("error")
+        if set(frame) != {"version", "type", "error"} or not isinstance(error, str):
+            print("SkyPilot bridge returned an invalid frame", file=stderr)
+            return False
+        print(f"SkyPilot bridge error: {error}", file=stderr)
+        return False
+    print("SkyPilot bridge returned an invalid frame", file=stderr)
+    return False
+
+
+def _complete_result(
+    frame: dict[str, object],
+    artifacts: tuple[str, ...],
+    *,
+    artifact_received: bool,
+    session: _BridgeSession,
+    stderr: TextIO,
+) -> int:
+    status = _validate_result(frame, artifacts, artifact_received=artifact_received, stderr=stderr)
+    if status is None:
+        return 2
+    if not _acknowledge_result(session):
+        print("SkyPilot bridge returned an invalid acknowledgement", file=stderr)
+        return 2
+    _remove_pending_invocation(session.pending_path)
+    return 0 if status == "COMPLETED" else 130 if status == "CANCELLED" else 1
 
 
 def run_evaluator(
@@ -39,7 +204,7 @@ def run_evaluator(
                 len(arguments) != _FRAMEWORK_ARGUMENT_COUNT
                 or not arguments[0].startswith("-")
                 or any(character.isspace() for character in arguments[0])
-                or not arguments[1].startswith("/tmp/vibesys-framework-benchmark-")
+                or not arguments[1].startswith("/tmp/vibesys-framework-benchmark-")  # noqa: S108  # lint-waiver: LW-010208 [S108]; validate the fixed artifact path required by the benchmark bridge protocol.
                 or not arguments[1].endswith(".json")
             ):
                 print("Unsupported SkyPilot evaluator arguments", file=stderr)
@@ -54,108 +219,30 @@ def run_evaluator(
         }
         client.sendall(json.dumps(request, separators=(",", ":")).encode() + b"\n")
         reader = client.makefile("rb")
+        session = _BridgeSession(client, reader, invocation_id, pending_path)
         artifact_received = False
         while payload := reader.readline(_MAX_FRAME_BYTES + 1):
-            if len(payload) > _MAX_FRAME_BYTES or not payload.endswith(b"\n"):
-                print("SkyPilot bridge returned an invalid frame", file=stderr)
+            frame = _decode_frame(payload, stderr)
+            if frame is None:
                 return 2
-            try:
-                frame = json.loads(payload)
-            except json.JSONDecodeError:
-                print("SkyPilot bridge returned invalid JSON", file=stderr)
-                return 2
-            if not isinstance(frame, dict) or frame.get("version") != _PROTOCOL_VERSION:
-                print("SkyPilot bridge protocol version mismatch", file=stderr)
-                return 2
-            frame_type = frame.get("type")
-            if (
-                frame_type == "stdout"
-                and set(frame) == {"version", "type", "data"}
-                and isinstance(frame.get("data"), str)
-            ):
-                stdout.write(frame["data"])
-                stdout.flush()
-            elif (
-                frame_type == "stderr"
-                and set(frame) == {"version", "type", "data"}
-                and isinstance(frame.get("data"), str)
-            ):
-                stderr.write(frame["data"])
-                stderr.flush()
-            elif frame_type == "result":
-                status = frame.get("status")
-                if (
-                    set(frame) != {"version", "type", "status", "sky_exit_code", "remote_job_id"}
-                    or status not in {"COMPLETED", "APPLICATION_FAILED", "CANCELLED"}
-                    or not _strict_int(frame.get("sky_exit_code"))
-                    or not _strict_int(frame.get("remote_job_id"))
-                    or (status == "COMPLETED" and bool(artifacts) != artifact_received)
-                ):
-                    print("SkyPilot bridge returned an invalid result", file=stderr)
-                    return 2
-                client.sendall(
-                    json.dumps(
-                        {
-                            "version": _PROTOCOL_VERSION,
-                            "type": "ack",
-                            "invocation_id": invocation_id,
-                        },
-                        separators=(",", ":"),
-                    ).encode()
-                    + b"\n"
+            if frame.get("type") == "result":
+                return _complete_result(
+                    frame,
+                    artifacts,
+                    artifact_received=artifact_received,
+                    session=session,
+                    stderr=stderr,
                 )
-                acknowledgement = reader.readline(_MAX_FRAME_BYTES + 1)
-                try:
-                    acked = json.loads(acknowledgement)
-                except json.JSONDecodeError:
-                    print("SkyPilot bridge returned an invalid acknowledgement", file=stderr)
-                    return 2
-                if acked != {
-                    "version": _PROTOCOL_VERSION,
-                    "type": "acked",
-                    "invocation_id": invocation_id,
-                }:
-                    print("SkyPilot bridge returned an invalid acknowledgement", file=stderr)
-                    return 2
-                _remove_pending_invocation(pending_path)
-                return 0 if status == "COMPLETED" else 130 if status == "CANCELLED" else 1
-            elif frame_type == "artifact":
-                path = frame.get("path")
-                data = frame.get("data_base64")
-                if (
-                    set(frame) != {"version", "type", "path", "size", "sha256", "data_base64"}
-                    or not isinstance(path, str)
-                    or path not in artifacts
-                    or not isinstance(data, str)
-                    or not _strict_int(frame.get("size"))
-                    or not isinstance(frame.get("sha256"), str)
-                    or artifact_received
-                ):
-                    print("SkyPilot bridge returned an invalid artifact", file=stderr)
-                    return 2
-                try:
-                    decoded = base64.b64decode(data, validate=True)
-                    valid_artifact = (
-                        len(decoded) == frame["size"]
-                        and hashlib.sha256(decoded).hexdigest() == frame["sha256"]
-                    )
-                    if not valid_artifact:
-                        raise ValueError
-                    _atomic_write(Path(path), decoded)
-                except (binascii.Error, OSError, ValueError):
-                    print("SkyPilot bridge returned an invalid artifact", file=stderr)
-                    return 2
-                artifact_received = True
-            elif frame_type == "error":
-                error = frame.get("error")
-                if set(frame) != {"version", "type", "error"} or not isinstance(error, str):
-                    print("SkyPilot bridge returned an invalid frame", file=stderr)
-                    return 2
-                print(f"SkyPilot bridge error: {error}", file=stderr)
+            frame_result = _process_stream_frame(
+                frame,
+                artifacts,
+                artifact_received=artifact_received,
+                stdout=stdout,
+                stderr=stderr,
+            )
+            if not frame_result:
                 return 2
-            else:
-                print("SkyPilot bridge returned an invalid frame", file=stderr)
-                return 2
+            artifact_received = artifact_received or frame.get("type") == "artifact"
     print("SkyPilot bridge closed without a result", file=stderr)
     return 2
 

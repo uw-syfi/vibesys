@@ -172,12 +172,14 @@ class TestFrameworkEmitters:
         sink = OutputSink()
         seen, _ = _collect(sink)
         sink.run_configured(
-            run_log_path="/logs/run.log",
-            project_root="/work/project",
-            objective="\n  \nMake the queue fast.\nSecond paragraph.",
-            search_policy="pareto-ucb",
-            benchmark_contract=True,
-            pareto_objectives="[latency(min)]",
+            RunConfiguredData(
+                run_log_path="/logs/run.log",
+                project_root="/work/project",
+                objective="\n  \nMake the queue fast.\nSecond paragraph.",
+                search_policy="pareto-ucb",
+                benchmark_contract=True,
+                pareto_objectives="[latency(min)]",
+            )
         )
         assert seen[0].type == CoreEventType.RUN_CONFIGURED
         data = seen[0].data
@@ -191,7 +193,9 @@ class TestFrameworkEmitters:
     def test_run_configured_without_objective(self) -> None:
         sink = OutputSink()
         seen, _ = _collect(sink)
-        sink.run_configured(run_log_path="/logs/run.log", project_root="/p", model="m")
+        sink.run_configured(
+            RunConfiguredData(run_log_path="/logs/run.log", project_root="/p", model="m")
+        )
         data = seen[0].data
         assert isinstance(data, RunConfiguredData)
         assert data.objective is None

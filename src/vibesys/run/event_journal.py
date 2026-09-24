@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
@@ -79,7 +79,7 @@ class EventJournal:
         text: str = "",
         *,
         data: CoreEventData | None = None,
-        **fields: Any,
+        **fields: object,
     ) -> CoreEvent:
         """Create, record, and publish one core event."""
         return self.record(make_core_event(event_type, text, data=data, **fields))
@@ -117,7 +117,8 @@ class EventJournal:
             update={"sequence": sequence, "run_id": self._run_id},
         )
         if self._path is None:
-            raise RuntimeError("cannot append a durable event before attachment")
+            message = "cannot append a durable event before attachment"
+            raise RuntimeError(message)
         with self._path.open("a", encoding="utf-8") as stream:
             stream.write(recorded.model_dump_json() + "\n")
         self._events.append(recorded)

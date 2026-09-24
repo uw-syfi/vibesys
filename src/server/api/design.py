@@ -145,9 +145,8 @@ class DesignLog:
         """
         for value in (base, head):
             if _COMMIT_PATTERN.fullmatch(value) is None:
-                raise ValueError(
-                    f"not a commit object name: {value!r}"
-                )  # Names the rejected value.
+                _exception_message = f"not a commit object name: {value!r}"
+                raise ValueError(_exception_message)  # Names the rejected value.
         changes = self._changed_files(base, head)
         if changes is None:
             # The range's file list itself is unreadable (repository gone or
@@ -157,9 +156,8 @@ class DesignLog:
             return DesignPatch(base=base, head=head, path=path)
         change = next((entry for entry in changes if entry.path == path), None)
         if change is None:
-            raise ValueError(
-                f"path is not in the round's change list: {path!r}"
-            )  # Names the rejected value.
+            message = f"path is not in the round's change list: {path!r}"
+            raise ValueError(message)  # Names the rejected value.
         key = (base, head, path)
         cached = self._patch_cache.get(key)
         if cached is not None:

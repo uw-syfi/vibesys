@@ -17,12 +17,12 @@ from __future__ import annotations
 
 import inspect
 import json
-import os
 import re
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from agentshim import CommandResult
@@ -62,9 +62,9 @@ def _codex_resume_argv_matches(argv: list[str], thread_id: str) -> bool:
     the process argv reads ``node /usr/local/bin/codex exec resume ...`` while
     its native child reads ``.../codex exec resume ...``; both must match.
     """
-    if len(argv) > 1 and os.path.basename(argv[0]) != "codex":
+    if len(argv) > 1 and Path(argv[0]).name != "codex":
         argv = argv[1:]
-    if not argv or os.path.basename(argv[0]) != "codex":
+    if not argv or Path(argv[0]).name != "codex":
         return False
     if "exec" not in argv or "--json" not in argv:
         return False
@@ -199,7 +199,7 @@ class CodexRolloutWatchdogExecutor:
     # Each keyword argument is an independent documented timing knob; folding
     # them into a config object would break the constructors already calling
     # this with the current keyword spellings.
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-010128 [PLR0913]; Preserve CodexRolloutWatchdogExecutor.__init__'s named-argument contract because callers pass these independent settings directly.
         self,
         inner: CommandExecutor,
         container_id_resolver: Callable[[], str],
@@ -323,7 +323,7 @@ class CodexRolloutWatchdogExecutor:
         """Poll the container until the run ends or the watchdog stops it."""
         try:
             self._poll(argv, handle, state, stopped)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010129 [BLE001]; CodexRolloutWatchdogExecutor._watch runs on a watchdog thread and must surface unexpected Docker failures to the active turn.
             # This runs on a helper thread: an escaping exception would vanish
             # and leave the turn to burn its whole budget with no explanation.
             self._log(f"codex rollout watchdog stopped after an unexpected error: {exc}")
@@ -336,7 +336,7 @@ class CodexRolloutWatchdogExecutor:
         stopped: threading.Event,
     ) -> None:
         container_id = self._container_id_resolver()
-        child_binary = os.path.basename(argv[0]) if argv else ""
+        child_binary = Path(argv[0]).name if argv else ""
         thread_id = _codex_resume_thread_id(argv)
         next_poll = time.monotonic()
         fingerprint: str | None = None
@@ -525,7 +525,7 @@ def _last_codex_agent_message(events: Sequence[dict[str, Any]]) -> str | None:
 
 def _is_codex_json_command(cmd: Sequence[str]) -> bool:
     """Return whether *cmd* is a machine-readable Codex exec invocation."""
-    if not cmd or os.path.basename(cmd[0]) != "codex" or "--json" not in cmd:
+    if not cmd or Path(cmd[0]).name != "codex" or "--json" not in cmd:
         return False
     return "exec" in cmd
 

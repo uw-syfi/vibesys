@@ -17,6 +17,7 @@ from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from pydantic import BaseModel
@@ -103,25 +104,41 @@ def materialize_skills(
         target_root = workspace / target_rel
         target_root.mkdir(parents=True, exist_ok=True)
         for name, src_skill in discovered.items():
-            dest = target_root / name
-            try:
-                if src_skill.resolve() == dest.resolve():
-                    continue
-                if dest.exists() or dest.is_symlink():
-                    if dest.is_dir() and not dest.is_symlink():
-                        shutil.rmtree(dest)
-                    else:
-                        dest.unlink()
-                shutil.copytree(src_skill, dest, symlinks=True, ignore=skip_ignore)
-            except OSError as exc:
-                message = (
-                    f"[skills] failed to materialize {src_skill} -> "
-                    f"{dest}: {type(exc).__name__}: {exc}"
-                )
-                event_sink.agent_output(message + "\n", channel="diagnostic")
-                if log_file is not None:
-                    log_file.write(message + "\n")
-                    log_file.flush()
+            _materialize_skill_copy(
+                src_skill,
+                target_root / name,
+                ignore=skip_ignore,
+                log_file=log_file,
+                event_sink=event_sink,
+            )
+
+
+def _materialize_skill_copy(
+    src_skill: Path,
+    dest: Path,
+    *,
+    ignore: Callable[[str, list[str]], set[str]],
+    log_file: TextIO | None,
+    event_sink: AgentEventSink,
+) -> None:
+    """Replace one copied skill tree, reporting filesystem failures in-place."""
+    try:
+        if src_skill.resolve() == dest.resolve():
+            return
+        if dest.exists() or dest.is_symlink():
+            if dest.is_dir() and not dest.is_symlink():
+                shutil.rmtree(dest)
+            else:
+                dest.unlink()
+        shutil.copytree(src_skill, dest, symlinks=True, ignore=ignore)
+    except OSError as exc:
+        message = (
+            f"[skills] failed to materialize {src_skill} -> {dest}: {type(exc).__name__}: {exc}"
+        )
+        event_sink.agent_output(message + "\n", channel="diagnostic")
+        if log_file is not None:
+            log_file.write(message + "\n")
+            log_file.flush()
 
 
 def build_schema_hint(response_cls: type[BaseModel]) -> str:

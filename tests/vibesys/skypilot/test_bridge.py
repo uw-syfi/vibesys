@@ -112,7 +112,7 @@ class FakeRunner(SkyPilotJobRunner):
             return None
         return ClusterInfo(name, self.cluster_status)
 
-    def run(
+    def run(  # noqa: PLR0913  # lint-waiver: LW-010051 [PLR0913]; this fake preserves the public SkyPilotJobRunner.run callback and resume controls so the bridge exercises the real runner contract.
         self,
         cluster_name: str,
         resources: ResolvedSkyPilotResources,
@@ -553,30 +553,7 @@ def test_job_discovered_during_close_is_cancelled_and_released(
 def test_bridge_stages_allowlisted_command_streams_and_cleans_up(
     tmp_path: Path, socket_dir: Path
 ) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / "candidate.py").write_text("candidate")
-    (workspace / ".env").write_text("SECRET=x")
-    (workspace / ".venv").mkdir()
-    (workspace / ".venv" / "large-cache").write_text("excluded")
-    (workspace / ".vibesys-evaluator-tools").mkdir()
-    (workspace / ".vibesys-evaluator-tools" / "poisoned").write_text("candidate")
-    (workspace / ".vibesys-evaluator-toolchains").mkdir()
-    (workspace / ".vibesys-evaluator-toolchains" / "poisoned").write_text("candidate")
-    (workspace / ".bin").mkdir()
-    (workspace / ".bin" / "cargo").write_text("candidate")
-    (workspace / ".pip").mkdir()
-    (workspace / ".pip" / "uv.py").write_text("candidate")
-    (workspace / ".uv-cache").mkdir()
-    (workspace / ".uv-cache" / "archive").write_text("candidate")
-    (workspace / ".vibesys-evaluator-package").mkdir()
-    (workspace / ".vibesys-evaluator-package" / "checker.py").write_text("candidate")
-    (workspace / ".skyignore").write_text(".vibesys-evaluator-package\n")
-    (workspace / "private").mkdir()
-    (workspace / "private" / "token").write_text("secret")
-    package = tmp_path / "package"
-    package.mkdir()
-    (package / "checker.py").write_text("checker")
+    workspace, package = _staging_fixture(tmp_path)
     runner = FakeRunner()
     bridge = SkyPilotBridge(
         runner=runner,
@@ -629,6 +606,35 @@ def test_bridge_stages_allowlisted_command_streams_and_cleans_up(
         assert bridge.socket_path.stat().st_mode & 0o777 == 0o600
     finally:
         bridge.close()
+
+
+def _staging_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "candidate.py").write_text("candidate")
+    (workspace / ".env").write_text("SECRET=x")
+    for directory, name in (
+        (".venv", "large-cache"),
+        (".vibesys-evaluator-tools", "poisoned"),
+        (".vibesys-evaluator-toolchains", "poisoned"),
+        (".bin", "cargo"),
+        (".pip", "uv.py"),
+        (".uv-cache", "archive"),
+    ):
+        hidden = workspace / directory
+        hidden.mkdir()
+        (hidden / name).write_text("excluded")
+    package = workspace / ".vibesys-evaluator-package"
+    package.mkdir()
+    (package / "checker.py").write_text("candidate")
+    (workspace / ".skyignore").write_text(".vibesys-evaluator-package\n")
+    private = workspace / "private"
+    private.mkdir()
+    (private / "token").write_text("secret")
+    evaluator_package = tmp_path / "package"
+    evaluator_package.mkdir()
+    (evaluator_package / "checker.py").write_text("checker")
+    return workspace, evaluator_package
 
 
 def test_bridge_releases_cluster_when_socket_startup_fails(

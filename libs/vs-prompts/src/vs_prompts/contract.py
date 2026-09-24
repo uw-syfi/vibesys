@@ -30,7 +30,7 @@ from jinja2 import Environment, TemplateSyntaxError, meta, nodes
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
     from pathlib import Path
-_env = Environment()
+_env = Environment()  # noqa: S701  # lint-waiver: LW-010109 [S701]; prompt templates produce plain text, so HTML autoescaping would alter model instructions.
 
 
 @dataclass(frozen=True)
@@ -78,7 +78,8 @@ def resolve_free_variables(
         source = template_path.read_text()
         ast = _env.parse(source)
     except (OSError, TemplateSyntaxError) as exc:
-        raise ValueError(f"Cannot parse template {template_path}: {exc}") from exc
+        message = f"Cannot parse template {template_path}: {exc}"
+        raise ValueError(message) from exc
 
     free = frozenset(meta.find_undeclared_variables(ast))
     unresolved: list[UnresolvedInclude] = []

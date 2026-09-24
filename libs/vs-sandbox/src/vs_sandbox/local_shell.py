@@ -33,7 +33,8 @@ class LocalShellSandbox:
     ) -> None:
         """Configure the working directory, environment, and limits."""
         if timeout <= 0:
-            raise ValueError(f"timeout must be positive, got {timeout}")
+            message = f"timeout must be positive, got {timeout}"
+            raise ValueError(message)
         self.root_dir = Path(root_dir).resolve()
         #: Mutable on purpose: device re-selection edits it between commands.
         self.env: dict[str, str] = dict(os.environ) if inherit_env else {}
@@ -61,7 +62,8 @@ class LocalShellSandbox:
             )
         effective_timeout = timeout if timeout is not None else self._default_timeout
         if effective_timeout <= 0:
-            raise ValueError(f"timeout must be positive, got {effective_timeout}")
+            message = f"timeout must be positive, got {effective_timeout}"
+            raise ValueError(message)
         try:
             proc = subprocess.run(  # noqa: S602  # lint-waiver: LW-007109 [S602]; this host sandbox boundary intentionally executes the requested shell command.
                 command,
@@ -78,7 +80,7 @@ class LocalShellSandbox:
                 output=f"Error: Command timed out after {effective_timeout} seconds.",
                 exit_code=_TIMEOUT_EXIT_CODE,
             )
-        except Exception as exc:
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
             return SandboxExecutionResult(
                 output=f"Error executing command ({type(exc).__name__}): {exc}", exit_code=1
             )

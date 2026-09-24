@@ -8,13 +8,17 @@ open) the run-environment view; selection logic itself stays in the
 backend.
 """
 
+from __future__ import annotations
+
 import json
-from datetime import datetime
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vibesys.backends.base import ComputeBackendImpl, ContentionMonitor
+    from vibesys.backends.cuda import GpuInfo
     from vibesys.sandbox.run_environment import RunEnvironmentView
 
 
@@ -23,10 +27,10 @@ class DeviceLease:
 
     def __init__(
         self,
-        backend: "ComputeBackendImpl",
+        backend: ComputeBackendImpl,
         *,
         log_dir: Path,
-        run_environment_view: "RunEnvironmentView | None" = None,
+        run_environment_view: RunEnvironmentView | None = None,
     ) -> None:
         """Bind the selected backend to run-specific device monitoring state."""
         self._backend = backend
@@ -35,7 +39,7 @@ class DeviceLease:
         self.monitor: ContentionMonitor | None = None
 
     @property
-    def selected_device(self):
+    def selected_device(self) -> GpuInfo | None:
         """Return the device selected by the backend, if it exposes one."""
         return getattr(self._backend, "selected_device", None)
 
@@ -86,7 +90,7 @@ class DeviceLease:
 
         data["contention_detected"] = contention_events > 0
         data["contention_events"] = contention_events
-        data["finished_at"] = datetime.now().isoformat()
+        data["finished_at"] = datetime.now(UTC).isoformat()
         gpu_json.write_text(json.dumps(data, indent=2))
 
     def close(self) -> None:

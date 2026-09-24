@@ -124,7 +124,7 @@ def _headless_requested(args: list[str]) -> bool:
 def _run_headless(args: list[str]) -> int:
     module = "entrypoints.server" if args and args[0] == "tui-defaults" else "entrypoints.headless"
     command_args = args if module == "entrypoints.server" else _without_option(args, "--theme")
-    return subprocess.call([sys.executable, "-m", module, *command_args])
+    return subprocess.call([sys.executable, "-m", module, *command_args])  # noqa: S603  # lint-waiver: LW-010226 [S603]; this forwards the user's CLI arguments to VibeSys's fixed Python entry module.
 
 
 def _without_option(args: list[str], option: str) -> list[str]:
@@ -176,7 +176,7 @@ def _run_bundled_tui(bundle: BundledTui, args: list[str]) -> int:
         # reach clients/tui/src/boot-trace.ts unchanged.
         **boot_trace.child_env(),
     }
-    return subprocess.call(
+    return subprocess.call(  # noqa: S603  # lint-waiver: LW-010227 [S603]; bundle runtime and launcher paths come from the verified installation manifest.
         [str(bundle.runtime), str(bundle.launcher), *args],
         env=env,
     )
@@ -230,7 +230,7 @@ def _node_executable() -> Path | None:
 
 def _node_major(node: Path) -> int | None:
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010228 [S603]; execute the resolved Node binary with only its version probe argument.
             [str(node), "--version"], capture_output=True, text=True, check=True
         )
     except (OSError, subprocess.CalledProcessError):
@@ -316,7 +316,7 @@ def _write_install_stamp(root: Path) -> None:
 def _run_pnpm_install(pnpm: list[str], root: Path) -> bool:
     sys.stderr.write("vibesys: installing JS dependencies (pnpm install --frozen-lockfile)...\n")
     started = time.monotonic()
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010229 [S603]; pnpm install uses the resolved package manager and fixed workspace setup arguments.
         [*pnpm, "install", "--frozen-lockfile"],
         cwd=str(root / _WORKSPACE_REL),
         capture_output=True,
@@ -340,7 +340,7 @@ def _run_codegen_and_build(pnpm: list[str], root: Path) -> bool:
         [*pnpm, "build:clients"],
     )
     for command in steps:
-        result = subprocess.run(
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010230 [S603]; build steps are framework-constructed argv executed without a shell.
             command, cwd=str(root / _WORKSPACE_REL), capture_output=True, text=True, check=False
         )
         if result.returncode != 0:
@@ -408,7 +408,7 @@ def _run_source_tui(root: Path, args: list[str]) -> int:
         # Launch anchor and stderr-trace request; see _run_bundled_tui.
         **boot_trace.child_env(),
     }
-    return subprocess.call([str(node), str(launcher), *args], env=env)
+    return subprocess.call([str(node), str(launcher), *args], env=env)  # noqa: S603  # lint-waiver: LW-010231 [S603]; this forwards user CLI args to the verified JS launcher with no shell.
 
 
 def main(argv: list[str] | None = None) -> int:

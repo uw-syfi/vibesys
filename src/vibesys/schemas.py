@@ -50,7 +50,7 @@ PerfDeltaReason = _loop_state_api.PerfDeltaReason
 class Verdict(StrEnum):
     """Binary outcome returned by a judge or validation stage."""
 
-    PASS = "pass"
+    PASS = "pass"  # noqa: S105  # lint-waiver: LW-010203 [S105]; this is the public result enum value, not a credential.
     FAIL = "fail"
 
 
@@ -70,7 +70,8 @@ class HypothesisStrategyUpdate(BaseModel):
     @classmethod
     def _strip_non_empty(cls, value: str) -> str:
         if not (stripped := value.strip()):
-            raise ValueError("must not be blank")
+            message = "must not be blank"
+            raise ValueError(message)
         return stripped
 
 
@@ -111,7 +112,8 @@ class SkillResourceSelection(BaseModel):
     def _strip_required_text(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("must contain non-whitespace text")
+            message = "must contain non-whitespace text"
+            raise ValueError(message)
         return value
 
 
@@ -166,7 +168,8 @@ class ValidationRecipe(BaseModel):
     def _strip_recipe_text(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("must contain non-whitespace text")
+            message = "must contain non-whitespace text"
+            raise ValueError(message)
         return value
 
     @field_validator("input_paths")
@@ -177,13 +180,12 @@ class ValidationRecipe(BaseModel):
             value = raw.strip()
             path = PurePosixPath(value)
             if not value or path.is_absolute() or value == "." or ".." in path.parts:
-                raise ValueError(
-                    "input_paths must contain non-empty workspace-relative paths "
-                    "without parent traversal"
-                )
+                _exception_message = "input_paths must contain non-empty workspace-relative paths without parent traversal"
+                raise ValueError(_exception_message)
             normalized.append(path.as_posix())
         if len(set(normalized)) != len(normalized):
-            raise ValueError("input_paths must not contain duplicates")
+            message = "input_paths must not contain duplicates"
+            raise ValueError(message)
         return normalized
 
 

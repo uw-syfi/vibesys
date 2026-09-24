@@ -81,7 +81,7 @@ def test_skill_copy_into_workspace_root_prunes_foreign_platforms(
     ws = _make_workspace(tmp_path / "ws", compute_backend=selected)
     ws.create()
 
-    ws.copy_dir(skill, ws.root / skill.name, prune_platforms=True)
+    ws.copy_dir(CopySpec(src=skill, dest=ws.root / skill.name, prune_platforms=True))
 
     platforms = ws.root / skill.name / "references" / "platforms"
     assert {p.name for p in platforms.iterdir()} == {selected.value}
@@ -95,7 +95,7 @@ def test_skill_copy_without_backend_keeps_every_platform(tmp_path: Path) -> None
     ws = _make_workspace(tmp_path / "ws", compute_backend=None)
     ws.create()
 
-    ws.copy_dir(skill, ws.root / skill.name, prune_platforms=True)
+    ws.copy_dir(CopySpec(src=skill, dest=ws.root / skill.name, prune_platforms=True))
 
     platforms = ws.root / skill.name / "references" / "platforms"
     assert {p.name for p in platforms.iterdir()} == {b.value for b in ComputeBackend}
@@ -108,7 +108,7 @@ def test_non_skill_copies_never_prune_platforms(tmp_path: Path) -> None:
     ws = _make_workspace(tmp_path / "ws", compute_backend=ComputeBackend.CUDA)
     ws.create()
 
-    ws.copy_dir(src, ws.root / "input")
+    ws.copy_dir(CopySpec(src=src, dest=ws.root / "input"))
 
     platforms = ws.root / "input" / "references" / "platforms"
     assert {p.name for p in platforms.iterdir()} == {b.value for b in ComputeBackend}
@@ -296,7 +296,7 @@ def test_copy_dir_replaces_external_symlinks_when_not_isolated(tmp_path: Path) -
     (src / "model").symlink_to(outside)
 
     dst = tmp_path / "ws"
-    _make_workspace(dst, isolated=False).copy_dir(src, dst)
+    _make_workspace(dst, isolated=False).copy_dir(CopySpec(src=src, dest=dst))
 
     assert not (dst / "model").exists()
     assert (dst / "model.symlink_target").read_text() == str(outside.resolve())
@@ -311,7 +311,7 @@ def test_copy_dir_removes_external_symlinks_when_isolated(tmp_path: Path) -> Non
     (src / "kept.py").write_text("pass\n")
 
     dst = tmp_path / "ws"
-    _make_workspace(dst, isolated=True).copy_dir(src, dst)
+    _make_workspace(dst, isolated=True).copy_dir(CopySpec(src=src, dest=dst))
 
     assert not (dst / "model").exists()
     assert not (dst / "model.symlink_target").exists()

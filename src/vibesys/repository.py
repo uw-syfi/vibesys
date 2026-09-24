@@ -45,10 +45,8 @@ def validate_experiment_name(experiment_name: str) -> str:
         or "/" in experiment_name
         or "\\" in experiment_name
     ):
-        raise ValueError(
-            "--exp-name must be a non-empty single path component other than '.' or '..': "
-            f"{experiment_name!r}"
-        )
+        message = f"--exp-name must be a non-empty single path component other than '.' or '..': {experiment_name!r}"
+        raise ValueError(message)
     return experiment_name
 
 
