@@ -20,9 +20,10 @@ current rather than growing them unboundedly.
 | `att.py` (thread trace) | Merged, validated on real MI210 data (ROCm >=7.1 only) |
 | `compute.py` (rocprof-compute doctor/profile/analyze) | Merged, validated on real MI210 data |
 | `kernel_bench.py` (paired A/B microbenchmarking) | Merged |
-| `analyze_torch_profile.py` extensions (certify/gemm_shapes/roofline) | Merged |
+| `analyze_torch_profile.py` extensions (certify/gemm_shapes/roofline) | Merged, validated on real MI210 + vLLM traces |
+| `capture_ops.py`/`inject/sitecustomize.py` (`profile_ops`, generic torch.profiler capture) | Merged, validated on real MI210 + vLLM (offline single-process and `vllm serve` topologies), driven through the real MCP server |
 | Regression + property test hardening | Merged, tests fail on pre-fix code |
-| Real vLLM-trace validation of the analyzers | In progress |
+| Real vLLM-trace validation of the analyzers | Done for `analyze_torch_profile.py`/`profile_ops`; `analyze_rocprof.py`/`capture.py` (rocprof side) tracked separately |
 | VibeSys remote (SkyPilot/Slurm) execution with `rocprof` | Not started: remote execution only supports `--profiler none` today |
 
 ## What was built
@@ -193,6 +194,58 @@ trace's `FmhaFwdKernel` >1000x-outlier duration is not a VibeSys bug --
 rocprofv3's own `kernel_stats.csv` and the raw per-dispatch rows agree, and
 the tool now flags this class of outlier instead of reporting it silently.
 Targeted test slice now passes 369 tests.
+
+Validated the generic `torch.profiler` capture tool (`profile_ops`,
+`resources/profilers/torch/{capture_ops.py,inject/sitecustomize.py,
+server.py}`) against a real MI210 running vLLM with Qwen/Qwen3.5-9B, driven
+through the real MCP server (a stdio JSON-RPC client, not a direct Python
+call). Four checks:
+
+- **Offline single-process capture** (no engine cooperation, `delay_s=0`,
+  no `duration_s`): produces a real Kineto trace with GPU kernels and Input
+  Dims; `certify` PASS/WARN with no FAIL; `gemm_shapes` correctly separates
+  decode-phase GEMMs (M = batch size, K = hidden size 4096) from
+  prefill-phase GEMMs (M = total prompt tokens). The generic tool needs no
+  engine cooperation to produce a usable trace.
+- **`delay_s`/`duration_s` window bounding** is mechanically precise
+  (confirmed against a predictable synthetic GEMM workload): SIGUSR1/SIGUSR2
+  fire almost exactly `delay_s`/`delay_s + duration_s` after arming. But
+  `torch.profiler.profile().start()` itself took ~1.9-2.5s to actually begin
+  recording after the handler ran, every time, on this stack; `duration_s`
+  is measured from signal-send, not from when recording starts, so a short
+  requested window loses a large fraction of its nominal length to this
+  fixed cost. Documented in `inject/sitecustomize.py`.
+- **Signal delivery latency is not the bottleneck**: measured well under
+  100ms from `os.kill(SIGUSR1)` to the handler running, including under
+  sustained GPU-launch load on another thread. The real latency is
+  torch.profiler's own ROCm backend init (above).
+- **Cross-thread CPU-op capture**: a background thread that predates
+  `prof.start()` recorded 0% of its ops (the `cpu_op`/`record_shapes`
+  attribution `gemm_shapes`/`roofline` need), while its GPU kernels were
+  captured in full; an identical workload run on the main thread (so it
+  necessarily starts after the signal-triggered `prof.start()`) recorded
+  ops for 100% of its calls. No public torch.profiler option was found to
+  fix already-running threads; documented with the concrete mitigation
+  (arm early, `delay_s=0`, before the target spawns its own worker
+  threads).
+- **`vllm serve`-style multi-process topology** (API server + a separate
+  engine-core process) with `ready_command`/`load_command`/
+  `stop_signal=SIGINT`: the target exits cleanly with no escalation needed,
+  and the chained SIGINT handler does not interfere with the engine's own
+  graceful shutdown. Found and fixed a real bug: the engine-core process
+  (the one doing the actual GPU work) armed and started profiling
+  correctly, but `profile_ops` picked the primary trace immediately after
+  the directly-launched API-server process exited, before the worker's own
+  independent stop/export had produced a file — silently falling back to
+  the near-empty driver-process trace with no error. Fixed with a bounded
+  post-stop wait (`capture_ops.wait_for_additional_traces`, capped at
+  `grace_s`) before trace discovery; regression and hypothesis property
+  tests added (`tests/vibesys/loops/test_torch_capture_ops.py`), verified
+  failing on the pre-fix code.
+
+GPU-free unit/property tests for the torch profiler plugin (capture_ops,
+inject/sitecustomize, analyze_torch_profile, the MCP server) pass: 155
+tests across the targeted slice.
 
 ## Appendix: detailed format notes and commands
 
