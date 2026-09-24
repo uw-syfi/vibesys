@@ -738,6 +738,129 @@ def cmd_report(ns: argparse.Namespace) -> None:
         print(f"\n( +{len(remainder)} more kernel(s) not shown; raise --top )")  # noqa: T201  # tracked: #288
 
 
+OCCUPANCY_LOW_WAVES_PER_CU = 8  # out of a max of 32 (8 waves/SIMD * 4 SIMD/CU)
+BANDWIDTH_BOUND_FRACTION_OF_PEAK = 0.5
+MFMA_ISSUE_RATE_COMPUTE_BOUND = 0.05
+LDS_BANK_CONFLICT_BOUND_PCT = 5.0
+SMALL_GRID_CU_MULTIPLE = 2
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """One kernel's bottleneck classification with its supporting evidence and next lever."""
+
+    label: str
+    evidence: str
+    lever: str
+
+
+def _classify(
+    *, agg: KernelAgg, occ: Occupancy, metrics: DerivedMetrics, spec: PeakSpec
+) -> Verdict:  # tracked: #288
+    if occ.waves_per_cu < OCCUPANCY_LOW_WAVES_PER_CU:
+        return Verdict(
+            "OCCUPANCY-LIMITED",
+            f"{occ.waves_per_cu} waves/CU (max 32), bound by {occ.bound_by} "
+            f"(vgpr={agg.vgpr_count} sgpr={agg.sgpr_count} lds={agg.lds_block_size}B)",
+            f"reduce {occ.bound_by} usage per thread, or shrink the workgroup, to raise waves/CU",
+        )
+    if metrics.achieved_bw_gb_s is not None:
+        bw_fraction = metrics.achieved_bw_gb_s / (spec.hbm_tb_s * 1000)
+        if bw_fraction >= BANDWIDTH_BOUND_FRACTION_OF_PEAK:
+            return Verdict(
+                "BANDWIDTH-BOUND",
+                f"achieved {metrics.achieved_bw_gb_s:.0f} GB/s "
+                f"({bw_fraction * 100:.0f}% of {spec.hbm_tb_s * 1000:.0f} GB/s spec peak)",
+                "raise arithmetic intensity: fuse epilogues, tile for L2/Infinity-Cache reuse, check XCD locality",
+            )
+    if (
+        metrics.mfma_issue_rate is not None
+        and metrics.mfma_issue_rate >= MFMA_ISSUE_RATE_COMPUTE_BOUND
+    ):
+        busy = _fmt(metrics.gpu_busy_pct, "%", 1)
+        return Verdict(
+            "COMPUTE-BOUND",
+            f"MFMA issue rate {metrics.mfma_issue_rate:.4f} insts/cycle, GPU busy {busy}",
+            "tune MFMA shape/wave scheduling, or move to a lower-precision path (FP8/FP6/FP4) before "
+            "grinding further -- ~45-55% of the dense TFLOP/s peak is the practical ceiling for tuned GEMM",
+        )
+    if (
+        metrics.lds_bank_conflict_rate_pct is not None
+        and metrics.lds_bank_conflict_rate_pct >= LDS_BANK_CONFLICT_BOUND_PCT
+    ):
+        return Verdict(
+            "LDS-BOUND",
+            f"LDS bank-conflict rate {metrics.lds_bank_conflict_rate_pct:.1f}%",
+            "change the LDS access pattern (padding, stride) to reduce bank conflicts",
+        )
+    if agg.grid_size and agg.grid_size < spec.compute_units * SMALL_GRID_CU_MULTIPLE:
+        return Verdict(
+            "LAUNCH/UNDER-FILLED",
+            f"grid_size={agg.grid_size} vs. {spec.compute_units} CUs "
+            f"({agg.grid_size / spec.compute_units:.2f} workgroups/CU)",
+            "batch more work per launch, fuse dispatches, or use HIP graphs to cut launch overhead",
+        )
+    return Verdict(
+        "LATENCY-BOUND",
+        f"occupancy fine ({occ.waves_per_cu} waves/CU) but far from both roofs",
+        "capture an ATT trace (att.py) to find the stalling instructions and deepen the pipeline / "
+        "prefetch distance",
+    )
+
+
+def _print_peak_table(spec: PeakSpec, arch: str) -> None:
+    print(  # noqa: T201  # tracked: #288
+        f"Peak constants for {arch} ({spec.label}) -- SPEC PEAKS, not an achievable ceiling:"
+    )
+    print(  # noqa: T201  # tracked: #288
+        f"  {spec.compute_units} CUs, {spec.dense_bf16_fp16_tflops:.1f} TFLOP/s dense bf16/fp16, "
+        f"{spec.hbm_tb_s:.1f} TB/s HBM, {spec.hbm_gb} GB   (ridge: {spec.ridge_flop_per_byte:.0f} FLOP/byte)"
+    )
+    print(  # noqa: T201  # tracked: #288
+        "  Practical ceiling for tuned GEMM is ~45-55% of the compute peak, and clean streaming "
+        "reads land ~50-60% of the HBM peak -- do not treat the spec numbers as achievable."
+    )
+    if arch == "gfx942":
+        print(f"  {PEAK_ARCH_NOTE}")  # noqa: T201  # tracked: #288
+
+
+def _peak_spec_for(arch: str) -> tuple[str, PeakSpec]:
+    family = _normalize_arch_or_exit(arch)
+    if family not in PEAK_SPECS:
+        known = ", ".join(sorted(PEAK_SPECS))
+        sys.exit(f"no peak spec for {family!r}; known families: {known}")
+    return family, PEAK_SPECS[family]
+
+
+def cmd_triage(ns: argparse.Namespace) -> None:
+    """Classify each hot kernel as one of five bottleneck verdicts with evidence."""
+    arch, spec = _peak_spec_for(ns.arch)
+    counter_files = _discover(ns.dirs, "counter_collection", (".csv", ".json"))
+    if not counter_files:
+        print("(no *counter_collection*.csv/.json files found under the given directories)")  # noqa: T201  # tracked: #288
+        return
+    rows = _load_counter_rows(counter_files)
+    durations = _load_kernel_trace_durations(ns.dirs)
+    aggs = _aggregate_by_kernel(rows)
+    kernels = _filter_kernels(aggs, ns.kernel)
+
+    _print_peak_table(spec, arch)
+    for agg in kernels[: ns.top]:
+        occ = resource_occupancy(
+            vgpr_count=agg.vgpr_count,
+            sgpr_count=agg.sgpr_count,
+            lds_block_size=agg.lds_block_size,
+            workgroup_size=agg.workgroup_size,
+            arch=arch,
+        )
+        metrics = derive_metrics(agg, durations.get(agg.name))
+        verdict = _classify(agg=agg, occ=occ, metrics=metrics, spec=spec)
+        print(f"\n{agg.name}")  # noqa: T201  # tracked: #288
+        print(f"  verdict: {verdict.label}")  # noqa: T201  # tracked: #288
+        print(f"  evidence: {verdict.evidence}")  # noqa: T201  # tracked: #288
+        print(f"  next lever: {verdict.lever}")  # noqa: T201  # tracked: #288
+
+
 def _add_dirs_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("dirs", nargs="+", help="One or more PMC pass output directories")
     parser.add_argument("--kernel", default=None, help="Regex filter on Kernel_Name")
@@ -747,7 +870,7 @@ def _add_dirs_arg(parser: argparse.ArgumentParser) -> None:
 def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
     parser = argparse.ArgumentParser(
         prog="counters",
-        description="rocprofv3 PMC counter-set catalogue and report aggregation.",
+        description="rocprofv3 PMC counter-set catalogue, report aggregation, and bottleneck triage.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -771,6 +894,11 @@ def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
         "--arch", default=None, help="for the occupancy LDS-size model; default gfx942"
     )
     report.set_defaults(fn=cmd_report)
+
+    triage = sub.add_parser("triage", help="classify each hot kernel's bottleneck with evidence")
+    _add_dirs_arg(triage)
+    triage.add_argument("--arch", required=True)
+    triage.set_defaults(fn=cmd_triage)
 
     ns = parser.parse_args(argv)
     ns.fn(ns)
