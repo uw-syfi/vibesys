@@ -195,6 +195,31 @@ rocprofv3's own `kernel_stats.csv` and the raw per-dispatch rows agree, and
 the tool now flags this class of outlier instead of reporting it silently.
 Targeted test slice now passes 369 tests.
 
+MCP validation of `profiling_capabilities`, `profile_counters`, and
+`profile_instructions` against a real MI210 running an offline single-process
+vLLM Qwen3.5-9B workload, driven through the real stdio MCP server (not a
+direct Python import). `profiling_capabilities` correctly reported
+rocprofv3/ROCm version, the detected GPU agent (gfx90a, 104 CUs), ATT
+available/unavailable in both directions (decoder found vs. a clear
+fix-pointing message when the library path env var is unset), and
+rocprof-compute absent with a clear fix. `profile_counters` ran two counter
+sets against the real offline workload with a kernel filter on the top
+Tensile GEMM kernels and, separately, the CK FMHA kernel: verdicts and
+utilization numbers were physically sane (achieved HBM bandwidth ~52-53% of
+spec peak on bandwidth-bound GEMM shapes; the CK FMHA kernel's measured MFMA
+busy fraction at 77% of peak). Found and fixed a real bug this exercise
+surfaced: `counters.py`'s MFMA compute-bound classifier fell back to an
+uninterpretable, mislabeled "no peak reference" verdict for a kernel whose
+peak-normalized MFMA busy fraction had actually been measured and simply
+landed under the compute-bound threshold -- the honest low-utilization
+verdict was being hidden behind advice to recapture a counter that was
+already captured. `profile_instructions` (ATT) captured a decoded dispatch
+end to end and produced a sane stall breakdown (VMEM-wait dominant, real
+`v_mfma_f32_32x32x8bf16_1k` instructions present); its per-instruction source
+lines came back `<unknown>`, expected since the precompiled Tensile/CK
+kernels this workload dispatches ship without debug info, not a profiler
+defect.
+
 Validated the generic `torch.profiler` capture tool (`profile_ops`,
 `resources/profilers/torch/{capture_ops.py,inject/sitecustomize.py,
 server.py}`) against a real MI210 running vLLM with Qwen/Qwen3.5-9B, driven
