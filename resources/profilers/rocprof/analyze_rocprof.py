@@ -46,15 +46,30 @@ durations for HIP-API matching — not a dict per raw event.
 
 Usage:
     python analyze_rocprof.py files <report>
-    python analyze_rocprof.py kernels <report> [--top N]
-    python analyze_rocprof.py families <report>
-    python analyze_rocprof.py idle_gaps <report> [--top N]
-    python analyze_rocprof.py cpu_overhead <report>
-    python analyze_rocprof.py memory <report>
-    python analyze_rocprof.py graphs <report>
-    python analyze_rocprof.py host_idle <report>
+    python analyze_rocprof.py kernels <report> [--top N] [--window WINDOW]
+    python analyze_rocprof.py families <report> [--window WINDOW]
+    python analyze_rocprof.py idle_gaps <report> [--top N] [--window WINDOW]
+    python analyze_rocprof.py cpu_overhead <report> [--window WINDOW]
+    python analyze_rocprof.py memory <report> [--window WINDOW]
+    python analyze_rocprof.py graphs <report> [--window WINDOW]
+    python analyze_rocprof.py host_idle <report> [--window WINDOW]
     python analyze_rocprof.py query <report> "<sql>"
-    python analyze_rocprof.py summary <report> [--top N]
+    python analyze_rocprof.py summary <report> [--top N] [--window WINDOW]
+
+``--window`` (default ``load``, when the capture recorded a load phase):
+selects which events a timeline analysis considers. A server capture
+includes startup (weight load, warmup, KV init, ...) ahead of the actual
+benchmarked load, which can dominate the trace and pollute the
+kernel/family tables; ``load`` restricts analysis to the recorded load
+phase (see ``capture_runtime``'s manifest ``load_window``/``capture_start``/
+``capture_end`` fields). Other values: ``all`` (no filtering, the whole
+run), ``startup`` (process launch through load start), or an explicit
+``start_s:end_s`` pair of seconds relative to the trace's own earliest
+timestamp. Falls back to ``all`` -- with a note in the output header --
+whenever no load window was recorded or the trace's own timestamps don't
+plausibly align with the manifest's recorded capture span, rather than
+silently mis-slicing. ``query`` is not windowed (rocpd SQL runs against the
+whole export).
 """
 
 from __future__ import annotations
@@ -70,7 +85,7 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -569,7 +584,14 @@ def _bump_agg(agg: dict[str, dict], name: str, dur_ns: float) -> None:
 
 @dataclass
 class KernelBundle:
-    """One streaming pass over ``*_kernel_trace.csv`` (or a JSON/stats fallback)."""
+    """One streaming pass over ``*_kernel_trace.csv`` (or a JSON/stats fallback).
+
+    ``count``/``window_start``/``window_end`` describe the events actually
+    kept (inside the requested ``window``, see ``resolve_window``);
+    ``count_total`` is every event seen in the streaming pass regardless of
+    ``window``, kept so callers can report "N of M dispatches" without a
+    second pass.
+    """
 
     by_name: dict[str, dict] = field(default_factory=dict)
     by_key: dict[tuple[str, str], list[tuple[float, float, str]]] = field(default_factory=dict)
@@ -577,12 +599,13 @@ class KernelBundle:
     window_start: float = 0.0
     window_end: float = 0.0
     count: int = 0
+    count_total: int = 0
     source: str = ""
 
 
 @dataclass
 class ApiBundle:
-    """One streaming pass over ``*_hip_api_trace.csv`` (or a JSON fallback)."""
+    """One streaming pass over ``*_hip_api_trace.csv`` (or a JSON fallback). See ``KernelBundle``."""
 
     by_name: dict[str, dict] = field(default_factory=dict)
     direct_launches: list[tuple[str, float]] = field(default_factory=list)
@@ -592,18 +615,20 @@ class ApiBundle:
     window_start: float = 0.0
     window_end: float = 0.0
     count: int = 0
+    count_total: int = 0
     source: str = ""
 
 
 @dataclass
 class MemcpyBundle:
-    """One streaming pass over ``*_memory_copy_trace.csv`` (or a JSON fallback)."""
+    """One streaming pass over ``*_memory_copy_trace.csv`` (or a JSON fallback). See ``KernelBundle``."""
 
     by_dir: dict[str, dict] = field(default_factory=dict)
     bytes_available: bool = False
     window_start: float = 0.0
     window_end: float = 0.0
     count: int = 0
+    count_total: int = 0
 
 
 def _iter_csv_reader(path: Path) -> Iterator[list[str]]:
@@ -616,13 +641,27 @@ def _iter_csv_reader(path: Path) -> Iterator[list[str]]:
         yield from reader
 
 
-def _build_kernel_bundle_from_csv(files: list[Path]) -> KernelBundle:
+def _in_window(start_ns: float, window: tuple[float, float] | None) -> bool:
+    """Whether an event's start timestamp falls inside *window* (inclusive both ends).
+
+    ``window is None`` means "no filtering" (the 'all' window): every event
+    is kept. Filtering keys off the event's *start*, per the load-window
+    contract: an event that starts inside the window is attributed to it
+    even if it runs slightly past ``window[1]``.
+    """
+    return window is None or (window[0] <= start_ns <= window[1])
+
+
+def _build_kernel_bundle_from_csv(
+    files: list[Path], window: tuple[float, float] | None = None
+) -> KernelBundle:
     by_name: dict[str, dict] = {}
     by_key: dict[tuple[str, str], list[tuple[float, float, str]]] = defaultdict(list)
     dur_by_corr: dict[str, list[float]] = defaultdict(list)
     window_start = float("inf")
     window_end = float("-inf")
     count = 0
+    count_total = 0
     for path in files:
         rows = _iter_csv_reader(path)
         header = next(rows, None)
@@ -636,8 +675,11 @@ def _build_kernel_bundle_from_csv(files: list[Path]) -> KernelBundle:
         i_queue = _resolve_col(header, _QUEUE_COLS)
         i_corr = _resolve_col(header, _CORR_COLS)
         for row in rows:
-            name = (_at(row, i_name) or "?").strip()
+            count_total += 1
             start = _numf(_at(row, i_start))
+            if not _in_window(start, window):
+                continue
+            name = (_at(row, i_name) or "?").strip()
             end = _numf(_at(row, i_end))
             dur = end - start if end > start else _numf(_at(row, i_dur))
             agent = _at(row, i_agent) or "0"
@@ -660,11 +702,14 @@ def _build_kernel_bundle_from_csv(files: list[Path]) -> KernelBundle:
         window_start=window_start,
         window_end=window_end,
         count=count,
+        count_total=count_total,
         source="trace",
     )
 
 
-def _build_api_bundle_from_csv(files: list[Path]) -> ApiBundle:
+def _build_api_bundle_from_csv(
+    files: list[Path], window: tuple[float, float] | None = None
+) -> ApiBundle:
     by_name: dict[str, dict] = {}
     direct_launches: list[tuple[str, float]] = []
     graph_launches: list[tuple[str, float]] = []
@@ -673,6 +718,7 @@ def _build_api_bundle_from_csv(files: list[Path]) -> ApiBundle:
     window_start = float("inf")
     window_end = float("-inf")
     count = 0
+    count_total = 0
     for path in files:
         rows = _iter_csv_reader(path)
         header = next(rows, None)
@@ -684,8 +730,11 @@ def _build_api_bundle_from_csv(files: list[Path]) -> ApiBundle:
         i_dur = _resolve_col(header, _DUR_COLS)
         i_corr = _resolve_col(header, _CORR_COLS)
         for row in rows:
-            name = _at(row, i_name) or "?"
+            count_total += 1
             start = _numf(_at(row, i_start))
+            if not _in_window(start, window):
+                continue
+            name = _at(row, i_name) or "?"
             end = _numf(_at(row, i_end))
             dur = end - start if end > start else _numf(_at(row, i_dur))
             corr = _at(row, i_corr)
@@ -712,16 +761,20 @@ def _build_api_bundle_from_csv(files: list[Path]) -> ApiBundle:
         window_start=window_start,
         window_end=window_end,
         count=count,
+        count_total=count_total,
         source="trace",
     )
 
 
-def _build_memcpy_bundle_from_csv(files: list[Path]) -> MemcpyBundle:
+def _build_memcpy_bundle_from_csv(
+    files: list[Path], window: tuple[float, float] | None = None
+) -> MemcpyBundle:
     by_dir: dict[str, dict] = {}
     bytes_available = False
     window_start = float("inf")
     window_end = float("-inf")
     count = 0
+    count_total = 0
     for path in files:
         rows = _iter_csv_reader(path)
         header = next(rows, None)
@@ -735,8 +788,11 @@ def _build_memcpy_bundle_from_csv(files: list[Path]) -> MemcpyBundle:
         if i_bytes >= 0:
             bytes_available = True
         for row in rows:
-            direction = _normalize_direction(_at(row, i_dir) or "")
+            count_total += 1
             start = _numf(_at(row, i_start))
+            if not _in_window(start, window):
+                continue
+            direction = _normalize_direction(_at(row, i_dir) or "")
             end = _numf(_at(row, i_end))
             dur = end - start if end > start else _numf(_at(row, i_dur))
             b = _numf(_at(row, i_bytes)) if i_bytes >= 0 else 0.0
@@ -756,6 +812,7 @@ def _build_memcpy_bundle_from_csv(files: list[Path]) -> MemcpyBundle:
         window_start=window_start,
         window_end=window_end,
         count=count,
+        count_total=count_total,
     )
 
 
@@ -809,13 +866,16 @@ def _json_agent_id(d: dict) -> str:
     return str(d.get("agent_id", "0"))
 
 
-def _build_kernel_bundle_from_json(files: list[Path]) -> KernelBundle:
+def _build_kernel_bundle_from_json(
+    files: list[Path], window: tuple[float, float] | None = None
+) -> KernelBundle:
     by_name: dict[str, dict] = {}
     by_key: dict[tuple[str, str], list[tuple[float, float, str]]] = defaultdict(list)
     dur_by_corr: dict[str, list[float]] = defaultdict(list)
     window_start = float("inf")
     window_end = float("-inf")
     count = 0
+    count_total = 0
     for path in files:
         root = _json_root(_load_json(path))
         dispatches = _json_records(root, "kernel_dispatch")
@@ -826,9 +886,12 @@ def _build_kernel_bundle_from_json(files: list[Path]) -> KernelBundle:
             ("formatted_kernel_name", "kernel_name", "name"),
         )
         for d in dispatches:
+            count_total += 1
+            start = _numf(d.get("start_timestamp"))
+            if not _in_window(start, window):
+                continue
             kid = d.get("kernel_id")
             name = str(d.get("name") or names.get(kid) or f"kernel_{kid}").strip()
-            start = _numf(d.get("start_timestamp"))
             end = _numf(d.get("end_timestamp"))
             dur = end - start if end > start else 0.0
             agent = _json_agent_id(d) or "0"
@@ -851,11 +914,14 @@ def _build_kernel_bundle_from_json(files: list[Path]) -> KernelBundle:
         window_start=window_start,
         window_end=window_end,
         count=count,
+        count_total=count_total,
         source="json",
     )
 
 
-def _build_api_bundle_from_json(files: list[Path]) -> ApiBundle:
+def _build_api_bundle_from_json(
+    files: list[Path], window: tuple[float, float] | None = None
+) -> ApiBundle:
     by_name: dict[str, dict] = {}
     direct_launches: list[tuple[str, float]] = []
     graph_launches: list[tuple[str, float]] = []
@@ -864,10 +930,14 @@ def _build_api_bundle_from_json(files: list[Path]) -> ApiBundle:
     window_start = float("inf")
     window_end = float("-inf")
     count = 0
+    count_total = 0
     for path in files:
         root = _json_root(_load_json(path))
         for d in _json_records(root, "hip_api"):
+            count_total += 1
             start = _numf(d.get("start_timestamp"))
+            if not _in_window(start, window):
+                continue
             end = _numf(d.get("end_timestamp"))
             dur = end - start if end > start else 0.0
             name = str(d.get("name") or d.get("function") or "?")
@@ -895,20 +965,27 @@ def _build_api_bundle_from_json(files: list[Path]) -> ApiBundle:
         window_start=window_start,
         window_end=window_end,
         count=count,
+        count_total=count_total,
         source="json",
     )
 
 
-def _build_memcpy_bundle_from_json(files: list[Path]) -> MemcpyBundle:
+def _build_memcpy_bundle_from_json(
+    files: list[Path], window: tuple[float, float] | None = None
+) -> MemcpyBundle:
     by_dir: dict[str, dict] = {}
     bytes_available = False
     window_start = float("inf")
     window_end = float("-inf")
     count = 0
+    count_total = 0
     for path in files:
         root = _json_root(_load_json(path))
         for d in _json_records(root, "memory_copy"):
+            count_total += 1
             start = _numf(d.get("start_timestamp"))
+            if not _in_window(start, window):
+                continue
             end = _numf(d.get("end_timestamp"))
             dur = end - start if end > start else 0.0
             direction = _normalize_direction(str(d.get("direction") or d.get("copy_kind") or ""))
@@ -931,10 +1008,20 @@ def _build_memcpy_bundle_from_json(files: list[Path]) -> MemcpyBundle:
         window_start=window_start,
         window_end=window_end,
         count=count,
+        count_total=count_total,
     )
 
 
 def _kernel_bundle_from_stats(disc: DiscoveredReport) -> KernelBundle:
+    """Pre-aggregated ``*_kernel_stats.csv`` fallback: no per-event timestamps to window by.
+
+    ``count``/``count_total`` stay 0 (not the call total): several callers
+    (``cmd_idle_gaps``, ``cmd_graphs``, ``cmd_host_idle``) key off
+    ``bundle.count`` truthiness to detect "no per-event timestamps
+    available" and fall back to a coarser, aggregate-only code path; window
+    filtering is meaningless here for the same reason (no per-event
+    timestamps to filter by).
+    """
     stats_rows = [row for f in disc.kernel_stats for row in _stats_rows_from_csv(f)]
     if not stats_rows:
         return KernelBundle()
@@ -964,73 +1051,309 @@ def _files_key(files: list[Path]) -> tuple:
     return tuple(sorted(key))
 
 
-def _get_kernel_bundle(disc: DiscoveredReport) -> KernelBundle:
+def _get_kernel_bundle(
+    disc: DiscoveredReport, window: tuple[float, float] | None = None
+) -> KernelBundle:
     if disc.kernel_trace:
-        cache_key = ("kernel", _files_key(disc.kernel_trace))
+        cache_key = ("kernel", _files_key(disc.kernel_trace), window)
         if cache_key not in _BUNDLE_CACHE:
-            _BUNDLE_CACHE[cache_key] = _build_kernel_bundle_from_csv(disc.kernel_trace)
+            _BUNDLE_CACHE[cache_key] = _build_kernel_bundle_from_csv(disc.kernel_trace, window)
         return _BUNDLE_CACHE[cache_key]
     if disc.json_files:
-        cache_key = ("kernel_json", _files_key(disc.json_files))
+        cache_key = ("kernel_json", _files_key(disc.json_files), window)
         if cache_key not in _BUNDLE_CACHE:
-            _BUNDLE_CACHE[cache_key] = _build_kernel_bundle_from_json(disc.json_files)
+            _BUNDLE_CACHE[cache_key] = _build_kernel_bundle_from_json(disc.json_files, window)
         return _BUNDLE_CACHE[cache_key]
     return _kernel_bundle_from_stats(disc)
 
 
-def _get_api_bundle(disc: DiscoveredReport) -> ApiBundle:
+def _get_api_bundle(disc: DiscoveredReport, window: tuple[float, float] | None = None) -> ApiBundle:
     if disc.hip_api_trace:
-        cache_key = ("api", _files_key(disc.hip_api_trace))
+        cache_key = ("api", _files_key(disc.hip_api_trace), window)
         if cache_key not in _BUNDLE_CACHE:
-            _BUNDLE_CACHE[cache_key] = _build_api_bundle_from_csv(disc.hip_api_trace)
+            _BUNDLE_CACHE[cache_key] = _build_api_bundle_from_csv(disc.hip_api_trace, window)
         return _BUNDLE_CACHE[cache_key]
     if disc.json_files:
-        cache_key = ("api_json", _files_key(disc.json_files))
+        cache_key = ("api_json", _files_key(disc.json_files), window)
         if cache_key not in _BUNDLE_CACHE:
-            _BUNDLE_CACHE[cache_key] = _build_api_bundle_from_json(disc.json_files)
+            _BUNDLE_CACHE[cache_key] = _build_api_bundle_from_json(disc.json_files, window)
         return _BUNDLE_CACHE[cache_key]
     return ApiBundle()
 
 
-def _get_memcpy_bundle(disc: DiscoveredReport) -> MemcpyBundle:
+def _get_memcpy_bundle(
+    disc: DiscoveredReport, window: tuple[float, float] | None = None
+) -> MemcpyBundle:
     if disc.memory_copy_trace:
-        cache_key = ("memcpy", _files_key(disc.memory_copy_trace))
+        cache_key = ("memcpy", _files_key(disc.memory_copy_trace), window)
         if cache_key not in _BUNDLE_CACHE:
-            _BUNDLE_CACHE[cache_key] = _build_memcpy_bundle_from_csv(disc.memory_copy_trace)
+            _BUNDLE_CACHE[cache_key] = _build_memcpy_bundle_from_csv(disc.memory_copy_trace, window)
         return _BUNDLE_CACHE[cache_key]
     if disc.json_files:
-        cache_key = ("memcpy_json", _files_key(disc.json_files))
+        cache_key = ("memcpy_json", _files_key(disc.json_files), window)
         if cache_key not in _BUNDLE_CACHE:
-            _BUNDLE_CACHE[cache_key] = _build_memcpy_bundle_from_json(disc.json_files)
+            _BUNDLE_CACHE[cache_key] = _build_memcpy_bundle_from_json(disc.json_files, window)
         return _BUNDLE_CACHE[cache_key]
     return MemcpyBundle()
 
 
-def _load_kernels(disc: DiscoveredReport) -> tuple[dict[str, dict], str]:
+# ---------------------------------------------------------------------------
+# Window resolution: 'load' / 'startup' / 'all' / explicit 'start_s:end_s'
+# ---------------------------------------------------------------------------
+#
+# A whole-run system-trace capture of a server includes the server's own
+# startup (weight load, warmup, KV-cache init, ...), which can dominate the
+# trace (a real capture: 12 minutes / 1.4M kernel rows, most of it startup)
+# and pollute the family/kernel tables with one-time setup work that has
+# nothing to do with steady-state serving. capture_runtime.run_capture
+# records CLOCK_MONOTONIC-domain timestamps bracketing the "load phase"
+# (ready_command succeeded -> load_command finished) and the whole capture
+# (process launch -> capture end) in the manifest; rocprofv3's own CSV trace
+# timestamps are CLOCK_MONOTONIC-based ns too (verified against real MI210
+# fixtures: magnitude matches plausible system uptime, many orders of
+# magnitude below a CLOCK_REALTIME epoch value -- see
+# docs/contributing/amd-profiler-worklog.md), so both are directly
+# comparable with no offset math *when they came from the same host/boot*.
+# The functions below turn a requested window name into concrete
+# CLOCK_MONOTONIC-ns bounds, defaulting to 'load' and falling back to 'all'
+# whenever the manifest is missing, has no load window, or its own capture
+# span doesn't plausibly bracket the trace's timestamps (different
+# host/boot, or a synthetic/foreign fixture) -- never silently mis-slicing.
+
+WINDOW_ALL = "all"
+WINDOW_LOAD = "load"
+WINDOW_STARTUP = "startup"
+_DEFAULT_WINDOW = WINDOW_LOAD
+# Generous: a profiler's own post-stop flush, or the outer capture
+# lifecycle's escalation wait, can add real seconds-to-minutes between the
+# recorded capture_start/capture_end stamps and the first/last event
+# rocprofv3 actually wrote to disk.
+_ALIGNMENT_SLACK_S = 300.0
+_EXPLICIT_WINDOW_RE = re.compile(r"^\s*(-?[0-9.]+)\s*:\s*(-?[0-9.]+)\s*$")
+_MANIFEST_NAME = "manifest.json"
+_MANIFEST_SEARCH_DEPTH = 4
+
+
+@dataclass(frozen=True)
+class ResolvedWindow:
+    """The outcome of resolving a ``window`` argument against one report.
+
+    ``bounds`` is ``None`` for the 'all' window (no filtering) or whenever
+    resolution fell back to it; otherwise a ``(start_ns, end_ns)`` pair in
+    the same CLOCK_MONOTONIC-ns domain as the trace's own timestamps.
+    ``label`` is the human-readable window name for the output header;
+    ``note`` explains a fallback or is empty when the requested window
+    resolved cleanly.
+    """
+
+    bounds: tuple[float, float] | None
+    label: str
+    note: str = ""
+
+
+def _load_capture_manifest(report: str) -> dict[str, Any] | None:
+    """Best-effort ``manifest.json`` lookup near *report*, or ``None``.
+
+    ``report`` is almost always a capture's top-level directory (where
+    ``capture_runtime.run_capture`` writes ``manifest.json``), reached via
+    ``capture.resolve_report_arg`` before this module ever sees it. A
+    bounded walk up a few parent directories also covers a *report* pointing
+    at a nested ``<hostname>/<pid>`` file inside one. Returns ``None``
+    (never raises) for a hand-run rocprofv3 capture, a test fixture, or any
+    other report with no manifest -- window resolution then falls back to
+    'all'.
+    """
+    path = Path(report)
+    start = path if path.is_dir() else path.parent
+    candidates = [start, *list(start.parents)[:_MANIFEST_SEARCH_DEPTH]]
+    for candidate in candidates:
+        manifest_path = candidate / _MANIFEST_NAME
+        if not manifest_path.is_file():
+            continue
+        try:
+            data = json.loads(manifest_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _clock_ns(stamp: object) -> float | None:
+    """Extract a CLOCK_MONOTONIC-ns reading from one of capture_runtime's timestamp snapshots."""
+    if not isinstance(stamp, dict):
+        return None
+    value = stamp.get("clock_monotonic_ns", stamp.get("monotonic_ns"))
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _manifest_phase_bounds(manifest: dict[str, Any], kind: str) -> tuple[float, float] | None:
+    """The requested named phase's ``(start_ns, end_ns)`` from *manifest*, or ``None``."""
+    load_window = manifest.get("load_window")
+    if not isinstance(load_window, dict):
+        return None
+    if kind == WINDOW_LOAD:
+        start = _clock_ns(load_window.get("start"))
+        end = _clock_ns(load_window.get("end"))
+    else:  # WINDOW_STARTUP: process launch -> load phase start (or ready, if no load start)
+        start = _clock_ns(manifest.get("capture_start"))
+        end = _clock_ns(load_window.get("start")) or _clock_ns(load_window.get("ready"))
+    if start is None or end is None or end < start:
+        return None
+    return start, end
+
+
+def _alignment_ok(manifest: dict[str, Any], trace_span: tuple[float, float]) -> bool:
+    """Whether *trace_span* plausibly falls inside this manifest's own recorded capture span.
+
+    A generous ``_ALIGNMENT_SLACK_S`` absorbs real flush/escalation delay
+    between ``capture_end`` and the last byte rocprofv3 actually wrote.
+    Failing this check means the trace's timestamps came from a different
+    clock domain (a different host/boot, or a synthetic/foreign fixture
+    reused against a live manifest) -- slicing by the manifest's window
+    would silently misattribute events, so callers must fall back to 'all'
+    instead.
+    """
+    cap_start = _clock_ns(manifest.get("capture_start"))
+    cap_end = _clock_ns(manifest.get("capture_end"))
+    if cap_start is None or cap_end is None:
+        return False
+    slack_ns = _ALIGNMENT_SLACK_S * _NS_PER_SEC
+    trace_start, trace_end = trace_span
+    return trace_start >= cap_start - slack_ns and trace_end <= cap_end + slack_ns
+
+
+def _resolve_named_window(
+    requested: str,
+    manifest: dict[str, Any] | None,
+    trace_span: tuple[float, float] | None,
+) -> ResolvedWindow:
+    """Resolve the ``'load'``/``'startup'`` branch of ``resolve_window``.
+
+    Split out to keep each function's return-statement count within the
+    repo's complexity ratchet.
+    """
+    label = "load phase" if requested == WINDOW_LOAD else "startup phase"
+    if manifest is None:
+        return ResolvedWindow(None, WINDOW_ALL, "no manifest.json found for this capture")
+    bounds = _manifest_phase_bounds(manifest, requested)
+    if bounds is None:
+        return ResolvedWindow(None, WINDOW_ALL, f"no {label} recorded in this capture's manifest")
+    if trace_span is None:
+        return ResolvedWindow(None, WINDOW_ALL, "no timestamped trace data to slice")
+    if not _alignment_ok(manifest, trace_span):
+        return ResolvedWindow(
+            None,
+            WINDOW_ALL,
+            f"trace timestamps do not align with the manifest's recorded capture span "
+            f"(different host/boot, or a non-live fixture); refusing to risk mis-slicing the "
+            f"{label}",
+        )
+    return ResolvedWindow(bounds, label)
+
+
+def resolve_window(
+    window: str | None,
+    manifest: dict[str, Any] | None,
+    trace_bundle: KernelBundle,
+) -> ResolvedWindow:
+    """Turn a requested ``window`` string into concrete bounds against one report.
+
+    ``window`` is ``None``/``'load'`` (default: the recorded load phase),
+    ``'all'`` (no filtering), ``'startup'`` (process launch through load
+    start), or an explicit ``'start_s:end_s'`` pair of seconds relative to
+    the trace's own earliest timestamp. Falls back to 'all' -- with ``note``
+    explaining why -- whenever the requested window can't be resolved
+    cleanly: no manifest, no recorded window, or the trace's timestamps
+    don't plausibly align with the manifest's own recorded capture span.
+    """
+    requested = (window or _DEFAULT_WINDOW).strip().lower()
+    trace_span = (
+        (trace_bundle.window_start, trace_bundle.window_end) if trace_bundle.count_total else None
+    )
+
+    if requested == WINDOW_ALL:
+        return ResolvedWindow(None, WINDOW_ALL)
+
+    explicit = _EXPLICIT_WINDOW_RE.match(requested)
+    if explicit:
+        if trace_span is None:
+            return ResolvedWindow(
+                None, WINDOW_ALL, "no timestamped trace data to anchor an explicit window against"
+            )
+        start_s, end_s = float(explicit.group(1)), float(explicit.group(2))
+        base = trace_span[0]
+        return ResolvedWindow(
+            (base + start_s * _NS_PER_SEC, base + end_s * _NS_PER_SEC),
+            f"custom range {start_s:g}s-{end_s:g}s from trace start",
+        )
+
+    if requested not in (WINDOW_LOAD, WINDOW_STARTUP):
+        return ResolvedWindow(
+            None,
+            WINDOW_ALL,
+            f"unknown window {window!r} (use 'load', 'startup', 'all', or 'start_s:end_s')",
+        )
+
+    return _resolve_named_window(requested, manifest, trace_span)
+
+
+def _resolve_window_for_report(
+    disc: DiscoveredReport, report: str, window: str | None
+) -> ResolvedWindow:
+    manifest = _load_capture_manifest(report)
+    unfiltered = _get_kernel_bundle(disc)
+    return resolve_window(window, manifest, unfiltered)
+
+
+def _window_header(
+    resolved: ResolvedWindow, kept: int, total: int, *, unit: str = "dispatches"
+) -> str:
+    """The ``window: ...`` line every windowed subcommand prints first."""
+    line = f"window: {resolved.label}, {kept} of {total} {unit}"
+    if resolved.bounds is not None:
+        line += "; pass window='all' for the whole run"
+    lines = [line]
+    if resolved.note:
+        lines.append(f"  ({resolved.note})")
+    return "\n".join(lines)
+
+
+def _load_kernels(
+    disc: DiscoveredReport, window: tuple[float, float] | None = None
+) -> tuple[dict[str, dict], str]:
     """Return (per-kernel aggregate, source label): 'trace', 'json', 'stats', or ''."""
-    bundle = _get_kernel_bundle(disc)
+    bundle = _get_kernel_bundle(disc, window)
     return bundle.by_name, bundle.source
 
 
-def kernel_time_totals(report: str) -> dict[str, float]:
+def kernel_time_totals(report: str, window: str | None = "load") -> dict[str, float]:
     """Per-kernel total GPU time in nanoseconds, keyed by kernel name.
 
     Thin, structured counterpart to ``cmd_kernels``'s printed table, for
     callers (``compare``) that need numeric deltas rather than formatted
     text. Returns an empty dict when *report* has no kernel data.
+
+    ``window`` has the same meaning as every windowed subcommand's
+    ``--window`` (default ``'load'``: the capture's recorded load phase
+    when available, falling back to ``'all'`` otherwise -- see
+    ``resolve_window``).
     """
-    agg, _source = _load_kernels(discover(report))
+    disc = discover(report)
+    resolved = _resolve_window_for_report(disc, report, window)
+    agg, _source = _load_kernels(disc, resolved.bounds)
     return {name: entry["total_ns"] for name, entry in agg.items()}
 
 
-def family_time_totals(report: str) -> dict[str, float]:
+def family_time_totals(report: str, window: str | None = "load") -> dict[str, float]:
     """Per-library-family total GPU time in nanoseconds.
 
     Same family classification as ``cmd_families``, structured for
-    ``compare`` rather than printed.
+    ``compare`` rather than printed. ``window`` is forwarded to
+    ``kernel_time_totals``.
     """
     totals: dict[str, float] = {}
-    for name, total_ns in kernel_time_totals(report).items():
+    for name, total_ns in kernel_time_totals(report, window=window).items():
         family = _classify_family(name)
         totals[family] = totals.get(family, 0.0) + total_ns
     return totals
@@ -1101,7 +1424,7 @@ def cmd_files(ns: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _gpu_busy_denominator_ns(disc: DiscoveredReport, naive_sum_ns: float) -> float:
+def _gpu_busy_denominator_ns(bundle: KernelBundle, naive_sum_ns: float) -> float:
     """True GPU-busy denominator for a "%GPU" share.
 
     Merged-interval union across every (agent, queue), not a naive sum of
@@ -1116,7 +1439,6 @@ def _gpu_busy_denominator_ns(disc: DiscoveredReport, naive_sum_ns: float) -> flo
     when only pre-aggregated ``*_kernel_stats.csv`` is available (no
     per-event timestamps to merge).
     """
-    bundle = _get_kernel_bundle(disc)
     if bundle.by_key:
         return _kernel_union_ns(bundle)
     return naive_sum_ns
@@ -1136,7 +1458,9 @@ def _print_overlap_note(naive_sum_ns: float, denom_ns: float) -> None:
 def cmd_kernels(ns: argparse.Namespace) -> None:
     """Top GPU kernels by total execution time, with a library-family column."""
     disc = discover(ns.report)
-    agg, source = _load_kernels(disc)
+    resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
+    bundle = _get_kernel_bundle(disc, resolved.bounds)
+    agg, source = bundle.by_name, bundle.source
     if not agg:
         print(  # noqa: T201
             "(no kernel data found — no *_kernel_trace.csv or *_kernel_stats.csv under report path)"
@@ -1145,9 +1469,10 @@ def cmd_kernels(ns: argparse.Namespace) -> None:
 
     total_ns = sum(e["total_ns"] for e in agg.values())
     total_calls = sum(e["calls"] for e in agg.values())
-    denom_ns = _gpu_busy_denominator_ns(disc, total_ns)
+    denom_ns = _gpu_busy_denominator_ns(bundle, total_ns)
     ranked = sorted(agg.items(), key=lambda kv: -kv[1]["total_ns"])[: ns.top]
 
+    print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201
     print(f"Kernel data source: {source}")  # noqa: T201
     header = f"{'Kernel':<44s} {'Family':<28s} {'Calls':>7s} {'Total':>9s} {'Avg':>9s} {'Min':>9s} {'Max':>9s} {'%GPU':>6s}"
     print(header)  # noqa: T201
@@ -1210,7 +1535,9 @@ def _outlier_family_note(ordered: list[tuple[str, dict]]) -> str | None:
 def cmd_families(ns: argparse.Namespace) -> None:
     """GPU time grouped by kernel-library family, flagging fallback-family hot spots."""
     disc = discover(ns.report)
-    agg, source = _load_kernels(disc)
+    resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
+    bundle = _get_kernel_bundle(disc, resolved.bounds)
+    agg, source = bundle.by_name, bundle.source
     if not agg:
         print(  # noqa: T201
             "(no kernel data found — no *_kernel_trace.csv or *_kernel_stats.csv under report path)"
@@ -1230,9 +1557,10 @@ def cmd_families(ns: argparse.Namespace) -> None:
             entry["top_name"] = name
 
     total_ns = sum(e["total_ns"] for e in fam_totals.values())
-    denom_ns = _gpu_busy_denominator_ns(disc, total_ns)
+    denom_ns = _gpu_busy_denominator_ns(bundle, total_ns)
     ordered = sorted(fam_totals.items(), key=lambda kv: -kv[1]["total_ns"])
 
+    print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201
     print(f"Kernel data source: {source}")  # noqa: T201
     header = (
         f"{'Family':<32s} {'Calls':>8s} {'Total':>10s} {'%GPU':>6s}  {'Top kernel in family':<40s}"
@@ -1303,7 +1631,8 @@ def _gaps_for_key(
 def cmd_idle_gaps(ns: argparse.Namespace) -> None:
     """GPU busy vs. idle over the trace window, per agent/queue, largest gaps."""
     disc = discover(ns.report)
-    bundle = _get_kernel_bundle(disc)
+    resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
+    bundle = _get_kernel_bundle(disc, resolved.bounds)
     if bundle.count < 2:  # noqa: PLR2004
         if disc.kernel_stats and not disc.kernel_trace:
             print(  # noqa: T201
@@ -1325,6 +1654,7 @@ def cmd_idle_gaps(ns: argparse.Namespace) -> None:
     total_idle = sum(g[3] for g in gaps)
     window_ns = bundle.window_end - bundle.window_start
 
+    print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201
     print(f"Capture window: {_fmt_ns(window_ns)}")  # noqa: T201
     print(f"GPU busy (union per agent/queue): {_fmt_ns(total_busy)}")  # noqa: T201
     denom = total_busy + total_idle
@@ -1463,9 +1793,11 @@ def _cpu_overhead_from_stats(stats: dict[str, dict], disc: DiscoveredReport) -> 
 def cmd_cpu_overhead(ns: argparse.Namespace) -> None:
     """HIP API time, launch rate, sync stalls, and a launch-bound heuristic."""
     disc = discover(ns.report)
-    api_bundle = _get_api_bundle(disc)
+    resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
+    api_bundle = _get_api_bundle(disc, resolved.bounds)
     if api_bundle.count:
-        _cpu_overhead_from_trace(api_bundle, _get_kernel_bundle(disc))
+        print(_window_header(resolved, api_bundle.count, api_bundle.count_total, unit="API calls"))  # noqa: T201
+        _cpu_overhead_from_trace(api_bundle, _get_kernel_bundle(disc, resolved.bounds))
         return
     stats = _load_api_stats(disc)
     if not stats:
@@ -1484,11 +1816,13 @@ def cmd_cpu_overhead(ns: argparse.Namespace) -> None:
 def cmd_memory(ns: argparse.Namespace) -> None:
     """Memory copies by direction, bytes, time, and bandwidth."""
     disc = discover(ns.report)
-    bundle = _get_memcpy_bundle(disc)
+    resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
+    bundle = _get_memcpy_bundle(disc, resolved.bounds)
     if not bundle.count:
         print("(no memory copy data found — no *_memory_copy_trace.csv under report path)")  # noqa: T201
         return
 
+    print(_window_header(resolved, bundle.count, bundle.count_total, unit="memory copies"))  # noqa: T201
     ordered = sorted(bundle.by_dir.items(), key=lambda kv: -kv[1]["total_ns"])
     if bundle.bytes_available:
         print(f"{'Direction':<10s} {'Count':>8s} {'Total':>10s} {'Bytes':>16s} {'Bandwidth':>12s}")  # noqa: T201
@@ -1571,10 +1905,12 @@ def _report_matched_graph_kernels(
 def cmd_graphs(ns: argparse.Namespace) -> None:
     """HIP graph launches, and detection of graph-degraded kernel attribution."""
     disc = discover(ns.report)
-    kernel_bundle = _get_kernel_bundle(disc)
+    resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
+    kernel_bundle = _get_kernel_bundle(disc, resolved.bounds)
     total_kernels = kernel_bundle.count or sum(e["calls"] for e in kernel_bundle.by_name.values())
 
-    api_bundle = _get_api_bundle(disc)
+    api_bundle = _get_api_bundle(disc, resolved.bounds)
+    print(_window_header(resolved, kernel_bundle.count, kernel_bundle.count_total))  # noqa: T201
     if api_bundle.count:
         _report_graph_counts(
             len(api_bundle.graph_launches), len(api_bundle.direct_launches), total_kernels
@@ -1612,9 +1948,10 @@ def _kernel_union_ns(bundle: KernelBundle) -> float:
 def cmd_host_idle(ns: argparse.Namespace) -> None:
     """Detect a mostly host-idle capture (missed load, or an idle server)."""
     disc = discover(ns.report)
-    kernel_bundle = _get_kernel_bundle(disc)
-    api_bundle = _get_api_bundle(disc)
-    mem_bundle = _get_memcpy_bundle(disc)
+    resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
+    kernel_bundle = _get_kernel_bundle(disc, resolved.bounds)
+    api_bundle = _get_api_bundle(disc, resolved.bounds)
+    mem_bundle = _get_memcpy_bundle(disc, resolved.bounds)
 
     bundles = (kernel_bundle, api_bundle, mem_bundle)
     total_events = sum(b.count for b in bundles)
@@ -1634,6 +1971,7 @@ def cmd_host_idle(ns: argparse.Namespace) -> None:
     busy_ns = _kernel_union_ns(kernel_bundle)
     busy_pct = busy_ns / window_ns * 100 if window_ns > 0 else 0.0
 
+    print(_window_header(resolved, kernel_bundle.count, kernel_bundle.count_total))  # noqa: T201
     print(f"Capture window: {_fmt_ns(window_ns)}")  # noqa: T201
     print(f"GPU kernel activity: {_fmt_ns(busy_ns)} ({busy_pct:.2f}% of window)")  # noqa: T201
     print(f"Kernels recorded: {kernel_bundle.count}")  # noqa: T201
@@ -1658,13 +1996,23 @@ def cmd_host_idle(ns: argparse.Namespace) -> None:
 
 
 def cmd_query(ns: argparse.Namespace) -> None:
-    """Run arbitrary SQL against a rocpd SQLite export, if one is present."""
+    """Run arbitrary SQL against a rocpd SQLite export.
+
+    Only works against a rocpd SQLite (``.db``) export: ROCm 7+'s
+    ``rocprofv3 ... --output-format rocpd``, converted or exported to
+    SQLite. It does **not** work against the CSV or ``--output-format
+    json`` output every other subcommand here reads (there is no rocpd
+    ``.db`` file to query in that case); use ``kernels``/``families``/
+    ``summary``/etc. for those. Not windowed (unlike the trace subcommands
+    above): the SQL is run as given against the whole rocpd export.
+    """
     disc = discover(ns.report)
     if not disc.db_files:
         print(  # noqa: T201
             "(no rocpd SQLite (.db) file found under report path. `query` only works "
-            "against ROCm 7's rocpd SQLite output; use `kernels`/`families`/`summary`/etc. "
-            "for CSV or JSON traces.)"
+            "against a rocpd SQLite export -- ROCm 7+'s `rocprofv3 ... --output-format "
+            "rocpd` -- not CSV or `--output-format json` output; use "
+            "`kernels`/`families`/`summary`/etc. for those.)"
         )
         return
     conn = sqlite3.connect(str(disc.db_files[0]))
@@ -1705,8 +2053,15 @@ def _capped(fn, ns: argparse.Namespace) -> str:  # noqa: ANN001
 
 
 def cmd_summary(ns: argparse.Namespace) -> None:
-    """All-in-one analysis: files, validity checks, kernels/families/idle/overhead/memory/graphs."""
+    """All-in-one analysis: files, validity checks, kernels/families/idle/overhead/memory/graphs.
+
+    Defaults to the ``window='load'`` slice (the capture's recorded load
+    phase, when available) for every section below except ``Files``: each
+    section prints its own ``window: ...`` header. Pass ``window='all'`` for
+    the whole run.
+    """
     ns.top = getattr(ns, "top", 15)
+    ns.window = getattr(ns, "window", None)
 
     print("=" * 78)  # noqa: T201
     print("  ROCPROFV3 TRACE SUMMARY")  # noqa: T201
@@ -1750,35 +2105,55 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("files", help="Discover output files, processes, agents, row counts")
     _add_report_arg(p)
 
+    def _add_window_arg(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--window",
+            default=None,
+            help=(
+                "'load' (default, when the capture recorded a load phase) | 'all' | "
+                "'startup' | explicit 'start_s:end_s' relative to trace start"
+            ),
+        )
+
     p = sub.add_parser("kernels", help="Top GPU kernels by total time")
     _add_report_arg(p)
     p.add_argument("--top", type=int, default=15)
+    _add_window_arg(p)
 
     p = sub.add_parser("families", help="GPU time grouped by kernel library family")
     _add_report_arg(p)
+    _add_window_arg(p)
 
     p = sub.add_parser("idle_gaps", help="GPU busy vs idle, largest gaps")
     _add_report_arg(p)
     p.add_argument("--top", type=int, default=10)
+    _add_window_arg(p)
 
     p = sub.add_parser("cpu_overhead", help="HIP API launch overhead and launch-bound heuristic")
     _add_report_arg(p)
+    _add_window_arg(p)
 
     p = sub.add_parser("memory", help="Memory copies by direction, bytes, bandwidth")
     _add_report_arg(p)
+    _add_window_arg(p)
 
     p = sub.add_parser("graphs", help="HIP graph launches and attribution-degradation check")
     _add_report_arg(p)
+    _add_window_arg(p)
 
     p = sub.add_parser("host_idle", help="Detect a mostly host-idle / load-missed capture")
     _add_report_arg(p)
+    _add_window_arg(p)
 
-    p = sub.add_parser("query", help="Run arbitrary SQL against a rocpd SQLite export, if present")
+    p = sub.add_parser(
+        "query", help="Run arbitrary SQL against a rocpd SQLite export (ROCm 7+ only)"
+    )
     _add_report_arg(p)
     p.add_argument("sql")
 
     p = sub.add_parser("summary", help="All-in-one analysis")
     _add_report_arg(p)
+    _add_window_arg(p)
     p.add_argument("--top", type=int, default=15)
 
     return parser

@@ -17,6 +17,7 @@ import argparse
 import contextlib
 import csv
 import io
+import json
 import sqlite3
 import string
 from pathlib import Path
@@ -31,6 +32,8 @@ from resources.profilers.rocprof.analyze_rocprof import (
     _KERNEL_NAME_COLS,
     _START_COLS,
     DiscoveredReport,
+    ResolvedWindow,
+    _build_kernel_bundle_from_csv,
     _classify_family,
     _gaps_for_key,
     _get,
@@ -50,6 +53,7 @@ from resources.profilers.rocprof.analyze_rocprof import (
     cmd_query,
     cmd_summary,
     discover,
+    resolve_window,
 )
 from tests.vibesys.loops.rocprof_strategies import (
     FAST,
@@ -383,7 +387,7 @@ def test_gpu_busy_denominator_never_exceeds_the_naive_sum(tmp_path_factory, gap_
     disc = discover(str(root))
     bundle = analyze_rocprof._get_kernel_bundle(disc)  # noqa: SLF001
     naive_sum = sum(e["total_ns"] for e in bundle.by_name.values())
-    denom = analyze_rocprof._gpu_busy_denominator_ns(disc, naive_sum)  # noqa: SLF001
+    denom = analyze_rocprof._gpu_busy_denominator_ns(bundle, naive_sum)  # noqa: SLF001
     assert denom <= naive_sum + 1e-6
     # And when the two windows don't overlap at all, merging changes nothing.
     if gap_ns >= dur:
@@ -1208,3 +1212,289 @@ def test_kernels_on_the_real_eager_trace_matches_the_hand_computed_total() -> No
     out = buf.getvalue()
 
     assert "Total kernel launches: 14" in out
+
+
+# ---------------------------------------------------------------------------
+# window resolution (issue: server captures polluted by startup)
+# ---------------------------------------------------------------------------
+
+
+def _stamp(ns: float) -> dict:
+    return {"monotonic_ns": ns, "clock_monotonic_ns": ns, "realtime_ns": ns}
+
+
+def _write_manifest(  # noqa: PLR0913
+    root: Path,
+    *,
+    capture_start_ns: float,
+    capture_end_ns: float,
+    ready_ns: float | None = None,
+    load_start_ns: float | None = None,
+    load_end_ns: float | None = None,
+) -> None:
+    """Write a ``manifest.json`` matching ``capture_runtime.run_capture``'s schema."""
+    load_window = None
+    if load_start_ns is not None and load_end_ns is not None:
+        load_window = {
+            "ready": _stamp(load_start_ns if ready_ns is None else ready_ns),
+            "start": _stamp(load_start_ns),
+            "end": _stamp(load_end_ns),
+        }
+    manifest = {
+        "capture_id": "test",
+        "kind": "timeline",
+        "capture_start": _stamp(capture_start_ns),
+        "capture_end": _stamp(capture_end_ns),
+        "load_window": load_window,
+    }
+    (root / "manifest.json").write_text(json.dumps(manifest))
+
+
+def _windowed_scenario(tmp_path: Path) -> Path:
+    """A trace with one startup-phase kernel and two load-phase kernels, plus a matching manifest."""
+    d = _process_dir(tmp_path)
+    _kernel_trace(
+        d,
+        "startup_kernel,0,0,1,0,500,4242",
+        "steady_kernel_a,0,0,2,10500,10600,4242",
+        "steady_kernel_b,0,0,3,15000,15100,4242",
+    )
+    _write_manifest(
+        tmp_path,
+        capture_start_ns=0,
+        capture_end_ns=25000,
+        ready_ns=9000,
+        load_start_ns=10000,
+        load_end_ns=20000,
+    )
+    return tmp_path
+
+
+def test_cmd_kernels_default_window_excludes_startup_kernels_with_a_load_window(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression: without this fix, `cmd_kernels` has no notion of a manifest or a window at
+    all and always reports every kernel in the trace, including one-time server startup
+    (weight load, warmup, KV init) that has nothing to do with steady-state serving -- exactly
+    the real symptom (12 min / 1.4M rows, mostly startup, polluting the kernel/family tables).
+    """
+    root = _windowed_scenario(tmp_path)
+
+    cmd_kernels(_ns(str(root), top=15))
+    out = capsys.readouterr().out
+
+    assert "window: load phase, 2 of 3 dispatches" in out
+    assert "pass window='all'" in out
+    assert "steady_kernel_a" in out
+    assert "steady_kernel_b" in out
+    assert "startup_kernel" not in out
+
+
+def test_cmd_families_default_window_excludes_startup_kernels_with_a_load_window(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _windowed_scenario(tmp_path)
+
+    cmd_families(_ns(str(root)))
+    out = capsys.readouterr().out
+
+    assert "window: load phase, 2 of 3 dispatches" in out
+    assert "startup_kernel" not in out
+
+
+def test_cmd_kernels_window_all_includes_the_startup_kernel(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _windowed_scenario(tmp_path)
+
+    cmd_kernels(_ns(str(root), top=15, window="all"))
+    out = capsys.readouterr().out
+
+    assert "window: all, 3 of 3 dispatches" in out
+    assert "startup_kernel" in out
+    assert "steady_kernel_a" in out
+
+
+def test_cmd_kernels_window_startup_shows_only_the_startup_kernel(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _windowed_scenario(tmp_path)
+
+    cmd_kernels(_ns(str(root), top=15, window="startup"))
+    out = capsys.readouterr().out
+
+    assert "window: startup phase" in out
+    assert "startup_kernel" in out
+    assert "steady_kernel_a" not in out
+    assert "steady_kernel_b" not in out
+
+
+def test_cmd_kernels_window_load_falls_back_to_all_without_a_manifest(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    d = _process_dir(tmp_path)
+    _kernel_trace(d, "only_kernel,0,0,1,0,500,4242")
+
+    cmd_kernels(_ns(str(tmp_path), top=15))
+    out = capsys.readouterr().out
+
+    assert "window: all" in out
+    assert "no manifest.json found" in out
+    assert "only_kernel" in out
+
+
+def test_cmd_kernels_window_load_falls_back_to_all_when_manifest_has_no_load_window(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    d = _process_dir(tmp_path)
+    _kernel_trace(d, "only_kernel,0,0,1,0,500,4242")
+    _write_manifest(tmp_path, capture_start_ns=0, capture_end_ns=1000)
+
+    cmd_kernels(_ns(str(tmp_path), top=15))
+    out = capsys.readouterr().out
+
+    assert "window: all" in out
+    assert "no load phase recorded" in out
+    assert "only_kernel" in out
+
+
+def test_cmd_kernels_window_load_falls_back_to_all_when_trace_timestamps_are_misaligned(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A manifest recorded against a different clock domain (a different host/boot, or --
+    exactly this case -- a synthetic/real fixture with no relation to this manifest's own
+    capture span) must never silently mis-slice; the tool must notice and fall back to 'all'.
+    """
+    d = _process_dir(tmp_path)
+    # Real MI210 fixture-scale timestamps (~2.3e15 ns, i.e. CLOCK_MONOTONIC-since-boot at
+    # ~26.6 days uptime) -- nowhere near this test's fabricated capture span below.
+    _kernel_trace(d, "real_kernel,0,0,1,2297022669872562,2297022991751054,4242")
+    _write_manifest(
+        tmp_path, capture_start_ns=0, capture_end_ns=1000, load_start_ns=0, load_end_ns=1000
+    )
+
+    cmd_kernels(_ns(str(tmp_path), top=15))
+    out = capsys.readouterr().out
+
+    assert "window: all" in out
+    assert "do not align" in out
+    assert "real_kernel" in out
+
+
+def test_cmd_kernels_explicit_window_slices_relative_to_trace_start(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    d = _process_dir(tmp_path)
+    _kernel_trace(
+        d,
+        "early_kernel,0,0,1,0,100,4242",
+        "late_kernel,0,0,2,5000000000,5000000100,4242",
+    )
+
+    cmd_kernels(_ns(str(tmp_path), top=15, window="1:10"))
+    out = capsys.readouterr().out
+
+    assert "custom range 1s-10s from trace start" in out
+    assert "late_kernel" in out
+    assert "early_kernel" not in out
+
+
+def test_resolve_window_all_never_reads_the_manifest() -> None:
+    """`window='all'` is an unconditional override: it must never consult the manifest at all."""
+    bundle = _build_kernel_bundle_from_csv([])
+    resolved = resolve_window("all", manifest=None, trace_bundle=bundle)
+    assert resolved == ResolvedWindow(None, "all")
+
+
+def test_resolve_window_unknown_value_falls_back_to_all_with_a_clear_note() -> None:
+    bundle = _build_kernel_bundle_from_csv([])
+    resolved = resolve_window("bogus", manifest={}, trace_bundle=bundle)
+    assert resolved.bounds is None
+    assert resolved.label == "all"
+    assert "unknown window" in resolved.note
+
+
+# ---------------------------------------------------------------------------
+# window resolution: hypothesis property tests
+# ---------------------------------------------------------------------------
+
+
+@given(
+    events=st.lists(
+        st.tuples(
+            st.integers(min_value=0, max_value=100_000),
+            st.integers(min_value=1, max_value=5_000),
+        ),
+        min_size=0,
+        max_size=15,
+    ),
+    win_start=st.integers(min_value=0, max_value=100_000),
+    win_len=st.integers(min_value=0, max_value=50_000),
+)
+@FAST
+def test_property_window_filter_partitions_events_and_keeps_only_events_starting_inside_it(
+    tmp_path_factory: pytest.TempPathFactory,
+    events: list[tuple[int, int]],
+    win_start: int,
+    win_len: int,
+) -> None:
+    """sliced UNION outside == all; every sliced kernel starts inside the window."""
+    # Empty `events` needs a placeholder row to keep the CSV non-degenerate
+    # (see the sibling monotone-totals test below), which would need its own
+    # exclusion bookkeeping in the outside_count/count_total identity below
+    # for no additional coverage; skip it instead.
+    assume(events)
+    win_end = win_start + win_len
+    tmp_path = tmp_path_factory.mktemp("window-prop")
+    d = _process_dir(tmp_path)
+    rows = [
+        f"kernel_{i},0,0,{i},{start},{start + dur},4242" for i, (start, dur) in enumerate(events)
+    ]
+    _kernel_trace(d, *rows)
+    files = sorted(d.glob("*_kernel_trace.csv"))
+
+    all_bundle = _build_kernel_bundle_from_csv(files, None)
+    inside_bundle = _build_kernel_bundle_from_csv(files, (win_start, win_end))
+
+    inside_starts = [s for evs in inside_bundle.by_key.values() for s, _e, _n in evs]
+    for s in inside_starts:
+        assert win_start <= s <= win_end
+
+    outside_count = sum(1 for s, _d in events if not (win_start <= s <= win_end))
+    assert inside_bundle.count + outside_count == all_bundle.count_total
+
+
+@given(
+    events=st.lists(
+        st.tuples(
+            st.integers(min_value=0, max_value=100_000),
+            st.integers(min_value=1, max_value=5_000),
+        ),
+        min_size=0,
+        max_size=15,
+    ),
+    win_start=st.integers(min_value=0, max_value=100_000),
+    small_len=st.integers(min_value=0, max_value=20_000),
+    grow=st.integers(min_value=0, max_value=30_000),
+)
+@FAST
+def test_property_window_totals_are_monotone_in_window_size(
+    tmp_path_factory: pytest.TempPathFactory,
+    events: list[tuple[int, int]],
+    win_start: int,
+    small_len: int,
+    grow: int,
+) -> None:
+    """A strictly larger window can only ever keep more (never fewer) events."""
+    tmp_path = tmp_path_factory.mktemp("window-prop-mono")
+    d = _process_dir(tmp_path)
+    rows = [
+        f"kernel_{i},0,0,{i},{start},{start + dur},4242" for i, (start, dur) in enumerate(events)
+    ]
+    _kernel_trace(d, *rows) if rows else _kernel_trace(d, "no_events,0,0,0,-1,-1,4242")
+    files = sorted(d.glob("*_kernel_trace.csv"))
+
+    small = _build_kernel_bundle_from_csv(files, (win_start, win_start + small_len))
+    big = _build_kernel_bundle_from_csv(files, (win_start, win_start + small_len + grow))
+
+    assert big.count >= small.count

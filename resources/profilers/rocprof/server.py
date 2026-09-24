@@ -372,81 +372,133 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         return _capture_cli(analyze_rocprof.cmd_files, report=capture.resolve_report_arg(report))
 
     @mcp.tool()
-    def kernels(report: str, top: int = 15) -> str:
+    def kernels(report: str, top: int = 15, window: str = "load") -> str:
         """Top GPU kernels by total execution time, with a library-family column.
 
         Args:
             report: A timeline capture id, or an explicit directory/file path.
             top: Number of kernels to show (default 15).
+            window: 'load' (default, when recorded) | 'all' | 'startup' | explicit
+                'start_s:end_s' relative to trace start. A server capture's startup
+                (weight load, warmup, KV init) can dominate the trace, so this defaults
+                to just the recorded load phase; pass 'all' for the whole run.
         """
         return _capture_cli(
-            analyze_rocprof.cmd_kernels, report=capture.resolve_report_arg(report), top=top
+            analyze_rocprof.cmd_kernels,
+            report=capture.resolve_report_arg(report),
+            top=top,
+            window=window,
         )
 
     @mcp.tool()
-    def families(report: str) -> str:
+    def families(report: str, window: str = "load") -> str:
         """GPU time grouped by kernel library family (e.g. hipBLASLt, AITER, Triton).
 
         Args:
             report: A timeline capture id, or an explicit directory/file path.
+            window: 'load' (default, when recorded) | 'all' | 'startup' | explicit
+                'start_s:end_s' relative to trace start. A server capture's startup
+                (weight load, warmup, KV init) can dominate the trace, so this defaults
+                to just the recorded load phase; pass 'all' for the whole run.
         """
-        return _capture_cli(analyze_rocprof.cmd_families, report=capture.resolve_report_arg(report))
+        return _capture_cli(
+            analyze_rocprof.cmd_families,
+            report=capture.resolve_report_arg(report),
+            window=window,
+        )
 
     @mcp.tool()
-    def idle_gaps(report: str, top: int = 10) -> str:
+    def idle_gaps(report: str, top: int = 10, window: str = "load") -> str:
         """GPU busy vs idle, largest idle gaps between kernel launches.
 
         Args:
             report: A timeline capture id, or an explicit directory/file path.
             top: Number of gaps to show (default 10).
+            window: 'load' (default, when recorded) | 'all' | 'startup' | explicit
+                'start_s:end_s' relative to trace start. A server capture's startup
+                (weight load, warmup, KV init) can dominate the trace, so this defaults
+                to just the recorded load phase; pass 'all' for the whole run.
         """
         return _capture_cli(
-            analyze_rocprof.cmd_idle_gaps, report=capture.resolve_report_arg(report), top=top
+            analyze_rocprof.cmd_idle_gaps,
+            report=capture.resolve_report_arg(report),
+            top=top,
+            window=window,
         )
 
     @mcp.tool()
-    def cpu_overhead(report: str) -> str:
+    def cpu_overhead(report: str, window: str = "load") -> str:
         """HIP API launch overhead and launch-bound heuristic.
 
         Args:
             report: A timeline capture id, or an explicit directory/file path.
+            window: 'load' (default, when recorded) | 'all' | 'startup' | explicit
+                'start_s:end_s' relative to trace start. A server capture's startup
+                (weight load, warmup, KV init) can dominate the trace, so this defaults
+                to just the recorded load phase; pass 'all' for the whole run.
         """
         return _capture_cli(
-            analyze_rocprof.cmd_cpu_overhead, report=capture.resolve_report_arg(report)
+            analyze_rocprof.cmd_cpu_overhead,
+            report=capture.resolve_report_arg(report),
+            window=window,
         )
 
     @mcp.tool()
-    def memory(report: str) -> str:
+    def memory(report: str, window: str = "load") -> str:
         """Memory copies by direction, bytes, bandwidth.
 
         Args:
             report: A timeline capture id, or an explicit directory/file path.
+            window: 'load' (default, when recorded) | 'all' | 'startup' | explicit
+                'start_s:end_s' relative to trace start. A server capture's startup
+                (weight load, warmup, KV init) can dominate the trace, so this defaults
+                to just the recorded load phase; pass 'all' for the whole run.
         """
-        return _capture_cli(analyze_rocprof.cmd_memory, report=capture.resolve_report_arg(report))
+        return _capture_cli(
+            analyze_rocprof.cmd_memory, report=capture.resolve_report_arg(report), window=window
+        )
 
     @mcp.tool()
-    def graphs(report: str) -> str:
+    def graphs(report: str, window: str = "load") -> str:
         """HIP graph launches and attribution-degradation check.
 
         Args:
             report: A timeline capture id, or an explicit directory/file path.
+            window: 'load' (default, when recorded) | 'all' | 'startup' | explicit
+                'start_s:end_s' relative to trace start. A server capture's startup
+                (weight load, warmup, KV init) can dominate the trace, so this defaults
+                to just the recorded load phase; pass 'all' for the whole run.
         """
-        return _capture_cli(analyze_rocprof.cmd_graphs, report=capture.resolve_report_arg(report))
+        return _capture_cli(
+            analyze_rocprof.cmd_graphs, report=capture.resolve_report_arg(report), window=window
+        )
 
     @mcp.tool()
-    def host_idle(report: str) -> str:
+    def host_idle(report: str, window: str = "load") -> str:
         """Detect a mostly host-idle / load-missed capture (validity check).
 
         Args:
             report: A timeline capture id, or an explicit directory/file path.
+            window: 'load' (default, when recorded) | 'all' | 'startup' | explicit
+                'start_s:end_s' relative to trace start. A server capture's startup
+                (weight load, warmup, KV init) can dominate the trace, so this defaults
+                to just the recorded load phase; pass 'all' for the whole run.
         """
         return _capture_cli(
-            analyze_rocprof.cmd_host_idle, report=capture.resolve_report_arg(report)
+            analyze_rocprof.cmd_host_idle,
+            report=capture.resolve_report_arg(report),
+            window=window,
         )
 
     @mcp.tool()
     def query(report: str, sql: str) -> str:
-        """Run arbitrary SQL against a rocpd SQLite export, if present.
+        """Run arbitrary SQL against a rocpd SQLite export (ROCm 7+ only).
+
+        Only works against a rocpd SQLite (.db) export -- ROCm 7+'s
+        ``rocprofv3 ... --output-format rocpd``. Does not work against the
+        CSV or ``--output-format json`` output the other tools here read;
+        use kernels/families/summary/etc. for those. Not windowed: the SQL
+        runs against the whole rocpd export.
 
         Args:
             report: A timeline capture id, or an explicit directory/file path.
