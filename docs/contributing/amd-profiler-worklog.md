@@ -272,6 +272,62 @@ GPU-free unit/property tests for the torch profiler plugin (capture_ops,
 inject/sitecustomize, analyze_torch_profile, the MCP server) pass: 155
 tests across the targeted slice.
 
+MCP validation of `profile_timeline` and `summary`/`compare`
+(`capture_runtime.py`, `capture.py`'s timeline/summary/compare code,
+`analyze_rocprof.py`) against a real MI210 running Qwen/Qwen3.5-9B, driven
+through the real stdio MCP server. Found and fixed two real bugs:
+
+- **Capture store root resolved relative to the wrong process's cwd.**
+  `$VIBESYS_PROFILE_DIR` defaults to a relative `./.profiles`, which the
+  profiled subprocess (launched with the capture's own `cwd` argument) and
+  this process's own analyzer code resolved against two different working
+  directories whenever they differed -- the profiler wrote its whole output
+  tree somewhere the analyzer never looked. First real `profile_timeline`
+  capture against an offline single-process vLLM script (eager mode, `cwd`
+  set to the script's run directory) completed cleanly but the auto-summary
+  found zero CSVs; rocprofv3's own log confirmed the files existed, just
+  under a different absolute path than the analyzer read from. Fixed by
+  resolving the capture store root to an absolute path once, at allocation
+  time, so both sides agree regardless of `cwd`. Re-ran clean: real
+  `kernel_trace.csv` (73k rows), correct family attribution (Composable
+  Kernel FMHA ~76% of GPU time, hipBLASLt/Tensile GEMMs, PyTorch native,
+  Triton), and the same `FmhaFwdKernel` >1000x-outlier flag the earlier
+  MI210 campaign found independently -- consistent with `FINDINGS.md`.
+- **Non-clean-exit timeline captures were discarded outright.**
+  `profile_timeline` skipped analysis whenever the overall lifecycle status
+  wasn't `ok`, even though rocprofv3 only needs its own `stop_signal`
+  delivered to flush a trace -- decoupled from whether the wrapped process
+  group exits promptly afterward. Surfaced by the graceful-SIGINT KEY
+  EXPERIMENT below: `killed_after_grace` captures had a complete, valid
+  trace on disk that the tool refused to analyze. Fixed to attempt analysis
+  unconditionally (every analyzer already degrades cleanly when nothing was
+  written), with a provisional-findings note when the status isn't `ok`.
+
+**KEY EXPERIMENT**: does graceful `SIGINT` make rocprofv3 flush a
+non-empty trace against `vllm serve` (the HTTP server, not the offline
+script), and does the multiprocessing setting matter? Ran
+`profile_timeline` with `ready_command`/`load_command` (a real benchmark
+client)/`stop_signal=SIGINT`/`grace_s=300`, twice: once with default V1
+multiprocessing (forked `EngineCore`), once with
+`VLLM_ENABLE_V1_MULTIPROCESSING=0`. **Verdict: yes, in both configurations**
+-- both produced a complete, real `kernel_trace.csv` (same magnitude as the
+offline-script path), confirmed written to disk minutes before the eventual
+forced kill. Both configurations still needed `capture_runtime` to escalate
+past `grace_s` to fully exit (the server process group does not exit
+cleanly even after rocprofv3's own flush completes), so the overall status
+reads `killed_after_grace` either way -- previously discarded outright by
+the bug above, now correctly analyzed. This corrects the branch's earlier,
+untested assumption (`vllm-profiling.md`) that a forked `EngineCore` would
+by itself block the flush; updated that file's server-capture section from
+unverified to verified with the actual finding.
+
+`summary`/`compare` validated on two `profile_timeline` captures (eager vs.
+HIP-graph mode of the same offline script): `compare` produced sane,
+antisymmetric per-family/per-kernel time deltas and new/removed-kernel
+lists (e.g. HIP-graph mode's own kernel-selection GEMM variants appearing
+only in graph mode); `summary` correctly dispatched to the timeline
+analyzer by the capture's recorded `kind`.
+
 ## Appendix: detailed format notes and commands
 
 ### rocprofv3 PMC counter output
