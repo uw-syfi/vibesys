@@ -136,6 +136,19 @@ built-in round and retry semantics. Custom orchestrations implement the
 run-level `execute(request, runtime)` hook above; they can inspect each agent's
 output to choose the next agent, message, or action dynamically.
 
+The built-in plain loop's `PlainPolicy` in
+`src/vibesys/loops/plain/policy.py` owns issue draining, retry budgets,
+implementer-to-judge handoffs, performance evaluation, resume cursor decisions,
+and termination. Its typed `PlainPolicyPort` supplies issue operations, turns,
+checkpoints, and progress effects. `run_plain_loop` provisions the existing run
+context and binds those effects in `_PlainEffects`; it retains the current
+prompts, issue board, persistence, and workspace snapshots. The policy can run
+with an in-memory fake port, as tested in
+`tests/vibesys/loops/plain/test_plain_policy.py`, without constructing a task,
+project, agent client, sandbox, or run environment.
+Run the fake-port checks with
+`uv run pytest tests/vibesys/loops/plain/test_plain_policy.py`.
+
 This is the first runtime slice. Agents share the run workspace unless the
 selected run environment isolates it. The runtime does not yet offer a generic
 message bus, checkpoint API, profiler capability, or custom resume policy.

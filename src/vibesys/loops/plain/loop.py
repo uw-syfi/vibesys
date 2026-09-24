@@ -21,12 +21,14 @@ issues exist.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vibesys.agent_spec_config import resolve_agent_driver
-from vibesys.config import Config, as_config
+from vibesys.config import Config, LoadLevelCfg, as_config
 from vibesys.constants import (
     DEFAULT_COMPUTE_BACKEND,
     ComputeBackend,
@@ -41,6 +43,7 @@ from vibesys.loops.plain.orchestration import (
     descriptor_from_options,
     legacy_configuration_from_options,
 )
+from vibesys.loops.plain.policy import PlainPolicy, _resume_point
 from vibesys.loops.plain.render import render_all
 from vibesys.loops.plain.runner_ext import PlainLoopAgentClient
 from vibesys.loops.plain.state import PlainStateStore
@@ -73,6 +76,9 @@ from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "plain"
 PlainLoopState = PlainLoopCursor
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 def _checkpoint_state(
     ctx: LoopContext,
@@ -89,30 +95,10 @@ def _checkpoint_state(
 def _determine_resume_point(
     state: PlainLoopState | None, store: IssueBoard
 ) -> tuple[int, str, int | None]:
-    """Return ``(iteration, phase, current_issue_id)`` to resume from.
-
-    *iteration* is 0-indexed.
-    """
+    """Compatibility helper for older callers of the plain-loop resume selector."""
     if state is None:
         return 0, "implementer", None
-
-    # Mid-judge crash: re-run the judge for the same issue
-    if state.phase == "judge" and state.current_issue_id is not None:
-        issue = store.get(state.current_issue_id)
-        if issue is not None and issue.status in (IssueStatus.IN_PROGRESS, IssueStatus.OPEN):
-            return state.round_idx, "judge", state.current_issue_id
-
-    # Mid-implementer crash: re-run the implementer for the same issue
-    if state.phase == "implementer" and state.current_issue_id is not None:
-        issue = store.get(state.current_issue_id)
-        if issue is not None and issue.status in (IssueStatus.IN_PROGRESS, IssueStatus.OPEN):
-            return state.round_idx, "implementer", state.current_issue_id
-
-    # Otherwise: drain remaining open issues, then fall through to perf_eval.
-    # _determine_resume_point never returns "perf_eval" — the drain loop in
-    # run_plain_loop short-circuits to perf_eval naturally when next_open()
-    # returns None.
-    return state.round_idx, "implementer", None
+    return _resume_point(state, store.get)
 
 
 # ---------------------------------------------------------------------------
@@ -266,12 +252,235 @@ def _ensure_bootstrap_issue(
     ctx.lprint(f"[bootstrap] created initial issue #{issue.id}")
 
 
+@dataclass
+class _PlainEffects:
+    """Concrete turns, persistence, and workspace effects for PlainPolicy."""
+
+    ctx: LoopContext
+    board: IssueBoard
+    state_store: PlainStateStore
+    prompt: Prompt
+    progress_path: Path
+    issues_dir: Path
+    perf_metrics_location: str
+    max_issues_per_perf_eval: int
+    load_levels: list[LoadLevelCfg] | None
+
+    def bootstrap(self, state: PlainLoopState) -> None:
+        _ensure_bootstrap_issue(
+            self.board, state=state, state_store=self.state_store, ctx=self.ctx, prompt=self.prompt
+        )
+
+    def checkpoint(self, state: PlainLoopState, label: str) -> None:
+        _checkpoint_state(self.ctx, self.state_store, state, label=label)
+
+    @contextmanager
+    def progress(self, iteration: int, total: int) -> Iterator[None]:
+        progress = RoundProgress(iteration, total)
+        self.ctx.lprint(f"\n{'=' * 60}")
+        self.ctx.lprint(f"  {progress.label()}")
+        self.ctx.lprint(f"{'=' * 60}\n")
+        with self.ctx.progress(progress):
+            yield
+
+    def log(self, message: str) -> None:
+        self.ctx.lprint(message)
+
+    def get_issue(self, issue_id: int) -> Issue | None:
+        return self.board.get(issue_id)
+
+    def next_open_issue(self) -> Issue | None:
+        return self.board.next_open()
+
+    def list_issues(self, status: IssueStatus | None = None) -> list[Issue]:
+        return self.board.list(status=status)
+
+    def reopen_blocked(self, iteration: int) -> list[int]:
+        return self.board.reopen_blocked(
+            actor="loop:resume", iteration=iteration, note="retried on resume"
+        )
+
+    def claim(self, issue: Issue, iteration: int) -> Issue:
+        return self.board.update_status(
+            issue.id,
+            IssueStatus.IN_PROGRESS,
+            actor="loop",
+            iteration=iteration,
+            note="claimed for processing",
+        )
+
+    def block(self, issue: Issue, iteration: int, max_attempts: int) -> None:
+        self.board.update_status(
+            issue.id,
+            IssueStatus.BLOCKED,
+            actor="loop",
+            iteration=iteration,
+            note=f"exhausted {max_attempts} attempts",
+        )
+
+    def increment_attempts(
+        self, issue: Issue, response: IssueImplementerResponse, iteration: int
+    ) -> Issue:
+        return self.board.increment_attempts(
+            issue.id,
+            actor="implementer",
+            iteration=iteration,
+            note=response.summary[:200],
+            payload=response.model_dump(mode="json"),
+        )
+
+    def close_issue(self, issue: Issue, response: IssueJudgeResponse, iteration: int) -> None:
+        self.board.update_status(
+            issue.id,
+            IssueStatus.CLOSED,
+            actor="judge",
+            iteration=iteration,
+            note=f"closed by judge after attempt {issue.attempts}",
+            payload=response.model_dump(mode="json"),
+        )
+
+    def reopen_issue(self, issue: Issue, response: IssueJudgeResponse, iteration: int) -> None:
+        self.board.update_status(
+            issue.id,
+            IssueStatus.OPEN,
+            actor="judge",
+            iteration=iteration,
+            note=response.feedback[:500],
+            payload=response.model_dump(mode="json"),
+        )
+
+    def implement(self, issue: Issue) -> IssueImplementerResponse:
+        ctx = self.ctx
+        ctx.reselect_gpu()
+        system_prompt = self.prompt.render(
+            "implementer/system.j2",
+            reference_path=ctx.ref_name,
+            runtime_notes=ctx.run_environment_view.prompt_notes,
+            issue=issue,
+        )
+        user_prompt = self.prompt.render(
+            "implementer/user.j2",
+            issue=issue,
+            prior_judge_review=_latest_judge_review(issue),
+        )
+        ctx.wait_for_debug(f"Implementer step on issue #{issue.id}")
+        ctx.lprint(f">>> Implementer working on issue #{issue.id}...")
+        issue_id = issue.id
+        return ctx.invoke(
+            kind="implementer",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_cls=IssueImplementerResponse,
+            fallback_factory=lambda: IssueImplementerResponse(
+                issue_id=issue_id,
+                summary="Implementer did not produce a structured response.",
+                files_touched=[],
+                self_check="No structured response received.",
+            ),
+            round_label=f"impl issue #{issue.id} att{issue.attempts + 1}",
+        )
+
+    def record_implementation(
+        self, issue: Issue, response: IssueImplementerResponse, iteration: int
+    ) -> None:
+        _update_progress_from_implementer(self.progress_path, iteration, issue, response)
+        self.ctx.snapshot_workspace(f"iter-{iteration}-impl-{issue.id}-att{issue.attempts}")
+        self.ctx.lprint(f"[snapshot] iter-{iteration}-impl-{issue.id}-att{issue.attempts}")
+
+    def judge(self, issue: Issue, iteration: int) -> IssueJudgeResponse:
+        ctx = self.ctx
+        ctx.reselect_gpu()
+        system_prompt = self.prompt.render(
+            "judge/system.j2",
+            accuracy_command=ctx.judge_accuracy_command,
+            benchmark_command=ctx.judge_benchmark_command,
+            issue=issue,
+        )
+        user_prompt = self.prompt.render("judge/user.j2", issue=issue)
+        ctx.wait_for_debug(f"Judge step on issue #{issue.id}")
+        ctx.lprint(f"\n>>> Judge reviewing issue #{issue.id}...")
+        issue_id = issue.id
+        response = ctx.invoke(
+            kind="judge",
+            iteration=iteration,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_cls=IssueJudgeResponse,
+            fallback_factory=lambda: IssueJudgeResponse(
+                issue_id=issue_id,
+                analysis="No structured response received from judge.",
+                feedback="Judge did not produce a structured response.",
+                verdict=Verdict.FAIL,
+                new_issues_filed=[],
+            ),
+            round_label=f"judge issue #{issue.id} att{issue.attempts}",
+        )
+        # Tracker tools write through a separate board instance.
+        self.board.reload()
+        render_all(self.issues_dir, self.board)
+        _update_progress_from_judge(self.progress_path, iteration, issue, response)
+        ctx.snapshot_workspace(f"iter-{iteration}-judge-{issue.id}-att{issue.attempts}")
+        ctx.lprint(f">>> Judge verdict on #{issue.id}: {response.verdict.value.upper()}")
+        return response
+
+    def evaluate_performance(self, iteration: int) -> IssuePerfEvalResponse:
+        ctx = self.ctx
+        ctx.reselect_gpu()
+        system_prompt = self.prompt.render(
+            "perf_eval/system.j2",
+            load_levels=self.load_levels,
+            progress_path=None,
+            perf_metrics_path=self.perf_metrics_location,
+            issue_create_cap=self.max_issues_per_perf_eval,
+            benchmark_command=ctx.judge_benchmark_command,
+            runtime_notes=ctx.run_environment_view.prompt_notes,
+        )
+        user_prompt = self.prompt.render("perf_eval/user.j2")
+        ctx.wait_for_debug("Perf evaluator step")
+        ctx.lprint("\n>>> Performance Evaluator benchmarking...")
+        response = ctx.invoke(
+            kind="perf_eval",
+            iteration=iteration,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_cls=IssuePerfEvalResponse,
+            fallback_factory=lambda: IssuePerfEvalResponse(
+                analysis="No structured response received from perf evaluator.",
+                metrics=PerfMetrics(load_levels=[]),
+                evaluator_feedback=[],
+                new_issue_ids=[],
+                throughput_trend=PerfTrend.MIXED,
+                latency_trend=PerfTrend.MIXED,
+            ),
+            round_label=f"perf_eval iter {iteration}",
+        )
+        self.board.reload()
+        render_all(self.issues_dir, self.board)
+        _update_progress_from_perf_eval(self.progress_path, iteration, response)
+        self.state_store.append_performance(
+            PlainPerformanceRecord(
+                iteration=iteration,
+                timestamp=datetime.now(UTC),
+                throughput_trend=response.throughput_trend.value,
+                latency_trend=response.latency_trend.value,
+                metrics=response.metrics.model_dump(mode="json"),
+                new_issue_ids=tuple(response.new_issue_ids),
+            )
+        )
+        ctx.snapshot_workspace(f"iter-{iteration}-perf_eval")
+        ctx.lprint(
+            f"\n>>> Perf trend: throughput={response.throughput_trend.value.upper()}, "
+            f"latency={response.latency_trend.value.upper()}"
+        )
+        return response
+
+
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
 
-def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
+def run_plain_loop(  # noqa: PLR0913  # tracked: #288
     config: Config,
     exp_name: str,
     input_path: str,
@@ -411,379 +620,21 @@ def run_plain_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
 
         persisted_state = state_store.load_cursor()
         state = persisted_state or resume_state or PlainLoopState()
-        _ensure_bootstrap_issue(
-            store,
-            state=state,
-            state_store=state_store,
+        effects = _PlainEffects(
             ctx=ctx,
+            board=store,
+            state_store=state_store,
             prompt=prompt,
+            progress_path=progress_path,
+            issues_dir=issues_dir,
+            perf_metrics_location=perf_metrics_location,
+            max_issues_per_perf_eval=max_issues_per_perf_eval,
+            load_levels=config.perf_eval.load_levels,
         )
-
-        # On resume, give every previously BLOCKED issue a fresh attempt
-        # budget. The common reason a user resumes is that the prior run
-        # bailed out because every remaining issue was blocked; without
-        # this reset the resumed run would simply bail out again on the
-        # first drain pass.
-        if existing or persisted_state is not None or resume_state is not None:
-            reopened = store.reopen_blocked(
-                actor="loop:resume",
-                iteration=max(state.round_idx + 1, 1),
-                note="retried on resume",
-            )
-            if reopened:
-                ids = ", ".join(f"#{i}" for i in reopened)
-                ctx.lprint(
-                    f"[resume] reopened {len(reopened)} previously blocked "
-                    f"issue(s) for retry: {ids}"
-                )
-
-        # Determine where to resume from
-        i, next_phase, pending_issue_id = _determine_resume_point(state, store)
-        end_iteration = i + max_rounds
-
-        if existing or persisted_state is not None or resume_state is not None:
-            ctx.lprint(
-                f"Resuming at round {i + 1} phase '{next_phase}'"
-                + (f" issue #{pending_issue_id}" if pending_issue_id else "")
-                + f", running up to {max_rounds} more rounds"
-            )
-
-        load_levels = config.perf_eval.load_levels
-        while i < end_iteration:
-            iter_label = i + 1
-            round_progress = RoundProgress(iter_label, end_iteration)
-            ctx.lprint(f"\n{'=' * 60}")
-            ctx.lprint(f"  {round_progress.label()}")
-            ctx.lprint(f"{'=' * 60}\n")
-
-            with ctx.progress(round_progress):
-                # ---------------------------------------------------------------
-                # DRAIN open issues
-                # ---------------------------------------------------------------
-                while True:
-                    # If we're resuming with a specific issue, pick that one first.
-                    if pending_issue_id is not None:
-                        issue = store.get(pending_issue_id)
-                        pending_issue_id = None
-                    else:
-                        issue = store.next_open()
-
-                    if issue is None:
-                        break
-
-                    if issue.attempts >= max_attempts_per_issue:
-                        store.update_status(
-                            issue.id,
-                            IssueStatus.BLOCKED,
-                            actor="loop",
-                            iteration=iter_label,
-                            note=f"exhausted {max_attempts_per_issue} attempts",
-                        )
-                        ctx.lprint(
-                            f"[block] issue #{issue.id} blocked after {issue.attempts} attempts"
-                        )
-                        continue
-
-                    # Claim the issue
-                    if issue.status == IssueStatus.OPEN:
-                        issue = store.update_status(
-                            issue.id,
-                            IssueStatus.IN_PROGRESS,
-                            actor="loop",
-                            iteration=iter_label,
-                            note="claimed for processing",
-                        )
-
-                    # ----- Implementer phase -----
-                    if next_phase != "judge":
-                        state = state.transition(
-                            round_idx=i,
-                            phase="implementer",
-                            current_issue_id=issue.id,
-                        )
-                        _checkpoint_state(
-                            ctx,
-                            state_store,
-                            state,
-                            label=f"plain: begin implementer for issue {issue.id}",
-                        )
-                        ctx.reselect_gpu()
-
-                        impl_system_prompt = prompt.render(
-                            "implementer/system.j2",
-                            reference_path=ctx.ref_name,
-                            runtime_notes=ctx.run_environment_view.prompt_notes,
-                            issue=issue,
-                        )
-                        impl_prompt = prompt.render(
-                            "implementer/user.j2",
-                            issue=issue,
-                            prior_judge_review=_latest_judge_review(issue),
-                        )
-
-                        ctx.wait_for_debug(f"Implementer step on issue #{issue.id}")
-                        ctx.lprint(f">>> Implementer working on issue #{issue.id}...")
-                        # Implementer has no issue-tracker tools — the relevant
-                        # issue is inlined into its system prompt — so no
-                        # .mcp.json sandwich here.
-                        issue_id_for_fallback = issue.id
-                        impl_response = ctx.invoke(
-                            kind="implementer",
-                            system_prompt=impl_system_prompt,
-                            user_prompt=impl_prompt,
-                            response_cls=IssueImplementerResponse,
-                            fallback_factory=lambda issue_id=issue_id_for_fallback: (
-                                IssueImplementerResponse(
-                                    issue_id=issue_id,
-                                    summary="Implementer did not produce a structured response.",
-                                    files_touched=[],
-                                    self_check="No structured response received.",
-                                )
-                            ),
-                            round_label=f"impl issue #{issue.id} att{issue.attempts + 1}",
-                        )
-
-                        issue = store.increment_attempts(
-                            issue.id,
-                            actor="implementer",
-                            iteration=iter_label,
-                            note=impl_response.summary[:200],
-                            payload=impl_response.model_dump(mode="json"),
-                        )
-                        _update_progress_from_implementer(
-                            progress_path, iter_label, issue, impl_response
-                        )
-                        ctx.snapshot_workspace(
-                            f"iter-{iter_label}-impl-{issue.id}-att{issue.attempts}"
-                        )
-                        ctx.lprint(
-                            f"[snapshot] iter-{iter_label}-impl-{issue.id}-att{issue.attempts}"
-                        )
-
-                    # next_phase only kicks in for the first issue we resume on
-                    next_phase = ""
-
-                    # ----- Judge phase -----
-                    state = state.transition(
-                        round_idx=i,
-                        phase="judge",
-                        current_issue_id=issue.id,
-                    )
-                    _checkpoint_state(
-                        ctx,
-                        state_store,
-                        state,
-                        label=f"plain: begin judge for issue {issue.id}",
-                    )
-                    ctx.reselect_gpu()
-
-                    judge_system_prompt = prompt.render(
-                        "judge/system.j2",
-                        accuracy_command=ctx.judge_accuracy_command,
-                        benchmark_command=ctx.judge_benchmark_command,
-                        issue=issue,
-                    )
-                    judge_prompt = prompt.render("judge/user.j2", issue=issue)
-
-                    ctx.wait_for_debug(f"Judge step on issue #{issue.id}")
-                    ctx.lprint(f"\n>>> Judge reviewing issue #{issue.id}...")
-                    # PlainLoopAgentClient injects tracker access (an
-                    # MCPServerSpec) for kind="judge" — see
-                    # vibesys/plain/runner_ext.py. The judge may file
-                    # at most ONE bug-type issue per review; that policy is
-                    # enforced by the wrapper.
-                    judge_issue_id = issue.id
-                    judge_response = ctx.invoke(
-                        kind="judge",
-                        iteration=iter_label,
-                        system_prompt=judge_system_prompt,
-                        user_prompt=judge_prompt,
-                        response_cls=IssueJudgeResponse,
-                        fallback_factory=lambda issue_id=judge_issue_id: IssueJudgeResponse(
-                            issue_id=issue_id,
-                            analysis="No structured response received from judge.",
-                            feedback="Judge did not produce a structured response.",
-                            verdict=Verdict.FAIL,
-                            new_issues_filed=[],
-                        ),
-                        round_label=f"judge issue #{issue.id} att{issue.attempts}",
-                    )
-
-                    # The MCP server writes via a separate IssueBoard on the
-                    # same file, so reload picks up tool-created issues.
-                    # reload() does not fire on_change, so re-render explicitly
-                    # to keep the per-issue markdown view in sync.
-                    store.reload()
-                    render_all(issues_dir, store)
-
-                    _update_progress_from_judge(progress_path, iter_label, issue, judge_response)
-                    ctx.snapshot_workspace(
-                        f"iter-{iter_label}-judge-{issue.id}-att{issue.attempts}"
-                    )
-                    ctx.lprint(
-                        f">>> Judge verdict on #{issue.id}: {judge_response.verdict.value.upper()}"
-                    )
-
-                    if judge_response.verdict == Verdict.PASS:
-                        store.update_status(
-                            issue.id,
-                            IssueStatus.CLOSED,
-                            actor="judge",
-                            iteration=iter_label,
-                            note=f"closed by judge after attempt {issue.attempts}",
-                            payload=judge_response.model_dump(mode="json"),
-                        )
-                    else:
-                        store.update_status(
-                            issue.id,
-                            IssueStatus.OPEN,
-                            actor="judge",
-                            iteration=iter_label,
-                            note=judge_response.feedback[:500],
-                            payload=judge_response.model_dump(mode="json"),
-                        )
-
-                    state = state.transition(
-                        round_idx=i,
-                        phase="implementer",
-                        current_issue_id=None,
-                    )
-                    _checkpoint_state(
-                        ctx,
-                        state_store,
-                        state,
-                        label=f"plain: record judge result for issue {issue.id}",
-                    )
-                    # Loop back to drain the next open issue.
-
-                # ---------------------------------------------------------------
-                # PERF_EVAL phase (after drain complete)
-                # ---------------------------------------------------------------
-                # Bail-out check: if every remaining issue is BLOCKED, we're stuck.
-                remaining = [iss for iss in store.list() if iss.status not in (IssueStatus.CLOSED,)]  # noqa: FURB171  # tracked: #288
-                blocked_only = remaining and all(
-                    iss.status == IssueStatus.BLOCKED for iss in remaining
-                )
-                if blocked_only:
-                    ctx.lprint(
-                        f"[stop] all remaining issues are blocked "
-                        f"({len(remaining)} blocked); bailing out."
-                    )
-                    state = state.transition(
-                        round_idx=i,
-                        phase="perf_eval",
-                        current_issue_id=None,
-                    )
-                    _checkpoint_state(
-                        ctx,
-                        state_store,
-                        state,
-                        label="plain: record blocked issue queue",
-                    )
-                    return False
-
-                state = state.transition(
-                    round_idx=i,
-                    phase="perf_eval",
-                    current_issue_id=None,
-                )
-                _checkpoint_state(
-                    ctx,
-                    state_store,
-                    state,
-                    label=f"plain: begin performance evaluation {iter_label}",
-                )
-                ctx.reselect_gpu()
-
-                perf_system_prompt = prompt.render(
-                    "perf_eval/system.j2",
-                    load_levels=load_levels,
-                    progress_path=None,
-                    perf_metrics_path=perf_metrics_location,
-                    issue_create_cap=max_issues_per_perf_eval,
-                    benchmark_command=ctx.judge_benchmark_command,
-                    runtime_notes=ctx.run_environment_view.prompt_notes,
-                )
-                perf_prompt = prompt.render("perf_eval/user.j2")
-
-                ctx.wait_for_debug("Perf evaluator step")
-                ctx.lprint("\n>>> Performance Evaluator benchmarking...")
-                # PlainLoopAgentClient injects tracker access for kind="perf_eval"
-                # and scopes the per-iteration cap by the iteration kwarg below,
-                # so issues filed here are counted against iter_label's budget.
-                # See vibesys/plain/runner_ext.py.
-                perf_response = ctx.invoke(
-                    kind="perf_eval",
-                    iteration=iter_label,
-                    system_prompt=perf_system_prompt,
-                    user_prompt=perf_prompt,
-                    response_cls=IssuePerfEvalResponse,
-                    fallback_factory=lambda: IssuePerfEvalResponse(
-                        analysis="No structured response received from perf evaluator.",
-                        metrics=PerfMetrics(load_levels=[]),
-                        evaluator_feedback=[],
-                        new_issue_ids=[],
-                        throughput_trend=PerfTrend.MIXED,
-                        latency_trend=PerfTrend.MIXED,
-                    ),
-                    round_label=f"perf_eval iter {iter_label}",
-                )
-
-                store.reload()
-                render_all(issues_dir, store)
-
-                _update_progress_from_perf_eval(progress_path, iter_label, perf_response)
-                state_store.append_performance(
-                    PlainPerformanceRecord(
-                        iteration=iter_label,
-                        timestamp=datetime.now(UTC),
-                        throughput_trend=perf_response.throughput_trend.value,
-                        latency_trend=perf_response.latency_trend.value,
-                        metrics=perf_response.metrics.model_dump(mode="json"),
-                        new_issue_ids=tuple(perf_response.new_issue_ids),
-                    )
-                )
-                ctx.snapshot_workspace(f"iter-{iter_label}-perf_eval")
-                _checkpoint_state(
-                    ctx,
-                    state_store,
-                    state,
-                    label=f"plain: record performance evaluation {iter_label}",
-                )
-                ctx.lprint(
-                    f"\n>>> Perf trend: throughput={perf_response.throughput_trend.value.upper()}, "
-                    f"latency={perf_response.latency_trend.value.upper()}"
-                )
-
-                # Termination check: nothing open AND perf_eval filed nothing → done.
-                still_open = store.list(status=IssueStatus.OPEN)
-                if not still_open and not perf_response.new_issue_ids:
-                    ctx.lprint("[done] no open issues and perf_eval filed none.")
-                    state = state.transition(
-                        round_idx=i + 1,
-                        phase="implementer",
-                        current_issue_id=None,
-                    )
-                    _checkpoint_state(
-                        ctx,
-                        state_store,
-                        state,
-                        label=f"plain: complete performance evaluation {iter_label}",
-                    )
-                    return True
-
-                i += 1
-                state = state.transition(
-                    round_idx=i,
-                    phase="implementer",
-                    current_issue_id=None,
-                )
-                _checkpoint_state(
-                    ctx,
-                    state_store,
-                    state,
-                    label=f"plain: complete round {iter_label}",
-                )
-
-        ctx.lprint("Run completed — round budget exhausted.")
-        return False
+        return PlainPolicy(
+            effects,
+            state=state,
+            max_rounds=max_rounds,
+            max_attempts_per_issue=max_attempts_per_issue,
+            resuming=existing or persisted_state is not None or resume_state is not None,
+        ).run()
