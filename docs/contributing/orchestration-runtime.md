@@ -120,7 +120,11 @@ and review turn in `policy_single.py`. `ProfileGuidedFlow` wraps either inner fl
 with component profiling and measurement from `policy_profile.py`. Evolve has its
 own control flow in `src/vibesys/loops/evolve/loop.py`. The agent executor owns
 durable retry numbering, framework gates, and round transactions. These built-in
-role bindings use the existing shared context rather than
+policies receive typed `AgentTurns`, `RoundEffects`, and profile effect ports;
+`policy_local.py` binds those ports to the existing context, role handles, and
+issue board. Policy and retry decisions are tested with fake ports, without
+creating agents or run environments. The built-in role bindings use the existing
+shared context rather than
 `VibeSysRuntime.spawn_agent`. This internal protocol preserves the current
 built-in round and retry semantics. Custom orchestrations implement the
 run-level `execute(request, runtime)` hook above; they can inspect each agent's
