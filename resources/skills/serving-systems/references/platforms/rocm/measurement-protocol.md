@@ -1,6 +1,6 @@
 # Measurement protocol
 
-A ROCm timing or counter number that skips these rules is not evidence — it is
+A ROCm timing or counter number that skips these rules is not evidence: it is
 a single sample of a noisy process. This extends [`tooling/profiler.md`](../../tooling/profiler.md)'s
 portable invariants with the ROCm-specific mechanics: clock locking, per-chiplet
 variance, and how the toolkit's own capture overhead can inflate the thing
@@ -19,7 +19,7 @@ capture command and need to turn its output into a trustworthy number.
 | **Warm** | discard cold runs | clocks ramp, caches fill, AITER/Triton JIT and TunableOp search resolve on first call |
 | **Repeats** | ≥3, prefer 7 | a single sample is dominated by DVFS position |
 | **Report** | median + spread, never a lone number | spread is how a reader judges the claim |
-| **Noise band** | treat sub-~0.5% end-to-end deltas as unproven until you've measured your own floor | below it, clock and scheduling variance dominate; this repo has not yet published a measured noise floor — establish one before trusting small deltas |
+| **Noise band** | treat sub-~0.5% end-to-end deltas as unproven until you've measured your own floor | below it, clock and scheduling variance dominate; this repo has not yet published a measured noise floor: establish one before trusting small deltas |
 | **Clocks** | locked, or at minimum monitored | see below |
 | **A/B** | same session, non-overlapping (or interleaved), reference then candidate back-to-back | never compare across sessions, boxes, or days |
 | **Untraced** | time in a pass separate from counter/trace collection | a profiled or counter-replayed run is not a timing run |
@@ -31,12 +31,12 @@ capture command and need to turn its output into a trustworthy number.
   continuous serving load measures **115–122 TFLOP/s** (power-limited, not
   compute-limited), while isolated bursts reach **~150 TFLOP/s**. A single
   short timed run can land anywhere in that 115–150 range depending on how
-  long the clock has been under load — see
+  long the clock has been under load; see
   `examples/model-serving/qwen3.5-9b-mi210/config/platforms/mi210.toml`.
 - **Chiplet variance is architecture-dependent.** MI300-family parts (gfx942)
   are multi-die: several XCDs behind Infinity Fabric, each with its own clock
   domain, so repeat-to-repeat spread partly reflects *which* XCD a launch
-  landed on. MI210 (gfx90a) is a single monolithic die — there is no
+  landed on. MI210 (gfx90a) is a single monolithic die: there is no
   cross-XCD placement variance to reason about there, but there is still
   ordinary DVFS ramp and thermal drift. Don't import multi-chiplet variance
   explanations onto gfx90a runs.
@@ -73,7 +73,7 @@ actually help":
 3. Compare medians and require the delta to clear the noise band with the
    clock log showing no drift.
 
-Do not sum per-kernel microbenchmarks as a substitute for an end-to-end A/B —
+Do not sum per-kernel microbenchmarks as a substitute for an end-to-end A/B:
 that misses overlap, cache effects, and occupancy interactions between
 neighboring kernels, and routinely disagrees with the end-to-end number in
 either direction.
@@ -84,7 +84,7 @@ Every ROCm capture path perturbs wall time:
 
 - `rocprofv3` system/kernel tracing adds per-dispatch interception overhead.
 - `rocprof-compute`'s `profile` phase **replays the workload multiple times**
-  to collect its full counter set — timing taken during that phase describes
+  to collect its full counter set: timing taken during that phase describes
   the replay, not one execution.
 - PMC counter collection can force multi-pass replay when a job requests more
   counters than fit in one hardware pass (see
@@ -94,7 +94,7 @@ Run the timing pass with no tracer or counter collector attached
 (`kernel_bench.py`'s event-timing mode), and run the attribution pass
 (`analyze_rocprof.py`, `counters.py`, `compute.py`) separately. Report the
 former as the speed number and the latter as the "where does the time go"
-evidence — never quote a profiled run's wall time as the performance number.
+evidence: never quote a profiled run's wall time as the performance number.
 
 A known ROCm 6.4 + torch 2.9.1 pitfall makes this doubly important for
 `torch.profiler`: after a capture ends, subsequent async event waits can hang
@@ -144,8 +144,8 @@ measurement:
 
 ## See also
 
-- [`profiler.md`](profiler.md) — the tool-to-question map and capture recipes this protocol governs
-- [`counter-triage.md`](counter-triage.md) — what to do with a counter capture once it's trustworthy
-- [`roofline.md`](roofline.md) — the measured ceilings this file's "sustained, not spec" rule points at
-- [`aiter-engagement.md`](aiter-engagement.md) — engagement proof before believing an AITER-path delta
-- [`tooling/profiler.md`](../../tooling/profiler.md) — the portable profiling invariants
+- [`profiler.md`](profiler.md): the tool-to-question map and capture recipes this protocol governs
+- [`counter-triage.md`](counter-triage.md): what to do with a counter capture once it's trustworthy
+- [`roofline.md`](roofline.md): the measured ceilings this file's "sustained, not spec" rule points at
+- [`aiter-engagement.md`](aiter-engagement.md): engagement proof before believing an AITER-path delta
+- [`tooling/profiler.md`](../../tooling/profiler.md): the portable profiling invariants

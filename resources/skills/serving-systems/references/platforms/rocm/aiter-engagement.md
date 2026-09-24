@@ -3,7 +3,7 @@
 Prove a kernel-library or tuning change actually reaches the live vLLM/SGLang
 dispatch **before** trusting any measured delta from it. This is the ROCm
 answer to "did the profile move because of my change, or because I measured
-the wrong kernel" — see [`aiter.md`](aiter.md) for the library stack itself;
+the wrong kernel." See [`aiter.md`](aiter.md) for the library stack itself;
 this file is about proving which piece of it actually ran.
 
 ## The one fact that decides everything
@@ -14,8 +14,8 @@ beside it do not automatically reach that path:
 
 | Tier | Tool | Reaches the live serving dispatch? |
 |:--|:--|:--|
-| Library offline tuning | `hipblaslt-bench`, PyTorch `TunableOp` | Only if the live call site actually resolves to hipBLASLt *and* the tuning file is loaded there — many AITER-covered ops bypass this hook entirely. |
-| **AITER dispatch (tuned or default)** | **AITER's per-shape config lookup** | **Yes — this is the live path for AITER-covered ops.** |
+| Library offline tuning | `hipblaslt-bench`, PyTorch `TunableOp` | Only if the live call site actually resolves to hipBLASLt *and* the tuning file is loaded there: many AITER-covered ops bypass this hook entirely. |
+| **AITER dispatch (tuned or default)** | **AITER's per-shape config lookup** | **Yes: this is the live path for AITER-covered ops.** |
 
 Tuning the wrong tier is the expensive failure mode: a real, measured win in
 an isolated microbenchmark, and zero change on the server, because the tuned
@@ -30,7 +30,7 @@ grep -c 'is tuned on cu_num' server.log     # must be > 0
 
 Zero hits means every lookup missed and any measured delta is noise, not a
 tuning effect. The lookup resolves a multi-field key (GPU target first, then
-CU count, shape, dtype, and flags such as bias/scale) — treat the exact field
+CU count, shape, dtype, and flags such as bias/scale): treat the exact field
 list as version-dependent and verify it against your AITER version, but the
 practical failure mode is stable across versions: **one mismatched field is a
 100% silent miss**, with no error. The usual culprits are a `bias` flag tuned
@@ -45,7 +45,7 @@ kernel is the one you expect. Confirm independently with
 `analyze_rocprof.py families` (see [`profiler.md`](profiler.md)) that the
 dispatched kernel name belongs to the AITER/CK bucket, not a Triton or
 torch-native fallback. A shape gap in AITER's coverage silently lands on
-Triton — the log can stay quiet about this because "not found tuned config,
+Triton: the log can stay quiet about this because "not found tuned config,
 will use default" is a different code path than a lookup miss, and a default
 (untuned) AITER dispatch and a Triton fallback can look similar in aggregate
 GPU time without a kernel-name check.
@@ -65,7 +65,7 @@ before concluding anything about relative hardware performance"
 - MI210 (gfx90a) has no native FP8, and AITER/CK coverage there is unverified
   relative to the gfx942 examples in [`aiter.md`](aiter.md).
 - vLLM's own default attention backend (`ROCM_ATTN`) on this model/GPU
-  measurably underperforms — the boot log shows its custom paged-attention
+  measurably underperforms: the boot log shows its custom paged-attention
   kernel falling back to Triton for the chunked-prefill/decode path
   (`"Cannot use ROCm custom paged attention kernel, falling back to Triton
   implementation"`), and switching to `TRITON_ATTN` directly measured
@@ -75,7 +75,7 @@ before concluding anything about relative hardware performance"
   serving load only for decode-sized shapes**; picks for large prefill GEMM
   shapes lose to hipBLASLt's own defaults once the GPU is under load. A
   tuning run's picks are only as trustworthy as the load they were tuned
-  under — verify under the real serving load, not just the tuning run's own
+  under: verify under the real serving load, not just the tuning run's own
   acceptance gate.
 
 Source: `examples/model-serving/qwen3.5-9b-mi210/config/platforms/mi210.toml`.
@@ -84,9 +84,9 @@ Source: `examples/model-serving/qwen3.5-9b-mi210/config/platforms/mi210.toml`.
 
 | Check | How | Pass |
 |:--|:--|:--|
-| Engagement | `grep -c 'is tuned on cu_num' server.log` | **> 0** — check this first, always |
+| Engagement | `grep -c 'is tuned on cu_num' server.log` | **> 0** (check this first, always) |
 | Kernel identity | `analyze_rocprof.py families` | dispatched kernel is in the bucket you intended (AITER/CK), not a fallback |
-| Real delta | same-session A/B | outside the noise band — [`measurement-protocol.md`](measurement-protocol.md) |
+| Real delta | same-session A/B | outside the noise band, per [`measurement-protocol.md`](measurement-protocol.md) |
 | Sanity | [`counter-triage.md`](counter-triage.md) | tuned config shows a roofline point closer to its roof, not just a shorter wall time |
 
 ## Failure modes
@@ -101,6 +101,6 @@ Source: `examples/model-serving/qwen3.5-9b-mi210/config/platforms/mi210.toml`.
 
 ## See also
 
-- [`aiter.md`](aiter.md) — the AITER/CK/Triton/SDPA stack and when to pick each
-- [`profiler.md`](profiler.md) — `analyze_rocprof.py families` and the capture recipes
-- [`measurement-protocol.md`](measurement-protocol.md) — the A/B discipline engagement proof feeds into
+- [`aiter.md`](aiter.md): the AITER/CK/Triton/SDPA stack and when to pick each
+- [`profiler.md`](profiler.md): `analyze_rocprof.py families` and the capture recipes
+- [`measurement-protocol.md`](measurement-protocol.md): the A/B discipline engagement proof feeds into

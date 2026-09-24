@@ -1,7 +1,7 @@
 A ROCm profiling toolkit is available at `rocprof_profiler/analyze_rocprof.py`, analyzing captures taken with `rocprofv3`'s system trace. Capture takes several minutes (AITER/Triton JIT + capture + export), which is why profiling is gated by the diagnosis step above. See `serving-systems/references/platforms/rocm/profiler.md` for the full tool-to-question map (counters, kernel-internal `rocprof-compute`, thread trace, paired A/B) and `measurement-protocol.md` / `counter-triage.md` / `aiter-engagement.md` in the same directory for the measurement discipline and the AITER-fallback check.
 
 1. Inspect the manifest, checker, and candidate build/run documentation to identify
-   the real server command and port. Pre-warm (CRITICAL — first-time AITER/Triton
+   the real server command and port. Pre-warm (CRITICAL: first-time AITER/Triton
    kernel resolution and any TunableOp search take minutes and will otherwise
    dominate the capture):
    ```
@@ -13,11 +13,11 @@ A ROCm profiling toolkit is available at `rocprof_profiler/analyze_rocprof.py`, 
    kill $PID 2>/dev/null; wait $PID 2>/dev/null; sleep 2
    ```
    `VLLM_ENABLE_V1_MULTIPROCESSING=0` keeps vLLM's engine in the server
-   process instead of forking a separate `EngineCore` — needed for step 2's
+   process instead of forking a separate `EngineCore`, needed for step 2's
    clean-exit requirement, and harmless here too. SGLang: use its equivalent
    single-process/non-multiprocessing flag if the manifest names one.
 
-2. Profile under a representative benchmark load (pick the load level closest to saturation from your earlier runs). If the server is tensor-parallel, profile the worker process that actually issues HIP kernels, not the API-server/driver process — a driver-only capture reads as idle by construction:
+2. Profile under a representative benchmark load (pick the load level closest to saturation from your earlier runs). If the server is tensor-parallel, profile the worker process that actually issues HIP kernels, not the API-server/driver process (a driver-only capture reads as idle by construction):
    ```
    VLLM_ENABLE_V1_MULTIPROCESSING=0 rocprofv3 --kernel-trace --memory-copy-trace --stats --output-format csv \
      -d /tmp/profile -o capture \
@@ -38,13 +38,13 @@ A ROCm profiling toolkit is available at `rocprof_profiler/analyze_rocprof.py`, 
    for i in $(seq 1 60); do kill -0 $ROCPROF_PID 2>/dev/null || break; sleep 5; done
    wait $ROCPROF_PID 2>/dev/null
    ```
-   Use `--output-format csv` only — adding `json` duplicates every CSV's
+   Use `--output-format csv` only: adding `json` duplicates every CSV's
    content inside one JSON blob and can reach GB scale at serving-workload row
    counts for no extra information. Add `--hip-runtime-trace` only when
    `cpu_overhead`/`graphs`/launch-bound analysis is actually needed: it traces
    one HIP runtime API call per kernel launch/memcpy/event, so on a
    batched-decode workload it typically runs 2-4x the size of the kernel trace
-   it's paired with — do not enable it by default on a large capture.
+   it's paired with; do not enable it by default on a large capture.
 
 3. Analyze:
    ```

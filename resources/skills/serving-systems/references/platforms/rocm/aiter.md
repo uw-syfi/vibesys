@@ -66,7 +66,7 @@ Writing new CDNA kernels (HIP, CK templates) is outside this collection. This fi
 
 ## See also
 
-- [`aiter-engagement.md`](aiter-engagement.md) — prove a tuning or dispatch change reached the live server before trusting a measured delta
+- [`aiter-engagement.md`](aiter-engagement.md): prove a tuning or dispatch change reached the live server before trusting a measured delta
 - [`floor.md`](floor.md) — where the fused kernel sits in the optimization floor
 - [`hardware.md`](hardware.md) — CDNA3/CDNA4 precision support and GFX IDs
 - [`frameworks/triton.md`](../../frameworks/triton.md) — the portable fallback
