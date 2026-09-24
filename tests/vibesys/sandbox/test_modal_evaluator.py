@@ -11,7 +11,7 @@ import sys
 import tarfile
 from importlib.util import module_from_spec, spec_from_file_location
 from types import ModuleType, SimpleNamespace
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, TypedDict, Unpack, cast
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -34,6 +34,7 @@ from vibesys.sandbox.modal_evaluator import (
 _UV_EXECUTABLE = modal_evaluator.shutil.which("uv") or "uv"
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 
@@ -1494,7 +1495,7 @@ def test_setup_command_rejects_malformed_argv(
     command: object, error: type[Exception], message: str
 ) -> None:
     with pytest.raises(error, match=message):
-        modal_evaluator.encode_setup_command(command)  # type: ignore[arg-type]
+        modal_evaluator.encode_setup_command(cast("Sequence[str]", command))
 
 
 def test_setup_command_enforces_the_encoded_size_limit() -> None:

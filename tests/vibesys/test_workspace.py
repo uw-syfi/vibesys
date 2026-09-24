@@ -23,6 +23,8 @@ from vibesys.sandbox.run_environment import LocalEnvironment
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from vibesys.backends.base import ComputeBackendImpl
+
 
 class _StubRunEnvironment(LocalEnvironment):
     """LocalEnvironment with ``isolated`` under the test's control."""
@@ -327,8 +329,11 @@ class _RemovalEnvironment(_StubRunEnvironment):
         self.removes = removes
         self.removed: list[tuple[Path, str]] = []
 
-    def remove_workspace_child(self, workspace: Path, name: str, **_kwargs: object) -> bool:
-        self.removed.append((workspace, name))
+    def remove_workspace_child(
+        self, workspace: Path, rel_path: str, *, backend: ComputeBackendImpl
+    ) -> bool:
+        del backend
+        self.removed.append((workspace, rel_path))
         return self.removes
 
 

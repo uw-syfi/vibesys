@@ -2285,7 +2285,7 @@ def _tool_request(tmp_path: Path, **overrides: object) -> tuple[RunEnvironmentRe
 
 def test_docker_tool_mounts_need_a_backend_image_and_a_tools_root(tmp_path: Path) -> None:
     request, tools = _tool_request(tmp_path)
-    request.backend.image = ""  # type: ignore[misc]
+    cast("FakeBackend", request.backend).image = ""
     with pytest.raises(EvaluatorToolError, match="requires a configured backend image"):
         _docker_evaluator_tool_mounts(request, tools)
 
@@ -2302,12 +2302,13 @@ def test_docker_tool_builder_reports_ownership_and_incomplete_builds(
         "vibesys.sandbox.run_environment.prepare_evaluator_tools",
         MagicMock(side_effect=_EvaluatorToolBuildRequiredError),
     )
-    request.backend.sandbox.execute.return_value = MagicMock(exit_code=1, output="denied\n")  # type: ignore[attr-defined]
+    backend = cast("FakeBackend", request.backend)
+    backend.sandbox.execute.return_value = MagicMock(exit_code=1, output="denied\n")
 
     with pytest.raises(EvaluatorToolError, match=r"could not return cache ownership.*denied"):
         _docker_evaluator_tool_mounts(request, tools, container_image="sha256:pinned")
 
-    request.backend.sandbox.execute.return_value = MagicMock(exit_code=0, output="")  # type: ignore[attr-defined]
+    backend.sandbox.execute.return_value = MagicMock(exit_code=0, output="")
     with pytest.raises(EvaluatorToolError, match="did not publish every declared tool"):
         _docker_evaluator_tool_mounts(request, tools, container_image="sha256:pinned")
 

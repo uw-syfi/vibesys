@@ -169,8 +169,8 @@ class _RecordingEvents(NullGitTrackerEvents):
     def __init__(self) -> None:
         self.warnings: list[tuple[str, str | None]] = []
 
-    def warning(self, message: str, *, detail: str | None = None) -> None:
-        self.warnings.append((message, detail))
+    def warning(self, summary: str, *, detail: str | None = None) -> None:
+        self.warnings.append((summary, detail))
 
 
 def test_checkout_tree_reports_failed_restore_of_preserved_memory(

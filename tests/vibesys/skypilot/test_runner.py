@@ -27,7 +27,7 @@ from vibesys.skypilot.runner import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
 
 def _resources(**overrides: object) -> ResolvedSkyPilotResources:
@@ -365,7 +365,7 @@ def test_process_boundary_failures_are_typed(
         runner.inspect_cluster("lease", timeout=1)
 
 
-def _queue(*jobs: dict[str, object], cluster: str = "lease") -> ProcessResult:
+def _queue(*jobs: Mapping[str, object], cluster: str = "lease") -> ProcessResult:
     return _result(stdout=json.dumps({cluster: list(jobs)}))
 
 

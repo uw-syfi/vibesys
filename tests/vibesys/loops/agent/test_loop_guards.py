@@ -56,6 +56,7 @@ from vs_loop_state.api import RoundRecord
 if TYPE_CHECKING:
     from vibesys.loops.agent.loop import LoopContext
     from vibesys.loops.request import LoopRunRequest
+    from vibesys.schemas import ImplementerResponse, SingleAgentRoundResponse
 
 
 def _plan(identifier: str, **fields: object) -> OrchestratorPlan:
@@ -410,7 +411,10 @@ def test_read_only_role_summarizes_many_reverted_changes() -> None:
 
 def _engine_with_active(identifier: str = "H-1", **fields: object) -> HypothesisEngine:
     hypothesis = Hypothesis(
-        hypothesis_id=identifier, plan=_plan(identifier), started_round=1, **fields
+        hypothesis_id=identifier,
+        plan=_plan(identifier),
+        started_round=1,
+        **cast("dict[str, Any]", fields),
     )
     state = AgentRunState(active_hypothesis_id=identifier, hypotheses=[hypothesis])
     return HypothesisEngine.create(state, config=None)
@@ -562,8 +566,14 @@ def test_candidate_evidence_reads_the_final_attempt(source: str) -> None:
     attempt = _RoundAttemptOutcome(
         passed=True,
         feedback=None,
-        implementation=_candidate_row() if source == "implementation" else None,
-        single_agent_response=_candidate_row() if source == "single_agent_response" else None,
+        implementation=cast(
+            "ImplementerResponse | None",
+            _candidate_row() if source == "implementation" else None,
+        ),
+        single_agent_response=cast(
+            "SingleAgentRoundResponse | None",
+            _candidate_row() if source == "single_agent_response" else None,
+        ),
     )
     evidence = _candidate_evidence(attempt, _engine_with_active().state.hypotheses[0])
 

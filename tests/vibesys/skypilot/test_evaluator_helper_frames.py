@@ -6,7 +6,7 @@ import base64
 import hashlib
 import io
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 
 def _artifact_frame(
-    target: Path, data: bytes = b"payload", **overrides: object
+    target: Path, data: bytes = b"payload", /, **overrides: object
 ) -> dict[str, object]:
     frame: dict[str, object] = {
         "version": 2,
@@ -74,7 +74,7 @@ def test_relay_output_routes_streams_and_rejects_bad_frames() -> None:
     assert (stdout.getvalue(), stderr.getvalue()) == ("o", "e")
     assert _relay_output({"type": "result"}, stdout, stderr) is None
 
-    bad = {"version": 2, "type": "stdout", "data": 5}
+    bad: dict[str, object] = {"version": 2, "type": "stdout", "data": 5}
     assert _relay_output(bad, stdout, stderr) is False
     assert _relay_output({"type": "stdout", "data": "x"}, stdout, stderr) is False
     assert stderr.getvalue().count("invalid frame") == 2
@@ -224,7 +224,7 @@ def test_acknowledge_result_sends_ack_and_validates_the_reply(tmp_path: Path) ->
     session = _session(tmp_path, good)
 
     assert _acknowledge_result(session) is True
-    sent = session.client.sendall.call_args.args[0]  # type: ignore[attr-defined]
+    sent = cast("MagicMock", session.client).sendall.call_args.args[0]
     assert json.loads(sent) == {"version": 2, "type": "ack", "invocation_id": "abc"}
 
     assert _acknowledge_result(_session(tmp_path, b"not json")) is False

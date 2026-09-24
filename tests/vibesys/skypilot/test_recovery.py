@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -148,8 +148,8 @@ def test_infrastructure_retry_gets_a_new_deterministic_job_name(tmp_path: Path) 
     assert retry.client_delivered_offset == 0
 
 
-def _base_fields(**overrides: object) -> dict[str, object]:
-    values: dict[str, object] = {
+def _base_fields(**overrides: object) -> dict[str, Any]:
+    values: dict[str, Any] = {
         "invocation_id": "a" * 32,
         "request_sha256": "b" * 64,
         "snapshot_sha256": "c" * 64,

@@ -39,9 +39,9 @@ class _Warnings:
     @property
     def summaries(self) -> list[str]:
         return [
-            f"{event.data.summary} | {event.data.detail or ''}"
+            f"{data.summary} | {data.detail or ''}"
             for event in self.events
-            if isinstance(getattr(event, "data", None), FrameworkWarningData)
+            if isinstance(data := getattr(event, "data", None), FrameworkWarningData)
         ]
 
 

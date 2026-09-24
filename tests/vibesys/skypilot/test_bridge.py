@@ -7,7 +7,7 @@ import socket
 import tempfile
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from tests.support import run_test_command
@@ -1050,7 +1050,7 @@ def test_bridge_rejects_completion_without_attempt_resources(
         def run(self, cluster_name: str, *_: object, **kwargs: object) -> JobResult:
             started = kwargs["job_started"]
             assert callable(started)
-            started(9)
+            cast("Callable[[int], None]", started)(9)
             journals = list(tmp_path.rglob(f"{'6' * 32}.json"))
             assert journals
             for journal_file in journals:

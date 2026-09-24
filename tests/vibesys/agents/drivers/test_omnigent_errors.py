@@ -9,7 +9,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -293,12 +293,12 @@ def test_close_executor_attempts_resources_and_preserves_first_failure() -> None
     driver = OmnigentDriver()
     try:
         executor = _Executor(RuntimeError("executor"))
-        resources = _Resources(OSError("resources"))
+        resources = cast("Any", _Resources(OSError("resources")))
         with pytest.raises(RuntimeError, match="executor"):
             driver.close_executor(executor, resources=resources)
         assert (executor.close_calls, resources.close_calls) == (1, 1)
 
-        lone = _Resources(OSError("resources"))
+        lone = cast("Any", _Resources(OSError("resources")))
         with pytest.raises(OSError, match="resources"):
             driver.close_executor(_Executor(), resources=lone)
         assert lone.close_calls == 1
