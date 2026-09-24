@@ -19,10 +19,8 @@ from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.loop import (
     _backfill_revert_commit,
     _finalize_agent_run,
-    _official_evaluation_reason,
     _pareto_archive_dominators,
     _pareto_archive_summary,
-    _provisional_candidates_since_official,
     _terminal_workspace_notice,
     run_agent_loop,
 )
@@ -35,10 +33,13 @@ from vibesys.loops.agent.policy_gates import (
 )
 from vibesys.loops.agent.policy_support import (
     _candidate_evidence_is_fresh,
+    _detect_plateau,
     _invoke_read_only_role,
     _missing_implementer_response,
+    _official_evaluation_reason,
     _pareto_archive_conflict,
     _pareto_frontier_records,
+    _provisional_candidates_since_official,
     _review_due,
     _select_final_candidate,
     _trusted_candidate_records,
@@ -4795,7 +4796,6 @@ def _record(round_number: int, perf: float | None, unit: str = "tok/s"):  # noqa
 
 
 def test_detect_plateau_returns_none_when_too_few_rounds():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
 
     # Two rounds is below the 3-round minimum streak.
     records = [_record(1, 40.0), _record(2, 41.0)]
@@ -4803,7 +4803,6 @@ def test_detect_plateau_returns_none_when_too_few_rounds():  # noqa: ANN201  # t
 
 
 def test_detect_plateau_fires_on_flat_perf_streak():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
 
     # 41.0 vs 41.5 is ~1.2% spread — well under the 5% threshold.
     records = [_record(1, 41.0), _record(2, 41.5), _record(3, 41.2)]
@@ -4814,7 +4813,6 @@ def test_detect_plateau_fires_on_flat_perf_streak():  # noqa: ANN201  # tracked:
 
 
 def test_detect_plateau_skips_when_perf_diverges():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
 
     # 41.0 vs 116.0 is ~64% spread — clearly off-plateau.
     records = [_record(1, 41.0), _record(2, 116.0), _record(3, 114.5)]
@@ -4824,7 +4822,6 @@ def test_detect_plateau_skips_when_perf_diverges():  # noqa: ANN201  # tracked: 
 def test_detect_plateau_ignores_rounds_without_perf():  # noqa: ANN201  # tracked: #288
     """Rounds where the profiler skipped or the round failed (perf=None) must
     not interrupt the streak — only valid measurements count."""
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
 
     records = [
         _record(1, 41.0),
@@ -4840,7 +4837,6 @@ def test_detect_plateau_ignores_rounds_without_perf():  # noqa: ANN201  # tracke
 def test_detect_plateau_ignores_failed_official_measurements():  # noqa: ANN201  # tracked: #288
     """A measured row rejected by the judge or another round gate is not
     trusted trajectory evidence, even when the framework evaluator ran."""
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
 
     failed = _record(2, 100.0)
     failed.passed = False
@@ -4856,7 +4852,6 @@ def test_detect_plateau_ignores_failed_official_measurements():  # noqa: ANN201 
 
 
 def test_failed_official_measurement_cannot_complete_plateau_streak():  # noqa: ANN201  # tracked: #288
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
 
     failed = _record(3, 41.1)
     failed.passed = False
@@ -4866,7 +4861,6 @@ def test_failed_official_measurement_cannot_complete_plateau_streak():  # noqa: 
 def test_detect_plateau_streak_must_be_recent():  # noqa: ANN201  # tracked: #288
     """A plateau early in the run that's followed by a clear win must NOT
     fire a warning on the next round — only the *last N* matter."""
-    from vibesys.loops.agent.loop import _detect_plateau  # noqa: PLC0415  # tracked: #288
 
     records = [
         _record(1, 41.0),  # plateau

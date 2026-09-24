@@ -5,11 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, cast
 
+from vibesys.events import FrameworkSource
 from vibesys.loops.agent import issue_board
 from vibesys.loops.agent.hypothesis_controller import (
     HypothesisEngine,
     persist_active_hypothesis,
     persist_agent_run_state,
+    plan_changed_keys,
+    publish_experiments_changed,
 )
 from vibesys.loops.agent.policy_gates import (
     _run_framework_gates,
@@ -18,19 +21,22 @@ from vibesys.loops.agent.policy_gates import (
 from vibesys.loops.agent.policy_support import (
     _run_implementer,
     _run_judge,
+    _run_orchestrator_plan,
     _run_pre_round_decision,
     _run_profiler,
     _run_single_agent_round,
 )
+from vibesys.render.sink import output_sink
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.domains.base import DomainDefinition
     from vibesys.evaluators.input_manifest import BenchmarkResult, ProfileGuidedInput
-    from vibesys.loops.agent.model import AgentRunState
+    from vibesys.loops.agent.model import AgentRunState, Hypothesis
     from vibesys.loops.agent.policy_attempts import AttemptRequest, AttemptState
     from vibesys.loops.agent.policy_rounds import RoundPreparationRequest
+    from vibesys.loops.agent.policy_scheduler import PlanRequest
     from vibesys.loops.agent.policy_support import _ImplementerAttempt
     from vibesys.loops.agent.roles import BuiltInAgentRoles
     from vibesys.loops.agent.state import AgentRunStateStore
@@ -40,6 +46,7 @@ if TYPE_CHECKING:
     from vibesys.schemas import (
         ImplementerResponse,
         JudgeResponse,
+        OrchestratorPlan,
         PreRoundDecision,
         ProfilerSummary,
         SingleAgentRoundResponse,
@@ -59,6 +66,8 @@ class _LocalAgentPolicyIO:
     interface: str
     progress_path: Path
     progress_location: str
+    roadmap_path: Path
+    roadmap_location: str
     pareto_archive_location: str
     framework_benchmark_configured: bool
     benchmark_result: BenchmarkResult | None
@@ -68,6 +77,91 @@ class _LocalAgentPolicyIO:
     benchmark_timeout_seconds: int | None
     judge_every: int
     official_eval_every: int
+
+    def plan(self, request: PlanRequest) -> OrchestratorPlan:
+        return _run_orchestrator_plan(
+            self.ctx,
+            agent=self.agents.orchestrator,
+            agent_run_state=request.state,
+            round_number=request.round_number,
+            objective=self.objective,
+            profiler_summary=request.profiler_summary,
+            carry=request.carry,
+            progress_path=self.progress_path,
+            progress_location=self.progress_location,
+            roadmap_location=self.roadmap_location,
+            pareto_archive_location=self.pareto_archive_location,
+            plateau_warning=request.plateau_warning,
+            modality=self.modality,
+            interface=self.interface,
+            domain_definition=self.domain_definition,
+            framework_benchmark_enabled=self.framework_benchmark_configured,
+            official_eval_every=self.official_eval_every,
+            provisional_candidates=request.provisional_candidates,
+            official_eval_cadence_due=(
+                request.provisional_candidates + 1 >= self.official_eval_every
+            ),
+            profile_guidance=request.profile_guidance,
+        )
+
+    def persist_started(self, state: AgentRunState, plan: OrchestratorPlan) -> None:
+        persist_agent_run_state(
+            self.ctx,
+            self.state_store,
+            state,
+            label=f"agent: start hypothesis {plan.hypothesis_id}",
+        )
+        publish_experiments_changed(
+            self.ctx, state, "active_hypothesis_changed", plan_changed_keys(plan)
+        )
+
+    def record_continuation(self, round_number: int, hypothesis: Hypothesis) -> None:
+        plan = hypothesis.plan
+        issue_board.append_hypothesis_continuation(
+            self.progress_path,
+            round_number,
+            plan=plan,
+            started_round=hypothesis.started_round,
+            continuation_step=hypothesis.next_step or plan.task,
+        )
+        self.ctx.lprint(
+            f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
+        )
+
+    def checkout_rollback(
+        self, commit: str, parent_round: int, failed_child_round: int | None
+    ) -> bool:
+        memory_paths = tuple(
+            str(path.relative_to(self.ctx.workspace))
+            for path in (
+                self.roadmap_path,
+                self.progress_path,
+                issue_board.pareto_archive_path(self.progress_path),
+            )
+        )
+        if not self.ctx.git.checkout_tree(commit, clean=True, preserve_paths=memory_paths):
+            return False
+        if failed_child_round is None:
+            self.ctx.lprint(f"Reverted workspace to round {parent_round} ({commit[:8]}).")
+        else:
+            self.ctx.lprint(
+                "Reverted workspace to the pre-hypothesis parent of "
+                f"failed round {failed_child_round} ({commit[:8]}), "
+                f"based on parent round {parent_round}."
+            )
+        return True
+
+    def persist_rollback(self, state: AgentRunState, hypothesis: Hypothesis) -> AgentRunState:
+        return persist_active_hypothesis(
+            self.ctx,
+            self.state_store,
+            state,
+            hypothesis,
+            label=f"agent: set hypothesis {hypothesis.hypothesis_id} parent",
+        )
+
+    def warn(self, message: str) -> None:
+        output_sink().framework_warning(message, source=FrameworkSource.LOOP)
 
     def pre_round_decision(
         self, request: RoundPreparationRequest, *, has_history: bool

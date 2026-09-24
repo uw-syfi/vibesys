@@ -114,34 +114,26 @@ choice. It uses the same run control and event path as text turns.
 Use `AgentDefinition.resources` for grants; nondefault `AgentSpec.execution`
 is rejected by this runtime slice rather than silently ignored.
 
-The built-in agent loop uses an internal `BuiltInAgentControlFlow` protocol in
-`src/vibesys/loops/agent/policy_flow.py`. The shared executor in `loop.py`
-selects one flow before the first round and calls its preparation, attempt,
-evidence, continuation, and profile-outcome methods. `MultiAgentFlow` binds the
-orchestrator prepass, optional profiler, implementer, and judge in
-`policy_multi.py`. `SingleAgentFlow` binds one combined implementation, profile,
-and review turn in `policy_single.py`. `ProfileGuidedFlow` wraps either inner flow
-with component profiling and measurement from `policy_profile.py`. Evolve has its
-own policy in `src/vibesys/loops/evolve/policy_flow.py`: `EvolveSearch` selects
-parents, records outcomes, checkpoints search state, and chooses the final
-candidate. `EvolveRunScheduler` decides when to bootstrap, how each generation
-is dispatched, when to checkpoint, and when to finalize. `evaluate_candidate`
-orders mutation, review, framework gates,
-measurement, and snapshotting through typed `CandidateEffects`. The adapter in
-`loop.py` binds those effects to agents, the run context, task gates, Git, and
-the run environment. The concrete bootstrap attempt body and candidate worker
-pools remain there. Policy tests use fake effects and in-memory populations.
-The agent executor owns
-durable retry numbering, framework gates, and round transactions. These built-in
-policies receive typed `AgentTurns`, `RoundEffects`, and profile effect ports;
-`policy_local.py` binds those ports to the existing context, role handles, and
-issue board. Policy and retry decisions are tested with fake ports, without
-creating agents or run environments. The built-in role bindings use the existing
-shared context rather than
-`VibeSysRuntime.spawn_agent`. This internal protocol preserves the current
-built-in round and retry semantics. Custom orchestrations implement the
-run-level `execute(request, runtime)` hook above; they can inspect each agent's
-output to choose the next agent, message, or action dynamically.
+The built-in agent loop selects `MultiAgentFlow`, `SingleAgentFlow`, or
+`ProfileGuidedFlow` through its internal `BuiltInAgentControlFlow` protocol.
+`policy_scheduler.py` chooses new and continuing hypotheses and terminal
+transitions; `policy_attempts.py` handles retries. These policies use typed
+`AgentTurns`, `RoundEffects`, and profile effect ports. `policy_local.py` binds
+the ports to the run context, role handles, and issue board. Policy decisions
+have fake-based tests without agents or run environments. The local bindings
+use the existing shared context rather than `VibeSysRuntime.spawn_agent`.
+
+The evolve policy in `src/vibesys/loops/evolve/policy_flow.py` selects parents,
+records outcomes, and chooses the final candidate. `EvolveRunScheduler`
+schedules bootstrap, serial or parallel generations, checkpoints, and final
+selection. `evaluate_candidate` orders mutation, review, framework gates,
+measurement, and snapshotting through typed `CandidateEffects`. The loop
+adapter binds these effects to agents, task gates, Git, and the run environment.
+The concrete bootstrap attempt body and candidate workers remain there.
+Policy tests use fake effects and in-memory populations.
+
+Custom orchestrations implement `execute(request, runtime)` above and may
+choose agents, messages, and later actions from earlier outputs.
 
 The built-in plain loop's `PlainPolicy` in
 `src/vibesys/loops/plain/policy.py` owns issue draining, retry budgets,

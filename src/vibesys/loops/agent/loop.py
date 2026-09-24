@@ -24,7 +24,6 @@ from vibesys.evaluators.input_manifest import (  # noqa: TC001  # tracked: #288
 from vibesys.events import (
     CoreEventType,
     EventStatus,
-    FrameworkSource,
     RoundFinishedData,
 )
 from vibesys.loops.agent import issue_board
@@ -43,9 +42,6 @@ from vibesys.loops.agent.hypotheses import (
 )
 from vibesys.loops.agent.hypothesis_controller import (
     HypothesisEngine,
-    persist_active_hypothesis,
-    persist_agent_run_state,
-    plan_changed_keys,
     publish_experiments_changed,
 )
 from vibesys.loops.agent.model import (
@@ -66,31 +62,25 @@ from vibesys.loops.agent.policy_attempts import (
 )
 from vibesys.loops.agent.policy_flow import control_flow_for, validate_control_flow
 from vibesys.loops.agent.policy_local import _LocalAgentPolicyIO
-from vibesys.loops.agent.policy_profile import (
-    ProfileOutcomeInput,
-    ProfilePreparation,
-)
 from vibesys.loops.agent.policy_rounds import (
-    RoundPreparationRequest,
     RoundPreparationServices,
 )
+from vibesys.loops.agent.policy_scheduler import (
+    RoundSelectionRequest,
+    TerminalRequest,
+    apply_requested_rollback,
+    select_round,
+    transition_round,
+)
 from vibesys.loops.agent.policy_support import (
-    _FAILED_HYPOTHESIS_OUTCOMES,
     _INTERFACES,
-    _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW,
     DEFAULT_INTERFACE,
     _backfill_revert_commit,
     _CarryOver,
-    _detect_plateau,
     _finalize_agent_run,
-    _implementation_keeps_hypothesis_active,
-    _implementation_requests_continuation,
-    _official_evaluation_reason,
     _pareto_archive_dominators,
     _pareto_archive_summary,
     _provisional_candidate_retained,
-    _provisional_candidates_since_official,
-    _run_orchestrator_plan,
     _terminal_workspace_notice,
 )
 from vibesys.loops.agent.roles import (
@@ -119,7 +109,6 @@ from vibesys.sandbox.run_environment import (
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
-    ProfilerSummary,
     SingleAgentRoundResponse,
 )
 from vs_agent.api import (
@@ -392,6 +381,8 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         interface=interface,
         progress_path=progress_path,
         progress_location=progress_location,
+        roadmap_path=roadmap_path,
+        roadmap_location=roadmap_location,
         pareto_archive_location=pareto_archive_location,
         framework_benchmark_configured=framework_benchmark_configured,
         benchmark_result=benchmark_result,
@@ -430,171 +421,30 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
             round_progress = RoundProgress(round_number, max_rounds)
             ctx.lprint(f"\n{'=' * 60}\n  {round_progress.label()}\n{'=' * 60}\n")
             with ctx.progress(round_progress):
-                # The designer runs only when selecting a new causal claim.
-                # A continuing hypothesis remains owned by its persistent
-                # implementer session without another designer intervention.
-                profiler_summary: ProfilerSummary | None = None
-                if active_hypothesis is None:
-                    engine, agent_run_state = flow.prepare_profile(
-                        ProfilePreparation(
-                            effects=policy_io,
-                            engine=engine,
-                            state=agent_run_state,
-                            round_number=round_number,
-                        )
-                    )
-                    profiler_summary = flow.profiler_summary(
-                        RoundPreparationRequest(
-                            round_number=round_number,
-                            records=records,
-                            carry=carry,
-                            previous_single_response=last_single_agent_response,
-                        )
-                    )
-                    plateau_warning = _detect_plateau(records)
-                    provisional_candidates = _provisional_candidates_since_official(records)
-                    plan = _run_orchestrator_plan(
-                        ctx,
-                        agent=agents.orchestrator,
-                        agent_run_state=agent_run_state,
-                        round_number=round_number,
-                        objective=objective,
-                        profiler_summary=profiler_summary,
+                selection = select_round(
+                    flow,
+                    policy_io,
+                    RoundSelectionRequest(
+                        engine=engine,
+                        state=agent_run_state,
+                        records=records,
                         carry=carry,
-                        progress_path=progress_path,
-                        progress_location=progress_location,
-                        roadmap_location=roadmap_location,
-                        pareto_archive_location=pareto_archive_location,
-                        plateau_warning=plateau_warning,
-                        modality=modality,
-                        interface=interface,
-                        domain_definition=domain_definition,
-                        framework_benchmark_enabled=framework_benchmark_configured,
+                        round_number=round_number,
+                        max_rounds=max_rounds,
                         official_eval_every=official_eval_every,
-                        provisional_candidates=provisional_candidates,
-                        official_eval_cadence_due=(
-                            provisional_candidates + 1 >= official_eval_every
-                        ),
-                        profile_guidance=engine.controller.guidance,
-                    )
-                    parent_round = (
-                        plan.revert_to_round
-                        if plan.revert_to_round is not None
-                        else round_number - 1
-                        if round_number > 1
-                        else None
-                    )
-                    parent_record = next(
-                        (
-                            record
-                            for record in reversed(records)
-                            if record.round_number == parent_round
-                        ),
-                        None,
-                    )
-                    engine = engine.replace_state(agent_run_state).start(
-                        plan,
-                        started_round=round_number,
-                        parent_round=parent_round,
-                        parent_commit=(
-                            parent_record.commit
-                            if parent_record is not None and parent_record.commit is not None
-                            else ctx.git.current_sha()
-                        ),
-                    )
-                    agent_run_state = engine.state
-                    active_hypothesis = agent_run_state.active_hypothesis
-                    assert active_hypothesis is not None  # noqa: S101  # started above
-                    plan = active_hypothesis.plan
-                    persist_agent_run_state(
-                        ctx,
-                        state_store,
-                        agent_run_state,
-                        label=f"agent: start hypothesis {plan.hypothesis_id}",
-                    )
-                    publish_experiments_changed(
-                        ctx, agent_run_state, "active_hypothesis_changed", plan_changed_keys(plan)
-                    )
-                else:
-                    plan = active_hypothesis.plan
-                    issue_board.append_hypothesis_continuation(
-                        progress_path,
-                        round_number,
-                        plan=plan,
-                        started_round=active_hypothesis.started_round,
-                        continuation_step=active_hypothesis.next_step or plan.task,
-                    )
-                    ctx.lprint(
-                        f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
-                    )
-                planned_official_reason = _official_evaluation_reason(
-                    records=records,
-                    round_number=round_number,
-                    max_rounds=max_rounds,
-                    official_eval_every=official_eval_every,
-                    requested=plan.request_official_evaluation,
-                    candidate_ready=True,
+                        previous_single_response=last_single_agent_response,
+                    ),
                 )
-                planned_official_reason = flow.official_reason(planned_official_reason, engine)
-                # No early stop. Previously OrchestratorPlan had a ``done`` field that
-                # could halt the loop; it was removed because the orchestrator
-                # can't reliably tell when the objective is "fully met" and
-                # early-stopping masks further optimization opportunities.
-                # --- Optional rollback ---
-                if plan.revert_to_round is not None and not active_hypothesis.revert_applied:
-                    target = next(
-                        (r for r in records if r.round_number == plan.revert_to_round),
-                        None,
-                    )
-                    if target and target.commit:
-                        rollback_commit, failed_child_round = round_history.resolve_rollback_commit(
-                            target, _FAILED_HYPOTHESIS_OUTCOMES
-                        )
-                        assert rollback_commit is not None  # noqa: S101  # tracked: #288
-                        # Restore the tree without moving HEAD so subsequent
-                        # commits land on the current branch as new commits
-                        # after the reverted state.
-                        memory_paths = tuple(
-                            str(path.relative_to(ctx.workspace))
-                            for path in (roadmap_path, progress_path, pareto_archive_path)
-                        )
-                        if ctx.git.checkout_tree(
-                            rollback_commit,
-                            clean=True,
-                            preserve_paths=memory_paths,
-                        ):
-                            if failed_child_round is None:
-                                ctx.lprint(
-                                    "Reverted workspace to round "
-                                    f"{plan.revert_to_round} ({rollback_commit[:8]})."
-                                )
-                            else:
-                                ctx.lprint(
-                                    "Reverted workspace to the pre-hypothesis parent of "
-                                    f"failed round {failed_child_round} ({rollback_commit[:8]}), "
-                                    f"based on parent round {plan.revert_to_round}."
-                                )
-                            active_hypothesis.revert_applied = True
-                            active_hypothesis.revert_commit = rollback_commit
-                            active_hypothesis.parent_commit = rollback_commit
-                            agent_run_state = persist_active_hypothesis(
-                                ctx,
-                                state_store,
-                                agent_run_state,
-                                active_hypothesis,
-                                label=(f"agent: set hypothesis {plan.hypothesis_id} parent"),
-                            )
-                        else:
-                            output_sink().framework_warning(
-                                "rollback was not applied; will retry round "
-                                f"{plan.revert_to_round} on the next continuation",
-                                source=FrameworkSource.LOOP,
-                            )
-                    else:
-                        output_sink().framework_warning(
-                            f"cannot revert: no commit recorded for round {plan.revert_to_round}",
-                            source=FrameworkSource.LOOP,
-                        )
+                engine = selection.engine
+                agent_run_state = selection.state
+                active_hypothesis = selection.hypothesis
+                plan = selection.plan
+                planned_official_reason = selection.planned_official_reason
+                # The orchestrator cannot reliably declare the objective complete;
+                # the configured round limit controls termination.
+                agent_run_state = apply_requested_rollback(
+                    policy_io, selection, round_history, records
+                )
                 # The issue board marks paid attempts before another agent turn.
                 attempt_request = AttemptRequest(
                     round_number=round_number,
@@ -612,7 +462,6 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                 )
                 execute_attempts(flow, attempt_services, attempt_request, attempt_state)
                 agent_run_state = attempt_state.agent_run_state
-                feedback = attempt_state.feedback
                 passed = attempt_state.passed
                 implementation = attempt_state.implementation
                 single_agent_response = attempt_state.single_agent_response
@@ -888,115 +737,35 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
                     implementer_provider=ctx.agent_client.provider,
                     implementer_model=ctx.agent_client.model_for_kind("implementer"),
                 )
-                # Compute the completed lifecycle transition in memory so its
-                # exact representation can enter the write-ahead journal before
-                # progress notes or durable state are mutated.
-                next_active_hypothesis = active_hypothesis.clone()
-                if flow.keeps_hypothesis_active(
-                    attempt_state, next_active_hypothesis.continuation_rounds
-                ):
-                    next_active_hypothesis.feedback = feedback if reviewed and not passed else None
-                    assert implementation is not None  # noqa: S101  # tracked: #288
-                    next_active_hypothesis.next_step = implementation.next_step
-                    next_active_hypothesis.continuation_rounds += 1
-                elif passed:
-                    next_active_hypothesis = None
-                elif (
-                    reviewed
-                    and next_active_hypothesis.continuation_rounds
-                    < _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW
-                ):
-                    # A rejected review may justify another scoped repair, but
-                    # it consumes the same bounded ownership lease as an
-                    # implementer-declared continuation. Otherwise repeated
-                    # judge failures can bypass the designer indefinitely.
-                    next_active_hypothesis.feedback = feedback
-                    next_active_hypothesis.next_step = (
-                        implementation.next_step
-                        if implementation is not None
-                        and _implementation_requests_continuation(implementation)
-                        else None
-                    )
-                    next_active_hypothesis.continuation_rounds += 1
-                elif reviewed or (
-                    implementation is not None
-                    and not _implementation_keeps_hypothesis_active(
-                        implementation,
-                        continuation_rounds=next_active_hypothesis.continuation_rounds,
-                    )
-                ):
-                    next_active_hypothesis = None
-                else:
-                    next_active_hypothesis.feedback = None
-                    next_active_hypothesis.next_step = (
-                        implementation.next_step if implementation is not None else None
-                    )
-                profile_outcome = flow.profile_outcome(
-                    ProfileOutcomeInput(round_number, passed, official_evaluation, perf_delta_pct)
+                # Compute the next policy state before writing the round transaction.
+                terminal = transition_round(
+                    flow,
+                    TerminalRequest(
+                        engine=engine,
+                        state=agent_run_state,
+                        hypothesis=active_hypothesis,
+                        attempt=attempt_state,
+                        record=completed_record,
+                        records=records,
+                        carry=carry,
+                        reviewed=reviewed,
+                        max_retries_per_round=max_retries_per_round,
+                    ),
                 )
-                engine = engine.replace_state(agent_run_state).complete_round(
-                    completed_record,
-                    next_active=next_active_hypothesis,
-                    profile_outcome=profile_outcome,
-                )
-                next_agent_run_state = engine.state
+                engine = terminal.engine
+                next_agent_run_state = terminal.state
                 state_transition = state_store.transition(next_agent_run_state)
-                ctx.begin_completed_round(
-                    round_number,
-                    state_transition=state_transition,
-                )
+                ctx.begin_completed_round(round_number, state_transition=state_transition)
                 records.append(completed_record)
-
-                if not passed and records[-1].reviewed:
+                if terminal.exhaustion_feedback is not None:
                     issue_board.append_exhaustion_note(
                         progress_path,
                         round_number,
                         max_retries_per_round,
-                        feedback or "",
+                        terminal.exhaustion_feedback,
                     )
-                    carry.exhaustion_info = (
-                        f"Round {round_number} did not pass after "
-                        f"{max_retries_per_round} attempts. Last judge feedback: "
-                        f"{feedback or '(empty)'}"
-                    )
-                    carry.regression_info = None
-                elif passed:
-                    carry.exhaustion_info = None
-                    if flow.terminal_success_needs_parent_choice(
-                        attempt_state, active_hypothesis.continuation_rounds
-                    ):
-                        # A reviewed terminal classification is accepted, but
-                        # its implementation edits are still in the workspace.
-                        # Give the next designer the same explicit parent-state
-                        # decision as an unreviewed terminal result.
-                        carry.regression_info = _terminal_workspace_notice(records)
-                    elif official_evaluation and candidate_retained is False:
-                        carry.regression_info = (
-                            f"Round {round_number}'s official candidate was not retained: "
-                            f"{perf_metric}{(' ' + perf_unit) if perf_unit else ''}. "
-                            "Use its recorded parent and objective directions when choosing "
-                            "the next checkpoint."
-                        )
-                    else:
-                        carry.regression_info = None
-                else:
-                    # A provisional round is normal hypothesis work, not a
-                    # judge-loop exhaustion or a performance regression.
-                    carry.exhaustion_info = None
-                    carry.regression_info = (
-                        None
-                        if _implementation_keeps_hypothesis_active(
-                            implementation,
-                            continuation_rounds=active_hypothesis.continuation_rounds,
-                        )
-                        else _terminal_workspace_notice(records)
-                    )
+                carry = terminal.carry
 
-                # The framework, rather than the designer, owns this lifecycle.
-                # A continuing implementation keeps its plan and session. An
-                # unreviewed terminal result hands control back to the designer;
-                # a rejected review keeps the same claim plus reviewer feedback
-                # so the implementer can address it on the next round.
                 ctx.persist_completed_round()
                 agent_run_state = next_agent_run_state
                 active_hypothesis = agent_run_state.active_hypothesis

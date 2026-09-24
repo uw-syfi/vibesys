@@ -194,6 +194,7 @@ graph TD
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_flow
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_local
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_profile
+    vibesys.loops.agent.loop --> vibesys.loops.agent.policy_scheduler
     vibesys.loops.agent.loop --> vibesys.render
     vibesys.loops.agent.loop --> vibesys.run
     vibesys.loops.agent.loop --> vibesys.sandbox
@@ -208,11 +209,17 @@ graph TD
     vibesys.loops.agent.policy_local --> vibesys.evaluators
     vibesys.loops.agent.policy_local --> vibesys.loops
     vibesys.loops.agent.policy_local --> vibesys.loops.agent
+    vibesys.loops.agent.policy_local --> vibesys.loops.agent.policy_scheduler
+    vibesys.loops.agent.policy_local --> vibesys.render
     vibesys.loops.agent.policy_local --> vibesys.run
     vibesys.loops.agent.policy_multi --> vibesys
     vibesys.loops.agent.policy_multi --> vibesys.loops.agent
     vibesys.loops.agent.policy_profile --> vibesys.evaluators
     vibesys.loops.agent.policy_profile --> vibesys.loops.agent
+    vibesys.loops.agent.policy_scheduler --> vibesys
+    vibesys.loops.agent.policy_scheduler --> vibesys.loops
+    vibesys.loops.agent.policy_scheduler --> vibesys.loops.agent
+    vibesys.loops.agent.policy_scheduler --> vibesys.loops.agent.policy_profile
     vibesys.loops.agent.policy_single --> vibesys
     vibesys.loops.agent.policy_single --> vibesys.loops.agent
     vibesys.loops.evolve --> vibesys
@@ -496,6 +503,7 @@ graph TD
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_flow
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_local
     vibesys.loops.agent.loop --> vibesys.loops.agent.policy_profile
+    vibesys.loops.agent.loop --> vibesys.loops.agent.policy_scheduler
     vibesys.loops.agent.loop --> vibesys.render
     vibesys.loops.agent.loop --> vibesys.run
     vibesys.loops.agent.loop --> vibesys.sandbox
@@ -512,12 +520,19 @@ graph TD
     vibesys.loops.agent.policy_local --> vibesys.evaluators
     vibesys.loops.agent.policy_local --> vibesys.loops
     vibesys.loops.agent.policy_local --> vibesys.loops.agent
+    vibesys.loops.agent.policy_local --> vibesys.loops.agent.policy_scheduler
+    vibesys.loops.agent.policy_local --> vibesys.render
     vibesys.loops.agent.policy_local --> vibesys.run
     vibesys.loops.agent.policy_local --> vs_loop_state
     vibesys.loops.agent.policy_multi --> vibesys
     vibesys.loops.agent.policy_multi --> vibesys.loops.agent
     vibesys.loops.agent.policy_profile --> vibesys.evaluators
     vibesys.loops.agent.policy_profile --> vibesys.loops.agent
+    vibesys.loops.agent.policy_scheduler --> vibesys
+    vibesys.loops.agent.policy_scheduler --> vibesys.loops
+    vibesys.loops.agent.policy_scheduler --> vibesys.loops.agent
+    vibesys.loops.agent.policy_scheduler --> vibesys.loops.agent.policy_profile
+    vibesys.loops.agent.policy_scheduler --> vs_loop_state
     vibesys.loops.agent.policy_single --> vibesys
     vibesys.loops.agent.policy_single --> vibesys.loops.agent
     vibesys.loops.agent.policy_single --> vs_loop_state
