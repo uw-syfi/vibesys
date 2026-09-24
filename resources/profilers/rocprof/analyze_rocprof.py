@@ -1058,6 +1058,28 @@ def cmd_cpu_overhead(ns: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _memcpy_bytes_column_present(disc: DiscoveredReport) -> bool:
+    """Whether any discovered ``*_memory_copy_trace.csv`` actually has a Bytes/Size column.
+
+    Some rocprofv3 versions/flag combinations omit it entirely (confirmed on
+    a real vLLM capture: header is just
+    ``Kind,Direction,Stream_Id,Source_Agent_Id,Destination_Agent_Id,
+    Correlation_Id,Start_Timestamp,End_Timestamp``, no bytes field at all).
+    ``_get``'s missing-column default of 0 is indistinguishable from a real
+    zero-byte copy unless callers check for the column's presence first.
+    """
+    cols = {c.lower() for c in _MEMCPY_BYTES_COLS}
+    for f in disc.memory_copy_trace:
+        try:
+            with f.open("r", encoding="utf-8-sig", newline="") as fh:
+                header = next(csv.reader(fh), None)
+        except OSError:
+            continue
+        if header and cols & {h.lower() for h in header}:
+            return True
+    return False
+
+
 def cmd_memory(ns: argparse.Namespace) -> None:
     """Memory copies by direction, bytes, time, and bandwidth."""
     disc = discover(ns.report)
@@ -1074,21 +1096,33 @@ def cmd_memory(ns: argparse.Namespace) -> None:
         entry["bytes"] += e["bytes"]
 
     ordered = sorted(by_dir.items(), key=lambda kv: -kv[1]["total_ns"])
-    print(f"{'Direction':<10s} {'Count':>8s} {'Total':>10s} {'Bytes':>16s} {'Bandwidth':>12s}")  # noqa: T201
-    print("-" * 60)  # noqa: T201
-    for d, e in ordered:
-        bw_gbps = (
-            (e["bytes"] / _BYTES_PER_GB) / (e["total_ns"] / _NS_PER_SEC)
-            if e["total_ns"] > 0
-            else 0.0
-        )
+    bytes_available = _memcpy_bytes_column_present(disc)
+    if bytes_available:
+        print(f"{'Direction':<10s} {'Count':>8s} {'Total':>10s} {'Bytes':>16s} {'Bandwidth':>12s}")  # noqa: T201
+        print("-" * 60)  # noqa: T201
+        for d, e in ordered:
+            bw_gbps = (
+                (e["bytes"] / _BYTES_PER_GB) / (e["total_ns"] / _NS_PER_SEC)
+                if e["total_ns"] > 0
+                else 0.0
+            )
+            print(  # noqa: T201
+                f"{d:<10s} {e['count']:>8d} {_fmt_ns(e['total_ns']):>10s} {e['bytes']:>16,.0f} {bw_gbps:>10.1f}GB/s"
+            )
+        total_bytes = sum(e["bytes"] for e in by_dir.values())
+        total_ns = sum(e["total_ns"] for e in by_dir.values())
+        print(f"\nTotal memory copy: {total_bytes / _BYTES_PER_GB:.2f} GB in {_fmt_ns(total_ns)}")  # noqa: T201
+    else:
+        print(f"{'Direction':<10s} {'Count':>8s} {'Total':>10s}")  # noqa: T201
+        print("-" * 34)  # noqa: T201
+        for d, e in ordered:
+            print(f"{d:<10s} {e['count']:>8d} {_fmt_ns(e['total_ns']):>10s}")  # noqa: T201
+        total_ns = sum(e["total_ns"] for e in by_dir.values())
+        print(f"\nTotal memory copy time: {_fmt_ns(total_ns)}")  # noqa: T201
         print(  # noqa: T201
-            f"{d:<10s} {e['count']:>8d} {_fmt_ns(e['total_ns']):>10s} {e['bytes']:>16,.0f} {bw_gbps:>10.1f}GB/s"
+            "(byte counts not available: this rocprofv3 capture's "
+            "*_memory_copy_trace.csv has no Bytes/Size column — showing count and time only)"
         )
-
-    total_bytes = sum(e["bytes"] for e in by_dir.values())
-    total_ns = sum(e["total_ns"] for e in by_dir.values())
-    print(f"\nTotal memory copy: {total_bytes / _BYTES_PER_GB:.2f} GB in {_fmt_ns(total_ns)}")  # noqa: T201
 
 
 # ---------------------------------------------------------------------------
