@@ -24,7 +24,7 @@
    [32mINFO[0m    |-> [rocprof] 
    [32mINFO[0m    |-> [rocprof] [0;31mWARNING: We are phasing out development and support for roctracer/rocprofiler/rocprof/rocprofv2 in favor of rocprofiler-sdk/rocprofv3 in upcoming ROCm releases. Going forward, only critical defect fixes will be addressed for older versions of profiling tools and libraries. We encourage all users to upgrade to the latest version, rocprofiler-sdk library and rocprofv3 tool, to ensure continued support and access to new features.[0m
    [32mINFO[0m    |-> [rocprof] 
-   [32mINFO[0m    |-> [rocprof] RPL: on '260923_225900' from '/opt/rocm-6.4.1' in '/home/user'
+   [32mINFO[0m    |-> [rocprof] RPL: on '260923_225900' from '/opt/rocm-6.4.1' in '/home1/user'
    [32mINFO[0m    |-> [rocprof] RPL: profiling '""/scratch/user/mi210-smoke/venv/bin/python /scratch/user/campaign/amd-profiler/workload.py""'
    [32mINFO[0m    |-> [rocprof] RPL: input file '/scratch/user/campaign/amd-profiler/rocprof_compute/workloads2/perfmon/SQ_IFETCH_LEVEL.txt'
    [32mINFO[0m    |-> [rocprof] RPL: output dir '/tmp/rpl_data_260923_225900_1436846'
@@ -46,7 +46,7 @@
    [32mINFO[0m    |-> [rocprof] 
    [32mINFO[0m    |-> [rocprof] [0;31mWARNING: We are phasing out development and support for roctracer/rocprofiler/rocprof/rocprofv2 in favor of rocprofiler-sdk/rocprofv3 in upcoming ROCm releases. Going forward, only critical defect fixes will be addressed for older versions of profiling tools and libraries. We encourage all users to upgrade to the latest version, rocprofiler-sdk library and rocprofv3 tool, to ensure continued support and access to new features.[0m
    [32mINFO[0m    |-> [rocprof] 
-   [32mINFO[0m    |-> [rocprof] RPL: on '260923_225921' from '/opt/rocm-6.4.1' in '/home/user'
+   [32mINFO[0m    |-> [rocprof] RPL: on '260923_225921' from '/opt/rocm-6.4.1' in '/home1/user'
    [32mINFO[0m    |-> [rocprof] RPL: profiling '""/scratch/user/mi210-smoke/venv/bin/python /scratch/user/campaign/amd-profiler/workload.py""'
    [32mINFO[0m    |-> [rocprof] RPL: input file '/scratch/user/campaign/amd-profiler/rocprof_compute/workloads2/perfmon/SQ_INST_LEVEL_LDS.txt'
    [32mINFO[0m    |-> [rocprof] RPL: output dir '/tmp/rpl_data_260923_225921_1437062'

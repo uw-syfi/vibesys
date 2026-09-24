@@ -35,7 +35,7 @@ _MODULE_PATH = (
     Path(__file__).resolve().parents[3] / "resources" / "profilers" / "rocprof" / "compute.py"
 )
 # Real MI210 (gfx90a), rocprof-compute 3.1.0 output, trimmed -- see
-# <samples-dir>/FINDINGS.md ("3. rocprof-compute").
+# amd-profiler-samples/FINDINGS.md ("3. rocprof-compute").
 _REAL_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "rocprof" / "compute_real"
 _REAL_WORKLOAD_DIR = _REAL_FIXTURE_DIR / "workloads2"
 

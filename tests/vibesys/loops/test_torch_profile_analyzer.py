@@ -1128,7 +1128,7 @@ class TestRealTraceFixtures:
     from actual ``vLLM(Qwen/Qwen3.5-9B)`` + ``torch.profiler`` captures off
     an AMD HPC Fund MI210 node (ROCm 7.2.3, torch 2.12; see
     ``resources/profilers/torch/analyze_torch_profile.py``'s module
-    docstring and ``<samples-dir>/FINDINGS.md``
+    docstring and ``amd-profiler-samples/FINDINGS.md``
     section 5 for the capture recipe). Each fixture keeps ``deviceProperties``
     verbatim (the real, blank ``name`` field this device ships -- see
     ``test_detects_mi210_from_real_trace_device_properties_with_blank_name``)
