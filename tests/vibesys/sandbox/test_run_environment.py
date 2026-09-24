@@ -1303,6 +1303,56 @@ def test_docker_environment_mounts_selected_profiler_support(tmp_path):  # noqa:
     assert session.view.paths.profiler_support == "fixture_profiler"
 
 
+def test_docker_environment_mounts_extra_profiler_support_dirs(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    """A candidate sub-context does not restage the workspace, so the shared
+    capture runtime and any declared extra plugin dirs must reach the
+    container through the same bind-mount plan as the primary profiler
+    support dir, not through Workspace copies."""
+    backend = FakeBackend()
+    env = build_run_environment(RunEnvironmentSpec("docker"))
+    support = tmp_path / "rocprof"
+    support.mkdir()
+    common = tmp_path / "_common"
+    common.mkdir()
+    torch = tmp_path / "torch"
+    torch.mkdir()
+
+    env.open(
+        _request(
+            tmp_path,
+            backend,
+            profiler_support_path=str(support),
+            profiler_support_name="rocprof_profiler",
+            profiler_support_extra=(
+                (str(common), "profilers_common"),
+                (str(torch), "torch_profiler"),
+            ),
+        )
+    )
+
+    mounts = _as_mount_tuples(backend.calls[0][1]["resources"])
+    assert (str(common), "/workspace/profilers_common", True) in mounts
+    assert (str(torch), "/workspace/torch_profiler", True) in mounts
+
+
+def test_docker_environment_ignores_profiler_support_extra_without_a_primary_profiler(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    backend = FakeBackend()
+    env = build_run_environment(RunEnvironmentSpec("docker"))
+    common = tmp_path / "_common"
+    common.mkdir()
+
+    env.open(
+        _request(
+            tmp_path,
+            backend,
+            profiler_support_extra=((str(common), "profilers_common"),),
+        )
+    )
+
+    mounts = _as_mount_tuples(backend.calls[0][1]["resources"])
+    assert all(container_path != "/workspace/profilers_common" for _, container_path, _ in mounts)
+
+
 def test_docker_environment_does_not_infer_model_mount_from_reference_dir(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     backend = FakeBackend()
     env = build_run_environment(RunEnvironmentSpec("docker"))

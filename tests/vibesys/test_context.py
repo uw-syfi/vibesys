@@ -14,6 +14,7 @@ from vibesys.backends.cuda.gpu_monitor import GpuInfo
 from vibesys.config import Config
 from vibesys.constants import DomainName
 from vibesys.context import (
+    _profiler_support_extra,
     _resume_configuration_update,
     _RunContext,
     create_candidate_context,
@@ -30,7 +31,8 @@ from vibesys.evaluators import (
 from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.events import CoreEventType
 from vibesys.loops.agent.model import AgentRunState
-from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
+from vibesys.profilers import ProfilerKind, ProfilerPreflightResult, profiler_definition
+from vibesys.resource_paths import PROFILERS_COMMON_STAGED_NAME
 from vibesys.run import (
     DeviceLease,
     LocalRunIntegration,
@@ -1057,3 +1059,24 @@ def test_a_container_agent_carries_no_host_device_pin(
     )
 
     assert driver.specs[0].environment == ()
+
+
+def test_profiler_support_extra_includes_shared_runtime_and_declared_extras():  # noqa: ANN201  # tracked: #288
+    """rocprof declares torch as an extra plugin dir; profilers_common is universal."""
+    definition = profiler_definition(ProfilerKind.ROCPROF)
+
+    extra = _profiler_support_extra(definition)
+    names = [name for _path, name in extra]
+
+    assert names[0] == PROFILERS_COMMON_STAGED_NAME
+    assert "torch_profiler" in names
+    for path, _name in extra:
+        assert Path(path).is_dir()
+
+
+def test_profiler_support_extra_without_declared_extras_is_just_the_shared_runtime():  # noqa: ANN201  # tracked: #288
+    definition = profiler_definition(ProfilerKind.NSYS)
+
+    extra = _profiler_support_extra(definition)
+
+    assert [name for _path, name in extra] == [PROFILERS_COMMON_STAGED_NAME]

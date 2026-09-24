@@ -24,6 +24,9 @@ def _make_fake_repo(root: Path) -> Path:
     (root / "resources" / "profilers" / "nsys" / "server.py").write_text("# server")
     (root / "resources" / "profilers" / "nsys" / "__pycache__").mkdir()
     (root / "resources" / "profilers" / "nsys" / "__pycache__" / "server.pyc").write_text("x")
+    common = root / "resources" / "profilers" / "_common"
+    common.mkdir(parents=True)
+    (common / "capture_runtime.py").write_text("# capture runtime")
     evaluator = root / "resources" / "evaluators" / "queue"
     evaluator.mkdir(parents=True)
     (evaluator / "vibesys.evaluator.toml").write_text("schema_version = 1\n")
@@ -44,6 +47,7 @@ def test_stage_resources_copies_trees_and_drops_vendored_checkouts(tmp_path):  #
 
     assert stage_resources(repo, dest)
     assert (dest / "profilers" / "nsys" / "server.py").is_file()
+    assert (dest / "profilers" / "_common" / "capture_runtime.py").is_file()
     assert (dest / "skills" / "serving-systems" / "SKILL.md").is_file()
     assert (dest / "skills" / "serving-systems" / ".vibesys.toml").is_file()
     assert (dest / "evaluators" / "queue" / "vibesys.evaluator.toml").is_file()
@@ -117,6 +121,13 @@ def test_profiler_support_dir_resolves_known_kind_and_rejects_unknown():  # noqa
     assert resource_paths.profiler_support_dir("no-such-profiler") is None
 
 
+def test_profiler_support_common_dir_points_at_the_shared_capture_runtime():  # noqa: ANN201  # tracked: #288
+    common = resource_paths.profiler_support_common_dir()
+    assert common is not None
+    assert (common / "capture_runtime.py").is_file()
+    assert resource_paths.PROFILERS_COMMON_STAGED_NAME == "profilers_common"
+
+
 def test_default_skill_roots_point_at_the_resources_tree():  # noqa: ANN201  # tracked: #288
     roots = resource_paths.default_skill_roots()
     assert roots == (PROJECT_ROOT / "resources" / "skills",)
@@ -133,6 +144,8 @@ def test_resources_root_falls_back_to_the_staged_wheel_copy(tmp_path, monkeypatc
     (staged / "evaluators").mkdir(parents=True)
     (staged / "profilers" / "nsys").mkdir(parents=True)
     (staged / "profilers" / "nsys" / "server.py").write_text("# server")
+    (staged / "profilers" / "_common").mkdir(parents=True)
+    (staged / "profilers" / "_common" / "capture_runtime.py").write_text("# capture runtime")
     (staged / "skills").mkdir()
 
     monkeypatch.setattr(resource_paths, "PROJECT_ROOT", fake_checkout)
@@ -142,6 +155,8 @@ def test_resources_root_falls_back_to_the_staged_wheel_copy(tmp_path, monkeypatc
     assert resource_paths.evaluator_packages_dir() == staged / "evaluators"
     support = resource_paths.profiler_support_dir("nsys")
     assert support == staged / "profilers" / "nsys"
+    common = resource_paths.profiler_support_common_dir()
+    assert common == staged / "profilers" / "_common"
     assert resource_paths.default_skill_roots() == (staged / "skills",)
 
 
@@ -151,4 +166,5 @@ def test_resources_root_is_none_without_checkout_or_staged_copy(tmp_path, monkey
 
     assert resource_paths.resources_root() is None
     assert resource_paths.profiler_support_dir("nsys") is None
+    assert resource_paths.profiler_support_common_dir() is None
     assert resource_paths.default_skill_roots() == ()

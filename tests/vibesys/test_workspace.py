@@ -175,6 +175,33 @@ def test_fresh_plan_with_git_source_rejects_input_collisions(tmp_path):  # noqa:
     )
 
 
+def test_fresh_plan_stages_extra_profiler_support_dirs(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    """Sibling support dirs (shared capture runtime, extra plugin kinds)."""
+    ws = _make_workspace(tmp_path / "ws")
+    input_dir = tmp_path / "input"
+
+    plan = ws.plan_setup(
+        existing=False,
+        input_dir=input_dir,
+        evaluator_source=None,
+        skill_sources=[],
+        input_project_dir=None,
+        profiler_support_path=str(tmp_path / "profilers" / "rocprof"),
+        profiler_support_name="rocprof_profiler",
+        profiler_support_extra=(
+            (str(tmp_path / "profilers" / "_common"), "profilers_common"),
+            (str(tmp_path / "profilers" / "torch"), "torch_profiler"),
+        ),
+    )
+
+    assert plan == (
+        CopySpec(src=input_dir, dest=ws.root),
+        CopySpec(src=tmp_path / "profilers" / "rocprof", dest=ws.root / "rocprof_profiler"),
+        CopySpec(src=tmp_path / "profilers" / "_common", dest=ws.root / "profilers_common"),
+        CopySpec(src=tmp_path / "profilers" / "torch", dest=ws.root / "torch_profiler"),
+    )
+
+
 def test_fresh_plan_without_sources_does_not_reject_collisions(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     ws = _make_workspace(tmp_path / "ws")
     input_dir = tmp_path / "input"
@@ -237,6 +264,33 @@ def test_resume_plan_skips_profiler_already_present(tmp_path):  # noqa: ANN001, 
     )
 
     assert plan == ()
+
+
+def test_resume_plan_stages_missing_extra_profiler_support_dirs(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    root = tmp_path / "ws"
+    # rocprof_profiler and torch_profiler are missing; profilers_common is
+    # already present from a previous run and must be left alone.
+    (root / "profilers_common").mkdir(parents=True)
+
+    ws = _make_workspace(root)
+    plan = ws.plan_setup(
+        existing=True,
+        input_dir=tmp_path / "input",
+        evaluator_source=None,
+        skill_sources=[],
+        input_project_dir=None,
+        profiler_support_path=str(tmp_path / "profilers" / "rocprof"),
+        profiler_support_name="rocprof_profiler",
+        profiler_support_extra=(
+            (str(tmp_path / "profilers" / "_common"), "profilers_common"),
+            (str(tmp_path / "profilers" / "torch"), "torch_profiler"),
+        ),
+    )
+
+    assert plan == (
+        CopySpec(src=tmp_path / "profilers" / "rocprof", dest=root / "rocprof_profiler"),
+        CopySpec(src=tmp_path / "profilers" / "torch", dest=root / "torch_profiler"),
+    )
 
 
 def test_setup_rejects_preexisting_evaluator_dir(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288

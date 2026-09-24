@@ -307,3 +307,16 @@ def test_rocprof_profiler_domains_and_preflight():  # noqa: ANN201  # tracked: #
     # nsys on CUDA; no host command-availability check, to avoid a false
     # negative on an editor host that never runs the profiler itself.
     assert preflight_profiler_kind(ProfilerKind.ROCPROF).usable
+    # The rocprof MCP server also exposes the torch analyzer's tools, so
+    # torch_profiler/ is staged alongside rocprof_profiler/.
+    assert definition.extra_support_kinds == frozenset({ProfilerKind.TORCH})
+
+
+def test_extra_support_kinds_default_empty_and_are_runnable_kinds():  # noqa: ANN201  # tracked: #288
+    for kind, definition in PROFILER_DEFINITIONS.items():
+        if kind is ProfilerKind.ROCPROF:
+            continue
+        assert definition.extra_support_kinds == frozenset()
+    for definition in PROFILER_DEFINITIONS.values():
+        for extra_kind in definition.extra_support_kinds:
+            assert extra_kind in PROFILER_DEFINITIONS
