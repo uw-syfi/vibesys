@@ -8,7 +8,7 @@ from tests.support.run_execution import run_execution_record
 from server.diagnostics import DiagnosticScope
 from server.events import ConfigurationFailedData, EventStatus, EventType
 from server.read_model import RunInspector
-from vibesys.agent_run.state import AgentRunState, AgentRunStateStore, Hypothesis
+from vibesys.agent_run.state import AgentRunState, Hypothesis
 from vibesys.schemas import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
@@ -35,7 +35,7 @@ def _project_run(root: Path) -> tuple[Project, str]:
 
 def test_inspector_answers_round_and_failure_queries(tmp_path):  # noqa: ANN001, ANN201
     project, run_id = _project_run(tmp_path / "project")
-    AgentRunStateStore(project.state.portable_namespace(run_id, "single")).save(
+    project.state.portable_namespace(run_id, "single").slot("state.json", AgentRunState).save(
         AgentRunState(
             hypotheses=[
                 Hypothesis(

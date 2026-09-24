@@ -13,7 +13,6 @@ from vibesys.agent_run.hypotheses import reproject_run_evidence
 from vibesys.agent_run.readmodel import project_run_view
 from vibesys.agent_run.state import (
     AgentRunState,
-    AgentRunStateStore,
     Hypothesis,
     HypothesisMeasurement,
 )
@@ -138,7 +137,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         )
     )
 
-    AgentRunStateStore(project.state.portable_namespace(run_id, "single")).save(state)
+    project.state.portable_namespace(run_id, "single").slot("state.json", AgentRunState).save(state)
     response = _service(project, run_id).execute(PerformanceQuery())
 
     context = response.performance_context
@@ -156,7 +155,9 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
 
 def test_service_names_the_objective_before_the_first_measurement(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project", ("total_ops_per_sec:max",))
-    AgentRunStateStore(project.state.portable_namespace(run_id, "single")).save(AgentRunState())
+    project.state.portable_namespace(run_id, "single").slot("state.json", AgentRunState).save(
+        AgentRunState()
+    )
 
     response = _service(project, run_id).execute(PerformanceQuery())
 

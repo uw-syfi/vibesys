@@ -916,7 +916,7 @@ class _Workspaces:
                     continue
                 try:
                     await agent.close()
-                except Exception as exc:  # noqa: BLE001  # finish scope cleanup
+                except BaseException as exc:  # noqa: BLE001  # finish scope cleanup
                     errors.append(exc)
             async with (
                 self._host.evaluator._lock_for(scope),
@@ -925,7 +925,7 @@ class _Workspaces:
             ):
                 try:
                     await self._host._run_blocking(self._discard, scope)
-                except Exception as exc:  # noqa: BLE001  # report all cleanup errors
+                except BaseException as exc:  # noqa: BLE001  # report all cleanup errors
                     errors.append(exc)
                 finally:
                     if scope.id not in self._scopes:

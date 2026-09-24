@@ -8,6 +8,5 @@ class RunStateNamespace(StrEnum):
 
     AGENT = "agent"
     EVOLVE = "evolve"
-    PLAIN = "plain"
     RUNTIME = "runtime"
     SKYPILOT = "skypilot"

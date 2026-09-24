@@ -40,7 +40,7 @@ from vibesys.prompts import PROMPTS_DIR
 from vibesys.prompts.renderer import _build_env
 from vs_prompts.api import filter_skip_marked
 
-_PROFILERS_DIR = PROMPTS_DIR / "loops" / "multi" / "profilers"
+_PROFILERS_DIR = PROMPTS_DIR / "shared" / "profilers"
 _AGENT_LOOP_ROOT = PROMPTS_DIR / "loops" / "multi"
 
 # Exactly the kwargs MultiAgentTurns.profile (src/vibesys/loops/multi/turns.py)

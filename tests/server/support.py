@@ -11,7 +11,7 @@ from server.chat.manager import ChatManager
 from server.controller import RunController
 from server.execution import ExecutionTracker
 from server.integration import RunIntegrationAdapter
-from server.journal import EventJournal
+from server.journal import WireJournal
 from server.read_model import RunInspector
 from vibesys.agent_run.options import (
     AgentOrchestrationOptions,
@@ -79,7 +79,7 @@ class ServerParts:
     """Explicitly composed server components used by focused tests."""
 
     condition: threading.Condition
-    journal: EventJournal
+    journal: WireJournal
     executions: ExecutionTracker
     controller: RunController
     chat: ChatManager
@@ -131,7 +131,7 @@ def build_server_parts(
 ) -> ServerParts:
     """Compose real server components and optionally attach durable state."""
     condition = threading.Condition(threading.RLock())
-    journal = EventJournal(condition)
+    journal = WireJournal(condition)
     executions = ExecutionTracker(condition, journal)
     controller = RunController(condition, journal, executions)
     chat = ChatManager(condition, journal, run_status=controller.run_status)

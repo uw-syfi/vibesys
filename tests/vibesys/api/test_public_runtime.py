@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from pydantic import BaseModel
 
 from vibesys.api import (
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.context import _RunResources
+    from vibesys.orchestration.runtime import _LocalAgentHandle
     from vibesys.sandbox.run_environment import RunEnvironmentRequest, RunEnvironmentSession
 
 
@@ -539,6 +542,144 @@ def test_scoped_workspace_adopts_candidate_and_closes_its_agent(
             assert (ctx.workspaces.root.path / "queue.py").read_text() == "VALUE = 3\n"
             await scoped.discard()
             assert client.closed
+            with pytest.raises(ValueError, match="closed"):
+                _ = scoped.path
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        integration.close()
+
+
+class _ScopedCloseProbe:
+    """Fake scoped agent handle for exercising ``_discard_scope`` cleanup ordering.
+
+    ``close()`` is idempotent (like the real agent handle): a discarded scope's
+    agents stay in ``RunContext._agents`` and get a second ``close()`` call
+    when the run itself closes, so a fake that kept re-raising on every call
+    would fail the run teardown for reasons unrelated to what this test
+    covers.
+    """
+
+    def __init__(
+        self, scope_id: str, name: str, calls: list[str], *, exc: BaseException | None = None
+    ) -> None:
+        self.scope_id = scope_id
+        self._name = name
+        self._calls = calls
+        self._exc = exc
+        self._closed = False
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._calls.append(self._name)
+        if self._exc is not None:
+            raise self._exc
+
+
+def test_discard_scope_continues_after_a_cancelled_agent_close(tmp_path: Path) -> None:
+    """Regression: ``_discard_scope`` used to catch only ``Exception``, so a
+    ``CancelledError`` from one agent's ``close()`` (a ``BaseException``, not an
+    ``Exception``) escaped immediately -- skipping every remaining agent's
+    cleanup and the worktree teardown entirely. It must instead behave like
+    ``RunContext.close()``'s sibling cleanup path: catch ``BaseException``,
+    keep closing the remaining agents, tear down the worktree, and surface
+    every error afterward.
+    """
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+
+    async def exercise() -> None:
+        async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
+            ctx._resources.run_environment_view = replace(  # noqa: SLF001
+                ctx.environment.view, supports_parallel_candidate_evaluation=True
+            )
+            parent_revision = ctx.workspaces.root.revision
+            assert parent_revision is not None
+            scoped = await ctx.workspaces.fork(parent_revision)
+            assert scoped.id is not None
+            calls: list[str] = []
+            ctx._agents[(scoped.id, "first")] = cast(  # noqa: SLF001
+                "_LocalAgentHandle",
+                _ScopedCloseProbe(scoped.id, "first", calls, exc=asyncio.CancelledError()),
+            )
+            ctx._agents[(scoped.id, "second")] = cast(  # noqa: SLF001
+                "_LocalAgentHandle", _ScopedCloseProbe(scoped.id, "second", calls)
+            )
+
+            with pytest.raises(BaseExceptionGroup) as caught:
+                await scoped.discard()
+
+            # Both agents were closed despite the first raising a BaseException.
+            assert calls == ["first", "second"]
+            assert isinstance(caught.value.exceptions[0], asyncio.CancelledError)
+            # The worktree itself was still torn down.
+            with pytest.raises(ValueError, match="closed"):
+                _ = scoped.path
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        integration.close()
+
+
+@given(
+    exception_specs=st.lists(
+        st.sampled_from([None, RuntimeError, asyncio.CancelledError]),
+        min_size=1,
+        max_size=4,
+    )
+)
+@settings(
+    max_examples=15, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+def test_discard_scope_closes_every_agent_for_any_failure_mix(
+    exception_specs: list[type[BaseException] | None],
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """Property generalizing the CancelledError regression: whatever mix of
+    ``Exception``/``BaseException`` failures scoped agents raise on
+    ``close()`` -- including several ``CancelledError``s in a row -- discard()
+    still attempts every agent's close() exactly once, in order, still tears
+    down the worktree, and surfaces every failure (none silently dropped).
+    """
+    project_root = tmp_path_factory.mktemp("discard_scope_property") / "project"
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+
+    async def exercise() -> None:
+        async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
+            ctx._resources.run_environment_view = replace(  # noqa: SLF001
+                ctx.environment.view, supports_parallel_candidate_evaluation=True
+            )
+            parent_revision = ctx.workspaces.root.revision
+            assert parent_revision is not None
+            scoped = await ctx.workspaces.fork(parent_revision)
+            assert scoped.id is not None
+            calls: list[str] = []
+            expected_failures = 0
+            names = [f"agent-{index}" for index in range(len(exception_specs))]
+            for name, exc_type in zip(names, exception_specs, strict=True):
+                exc = exc_type() if exc_type is not None else None
+                if exc is not None:
+                    expected_failures += 1
+                ctx._agents[(scoped.id, name)] = cast(  # noqa: SLF001
+                    "_LocalAgentHandle", _ScopedCloseProbe(scoped.id, name, calls, exc=exc)
+                )
+
+            if expected_failures:
+                with pytest.raises(BaseExceptionGroup) as caught:
+                    await scoped.discard()
+                assert len(caught.value.exceptions) == expected_failures
+            else:
+                await scoped.discard()
+
+            # Every agent's close() ran exactly once, regardless of failures.
+            assert calls == names
+            # The worktree itself was torn down either way.
             with pytest.raises(ValueError, match="closed"):
                 _ = scoped.path
 

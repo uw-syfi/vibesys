@@ -37,7 +37,7 @@ from vibesys.api import CoreEvent
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from server.journal import EventJournal
+    from server.journal import WireJournal
 
 
 @dataclass(frozen=True)
@@ -69,7 +69,7 @@ class ActiveAgentExecution(BaseModel):
 class ExecutionTracker:
     """Own live execution identity, activity, and lifecycle event emission."""
 
-    def __init__(self, condition: threading.Condition, journal: EventJournal) -> None:
+    def __init__(self, condition: threading.Condition, journal: WireJournal) -> None:
         """Initialize live execution state over the shared server condition."""
         self._condition = condition
         self._journal = journal

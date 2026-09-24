@@ -17,7 +17,7 @@ from vibesys.schemas import (
 from vs_loop_state.api import HypothesisResolution, RoundRecord
 
 if TYPE_CHECKING:
-    from vs_project.api import Project, StateNamespace, StateTransition
+    from vs_project.api import Project, StateNamespace
 
 
 class HypothesisReview(StrEnum):
@@ -299,14 +299,6 @@ class AgentRunStateStore:
     def load(self) -> AgentRunState:
         """Return the aggregate or a new empty state."""
         return self.load_optional() or AgentRunState()
-
-    def save(self, state: AgentRunState) -> None:
-        """Atomically replace the policy's portable state."""
-        self._slot.save(state)
-
-    def transition(self, state: AgentRunState) -> StateTransition:
-        """Prepare an exact replacement for the round transaction."""
-        return self._slot.transition(state)
 
     @property
     def namespace(self) -> StateNamespace:

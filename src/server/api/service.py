@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from server.controller import ProjectRunState, RunController
     from server.execution import ActiveAgentExecution, ExecutionTracker
     from server.integration import RunIntegrationAdapter
-    from server.journal import EventJournal
+    from server.journal import WireJournal
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunControl, RunView
     from vs_project.api import Project
@@ -123,7 +123,7 @@ class RunApi:
         condition: threading.Condition,
         controller: RunController,
         executions: ExecutionTracker,
-        journal: EventJournal,
+        journal: WireJournal,
         chat: ChatManager,
         integration: RunIntegrationAdapter,
         *,

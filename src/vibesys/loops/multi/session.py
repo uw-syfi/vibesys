@@ -17,6 +17,7 @@ from vibesys.agent_run.attempts import (
     PerformanceProjection,
     attempt_was_reviewed,
 )
+from vibesys.agent_run.errors import StrategySessionError
 from vibesys.agent_run.evidence import (
     _FAILED_HYPOTHESIS_OUTCOMES,
     CarryOver,
@@ -88,50 +89,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.runtime import RunContext
 
 
-class MultiSessionError(RuntimeError):
-    """A durable multi strategy invariant failed."""
-
-    def __init__(self, detail: str) -> None:
-        """Preserve the precise failed invariant."""
-        super().__init__(detail)
-
-    @classmethod
-    def missing_active(cls) -> MultiSessionError:
-        """Report that the accepted plan produced no active state."""
-        return cls("designer plan did not create an active hypothesis")
-
-    @classmethod
-    def missing_rollback(cls) -> MultiSessionError:
-        """Report an incomplete rollback decision."""
-        return cls("rollback resolution omitted a commit")
-
-    @classmethod
-    def exhausted_attempts(cls, round_number: int, first: int, limit: int) -> MultiSessionError:
-        """Report a resume cursor beyond the paid attempt limit."""
-        return cls(
-            f"Round {round_number} already persisted {first - 1} attempts, "
-            f"exhausting max_retries_per_round={limit}"
-        )
-
-    @classmethod
-    def missing_gate_reason(cls) -> MultiSessionError:
-        """Report an invalid official gate transition."""
-        return cls("official gate requested without a reason")
-
-    @classmethod
-    def missing_implementation(cls) -> MultiSessionError:
-        """Report a review step without parsed implementer evidence."""
-        return cls("review requires an implementer response")
-
-    @classmethod
-    def missing_baseline(cls) -> MultiSessionError:
-        """Report that no trusted revision can be restored."""
-        return cls("no trusted retained candidate or input baseline is available")
-
-    @classmethod
-    def missing_winner_commit(cls) -> MultiSessionError:
-        """Report a selected record without a candidate revision."""
-        return cls("selected candidate has no commit")
+MultiSessionError = StrategySessionError
 
 
 @dataclass(frozen=True)

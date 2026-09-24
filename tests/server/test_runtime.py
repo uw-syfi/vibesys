@@ -17,7 +17,7 @@ from server.chat.manager import ChatManager
 from server.controller import RunController
 from server.execution import ExecutionTracker
 from server.integration import RunIntegrationAdapter
-from server.journal import EventJournal
+from server.journal import WireJournal
 from server.runtime import ServerRuntime
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, EventStatus
@@ -84,7 +84,7 @@ def _collect_until(socket_path: Path, terminal_type: str, received: list[dict]) 
 def test_runtime_explicitly_composes_server_components(tmp_path):  # noqa: ANN001, ANN201
     runtime = ServerRuntime(socket_path=tmp_path / "control.sock")
 
-    assert isinstance(runtime.journal, EventJournal)
+    assert isinstance(runtime.journal, WireJournal)
     assert isinstance(runtime.executions, ExecutionTracker)
     assert isinstance(runtime.controller, RunController)
     assert isinstance(runtime.chat, ChatManager)
