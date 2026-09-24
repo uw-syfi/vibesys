@@ -175,8 +175,11 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 # vs_agent imports were consolidated into one parenthesized `vs_agent.api` block.
 "src/vibesys/loops/agent/loop.py" = 3710
 # Sandbox run environment: setup, execution, and teardown across strategies.
-# Grew +1 from the agent-library refactor's AgentBackend enum swap.
-"src/vibesys/sandbox/run_environment.py" = 2240
+# Grew +1 from the agent-library refactor's AgentBackend enum swap. Grew +9
+# for profiler_support_extra: the extra sibling support dirs (shared capture
+# runtime, declared extra plugin kinds) staged alongside a profiler's own
+# support dir in Docker/Modal-via-Docker bind mounts.
+"src/vibesys/sandbox/run_environment.py" = 2249
 
 [tool.ruff]
 line-length = 100
