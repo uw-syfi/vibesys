@@ -31,19 +31,26 @@ from resources.profilers.rocprof.counters import (
     ARCH_ALIASES,
     CANDIDATES,
     COUNTER_SETS,
+    MFMA_BUSY_FRACTION_COMPUTE_BOUND,
     MFMA_CANDIDATE_KEYS,
     PEAK_SPECS,
+    SIMDS_PER_CU,
+    AgentInfo,
     CounterRow,
     CounterSet,
     KernelAgg,
+    MfmaPeakContext,
     _aggregate_by_kernel,
     _duration_from_counter_rows,
     _filter_kernels,
     _hbm_bytes,
+    _load_agent_info,
     _load_counter_rows,
     _load_kernel_trace_durations,
     _lookup,
+    _mfma_busy_fraction,
     _row_from_mapping,
+    _simd_num_for,
     _walk_json_records,
     cmd_list_sets,
     cmd_plan,
@@ -126,6 +133,20 @@ def test_gfx942_l2_and_hbm_sets_are_marked_verified():  # noqa: ANN201  # tracke
     # against a real capture or `rocprofv3 --list-avail`.
     assert COUNTER_SETS["gfx942"]["l2"].verified
     assert COUNTER_SETS["gfx942"]["hbm"].verified
+
+
+def test_gfx90a_mfma_set_prioritizes_the_measured_busy_cycles_formula():  # noqa: ANN201  # tracked: #288
+    # SQ_VALU_MFMA_BUSY_CYCLES + GRBM_GUI_ACTIVE are what the fraction-of-peak
+    # formula needs (mirrors rocprof-compute's own MfmaUtil derived metric);
+    # SQ_INSTS_MFMA + GRBM_COUNT stay as the fallback path.
+    cset = COUNTER_SETS["gfx90a"]["mfma"]
+    assert cset.verified
+    assert cset.counters == (
+        "SQ_VALU_MFMA_BUSY_CYCLES",
+        "GRBM_GUI_ACTIVE",
+        "SQ_INSTS_MFMA",
+        "GRBM_COUNT",
+    )
 
 
 def test_ridge_points_match_known_generational_trend():  # noqa: ANN201  # tracked: #288
@@ -358,6 +379,34 @@ def test_load_kernel_trace_durations_is_empty_without_a_matching_file(tmp_path: 
     assert _load_kernel_trace_durations([str(tmp_path)]) == {}
 
 
+def test_load_agent_info_reads_the_real_mi210_capture():  # noqa: ANN201  # tracked: #288
+    # 782163_agent_info.csv is a real rocprofv3 capture from the same MI210
+    # job (gpu-node) the real_mi210_gfx90a counter fixtures come
+    # from -- Cu_Count=104, Simd_Count=416 (416/104=4 SIMD/CU), matching the
+    # static gfx90a PeakSpec/SIMDS_PER_CU table exactly.
+    agent_info = _load_agent_info(_real_mi210_dirs())
+    assert agent_info == AgentInfo(cu_count=104, simds_per_cu=4)
+    assert agent_info.simd_num == 416
+
+
+def test_load_agent_info_is_none_without_a_matching_file(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    assert _load_agent_info([str(tmp_path)]) is None
+
+
+def test_load_agent_info_skips_the_cpu_row(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    path = tmp_path / "x_agent_info.csv"
+    path.write_text("Agent_Type,Cu_Count,Simd_Count\nCPU,16,0\nGPU,104,416\n")
+    assert _load_agent_info([str(tmp_path)]) == AgentInfo(cu_count=104, simds_per_cu=4)
+
+
+def test_simd_num_for_prefers_agent_info_over_the_static_spec_table():  # noqa: ANN201  # tracked: #288
+    spec = PEAK_SPECS["gfx942"]  # 304 CUs in the static table
+    real = AgentInfo(cu_count=228, simds_per_cu=4)  # e.g. an MI300A capture
+    assert _simd_num_for(spec, real) == real.simd_num
+    assert _simd_num_for(spec, None) == spec.compute_units * SIMDS_PER_CU
+    assert _simd_num_for(None, None) is None
+
+
 def test_cmd_list_sets_prints_the_catalogue_for_one_arch():  # noqa: ANN201  # tracked: #288
     out = _run(cmd_list_sets, arch="mi210")
     assert "gfx90a" in out
@@ -525,6 +574,42 @@ def test_real_mi210_triage_classifies_gemm_compute_bound_and_ew_bandwidth_bound(
     assert "achieved 211 GB/s" not in out  # GEMM's bandwidth isn't the verdict driver
 
 
+def test_real_mi210_triage_without_flops_falls_back_to_the_uninterpretable_raw_rate():  # noqa: ANN201  # tracked: #288
+    # Documents the pre-fix behavior this fixture still exercises when neither
+    # SQ_VALU_MFMA_BUSY_CYCLES nor --flops is available (job1 pass1 didn't
+    # capture the busy-cycles counter): the raw insts/cycle number is kept as
+    # an honestly-labeled fallback, not silently presented as peak-normalized.
+    out = _run(cmd_triage, dirs=_real_mi210_dirs(), kernel=_REAL_GEMM_KERNEL, top=15, arch="gfx90a")
+    assert "verdict: COMPUTE-BOUND" in out
+    assert "MFMA issue rate 5.4477 insts/cycle" in out
+    assert "no peak reference" in out
+    assert "MFMA busy" not in out  # the new peak-normalized evidence didn't fire
+
+
+def test_real_mi210_triage_expresses_mfma_utilization_as_a_fraction_of_spec_peak():  # noqa: ANN201  # tracked: #288
+    # The real capture (job1 pass1) never requested SQ_VALU_MFMA_BUSY_CYCLES,
+    # so this exercises the --flops fallback end to end: FLOPs = 2*M*N*K for
+    # the fixture's bf16 4096^3 GEMM (see the "Real MI210" section docstring
+    # above), duration comes straight from the real Start/End_Timestamp
+    # columns (2320966 ns total across the kernel's 2 dispatches), and
+    # 59.2 TFLOP/s achieved / 181.0 TFLOP/s spec peak = 32.7% -> 33%.
+    flops = 2 * 4096 * 4096 * 4096
+    out = _run(
+        cmd_triage,
+        dirs=_real_mi210_dirs(),
+        kernel=_REAL_GEMM_KERNEL,
+        top=15,
+        arch="gfx90a",
+        flops=flops,
+    )
+    assert _REAL_GEMM_KERNEL in out
+    assert "verdict: COMPUTE-BOUND" in out
+    assert "MFMA busy 33% of peak (spec peak, from --flops)" in out
+    # The old uninterpretable raw-rate form must be gone from this verdict.
+    assert "insts/cycle" not in out
+    assert "MFMA issue rate" not in out
+
+
 # ---------------------------------------------------------------------------
 # Property tests: derive_metrics never crashes/NaNs/negatives, and computes
 # every metric whose inputs are present, for ANY subset of an arch's
@@ -652,6 +737,140 @@ def test_report_and_triage_never_crash_over_every_arch_counter_set_in_isolation(
     ):
         _assert_finite_and_nonnegative(value)
     assert occ.waves_per_simd >= 1
+
+
+# ---------------------------------------------------------------------------
+# Property tests: mfma_busy_fraction (peak-normalized MFMA utilization) is
+# always in [0, 1] (clamped + warned when the raw ratio isn't), monotone in
+# the busy-cycles numerator, and invariant to scaling every cycle counter in
+# the ratio together -- generalizes the real_mi210 "% of peak" regression.
+# ---------------------------------------------------------------------------
+
+
+@given(
+    mfma_busy_cycles=st.floats(min_value=0, max_value=1e9, allow_nan=False, allow_infinity=False),
+    grbm_gui_active=st.floats(min_value=1, max_value=1e9, allow_nan=False, allow_infinity=False),
+    simd_num=st.integers(min_value=1, max_value=2000),
+)
+@FAST
+def test_mfma_busy_fraction_measured_path_always_in_unit_interval(  # noqa: ANN201
+    mfma_busy_cycles: float, grbm_gui_active: float, simd_num: int
+):
+    fraction, source = _mfma_busy_fraction(
+        counters={"SQ_VALU_MFMA_BUSY_CYCLES": mfma_busy_cycles},
+        busy_cycles=grbm_gui_active,
+        duration_ns=None,
+        peak=MfmaPeakContext(simd_num=simd_num),
+    )
+    assert fraction is not None
+    assert 0.0 <= fraction <= 1.0
+    assert source == "measured"
+
+
+@given(
+    mfma_busy_cycles=st.floats(min_value=0, max_value=1e6, allow_nan=False, allow_infinity=False),
+    extra_busy_cycles=st.floats(min_value=0, max_value=1e6, allow_nan=False, allow_infinity=False),
+    grbm_gui_active=st.floats(min_value=1, max_value=1e9, allow_nan=False, allow_infinity=False),
+    simd_num=st.integers(min_value=1, max_value=2000),
+)
+@FAST
+def test_mfma_busy_fraction_is_monotone_in_busy_cycles(  # noqa: ANN201
+    mfma_busy_cycles: float, extra_busy_cycles: float, grbm_gui_active: float, simd_num: int
+):
+    lower, _ = _mfma_busy_fraction(
+        counters={"SQ_VALU_MFMA_BUSY_CYCLES": mfma_busy_cycles},
+        busy_cycles=grbm_gui_active,
+        duration_ns=None,
+        peak=MfmaPeakContext(simd_num=simd_num),
+    )
+    higher, _ = _mfma_busy_fraction(
+        counters={"SQ_VALU_MFMA_BUSY_CYCLES": mfma_busy_cycles + extra_busy_cycles},
+        busy_cycles=grbm_gui_active,
+        duration_ns=None,
+        peak=MfmaPeakContext(simd_num=simd_num),
+    )
+    assert lower is not None
+    assert higher is not None
+    assert higher >= lower
+
+
+@given(
+    mfma_busy_cycles=st.floats(min_value=1, max_value=1e6, allow_nan=False, allow_infinity=False),
+    grbm_gui_active=st.floats(min_value=1, max_value=1e9, allow_nan=False, allow_infinity=False),
+    simd_num=st.integers(min_value=1, max_value=2000),
+    scale=st.floats(min_value=1e-3, max_value=1e3, allow_nan=False, allow_infinity=False),
+)
+@FAST
+def test_mfma_busy_fraction_is_invariant_to_scaling_all_cycle_counters_together(  # noqa: ANN201
+    mfma_busy_cycles: float, grbm_gui_active: float, simd_num: int, scale: float
+):
+    # Scaling both the numerator (SQ_VALU_MFMA_BUSY_CYCLES) and the busy-cycle
+    # term of the denominator (GRBM_GUI_ACTIVE) by the same factor is exactly
+    # what happens when the same dispatch is re-measured at a different clock
+    # or over a different-length capture window with proportional counts --
+    # the ratio itself must not move.
+    base, _ = _mfma_busy_fraction(
+        counters={"SQ_VALU_MFMA_BUSY_CYCLES": mfma_busy_cycles},
+        busy_cycles=grbm_gui_active,
+        duration_ns=None,
+        peak=MfmaPeakContext(simd_num=simd_num),
+    )
+    scaled, _ = _mfma_busy_fraction(
+        counters={"SQ_VALU_MFMA_BUSY_CYCLES": mfma_busy_cycles * scale},
+        busy_cycles=grbm_gui_active * scale,
+        duration_ns=None,
+        peak=MfmaPeakContext(simd_num=simd_num),
+    )
+    assert base is not None
+    assert scaled is not None
+    assert scaled == pytest.approx(base, rel=1e-6, abs=1e-9)
+
+
+def test_mfma_busy_fraction_clamps_and_warns_when_measured_value_exceeds_peak(capsys):  # noqa: ANN001, ANN201  # tracked: #288
+    # SQ_VALU_MFMA_BUSY_CYCLES far larger than busy_cycles*simd_num could
+    # allow -- inconsistent counters (stitched passes, a measurement race).
+    fraction, source = _mfma_busy_fraction(
+        counters={"SQ_VALU_MFMA_BUSY_CYCLES": 1_000_000.0},
+        busy_cycles=10.0,
+        duration_ns=None,
+        peak=MfmaPeakContext(simd_num=4),
+    )
+    assert fraction == 1.0
+    assert source == "measured"
+    assert "warning" in capsys.readouterr().err.lower()
+
+
+def test_mfma_busy_fraction_flops_hint_only_fires_when_the_kernel_has_mfma_activity():  # noqa: ANN201  # tracked: #288
+    # A --flops hint must never manufacture a compute-bound signal for a
+    # kernel that issued zero MFMA instructions (e.g. the elementwise kernel
+    # in the real_mi210 fixture) even if a peak spec and duration are given.
+    fraction, source = _mfma_busy_fraction(
+        counters={},
+        busy_cycles=None,
+        duration_ns=1000.0,
+        peak=MfmaPeakContext(simd_num=None, spec=PEAK_SPECS["gfx90a"], flops=1e12),
+    )
+    assert fraction is None
+    assert source is None
+
+
+def test_mfma_busy_fraction_prefers_measured_over_flops_hint_when_both_are_present():  # noqa: ANN201  # tracked: #288
+    fraction, source = _mfma_busy_fraction(
+        counters={"SQ_VALU_MFMA_BUSY_CYCLES": 100.0, "SQ_INSTS_MFMA": 1.0},
+        busy_cycles=1000.0,
+        duration_ns=1000.0,
+        peak=MfmaPeakContext(simd_num=416, spec=PEAK_SPECS["gfx90a"], flops=1e12),
+    )
+    assert source == "measured"
+    assert fraction == pytest.approx(100.0 / (1000.0 * 416))
+
+
+def test_mfma_busy_fraction_compute_bound_threshold_is_well_below_the_practical_tuned_gemm_ceiling():  # noqa: ANN201  # tracked: #288
+    # 45-55% of spec peak is the documented realistic ceiling for a tuned
+    # GEMM (see PeakSpec's docstring); the compute-bound threshold must sit
+    # comfortably below that so a well-tuned kernel is still classified
+    # COMPUTE-BOUND rather than falling through to a different verdict.
+    assert 0.0 < MFMA_BUSY_FRACTION_COMPUTE_BOUND < 0.45
 
 
 # ---------------------------------------------------------------------------
