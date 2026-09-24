@@ -143,6 +143,9 @@ floor = 40
 # actually falls below the floor: allowlisting a covered module wrongly
 # implies it is untested.
 allowlist = [
+    # Pure Protocol definitions declare policy effects but contain no
+    # executable implementation; fake-port tests cover their consumers.
+    "src/vibesys/loops/agent/policy_ports.py",
     # Zero tests and zero callers anywhere in the repo (verified by
     # grepping src/, tests/, and libs/). This is an adopt-or-delete
     # decision, not a test gap, and is tracked separately from coverage
