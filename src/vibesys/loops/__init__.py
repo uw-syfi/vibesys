@@ -9,8 +9,6 @@ Each subpackage corresponds to one ``--outer-loop`` value:
 ``loops.profiler`` is the shared profiler invocation helper used by
 ``agent`` and ``evolve`` (``plain`` does not run a profiler step today).
 
-This package's ``__init__.py`` is intentionally empty so submodules with
-lightweight footprints (e.g. ``loops.plain.mcp_server``, spawned inside
-Docker containers that only have ``mcp>=1.0,<2`` installed) don't drag in
-heavy optional dependencies via package-level re-exports.
+This package's ``__init__.py`` is intentionally empty so importing one
+policy does not import the others or their optional dependencies.
 """

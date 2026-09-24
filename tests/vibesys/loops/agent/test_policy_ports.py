@@ -13,11 +13,13 @@ from vibesys.loops.agent.policy_attempts import (
     AttemptRequest,
     AttemptServices,
     AttemptState,
-    execute_attempts,
+    JudgeSkipped,
+    JudgeSkipReason,
+    run_official_gates,
 )
 from vibesys.loops.agent.policy_multi import MultiAgentAttemptPolicy, MultiAgentRoundPreparation
+from vibesys.loops.agent.policy_ports import RoundPreparationRequest, RoundPreparationServices
 from vibesys.loops.agent.policy_profile import ProfileGuidedPolicy, ProfilePreparation
-from vibesys.loops.agent.policy_rounds import RoundPreparationRequest, RoundPreparationServices
 from vibesys.loops.agent.policy_single import SingleAgentAttemptPolicy
 from vibesys.loops.agent.policy_support import _CarryOver, _ImplementerAttempt
 from vibesys.schemas import (
@@ -32,7 +34,6 @@ from vibesys.schemas import (
 
 if TYPE_CHECKING:
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
-    from vibesys.loops.agent.policy_attempts import AttemptRunner
 
 
 @dataclass
@@ -74,7 +75,6 @@ class _FakeTurns:
 @dataclass
 class _FakeEffects:
     calls: list[str]
-    first_unpaid: int = 1
     validation_feedback: list[str | None] = field(default_factory=list)
     gate_feedback: list[str | None] = field(default_factory=list)
 
@@ -119,10 +119,6 @@ class _FakeEffects:
         self.calls.append(f"official-gate:{state.retry}")
         feedback = self.gate_feedback.pop(0) if self.gate_feedback else None
         return feedback, FrameworkBenchmarkOutcome(), feedback is None
-
-    def next_attempt(self, round_number: int) -> int:
-        self.calls.append(f"next:{round_number}")
-        return self.first_unpaid
 
     def log(self, _message: str) -> None:
         self.calls.append("log")
@@ -221,7 +217,16 @@ def test_multi_validation_failure_checkpoints_before_retry_and_official_gate() -
     services = _services(turns, effects, retries=2)
     request, state = _attempt()
 
-    execute_attempts(MultiAgentAttemptPolicy(services), services, request, state)
+    policy = MultiAgentAttemptPolicy(services)
+    for retry in (1, 2):
+        state.retry = retry
+        state.judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
+        state.official_reason = None
+        if not policy.implement(request, state):
+            continue
+        decision = policy.review(request, state)
+        if decision is AttemptDecision.OFFICIAL and run_official_gates(services, request, state):
+            break
 
     assert state.passed
     assert calls.index("checkpoint:1") < calls.index("implement:2")
@@ -263,42 +268,3 @@ def test_single_policy_uses_only_combined_turn_and_its_own_verdict() -> None:
 
     assert decision is AttemptDecision.OFFICIAL
     assert calls == ["combined:1"]
-
-
-def test_resume_marker_skips_paid_turn_and_retries_failed_official_gate() -> None:
-    @dataclass
-    class FakeFlow:
-        calls: list[str]
-
-        def run_attempt(self, _request: AttemptRequest, state: AttemptState) -> AttemptDecision:
-            self.calls.append(f"policy:{state.retry}")
-            if state.retry == 2:
-                state.official_reason = "cadence"
-                return AttemptDecision.OFFICIAL
-            state.passed = True
-            return AttemptDecision.FINISH
-
-    calls: list[str] = []
-    turns = _FakeTurns(calls)
-    effects = _FakeEffects(calls, first_unpaid=2, gate_feedback=["accuracy failed"])
-    services = _services(turns, effects)
-    request, state = _attempt()
-    flow: AttemptRunner = FakeFlow(calls)
-
-    execute_attempts(flow, services, request, state)
-
-    assert state.retry == 3
-    assert state.passed
-    assert state.feedback == "accuracy failed"
-    assert calls == [
-        "next:1",
-        "log",
-        "log",
-        "policy:2",
-        "official-decision:2:True:cadence",
-        "commit",
-        "official-gate:2",
-        "checkpoint:2",
-        "log",
-        "policy:3",
-    ]

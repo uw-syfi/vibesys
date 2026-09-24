@@ -84,8 +84,6 @@ if TYPE_CHECKING:
 _INTERFACES = ("inprocess", "service")
 DEFAULT_INTERFACE = "inprocess"
 
-_INNER_LOOPS = ("multi-agent", "single-agent")
-
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 
 

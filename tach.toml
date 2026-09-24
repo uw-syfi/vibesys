@@ -139,7 +139,7 @@ depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "v
 
 [[modules]]
 path = "vibesys.api.agent"
-depends_on = [ "vibesys.loops.agent", "vibesys.loops.agent.projection", "vibesys.loops.agent.read_state"]
+depends_on = [ "vibesys.loops.agent", "vibesys.loops.agent.projection"]
 
 [[modules]]
 path = "vibesys.api.contracts"
@@ -346,11 +346,7 @@ depends_on = [ "vibesys.loops.agent.entrypoint", "vibesys.loops.plain.entrypoint
 
 [[modules]]
 path = "vibesys.loops.agent.entrypoint"
-depends_on = ["vibesys.orchestration.view", "vibesys.loops.agent.policy_profile", "vibesys.loops.agent.readmodel", "vs_project", "vibesys.loops.agent.policy_multi", "vibesys.loops.agent.read_state", "vibesys.context", "vibesys.loops.agent.policy_single", "vibesys.orchestration.runtime", "vibesys.loops.agent", "vibesys.loops.agent.session"]
-
-[[modules]]
-path = "vibesys.loops.agent.read_state"
-depends_on = [ "vs_project", "vibesys.loops.agent"]
+depends_on = ["vibesys.orchestration.view", "vibesys.loops.agent.policy_profile", "vibesys.loops.agent.readmodel", "vs_project", "vibesys.loops.agent.policy_multi", "vibesys.context", "vibesys.loops.agent.policy_single", "vibesys.orchestration.runtime", "vibesys.loops.agent", "vibesys.loops.agent.session"]
 
 [[modules]]
 path = "vibesys.loops.agent.readmodel"

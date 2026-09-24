@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING, Any, Literal
 
-from vibesys.loops.plain.mcp_config import build_issue_mcp_spec
 from vibesys.loops.plain.render import render_all
 from vibesys.loops.plain.state import PlainStateStore
 from vibesys.prompts import PROMPTS_DIR, Prompt
@@ -38,6 +37,31 @@ if TYPE_CHECKING:
     from vibesys.config import LoadLevelCfg
     from vibesys.loops.plain.orchestration import PlainOrchestrationOptions
     from vibesys.orchestration.runtime import RunContext
+
+
+def build_issue_mcp_spec(
+    *,
+    store_relpath: str,
+    creator: str,
+    iteration: int,
+    cap: int | None,
+    allowed_types: set[IssueType],
+) -> MCPServerSpec:
+    """Describe the issue-board MCP server and its per-phase policy."""
+    args = [
+        "-m",
+        "vs_issue_board.mcp",
+        store_relpath,
+        "--creator",
+        creator,
+        "--iteration",
+        str(iteration),
+        "--allowed-types",
+        ",".join(sorted(issue_type.value for issue_type in allowed_types)),
+    ]
+    if cap is not None:
+        args += ["--cap", str(cap)]
+    return MCPServerSpec(name="vibesys-issues", command="python", args=tuple(args))
 
 
 # ---------------------------------------------------------------------------

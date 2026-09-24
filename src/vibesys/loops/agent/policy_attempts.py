@@ -4,18 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, assert_never, cast
 
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
-from vibesys.loops.agent.attempt import (
-    JudgeOutcome,
-    JudgeSkipped,
-    JudgeSkipReason,
-)
 from vibesys.loops.agent.policy_support import (
     _official_evaluation_reason,
     _provisional_candidates_since_official,
 )
+from vibesys.schemas import Verdict
 
 if TYPE_CHECKING:
     from vibesys.loops.agent.hypothesis_controller import HypothesisEngine
@@ -26,7 +22,60 @@ if TYPE_CHECKING:
         OrchestratorPlan,
         SingleAgentRoundResponse,
     )
-    from vs_loop_state.api import PerfProvenance, RoundRecord
+    from vs_loop_state.api import JudgeVerdict, PerfProvenance, RoundRecord
+
+
+class JudgeSkipReason(StrEnum):
+    """Why one implementer attempt received no independent judge verdict."""
+
+    NOT_REACHED = "not_reached"
+    UNPARSEABLE_IMPLEMENTATION = "unparseable_implementation"
+    SPARSE_REVIEW_POLICY = "sparse_review_policy"
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeReviewed:
+    """An independent judge audited this attempt and returned a verdict."""
+
+    verdict: Verdict
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeSkipped:
+    """No judge ran for this attempt, for the given reason."""
+
+    reason: JudgeSkipReason
+
+
+type JudgeOutcome = JudgeReviewed | JudgeSkipped
+
+
+def attempt_was_reviewed(outcome: JudgeOutcome) -> bool:
+    """Return whether an independent judge ruled on this attempt."""
+    match outcome:
+        case JudgeReviewed():
+            return True
+        case JudgeSkipped():
+            return False
+        case _:
+            assert_never(outcome)
+
+
+def recorded_judge_verdict(outcome: JudgeOutcome) -> JudgeVerdict:
+    """Persist a skipped review as deferred, never as a prior verdict."""
+    match outcome:
+        case JudgeReviewed(verdict=verdict):
+            match verdict:
+                case Verdict.PASS:
+                    return "pass"
+                case Verdict.FAIL:
+                    return "fail"
+                case _:
+                    assert_never(verdict)
+        case JudgeSkipped():
+            return "deferred"
+        case _:
+            assert_never(outcome)
 
 
 class AttemptDecision(StrEnum):
@@ -47,10 +96,6 @@ class AttemptServices:
     max_retries_per_round: int
     judge_every: int
     official_eval_every: int
-
-    def checkpoint(self, request: AttemptRequest, state: AttemptState) -> None:
-        """Durably retain feedback and gate state before another paid turn."""
-        self.effects.checkpoint(request, state)
 
     def official_reason(self, request: AttemptRequest, *, candidate_ready: bool) -> str | None:
         """Apply the framework's official evaluation cadence."""
@@ -125,10 +170,6 @@ class PerformanceProjection:
 class AttemptPolicy(Protocol):
     """Role communication and review decisions for one built-in loop kind."""
 
-    def run_attempt(self, request: AttemptRequest, state: AttemptState, /) -> AttemptDecision:
-        """Run one attempt and tell the executor whether to retry or evaluate."""
-        ...
-
     def project_performance(
         self, request: AttemptRequest, state: AttemptState, /
     ) -> PerformanceProjection:
@@ -147,14 +188,6 @@ class AttemptPolicy(Protocol):
         self, state: AttemptState, continuation_rounds: int, /
     ) -> bool:
         """Report whether terminal edits need an explicit parent choice."""
-        ...
-
-
-class AttemptRunner(Protocol):
-    """Minimum policy operation needed by the shared retry executor."""
-
-    def run_attempt(self, request: AttemptRequest, state: AttemptState, /) -> AttemptDecision:
-        """Execute one paid attempt and select its next framework action."""
         ...
 
 
@@ -188,37 +221,5 @@ def run_official_gates(
     hypothesis.gate_candidate_commit = candidate_commit
     hypothesis.gate_accuracy_passed = accuracy_passed
     hypothesis.feedback = state.feedback
-    services.checkpoint(request, state)
+    services.effects.checkpoint(request, state)
     return False
-
-
-def execute_attempts(
-    flow: AttemptRunner,
-    services: AttemptServices,
-    request: AttemptRequest,
-    state: AttemptState,
-) -> None:
-    """Resume at the first unpaid attempt and run the bounded retry sequence."""
-    first_retry = services.effects.next_attempt(request.round_number)
-    if first_retry > services.max_retries_per_round:
-        raise RuntimeError(  # noqa: TRY003  # tracked: #288
-            f"Round {request.round_number} already persisted "
-            f"{first_retry - 1} implementer attempts, exhausting "
-            f"max_retries_per_round={services.max_retries_per_round}; refusing "
-            "to overwrite or replay paid work."
-        )
-    if first_retry > 1:
-        services.effects.log(
-            f"[resume] round {request.round_number} continues at durable "
-            f"attempt {first_retry}/{services.max_retries_per_round}"
-        )
-    for retry in range(first_retry, services.max_retries_per_round + 1):
-        services.effects.log(f"\n--- attempt {retry}/{services.max_retries_per_round} ---\n")
-        state.retry = retry
-        state.judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
-        state.official_reason = None
-        decision = flow.run_attempt(request, state)
-        if decision is AttemptDecision.FINISH:
-            break
-        if decision is AttemptDecision.OFFICIAL and run_official_gates(services, request, state):
-            break

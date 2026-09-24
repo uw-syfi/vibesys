@@ -30,8 +30,8 @@ if TYPE_CHECKING:
         AttemptRequest,
         PerformanceProjection,
     )
+    from vibesys.loops.agent.policy_ports import RoundPreparationRequest
     from vibesys.loops.agent.policy_profile import ProfileOutcomeInput, ProfilePreparation
-    from vibesys.loops.agent.policy_rounds import RoundPreparationRequest
     from vibesys.schemas import ProfilerSummary
 
 

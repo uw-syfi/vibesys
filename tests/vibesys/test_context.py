@@ -452,7 +452,21 @@ def test_repository_task_exposes_its_actual_reference_path(tmp_path: Path) -> No
     reference = task / "reference"
     reference.mkdir(parents=True)
     (task / "OBJECTIVE.md").write_text("Reduce latency.\n", encoding="utf-8")
-    (task / "vibesys.input.toml").write_text("version = 1\n", encoding="utf-8")
+    (task / "vibesys.input.toml").write_text(
+        """\
+version = 1
+
+[agent]
+domain = "generic"
+
+[accuracy]
+command = ["python", "_evaluator/checker/check.py"]
+
+[benchmark]
+command = ["python", "_evaluator/checker/check.py"]
+""",
+        encoding="utf-8",
+    )
     (reference / "baseline.py").write_text("VALUE = 1\n", encoding="utf-8")
 
     with _create_context(

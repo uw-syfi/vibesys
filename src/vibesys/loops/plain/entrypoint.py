@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from vibesys.context import RunSetup, RunStartHints
 from vibesys.loops.plain.loop import PlainRun
 from vibesys.loops.plain.orchestration import compare_resume, options_from_descriptor
-from vibesys.loops.plain.policy import resume_point
 from vibesys.orchestration.view import RunStatus, RunView
 from vibesys.schemas import Verdict
 from vs_issue_board.api import Issue, IssueStatus
@@ -18,7 +17,18 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.orchestration.runtime import RunContext
+    from vs_issue_board.api import IssueBoard
     from vs_project.api import OrchestrationDescriptor, Project
+
+
+def resume_point(state: PlainLoopCursor, board: IssueBoard) -> tuple[int, str, int | None]:
+    """Revisit an interrupted role only while its issue remains actionable."""
+    issue_id = state.current_issue_id
+    if issue_id is not None and state.phase in {"judge", "implementer"}:
+        issue = board.get(issue_id)
+        if issue is not None and issue.status in (IssueStatus.IN_PROGRESS, IssueStatus.OPEN):
+            return state.round_idx, state.phase, issue_id
+    return state.round_idx, "implementer", None
 
 
 class PlainOrchestrator:

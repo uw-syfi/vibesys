@@ -18,7 +18,6 @@ from vibesys import constants
 from vibesys.domains.registry import resolve_domain
 from vibesys.events import CoreEventType, EventStatus, RoundFinishedData
 from vibesys.loops.agent import issue_board
-from vibesys.loops.agent.attempt import JudgeSkipped, JudgeSkipReason
 from vibesys.loops.agent.hypotheses import (
     adopt_metric_space,
 )
@@ -30,10 +29,12 @@ from vibesys.loops.agent.policy_attempts import (
     AttemptRequest,
     AttemptServices,
     AttemptState,
+    JudgeSkipped,
+    JudgeSkipReason,
     run_official_gates,
 )
 from vibesys.loops.agent.policy_local import _LocalAgentPolicyIO
-from vibesys.loops.agent.policy_rounds import RoundPreparation, RoundPreparationServices
+from vibesys.loops.agent.policy_ports import RoundPreparation, RoundPreparationServices
 from vibesys.loops.agent.policy_scheduler import (
     RoundSelection,
     RoundSelectionRequest,

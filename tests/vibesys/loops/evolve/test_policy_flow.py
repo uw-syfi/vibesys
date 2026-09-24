@@ -10,7 +10,6 @@ from vibesys.loops.evolve.policy_flow import (
     CandidateOutcome,
     EvolveSearch,
     SelectionSettings,
-    parallel_enabled,
 )
 from vibesys.loops.evolve.population import Individual, Population
 from vibesys.loops.evolve.search_policy import SearchSelection
@@ -114,8 +113,6 @@ def test_search_policy_handles_no_parent_and_no_fitness_resume() -> None:
     latest = Individual(id=9, generation=1, parent_id=2, passed=True, commit="latest")
     resumed = EvolveSearch(Population([first, latest]), policy, MetricSpace())
     assert resumed.final_choice() is latest
-    assert parallel_enabled(2, supported=True)
-    assert not parallel_enabled(2, supported=False)
 
 
 def test_failed_candidate_is_persisted_without_registering_search_code() -> None:

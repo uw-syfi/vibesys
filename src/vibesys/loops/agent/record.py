@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from vibesys.evaluators.metrics import Measurement
-from vibesys.loops.agent.attempt import recorded_judge_verdict
 from vibesys.loops.agent.hypotheses import (
     ResolutionEvidence,
     metric_baseline,
@@ -15,6 +14,7 @@ from vibesys.loops.agent.hypotheses import (
     scalar_candidate_retained,
     trusted_perf_provenance,
 )
+from vibesys.loops.agent.policy_attempts import recorded_judge_verdict
 from vibesys.loops.agent.policy_support import (
     _pareto_archive_dominators,
     _provisional_candidate_retained,

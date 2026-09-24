@@ -7,7 +7,7 @@ The issue board supports two backward-compatible layouts:
     scannable when a run grows to hundreds of rounds.
 
 Both surfaces together are this loop's planning artifact, parallel to
-the plain loop's structured :class:`~vibesys.loops.plain.issue_board.IssueBoard`
+the plain loop's structured :class:`~vs_issue_board.api.IssueBoard`
 (``issues.json``).
 """
 

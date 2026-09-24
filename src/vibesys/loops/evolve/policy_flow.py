@@ -161,11 +161,6 @@ class EvolveSearch:
         return not self.population.passed
 
 
-def parallel_enabled(max_parallelism: int, *, supported: bool) -> bool:
-    """Allow concurrent evaluation only when the environment supports it."""
-    return max_parallelism > 1 and supported
-
-
 @dataclass(frozen=True, slots=True)
 class BootstrapAttemptResult:
     """Recorded attempt whose checkpoint and report are still pending."""

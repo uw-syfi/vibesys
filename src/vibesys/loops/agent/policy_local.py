@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from vibesys.evaluators.metrics import Objective
     from vibesys.loops.agent.model import AgentRunState, Hypothesis
     from vibesys.loops.agent.policy_attempts import AttemptRequest, AttemptState
-    from vibesys.loops.agent.policy_rounds import RoundPreparationRequest
+    from vibesys.loops.agent.policy_ports import RoundPreparationRequest
     from vibesys.loops.agent.policy_scheduler import PlanRequest
     from vibesys.loops.agent.policy_support import _ImplementerAttempt
     from vibesys.loops.agent.roles import BuiltInAgentRoles

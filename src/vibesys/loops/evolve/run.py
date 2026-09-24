@@ -29,7 +29,6 @@ from vibesys.loops.evolve.policy_flow import (
     CandidateOutcome,
     EvolveSearch,
     SelectionSettings,
-    parallel_enabled,
 )
 from vibesys.loops.evolve.search_policy import (
     OpenEvolveSearchConfig,
@@ -252,7 +251,7 @@ class EvolveRun:
     def parallel(self) -> bool:
         """Return whether the selected environment can isolate candidates."""
         supported = self.ctx.run_environment_view.supports_parallel_candidate_evaluation
-        return parallel_enabled(self.options.max_parallelism, supported=supported)
+        return self.options.max_parallelism > 1 and supported
 
     @property
     def first_generation(self) -> int:

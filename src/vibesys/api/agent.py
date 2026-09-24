@@ -14,7 +14,7 @@ from vibesys.loops.agent.projection import (
     RoundView,
     agent_projection,
 )
-from vibesys.loops.agent.read_state import agent_run_objectives, is_agent_run_manifest
+from vibesys.loops.agent.state import agent_run_objectives, is_agent_run_manifest
 
 __all__ = [
     "AgentRunProjection",

@@ -5,13 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.loops.agent.policy_ports import ProfileEffect
+from vibesys.loops.agent.policy_ports import (
+    ProfileEffect,
+    RoundPreparation,
+    RoundPreparationRequest,
+)
 from vibesys.loops.agent.policy_profile import (
     ProfileOutcomeInput,
     ProfilePolicy,
     ProfilePreparation,
 )
-from vibesys.loops.agent.policy_rounds import RoundPreparation, RoundPreparationRequest
 from vibesys.loops.agent.policy_support import (
     _FAILED_HYPOTHESIS_OUTCOMES,
     _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW,

@@ -4,18 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from vibesys.loops.agent.attempt import (
-    JudgeReviewed,
-    JudgeSkipped,
-    JudgeSkipReason,
-    attempt_was_reviewed,
-)
 from vibesys.loops.agent.policy_attempts import (
     AttemptDecision,
     AttemptRequest,
     AttemptServices,
     AttemptState,
+    JudgeReviewed,
+    JudgeSkipped,
+    JudgeSkipReason,
     PerformanceProjection,
+    attempt_was_reviewed,
 )
 from vibesys.loops.agent.policy_support import (
     _candidate_evidence_is_fresh,
@@ -34,7 +32,7 @@ from vibesys.schemas import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.loops.agent.policy_rounds import RoundPreparationRequest, RoundPreparationServices
+    from vibesys.loops.agent.policy_ports import RoundPreparationRequest, RoundPreparationServices
 
 
 class MultiAgentRoundPreparation:
@@ -127,7 +125,7 @@ class MultiAgentAttemptPolicy:
         if verdict.verdict is not Verdict.PASS:
             state.feedback = verdict.feedback
             request.active_hypothesis.feedback = state.feedback
-            services.checkpoint(request, state)
+            services.effects.checkpoint(request, state)
         return verdict.verdict
 
     def _approved_candidate(self, request: AttemptRequest, state: AttemptState) -> None:
@@ -146,7 +144,7 @@ class MultiAgentAttemptPolicy:
         hypothesis.gate_approved_candidate_retention_reason = (
             implementation.candidate_retention_reason
         )
-        self.services.checkpoint(request, state)
+        self.services.effects.checkpoint(request, state)
 
     def _approved_perf(self, request: AttemptRequest, state: AttemptState) -> None:
         implementation = cast("ImplementerResponse", state.implementation)
@@ -157,7 +155,7 @@ class MultiAgentAttemptPolicy:
         hypothesis.gate_approved_perf_unit = implementation.perf_unit
         hypothesis.gate_approved_metrics = dict(implementation.metrics)
         hypothesis.gate_approved_evaluation_artifact = implementation.evaluation_artifact
-        self.services.checkpoint(request, state)
+        self.services.effects.checkpoint(request, state)
 
     def _passed_review(self, request: AttemptRequest, state: AttemptState) -> AttemptDecision:
         services = self.services
@@ -168,7 +166,7 @@ class MultiAgentAttemptPolicy:
         if validation_feedback is not None:
             state.feedback = validation_feedback
             request.active_hypothesis.feedback = state.feedback
-            services.checkpoint(request, state)
+            services.effects.checkpoint(request, state)
             return AttemptDecision.RETRY
         self._approved_candidate(request, state)
         candidate_ready = (
@@ -205,12 +203,6 @@ class MultiAgentAttemptPolicy:
         if self._judge(request, state) is Verdict.PASS:
             return self._passed_review(request, state)
         return AttemptDecision.RETRY
-
-    def run_attempt(self, request: AttemptRequest, state: AttemptState) -> AttemptDecision:
-        """Compatibility for callers that still execute a whole attempt."""
-        if not self.implement(request, state):
-            return AttemptDecision.RETRY
-        return self.review(request, state)
 
     def project_performance(
         self, request: AttemptRequest, state: AttemptState

@@ -86,7 +86,6 @@ graph TD
     vibesys.api --> vibesys.sandbox
     vibesys.api.agent --> vibesys.loops.agent
     vibesys.api.agent --> vibesys.loops.agent.projection
-    vibesys.api.agent --> vibesys.loops.agent.read_state
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.evaluators
     vibesys.api.contracts --> vibesys.orchestration.environment
@@ -123,7 +122,6 @@ graph TD
     vibesys.loops.agent.entrypoint --> vibesys.loops.agent.policy_multi
     vibesys.loops.agent.entrypoint --> vibesys.loops.agent.policy_profile
     vibesys.loops.agent.entrypoint --> vibesys.loops.agent.policy_single
-    vibesys.loops.agent.entrypoint --> vibesys.loops.agent.read_state
     vibesys.loops.agent.entrypoint --> vibesys.loops.agent.readmodel
     vibesys.loops.agent.entrypoint --> vibesys.loops.agent.session
     vibesys.loops.agent.entrypoint --> vibesys.orchestration.runtime
@@ -146,7 +144,6 @@ graph TD
     vibesys.loops.agent.policy_single --> vibesys.loops.agent
     vibesys.loops.agent.projection --> vibesys
     vibesys.loops.agent.projection --> vibesys.orchestration.view
-    vibesys.loops.agent.read_state --> vibesys.loops.agent
     vibesys.loops.agent.readmodel --> vibesys
     vibesys.loops.agent.readmodel --> vibesys.loops.agent
     vibesys.loops.agent.readmodel --> vibesys.loops.agent.projection
@@ -334,7 +331,6 @@ graph TD
     vibesys.api --> vs_sandbox
     vibesys.api.agent --> vibesys.loops.agent
     vibesys.api.agent --> vibesys.loops.agent.projection
-    vibesys.api.agent --> vibesys.loops.agent.read_state
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.evaluators
     vibesys.api.contracts --> vibesys.orchestration.environment
@@ -385,7 +381,6 @@ graph TD
     vibesys.loops.agent.entrypoint --> vibesys.loops.agent.policy_multi
     vibesys.loops.agent.entrypoint --> vibesys.loops.agent.policy_profile
     vibesys.loops.agent.entrypoint --> vibesys.loops.agent.policy_single
-    vibesys.loops.agent.entrypoint --> vibesys.loops.agent.read_state
     vibesys.loops.agent.entrypoint --> vibesys.loops.agent.readmodel
     vibesys.loops.agent.entrypoint --> vibesys.loops.agent.session
     vibesys.loops.agent.entrypoint --> vibesys.orchestration.runtime
@@ -411,8 +406,6 @@ graph TD
     vibesys.loops.agent.policy_single --> vs_loop_state
     vibesys.loops.agent.projection --> vibesys
     vibesys.loops.agent.projection --> vibesys.orchestration.view
-    vibesys.loops.agent.read_state --> vibesys.loops.agent
-    vibesys.loops.agent.read_state --> vs_project
     vibesys.loops.agent.readmodel --> vibesys
     vibesys.loops.agent.readmodel --> vibesys.loops.agent
     vibesys.loops.agent.readmodel --> vibesys.loops.agent.projection

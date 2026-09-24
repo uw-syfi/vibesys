@@ -6,6 +6,7 @@ state. Policies consume only typed turn results and explicit effects.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -14,14 +15,40 @@ if TYPE_CHECKING:
     from vibesys.loops.agent.hypothesis_controller import HypothesisEngine
     from vibesys.loops.agent.model import AgentRunState
     from vibesys.loops.agent.policy_attempts import AttemptRequest, AttemptState
-    from vibesys.loops.agent.policy_rounds import RoundPreparationRequest
-    from vibesys.loops.agent.policy_support import _ImplementerAttempt
+    from vibesys.loops.agent.policy_support import _CarryOver, _ImplementerAttempt
     from vibesys.schemas import (
         JudgeResponse,
         PreRoundDecision,
         ProfilerSummary,
         SingleAgentRoundResponse,
     )
+    from vs_loop_state.api import RoundRecord
+
+
+@dataclass(frozen=True)
+class RoundPreparationServices:
+    """Turn port and selection facts for built-in round preparation."""
+
+    turns: AgentTurns
+    profiler_enabled: bool
+
+
+@dataclass(frozen=True)
+class RoundPreparationRequest:
+    """Round evidence available before the designer chooses a new hypothesis."""
+
+    round_number: int
+    records: list[RoundRecord]
+    carry: _CarryOver
+    previous_single_response: SingleAgentRoundResponse | None
+
+
+class RoundPreparation(Protocol):
+    """Select the evidence given to the designer before a new hypothesis."""
+
+    def profiler_summary(self, request: RoundPreparationRequest) -> ProfilerSummary | None:
+        """Return fresh or carried profiler evidence for the round."""
+        ...
 
 
 class AgentTurns(Protocol):
@@ -96,10 +123,6 @@ class RoundEffects(Protocol):
         candidate_commit: str | None,
     ) -> tuple[str | None, FrameworkBenchmarkOutcome, bool]:
         """Run official gates and return feedback, benchmark, accuracy status."""
-        ...
-
-    def next_attempt(self, round_number: int) -> int:
-        """Return the next unpaid attempt from the durable issue board."""
         ...
 
     def log(self, message: str, /) -> None:

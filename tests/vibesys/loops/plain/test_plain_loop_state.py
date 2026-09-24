@@ -1,6 +1,6 @@
 """Tests for plain-loop resume decisions over typed state."""
 
-from vibesys.loops.plain.policy import resume_point
+from vibesys.loops.plain.entrypoint import resume_point
 from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
 from vs_loop_state.api import PlainLoopCursor
 

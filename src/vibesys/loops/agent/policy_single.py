@@ -4,19 +4,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.loops.agent.attempt import JudgeReviewed
 from vibesys.loops.agent.policy_attempts import (
     AttemptDecision,
     AttemptRequest,
     AttemptServices,
     AttemptState,
+    JudgeReviewed,
     PerformanceProjection,
 )
 from vibesys.loops.agent.policy_support import _profiler_summary_from_single_agent
 from vibesys.schemas import ProfilerSummary, Verdict
 
 if TYPE_CHECKING:
-    from vibesys.loops.agent.policy_rounds import RoundPreparationRequest
+    from vibesys.loops.agent.policy_ports import RoundPreparationRequest
     from vs_loop_state.api import PerfProvenance
 
 
@@ -46,7 +46,7 @@ class SingleAgentAttemptPolicy:
         if response.verdict is not Verdict.PASS:
             state.feedback = response.feedback
             request.active_hypothesis.feedback = state.feedback
-            services.checkpoint(request, state)
+            services.effects.checkpoint(request, state)
             return AttemptDecision.RETRY
         reason = services.official_reason(request, candidate_ready=True)
         if reason is None:

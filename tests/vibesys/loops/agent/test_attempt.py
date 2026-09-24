@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 
-from vibesys.loops.agent.attempt import (
+from vibesys.loops.agent.policy_attempts import (
     JudgeReviewed,
     JudgeSkipped,
     JudgeSkipReason,
