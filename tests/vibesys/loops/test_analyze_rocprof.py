@@ -14,15 +14,29 @@ the way rocprofv3 itself writes output.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import csv
+import io
 import sqlite3
+import string
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+from resources.profilers.rocprof import analyze_rocprof
 from resources.profilers.rocprof.analyze_rocprof import (
+    _CORR_COLS,
+    _END_COLS,
+    _KERNEL_NAME_COLS,
+    _START_COLS,
     DiscoveredReport,
     _classify_family,
+    _gaps_for_key,
+    _get,
     _normalize_direction,
     _short_name,
+    _union_duration,
     cmd_cpu_overhead,
     cmd_families,
     cmd_files,
@@ -34,6 +48,16 @@ from resources.profilers.rocprof.analyze_rocprof import (
     cmd_query,
     cmd_summary,
     discover,
+)
+from tests.vibesys.loops.rocprof_strategies import (
+    FAST,
+    FEWER,
+    case_variant,
+    column_order,
+    huge_kernel_name,
+    intervals,
+    permuted_csv,
+    wrap_with_namespace_and_template_noise,
 )
 
 if TYPE_CHECKING:
@@ -579,3 +603,205 @@ def test_discovered_report_defaults_to_empty_lists(tmp_path: Path) -> None:
     disc = DiscoveredReport(root=tmp_path)
     assert disc.kernel_trace == []
     assert disc.db_files == []
+
+
+# ---------------------------------------------------------------------------
+# Property: family classification is invariant to display-shortening and
+# namespace/template noise
+# ---------------------------------------------------------------------------
+
+_MARKER_FAMILY: dict[str, str] = {
+    "aiter": "AITER (asm/ck)",
+    "ck::": "Composable Kernel (ck::/ck_tile)",
+    "ck_tile::": "Composable Kernel (ck::/ck_tile)",
+    "cijk_": "hipBLASLt / Tensile (Cijk_*)",
+    "rocblas_": "rocBLAS",
+    "miopen": "MIOpen",
+    "triton_": "Triton (JIT)",
+    "at::native": "PyTorch native (at::native)",
+    "rccl": "RCCL",
+    "paged_attention": "vLLM/SGLang custom ops",
+    "rotary_embedding": "vLLM/SGLang custom ops",
+}
+
+
+@given(marker=st.sampled_from(tuple(_MARKER_FAMILY)), data=st.data())
+@FAST
+def test_classify_family_is_invariant_to_short_name_and_namespace_noise(marker, data):  # noqa: ANN001, ANN201  # tracked: #288
+    name = data.draw(wrap_with_namespace_and_template_noise(marker))
+    expected = _MARKER_FAMILY[marker]
+
+    family_from_full = _classify_family(name)
+    family_from_shortened = _classify_family(_short_name(name))
+
+    assert family_from_full == expected
+    assert family_from_shortened == family_from_full
+    assert family_from_full != "other"
+
+
+# ---------------------------------------------------------------------------
+# Property: CSV column discovery/parsing survives column order, casing, and
+# unrecognized columns; a header-only CSV is handled cleanly.
+# ---------------------------------------------------------------------------
+
+_KNOWN_COLUMN_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("kernel_name_val", _KERNEL_NAME_COLS),
+    ("1234.5", _START_COLS),
+    ("6789.5", _END_COLS),
+    ("corr_42", _CORR_COLS),
+)
+
+
+@given(data=st.data())
+@FAST
+def test_get_resolves_known_aliases_under_permutation_case_and_unknown_columns(data):  # noqa: ANN001, ANN201  # tracked: #288
+    names = []
+    values = []
+    for value, aliases in _KNOWN_COLUMN_SPECS:
+        alias = data.draw(case_variant(data.draw(st.sampled_from(aliases))))
+        names.append(alias)
+        values.append(value)
+    # An extra, unrecognized column mixed in must not interfere.
+    names.append("Some_Unknown_Column")
+    values.append("noise")
+
+    order = data.draw(column_order(len(names)))
+    csv_text = permuted_csv(names, [values], order)
+    row = next(csv.DictReader(io.StringIO(csv_text)))
+
+    for expected, aliases in _KNOWN_COLUMN_SPECS:
+        assert _get(row, aliases) == expected
+
+
+def test_cmd_kernels_handles_a_header_only_kernel_trace_cleanly(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+    d = _process_dir(tmp_path)
+    (d / "out_kernel_trace.csv").write_text("Kernel_Name,Start_Timestamp,End_Timestamp\n")
+
+    cmd_kernels(_ns(str(tmp_path), top=10))
+    out = capsys.readouterr().out
+
+    assert "no kernel data found" in out
+
+
+# ---------------------------------------------------------------------------
+# Property: per-PID directory discovery works at any nesting depth
+# ---------------------------------------------------------------------------
+
+_DIR_NAME = st.text(alphabet=string.ascii_letters + string.digits + "_-", min_size=1, max_size=12)
+
+
+@given(parts=st.lists(_DIR_NAME, min_size=0, max_size=3))
+@FEWER
+def test_discover_finds_trace_files_under_arbitrary_nesting_depth(tmp_path_factory, parts):  # noqa: ANN001, ANN201  # tracked: #288
+    root = tmp_path_factory.mktemp("nesting")
+    d = root.joinpath(*parts) if parts else root
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "out_kernel_trace.csv").write_text("Kernel_Name,Start_Timestamp,End_Timestamp\nk,0,10\n")
+    (d / "out_hip_api_trace.csv").write_text(
+        "Name,Start_Timestamp,End_Timestamp\nhipLaunchKernel,0,1\n"
+    )
+
+    disc = discover(str(root))
+
+    assert len(disc.kernel_trace) == 1
+    assert disc.kernel_trace[0].parent == d
+    assert len(disc.hip_api_trace) == 1
+    assert disc.hip_api_trace[0].parent == d
+
+
+# ---------------------------------------------------------------------------
+# Property: time-window busy/idle accounting never double-counts and never
+# goes negative
+# ---------------------------------------------------------------------------
+
+
+def test_union_duration_merges_overlapping_intervals_without_double_counting():  # noqa: ANN201  # tracked: #288
+    events = [
+        {"start_ns": 0.0, "end_ns": 100.0},
+        {"start_ns": 50.0, "end_ns": 150.0},  # overlaps
+        {"start_ns": 150.0, "end_ns": 200.0},  # touches
+    ]
+    assert _union_duration(events) == 200.0
+
+
+@given(ivals=intervals())
+@FAST
+def test_union_duration_never_exceeds_the_window(ivals):  # noqa: ANN001, ANN201  # tracked: #288
+    events = [{"start_ns": float(s), "end_ns": float(s + d)} for s, d in ivals]
+    busy = _union_duration(events)
+
+    assert busy >= 0.0
+    if not events:
+        assert busy == 0.0
+        return
+    window = max(e["end_ns"] for e in events) - min(e["start_ns"] for e in events)
+    assert busy <= window
+
+
+@given(ivals=intervals())
+@FAST
+def test_gaps_for_key_busy_plus_all_gaps_equals_window_with_no_negative_gap(ivals):  # noqa: ANN001, ANN201  # tracked: #288
+    # Force every positive gap to be reported (no threshold filtering), so
+    # busy + idle can be checked against the window exactly using only real
+    # merge/gap code, not a reimplementation of it. Set directly on the module
+    # (not via the function-scoped `monkeypatch` fixture, which hypothesis
+    # flags as unsafe to reuse across `@given` examples) and restore it
+    # unconditionally afterwards.
+    original_threshold = analyze_rocprof._IDLE_GAP_THRESHOLD_NS  # noqa: SLF001  # tracked: #288
+    analyze_rocprof._IDLE_GAP_THRESHOLD_NS = -1.0  # noqa: SLF001  # tracked: #288
+    try:
+        evs = [(float(s), float(s + d), f"k{i}") for i, (s, d) in enumerate(ivals)]
+        busy_ns, gaps = _gaps_for_key(("agent0", "queue0"), evs)
+    finally:
+        analyze_rocprof._IDLE_GAP_THRESHOLD_NS = original_threshold  # noqa: SLF001  # tracked: #288
+
+    assert all(gap[3] >= 0 for gap in gaps)
+    if len(evs) < 2:
+        return
+    window = max(e for _s, e, _n in evs) - min(s for s, _e, _n in evs)
+    idle_ns = sum(gap[3] for gap in gaps)
+    assert busy_ns >= 0.0
+    assert busy_ns <= window
+    assert busy_ns + idle_ns == pytest.approx(window)
+
+
+def _write_kernel_trace_csv(path: Path, header: list[str], rows: list[list[object]]) -> None:
+    with path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        writer.writerows(rows)
+
+
+@given(name=huge_kernel_name())
+@FEWER
+def test_cmd_kernels_and_idle_gaps_bound_line_width_for_huge_kernel_names(tmp_path_factory, name):  # noqa: ANN001, ANN201  # tracked: #288
+    root = tmp_path_factory.mktemp("huge-name")
+    d = _process_dir(root)
+    _write_kernel_trace_csv(
+        d / "out_kernel_trace.csv",
+        [
+            "Kernel_Name",
+            "Agent_Id",
+            "Queue_Id",
+            "Correlation_Id",
+            "Start_Timestamp",
+            "End_Timestamp",
+            "Pid",
+        ],
+        [
+            [name, 0, 0, 1, 0, 1000, 4242],
+            [name, 0, 0, 2, 1_000_000, 1_001_000, 4242],
+        ],
+    )
+
+    # Capture stdout manually (not via the function-scoped `capsys` fixture,
+    # which hypothesis flags as unsafe to reuse across `@given` examples).
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_kernels(_ns(str(root), top=10))
+        cmd_idle_gaps(_ns(str(root), top=10))
+    out = buf.getvalue()
+
+    assert out
+    for line in out.splitlines():
+        assert len(line) <= 200
