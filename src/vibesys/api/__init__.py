@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import warnings
 from importlib import import_module
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vibesys import boot_trace
 from vibesys.agent_spec_config import agent_spec_from_config
@@ -55,18 +55,6 @@ from vibesys.events import (
     ToolCallData,
     ToolResultData,
 )
-
-# Deprecated public imports retained for existing callers; omitted from __all__.
-from vibesys.orchestration.contracts import (
-    ExecutableOrchestration,
-    OrchestrationRegistry,
-)
-from vibesys.orchestration.contracts import (
-    Orchestration as Orchestration,
-)
-from vibesys.orchestration.contracts import (
-    RunDescription as RunDescription,
-)
 from vibesys.profilers import ProfilerKind
 from vibesys.render.format import format_status_prefix
 from vibesys.render.run_log import format_framework_event
@@ -78,14 +66,20 @@ from vibesys.runtime import AgentDefinition, AgentHandle, VibeSysRuntime
 from vs_agent.api import AgentBackend, AgentSpec
 from vs_sandbox.api import HostResource, HostResourceAccess
 
-
-def built_in_orchestrations() -> OrchestrationRegistry:
-    """Construct the built-in registry only when a caller selects it."""
-    from vibesys.loops.registry import (  # noqa: PLC0415
-        built_in_orchestrations as create_builtin_registry,
+if TYPE_CHECKING:
+    from vibesys.loops.registry import built_in_orchestrations as built_in_orchestrations
+    from vibesys.orchestration.contracts import (
+        ExecutableOrchestration as ExecutableOrchestration,
     )
-
-    return create_builtin_registry()
+    from vibesys.orchestration.contracts import (
+        Orchestration as Orchestration,
+    )
+    from vibesys.orchestration.contracts import (
+        OrchestrationRegistry as OrchestrationRegistry,
+    )
+    from vibesys.orchestration.contracts import (
+        RunDescription as RunDescription,
+    )
 
 
 __all__ = [
@@ -105,7 +99,6 @@ __all__ = [
     "CoreEventType",
     "DomainName",
     "EventStatus",
-    "ExecutableOrchestration",
     "HostResource",
     "HostResourceAccess",
     "HypothesisRoundView",
@@ -114,7 +107,6 @@ __all__ = [
     "MetricSpace",
     "Objective",
     "OrchestrationDescriptor",
-    "OrchestrationRegistry",
     "OrchestrationRunRequest",
     "PerfDeltaReason",
     "ProfilerKind",
@@ -139,7 +131,6 @@ __all__ = [
     "agent_run_objectives",
     "agent_spec_from_config",
     "boot_trace",
-    "built_in_orchestrations",
     "create_session",
     "format_framework_event",
     "format_status_prefix",
@@ -161,6 +152,9 @@ _AGENT_COMPAT_EXPORTS = frozenset(
         "is_agent_run_manifest",
     }
 )
+_ORCHESTRATION_COMPAT_EXPORTS = frozenset(
+    {"ExecutableOrchestration", "Orchestration", "OrchestrationRegistry", "RunDescription"}
+)
 
 
 def __getattr__(name: str) -> Any:  # noqa: ANN401
@@ -172,6 +166,21 @@ def __getattr__(name: str) -> Any:  # noqa: ANN401
             stacklevel=2,
         )
         return getattr(import_module("vibesys.loops.legacy_request"), name)
+    if name in _ORCHESTRATION_COMPAT_EXPORTS:
+        warnings.warn(
+            f"vibesys.api.{name} is deprecated; import it from vibesys.orchestration.contracts",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return getattr(import_module("vibesys.orchestration.contracts"), name)
+    if name == "built_in_orchestrations":
+        warnings.warn(
+            "vibesys.api.built_in_orchestrations is deprecated; "
+            "import it from vibesys.loops.registry",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return import_module("vibesys.loops.registry").built_in_orchestrations
     if name not in _AGENT_COMPAT_EXPORTS:
         raise AttributeError(name)
     warnings.warn(

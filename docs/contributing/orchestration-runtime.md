@@ -49,13 +49,13 @@ from vibesys.api import (
     AgentSpec,
     Config,
     OrchestrationDescriptor,
-    OrchestrationRegistry,
     ProfilerKind,
     OrchestrationRunRequest,
     VibeSysRuntime,
     create_session,
 )
 from vibesys.api.request import load_input_bundle
+from vibesys.orchestration.contracts import OrchestrationRegistry
 
 
 class ThreeAgentRounds:
@@ -176,8 +176,9 @@ authentication. Custom resume is rejected until an orchestration-owned
 checkpoint contract exists. History currently has a generic view for
 execute-only policies. The registry currently forwards optional `describe`,
 `view`, `project_committed`, `prepare`, and `resume_projection` methods if a
-policy supplies them. These are provisional internal lifecycle hooks, not the
-stable custom policy contract. The former public `Orchestration` and
-`RunDescription` imports remain available for compatibility but are deprecated.
+policy supplies them. These are provisional internal lifecycle hooks.
+`vibesys.api` retains deprecated compatibility imports for the orchestration
+contract and built-in registry; internal contributors should import from
+`vibesys.orchestration.contracts` and `vibesys.loops.registry` directly.
 The broader agent spawning, sandbox, workspace, and remote runtime design is
 tracked in [RFC #937](https://github.com/uw-syfi/vibesys/issues/937).

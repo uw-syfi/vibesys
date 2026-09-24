@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from importlib import import_module
 
 import pytest
 
 import vibesys.api as generic_api
 from vibesys.api import agent as agent_api
+from vibesys.orchestration import contracts as orchestration_contracts
 
 
 def test_generic_api_import_does_not_load_builtin_policies() -> None:
@@ -64,3 +66,21 @@ def test_deprecated_request_imports_preserve_identity() -> None:
         with pytest.warns(DeprecationWarning, match="deprecated for new policies"):
             assert getattr(module, "RunRequest") is RunRequest  # noqa: B009
         assert {"LoopKind", "RunRequest"} <= set(module.__all__)
+
+
+@pytest.mark.parametrize(
+    "name", ["ExecutableOrchestration", "Orchestration", "OrchestrationRegistry", "RunDescription"]
+)
+def test_internal_orchestration_imports_remain_deprecated_compatibility(name: str) -> None:
+    with pytest.warns(DeprecationWarning, match="vibesys.orchestration.contracts"):
+        assert getattr(generic_api, name) is getattr(orchestration_contracts, name)
+    assert name not in generic_api.__all__
+
+
+def test_builtin_registry_import_remains_deprecated_compatibility() -> None:
+    with pytest.warns(DeprecationWarning, match="vibesys.loops.registry"):
+        assert (
+            generic_api.built_in_orchestrations
+            is import_module("vibesys.loops.registry").built_in_orchestrations
+        )
+    assert "built_in_orchestrations" not in generic_api.__all__
