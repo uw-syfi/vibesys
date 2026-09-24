@@ -941,6 +941,73 @@ def test_classify_family_never_matches_templated_names_via_the_triton_fallback(n
 
 
 # ---------------------------------------------------------------------------
+# Regression: a family marker matched anywhere in the name via plain
+# substring search, so it could land inside an unrelated identifier that
+# merely happens to contain it. `topk_kernel` (a "PyTorch native" marker) is
+# a strict substring of the Triton-JIT kernel name `atopk_kernel_kernel`
+# (hypothesis found this via triton_jit_style_kernel_name -- a word can
+# itself contain "topk_kernel", then the "_kernel" suffix doubles up), so it
+# was misclassified as "PyTorch native (at::native)" instead of falling
+# through to the `_looks_like_triton_kernel` fallback. Confirmed by
+# reverting `_classify_family` to `any(s in lname for s in subs)`: both
+# assertions below fail on that code.
+# ---------------------------------------------------------------------------
+
+
+def test_classify_family_does_not_misattribute_interior_substring_collisions() -> None:
+    assert _classify_family("atopk_kernel_kernel") == "Triton (JIT)"
+    assert _classify_family("mytopk_kernel") == "Triton (JIT)"
+    # "rms_norm" (a "serving-engine custom ops" marker) as a strict interior
+    # substring of an unrelated identifier must not trigger that family
+    # either.
+    assert _classify_family("nonrms_norm_x") == "other"
+
+
+@given(
+    family_marker=st.sampled_from(
+        [
+            (family, sub)
+            for family, subs in analyze_rocprof._FAMILY_RULES  # noqa: SLF001
+            for sub in subs
+        ]
+    ),
+    glue_prefix=st.text(alphabet=string.ascii_lowercase, min_size=1, max_size=6),
+)
+@FAST
+def test_classify_family_requires_an_identifier_boundary_before_the_marker(
+    family_marker: tuple[str, str], glue_prefix: str
+) -> None:
+    """A family marker glued directly onto preceding letters (no token
+    boundary -- an interior substring of a larger identifier) must not
+    trigger that family, while the identical marker at a token boundary
+    (string start, or preceded by ``_``) still does.
+    """
+    family, marker = family_marker
+    interior = glue_prefix + marker  # letters directly before -- no boundary
+    at_start = marker  # string start is a valid boundary
+    after_underscore = "x_" + marker  # "_" is a valid snake_case token boundary
+
+    # Skip constructions where a *different* marker (same family or another
+    # one) also happens to appear at a valid boundary inside `marker` itself
+    # -- e.g. "fused_add_rms_norm" contains the same family's "rms_norm" at
+    # a "_"-boundary, so gluing a letter onto "fused_add_rms_norm" alone
+    # would not block the family match. Not what this property checks;
+    # test_classify_family_is_invariant_to_short_name_and_namespace_noise
+    # covers cross-family collisions.
+    other_markers = {
+        sub
+        for _fam, subs in analyze_rocprof._FAMILY_RULES  # noqa: SLF001
+        for sub in subs
+    } - {marker}
+    assume(not any(m in interior.lower() for m in other_markers))
+    assume(not any(m in after_underscore.lower() for m in other_markers))
+
+    assert _classify_family(interior) != family
+    assert _classify_family(at_start) == family
+    assert _classify_family(after_underscore) == family
+
+
+# ---------------------------------------------------------------------------
 # Regression: memory_copy_trace.csv with no Bytes/Size column used to print
 # a misleading "Total memory copy: 0.00 GB" / "0.0GB/s" instead of saying so
 #
