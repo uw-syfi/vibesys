@@ -1,0 +1,50 @@
+{
+  "individuals": [
+    {
+      "commit": "<SHA>",
+      "feedback": "",
+      "generation": 0,
+      "id": 1,
+      "inspiration_ids": [],
+      "metrics": {},
+      "parent_id": null,
+      "passed": true,
+      "perf_metric": 10.0,
+      "perf_unit": "tok/s",
+      "policy_parent_id": null,
+      "policy_target_island": null,
+      "summary": "bootstrap seed"
+    },
+    {
+      "commit": null,
+      "feedback": "regressed accuracy under load",
+      "generation": 1,
+      "id": 2,
+      "inspiration_ids": [],
+      "metrics": {},
+      "parent_id": 1,
+      "passed": false,
+      "perf_metric": null,
+      "perf_unit": null,
+      "policy_parent_id": null,
+      "policy_target_island": null,
+      "summary": "gen-1 child: broken"
+    },
+    {
+      "commit": "<SHA>",
+      "feedback": "",
+      "generation": 2,
+      "id": 3,
+      "inspiration_ids": [],
+      "metrics": {},
+      "parent_id": 1,
+      "passed": true,
+      "perf_metric": 12.0,
+      "perf_unit": "tok/s",
+      "policy_parent_id": null,
+      "policy_target_island": null,
+      "summary": "gen-2 child: repaired"
+    }
+  ],
+  "version": 1
+}
