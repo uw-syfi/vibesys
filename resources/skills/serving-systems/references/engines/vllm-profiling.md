@@ -60,6 +60,21 @@ stop_signal = "SIGINT"
 grace_s = 300
 ```
 
+**Picking `$PORT`: don't capture a helper command's stdout inside
+`command`.** A pattern like `PORT=$(python3 -c "...")` is unsafe here: the
+profiler injects into child processes, and something in that process tree
+can print a stray line to stdout (e.g. a capability warning) that lands
+inside `$PORT` via the substitution and gets word-split into `vllm serve`'s
+argv, producing an unrelated `unrecognized arguments` failure with no data
+captured. Prefer a fixed port chosen and checked in `ready_command`, or a
+bash builtin that spawns no profiled child, e.g.:
+
+```bash
+for ((p=8100; p<9000; p++)); do
+  (exec 3<>/dev/tcp/127.0.0.1/$p) 2>/dev/null || { PORT=$p; break; }
+done
+```
+
 **Verified:** a graceful `SIGINT` to the server process group does make
 rocprofv3 flush a complete, non-empty trace (confirmed: a full-size
 `kernel_trace.csv` matching the offline-script path's output), in both
@@ -78,6 +93,16 @@ disk) surfaces the data correctly. Still prefer the offline single-process
 path when the objective is engine-internal (no HTTP path involved): fewer
 moving parts, and its capture completes with a clean exit rather than
 needing escalation.
+
+**Analysis defaults to the load window, not the whole capture.** Timeline
+analyses exclude server startup (weight load, warmup/profile runs, KV init)
+by default (`window='load'`); pass `window='all'` to see startup too. There
+is no need to run two full captures at different prompt counts and diff them
+to isolate steady state: one capture is enough. A kernel that appears a
+small, fixed number of times regardless of request count (e.g. a
+prefill-path attention kernel seen 27 times during the engine's
+warmup/profile run) is a startup artifact, not a steady-state serving cost:
+the load window already excludes it.
 
 ## torch.profiler interface: check the installed build
 
@@ -137,6 +162,17 @@ Profile the worker process that actually issues kernels, not the
 API-server/driver process: a driver-only capture reads as idle by
 construction, which is "wrong process," not "no bottleneck." For
 tensor-parallel serving, capture each worker process independently.
+
+## Before writing conclusions
+
+Don't estimate a kernel's bandwidth/compute utilization from assumed model
+geometry, and don't recommend a kernel-library (e.g. AITER/CK) check without
+having run it. Your platform's directory under `platforms/` holds the
+measurement discipline this feeds into: a counters-to-verdict guide (e.g.
+ROCm's `counter-triage.md`), a kernel-library engagement proof (e.g. ROCm's
+`aiter-engagement.md`), and an A/B protocol for before/after claims (e.g.
+ROCm's `measurement-protocol.md`). Read it before the family/kernel
+breakdown turns into a written number.
 
 ## See also
 
