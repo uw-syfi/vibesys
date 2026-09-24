@@ -1,0 +1,249 @@
+"""Tests for the rocprof ATT capture planning and hotspot analysis toolkit.
+
+The ``resources.profilers.rocprof.att`` import below resolves at runtime
+because pytest's ``pythonpath = ["."]`` setting (pyproject.toml) puts the repo
+root on ``sys.path``, and statically because the repo root is listed in
+``[tool.ty.environment] root`` -- the same setup ``test_profiler.py``
+documents for the nsys toolkit.
+
+``fixtures/rocprof/att/ui_output_agent_123_dispatch_1/code.json`` is a small,
+hand-built rocprofv3 ATT decoder output shaped to the documented
+``[asm, _, pc_index, source_loc, _, pc_addr, exec_count, total_cycles,
+stall_cycles, issue_cycles]`` row schema (real MI210 captures were still
+being collected while this toolkit was written).
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import io
+import json
+from pathlib import Path
+
+import pytest
+from resources.profilers.rocprof.att import (
+    STALL_CATEGORIES,
+    AttOutputNotFoundError,
+    Instruction,
+    _find_code_json,
+    _instruction_from_row,
+    _stall_category,
+    aggregate_by_source,
+    cmd_hotspots,
+    cmd_plan,
+    load_instructions,
+    stall_category_totals,
+)
+
+_FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"
+
+
+def _run(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
+    ns = argparse.Namespace(**kwargs)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        fn(ns)
+    return buf.getvalue()
+
+
+def test_stall_category_classifies_common_isa_mnemonics():  # noqa: ANN201  # tracked: #288
+    assert _stall_category("buffer_load_dwordx4 v[4:7], v0, s[8:11], 0 offen") == "VMEM-load"
+    assert _stall_category("s_waitcnt vmcnt(0)") == "VMEM-wait"
+    assert _stall_category("s_waitcnt lgkmcnt(0)") == "LDS/SMEM-wait"
+    assert _stall_category("ds_write_b128 v0, v[8:11]") == "LDS"
+    assert _stall_category("v_mfma_f32_16x16x16_f16 a[0:3], v[0:1], v[2:3], a[0:3]") == "MFMA/FMA"
+    assert _stall_category("s_load_dwordx4 s[4:7], s[0:1], 0x0") == "SMEM"
+    assert _stall_category("v_add_f32 v0, v1, v2") == "other"
+
+
+def test_stall_categories_cover_every_declared_category_once_reachable():  # noqa: ANN201  # tracked: #288
+    categories = {c for _, c in STALL_CATEGORIES}
+    assert {
+        "barrier",
+        "VMEM-wait",
+        "VMEM-load",
+        "VMEM-store",
+        "LDS",
+        "SMEM",
+        "MFMA/FMA",
+    } <= categories
+
+
+def test_instruction_from_row_skips_rows_with_zero_or_missing_pc_index():  # noqa: ANN201  # tracked: #288
+    assert _instruction_from_row(["s_endpgm", "", 0, "", "", 1, 1, 10, 0, 10]) is None
+    assert _instruction_from_row(["short", "", 1]) is None
+
+
+def test_instruction_from_row_parses_a_full_row():  # noqa: ANN201  # tracked: #288
+    inst = _instruction_from_row(
+        ["buffer_load_dwordx4 v0", "", 3, "/k.py:38", "", 4108, 200, 9000, 8500, 500]
+    )
+    assert inst is not None
+    assert inst.pc_index == 3  # tracked: #288
+    assert inst.source_loc == "/k.py:38"
+    assert inst.stall_cycles == 8500  # tracked: #288
+    assert inst.category == "VMEM-load"
+    assert inst.stall_pct == pytest.approx(8500 / 9000 * 100)
+
+
+def test_instruction_stall_pct_is_zero_without_total_cycles():  # noqa: ANN201  # tracked: #288
+    inst = Instruction(
+        asm="nop",
+        pc_index=1,
+        source_loc="",
+        pc_addr=0,
+        exec_count=0,
+        total_cycles=0,
+        stall_cycles=0,
+        issue_cycles=0,
+    )
+    assert inst.stall_pct == 0.0
+
+
+def test_find_code_json_prefers_a_direct_file():  # noqa: ANN201  # tracked: #288
+    path = _find_code_json(_FIXTURES / "att" / "ui_output_agent_123_dispatch_1")
+    assert path.name == "code.json"
+
+
+def test_find_code_json_descends_one_level_into_a_dispatch_dir():  # noqa: ANN201  # tracked: #288
+    path = _find_code_json(_FIXTURES / "att")
+    assert path.parent.name == "ui_output_agent_123_dispatch_1"
+
+
+def test_find_code_json_raises_a_clear_error_when_absent(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    with pytest.raises(AttOutputNotFoundError, match=r"no code\.json found"):
+        _find_code_json(tmp_path)
+
+
+def test_find_code_json_raises_when_multiple_dispatch_dirs_are_ambiguous(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    for name in ("ui_output_agent_1_dispatch_1", "ui_output_agent_1_dispatch_2"):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "code.json").write_text("{}")
+    with pytest.raises(AttOutputNotFoundError, match="multiple dispatch dirs"):
+        _find_code_json(tmp_path)
+
+
+def test_load_instructions_parses_the_fixture():  # noqa: ANN201  # tracked: #288
+    instructions = load_instructions(_FIXTURES / "att" / "ui_output_agent_123_dispatch_1")
+    # The s_endpgm row (pc_index=0) is dropped.
+    assert len(instructions) == 5  # tracked: #288
+    assert {i.category for i in instructions} == {
+        "SMEM",
+        "MFMA/FMA",
+        "VMEM-load",
+        "VMEM-wait",
+        "LDS",
+    }
+
+
+def test_load_instructions_raises_on_malformed_json(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    (tmp_path / "code.json").write_text("{not valid json")
+    with pytest.raises(AttOutputNotFoundError, match="could not parse"):
+        load_instructions(tmp_path)
+
+
+def test_load_instructions_raises_without_a_code_list(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    (tmp_path / "code.json").write_text(json.dumps({"not_code": []}))
+    with pytest.raises(AttOutputNotFoundError, match="expected top-level 'code' list"):
+        load_instructions(tmp_path)
+
+
+def test_aggregate_by_source_sums_stall_cycles_per_line():  # noqa: ANN201  # tracked: #288
+    instructions = load_instructions(_FIXTURES / "att" / "ui_output_agent_123_dispatch_1")
+    hotspots = aggregate_by_source(instructions)
+    assert hotspots[0].source_loc == "/kernels/attn.py:38"
+    assert hotspots[0].total_stall_cycles == 8500  # tracked: #288
+    assert hotspots[0].dominant_category == "VMEM-load"
+
+
+def test_stall_category_totals_ranks_vmem_load_and_wait_highest():  # noqa: ANN201  # tracked: #288
+    instructions = load_instructions(_FIXTURES / "att" / "ui_output_agent_123_dispatch_1")
+    totals = dict(stall_category_totals(instructions))
+    assert totals["VMEM-load"] == 8500  # tracked: #288
+    assert totals["VMEM-wait"] == 8400  # tracked: #288
+    assert list(dict(stall_category_totals(instructions))) == sorted(
+        totals, key=totals.get, reverse=True
+    )
+
+
+def test_cmd_hotspots_prints_category_totals_and_top_instructions():  # noqa: ANN201  # tracked: #288
+    out = _run(cmd_hotspots, dispatch_dir=str(_FIXTURES / "att"), top=5)
+    assert "Stall category totals" in out
+    assert "VMEM-load" in out
+    assert "Top 5 instructions by stall cycles" in out
+    assert "/kernels/attn.py:38" in out
+    assert "Top 5 source lines by aggregated stall cycles" in out
+
+
+def test_cmd_hotspots_reports_a_clean_error_for_a_missing_dispatch_dir(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    missing = tmp_path / "does_not_exist"
+    with pytest.raises(SystemExit, match="not a directory"):
+        _run(cmd_hotspots, dispatch_dir=str(missing), top=5)
+
+
+def test_cmd_hotspots_reports_a_clean_error_when_decoder_output_is_absent(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    with pytest.raises(SystemExit, match=r"no code\.json found"):
+        _run(cmd_hotspots, dispatch_dir=str(tmp_path), top=5)
+
+
+def test_cmd_plan_prints_a_yaml_job_and_invocation():  # noqa: ANN201  # tracked: #288
+    out = _run(
+        cmd_plan,
+        arch="gfx90a",
+        kernel="flash_attn.*",
+        target_cu=1,
+        buffer_size="0x6000000",
+        se_mask="0xf",
+        simd_select="0xf",
+        iteration_range="[1, [2-4]]",
+        out_dir="rocprof_att",
+        yaml_path="rocprof_att.yaml",
+        write=False,
+        command=["--", "python", "bench.py"],
+    )
+    assert "kernel_include_regex: 'flash_attn.*'" in out
+    assert "advanced_thread_trace: true" in out
+    assert "att_target_cu: 1" in out
+    assert "rocprofv3 -i rocprof_att.yaml -- python bench.py" in out
+    assert "-- -- python bench.py" not in out  # the leading -- must not be duplicated
+    assert "rocprof-trace-decoder" in out
+
+
+def test_cmd_plan_without_a_command_prints_a_placeholder():  # noqa: ANN201  # tracked: #288
+    out = _run(
+        cmd_plan,
+        arch="gfx90a",
+        kernel="flash_attn.*",
+        target_cu=1,
+        buffer_size="0x6000000",
+        se_mask="0xf",
+        simd_select="0xf",
+        iteration_range="[1, [2-4]]",
+        out_dir="rocprof_att",
+        yaml_path="rocprof_att.yaml",
+        write=False,
+        command=[],
+    )
+    assert "<your_command_and_args>" in out
+
+
+def test_cmd_plan_can_write_the_yaml_to_disk(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+    yaml_path = tmp_path / "job.yaml"
+    _run(
+        cmd_plan,
+        arch="gfx942",
+        kernel="gemm.*",
+        target_cu=2,
+        buffer_size="0xC000000",
+        se_mask="0xf",
+        simd_select="0xf",
+        iteration_range="[1, [2-4]]",
+        out_dir=str(tmp_path / "out"),
+        yaml_path=str(yaml_path),
+        write=True,
+        command=[],
+    )
+    assert yaml_path.is_file()
+    assert "att_target_cu: 2" in yaml_path.read_text()
