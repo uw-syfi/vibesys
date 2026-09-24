@@ -18,6 +18,18 @@ import pytest
 from tests.support import run_test_command
 
 from vibesys.sandbox import modal_evaluator
+from vibesys.sandbox.modal_evaluator import (
+    _MAX_DIAGNOSTIC_CHARS,
+    _MAX_ENCODED_SETUP_COMMAND_CHARS,
+    _RELEASE_DEPLOYMENT_ENV,
+    _build_stage_archive,
+    _decode_setup_command,
+    _execute_colocated,
+    _execute_reused_candidate,
+    _healthy_now,
+    _modal_health_url,
+    _stop_modal_app,
+)
 
 _UV_EXECUTABLE = modal_evaluator.shutil.which("uv") or "uv"
 
@@ -1467,3 +1479,256 @@ def test_run_evaluator_prints_modal_logs_when_readiness_fails(
         )
         in run.call_args_list
     )
+
+
+@pytest.mark.parametrize(
+    ("command", "error", "message"),
+    [
+        ("python", TypeError, "only argv strings"),
+        (["python", 3], TypeError, "only argv strings"),
+        ([], ValueError, "non-empty string argv"),
+        ([""], ValueError, "executable must not be empty"),
+    ],
+)
+def test_setup_command_rejects_malformed_argv(
+    command: object, error: type[Exception], message: str
+) -> None:
+    with pytest.raises(error, match=message):
+        modal_evaluator.encode_setup_command(command)  # type: ignore[arg-type]
+
+
+def test_setup_command_enforces_the_encoded_size_limit() -> None:
+    limit = _MAX_ENCODED_SETUP_COMMAND_CHARS
+    with pytest.raises(ValueError, match="exceeds the encoded size limit"):
+        modal_evaluator.encode_setup_command(["x" * limit])
+    with pytest.raises(ValueError, match="exceeds the encoded size limit"):
+        _decode_setup_command("a" * (limit + 1))
+
+
+def test_modal_health_url_only_accepts_modal_web_hosts() -> None:
+    url = "https://workspace--candidate.modal.run"
+    assert _modal_health_url(url) == f"{url}/health"
+    for bad in ("http://workspace--candidate.modal.run", "https://evil.example", ""):
+        with pytest.raises(ValueError, match="invalid web URL"):
+            _modal_health_url(bad)
+
+
+def _fake_response(status: int) -> MagicMock:
+    response = MagicMock()
+    response.status = status
+    response.__enter__.return_value = response
+    return response
+
+
+def test_wait_for_health_retries_until_http_200(monkeypatch: pytest.MonkeyPatch) -> None:
+    urlopen = MagicMock(side_effect=[_fake_response(503), OSError("refused"), _fake_response(200)])
+    sleeps: list[float] = []
+    monkeypatch.setattr(modal_evaluator.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(modal_evaluator.time, "sleep", sleeps.append)
+
+    modal_evaluator.wait_for_health("https://a--b.modal.run", timeout_seconds=1000)
+
+    assert urlopen.call_count == 3
+    assert urlopen.call_args.args[0] == "https://a--b.modal.run/health"
+    assert sleeps == [2, 2]
+
+
+def test_wait_for_health_times_out_with_the_last_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(TimeoutError, match="did not become ready: no response"):
+        modal_evaluator.wait_for_health("https://a--b.modal.run", timeout_seconds=0)
+
+    ticks = iter([0.0, 0.0, 5.0])
+    monkeypatch.setattr(modal_evaluator.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(modal_evaluator.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        modal_evaluator.urllib.request, "urlopen", MagicMock(return_value=_fake_response(502))
+    )
+    with pytest.raises(TimeoutError, match="did not become ready: HTTP 502"):
+        modal_evaluator.wait_for_health("https://a--b.modal.run", timeout_seconds=1)
+
+
+def test_wait_for_health_rejects_untrusted_urls_before_any_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    urlopen = MagicMock()
+    monkeypatch.setattr(modal_evaluator.urllib.request, "urlopen", urlopen)
+
+    with pytest.raises(ValueError, match="invalid web URL"):
+        modal_evaluator.wait_for_health("https://evil.example", timeout_seconds=1)
+
+    urlopen.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [
+        (_fake_response(200), True),
+        (_fake_response(503), False),
+        (OSError("refused"), False),
+    ],
+)
+def test_healthy_now_reflects_the_health_probe(
+    monkeypatch: pytest.MonkeyPatch, outcome: object, expected: object
+) -> None:
+    if isinstance(outcome, Exception):
+        urlopen = MagicMock(side_effect=outcome)
+    else:
+        urlopen = MagicMock(return_value=outcome)
+    monkeypatch.setattr(modal_evaluator.urllib.request, "urlopen", urlopen)
+
+    assert _healthy_now("https://a--b.modal.run") is expected
+    assert _healthy_now("https://evil.example") is False
+
+
+def test_recent_modal_logs_formats_bounded_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    limit = _MAX_DIAGNOSTIC_CHARS
+    results = iter(
+        [
+            SimpleNamespace(stdout="\x1b[31mred\x1b[0m line", stderr="err"),
+            SimpleNamespace(stdout="", stderr=""),
+            SimpleNamespace(stdout="a" * (limit + 10) + "TAIL", stderr=""),
+        ]
+    )
+    run = MagicMock(side_effect=lambda *_a, **_k: next(results))
+    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
+
+    assert modal_evaluator.recent_modal_logs("app", workspace="/w") == "red line\nerr"
+    assert (
+        modal_evaluator.recent_modal_logs("app", workspace="/w") == "Modal returned no recent logs."
+    )
+    truncated = modal_evaluator.recent_modal_logs("app", workspace="/w")
+    assert truncated.startswith("[... earlier Modal logs omitted ...]\n")
+    assert truncated.endswith("TAIL")
+    assert len(truncated) == len("[... earlier Modal logs omitted ...]\n") + limit
+    argv = run.call_args.args[0]
+    assert argv[argv.index("logs") + 1] == "app"
+    assert run.call_args.kwargs["cwd"] == "/w"
+
+
+def test_recent_modal_logs_reports_fetch_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(modal_evaluator.subprocess, "run", MagicMock(side_effect=OSError("no uv")))
+
+    assert (
+        modal_evaluator.recent_modal_logs("app", workspace="/w")
+        == "Could not fetch Modal logs: OSError: no uv"
+    )
+
+
+def test_stop_modal_app_reports_success_failure_and_launch_errors(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    outcomes = iter(
+        [
+            SimpleNamespace(returncode=0, stdout="", stderr=""),
+            SimpleNamespace(returncode=3, stdout="out", stderr="boom"),
+            OSError("gone"),
+        ]
+    )
+
+    def run(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        outcome = next(outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
+
+    assert _stop_modal_app("app", workspace="/w") is True
+    assert _stop_modal_app("app", workspace="/w") is False
+    assert _stop_modal_app("app", workspace="/w") is False
+    assert capsys.readouterr().err.splitlines() == [
+        "Stopped Modal app app.",
+        "Could not stop Modal app app (exit 3): out",
+        "boom",
+        "Could not stop Modal app app: OSError: gone",
+    ]
+
+
+def test_stage_archive_rejects_a_package_root_that_is_a_file(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    package = tmp_path / "package.txt"
+    package.write_text("x")
+
+    with pytest.raises(ValueError, match="evaluator package root is not a directory"):
+        _build_stage_archive(str(workspace), [], evaluator_package_root=str(package))
+
+
+def test_run_evaluator_validates_command_and_package_root(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="missing evaluator command after"):
+        modal_evaluator.run_evaluator([], workspace=str(tmp_path))
+    package = tmp_path / "package.txt"
+    package.write_text("x")
+
+    with pytest.raises(ValueError, match="evaluator package root is not a directory"):
+        modal_evaluator.run_evaluator(
+            ["true"], workspace=str(tmp_path), evaluator_package_root=str(package)
+        )
+
+
+def test_evaluator_relays_exec_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("app = object()\n")
+
+    def run(command: list[str], **_options: object) -> SimpleNamespace:
+        if command[3:5] == ["container", "list"]:
+            listing = [{"app_name": "candidate-app", "container_id": "ta-123"}]
+            return SimpleNamespace(returncode=0, stdout=json.dumps(listing), stderr="")
+        return SimpleNamespace(returncode=0, stdout="__VIBESYS_EXEC_RC__=0\n", stderr="warn\n")
+
+    keepwarm = MagicMock()
+    keepwarm.return_value.__enter__ = MagicMock()
+    keepwarm.return_value.__exit__ = MagicMock(return_value=False)
+    monkeypatch.setattr(modal_evaluator, "_DeploymentKeepWarm", keepwarm)
+    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
+
+    result = _execute_colocated(
+        ["python", "main.py"],
+        workspace=str(workspace),
+        deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+    )
+
+    assert result == 0
+    assert capsys.readouterr().err == "warn\n"
+
+
+def test_reused_deployment_setup_failure_is_reported_and_released(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    lease_path = tmp_path / "deployment.json"
+    lease_path.write_text(
+        json.dumps(
+            {
+                "candidate_revision": "abc123",
+                "base_url": "https://workspace--candidate.modal.run",
+                "app_identifier": "candidate-app",
+            }
+        )
+    )
+    monkeypatch.setenv("VIBESYS_CANDIDATE_REVISION", "abc123")
+    monkeypatch.setenv(_RELEASE_DEPLOYMENT_ENV, "1")
+    monkeypatch.setattr(modal_evaluator, "_DEPLOYMENT_LEASE_PATH", lease_path)
+    monkeypatch.setattr(modal_evaluator, "_healthy_now", MagicMock(return_value=True))
+    monkeypatch.setattr(
+        modal_evaluator, "_execute_colocated", MagicMock(side_effect=ValueError("bad setup"))
+    )
+    stop = MagicMock(return_value=True)
+    monkeypatch.setattr(modal_evaluator, "_stop_modal_app", stop)
+
+    result = _execute_reused_candidate(
+        ["true"], workspace="/workspace", setup_command=None, evaluator_package_root=None
+    )
+
+    assert result == 1
+    err = capsys.readouterr().err
+    assert "Reusing healthy Modal deployment for candidate revision abc123." in err
+    assert "Modal evaluator setup failed: bad setup" in err
+    stop.assert_called_once_with("candidate-app", workspace="/workspace")
+    assert not lease_path.exists()

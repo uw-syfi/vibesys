@@ -13,6 +13,8 @@ from vibesys.linux_cpu_profiler import (
     DiagnosticCode,
     LinuxProfilerTool,
 )
+from vibesys.macos_cpu_profiler import Capability as MacOSCapability
+from vibesys.macos_cpu_profiler import MacOSProfilerTool
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     PROFILER_DEFINITIONS,
@@ -21,6 +23,8 @@ from vibesys.profilers import (
     allowed_profiler_kinds,
     coerce_profiler_kind,
     preflight_profiler_kind,
+    profiler_definition,
+    require_domain_name,
     resolve_profiler_kind,
 )
 
@@ -302,3 +306,95 @@ def test_headroom_profiler_domains_and_preflight() -> None:
     assert ProfilerKind.HEADROOM not in allowed_profiler_kinds(DomainName.MICROSERVICES)
     # Capture is target-owned; the analysis side needs no host tooling.
     assert preflight_profiler_kind(ProfilerKind.HEADROOM).usable
+
+
+@pytest.mark.parametrize("kind", [ProfilerKind.AUTO, ProfilerKind.NONE])
+def test_profiler_definition_rejects_non_runnable_kinds(kind: ProfilerKind) -> None:
+    with pytest.raises(ValueError, match=f"Profiler {kind.value!r} is not runnable"):
+        profiler_definition(kind)
+
+
+def test_profiler_definition_returns_declaration_for_runnable_kind() -> None:
+    assert profiler_definition(ProfilerKind.NSYS) is PROFILER_DEFINITIONS[ProfilerKind.NSYS]
+
+
+def test_require_domain_name_rejects_raw_strings() -> None:
+    with pytest.raises(TypeError, match="domain must be a DomainName, got str"):
+        require_domain_name("generic")
+    assert require_domain_name(DomainName.GENERIC) is DomainName.GENERIC
+
+
+def test_generic_auto_falls_back_to_supported_environment_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.GENERIC,
+            backend_profiler_kind=None,
+            environment_default_profiler_kind=ProfilerKind.MACOS_CPU,
+            environment_supported_profiler_kinds=frozenset(
+                {ProfilerKind.MACOS_CPU, ProfilerKind.NSYS}
+            ),
+        )
+        is ProfilerKind.MACOS_CPU
+    )
+
+
+def test_generic_auto_errors_when_environment_supports_no_generic_profiler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+
+    with pytest.raises(
+        ValueError, match=r"No profiler supported by both.*environment allows: nsys"
+    ):
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.GENERIC,
+            backend_profiler_kind=None,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+            environment_supported_profiler_kinds=frozenset({ProfilerKind.NSYS}),
+        )
+
+
+def test_auto_rejects_environment_default_the_environment_cannot_run() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"Resolved profiler 'torch' is not supported by the selected run environment; "
+        r"allowed: none",
+    ):
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.LLM_SERVING,
+            backend_profiler_kind=ProfilerKind.NSYS,
+            environment_default_profiler_kind=ProfilerKind.TORCH,
+            environment_supported_profiler_kinds=frozenset({ProfilerKind.NONE}),
+        )
+
+
+@pytest.mark.parametrize(
+    ("tool", "sample_path"),
+    [(MacOSProfilerTool.SAMPLE, "/usr/bin/sample"), (MacOSProfilerTool.NONE, None)],
+)
+def test_macos_cpu_preflight_reports_tool_availability(
+    monkeypatch: pytest.MonkeyPatch,
+    tool: MacOSProfilerTool,
+    sample_path: str | None,
+) -> None:
+    monkeypatch.setattr(
+        "vibesys.macos_cpu_profiler.detect_capability",
+        lambda: MacOSCapability(tool, None, None, sample_path, None, ()),
+    )
+
+    result = preflight_profiler_kind(ProfilerKind.MACOS_CPU)
+
+    assert result.usable is (tool is MacOSProfilerTool.SAMPLE)
+    assert result.diagnostics == ()
+    assert result.details == (
+        "xcode_path=missing",
+        "xctrace_path=missing",
+        f"sample_path={sample_path or 'missing'}",
+    )

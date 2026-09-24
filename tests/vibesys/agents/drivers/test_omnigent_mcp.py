@@ -378,3 +378,94 @@ def test_same_bare_tool_name_from_multiple_servers_stays_namespaced(tmp_path: Pa
 
     assert tools is not None
     assert [schema["name"] for schema in tools.schemas] == ["one__status", "two__status"]
+
+
+_REAL_NATIVE_API = vars(subject)["_native_mcp_api"]
+
+
+def test_real_native_api_exposes_the_pinned_omnigent_classes() -> None:
+    pytest.importorskip("omnigent")
+
+    api = _REAL_NATIVE_API()
+
+    assert api.manager.__name__ == "RunnerMcpManager"
+    assert api.agent_spec.__name__ == "AgentSpec"
+    assert api.server_config.__name__ == "MCPServerConfig"
+    assert callable(api.validate)
+
+
+def test_missing_native_mcp_api_reports_import_detail_and_remedy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "omnigent.runner.mcp_manager", None)
+
+    with pytest.raises(
+        OmnigentMCPError, match=r"not importable \((Import|ModuleNotFound)Error"
+    ) as caught:
+        _REAL_NATIVE_API()
+
+    assert "uv sync" in str(caught.value)
+    assert isinstance(caught.value.__cause__, ImportError)
+
+
+def test_dependency_error_constructor_names_error_type_and_message() -> None:
+    error = OmnigentMCPError.dependency_unavailable(ModuleNotFoundError("no omnigent"))
+
+    assert str(error).startswith(
+        "Omnigent MCP support is not importable (ModuleNotFoundError: no omnigent)."
+    )
+
+
+def _built(tmp_path: Path) -> OmnigentMCPTools:
+    tools = OmnigentMCPTools.build(
+        servers=_servers()[:1],
+        workspace=tmp_path,
+        harness="codex",
+        session_id=lambda: None,
+    )
+    assert tools is not None
+    return tools
+
+
+def test_build_returns_none_without_servers(tmp_path: Path) -> None:
+    assert (
+        OmnigentMCPTools.build(
+            servers=(), workspace=tmp_path, harness="codex", session_id=lambda: None
+        )
+        is None
+    )
+
+
+def test_lifecycle_misuse_is_rejected_with_specific_errors(tmp_path: Path) -> None:
+    tools = _built(tmp_path)
+
+    with pytest.raises(RuntimeError, match="not initialized"):
+        asyncio.run(tools.dispatch("profiler__analyze", {}))
+    asyncio.run(tools.initialize())
+    with pytest.raises(RuntimeError, match="already initialized"):
+        asyncio.run(tools.initialize())
+    with pytest.raises(RuntimeError, match="do not contain 'other__tool'"):
+        asyncio.run(tools.dispatch("other__tool", {}))
+
+    closed = _built(tmp_path)
+    asyncio.run(closed.close())
+    with pytest.raises(RuntimeError, match="tools are closed"):
+        asyncio.run(closed.initialize())
+
+
+def test_failed_discovery_with_failed_cleanup_keeps_first_error_and_adds_note(
+    tmp_path: Path,
+) -> None:
+    _FakeManager.failures = {"profiler": "connection refused"}
+    tools = _built(tmp_path)
+
+    async def failing_shutdown() -> None:
+        message = "shutdown broke"
+        raise OSError(message)
+
+    _FakeManager.instances[0].shutdown_override = failing_shutdown
+
+    with pytest.raises(OmnigentMCPError, match="connection refused") as caught:
+        asyncio.run(tools.initialize())
+
+    assert caught.value.__notes__ == ["Omnigent MCP cleanup also failed: shutdown broke"]

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import io
 import os
 import re
 import socket
 import tempfile
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.support import run_test_command
@@ -26,6 +27,10 @@ from vibesys.skypilot.protocol import (
 from vibesys.skypilot.recovery import (
     AttemptResourcesRecord,
     InvocationJournal,
+    InvocationPhase,
+    InvocationProvenance,
+    InvocationRecord,
+    InvocationResultRecord,
 )
 from vibesys.skypilot.runner import (
     ClusterInfo,
@@ -772,3 +777,421 @@ def test_bridge_rejects_workspace_symlink_escape(tmp_path: Path, socket_dir: Pat
         assert runner.commands == []
     finally:
         bridge.close()
+
+
+def _private(target: object, name: str) -> _Dynamic:
+    """Reach a private attribute the tests deliberately drive or seed."""
+    return getattr(target, name)
+
+
+def _set_private(target: object, name: str, *, value: object) -> None:
+    setattr(target, name, value)
+
+
+_Dynamic = Any
+_BEGIN = "__BEGIN__"
+_END = "__END__"
+
+
+def _artifact_stream(*, expected: bool = True) -> _Dynamic:
+    return _private(bridge_module, "_ArtifactStream")(
+        lambda _: None, expected=expected, begin_marker=_BEGIN, end_marker=_END
+    )
+
+
+@pytest.mark.parametrize(
+    ("lines", "message"),
+    [
+        ("plain output\n", "missing or invalid"),
+        (f"{_BEGIN}\ne30=\n", "missing or invalid"),
+        (f"{_BEGIN}\n{_END}\n", "missing or invalid"),
+        (f"{_BEGIN}\n!!!\n{_END}\n", "artifact was invalid"),
+    ],
+)
+def test_artifact_stream_rejects_missing_or_invalid_artifact(lines: str, message: str) -> None:
+    stream = _artifact_stream()
+    stream.feed(lines)
+
+    with pytest.raises(ValueError, match=message):
+        stream.result()
+
+
+def test_artifact_stream_decodes_and_bounds_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
+    good = _artifact_stream()
+    good.feed(f"out\n{_BEGIN}\ne30=\n{_END}\n")
+    assert good.result() == b"{}"
+    assert _artifact_stream(expected=False).result() is None
+
+    monkeypatch.setattr(bridge_module, "_MAX_ARTIFACT_BYTES", 2)
+    big = _artifact_stream()
+    big.feed(f"{_BEGIN}\nAAAA\n{_END}\n")
+    with pytest.raises(ValueError, match="too large"):
+        big.result()
+
+
+def _spool_fixture(
+    tmp_path: Path, invocation_id: str
+) -> tuple[InvocationJournal, Path, Callable[[list[str]], _Dynamic]]:
+    journal = InvocationJournal(_namespace(tmp_path))
+    record = journal.prepare(invocation_id, "b" * 64, "e" * 64)
+    record = journal.submitting(record, "lease", _attempt_resources())
+    journal.submitted(record, 9, "lease")
+    path = tmp_path / "logs" / "stdout"
+
+    def make(output: list[str]) -> _Dynamic:
+        return _private(bridge_module, "_DecodedLogSpool")(
+            path=path, journal=journal, invocation_id=invocation_id, sink=output.append
+        )
+
+    return journal, path, make
+
+
+def test_decoded_log_spool_rejects_changed_replay_prefix_and_truncated_replay(
+    tmp_path: Path,
+) -> None:
+    _, _, make = _spool_fixture(tmp_path, "1" * 32)
+    make([]).feed("abc\n")
+
+    changed = make([])
+    with pytest.raises(ValueError, match="replayed log prefix changed"):
+        changed.feed("xyz\n")
+
+    truncated = make([])
+    truncated.feed("abc\n")
+    truncated.finish()
+    with pytest.raises(ValueError, match="terminal log replay was truncated"):
+        make([]).finish()
+
+
+def test_decoded_log_spool_rejects_short_spool_and_missing_journal(tmp_path: Path) -> None:
+    journal, _, make = _spool_fixture(tmp_path, "2" * 32)
+    record = journal.load("2" * 32)
+    assert record is not None
+    journal.offsets(record, remote_read=5, client_delivered=0)
+
+    with pytest.raises(ValueError, match="shorter than its journal offset"):
+        make([])
+
+    with pytest.raises(ValueError, match="journal disappeared"):
+        _private(bridge_module, "_DecodedLogSpool")(
+            path=tmp_path / "other" / "stdout",
+            journal=journal,
+            invocation_id="3" * 32,
+            sink=lambda _: None,
+        )
+
+
+def _bridge(
+    tmp_path: Path,
+    socket_dir: Path,
+    runner: FakeRunner | None = None,
+    log: Callable[[str], None] | None = None,
+    max_retries: int = 1,
+) -> SkyPilotBridge:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+    return SkyPilotBridge(
+        runner=runner or FakeRunner(),
+        cluster_name="lease",
+        resources=_resources(),
+        workspace=workspace,
+        evaluator_package_root=None,
+        hidden_paths=(),
+        commands={"accuracy": ("true",)},
+        benchmark_output_argument=None,
+        state_namespace=_namespace(tmp_path),
+        socket_path=socket_dir / "bridge.sock",
+        log=log or (lambda _: None),
+        max_infrastructure_retries=max_retries,
+    )
+
+
+def _send_raw(bridge: SkyPilotBridge, payload: bytes) -> ResponseFrame:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(3)
+        client.connect(str(bridge.socket_path))
+        client.sendall(payload)
+        client.shutdown(socket.SHUT_WR)
+        return decode_response(client.makefile("rb").readline())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"no newline framing",
+        encode_message(EvaluationRequest(kind="benchmark", invocation_id="4" * 32)),
+        encode_message(
+            EvaluationRequest(kind="accuracy", invocation_id="4" * 32, arguments=("--x",))
+        ),
+        encode_message(
+            EvaluationRequest(kind="accuracy", invocation_id="4" * 32, artifacts=("artifact.json",))
+        ),
+    ],
+    ids=["framing", "unconfigured-kind", "arguments", "artifacts"],
+)
+def test_bridge_rejects_malformed_or_unauthorized_requests(
+    tmp_path: Path, socket_dir: Path, payload: bytes
+) -> None:
+    runner = FakeRunner()
+    bridge = _bridge(tmp_path, socket_dir, runner)
+    bridge.start()
+    try:
+        frame = _send_raw(bridge, payload)
+    finally:
+        bridge.close()
+
+    assert isinstance(frame, ErrorFrame)
+    assert frame.error == "ValueError"
+    assert runner.commands == []
+
+
+def test_bridge_cannot_restart_after_close(tmp_path: Path, socket_dir: Path) -> None:
+    bridge = _bridge(tmp_path, socket_dir)
+    bridge.close()
+
+    with pytest.raises(RuntimeError, match="cannot be restarted after close"):
+        bridge.start()
+
+
+def test_bridge_close_logs_failed_cancel_and_release_and_continues(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    class FailingRunner(FakeRunner):
+        def cancel(self, cluster_name: str, job_id: int, *, timeout: float = 60) -> None:
+            del cluster_name, job_id, timeout
+            message = "cancel broke"
+            raise RuntimeError(message)
+
+        def release(self, cluster_name: str, *, timeout: float = 60) -> None:
+            del cluster_name, timeout
+            message = "release broke"
+            raise OSError(message)
+
+    logs: list[str] = []
+    bridge = _bridge(tmp_path, socket_dir, FailingRunner(), logs.append)
+    bridge.start()
+    _private(bridge, "_active_jobs").add(("lease", 3))
+
+    bridge.close()
+
+    assert "[warn] SkyPilot job cancellation failed: RuntimeError" in logs
+    assert "[warn] SkyPilot allocation release failed: OSError" in logs
+    assert not bridge.socket_path.exists()
+
+
+def test_handler_reports_value_error_frame_once_shutdown_has_started(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    bridge = _bridge(tmp_path, socket_dir)
+    early = io.BytesIO()
+    _set_private(bridge, "_closed", value=True)
+    _private(bridge, "_handle")(io.BytesIO(), early, socket.socket())
+    assert decode_response(early.getvalue()) == ErrorFrame(error="ValueError")
+
+    class CloseWhileLocked:
+        def __enter__(self) -> None:
+            _set_private(bridge, "_closed", value=True)
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+    _set_private(bridge, "_closed", value=False)
+    _set_private(bridge, "_evaluation_lock", value=CloseWhileLocked())
+    late = io.BytesIO()
+    _private(bridge, "_handle")(io.BytesIO(), late, socket.socket())
+    assert decode_response(late.getvalue()) == ErrorFrame(error="ValueError")
+
+
+def _digests(bridge: SkyPilotBridge, request: EvaluationRequest) -> tuple[str, str]:
+    staging = _private(bridge, "_snapshot")(request.invocation_id)
+    return (
+        _private(bridge, "_request_digest")(request, ("true",)),
+        _private(bridge, "_snapshot_digest")(staging),
+    )
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [InvocationPhase.SUBMITTING, InvocationPhase.SUBMITTED],
+)
+def test_bridge_refuses_to_resubmit_when_prior_attempt_is_unresolved(
+    tmp_path: Path, socket_dir: Path, phase: InvocationPhase
+) -> None:
+    runner = FakeRunner()
+    logs: list[str] = []
+    bridge = _bridge(tmp_path, socket_dir, runner, logs.append)
+    request = EvaluationRequest(kind="accuracy", invocation_id="5" * 32)
+    request_digest, snapshot_digest = _digests(bridge, request)
+    journal = InvocationJournal(_namespace(tmp_path))
+    record = journal.prepare(request.invocation_id, request_digest, snapshot_digest)
+    record = journal.submitting(record, "lease", _attempt_resources())
+    if phase is InvocationPhase.SUBMITTED:
+        record = journal.submitted(record, 9, "lease")
+    bridge.start()
+    try:
+        frame = _send_raw(bridge, encode_message(request))
+    finally:
+        bridge.close()
+
+    assert isinstance(frame, ErrorFrame)
+    assert frame.error == "RuntimeError"
+    assert runner.commands == []
+    persisted = journal.load(request.invocation_id)
+    assert persisted is not None
+    assert persisted.phase is record.phase
+
+
+def test_bridge_rejects_completion_without_attempt_resources(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    namespace = _namespace(tmp_path)
+
+    class ForgetfulRunner(FakeRunner):
+        def run(self, cluster_name: str, *_: object, **kwargs: object) -> JobResult:
+            started = kwargs["job_started"]
+            assert callable(started)
+            started(9)
+            journals = list(tmp_path.rglob(f"{'6' * 32}.json"))
+            assert journals
+            for journal_file in journals:
+                journal_file.unlink()
+            return JobResult(JobStatus.COMPLETED, 0, 9, "", "", cluster_name)
+
+    bridge = _bridge(tmp_path, socket_dir, ForgetfulRunner())
+    bridge.start()
+    try:
+        frame = _send_raw(
+            bridge, encode_message(EvaluationRequest(kind="accuracy", invocation_id="6" * 32))
+        )
+    finally:
+        bridge.close()
+
+    assert isinstance(frame, ErrorFrame)
+    assert frame.error == "ValueError"
+    assert InvocationJournal(namespace).load("6" * 32) is None
+
+
+def test_retry_limit_is_enforced_from_persisted_attempt_count(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    bridge = _bridge(tmp_path, socket_dir, max_retries=0)
+    journal = InvocationJournal(_namespace(tmp_path))
+    record = journal.prepare("7" * 32, "1" * 64, "2" * 64)
+    record = journal.submitting(record, "lease", _attempt_resources())
+
+    with pytest.raises(RuntimeError, match="retry limit was exhausted"):
+        _private(bridge, "_retry_after_infrastructure_failure")(record)
+    assert _private(bridge, "_recover_after_allocation_loss")(
+        journal.prepare("8" * 32, "1" * 64, "2" * 64)
+    )
+
+
+def test_ensure_current_cluster_releases_racing_launch_and_reports_closing(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    class ClosingRunner(FakeRunner):
+        bridge: SkyPilotBridge
+
+        def ensure_cluster(
+            self, name: str, resources: ResolvedSkyPilotResources, *, timeout: float | None = 300
+        ) -> ClusterInfo:
+            _private(self.bridge, "_closing").set()
+            return super().ensure_cluster(name, resources, timeout=timeout)
+
+        def release(self, cluster_name: str, *, timeout: float = 60) -> None:
+            super().release(cluster_name, timeout=timeout)
+            message = "release broke"
+            raise OSError(message)
+
+    runner = ClosingRunner()
+    logs: list[str] = []
+    bridge = _bridge(tmp_path, socket_dir, runner, logs.append)
+    runner.bridge = bridge
+
+    with pytest.raises(RuntimeError, match="bridge is closing"):
+        _private(bridge, "_ensure_current_cluster_for_work")()
+
+    assert runner.release_names == ["lease"]
+    assert logs == ["[warn] SkyPilot allocation release failed: OSError"]
+
+
+def test_job_started_during_close_logs_failed_cancel_then_refuses(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    class FailingCancel(FakeRunner):
+        def cancel(self, cluster_name: str, job_id: int, *, timeout: float = 60) -> None:
+            del cluster_name, job_id, timeout
+            message = "cancel broke"
+            raise OSError(message)
+
+    logs: list[str] = []
+    bridge = _bridge(tmp_path, socket_dir, FailingCancel(), logs.append)
+    journal = InvocationJournal(_namespace(tmp_path))
+    record = journal.prepare("9" * 32, "1" * 64, "2" * 64)
+    record = journal.submitting(record, "lease", _attempt_resources())
+    _private(bridge, "_closing").set()
+
+    with pytest.raises(RuntimeError, match="bridge is closing"):
+        _private(bridge, "_job_started")(record, 4, "lease", threading.Event())
+
+    assert logs == ["[warn] SkyPilot job cancellation failed: OSError"]
+
+
+def _terminal_record(tmp_path: Path) -> tuple[InvocationJournal, InvocationRecord]:
+    journal = InvocationJournal(_namespace(tmp_path))
+    record = journal.prepare("a" * 32, "1" * 64, "2" * 64)
+    record = journal.submitting(record, "lease", _attempt_resources())
+    record = journal.submitted(record, 9, "lease")
+    result = InvocationResultRecord(
+        status="COMPLETED",
+        sky_exit_code=0,
+        provenance=InvocationProvenance(
+            profile_name="test",
+            infra="slurm/example/gpu",
+            cluster_name="lease",
+            job_name=record.job_name,
+            remote_job_id=9,
+            attempt=1,
+            accelerator_type="MI300A",
+            nodes=1,
+            accelerators_per_node=4,
+        ),
+    )
+    return journal, journal.completed(record, result)
+
+
+def test_deliver_rejects_missing_result_and_mismatched_acknowledgement(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    bridge = _bridge(tmp_path, socket_dir)
+    journal, completed = _terminal_record(tmp_path)
+    prepared = journal.prepare("b" * 32, "1" * 64, "2" * 64)
+
+    with pytest.raises(ValueError, match="missing its result"):
+        _private(bridge, "_deliver")(prepared, io.BytesIO(), io.BytesIO())
+    wrong_ack = io.BytesIO(encode_message(AckRequest(invocation_id="c" * 32)))
+    out = io.BytesIO()
+    with pytest.raises(ValueError, match="acknowledgement invocation mismatch"):
+        _private(bridge, "_deliver")(completed, wrong_ack, out)
+
+    assert decode_response(out.getvalue().splitlines()[0]).type == "result"
+    assert not [line for line in out.getvalue().splitlines() if b"acked" in line]
+    reloaded = journal.load("a" * 32)
+    assert reloaded is not None
+    assert reloaded.phase is InvocationPhase.COMPLETED
+
+
+def test_snapshot_digest_and_staging_reject_special_files_and_oversized_workspaces(
+    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge = _bridge(tmp_path, socket_dir)
+    snapshot = tmp_path / "snap"
+    snapshot.mkdir()
+    os.mkfifo(snapshot / "pipe")
+    with pytest.raises(ValueError, match="unsupported file type"):
+        _private(bridge, "_snapshot_digest")(snapshot)
+
+    (tmp_path / "workspace" / "big.txt").write_text("x")
+    monkeypatch.setattr(bridge_module, "_MAX_STAGED_FILES", 0)
+    with pytest.raises(ValueError, match="exceeds remote staging limits"):
+        _private(bridge, "_stage_workspace")(tmp_path / "stage")

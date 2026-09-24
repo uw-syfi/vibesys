@@ -489,3 +489,92 @@ def test_benchmark_gate_undeclared_contract_emits_nothing() -> None:
 
     assert not result.executed
     assert _gate_events(seen) == []
+
+
+def test_accuracy_gate_turns_a_backend_error_into_failing_feedback() -> None:
+    ctx = _accuracy_ctx()
+    ctx.judge_backend.execute.side_effect = RuntimeError("sandbox down")
+
+    result = run_accuracy_gate(ctx, process_id="acc")
+
+    assert not result.passed
+    assert result.executed
+    assert result.output == "accuracy command could not be executed: sandbox down"
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ('{"tok_per_sec": "fast"}', "'tok_per_sec' is not numeric"),
+        ('{"tok_per_sec": true}', "'tok_per_sec' is not numeric"),
+        ('{"tok_per_sec": NaN}', "'tok_per_sec' is not finite"),
+        ('{"tok_per_sec": Infinity}', "'tok_per_sec' is not finite"),
+    ],
+)
+def test_benchmark_gate_rejects_non_finite_or_non_numeric_metrics(
+    tmp_path: Path, payload: str, message: str
+) -> None:
+    result = run_benchmark_gate(
+        _gate_ctx(_writer_command(payload, tmp_path)),
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="5-0",
+    )
+
+    assert not result.passed
+    assert f"invalid benchmark result: {message}" in result.output
+
+
+def test_benchmark_gate_fails_when_output_lacks_the_result_frame() -> None:
+    backend = MagicMock()
+    backend.execute.return_value = SandboxExecutionResult(
+        output="benchmark ran\n", exit_code=0, stdout="benchmark ran\n"
+    )
+
+    result = run_benchmark_gate(
+        _gate_ctx_with(backend),
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="5-1",
+    )
+
+    assert not result.passed
+    assert result.output == "benchmark ran\nbenchmark output did not include its result JSON"
+
+
+def test_benchmark_gate_refuses_to_run_after_evaluator_files_were_modified() -> None:
+    backend = MagicMock()
+    ctx = _gate_ctx_with(backend)
+    ctx.trusted_input_changes.return_value = ["bench.py"]
+
+    result = run_benchmark_gate(
+        ctx,
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="5-2",
+    )
+
+    assert not result.passed
+    assert "Evaluator-owned files were modified: bench.py" in result.output
+    backend.execute.assert_not_called()
+
+
+def test_benchmark_gate_turns_a_backend_error_into_failing_feedback() -> None:
+    backend = MagicMock()
+    backend.execute.side_effect = RuntimeError("no sandbox")
+
+    result = run_benchmark_gate(
+        _gate_ctx_with(backend),
+        contract=BenchmarkContract(result_spec=_SCALAR_SPEC),
+        space=MetricSpace(),
+        process_id="benchmark",
+        output_slug="5-3",
+    )
+
+    assert not result.passed
+    assert "benchmark command could not be executed: no sandbox" in result.output
+    # The cleanup `rm -f` is still attempted, and its own failure is swallowed.
+    assert "rm -f --" in backend.execute.call_args.args[0]

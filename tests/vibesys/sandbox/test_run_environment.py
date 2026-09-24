@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import shlex
+import subprocess
 import sys
 import sys as _sys
 from pathlib import Path
@@ -29,18 +30,24 @@ from vibesys.evaluators.input_manifest import (
     WorkspaceSource,
     load_project_task,
 )
+from vibesys.evaluators.tools import EvaluatorToolError
 from vibesys.profilers import ProfilerKind
+from vibesys.sandbox.images import ImagePushError
 from vibesys.sandbox.run_environment import (
     RunEnvironmentRequest,
     RunEnvironmentSpec,
+    SkyPilotEnvironment,
     _cli_container_env,
     _cli_provider_env_and_auth_files,
     _container_mount_plan,
     _docker_agent_toolchains,
     _docker_evaluator_tool_mounts,
+    _ensure_pushed_for_remote_backend,
+    _environment_command,
     _evaluator_container_setup,
     _evaluator_tools,
     _EvaluatorToolBuildRequiredError,
+    _materialize_effective_objective,
     _resolve_docker_image_id,
     _SkyPilotRunEnvironmentSession,
     _symlink_lifecycle_hooks,
@@ -2153,3 +2160,205 @@ remote_artifact_root = "/remote/vibesys"
         for agent_path, resource in mounts.items():
             if resource.access is HostResourceAccess.READ_WRITE:
                 assert agent_path in legitimately_writable, (env_name, agent_path)
+
+
+@pytest.mark.parametrize("environment_name", ["local", "modal"])
+def test_environments_without_a_sandbox_workspace_cannot_remove_children(
+    tmp_path: Path, environment_name: str
+) -> None:
+    env = build_run_environment(RunEnvironmentSpec(environment_name))
+
+    assert env.remove_workspace_child(tmp_path, "child", backend=FakeBackend()) is False
+
+
+def test_docker_repair_workspace_logs_launch_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = build_run_environment(RunEnvironmentSpec("docker"))
+    monkeypatch.setattr(
+        "vibesys.sandbox.run_environment.subprocess.run",
+        MagicMock(side_effect=OSError("docker unavailable")),
+    )
+    logs: list[str] = []
+
+    env.repair_workspace(tmp_path, backend=FakeBackend(), log=logs.append)
+
+    assert logs == [f"[warn] chown failed for {tmp_path}: docker unavailable"]
+
+
+def test_docker_candidate_runtime_reuses_the_session_namespace(tmp_path: Path) -> None:
+    env = build_run_environment(RunEnvironmentSpec("docker"))
+    session = env.open(_request(tmp_path, FakeBackend()))
+
+    runtime = env.candidate_runtime(session.view, generation=3, child_idx=1)
+
+    assert runtime.prompt_notes == session.view.prompt_notes
+    assert runtime.deployment_name == session.view.deployment_namespace
+
+
+def test_skypilot_options_require_a_cluster_profile() -> None:
+    for options in ({}, {"profile": ""}, {"profile": 5}):
+        with pytest.raises(ValueError, match="non-empty cluster profile"):
+            SkyPilotEnvironment.from_options(options)
+
+
+def test_skypilot_open_requires_resources_and_a_state_namespace(tmp_path: Path) -> None:
+    request = _request(tmp_path, FakeBackend())
+
+    with pytest.raises(ValueError, match="requires portable run resources"):
+        SkyPilotEnvironment.from_options({"profile": "cluster"}).open(request)
+
+    resources = RunResourceRequest(accelerators_per_node=1, accelerator_backend="cuda")
+    with pytest.raises(ValueError, match="requires a machine-local state namespace"):
+        SkyPilotEnvironment.from_options({"profile": "cluster"}, resources).open(request)
+
+
+def test_modal_open_requires_a_model_id_in_reference_metadata(tmp_path: Path) -> None:
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    (ref_dir / "meta.json").write_text(json.dumps({"revision": "main"}))
+    env = build_run_environment(RunEnvironmentSpec("modal"))
+
+    with pytest.raises(ValueError, match="missing required 'model_id' field"):
+        env.open(_request(tmp_path, FakeBackend(), ref_dir=ref_dir))
+
+
+def test_modal_open_requires_a_model_id_in_draft_metadata(tmp_path: Path) -> None:
+    ref_dir = tmp_path / "ref"
+    ref_dir.mkdir()
+    (ref_dir / "draft_meta.json").write_text("{}")
+    env = build_run_environment(RunEnvironmentSpec("modal"))
+
+    with pytest.raises(ValueError, match=r"draft_meta\.json at .* missing required 'model_id'"):
+        env.open(_request(tmp_path, FakeBackend(), ref_dir=ref_dir))
+
+
+def test_effective_objective_must_match_a_document_inside_the_workspace(tmp_path: Path) -> None:
+    backend = FakeBackend()
+    outside = tmp_path / "OBJECTIVE.md"
+    outside.write_text("goal")
+    request = _request(tmp_path, backend, objective="goal", objective_document=outside)
+    with pytest.raises(ValueError, match="must be inside the project workspace"):
+        _materialize_effective_objective(request)
+
+    inside = request.workspace / "OBJECTIVE.md"
+    inside.write_text("stale goal")
+    request = _request(tmp_path, backend, objective="goal", objective_document=inside)
+    with pytest.raises(ValueError, match="does not match its committed document"):
+        _materialize_effective_objective(request)
+
+    inside.write_text("goal")
+    assert _materialize_effective_objective(request) == inside.resolve()
+
+
+def test_environment_command_rejects_unbalanced_quotes(tmp_path: Path) -> None:
+    request = _request(tmp_path, FakeBackend())
+
+    with pytest.raises(ValueError, match="invalid evaluator command"):
+        _environment_command(request, "python 'unterminated")
+
+
+def test_remote_push_failure_names_the_backend_and_image() -> None:
+    failing_push = MagicMock(side_effect=ImagePushError("registry refused"))
+
+    with pytest.raises(
+        ImagePushError,
+        match=r"agent image sha256:abc in the registry for a Modal run: registry refused",
+    ):
+        _ensure_pushed_for_remote_backend(
+            "sha256:abc", ensure_pushed=failing_push, backend_label="Modal"
+        )
+
+
+def _tool_request(tmp_path: Path, **overrides: object) -> tuple[RunEnvironmentRequest, Any]:
+    package = resolve_evaluator_package(
+        EvaluatorPackageRequirement(name="vibesys-evaluator-request-factory", version="0.1.0")
+    )
+    request = _request(
+        tmp_path,
+        FakeBackend(),
+        evaluator_package_root=package.root,
+        **{"evaluator_tools_root": tmp_path / "operator-tools", **overrides},
+    )
+    return request, package.metadata.tools
+
+
+def test_docker_tool_mounts_need_a_backend_image_and_a_tools_root(tmp_path: Path) -> None:
+    request, tools = _tool_request(tmp_path)
+    request.backend.image = ""  # type: ignore[misc]
+    with pytest.raises(EvaluatorToolError, match="requires a configured backend image"):
+        _docker_evaluator_tool_mounts(request, tools)
+
+    request, tools = _tool_request(tmp_path, evaluator_tools_root=None)
+    with pytest.raises(ValueError, match="require an operator-owned tools root"):
+        _docker_evaluator_tool_mounts(request, tools, container_image="sha256:pinned")
+
+
+def test_docker_tool_builder_reports_ownership_and_incomplete_builds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request, tools = _tool_request(tmp_path)
+    monkeypatch.setattr(
+        "vibesys.sandbox.run_environment.prepare_evaluator_tools",
+        MagicMock(side_effect=_EvaluatorToolBuildRequiredError),
+    )
+    request.backend.sandbox.execute.return_value = MagicMock(exit_code=1, output="denied\n")  # type: ignore[attr-defined]
+
+    with pytest.raises(EvaluatorToolError, match=r"could not return cache ownership.*denied"):
+        _docker_evaluator_tool_mounts(request, tools, container_image="sha256:pinned")
+
+    request.backend.sandbox.execute.return_value = MagicMock(exit_code=0, output="")  # type: ignore[attr-defined]
+    with pytest.raises(EvaluatorToolError, match="did not publish every declared tool"):
+        _docker_evaluator_tool_mounts(request, tools, container_image="sha256:pinned")
+
+
+@pytest.mark.parametrize(
+    ("runs", "error", "message"),
+    [
+        (
+            [MagicMock(returncode=1, stdout="", stderr=""), FileNotFoundError()],
+            EvaluatorToolError,
+            "Docker was not found",
+        ),
+        (
+            [MagicMock(returncode=1, stdout="", stderr=""), subprocess.TimeoutExpired("d", 600)],
+            EvaluatorToolError,
+            "Docker image pull timed out: img",
+        ),
+        (
+            [
+                MagicMock(returncode=1, stdout="", stderr=""),
+                MagicMock(returncode=1, stdout="", stderr="no such image"),
+            ],
+            EvaluatorToolError,
+            "Could not resolve Docker image 'img': no such image",
+        ),
+        (
+            [
+                MagicMock(returncode=1, stdout="", stderr=""),
+                MagicMock(returncode=0, stdout="pulled", stderr=""),
+                MagicMock(returncode=0, stdout="not-a-digest", stderr=""),
+            ],
+            EvaluatorToolError,
+            "no resolvable immutable image ID",
+        ),
+    ],
+)
+def test_docker_image_resolution_failures_are_diagnosed(
+    monkeypatch: pytest.MonkeyPatch,
+    runs: list[object],
+    error: type[Exception],
+    message: str,
+) -> None:
+    outcomes = iter(runs)
+
+    def run(*_args: object, **_kwargs: object) -> object:
+        outcome = next(outcomes)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr("vibesys.sandbox.run_environment.subprocess.run", run)
+
+    with pytest.raises(error, match=message):
+        _resolve_docker_image_id("img")
