@@ -15,9 +15,9 @@ from vibesys.loops.legacy_bridge import (
 from vibesys.orchestration._common import resolved_run_id
 
 if TYPE_CHECKING:
-    from vibesys.api.run_request import RunRequestLike
     from vibesys.orchestration import ResumeProjection
     from vibesys.orchestration.contracts import RunDescription
+    from vibesys.orchestration.request import RunRequestLike
     from vibesys.runtime import VibeSysRuntime
     from vs_project.api import OrchestrationRunManifest
 

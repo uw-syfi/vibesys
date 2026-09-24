@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from vibesys.schemas import PerfDeltaReason
 
 if TYPE_CHECKING:
-    from vibesys.api.contracts import RunView
+    from vibesys.orchestration.view import RunView
 
 
 class HypothesisRoundView(BaseModel):

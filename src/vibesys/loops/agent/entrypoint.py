@@ -8,7 +8,7 @@ from vibesys.loops.agent.entrypoint_common import AgentBuiltinDefaults, agent_ex
 from vibesys.loops.legacy_bridge import legacy_request
 
 if TYPE_CHECKING:
-    from vibesys.api.run_request import RunRequestLike
+    from vibesys.orchestration.request import RunRequestLike
     from vibesys.runtime import VibeSysRuntime
 
 

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal, cast
 
-from vibesys.api.contracts import RunStatus, RunView
 from vibesys.loops.agent.hypotheses import measurement_delta_reason
 from vibesys.loops.agent.model import HypothesisResolution
 from vibesys.loops.agent.projection import (
@@ -23,6 +22,7 @@ from vibesys.loops.agent.projection import (
     RoundView,
 )
 from vibesys.loops.legacy_request import LoopKind
+from vibesys.orchestration.view import RunStatus, RunView
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome, derive_hypothesis_title
 
 if TYPE_CHECKING:

@@ -24,11 +24,11 @@ from vibesys.orchestration._common import resolved_run_id
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.api.contracts import RunStatus, RunView
-    from vibesys.api.run_request import RunRequestLike
     from vibesys.loops.legacy_request import RunRequest
     from vibesys.orchestration import ResumeProjection
     from vibesys.orchestration.contracts import RunDescription
+    from vibesys.orchestration.request import RunRequestLike
+    from vibesys.orchestration.view import RunStatus, RunView
     from vibesys.runtime import VibeSysRuntime
     from vs_project.api import OrchestrationRunManifest, Project
 

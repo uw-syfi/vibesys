@@ -12,12 +12,12 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from vibesys.api.run_request import ResumeRef
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.evaluators.input_manifest import InputBundle
 from vibesys.loops.evolve.search_policy import OpenEvolveSearchConfig
 from vibesys.loops.metrics import MetricSpace
+from vibesys.orchestration.request import ResumeRef
 from vibesys.profilers import ProfilerKind
 from vibesys.repository import RepositoryVisibility
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
@@ -53,8 +53,8 @@ class RunRequest(BaseModel):
     Not every field applies to every built-in `loop`: `metrics` is agent-only, `space`/
     `search_policy`/`openevolve_config`/generation budgets are evolve-only,
     `max_attempts_per_issue`/`max_issues_per_perf_eval` are plain-only, and so
-    on -- each `_dispatch_*` helper in `vibesys.api._dispatch` reads only the
-    subset its loop understands. `max_rounds` defaults to `None` because its
+    on: each built-in entrypoint reads only the subset its loop understands.
+    `max_rounds` defaults to `None` because its
     concrete default differs by loop (24 for agent, 5 for plain, unused for
     evolve); the dispatch helper substitutes the loop's own default when unset.
     """

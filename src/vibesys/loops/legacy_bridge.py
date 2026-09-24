@@ -13,8 +13,8 @@ from vibesys.profilers import ProfilerKind
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.api.contracts import RunStatus, RunView
-    from vibesys.api.run_request import RunRequestLike
+    from vibesys.orchestration.request import RunRequestLike
+    from vibesys.orchestration.view import RunStatus, RunView
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.runtime import VibeSysRuntime
     from vs_project.api import Project
