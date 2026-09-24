@@ -368,9 +368,8 @@ def _fmt_us(us: float) -> str:
     return f"{us:.1f} us"
 
 
-def cmd_kernels(args: argparse.Namespace) -> None:
+def _print_kernels(data: dict, top: int) -> None:
     """Top GPU kernels by total self-CUDA time."""
-    data = _load(args.report)
     kernels = [e for e in data["events"] if e["self_cuda_time_us"] > 0]
     kernels.sort(key=lambda e: e["self_cuda_time_us"], reverse=True)
     total = data["total_cuda_time_us"] or 1.0
@@ -378,7 +377,7 @@ def cmd_kernels(args: argparse.Namespace) -> None:
     print()  # noqa: T201  # tracked: #288
     print(f"{'Name':<60}{'Self CUDA':>14}{'% of total':>12}{'Count':>10}")  # noqa: T201  # tracked: #288
     print("-" * 96)  # noqa: T201  # tracked: #288
-    for ev in kernels[: args.top]:
+    for ev in kernels[:top]:
         pct = 100.0 * ev["self_cuda_time_us"] / total
         name = ev["name"]
         if len(name) > 58:  # noqa: PLR2004  # tracked: #288
@@ -386,9 +385,13 @@ def cmd_kernels(args: argparse.Namespace) -> None:
         print(f"{name:<60}{_fmt_us(ev['self_cuda_time_us']):>14}{pct:>11.1f}%{ev['count']:>10}")  # noqa: T201  # tracked: #288
 
 
-def cmd_operators(args: argparse.Namespace) -> None:
+def cmd_kernels(args: argparse.Namespace) -> None:
+    """Top GPU kernels by total self-CUDA time."""
+    _print_kernels(_load(args.report), args.top)
+
+
+def _print_operators(data: dict, top: int) -> None:
     """Top operators (aten::*, torch::*) by CPU time."""
-    data = _load(args.report)
     ops = [e for e in data["events"] if e["category"] == "operator"]
     ops.sort(key=lambda e: e["self_cpu_time_us"], reverse=True)
     total_cpu = data["total_cpu_time_us"] or 1.0
@@ -396,7 +399,7 @@ def cmd_operators(args: argparse.Namespace) -> None:
     print()  # noqa: T201  # tracked: #288
     print(f"{'Operator':<50}{'Self CPU':>14}{'CUDA time':>14}{'% CPU':>10}{'Count':>10}")  # noqa: T201  # tracked: #288
     print("-" * 98)  # noqa: T201  # tracked: #288
-    for ev in ops[: args.top]:
+    for ev in ops[:top]:
         pct = 100.0 * ev["self_cpu_time_us"] / total_cpu
         name = ev["name"]
         if len(name) > 48:  # noqa: PLR2004  # tracked: #288
@@ -407,9 +410,13 @@ def cmd_operators(args: argparse.Namespace) -> None:
         )
 
 
-def cmd_cpu_overhead(args: argparse.Namespace) -> None:
+def cmd_operators(args: argparse.Namespace) -> None:
+    """Top operators (aten::*, torch::*) by CPU time."""
+    _print_operators(_load(args.report), args.top)
+
+
+def _print_cpu_overhead(data: dict) -> None:
     """CPU vs GPU time breakdown — detects launch-bound scenarios."""
-    data = _load(args.report)
     total_cpu = data["total_cpu_time_us"]
     total_cuda = data["total_cuda_time_us"]
     ratio = total_cpu / total_cuda if total_cuda else float("inf")
@@ -435,9 +442,13 @@ def cmd_cpu_overhead(args: argparse.Namespace) -> None:
         )
 
 
-def cmd_memory(args: argparse.Namespace) -> None:
+def cmd_cpu_overhead(args: argparse.Namespace) -> None:
+    """CPU vs GPU time breakdown — detects launch-bound scenarios."""
+    _print_cpu_overhead(_load(args.report))
+
+
+def _print_memory(data: dict) -> None:
     """Memory allocation / transfer events."""
-    data = _load(args.report)
     mem = [e for e in data["events"] if e["category"] == "memory"]
     mem.sort(key=lambda e: e["cuda_time_us"] + e["cpu_time_us"], reverse=True)
     if not mem:
@@ -455,9 +466,26 @@ def cmd_memory(args: argparse.Namespace) -> None:
         )
 
 
+def cmd_memory(args: argparse.Namespace) -> None:
+    """Memory allocation / transfer events."""
+    _print_memory(_load(args.report))
+
+
 def cmd_summary(args: argparse.Namespace) -> None:
-    """All-in-one: certify (raw traces only) + overhead + kernels + operators + memory."""
-    args.top = getattr(args, "top", 15)
+    """All-in-one: certify (raw traces only) + overhead + kernels + operators + memory.
+
+    Reads and indexes the trace exactly once, however large it is. The
+    per-section helpers below used to be implemented by calling
+    ``cmd_cpu_overhead``/``cmd_kernels``/``cmd_operators``/``cmd_memory``,
+    each of which re-read the file from disk and rebuilt the summarized
+    report from scratch -- 5 full read+decompress+index passes over one
+    trace for a single ``summary`` invocation. On a real multi-hundred-MB
+    gzipped Kineto trace that turned a ~10s analysis into a ~50s one for no
+    benefit, since nothing after the first pass depends on anything the
+    later commands would recompute differently.
+    """
+    top = getattr(args, "top", 15)
+
     print("=" * 80)  # noqa: T201  # tracked: #288
     print("  TORCH PROFILER SUMMARY")  # noqa: T201  # tracked: #288
     print("=" * 80)  # noqa: T201  # tracked: #288
@@ -477,13 +505,13 @@ def cmd_summary(args: argparse.Namespace) -> None:
     if "wall_time_sec" in data:
         print(f"Wall:     {data['wall_time_sec']:.2f}s over {data.get('num_iters', '?')} iters")  # noqa: T201  # tracked: #288
     print("\n## CPU / GPU Overhead\n")  # noqa: T201  # tracked: #288
-    cmd_cpu_overhead(args)
+    _print_cpu_overhead(data)
     print("\n## Top GPU Kernels\n")  # noqa: T201  # tracked: #288
-    cmd_kernels(args)
+    _print_kernels(data, top)
     print("\n## Top Operators\n")  # noqa: T201  # tracked: #288
-    cmd_operators(args)
+    _print_operators(data, top)
     print("\n## Memory Operations\n")  # noqa: T201  # tracked: #288
-    cmd_memory(args)
+    _print_memory(data)
 
 
 def cmd_tables(args: argparse.Namespace) -> None:
