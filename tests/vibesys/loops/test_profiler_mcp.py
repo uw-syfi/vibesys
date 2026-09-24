@@ -53,6 +53,11 @@ def test_profiler_mcp_spec_maps_known_kinds_exactly():  # noqa: ANN201  # tracke
     assert nsys.name == "vibesys-nsys-profiler"
     assert nsys.args == ("nsys_profiler/server.py",)
 
+    rocprof = mcp_spec(ProfilerKind.ROCPROF)
+    assert rocprof is not None
+    assert rocprof.name == "vibesys-rocprof-profiler"
+    assert rocprof.args == ("rocprof_profiler/server.py",)
+
     torch = mcp_spec(ProfilerKind.TORCH)
     assert torch is not None
     assert torch.name == "vibesys-torch-profiler"
@@ -111,6 +116,14 @@ def headroom_server_mod():  # noqa: ANN201  # tracked: #288
     return _load_module(
         "_headroom_server",
         _REPO / "resources" / "profilers" / "headroom" / "server.py",
+    )
+
+
+@pytest.fixture(scope="module")
+def rocprof_server_mod():  # noqa: ANN201  # tracked: #288
+    return _load_module(
+        "_rocprof_server",
+        _REPO / "resources" / "profilers" / "rocprof" / "server.py",
     )
 
 
@@ -1096,3 +1109,227 @@ class TestHeadroomMcpServer:
         out = asyncio.run(_call_tool(server, "summary", report=str(bogus)))
         assert out.startswith("error:")
         assert "not a headroom report" in out
+
+
+# ---------------------------------------------------------------------------
+# rocprof MCP server
+# ---------------------------------------------------------------------------
+
+_ROCPROF_FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"
+
+
+def _rocprof_kernel_trace_dir(tmp_path: Path) -> Path:
+    """A minimal single-process rocprofv3 kernel-trace directory."""
+    d = tmp_path / "gpu-node-01" / "4242"
+    d.mkdir(parents=True)
+    (d / "out_kernel_trace.csv").write_text(
+        "Kernel_Name,Agent_Id,Queue_Id,Correlation_Id,Start_Timestamp,End_Timestamp,Pid\n"
+        "flash_attn_decode_kernel,0,0,1,1000,2000,4242\n"
+    )
+    return tmp_path
+
+
+class TestRocprofMcpServer:
+    def test_registers_expected_tools(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+        server = rocprof_server_mod.build_server()
+        names = asyncio.run(_list_tool_names(server))
+        assert names == {
+            # analyze_rocprof.py: rocprofv3 system trace
+            "files",
+            "kernels",
+            "families",
+            "idle_gaps",
+            "cpu_overhead",
+            "memory",
+            "graphs",
+            "host_idle",
+            "query",
+            "summary",
+            # counters.py: PMC counter sets
+            "counter_sets",
+            "counter_plan",
+            "counter_report",
+            "counter_triage",
+            # att.py: Advanced Thread Trace
+            "att_plan",
+            "att_hotspots",
+            # compute.py: rocprof-compute (profile excluded -- shell only)
+            "compute_doctor",
+            "compute_analyze",
+            # kernel_bench.py: microbenchmark + paired A/B
+            "bench_parse",
+            "bench_compare",
+            "bench_verdict",
+        }
+
+    def test_kernels_tool_reports_from_a_kernel_trace_directory(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
+        report = _rocprof_kernel_trace_dir(tmp_path)
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "kernels", report=str(report), top=5))
+        assert "flash_attn_decode_kernel" in out
+
+    def test_counter_sets_tool_prints_the_catalogue_for_one_arch(
+        self, rocprof_server_mod: ModuleType
+    ) -> None:
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "counter_sets", arch="mi210"))
+        assert "gfx90a" in out
+        assert "hbm" in out
+
+    def test_counter_plan_tool_prints_one_pass_per_set_with_separate_output_dirs(
+        self, rocprof_server_mod: ModuleType
+    ) -> None:
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(
+            _call_tool(
+                server,
+                "counter_plan",
+                arch="gfx90a",
+                sets="l2,hbm",
+                kernel="flash_attn.*",
+                out_dir="rocprof_pmc",
+                command=["python", "bench.py"],
+            )
+        )
+        assert out.count("rocprofv3 --pmc") == 2
+        assert "rocprof_pmc/gfx90a/l2" in out
+        assert "rocprof_pmc/gfx90a/hbm" in out
+        assert "-- python bench.py" in out
+
+    def test_counter_report_tool_merges_pmc_passes(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+        dirs = [
+            str(_ROCPROF_FIXTURES / "pmc" / "l2"),
+            str(_ROCPROF_FIXTURES / "pmc" / "hbm"),
+            str(_ROCPROF_FIXTURES / "kernel_trace"),
+        ]
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "counter_report", dirs=dirs, top=15, arch="gfx90a"))
+        assert "flash_attn_decode_kernel" in out
+        assert "L2 hit rate:" in out
+
+    def test_counter_triage_tool_classifies_bottlenecks(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+        dirs = [str(_ROCPROF_FIXTURES / "pmc" / "occupancy_low")]
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "counter_triage", dirs=dirs, arch="gfx90a", top=15))
+        assert "gemv_lowocc_kernel" in out
+        assert "OCCUPANCY-LIMITED" in out
+
+    def test_att_plan_tool_prints_a_job_config_and_invocation(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(
+            _call_tool(
+                server,
+                "att_plan",
+                arch="gfx90a",
+                kernel="flash_attn.*",
+                command=["python", "bench.py"],
+            )
+        )
+        assert "rocprofv3 -i rocprof_att.yaml" in out
+        assert "python bench.py" in out
+
+    def test_att_hotspots_tool_ranks_stall_hotspots(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+        dispatch_dir = _ROCPROF_FIXTURES / "att" / "ui_output_agent_123_dispatch_1"
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "att_hotspots", dispatch_dir=str(dispatch_dir), top=5))
+        assert "Stall category totals" in out
+
+    def test_compute_doctor_tool_reports_all_checks_passed(
+        self, rocprof_server_mod: ModuleType, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            rocprof_server_mod.compute,
+            "find_rocprof_compute_bin",
+            lambda: "/opt/rocm/bin/rocprof-compute",
+        )
+        monkeypatch.setattr(
+            rocprof_server_mod.compute, "find_deps_python", lambda _bin: "/usr/bin/python3"
+        )
+        monkeypatch.setattr(
+            rocprof_server_mod.compute,
+            "check_pandas_version",
+            lambda _py: (True, "pandas 2.2.2 under /usr/bin/python3"),
+        )
+        monkeypatch.setattr(
+            rocprof_server_mod.compute, "find_rocprofv3_bin", lambda: "/opt/rocm/bin/rocprofv3"
+        )
+        monkeypatch.setattr(
+            rocprof_server_mod.compute,
+            "find_aqlprofile_lib",
+            lambda: "/opt/rocm/lib/libaqlprofile64.so",
+        )
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "compute_doctor"))
+        assert "[OK]" in out
+        assert "All checks passed." in out
+
+    def test_compute_doctor_tool_reports_missing_binary_as_a_fix(
+        self, rocprof_server_mod: ModuleType, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(rocprof_server_mod.compute, "find_rocprof_compute_bin", lambda: None)
+        monkeypatch.setattr(rocprof_server_mod.compute, "find_rocprofv3_bin", lambda: None)
+        monkeypatch.setattr(rocprof_server_mod.compute, "find_aqlprofile_lib", lambda: None)
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "compute_doctor"))
+        assert "[FAIL] rocprof-compute binary: not found" in out
+        assert "Fixes:" in out
+
+    def test_compute_analyze_tool_falls_back_to_raw_csvs(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(rocprof_server_mod.compute, "find_rocprof_compute_bin", lambda: None)
+        workload = tmp_path / "workload"
+        workload.mkdir()
+        (workload / "pmc_perf.csv").write_text("a,b\n1,2\n")
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "compute_analyze", workload_dir=str(workload)))
+        assert "falling back to raw CSVs" in out
+        assert "pmc_perf.csv" in out
+
+    def test_bench_parse_tool_extracts_wall_ms_lines(self, rocprof_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        log = tmp_path / "driver.log"
+        log.write_text("wall_ms: 12.5\nwall_ms: 13.0\n")
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "bench_parse", log=str(log)))
+        assert json.loads(out) == {"wall_ms": [12.5, 13.0]}
+
+    def test_bench_compare_tool_reports_a_decisive_verdict(self, rocprof_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        file_a = tmp_path / "a.json"
+        file_b = tmp_path / "b.json"
+        file_a.write_text(json.dumps({"wall_ms": [10.0, 10.1, 9.9, 10.0]}))
+        file_b.write_text(json.dumps({"wall_ms": [8.0, 8.1, 7.9, 8.0]}))
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(
+            _call_tool(server, "bench_compare", file_a=str(file_a), file_b=str(file_b))
+        )
+        assert "DECISIVE" in out
+
+    def test_bench_verdict_tool_reports_a_paired_verdict(self, rocprof_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+        samples = tmp_path / "pairs.json"
+        samples.write_text(
+            json.dumps(
+                {
+                    "pairs": [
+                        [10.0, 8.0],
+                        [10.0, 8.1],
+                        [10.0, 7.9],
+                        [10.0, 8.0],
+                    ]
+                }
+            )
+        )
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "bench_verdict", samples=str(samples)))
+        assert "DECISIVE" in out
