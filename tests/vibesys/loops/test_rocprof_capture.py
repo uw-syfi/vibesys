@@ -23,6 +23,7 @@ import shlex
 import shutil
 import socket
 import sys
+import tempfile
 import textwrap
 import time
 from pathlib import Path
@@ -468,6 +469,149 @@ def test_profile_timeline_records_hip_api_and_kernel_include_in_manifest(
     manifest = cr.load_manifest(summary.dir)
     assert manifest["meta"]["hip_api"] is True
     assert manifest["meta"]["kernel_include"] == "foo.*"
+
+
+def _install_fake_rocprofv3_flushes_on_sigint_then_hangs(bin_dir: Path) -> Path:
+    """A ``rocprofv3`` fake modeling real rocprofiler-sdk's in-process instrumentation.
+
+    Unlike ``_install_fake_rocprofv3`` (an external parent that waits on its
+    wrapped child before writing anything), real rocprofv3 instruments the
+    target process itself: SIGINT delivery flushes its trace synchronously,
+    independent of whether the process it's instrumenting goes on to exit
+    promptly afterward. Reproduces the real capture observed on a live
+    MI210 run: `rocprofv3 --kernel-trace ... -- vllm serve ...` under
+    VLLM_ENABLE_V1_MULTIPROCESSING=0, sent SIGINT, wrote a complete
+    non-empty kernel_trace.csv within ~3s (confirmed by mtime) while the
+    overall process group did not exit until forcibly killed ~5 minutes
+    later once capture_runtime's grace_s elapsed.
+    """
+    path = bin_dir / "rocprofv3"
+    _write_script(
+        path,
+        textwrap.dedent(
+            f"""
+            import signal
+
+            # Register the handler before any other import (mirrors
+            # test_capture_runtime.py's _FAKE_PROFILER_SOURCE): a
+            # ready_command/load_command pair that both succeed instantly
+            # can have capture_runtime send stop_signal while this process
+            # is still mid-startup, and an unhandled SIGINT during import
+            # raises KeyboardInterrupt instead of running the intended
+            # flush-and-keep-running handler below.
+            def _on_sigint(signum, frame):
+                if out_dir:
+                    out_path = Path(out_dir)
+                    out_path.mkdir(parents=True, exist_ok=True)
+                    src = FIXTURES / "kernel_trace" / "out_kernel_trace.csv"
+                    if src.is_file():
+                        shutil.copy(src, out_path / "out_kernel_trace.csv")
+
+            signal.signal(signal.SIGINT, _on_sigint)
+
+            import shutil
+            import subprocess
+            import sys
+            import time
+            from pathlib import Path
+
+            FIXTURES = Path({str(_ROCPROF_FIXTURES)!r})
+            argv = sys.argv[1:]
+            out_dir = None
+            for i, tok in enumerate(argv):
+                if tok == "-d" and i + 1 < len(argv):
+                    out_dir = argv[i + 1]
+                    break
+
+            wrapped = argv[argv.index("--") + 1:] if "--" in argv else []
+            if wrapped:
+                subprocess.Popen(wrapped)
+
+            # Outlives its own trace flush well past a short grace_s,
+            # mirroring the real hang: this process only ever exits via
+            # capture_runtime's escalation (SIGTERM/SIGKILL), never on its
+            # own -- the trace above is already safely on disk by then.
+            time.sleep(60)
+            """
+        ),
+    )
+    return path
+
+
+def test_profile_timeline_killed_after_grace_still_analyzes_a_real_flushed_trace(
+    profiles_dir: Path, bin_dir: Path
+) -> None:
+    del profiles_dir
+    _install_fake_rocprofv3_flushes_on_sigint_then_hangs(bin_dir)
+    # A load_command lifecycle (mirrors a real server capture: ready, then
+    # load, then a graceful stop_signal) is what actually sends stop_signal
+    # -- the no-load path escalates straight past its hard timeout without
+    # ever trying a graceful stop first.
+    lifecycle = cr.Lifecycle(
+        command="sleep 60",
+        ready_command="true",
+        # A short sleep, not "true": gives the fake profiler's own process
+        # startup (its handful of imports before its SIGINT handler is
+        # fully live) a comfortable cushion before stop_signal is sent, so
+        # the test exercises the intended race-free flush path rather than
+        # racing the fake process's own startup.
+        load_command="sleep 0.3",
+        stop_signal="SIGINT",
+        grace_s=0.2,
+        timeout_s=10.0,
+    )
+
+    out = capture.profile_timeline(lifecycle)
+
+    assert "killed_after_grace" in out
+    assert "Capture did not complete cleanly" in out
+    # The regression: rocprofv3 flushed a real, non-empty trace before the
+    # eventual forced kill, so the auto-summary must still surface it
+    # instead of unconditionally withholding analysis of a non-OK capture.
+    assert "no kernel data found" not in out
+    assert "Top Kernels" in out
+
+
+@given(status=st.sampled_from(list(cr.CaptureStatus)))
+@PURE_SETTINGS
+def test_format_timeline_result_always_runs_the_analyzer_regardless_of_status(
+    status: cr.CaptureStatus,
+) -> None:
+    """Generalizes the fixed bug over every ``CaptureStatus``, not just ``killed_after_grace``.
+
+    ``_format_timeline_result`` must attempt ``host_idle``/``summary``
+    analysis unconditionally: a non-OK status describes the *lifecycle's*
+    outcome (did the target/load process exit cleanly), which is
+    independent of whether rocprofv3 itself already flushed a usable trace
+    before that. Withholding analysis for any status class silently hides
+    real, already-on-disk data for whichever status happens to be hit.
+
+    Uses a plain ``tempfile.TemporaryDirectory`` rather than the ``tmp_path``
+    fixture: it's function-scoped, which Hypothesis warns against reusing
+    unreset across generated examples within one ``@given`` run.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp) / "capture"
+        out_dir.mkdir()
+        result = cr.CaptureResult(
+            capture_id="timeline-test",
+            kind="timeline",
+            status=status,
+            out_dir=out_dir,
+            target_returncode=None,
+            load_returncode=None,
+            ready_achieved=None,
+            escalated=False,
+            timings={"duration_s": 1.0},
+            target_log_tail="",
+            load_log_tail=None,
+            manifest_path=out_dir / "manifest.json",
+        )
+
+        out = capture._format_timeline_result(result)  # noqa: SLF001
+
+    assert "ROCPROFV3 TRACE SUMMARY" in out
+    assert "Top Kernels" in out  # section header always printed, data or not
 
 
 def test_profile_timeline_target_failed_has_no_kernel_data(

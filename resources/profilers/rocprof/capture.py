@@ -536,11 +536,26 @@ def profile_timeline(
 def _format_timeline_result(result: capture_runtime.CaptureResult) -> str:
     lines = [capture_runtime.format_result(result)]
     if result.status is not capture_runtime.CaptureStatus.OK:
+        # A non-OK status means the *overall* lifecycle didn't exit cleanly
+        # (the target needed escalation, the load command failed, etc.), but
+        # rocprofv3 only needs its own stop_signal delivered to flush a
+        # trace: a serving-engine capture can have rocprofv3 finish "output
+        # generation"/"tool finalization" within seconds of stop_signal,
+        # while some other thread in the same process group (observed with
+        # a real multi-threaded serving engine's API-server process under a
+        # graceful SIGINT; see the profiling-serving-engines skill
+        # references for the engine-specific detail) keeps the process
+        # alive until this lifecycle gives up and escalates -- the trace on
+        # disk is real and complete regardless. Attempt the analysis
+        # unconditionally rather than withholding it: every analyzer
+        # function already degrades cleanly ("no kernel data found") when
+        # nothing was actually written.
         lines.append(
-            "\nCapture did not complete cleanly; see the log tail above before trusting any "
-            "analysis of partial output."
+            "\nCapture did not complete cleanly (see the log tail above); analyzing whatever "
+            "rocprofv3 output exists anyway, since rocprofv3 can flush a complete trace before "
+            "an unrelated hang forces this lifecycle to escalate. Treat the findings below as "
+            "provisional until corroborated."
         )
-        return "\n".join(lines)
     lines.append("")
     lines.append(run_cli(analyze_rocprof.cmd_host_idle, report=str(result.out_dir)))
     lines.append("")
