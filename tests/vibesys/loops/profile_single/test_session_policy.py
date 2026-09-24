@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.attempts import AttemptDecision, AttemptState
+from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed
+from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.options import AgentOrchestrationOptions
 from vibesys.agent_run.state import AgentRunState, ProfileBottleneck
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
+from vibesys.loops.profile_single import session as profile_session
 from vibesys.loops.profile_single.hypothesis import HypothesisEngine
 from vibesys.loops.profile_single.session import (
     AttemptRequest,
@@ -120,6 +122,65 @@ def _response(verdict: Verdict) -> SingleAgentRoundResponse:
         suggestions="batch",
         profile_analysis="decode dominates",
     )
+
+
+@pytest.mark.asyncio
+async def test_profile_attribution_is_checkpointed_before_plan_and_continuation_skips_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = AgentRunState()
+    config = ProfileGuidedInput(command=("profile",))
+    session = ProfileSingleSession.__new__(ProfileSingleSession)
+    session.options = _session()[0].options
+    session.state = state
+    session.engine = HypothesisEngine.create(state, config=config)
+    session.records = []
+    session.round_number = 1
+    session.carry = CarryOver()
+    session.last_response = None
+    session.last_profile_focus = "decode"
+    monkeypatch.setattr(session, "profile", profile_session._ProfilePolicy(config), raising=False)  # noqa: SLF001
+    plan = AsyncMock(return_value=_plan())
+    monkeypatch.setattr(
+        session,
+        "turns",
+        SimpleNamespace(plan=plan, progress_path=tmp_path / "progress.md"),
+        raising=False,
+    )
+    monkeypatch.setattr(session, "ctx", SimpleNamespace(log=lambda _message: None), raising=False)
+    monkeypatch.setattr(
+        session, "workspace", SimpleNamespace(revision="trusted-base"), raising=False
+    )
+    attribution = AsyncMock(
+        return_value=(ProfileBottleneck(name="decode", cost=100, share=0.5, evidence=["sample"]),)
+    )
+    monkeypatch.setattr(profile_session, "run_attribution", attribution)
+    saves: list[str] = []
+    save = AsyncMock(side_effect=lambda _state, *, label: saves.append(label))
+    announce = MagicMock()
+    rollback = AsyncMock()
+    monkeypatch.setattr(session, "_save_state", save)
+    monkeypatch.setattr(session, "_announce_experiments", announce)
+    monkeypatch.setattr(session, "_apply_rollback", rollback)
+
+    first = await session.select_hypothesis()
+
+    assert first.selection.hypothesis.hypothesis_id == "h1"
+    assert first.selection.hypothesis.parent_commit == "trusted-base"
+    assert first.selection.planned_official_reason == "profile-guided component measurement"
+    assert session.engine.controller.guidance.active_component == "decode"
+    assert saves == ["profile-guided: prepare round 1", "profile_single: start hypothesis h1"]
+    assert plan.await_args is not None
+    assert plan.await_args.args[0].profile_guidance.active_component == "decode"
+    announce.assert_called_once_with("active_hypothesis_changed", session.state)
+    rollback.assert_awaited_once_with(first.selection)
+
+    session.round_number = 2
+    continued = await session.select_hypothesis()
+    assert continued.request.round_number == 2
+    plan.assert_awaited_once()
+    attribution.assert_awaited_once()
+    assert "continu" in (tmp_path / "progress.md").read_text().lower()
 
 
 @pytest.mark.asyncio
@@ -243,6 +304,61 @@ async def test_official_gate_failure_keeps_accuracy_evidence_for_same_revision(
     assert selected.request.active_hypothesis.gate_candidate_commit == "candidate-revision"
     assert selected.request.active_hypothesis.gate_accuracy_passed
     checkpoint_active.assert_awaited_once_with(selected)
+
+
+@pytest.mark.asyncio
+async def test_passed_profile_round_commits_record_and_publishes_finished_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session, selected = _session()
+    session.round_number = 1
+    session.records = []
+    session.state = session.engine.state
+    session.framework_benchmark_configured = False
+    session.terminal_policy = profile_session._TerminalPolicy()  # noqa: SLF001
+    selected.attempt.passed = True
+    selected.attempt.retry = 1
+    selected.attempt.single_agent_response = _response(Verdict.PASS)
+    selected.attempt.judge = JudgeReviewed(Verdict.PASS)
+    checkpoint = AsyncMock(return_value="state-revision")
+    events = MagicMock()
+    monkeypatch.setattr(
+        session,
+        "ctx",
+        SimpleNamespace(
+            state=SimpleNamespace(checkpoint=checkpoint),
+            environment=SimpleNamespace(
+                view=SimpleNamespace(paths=SimpleNamespace(accuracy_command=None))
+            ),
+            events=events,
+        ),
+        raising=False,
+    )
+    snapshot = AsyncMock(return_value="candidate-revision")
+    monkeypatch.setattr(session, "workspace", SimpleNamespace(snapshot=snapshot), raising=False)
+    monkeypatch.setattr(
+        session,
+        "turns",
+        SimpleNamespace(
+            progress_path=tmp_path / "progress.md",
+            worker=SimpleNamespace(
+                backend_name="stub", driver_name=None, provider=None, model="test"
+            ),
+        ),
+        raising=False,
+    )
+
+    await session.commit_round(selected)
+
+    assert session.round_number == 2
+    assert len(session.state.rounds) == 1
+    assert session.state.rounds[0].commit == "candidate-revision"
+    assert session.state.rounds[0].judge_verdict == "pass"
+    assert session.state.active_hypothesis is None
+    checkpoint.assert_awaited_once()
+    assert checkpoint.await_args.kwargs["sequence"] == 1
+    assert checkpoint.await_args.kwargs["writes"]["state.json"] == session.state
+    assert events.emit.call_count == 2
 
 
 def test_retry_cursor_and_official_command_keep_policy_boundaries(

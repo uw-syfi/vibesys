@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
@@ -82,6 +83,10 @@ class _ThreeAgentPolicy:
 
 class _TypedPlan(BaseModel):
     task: str
+
+
+class _PolicyState(BaseModel):
+    value: int
 
 
 class _TypedPolicy:
@@ -396,5 +401,148 @@ def test_runtime_closes_all_agents_and_preserves_policy_failure() -> None:
             asyncio.run(fail_inside_runtime())
         assert closed == ["last", "middle", "first", "context"]
         assert any("runtime cleanup also failed" in note for note in caught.value.__notes__)
+    finally:
+        integration.close()
+
+
+def test_root_workspace_and_typed_state_capabilities(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+
+    async def exercise() -> None:
+        setup = RunSetup(state_namespace="public_probe", state_slots={"state.json": _PolicyState})
+        async with RunContext.open(_request(project_root), integration, setup=setup) as ctx:
+            assert ctx.state.local_path("notes/cursor.json").name == "cursor.json"
+            assert ctx.state.artifact_path("reports").is_dir()
+            with pytest.raises(TypeError, match="not declared"):
+                ctx.state.slot("other.json", _PolicyState)
+            await ctx.state.checkpoint(
+                sequence=1,
+                writes={"state.json": _PolicyState(value=7)},
+                candidate=False,
+            )
+            assert await ctx.state.load(_PolicyState) == _PolicyState(value=7)
+
+            root = ctx.workspaces.root
+            original = root.revision
+            assert original is not None
+            assert await root.trusted_input_changes() == []
+            (root.path / "queue.py").write_text("VALUE = 2\n")
+            assert "queue.py" in await root.pending_changes()
+            changed = await root.snapshot("public runtime candidate")
+            assert changed == root.revision
+            assert "VALUE = 2" in await root.candidate_patch(changed)
+            await root.restore(original)
+            assert (root.path / "queue.py").read_text() == "VALUE = 1\n"
+            await root.restore(changed)
+            assert (root.path / "queue.py").read_text() == "VALUE = 2\n"
+            assert (await root.retain("public-probe", changed)).endswith("/candidates/public-probe")
+            with pytest.raises(ValueError, match="run root cannot be discarded"):
+                await root.discard()
+            with pytest.raises(RuntimeError, match="cannot open isolated candidate sandboxes"):
+                await ctx.workspaces.fork()
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        integration.close()
+
+
+def test_root_environment_and_trusted_evaluator_capabilities(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+
+    async def exercise() -> None:
+        async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
+            with pytest.raises(TypeError, match="portable state namespace"):
+                _ = ctx.state.namespace
+            assert ctx.environment.view.env_kind == "local"
+            assert ctx.environment.view_for() is ctx.environment.view
+            assert ctx.environment.reference_path
+            assert ctx.environment.model_name == "gpt-test"
+            assert ctx.environment.profiler_kind is ProfilerKind.NONE
+            assert ctx.environment.workspace_sources == ()
+            assert isinstance(ctx.environment.skill_source_paths, tuple)
+            assert ctx.environment.run_log_path.parent == ctx.environment.log_dir
+            assert ctx.environment.candidate_runtime(1, 1) is not None
+            await ctx.control.boundary()
+            await ctx.control.debug_step("host probe")
+            ctx.switch_log("host-probe")
+            ctx.log("host capability probe")
+            assert await ctx.environment.reconcile_model_requests() is None
+            await ctx.environment.reselect_device()
+            await ctx.environment.teardown_deployment("unused")
+            execution = await ctx.environment.execute("printf host-ok")
+            assert execution.exit_code == 0
+            assert "host-ok" in execution.output
+
+            accuracy = await ctx.evaluator.check("host-probe", label="host-probe")
+            assert accuracy.passed
+            reused = await ctx.evaluator.reuse_accuracy(label="host-probe")
+            assert reused.passed
+            assert not reused.executed
+            benchmark = await ctx.evaluator.measure("host-probe")
+            assert not benchmark.executed
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        integration.close()
+
+
+def test_scoped_workspace_adopts_candidate_and_closes_its_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    integration = LocalRunIntegration()
+    client = FakeAgentClient(model="scope").enqueue_text("worker", "scoped response")
+    monkeypatch.setattr(
+        "vibesys.orchestration.runtime.build_agent_client", lambda **_kwargs: client
+    )
+
+    async def exercise() -> None:
+        async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
+            # Local worktrees provide a cheap substrate for the generic parallel capability.
+            ctx._resources.run_environment_view = replace(  # noqa: SLF001
+                ctx.environment.view, supports_parallel_candidate_evaluation=True
+            )
+            parent_revision = ctx.workspaces.root.revision
+            assert parent_revision is not None
+            scoped = await ctx.workspaces.fork(parent_revision)
+            assert scoped.id is not None
+            assert scoped.path != ctx.workspaces.root.path
+            assert ctx.environment.view_for(scoped).env_kind == "local"
+            agent = await ctx.agents.spawn(
+                AgentDefinition("worker", AgentSpec(backend=AgentBackend.STUB, model="scope")),
+                scope=scoped,
+            )
+            assert agent.backend_name == "fake"
+            assert agent.driver_name == "fake"
+            assert agent.provider == "fake"
+            assert agent.model == "scope"
+            assert not agent.capabilities.mcp_servers
+            assert await agent.turn("work in the fork", label="scoped-turn") == "scoped response"
+            (scoped.path / "queue.py").write_text("VALUE = 3\n")
+            assert "queue.py" in await scoped.pending_changes()
+            revision = await scoped.snapshot("scoped candidate")
+            assert scoped.revision == revision
+            assert "VALUE = 3" in await scoped.candidate_patch(revision)
+            await scoped.restore(parent_revision)
+            assert (scoped.path / "queue.py").read_text() == "VALUE = 1\n"
+            await scoped.restore(revision)
+            assert (scoped.path / "queue.py").read_text() == "VALUE = 3\n"
+            assert (ctx.workspaces.root.path / "queue.py").read_text() == "VALUE = 1\n"
+            await ctx.workspaces.adopt(revision)
+            assert (ctx.workspaces.root.path / "queue.py").read_text() == "VALUE = 3\n"
+            await scoped.discard()
+            assert client.closed
+            with pytest.raises(ValueError, match="closed"):
+                _ = scoped.path
+
+    try:
+        asyncio.run(exercise())
     finally:
         integration.close()

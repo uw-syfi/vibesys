@@ -3,21 +3,26 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
 
 import pytest
 
 from vibesys.agent_run.attempts import AttemptState
 from vibesys.agent_run.evidence import CarryOver
+from vibesys.agent_run.options import AgentOrchestrationOptions
 from vibesys.agent_run.state import AgentRunState
+from vibesys.constants import DomainName
 from vibesys.loops.single.hypothesis import HypothesisEngine
 from vibesys.loops.single.session import AttemptRequest, PlanRequest
 from vibesys.loops.single.turns import InvalidPlanError, SingleAgentTurns
+from vibesys.profilers import ProfilerKind
 from vibesys.schemas import OrchestratorPlan, SingleAgentRoundResponse, Verdict
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vibesys.orchestration.runtime import RunContext
 
 
 def _plan(hypothesis_id: str) -> OrchestratorPlan:
@@ -42,6 +47,67 @@ def _response() -> SingleAgentRoundResponse:
         suggestions="Batch more",
         profile_analysis="Decode dominates",
     )
+
+
+def _configured_turns(tmp_path: Path) -> SingleAgentTurns:
+    view = SimpleNamespace(
+        paths=SimpleNamespace(
+            objective="OBJECTIVE.md", benchmark_command=None, accuracy_command=None
+        ),
+        prompt_notes="Run locally",
+        profile_execution="local",
+    )
+    context = SimpleNamespace(
+        workspaces=SimpleNamespace(root=SimpleNamespace(path=tmp_path)),
+        request=SimpleNamespace(
+            objective="Reduce decode latency",
+            input_bundle=SimpleNamespace(
+                domain=DomainName.GENERIC,
+                objective="Fallback objective",
+                benchmark_result=None,
+                benchmark_result_protocol=None,
+            ),
+        ),
+        environment=SimpleNamespace(
+            view=view,
+            reference_path="reference.py",
+            workspace_sources=(),
+            profiler_kind=ProfilerKind.NONE,
+        ),
+    )
+    options = AgentOrchestrationOptions(
+        interface="inprocess",
+        max_rounds=2,
+        max_retries_per_round=2,
+        judge_every=1,
+        official_eval_every=2,
+        memory_layout="files",
+    )
+    return SingleAgentTurns(cast("RunContext", context), options)
+
+
+def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path: Path) -> None:
+    turns = _configured_turns(tmp_path)
+    plan = _plan("h1")
+    engine = HypothesisEngine.create(AgentRunState()).start(plan, started_round=1)
+    hypothesis = engine.state.active_hypothesis
+    assert hypothesis is not None
+    plan_request = PlanRequest(1, engine.state, [], CarryOver(), None, None, 1, engine.guidance)
+
+    designer_prompt = turns._plan_prompt(plan_request)  # noqa: SLF001
+    combined_prompt = turns._combined_prompt(  # noqa: SLF001
+        AttemptRequest(1, plan, "cadence", [], hypothesis, "decode"),
+        AttemptState(agent_run_state=engine.state, feedback=None, retry=1),
+        [],
+    )
+
+    assert turns.template_dir.name == "single"
+    assert "OBJECTIVE.md" in designer_prompt
+    assert "Run locally" in designer_prompt
+    assert "OBJECTIVE.md" in combined_prompt
+    assert "cadence" in combined_prompt
+    assert "Batch decode requests" not in combined_prompt
+    assert (tmp_path / "progress-artifacts" / "plans" / "round-0001.json").exists()
 
 
 @pytest.mark.asyncio

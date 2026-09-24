@@ -1,4 +1,4 @@
-"""Profile multi durable decisions with fake host capabilities."""
+"""Multi durable decisions with fake host capabilities."""
 
 # ruff: noqa: SLF001  # These tests exercise the strategy's owned decision seams.
 
@@ -21,14 +21,11 @@ from vibesys.evaluators.gates import (
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
 )
-from vibesys.evaluators.input_manifest import ProfileGuidedInput
-from vibesys.loops.profile_multi.controller import HypothesisEngine
-from vibesys.loops.profile_multi.decisions import AttemptRequest, RoundSelection
-from vibesys.loops.profile_multi.session import (
-    ProfileMultiRound,
-    ProfileMultiSession,
-    ProfileMultiSessionError,
-    _ProfilePolicy,
+from vibesys.loops.multi.decisions import AttemptRequest, HypothesisEngine, RoundSelection
+from vibesys.loops.multi.session import (
+    MultiRound,
+    MultiSession,
+    MultiSessionError,
     _TerminalPolicy,
 )
 from vibesys.schemas import (
@@ -45,10 +42,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _config() -> ProfileGuidedInput:
-    return ProfileGuidedInput(command=("profile",))
-
-
 def _plan(*, hypothesis_id: str = "h1") -> OrchestratorPlan:
     return OrchestratorPlan(
         hypothesis_id=hypothesis_id,
@@ -59,23 +52,20 @@ def _plan(*, hypothesis_id: str = "h1") -> OrchestratorPlan:
     )
 
 
-def _selected() -> ProfileMultiRound:
+def _selected() -> MultiRound:
     plan = _plan()
-    engine = HypothesisEngine.create(AgentRunState(), config=_config()).start(
+    engine = HypothesisEngine.create(AgentRunState()).start(
         plan, started_round=1, parent_commit="a" * 40
     )
     hypothesis = engine.state.active_hypothesis
     assert hypothesis is not None
     selection = RoundSelection(engine, engine.state, hypothesis, plan, "final_round")
     request = AttemptRequest(1, plan, "final_round", [], hypothesis, engine, "decode")
-    return ProfileMultiRound(
-        selection, request, AttemptState(agent_run_state=engine.state, feedback=None)
-    )
+    return MultiRound(selection, request, AttemptState(agent_run_state=engine.state, feedback=None))
 
 
-def _session(tmp_path: Path) -> ProfileMultiSession:
-    session = cast("Any", ProfileMultiSession.__new__(ProfileMultiSession))
-    config = _config()
+def _session(tmp_path: Path) -> MultiSession:
+    session = cast("Any", MultiSession.__new__(MultiSession))
     state = AgentRunState()
     session.options = SimpleNamespace(
         max_rounds=3,
@@ -84,9 +74,8 @@ def _session(tmp_path: Path) -> ProfileMultiSession:
         official_eval_every=3,
         metric_space=state.metrics,
     )
-    session.profile = _ProfilePolicy(config)
     session.state = state
-    session.engine = HypothesisEngine.create(state, config=config)
+    session.engine = HypothesisEngine.create(state)
     session.records = []
     session.history = RoundHistory(records=[])
     session.carry = CarryOver()
@@ -153,14 +142,7 @@ def _session(tmp_path: Path) -> ProfileMultiSession:
     return session
 
 
-def test_profile_policy_keeps_prompt_reason_separate_from_gate_cadence() -> None:
-    engine = HypothesisEngine.create(AgentRunState(), config=_config())
-    policy = _ProfilePolicy(_config())
-    assert policy.official_reason(None, engine) is None
-    assert policy.official_reason("final_round", engine) == "final_round"
-
-
-def test_initialize_and_pre_round_cursor_checkpoint_before_plan(
+def test_initialize_and_select_checkpoint_after_plan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     session = cast("Any", _session(tmp_path))
@@ -171,10 +153,6 @@ def test_initialize_and_pre_round_cursor_checkpoint_before_plan(
 
     order: list[str] = []
 
-    async def attribution(_ctx: object, _config: ProfileGuidedInput, *, round_number: int):  # noqa: ANN202
-        order.append(f"attribution:{round_number}")
-        return ()
-
     async def checkpoint(_state: AgentRunState, *, label: str) -> None:
         order.append(f"checkpoint:{label}")
 
@@ -182,7 +160,6 @@ def test_initialize_and_pre_round_cursor_checkpoint_before_plan(
         order.append("plan")
         return _plan()
 
-    monkeypatch.setattr("vibesys.loops.profile_multi.session.run_attribution", attribution)
     session._save_state = checkpoint
     session._pre_round_profile = AsyncMock(return_value=None)
     session._apply_rollback = AsyncMock()
@@ -190,13 +167,11 @@ def test_initialize_and_pre_round_cursor_checkpoint_before_plan(
 
     selected = asyncio.run(session.select_hypothesis())
     assert selected.request.plan.hypothesis_id == "h1"
-    assert order[0] == "attribution:1"
-    assert order[1].startswith("checkpoint:profile-guided: prepare round 1")
-    assert order.index("plan") < order.index("checkpoint:profile_multi: start hypothesis h1")
+    assert order.index("plan") < order.index("checkpoint:multi: start hypothesis h1")
     assert session.state.active_hypothesis is not None
 
     monkeypatch.setattr(
-        "vibesys.loops.profile_multi.session.issue_board.append_hypothesis_continuation",
+        "vibesys.loops.multi.session.issue_board.append_hypothesis_continuation",
         MagicMock(),
     )
     session.turns.plan = AsyncMock(side_effect=AssertionError("designer must be skipped"))
@@ -211,7 +186,7 @@ def test_attempt_preflight_and_unparseable_implementation(
     session = cast("Any", _session(tmp_path))
     selected = _selected()
     monkeypatch.setattr(
-        "vibesys.loops.profile_multi.session.issue_board.next_implementer_attempt",
+        "vibesys.loops.multi.session.issue_board.next_implementer_attempt",
         lambda _path, _round: 2,
     )
     assert list(session.remaining_attempts(selected)) == [2]
@@ -228,10 +203,10 @@ def test_attempt_preflight_and_unparseable_implementation(
     assert selected.attempt.implementation == response
 
     monkeypatch.setattr(
-        "vibesys.loops.profile_multi.session.issue_board.next_implementer_attempt",
+        "vibesys.loops.multi.session.issue_board.next_implementer_attempt",
         lambda _path, _round: 3,
     )
-    with pytest.raises(ProfileMultiSessionError, match="exhausting"):
+    with pytest.raises(MultiSessionError, match="exhausting"):
         session.remaining_attempts(selected)
 
 
@@ -244,7 +219,7 @@ def test_review_retries_rejection_and_validation_before_official_gate(tmp_path: 
     session._approve_perf = AsyncMock()
     session.options.max_rounds = 1
 
-    with pytest.raises(ProfileMultiSessionError, match="review requires"):
+    with pytest.raises(MultiSessionError, match="review requires"):
         asyncio.run(session.review(selected))
 
     selected.attempt.implementation = ImplementerResponse(

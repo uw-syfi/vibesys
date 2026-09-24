@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.attempts import AttemptDecision, AttemptState
+from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed
+from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.options import AgentOrchestrationOptions
 from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
+from vibesys.loops.single import session as single_session
 from vibesys.loops.single.hypothesis import HypothesisEngine
 from vibesys.loops.single.session import (
     AttemptRequest,
@@ -119,6 +121,56 @@ def _response(verdict: Verdict) -> SingleAgentRoundResponse:
 
 
 @pytest.mark.asyncio
+async def test_new_plan_checkpoints_hypothesis_then_continues_without_new_designer_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = AgentRunState()
+    session = SingleSession.__new__(SingleSession)
+    session.options = _session()[0].options
+    session.state = state
+    session.engine = HypothesisEngine.create(state)
+    session.records = []
+    session.round_number = 1
+    session.carry = CarryOver()
+    session.last_response = None
+    session.last_profile_focus = "decode"
+    plan = AsyncMock(return_value=_plan())
+    monkeypatch.setattr(
+        session,
+        "turns",
+        SimpleNamespace(plan=plan, progress_path=tmp_path / "progress.md"),
+        raising=False,
+    )
+    monkeypatch.setattr(session, "ctx", SimpleNamespace(log=lambda _message: None), raising=False)
+    monkeypatch.setattr(
+        session, "workspace", SimpleNamespace(revision="trusted-base"), raising=False
+    )
+    save = AsyncMock()
+    announce = MagicMock()
+    rollback = AsyncMock()
+    monkeypatch.setattr(session, "_save_state", save)
+    monkeypatch.setattr(session, "_announce_experiments", announce)
+    monkeypatch.setattr(session, "_apply_rollback", rollback)
+
+    first = await session.select_hypothesis()
+
+    assert first.selection.hypothesis.hypothesis_id == "h1"
+    assert first.selection.hypothesis.parent_commit == "trusted-base"
+    save.assert_awaited_once()
+    announce.assert_called_once_with("active_hypothesis_changed", session.state)
+    rollback.assert_awaited_once_with(first.selection)
+    assert plan.await_args is not None
+    assert plan.await_args.args[0].profile_guidance.plan_prompt_context() == {}
+
+    session.round_number = 2
+    continued = await session.select_hypothesis()
+    assert continued.selection.hypothesis.hypothesis_id == "h1"
+    assert continued.request.round_number == 2
+    plan.assert_awaited_once()
+    assert "continu" in (tmp_path / "progress.md").read_text().lower()
+
+
+@pytest.mark.asyncio
 async def test_paid_attempt_is_marked_before_turn_and_failed_review_checkpoints(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -216,6 +268,61 @@ async def test_official_gate_failure_keeps_accuracy_evidence_for_same_revision(
     assert selected.request.active_hypothesis.gate_candidate_commit == "candidate-revision"
     assert selected.request.active_hypothesis.gate_accuracy_passed
     checkpoint_active.assert_awaited_once_with(selected)
+
+
+@pytest.mark.asyncio
+async def test_passed_round_commits_record_and_publishes_one_finished_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session, selected = _session()
+    session.round_number = 1
+    session.records = []
+    session.state = session.engine.state
+    session.framework_benchmark_configured = False
+    session.terminal_policy = single_session._TerminalPolicy()  # noqa: SLF001
+    selected.attempt.passed = True
+    selected.attempt.retry = 1
+    selected.attempt.single_agent_response = _response(Verdict.PASS)
+    selected.attempt.judge = JudgeReviewed(Verdict.PASS)
+    checkpoint = AsyncMock(return_value="state-revision")
+    events = MagicMock()
+    monkeypatch.setattr(
+        session,
+        "ctx",
+        SimpleNamespace(
+            state=SimpleNamespace(checkpoint=checkpoint),
+            environment=SimpleNamespace(
+                view=SimpleNamespace(paths=SimpleNamespace(accuracy_command=None))
+            ),
+            events=events,
+        ),
+        raising=False,
+    )
+    snapshot = AsyncMock(return_value="candidate-revision")
+    monkeypatch.setattr(session, "workspace", SimpleNamespace(snapshot=snapshot), raising=False)
+    monkeypatch.setattr(
+        session,
+        "turns",
+        SimpleNamespace(
+            progress_path=tmp_path / "progress.md",
+            worker=SimpleNamespace(
+                backend_name="stub", driver_name=None, provider=None, model="test"
+            ),
+        ),
+        raising=False,
+    )
+
+    await session.commit_round(selected)
+
+    assert session.round_number == 2
+    assert len(session.state.rounds) == 1
+    assert session.state.rounds[0].commit == "candidate-revision"
+    assert session.state.rounds[0].judge_verdict == "pass"
+    assert session.state.active_hypothesis is None
+    checkpoint.assert_awaited_once()
+    assert checkpoint.await_args.kwargs["sequence"] == 1
+    assert checkpoint.await_args.kwargs["writes"]["state.json"] == session.state
+    assert events.emit.call_count == 2
 
 
 def test_retry_cursor_and_official_command_keep_policy_boundaries(
