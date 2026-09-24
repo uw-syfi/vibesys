@@ -21,9 +21,12 @@ here.
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vibesys.constants import PROJECT_ROOT
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _ENGINE_NAME_RE = re.compile(r"vllm|sglang", re.IGNORECASE)
 
