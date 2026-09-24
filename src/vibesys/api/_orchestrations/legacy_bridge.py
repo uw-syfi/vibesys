@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from vibesys.api._orchestrations.contracts import empty_run_view
 from vibesys.api._orchestrations.legacy_request import RunRequest
@@ -10,7 +10,6 @@ from vibesys.api._orchestrations.legacy_request import RunRequest
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.api._orchestrations.runtime import _LocalVibeSysRuntime
     from vibesys.api.contracts import RunStatus, RunView
     from vibesys.api.run_request import RunRequestLike
     from vibesys.run.integration import LocalRunIntegration
@@ -20,6 +19,14 @@ if TYPE_CHECKING:
 
 class _BuiltinRequestError(ValueError):
     """A built-in policy requires its legacy request options."""
+
+
+@runtime_checkable
+class _LegacyIntegrationRuntime(Protocol):
+    """Internal capability required by built-in compatibility adapters."""
+
+    @property
+    def legacy_integration(self) -> LocalRunIntegration: ...
 
 
 def legacy_request(request: RunRequestLike) -> RunRequest:
@@ -35,8 +42,10 @@ def legacy_request(request: RunRequestLike) -> RunRequest:
 
 def legacy_integration(runtime: VibeSysRuntime) -> LocalRunIntegration:
     """Access the old run integration only within built-in adapters."""
-    local = cast("_LocalVibeSysRuntime", runtime)
-    return local.legacy_integration
+    if not isinstance(runtime, _LegacyIntegrationRuntime):
+        message = "built-in orchestration runtime requires legacy_integration"
+        raise TypeError(message)
+    return runtime.legacy_integration
 
 
 class LegacyBuiltinDefaults:

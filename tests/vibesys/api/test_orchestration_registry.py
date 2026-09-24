@@ -26,6 +26,7 @@ from vibesys.api._dispatch import dispatch_loop
 from vibesys.api._orchestrations.agent import AgentOrchestration
 from vibesys.api._orchestrations.contracts import RunDescription
 from vibesys.api._orchestrations.evolve import EvolveOrchestration
+from vibesys.api._orchestrations.legacy_bridge import legacy_integration
 from vibesys.api._orchestrations.plain import PlainOrchestration
 from vibesys.api._orchestrations.profile_guided import ProfileGuidedOrchestration
 from vibesys.api.contracts import LoopKind, RunRequest, RunResult, RunStatus, RunView
@@ -101,6 +102,13 @@ def test_builtin_ids_resolve_to_their_own_implementations() -> None:
         implementation = registry.resolve(kind)
         assert type(implementation) is implementation_type
         assert isinstance(implementation, Orchestration)
+
+
+def test_builtin_bridge_rejects_runtime_without_legacy_integration() -> None:
+    runtime = cast("VibeSysRuntime", SimpleNamespace())
+
+    with pytest.raises(TypeError, match="requires legacy_integration"):
+        legacy_integration(runtime)
 
 
 @pytest.mark.parametrize(
