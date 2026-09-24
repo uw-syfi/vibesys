@@ -181,13 +181,24 @@ tuning problem.
 
 ### 6. Descend only where the system trace points
 
+**Before writing a "compute-bound"/"bandwidth-bound" verdict or a % of
+peak/bandwidth number, measure it.** Don't derive it from kernel duration and
+an assumed weight size, layer split, or KV geometry: that's an estimate, not
+a measurement, even when the number happens to land in a plausible range.
+Capture PMC counters (`counters.py` / `profile_counters`) and turn them into
+a verdict with [`counter-triage.md`](counter-triage.md). Before recommending
+a check of AITER/CK engagement (or any kernel-library tuning), run the check
+instead of just recommending it: [`aiter-engagement.md`](aiter-engagement.md)'s
+engagement proof.
+
 - One kernel dominates and needs hardware-ceiling context → `counters.py`
   (≤4 counters per pass, see Pitfalls) or `compute.py`, targeted at that
   kernel only, never a whole run.
 - Need per-instruction stall evidence inside that kernel → `att.py`, one CU,
   only after counters already point at a specific stall class.
-- Need to confirm a change actually helped → `kernel_bench.py`'s paired,
-  interleaved A/B (see [`measurement-protocol.md`](measurement-protocol.md)).
+- Need to confirm a change actually helped, or comparing a before/after →
+  `kernel_bench.py`'s paired, interleaved A/B, per
+  [`measurement-protocol.md`](measurement-protocol.md).
 
 ## The characteristic ROCm finding
 
@@ -294,6 +305,13 @@ relative hardware performance. See [`aiter-engagement.md`](aiter-engagement.md).
 - **Collectives show as RCCL, not NCCL.** The topology reasoning differs
   (Infinity Fabric, not NVLink); see [`floor.md`](floor.md) and
   [`algorithms/parallelism.md`](../../algorithms/parallelism.md).
+- **A SQL `query` against the trace needs a rocpd SQLite (`.db`) export.**
+  The `--output-format csv` recipe in this file (recommended above) never
+  produces one: a `query` call against it fails cleanly with "no rocpd
+  SQLite (.db) file found." Use `kernels`/`families`/`summary`/`idle_gaps`
+  etc. against the CSV/JSON trace directly instead; timeline analyses already
+  default to the load window (excluding server startup), so there is usually
+  no need to hand-slice the trace at all.
 
 ## See also
 
