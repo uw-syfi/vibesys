@@ -1259,7 +1259,7 @@ class TestRocprofMcpServer:
             lambda _py: (True, "pandas 2.2.2 under /usr/bin/python3"),
         )
         monkeypatch.setattr(
-            rocprof_server_mod.compute, "find_rocprofv3_bin", lambda: "/opt/rocm/bin/rocprofv3"
+            rocprof_server_mod.compute, "find_rocprof_legacy_bin", lambda: "/opt/rocm/bin/rocprof"
         )
         monkeypatch.setattr(
             rocprof_server_mod.compute,
