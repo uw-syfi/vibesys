@@ -37,7 +37,9 @@ def case_variant(word: str) -> st.SearchStrategy[str]:
     ``_row_from_mapping`` and analyze_rocprof.py's ``_get`` implement.
     """
     flags = st.lists(st.booleans(), min_size=len(word), max_size=len(word))
-    return flags.map(lambda fs: "".join(c.upper() if f else c.lower() for c, f in zip(word, fs)))
+    return flags.map(
+        lambda fs: "".join(c.upper() if f else c.lower() for c, f in zip(word, fs, strict=True))
+    )
 
 
 def permuted_csv(header: list[str], rows: list[list[object]], order: list[int]) -> str:
