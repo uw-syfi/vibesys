@@ -8,8 +8,10 @@ itself is the ``mcp`` package's responsibility.
 import asyncio
 import importlib.util
 import json
+import os
 import sqlite3
 import sys
+import textwrap
 from pathlib import Path
 from types import ModuleType
 
@@ -1130,11 +1132,68 @@ def _rocprof_kernel_trace_dir(tmp_path: Path) -> Path:
     return tmp_path
 
 
+# A minimal fake rocprofv3 for the MCP-layer profile_timeline smoke test below
+# (the deep behavior coverage for capture.py's profile_* tools lives in
+# tests/vibesys/loops/test_rocprof_capture.py -- this only proves server.py's
+# wiring reaches capture.py correctly). No SIGINT handling is needed here:
+# the smoke test uses a trivial bounded command with no load_command.
+_FAKE_ROCPROFV3_TIMELINE_SOURCE = textwrap.dedent(
+    f"""
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    argv = sys.argv[1:]
+    out_dir = None
+    for i, tok in enumerate(argv):
+        if tok == "-d" and i + 1 < len(argv):
+            out_dir = argv[i + 1]
+            break
+    wrapped = argv[argv.index("--") + 1 :] if "--" in argv else []
+    rc = subprocess.Popen(wrapped).wait() if wrapped else 0
+    if rc == 0 and out_dir:
+        out_path = Path(out_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+        src = Path({str(_ROCPROF_FIXTURES)!r}) / "kernel_trace" / "out_kernel_trace.csv"
+        if src.is_file():
+            shutil.copy(src, out_path / "out_kernel_trace.csv")
+    sys.exit(rc)
+    """
+)
+
+
+def _install_fake_rocprofv3_timeline_only(bin_dir: Path) -> Path:
+    path = bin_dir / "rocprofv3"
+    path.write_text(f"#!{sys.executable}\n{_FAKE_ROCPROFV3_TIMELINE_SOURCE}")
+    path.chmod(0o755)
+    return path
+
+
 class TestRocprofMcpServer:
     def test_registers_expected_tools(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+        # Built from the live server rather than assumed: counter_sets/
+        # counter_plan/att_plan were folded into profiling_capabilities, and
+        # compute_doctor was folded into it too (reached via
+        # capture.profiling_capabilities() -> _capability_compute_block()).
+        # certify/gemm_shapes/roofline are only registered when the torch
+        # analyzer module is importable as a sibling; since
+        # resources/profilers/torch/analyze_torch_profile.py exists on disk
+        # in this repo, they ARE registered in this test environment.
         server = rocprof_server_mod.build_server()
         names = asyncio.run(_list_tool_names(server))
         assert names == {
+            # capabilities + capture tools (capture.py)
+            "profiling_capabilities",
+            "profile_timeline",
+            "profile_counters",
+            "profile_kernel_deep",
+            "profile_instructions",
+            "profile_ops",
+            # capture store: list / summarize / diff
+            "captures",
+            "summary",
+            "compare",
             # analyze_rocprof.py: rocprofv3 system trace
             "files",
             "kernels",
@@ -1145,23 +1204,35 @@ class TestRocprofMcpServer:
             "graphs",
             "host_idle",
             "query",
-            "summary",
             # counters.py: PMC counter sets
-            "counter_sets",
-            "counter_plan",
             "counter_report",
             "counter_triage",
             # att.py: Advanced Thread Trace
-            "att_plan",
             "att_hotspots",
-            # compute.py: rocprof-compute (profile excluded -- shell only)
-            "compute_doctor",
+            # compute.py: rocprof-compute analyze drill-down
             "compute_analyze",
+            # analyze_torch_profile.py: cross-check torch-side analysis
+            "certify",
+            "gemm_shapes",
+            "roofline",
             # kernel_bench.py: microbenchmark + paired A/B
             "bench_parse",
             "bench_compare",
             "bench_verdict",
         }
+
+    def test_registers_fewer_tools_when_torch_analyzer_is_unavailable(
+        self, rocprof_server_mod: ModuleType, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(rocprof_server_mod.capture, "import_torch_sibling", lambda _name: None)
+
+        server = rocprof_server_mod.build_server()
+        names = asyncio.run(_list_tool_names(server))
+
+        assert "certify" not in names
+        assert "gemm_shapes" not in names
+        assert "roofline" not in names
+        assert "profile_timeline" in names
 
     def test_kernels_tool_reports_from_a_kernel_trace_directory(
         self, rocprof_server_mod: ModuleType, tmp_path: Path
@@ -1171,34 +1242,6 @@ class TestRocprofMcpServer:
         server = rocprof_server_mod.build_server()
         out = asyncio.run(_call_tool(server, "kernels", report=str(report), top=5))
         assert "flash_attn_decode_kernel" in out
-
-    def test_counter_sets_tool_prints_the_catalogue_for_one_arch(
-        self, rocprof_server_mod: ModuleType
-    ) -> None:
-        server = rocprof_server_mod.build_server()
-        out = asyncio.run(_call_tool(server, "counter_sets", arch="mi210"))
-        assert "gfx90a" in out
-        assert "hbm" in out
-
-    def test_counter_plan_tool_prints_one_pass_per_set_with_separate_output_dirs(
-        self, rocprof_server_mod: ModuleType
-    ) -> None:
-        server = rocprof_server_mod.build_server()
-        out = asyncio.run(
-            _call_tool(
-                server,
-                "counter_plan",
-                arch="gfx90a",
-                sets="l2,hbm",
-                kernel="flash_attn.*",
-                out_dir="rocprof_pmc",
-                command=["python", "bench.py"],
-            )
-        )
-        assert out.count("rocprofv3 --pmc") == 2
-        assert "rocprof_pmc/gfx90a/l2" in out
-        assert "rocprof_pmc/gfx90a/hbm" in out
-        assert "-- python bench.py" in out
 
     def test_counter_report_tool_merges_pmc_passes(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
         dirs = [
@@ -1220,22 +1263,6 @@ class TestRocprofMcpServer:
         assert "gemv_lowocc_kernel" in out
         assert "OCCUPANCY-LIMITED" in out
 
-    def test_att_plan_tool_prints_a_working_command_line(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
-        server = rocprof_server_mod.build_server()
-        out = asyncio.run(
-            _call_tool(
-                server,
-                "att_plan",
-                arch="gfx90a",
-                kernel="flash_attn.*",
-                decoder_lib_dir="/opt/rocm/lib/att_decoder",
-                command=["python", "bench.py"],
-            )
-        )
-        assert "rocprofv3 --att" in out
-        assert "--att-library-path /opt/rocm/lib/att_decoder" in out
-        assert "-- python bench.py" in out
-
     def test_att_hotspots_tool_ranks_stall_hotspots(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
         dispatch_dir = _ROCPROF_FIXTURES / "att" / "ui_output_agent_123_dispatch_1"
 
@@ -1243,9 +1270,16 @@ class TestRocprofMcpServer:
         out = asyncio.run(_call_tool(server, "att_hotspots", dispatch_dir=str(dispatch_dir), top=5))
         assert "Stall category totals" in out
 
-    def test_compute_doctor_tool_reports_all_checks_passed(
+    def test_profiling_capabilities_tool_reports_all_compute_checks_passed(
         self, rocprof_server_mod: ModuleType, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # compute_doctor is gone as a standalone tool; its diagnosis is now
+        # reached via profiling_capabilities() -> capture._capability_compute_block()
+        # -> compute.cmd_doctor. rocprof_server_mod.compute and
+        # rocprof_server_mod.capture.compute are the same cached module
+        # object (both server.py and capture.py `import compute` after
+        # inserting the same rocprof dir onto sys.path), so patching either
+        # attribute path reaches the same functions capture.py calls.
         monkeypatch.setattr(
             rocprof_server_mod.compute,
             "find_rocprof_compute_bin",
@@ -1269,11 +1303,11 @@ class TestRocprofMcpServer:
         )
 
         server = rocprof_server_mod.build_server()
-        out = asyncio.run(_call_tool(server, "compute_doctor"))
+        out = asyncio.run(_call_tool(server, "profiling_capabilities"))
         assert "[OK]" in out
         assert "All checks passed." in out
 
-    def test_compute_doctor_tool_reports_missing_binary_as_a_fix(
+    def test_profiling_capabilities_tool_reports_missing_compute_binary_as_a_fix(
         self, rocprof_server_mod: ModuleType, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(rocprof_server_mod.compute, "find_rocprof_compute_bin", lambda: None)
@@ -1281,7 +1315,7 @@ class TestRocprofMcpServer:
         monkeypatch.setattr(rocprof_server_mod.compute, "find_aqlprofile_lib", lambda: None)
 
         server = rocprof_server_mod.build_server()
-        out = asyncio.run(_call_tool(server, "compute_doctor"))
+        out = asyncio.run(_call_tool(server, "profiling_capabilities"))
         assert "[FAIL] rocprof-compute binary: not found" in out
         assert "Fixes:" in out
 
@@ -1336,3 +1370,65 @@ class TestRocprofMcpServer:
         server = rocprof_server_mod.build_server()
         out = asyncio.run(_call_tool(server, "bench_verdict", samples=str(samples)))
         assert "DECISIVE" in out
+
+    # -- new curated-surface smoke tests: prove server.py's wiring, not the
+    # -- deep capture.py behavior (that's tests/vibesys/loops/test_rocprof_capture.py) --
+
+    def test_profiling_capabilities_tool_smoke(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "profiling_capabilities"))
+        assert out
+        assert "rocprofv3" in out
+
+    def test_profile_timeline_tool_with_fake_rocprofv3_returns_ok(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bin_dir = tmp_path / "fakebin"
+        bin_dir.mkdir()
+        _install_fake_rocprofv3_timeline_only(bin_dir)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+        monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
+
+        server = rocprof_server_mod.build_server()
+        out = asyncio.run(_call_tool(server, "profile_timeline", command="true"))
+
+        assert "): ok" in out
+
+    def test_captures_tool_with_no_captures_reports_the_empty_message(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
+        server = rocprof_server_mod.build_server()
+
+        out = asyncio.run(_call_tool(server, "captures"))
+
+        assert "(no captures" in out
+
+    def test_summary_and_compare_tools_with_a_bogus_capture_id_return_clean_error_text(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
+        server = rocprof_server_mod.build_server()
+
+        summary_out = asyncio.run(_call_tool(server, "summary", capture_id="bogus-capture-id"))
+        compare_out = asyncio.run(_call_tool(server, "compare", a="bogus-a", b="bogus-b"))
+
+        # This module's own clean "error: ..." text, not a raised exception
+        # turned into FastMCP's own error shape or a stack trace.
+        assert summary_out.startswith("error:")
+        assert compare_out.startswith("error:")
+
+    def test_profile_counters_tool_with_an_unknown_set_returns_error_string(
+        self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # capture.profile_counters *raises* ValueError for bad input; the
+        # profile_counters tool wrapper in server.py catches ValueError and
+        # returns f"error: {exc}" instead of letting it propagate.
+        monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
+        server = rocprof_server_mod.build_server()
+
+        out = asyncio.run(
+            _call_tool(server, "profile_counters", command="true", sets=["bogus-set-xyz"])
+        )
+
+        assert out.startswith("error:")
