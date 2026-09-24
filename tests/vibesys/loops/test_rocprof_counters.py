@@ -444,3 +444,65 @@ def test_cmd_triage_rejects_a_gfx_id_with_no_catalogued_peak_spec():  # noqa: AN
 def test_cmd_triage_reports_no_files_found(tmp_path: Path):  # noqa: ANN201  # tracked: #288
     out = _run(cmd_triage, dirs=[str(tmp_path)], kernel=None, top=15, arch="gfx90a")
     assert "no *counter_collection*" in out
+
+
+# ---------------------------------------------------------------------------
+# Real MI210 (gfx90a, ROCm 6.4.1) regression fixture
+#
+# `real_mi210_gfx90a/pass{1,2,3}/` mirrors a real rocprofv3 capture (AMD HPC
+# Fund cluster, job1_inventory_pmc_att.sh) of `workload.py` -- a bf16
+# 4096^3 GEMM (rocBLAS/Tensile kernel) + an fp32 elementwise axpy -- trimmed
+# to 2 real dispatches per kernel, keeping the real Kernel_Name, counter
+# values, and Start_Timestamp/End_Timestamp, and the real
+# `pmc_1/<hostname>/<pid>_*` nesting rocprofv3 always creates under `-d`.
+# ---------------------------------------------------------------------------
+
+_REAL_MI210 = _FIXTURES / "pmc" / "real_mi210_gfx90a"
+_REAL_GEMM_KERNEL = "Cijk_Ailk_Bljk_BBS_BH_Bias_HAS_SAV_UserArgs_MT256x128x32_MI32x32x1"
+_REAL_EW_KERNEL = "void at::native::vectorized_elementwise_kernel<4, at::native::AUnaryFunctor"
+
+
+def _real_mi210_dirs() -> list[str]:
+    return [str(_REAL_MI210 / f"pass{i}") for i in (1, 2, 3)]
+
+
+def test_real_mi210_report_finds_the_nested_pmc_1_output_and_derives_duration():  # noqa: ANN201  # tracked: #288
+    # rocprofv3 nests output under <out_dir>/pmc_1/<hostname>/<pid>_* rather
+    # than directly under <out_dir>; _discover must still find it via rglob,
+    # and duration must come from the PMC rows' own timestamps (no separate
+    # kernel_trace capture in this fixture, matching the real job).
+    out = _run(cmd_report, dirs=_real_mi210_dirs(), kernel=None, top=15, arch="gfx90a")
+    assert "Merged 3 counter file(s), 2 kernel(s) matched." in out
+    assert "Duration data available for 2 kernel name(s)." in out
+    assert "2 dispatch(es)" in out
+
+
+def test_real_mi210_report_attributes_gemm_as_mfma_heavy_and_ew_as_bandwidth_heavy():  # noqa: ANN201  # tracked: #288
+    out = _run(cmd_report, dirs=_real_mi210_dirs(), kernel=None, top=15, arch="gfx90a")
+    assert _REAL_GEMM_KERNEL in out
+    # SQ_INSTS_MFMA / GRBM_GUI_ACTIVE from the real capture -> ~5.45 insts/cycle.
+    assert "MFMA issue rate: 5.4477 insts/cycle" in out
+    assert _REAL_EW_KERNEL in out
+    assert "achieved BW: 1428.9 GB/s" in out
+
+
+def test_real_mi210_report_shortens_the_long_real_kernel_names():  # noqa: ANN201  # tracked: #288
+    # The real Tensile GEMM kernel name is 442 chars; report must not print
+    # it in full (this toolkit is meant to feed an LLM prompt).
+    out = _run(cmd_report, dirs=_real_mi210_dirs(), kernel=None, top=15, arch="gfx90a")
+    assert "UserArgs_MT256x128x32_MI32x32x1" in out  # enough of the name survives to identify it
+    assert "WS64_WG64_4_1" not in out  # the tail of the full 442-char name is gone
+
+
+def test_real_mi210_triage_classifies_gemm_compute_bound_and_ew_bandwidth_bound():  # noqa: ANN201  # tracked: #288
+    out = _run(cmd_triage, dirs=_real_mi210_dirs(), kernel=None, top=15, arch="gfx90a")
+    assert _REAL_GEMM_KERNEL in out
+    assert "verdict: COMPUTE-BOUND" in out
+    assert _REAL_EW_KERNEL in out
+    assert "verdict: BANDWIDTH-BOUND" in out
+    # GEMM's own achieved HBM bandwidth (~211 GB/s, ~13% of the 1.6 TB/s
+    # peak) must not itself cross the 50% bandwidth-bound threshold -- the
+    # occupancy check comes first, then bandwidth, then MFMA; GEMM should
+    # fall through bandwidth and land on the MFMA check.
+    assert "achieved 1429 GB/s" in out  # only the elementwise kernel's evidence
+    assert "achieved 211 GB/s" not in out  # GEMM's bandwidth isn't the verdict driver
