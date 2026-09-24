@@ -118,7 +118,13 @@ orchestrator prepass, optional profiler, implementer, and judge in
 `policy_multi.py`. `SingleAgentFlow` binds one combined implementation, profile,
 and review turn in `policy_single.py`. `ProfileGuidedFlow` wraps either inner flow
 with component profiling and measurement from `policy_profile.py`. Evolve has its
-own control flow in `src/vibesys/loops/evolve/loop.py`. The agent executor owns
+own policy in `src/vibesys/loops/evolve/policy_flow.py`: `EvolveSearch` selects
+parents, records outcomes, checkpoints search state, and chooses the final
+candidate. `evaluate_candidate` orders mutation, review, framework gates,
+measurement, and snapshotting through typed `CandidateEffects`. The adapter in
+`loop.py` binds those effects to agents, the run context, task gates, Git, and
+the run environment. Policy tests use fake effects and in-memory populations.
+The agent executor owns
 durable retry numbering, framework gates, and round transactions. These built-in
 policies receive typed `AgentTurns`, `RoundEffects`, and profile effect ports;
 `policy_local.py` binds those ports to the existing context, role handles, and
