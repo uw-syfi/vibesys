@@ -611,9 +611,8 @@ class OpenEvolveSearchPolicy:
 
         self._snapshot_dir = snapshot_dir
         self._save_selection_state()
-        for old_snapshot in snapshots_dir.iterdir():
-            if old_snapshot != snapshot_dir and old_snapshot.is_dir():
-                shutil.rmtree(old_snapshot)
+        # Earlier snapshots may already be committed as portable framework
+        # metadata. Keep them immutable; CURRENT selects the active snapshot.
 
     def _save_selection_state(self) -> None:
         if self._snapshot_dir is None:
