@@ -85,10 +85,7 @@ def fetch_bun(
 
 
 def _download(url: str) -> bytes:
-    opener = urllib.request.OpenerDirector()
-    opener.add_handler(urllib.request.HTTPHandler())
-    opener.add_handler(urllib.request.HTTPSHandler())
-    with opener.open(url, timeout=120) as response:
+    with urllib.request.build_opener().open(url, timeout=120) as response:
         return response.read()
 
 
