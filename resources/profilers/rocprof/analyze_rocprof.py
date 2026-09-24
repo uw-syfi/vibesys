@@ -190,6 +190,7 @@ _FAMILY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "moe_sum",
             "grouped_topk",
             "cutlass_scaled_mm",
+            "wvsplitk",
         ),
     ),
     ("Triton (JIT)", ("triton_poi_fused", "triton_red_fused", "triton_per_fused", "triton_")),
@@ -220,12 +221,34 @@ _GEMM_ATTN_RE = re.compile(
 _FALLBACK_FAMILY_SHARE_THRESHOLD = 5.0
 
 
+def _looks_like_triton_kernel(name: str) -> bool:
+    """Structural fallback for a Triton JIT kernel with no ``triton_*`` prefix.
+
+    Only kernels rocprofv3 renamed via torch.inductor carry a ``triton_``
+    prefix (the ``_FAMILY_RULES`` entry above). A kernel compiled directly
+    from a ``@triton.jit`` function (vLLM/SGLang's own ops — paged-attention
+    helpers, MoE routing, and linear-attention/GDN kernels such as
+    ``fused_recurrent_gated_delta_rule_packed_decode_kernel`` or
+    ``chunk_gated_delta_rule_fwd_kernel_h_blockdim64``) keeps its Python
+    function name verbatim instead: snake_case, usually leading-underscore
+    or ``_kernel``-suffixed by convention, with none of the C++ symbol shape
+    (``::`` namespaces, ``<...>`` template args, or an un-demangled Itanium
+    ``_Z...`` mangled prefix) that a hand-written HIP/CK kernel has.
+    """
+    if "::" in name or "<" in name or name.startswith(("_Z", "__")):
+        return False
+    lname = name.lower()
+    return "_kernel" in lname or lname.startswith("_")
+
+
 def _classify_family(name: str) -> str:
     """Classify a kernel name into a library family (best-effort, name-only)."""
     lname = name.lower()
     for family, subs in _FAMILY_RULES:
         if any(s in lname for s in subs):
             return family
+    if _looks_like_triton_kernel(name):
+        return "Triton (JIT)"
     return "other"
 
 
