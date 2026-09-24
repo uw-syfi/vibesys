@@ -60,6 +60,50 @@ handled identically either way.
 handler (if any) the host program had already installed, so a host that
 itself uses one of these signals keeps working.
 
+Measured on a real MI210 (ROCm 7.2.3 / torch 2.12): signal delivery itself is
+not the bottleneck. ``os.kill(SIGUSR1)`` to the wrapped handler actually
+running was well under 100ms in every measurement (as low as ~0.4ms with the
+main thread idle in ``Thread.join()``), including while the host process was
+issuing a sustained stream of GPU launches on another thread. The real,
+repeatable cost is ``torch.profiler.profile(...).start()`` itself: on this
+stack it took **~1.9-2.5 seconds** to return after the handler entered
+(CUPTI/roctracer-equivalent backend initialization), every single time,
+regardless of workload. ``duration_s`` (see ``capture_ops.py``) is measured
+from the moment ``SIGUSR1`` is *sent*, not from when recording actually
+starts, so a short ``duration_s`` (single-digit seconds) can lose a large
+fraction of its nominal window to this fixed cost; pad it accordingly, or use
+a longer window when the caller can. The symmetric stop-side cost
+(``prof.stop()`` + ``export_chrome_trace()``) was proportional to trace size
+in testing (milliseconds for a near-empty trace, ~8s for a ~4MB/28k-kernel
+one) -- expect it to scale further for larger real captures, which is why
+``grace_s`` should stay generous (see the ROCm post-export hang note below).
+
+## Cross-thread CPU-op capture (measured gap, not fixed here)
+
+Measured on the same hardware: GPU kernel (CUDA/HIP activity) events are
+captured for *every* thread that issues them, started before or after
+``prof.start()`` -- device-side activity tracking is process-wide, not
+thread-scoped. CPU-side ``cpu_op`` events (the ``RecordFunction``-based
+per-op records ``record_shapes``/``gemm_shapes``/``roofline`` need) are a
+different story: a background thread that already existed and was already
+issuing torch ops *before* ``prof.start()`` executed recorded **zero**
+``cpu_op`` events for its own ops in testing (58k GPU kernels, 0 correlated
+CPU ops), while an identical workload run entirely on the main thread (so it
+necessarily starts *after* the SIGUSR1-triggered ``prof.start()`` returns)
+recorded CPU ops for 100% of its GPU-issuing calls. No public
+``torch.profiler`` option was found to force capture on already-running
+threads; this is a real limitation of arming the profiler this late (via a
+signal, after the host program's own threads may already be running), not a
+bug in the signal-delivery mechanism above. The practical mitigation: arm as
+early as possible (``delay_s=0`` or small), since this module starts
+recording as soon as the host process imports torch and shows a GPU --
+typically before an application spawns its *own* worker threads during
+subsequent initialization. Once armed, GPU kernel-level numbers
+(``kernels``, ``certify``'s ``gpu_kernels``/``gpu_busy`` checks) stay
+reliable regardless of thread; only op-level attribution
+(``record_shapes`` coverage, ``gemm_shapes``, ``roofline``) needs the
+issuing thread to have started after ``prof.start()``.
+
 ## The ROCm post-export hang
 
 Per the AMD profiler worklog: exiting a ``torch.profiler`` session can hang
@@ -118,9 +162,20 @@ _LOG_PREFIX = "[vibesys-torch-inject]"
 
 
 def _log(message: str) -> None:
+    """Log one line, prefixed with a monotonic timestamp.
+
+    The timestamp is required to diagnose signal-delivery latency (the gap
+    between the watcher thread's ``os.kill(SIGUSR1/SIGUSR2)`` and the main
+    thread actually running the corresponding handler): both call sites log
+    through this function, so their timestamps are directly comparable
+    without cross-referencing wall-clock log-arrival order, which a busy
+    stderr stream does not guarantee.
+    """
     with contextlib.suppress(Exception):
         print(  # noqa: T201  # tracked: #288
-            f"{_LOG_PREFIX} pid={os.getpid()}: {message}", file=sys.stderr, flush=True
+            f"{_LOG_PREFIX} t={time.monotonic():.6f} pid={os.getpid()}: {message}",
+            file=sys.stderr,
+            flush=True,
         )
 
 
@@ -173,6 +228,7 @@ class _Capture:
         self._prof = None
 
     def start(self) -> None:
+        _log("SIGUSR1 handler entered (start requested)")
         with self._lock:
             if self._phase != "idle":
                 return
@@ -197,6 +253,7 @@ class _Capture:
             _ = torch  # keep the import alive via closure; no further use here
 
     def stop_and_export(self) -> None:
+        _log("SIGUSR2/SIGINT/atexit handler entered (stop requested)")
         with self._lock:
             if self._phase != "running" or self._prof is None:
                 self._phase = "stopped"
@@ -306,9 +363,11 @@ def _arm(capture: _Capture, *, delay_s: float, duration_s: float | None) -> None
             return
         if delay_s > 0 and stop_event.wait(delay_s):
             return
+        _log("sending SIGUSR1 (start)")
         with contextlib.suppress(ProcessLookupError):
             os.kill(os.getpid(), signal.SIGUSR1)
         if duration_s is not None and not stop_event.wait(duration_s):
+            _log("sending SIGUSR2 (stop, duration_s elapsed)")
             with contextlib.suppress(ProcessLookupError):
                 os.kill(os.getpid(), signal.SIGUSR2)
 
