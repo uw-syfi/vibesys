@@ -328,6 +328,58 @@ lists (e.g. HIP-graph mode's own kernel-selection GEMM variants appearing
 only in graph mode); `summary` correctly dispatched to the timeline
 analyzer by the capture's recorded `kind`.
 
+Follow-up round driven by an end-to-end eval transcript
+(`run-20260924T210449Z`), fixing two more real issues:
+
+- **rocprofv3 leaked its own SPM-support diagnostic into a `$(...)`-captured
+  value.** The eval's `command` picked a port via `PORT=$(python3 -c "...")`
+  under `profile_timeline`; rocprofv3 injects its tool library into every
+  process in the launched tree via inherited env, so the small python3
+  helper's stdout picked up rocprofv3's one-time "Streaming Performance
+  Monitor (SPM) is not supported on gfx90a devices" line ahead of the real
+  port, and `vllm serve` rejected its own corrupted `--port` argument.
+  Root-caused against the real transcript (not assumed) before fixing.
+  `capture.py` now defaults `ROCPROFILER_LOG_LEVEL`/`ROCPROF_LOG_LEVEL` to
+  `fatal` in the lifecycle env for every rocprofv3-driven capture
+  (`_ROCPROFV3_QUIET_ENV`, best-effort: unconfirmed against a live rocprofv3
+  in this GPU-free dev sandbox); the serving-engines skill doc also now
+  tells agents to avoid `$(...)` for values a launch needs in the first
+  place, the more robust fix since it doesn't depend on the right env var
+  name. Separately hardened `capture_runtime.run_capture` to write
+  `command`/`ready_command`/`load_command` to script files (`target.sh`
+  etc.) run via `bash <script>` rather than `bash -lc <text>`, so arbitrary
+  multi-line shell text survives any wrapper that isn't fully argv-opaque
+  about its trailing args -- independently justified hardening, not itself
+  what caused the observed incident.
+- **Server captures included startup in every timeline table.** A
+  `profile_timeline` of a server capture (12 min, 1.4M kernel rows) mixed
+  weight-load/warmup/KV-init kernels into the family/kernel tables the
+  auto-summary and every drill-down read, and the eval agent had no way to
+  exclude it -- also never dropped to `profile_counters` for confirmation
+  (criterion A4). Fixed: `capture_runtime` now records wall-clock and
+  `CLOCK_MONOTONIC` timestamps for capture start/end and the load phase
+  (ready-succeeded through load-command-finished) in the manifest;
+  `analyze_rocprof.py`'s timeline subcommands (`kernels`, `families`,
+  `idle_gaps`, `cpu_overhead`, `memory`, `graphs`, `host_idle`, `summary`,
+  `compare`) default to that load-phase window, print which window they
+  used, and take an explicit `window` override (`'all'`, `'startup'`, or
+  `'start_s:end_s'`); falls back to `'all'` with a clear note whenever a
+  capture has no manifest, no recorded window, or the trace's own
+  timestamps don't plausibly align with the manifest's recorded span
+  (never silently mis-slices). Confirmed rocprofv3's CSV timestamps are
+  `CLOCK_MONOTONIC`-based nanoseconds by reasoning from real MI210 fixture
+  data (`tests/vibesys/loops/fixtures/rocprof/rocprofv3_real/`): the first
+  real dispatch's `Start_Timestamp` is `2297022669872562` ns, ~26.6 days --
+  plausible host uptime, and far too small for a `CLOCK_REALTIME`/epoch
+  reading (~1.7e18 ns) and far too large to be measured from this
+  process's own start. `profile_timeline`'s auto-summary also now suggests
+  a concrete `profile_counters` drill-down (set names by kernel-name
+  keyword: GEMM-like -> `mfma,hbm`, attention-like -> `mfma,l2`) against
+  the load window's top kernel by GPU time, addressing the A4 gap directly.
+  `profile_ops` (torch) records the same `load_window`/`capture_start`/
+  `capture_end` for free via the shared lifecycle; its own op-level
+  analyses don't slice by it yet (left as a follow-up).
+
 ## Appendix: detailed format notes and commands
 
 ### rocprofv3 PMC counter output

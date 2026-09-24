@@ -50,6 +50,43 @@ it: it sidesteps the clean-exit problem above entirely instead of relying on
 a graceful-shutdown path that may not be verified. See the engine's own file
 for whether that path exists and how to reach it.
 
+`command`/`ready_command`/`load_command` may be arbitrary multi-line shell
+text (heredocs, embedded quotes, a multi-line `python3 -c "..."`): the
+capture tools write each to its own script file before running it, so
+nothing re-tokenizes the text on its way to the shell that finally executes
+it.
+
+## Avoid `$(...)` command substitution for values the launch needs
+
+Some capture tools inject themselves into every process in the launched
+tree, not only the top-level target -- including a small helper subprocess
+spawned just to compute a value via `$(...)` command substitution (e.g.
+picking a free port). If that injected tool prints anything of its own to
+the helper's stdout (a one-time capability/diagnostic line, commonly
+emitted the moment its tool library loads into a process, independent of
+whether that process ever does any of the work being profiled), the
+substitution captures the diagnostic line together with the real value,
+and using the result unquoted (`--port $PORT`) word-splits it into extra,
+unexpected arguments for the real target. Observed for real: a port-picker
+helper's `$(python3 -c "...")` output picked up a stray diagnostic line
+from the profiling tool, and the server rejected its own `--port` argument
+as a result. Write the value to a file and read it back, or use a plain
+bash loop/builtin with no subshell capturing stdout (e.g. an `/dev/tcp`
+probe loop for port selection), instead of `$(...)` inside a capture tool's
+lifecycle arguments.
+
+## Server captures default to the load-phase window
+
+A server capture also captures that server's own startup (weight load,
+warmup, KV init, ...) ahead of the actual benchmarked traffic, which can
+dwarf the traffic itself and pollute a system-trace analysis's kernel/
+family tables with one-time setup work. The timeline analysis tools default
+to the capture's recorded load-phase window (the span between
+`ready_command` succeeding and `load_command` finishing) rather than the
+whole run, and state which window they used in their output header; pass
+`window='all'` to see the whole run, or `window='startup'` to look at the
+excluded setup phase on its own.
+
 ## Per-engine files
 
 | Engine | File | Status |
