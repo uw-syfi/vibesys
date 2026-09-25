@@ -378,28 +378,6 @@ async def _run_profiler(  # noqa: PLR0913  # tracked: #288
 _CandidateOutcome = CandidateOutcome
 
 
-async def _run_framework_accuracy_gate(
-    ctx: RunContext,
-    *,
-    generation: int,
-    child_idx: int,
-    timeout_seconds: int | None = None,
-    scope: WorkspaceHandle | None = None,
-) -> str | None:
-    """Run the immutable accuracy command and return retry feedback on failure."""
-    if (
-        timeout_seconds is not None
-        and timeout_seconds != ctx.request.input_bundle.manifest.accuracy.timeout_seconds
-    ):
-        raise _AccuracyTimeoutMismatchError
-    result = await ctx.gates.check(
-        process_id=f"evolve-accuracy-{generation}-{child_idx}",
-        label=f"gen-{generation}-cand-{child_idx}",
-        scope=scope,
-    )
-    return result.feedback
-
-
 async def _run_framework_benchmark_gate(
     ctx: RunContext,
     *,
@@ -441,13 +419,17 @@ async def _run_candidate_gates(  # noqa: PLR0913  # tracked: #288
     when every gate passed; ``benchmark`` is set only when a declared contract
     ran and passed, and it carries the trusted measurement.
     """
-    failure_feedback = await _run_framework_accuracy_gate(
-        ctx,
-        generation=generation,
-        child_idx=child_idx,
-        timeout_seconds=accuracy_timeout_seconds,
+    if (
+        accuracy_timeout_seconds is not None
+        and accuracy_timeout_seconds != ctx.request.input_bundle.manifest.accuracy.timeout_seconds
+    ):
+        raise _AccuracyTimeoutMismatchError
+    accuracy = await ctx.gates.check(
+        process_id=f"evolve-accuracy-{generation}-{child_idx}",
+        label=f"gen-{generation}-cand-{child_idx}",
         scope=scope,
     )
+    failure_feedback = accuracy.feedback
     if failure_feedback is not None or not contract.declared:
         return failure_feedback, None
     gate = await _run_framework_benchmark_gate(

@@ -41,6 +41,7 @@ from vibesys.orchestration.agents import _Agents, _LocalAgentHandle
 from vibesys.orchestration.control import _RunControl
 from vibesys.orchestration.environment import _Environment
 from vibesys.orchestration.gates import (
+    GateExecutor,
     GateRunResult,
     MeasurementOptions,
     _Evaluator,
@@ -74,6 +75,7 @@ if TYPE_CHECKING:
 # Re-exported for callers that import these public names from this module
 # rather than from the capability module that now owns them.
 __all__ = [
+    "GateExecutor",
     "GateRunResult",
     "MeasurementOptions",
     "RunContext",
@@ -152,6 +154,7 @@ class RunContext:
         projector: _CommittedStateProjector | None = None,
         agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+        gate_executor: GateExecutor | None = None,
     ) -> None:
         """Bind request, policy setup, and the application control channel.
 
@@ -163,6 +166,11 @@ class RunContext:
         :func:`vs_agent.api.build_agent_client`, looked up as this module's
         own (still independently patchable) ``build_agent_client`` global when
         no override is given.
+
+        ``gate_executor`` is the same kind of seam for ``ctx.gates``: a test
+        passes a fake in place of monkeypatching the module-level
+        ``run_accuracy_gate``/``run_benchmark_gate`` functions the real
+        implementation wraps. Defaults to the real trusted-command gates.
         """
         self.request = request
         self._setup = setup
@@ -171,6 +179,7 @@ class RunContext:
         self._projector = projector
         self._agent_client_factory = agent_client_factory
         self._backend_factory = backend_factory
+        self._gate_executor = gate_executor
         self._resource_owner: _RunResources | None = None
         self._session_store: SynchronizedSessionStore | None = None
         self._agents: dict[tuple[str | None, str], _LocalAgentHandle] = {}
@@ -273,6 +282,7 @@ class RunContext:
         projector: _CommittedStateProjector | None = None,
         agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+        gate_executor: GateExecutor | None = None,
     ) -> AsyncIterator[RunContext]:
         """Construct and close the run, including after cancellation or setup failure."""
         host = cls(
@@ -283,6 +293,7 @@ class RunContext:
             projector=projector,
             agent_client_factory=agent_client_factory,
             backend_factory=backend_factory,
+            gate_executor=gate_executor,
         )
         try:
             prepare = asyncio.create_task(asyncio.to_thread(host._prepare))

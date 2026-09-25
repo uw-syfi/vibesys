@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import shlex
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from vibesys.evaluators.gates import (
     GATE_RECORD_TAIL_CHARS,
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.context import _RunResources
+    from vibesys.evaluators.input_manifest import BenchmarkResult
     from vibesys.evaluators.metrics import Objective
     from vibesys.orchestration._host import HostResources
     from vibesys.orchestration.workspaces import WorkspaceHandle
@@ -40,6 +41,97 @@ if TYPE_CHECKING:
     from vibesys.runtime import WorkspaceScope
     from vibesys.sandbox.run_environment import RunEnvironmentView
     from vs_sandbox.api import Sandbox
+
+
+class GateExecutor(Protocol):
+    """The two trusted gate operations ``ctx.gates`` runs off-thread.
+
+    Injected on :class:`~vibesys.orchestration.runtime.RunContext` (default:
+    the real trusted-command gates, ``_RealGateExecutor`` below) the same way
+    ``agent_client_factory``/``backend_factory`` are: a test passes a fake in
+    place of monkeypatching the module-level ``run_accuracy_gate``/
+    ``run_benchmark_gate`` functions this protocol's real implementation
+    wraps.
+    """
+
+    def run_accuracy(
+        self,
+        ctx: _GateInputs,
+        *,
+        process_id: str,
+        timeout_seconds: int | None = None,
+        execution_command: str | None = None,
+        round_label: str | None = None,
+    ) -> AccuracyGateResult:
+        """Run the trusted accuracy command for one candidate."""
+        ...
+
+    def run_benchmark(  # noqa: PLR0913  # mirrors run_benchmark_gate's own field count
+        self,
+        ctx: _GateInputs,
+        *,
+        result_spec: BenchmarkResult | None = None,
+        result_protocol: Literal[2] | None = None,
+        objectives: Sequence[Objective] = (),
+        process_id: str,
+        output_slug: str,
+        timeout_seconds: int | None = None,
+        execution_base: str | None = None,
+        round_label: str | None = None,
+    ) -> BenchmarkGateResult:
+        """Run the trusted benchmark result contract for one candidate."""
+        ...
+
+
+class _RealGateExecutor:
+    """Default `GateExecutor`: the real trusted accuracy/benchmark commands."""
+
+    def run_accuracy(
+        self,
+        ctx: _GateInputs,
+        *,
+        process_id: str,
+        timeout_seconds: int | None = None,
+        execution_command: str | None = None,
+        round_label: str | None = None,
+    ) -> AccuracyGateResult:
+        """Delegate to the module-level trusted accuracy gate."""
+        return run_accuracy_gate(
+            ctx,
+            process_id=process_id,
+            timeout_seconds=timeout_seconds,
+            execution_command=execution_command,
+            round_label=round_label,
+        )
+
+    def run_benchmark(  # noqa: PLR0913  # mirrors run_benchmark_gate's own field count
+        self,
+        ctx: _GateInputs,
+        *,
+        result_spec: BenchmarkResult | None = None,
+        result_protocol: Literal[2] | None = None,
+        objectives: Sequence[Objective] = (),
+        process_id: str,
+        output_slug: str,
+        timeout_seconds: int | None = None,
+        execution_base: str | None = None,
+        round_label: str | None = None,
+    ) -> BenchmarkGateResult:
+        """Delegate to the module-level trusted benchmark gate."""
+        return run_benchmark_gate(
+            ctx,
+            result_spec=result_spec,
+            result_protocol=result_protocol,
+            objectives=objectives,
+            process_id=process_id,
+            output_slug=output_slug,
+            timeout_seconds=timeout_seconds,
+            execution_base=execution_base,
+            round_label=round_label,
+        )
+
+
+_REAL_GATE_EXECUTOR = _RealGateExecutor()
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,8 +232,9 @@ class _Evaluator:
             timeout = framework_command_timeout(
                 context, self._host.request.input_bundle.manifest.accuracy.timeout_seconds
             )
+            executor = self._host._gate_executor or _REAL_GATE_EXECUTOR
             return await self._host._run_blocking(
-                run_accuracy_gate,
+                executor.run_accuracy,
                 context,
                 process_id=process_id,
                 timeout_seconds=timeout,
@@ -177,8 +270,9 @@ class _Evaluator:
             context = _GateInputs.from_resources(self._host.workspaces._resources_for(scope))
             bundle = self._host.request.input_bundle
             timeout = framework_command_timeout(context, bundle.manifest.benchmark.timeout_seconds)
+            executor = self._host._gate_executor or _REAL_GATE_EXECUTOR
             return await self._host._run_blocking(
-                run_benchmark_gate,
+                executor.run_benchmark,
                 context,
                 result_spec=bundle.benchmark_result,
                 result_protocol=bundle.benchmark_result_protocol,
