@@ -301,6 +301,82 @@ def test_sigusr2_toggles_stop_early_without_killing_process(tmp_path: Path) -> N
     assert events.count("profile.export_chrome_trace") == 1
 
 
+def _wait_for_event_count(call_log: Path, event: str, count: int, *, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        seen = sum(1 for _ts, name in parse_call_log(call_log) if name == event)
+        if seen >= count:
+            return
+        time.sleep(0.02)
+    events = parse_call_log(call_log)
+    raise AssertionError(  # noqa: TRY003  # tracked: #288
+        f"{event!r} never reached count {count} within {timeout}s; events={events}"
+    )
+
+
+def test_signal_mode_repeated_windows_produce_two_traces(tmp_path: Path) -> None:
+    """Regression test: a second SIGUSR1 must start a second window, not be a no-op.
+
+    Pre-fix, ``_Capture.stop_and_export`` set ``self._phase = "stopped"``
+    unconditionally and ``start`` only acted ``if self._phase == "idle"``:
+    there was no idle -> running cycle after the first stop, so a second
+    SIGUSR1 was silently ignored (verified against a real MI210/ROCm 7.2.3
+    warm vLLM server -- see docs/contributing/amd-profiler-worklog.md and
+    the referenced warm_attach.md experiment notes). This drives the state
+    machine through two full SIGUSR1/SIGUSR2 cycles in signal-trigger mode
+    (the mode a warm target uses) and requires two distinct, non-empty
+    traces.
+    """
+    fake_torch = write_fake_torch(tmp_path / "fake_torch")
+    out_dir = tmp_path / "out"
+    call_log = tmp_path / "calls.log"
+    env = base_env(
+        out_dir=out_dir,
+        fake_torch_root=fake_torch,
+        call_log=call_log,
+        VIBESYS_TORCH_PROFILE="1",
+        VIBESYS_TORCH_PROFILE_TRIGGER="signal",
+    )
+    proc = subprocess.Popen(  # tracked: #288
+        [sys.executable, "-c", "import torch\nimport time\ntime.sleep(5.0)\nprint('done')"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _wait_for_event(call_log, "torch.imported", timeout=5.0)
+
+        # Window 1.
+        os.kill(proc.pid, signal.SIGUSR1)
+        _wait_for_event_count(call_log, "profile.start", 1, timeout=5.0)
+        os.kill(proc.pid, signal.SIGUSR2)
+        _wait_for_event_count(call_log, "profile.export_chrome_trace", 1, timeout=5.0)
+
+        # Window 2: this second SIGUSR1 is exactly what the pre-fix state
+        # machine silently dropped.
+        os.kill(proc.pid, signal.SIGUSR1)
+        _wait_for_event_count(call_log, "profile.start", 2, timeout=5.0)
+        os.kill(proc.pid, signal.SIGUSR2)
+        _wait_for_event_count(call_log, "profile.export_chrome_trace", 2, timeout=5.0)
+
+        stdout, stderr = proc.communicate(timeout=10)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+
+    assert proc.returncode == 0, stderr
+    assert "done" in stdout
+
+    traces = _trace_files(out_dir)
+    assert len(traces) == 2, f"expected one trace per window, got {[p.name for p in traces]}"
+    for trace in traces:
+        assert _read_trace(trace)["traceEvents"]
+    windows = sorted(int(p.name.split("-")[1].split(".")[0]) for p in traces)
+    assert windows == [1, 2], f"trace filenames must carry a distinct window index: {windows}"
+
+
 def test_sigint_exports_then_still_terminates_the_process(tmp_path: Path) -> None:
     fake_torch = write_fake_torch(tmp_path / "fake_torch")
     out_dir = tmp_path / "out"
