@@ -17,10 +17,9 @@ from hypothesis import strategies as st
 
 from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed, JudgeSkipped
-from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
-from vibesys.loops.multi.decisions import AttemptRequest, HypothesisEngine, RoundSelection
+from vibesys.loops.multi.decisions import STATIC_GUIDANCE, AttemptRequest
 from vibesys.loops.multi.session import (
     MultiRound,
     MultiSession,
@@ -36,11 +35,15 @@ from vibesys.schemas import (
     ValidationRecipeArtifact,
     Verdict,
 )
-from vs_loop_state.api import RoundHistory, RoundRecord
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis.transitions import CarryOver
+from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
+
+    from vibesys.search.hypothesis.state import Hypothesis
 
 
 def _plan(*, hypothesis_id: str = "h1") -> OrchestratorPlan:
@@ -53,16 +56,31 @@ def _plan(*, hypothesis_id: str = "h1") -> OrchestratorPlan:
     )
 
 
+def _search() -> HypothesisSearch:
+    return HypothesisSearch(HypothesisConfig(max_rounds=3, max_retries_per_round=2))
+
+
 def _selected() -> MultiRound:
     plan = _plan()
-    engine = HypothesisEngine.create(AgentRunState()).start(
-        plan, started_round=1, parent_commit="a" * 40
+    search = _search()
+    started = search.start(
+        search.initial(), plan, round_number=1, current_commit="a" * 40, records=[]
     )
-    hypothesis = engine.state.active_hypothesis
+    hypothesis = started.hypothesis
     assert hypothesis is not None
-    selection = RoundSelection(engine, engine.state, hypothesis, plan, "final_round")
-    request = AttemptRequest(1, plan, "final_round", [], hypothesis, engine, "decode")
-    return MultiRound(selection, request, AttemptState(agent_run_state=engine.state, feedback=None))
+    request = AttemptRequest(
+        round_number=1,
+        plan=plan,
+        planned_official_reason="final_round",
+        records=[],
+        active_hypothesis=hypothesis,
+        engine=STATIC_GUIDANCE,
+        last_profile_focus="decode",
+    )
+    return MultiRound(
+        request=request,
+        attempt=AttemptState(agent_run_state=started.state, feedback=None),
+    )
 
 
 class _FakeTx:
@@ -106,14 +124,11 @@ def _session(tmp_path: Path) -> MultiSession:
         metric_space=state.metrics,
     )
     session.state = state
-    session.engine = HypothesisEngine.create(state)
-    session.records = []
-    session.history = RoundHistory(records=[])
+    session.search = _search()
     session.carry = CarryOver()
     session.round_number = 1
-    session.last_profile_focus = "decode"
     session.framework_benchmark_configured = False
-    session.terminal_policy = _TerminalPolicy()
+    session.terminal_policy = _TerminalPolicy(session.search.config)
     session.workspace = SimpleNamespace(
         path=tmp_path,
         revision="a" * 40,
@@ -190,7 +205,7 @@ def test_initialize_and_select_checkpoint_after_plan(
         del sequence, writes
         order.append(f"commit:{kwargs['label']}")
 
-    async def plan(_request: object) -> OrchestratorPlan:
+    async def plan(_context: object, **_kwargs: object) -> OrchestratorPlan:
         order.append("plan")
         return _plan()
 
@@ -289,6 +304,10 @@ def test_sparse_review_defers_gates_and_records_provisional_decision(tmp_path: P
         next_step="Finish cache",
     )
     session.options.judge_every = 3
+    session.search = HypothesisSearch(
+        HypothesisConfig(max_rounds=3, judge_every=3, official_eval_every=3)
+    )
+    session.terminal_policy = _TerminalPolicy(session.search.config)
     assert asyncio.run(session.review(selected)) is AttemptDecision.FINISH
     session.turns.review.assert_not_awaited()
 
@@ -375,8 +394,7 @@ def test_finalization_restores_baseline_when_no_candidate(tmp_path: Path) -> Non
 def test_completed_reviewed_round_checkpoints_record_before_advancing(tmp_path: Path) -> None:
     session = cast("Any", _session(tmp_path))
     selected = _selected()
-    session.engine = selected.selection.engine
-    session.state = selected.selection.state
+    session.state = selected.attempt.agent_run_state
     selected.attempt.retry = 2
     selected.attempt.passed = True
     selected.attempt.official_reason = "final_round"
@@ -402,18 +420,40 @@ def test_completed_reviewed_round_checkpoints_record_before_advancing(tmp_path: 
     assert commit.kwargs["writes"]["state.json"].rounds == session.records
 
 
-def _rollback_selection(tmp_path: Path, *, parent_round: int, started_round: int) -> RoundSelection:
-    del tmp_path
-    plan = _plan().model_copy(update={"revert_to_round": parent_round})
-    engine = HypothesisEngine.create(AgentRunState()).start(
-        plan,
-        started_round=started_round,
-        parent_round=parent_round,
-        parent_commit="c" * 40,
+def _rollback_state(*, parent_round: int, started_round: int) -> tuple[AgentRunState, Hypothesis]:
+    """Build a state with a completed prior round plus an active hypothesis
+    requesting a rollback to it, so ``_apply_rollback`` has a real commit to
+    resolve through ``self.records``/``self.state``.
+    """
+    from vibesys.search.hypothesis.transitions import append_round  # noqa: PLC0415
+
+    search = _search()
+    prior_plan = OrchestratorPlan(
+        hypothesis_id="prior",
+        hypothesis="prior claim",
+        task="prior task",
+        pass_criteria="tests pass",  # noqa: S106
+        reasoning="prior",
     )
-    hypothesis = engine.state.active_hypothesis
-    assert hypothesis is not None
-    return RoundSelection(engine, engine.state, hypothesis, plan, None)
+    prior_started = search.start(
+        search.initial(), prior_plan, round_number=parent_round, current_commit=None, records=[]
+    )
+    record = RoundRecord(
+        round_number=parent_round,
+        hypothesis_id="prior",
+        commit="c" * 40,
+        perf_metric=None,
+        perf_unit=None,
+        passed=True,
+        reviewed=True,
+        hypothesis_outcome="proven",
+    )
+    state = append_round(prior_started.state, record, keep_active=False)
+    plan = _plan().model_copy(update={"revert_to_round": parent_round})
+    started = search.start(
+        state, plan, round_number=started_round, current_commit="c" * 40, records=state.rounds
+    )
+    return started.state, started.hypothesis
 
 
 def test_apply_rollback_warns_and_retries_on_checkout_failure(tmp_path: Path) -> None:
@@ -426,17 +466,13 @@ def test_apply_rollback_warns_and_retries_on_checkout_failure(tmp_path: Path) ->
     round, leaving ``hypothesis.revert_applied`` false until it succeeds.
     """
     session = cast("Any", _session(tmp_path))
-    session.records = [
-        RoundRecord(round_number=1, commit="c" * 40, perf_metric=None, perf_unit=None, passed=True)
-    ]
-    session.history = RoundHistory(records=[])
+    session.state, hypothesis = _rollback_state(parent_round=1, started_round=2)
     session.round_number = 2
-    selection = _rollback_selection(tmp_path, parent_round=1, started_round=2)
     session.workspace.restore = AsyncMock(side_effect=WorkspaceRestoreError("c" * 40))
 
-    asyncio.run(session._apply_rollback(selection))
+    asyncio.run(session._apply_rollback(hypothesis))
 
-    assert selection.hypothesis.revert_applied is False
+    assert hypothesis.revert_applied is False
     session.ctx.warning.assert_called_once()
     session.ctx.state.commit.assert_not_awaited()
 
@@ -454,18 +490,8 @@ def test_apply_rollback_eventually_applies_once_checkout_succeeds(
     """
     tmp_path = tmp_path_factory.mktemp("rollback")
     session = cast("Any", _session(tmp_path))
-    session.records = [
-        RoundRecord(
-            round_number=parent_round,
-            commit="c" * 40,
-            perf_metric=None,
-            perf_unit=None,
-            passed=True,
-        )
-    ]
-    session.history = RoundHistory(records=[])
-    selection = _rollback_selection(
-        tmp_path, parent_round=parent_round, started_round=parent_round + 1
+    session.state, hypothesis = _rollback_state(
+        parent_round=parent_round, started_round=parent_round + 1
     )
 
     for round_number, should_fail in enumerate(fails, start=parent_round + 1):
@@ -474,16 +500,16 @@ def test_apply_rollback_eventually_applies_once_checkout_succeeds(
             session.workspace.restore = AsyncMock(side_effect=WorkspaceRestoreError("c" * 40))
         else:
             session.workspace.restore = AsyncMock(return_value=None)
-        asyncio.run(session._apply_rollback(selection))
+        asyncio.run(session._apply_rollback(hypothesis))
         if should_fail:
-            assert selection.hypothesis.revert_applied is False
+            assert hypothesis.revert_applied is False
         else:
-            assert selection.hypothesis.revert_applied is True
-        if selection.hypothesis.revert_applied:
+            assert hypothesis.revert_applied is True
+        if hypothesis.revert_applied:
             break
 
     # Once applied, a further call is a no-op (idempotent; state is consistent).
     session.workspace.restore = AsyncMock(side_effect=WorkspaceRestoreError("c" * 40))
-    asyncio.run(session._apply_rollback(selection))
+    asyncio.run(session._apply_rollback(hypothesis))
     if any(not f for f in fails):
-        assert selection.hypothesis.revert_applied is True
+        assert hypothesis.revert_applied is True

@@ -26,13 +26,12 @@ from vibesys.agent_run.errors import (
     MissingImplementationError,
     UnsupportedProfilerError,
 )
-from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.options import AgentOrchestrationOptions
 from vibesys.agent_run.state import AgentRunState
 from vibesys.constants import DomainName
 from vibesys.loops.multi.decisions import (
+    STATIC_GUIDANCE,
     AttemptRequest,
-    HypothesisEngine,
     PlainGuidance,
     PlanRequest,
 )
@@ -50,12 +49,15 @@ from vibesys.schemas import (
     ProfilerSummary,
     Verdict,
 )
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis.transitions import CarryOver
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.search.hypothesis.state import HypothesisState
 
 
 def _options() -> AgentOrchestrationOptions:
@@ -127,17 +129,41 @@ def _turns(tmp_path: Path) -> MultiAgentTurns:
     return turns
 
 
-def _request() -> tuple[PlanRequest, AttemptRequest, AttemptState]:
-    state = AgentRunState()
-    plan = _plan()
-    engine = HypothesisEngine.create(state).start(plan, started_round=1)
-    hypothesis = engine.state.active_hypothesis
-    assert hypothesis is not None
-    return (
-        PlanRequest(1, state, [], CarryOver(), None, None, 0, PlainGuidance()),
-        AttemptRequest(1, plan, "final_round", [], hypothesis, engine, "decode"),
-        AttemptState(agent_run_state=engine.state, feedback=None, retry=1),
+def _search() -> HypothesisSearch:
+    return HypothesisSearch(HypothesisConfig(max_rounds=2, official_eval_every=2))
+
+
+def _plan_request(*, round_number: int = 1, state: HypothesisState | None = None) -> PlanRequest:
+    return PlanRequest(
+        round_number=round_number,
+        state=state if state is not None else _search().initial(),
+        records=[],
+        carry=CarryOver(),
+        profiler_summary=None,
+        plateau_warning=None,
+        provisional_candidates=0,
+        profile_guidance=PlainGuidance(),
     )
+
+
+def _request() -> tuple[PlanRequest, AttemptRequest, AttemptState]:
+    search = _search()
+    initial = search.initial()
+    plan = _plan()
+    started = search.start(initial, plan, round_number=1, current_commit=None, records=[])
+    hypothesis = started.hypothesis
+    assert hypothesis is not None
+    request = AttemptRequest(
+        round_number=1,
+        plan=plan,
+        planned_official_reason="final_round",
+        records=[],
+        active_hypothesis=hypothesis,
+        engine=STATIC_GUIDANCE,
+        last_profile_focus="decode",
+    )
+    attempt = AttemptState(agent_run_state=started.state, feedback=None, retry=1)
+    return _plan_request(state=initial), request, attempt
 
 
 def _handle() -> SimpleNamespace:
@@ -175,8 +201,11 @@ def test_roles_open_close_and_plan_context(tmp_path: Path) -> None:
 def test_plan_reprompts_reused_id_then_accepts_new_one(tmp_path: Path) -> None:
     turns = cast("Any", _turns(tmp_path))
     turns.designer = _handle()
-    existing = HypothesisEngine.create(AgentRunState()).start(_plan(), started_round=1).state
-    request = PlanRequest(2, existing, [], CarryOver(), None, None, 0, PlainGuidance())
+    search = _search()
+    existing = search.start(
+        search.initial(), _plan(), round_number=1, current_commit=None, records=[]
+    ).state
+    request = _plan_request(round_number=2, state=existing)
     turns.ctx.agents.turn = AsyncMock(side_effect=[_plan(), _plan(hypothesis_id="h2")])
     result = asyncio.run(turns.plan(request))
     assert result.hypothesis_id == "h2"
@@ -202,7 +231,9 @@ def test_plan_rejects_duplicate_self_and_existing_hypothesis_updates(tmp_path: P
             ),
             state,
         )
-    existing = HypothesisEngine.create(state).start(_plan(), started_round=1).state
+    existing = (
+        _search().start(state, _plan(), round_number=1, current_commit=None, records=[]).state
+    )
     with pytest.raises(InvalidPlanError, match="already used"):
         turns._validate_plan(_plan(), existing)
 

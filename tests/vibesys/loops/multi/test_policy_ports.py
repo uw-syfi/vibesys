@@ -13,10 +13,14 @@ from unittest.mock import AsyncMock
 
 from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState
-from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
-from vibesys.loops.multi.decisions import AttemptRequest, HypothesisEngine, PlanRequest
+from vibesys.loops.multi.decisions import (
+    STATIC_GUIDANCE,
+    AttemptRequest,
+    PlainGuidance,
+    PlanRequest,
+)
 from vibesys.loops.multi.session import MultiSession
 from vibesys.loops.multi.turns import MultiAgentTurns
 from vibesys.loops.profile_multi.controller import HypothesisEngine as ProfileHypothesisEngine
@@ -34,6 +38,8 @@ from vibesys.schemas import (
     ValidationRecipeArtifact,
     Verdict,
 )
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis.transitions import CarryOver
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -78,6 +84,10 @@ class _FakeTurns:
         return JudgeResponse(analysis="reviewed", feedback="", verdict=Verdict.PASS)
 
 
+def _search() -> HypothesisSearch:
+    return HypothesisSearch(HypothesisConfig(max_rounds=1))
+
+
 def _attempt() -> tuple[AttemptRequest, AttemptState]:
     plan = OrchestratorPlan(
         hypothesis_id="h1",
@@ -86,8 +96,9 @@ def _attempt() -> tuple[AttemptRequest, AttemptState]:
         pass_criteria="tests pass",  # noqa: S106
         reasoning="measure decode",
     )
-    engine = HypothesisEngine.create(AgentRunState()).start(plan, started_round=1)
-    hypothesis = engine.state.active_hypothesis
+    search = _search()
+    started = search.start(search.initial(), plan, round_number=1, current_commit=None, records=[])
+    hypothesis = started.hypothesis
     assert hypothesis is not None
     return (
         AttemptRequest(
@@ -96,10 +107,10 @@ def _attempt() -> tuple[AttemptRequest, AttemptState]:
             planned_official_reason="final_round",
             records=[],
             active_hypothesis=hypothesis,
-            engine=engine,
+            engine=STATIC_GUIDANCE,
             last_profile_focus="decode",
         ),
-        AttemptState(agent_run_state=engine.state, feedback=None),
+        AttemptState(agent_run_state=started.state, feedback=None),
     )
 
 
@@ -109,7 +120,7 @@ def test_multi_prepass_profiles_only_when_requested_and_enabled() -> None:
     session = cast("Any", MultiSession.__new__(MultiSession))
     session.turns = turns
     session.round_number = 1
-    session.records = []
+    session.state = AgentRunState()
     session.carry = CarryOver()
 
     assert asyncio.run(session._pre_round_profile()) is not None
@@ -189,8 +200,8 @@ def test_multi_validation_failure_checkpoints_before_retry_and_official_gate() -
     request, state = _attempt()
     selected = SimpleNamespace(request=request, attempt=state)
     session = cast("Any", MultiSession.__new__(MultiSession))
+    session.search = _search()
     session.turns = _FakeTurns(calls)
-    session.records = []
     session.round_number = 1
     session.options = SimpleNamespace(max_rounds=1, judge_every=1, official_eval_every=1)
     session.workspace = SimpleNamespace(revision="a" * 40)
@@ -279,19 +290,19 @@ def test_single_uses_only_combined_turn_and_its_own_verdict() -> None:
 def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
     tmp_path: Path,
 ) -> None:
-    state = (
-        HypothesisEngine.create(AgentRunState())
-        .start(
-            OrchestratorPlan(
-                hypothesis_id="used",
-                task="first task",
-                pass_criteria="tests pass",  # noqa: S106
-                reasoning="first plan",
-            ),
-            started_round=1,
-        )
-        .state
-    )
+    search = _search()
+    state = search.start(
+        search.initial(),
+        OrchestratorPlan(
+            hypothesis_id="used",
+            task="first task",
+            pass_criteria="tests pass",  # noqa: S106
+            reasoning="first plan",
+        ),
+        round_number=1,
+        current_commit=None,
+        records=[],
+    ).state
     request = PlanRequest(
         round_number=2,
         state=state,
@@ -300,7 +311,7 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
         profiler_summary=None,
         plateau_warning=None,
         provisional_candidates=0,
-        profile_guidance=HypothesisEngine.create(state).guidance,
+        profile_guidance=PlainGuidance(),
     )
     turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
     turns.progress_path = tmp_path / "progress.md"

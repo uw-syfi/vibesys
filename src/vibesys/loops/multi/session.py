@@ -18,21 +18,11 @@ from vibesys.agent_run.attempts import (
 )
 from vibesys.agent_run.errors import StrategySessionError
 from vibesys.agent_run.evidence import (
-    _FAILED_HYPOTHESIS_OUTCOMES,
-    CarryOver,
-    _detect_plateau,
     _format_metric_row,
-    _pareto_archive_conflict,
     _pareto_archive_summary,
-    _pareto_frontier_records,
-    _provisional_candidates_since_official,
     _record_candidate_metrics,
-    _select_final_candidate,
-    _terminal_workspace_notice,
 )
-from vibesys.agent_run.hypotheses import adopt_metric_space, update_active_hypothesis
 from vibesys.agent_run.record import RecordInput, build_round_record
-from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.gates import (
     GATE_LOG_TAIL_CHARS,
     GATE_RECORD_TAIL_CHARS,
@@ -41,17 +31,10 @@ from vibesys.evaluators.gates import (
 )
 from vibesys.events import GateKind
 from vibesys.loops.multi.decisions import (
+    STATIC_GUIDANCE,
     AttemptRequest,
-    HypothesisEngine,
+    PlainGuidance,
     PlanRequest,
-    RoundSelection,
-    TerminalRequest,
-    candidate_evidence_is_fresh,
-    implementation_keeps_hypothesis_active,
-    implementation_requests_continuation,
-    official_evaluation_reason,
-    review_due,
-    transition_round,
 )
 from vibesys.loops.multi.turns import MultiAgentTurns
 from vibesys.loops.multi.validation import (
@@ -67,6 +50,18 @@ from vibesys.schemas import (
     ProfilerSummary,
     Verdict,
 )
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis import cadence as hypothesis_cadence
+from vibesys.search.hypothesis.results import Continue, Finished, NewHypothesis
+from vibesys.search.hypothesis.state import HypothesisState
+from vibesys.search.hypothesis.transitions import (
+    FAILED_HYPOTHESIS_OUTCOMES,
+    CarryOver,
+    adopt_metric_space,
+    provisional_candidates_since_official,
+    terminal_workspace_notice,
+    update_active_hypothesis,
+)
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 
@@ -75,16 +70,16 @@ if TYPE_CHECKING:
 
     from vibesys.agent_run.options import AgentOrchestrationOptions
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
 
 
 MultiSessionError = StrategySessionError
 
 
-@dataclass(frozen=True)
+@dataclass
 class MultiRound:
-    """One selected hypothesis and the mutable attempt state for its round."""
+    """One selected hypothesis's turn facts and the mutable attempt state."""
 
-    selection: RoundSelection
     request: AttemptRequest
     attempt: AttemptState
 
@@ -92,8 +87,12 @@ class MultiRound:
 class _TerminalPolicy:
     """Multi role policy facts consumed by the pure round transition."""
 
+    def __init__(self, config: HypothesisConfig) -> None:
+        """Bind the continuation-lease budget this policy enforces."""
+        self.config = config
+
     def project_performance(
-        self, request: AttemptRequest, state: AttemptState
+        self, hypothesis: Hypothesis, state: AttemptState
     ) -> PerformanceProjection:
         """Use the framework metric or reviewed implementer evidence."""
         implementation = state.implementation
@@ -107,9 +106,9 @@ class _TerminalPolicy:
             and implementation is not None
             and implementation.hypothesis_outcome
             in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
-            and request.active_hypothesis.gate_revalidation_pending
+            and hypothesis.gate_revalidation_pending
         ):
-            implementation_metric = request.active_hypothesis.gate_approved_perf_metric
+            implementation_metric = hypothesis.gate_approved_perf_metric
         profile_skipped = state.framework_perf_metric is None and implementation_metric is None
         if state.framework_perf_metric is not None and official:
             return PerformanceProjection(
@@ -133,7 +132,6 @@ class _TerminalPolicy:
                 implementation.evaluation_artifact,
                 None,
             )
-        hypothesis = request.active_hypothesis
         return PerformanceProjection(
             implementation_metric,
             hypothesis.gate_approved_perf_unit,
@@ -150,8 +148,12 @@ class _TerminalPolicy:
 
     def keeps_hypothesis_active(self, state: AttemptState, continuation_rounds: int) -> bool:
         """A reviewed or provisional implementation may retain its lease."""
-        return implementation_keeps_hypothesis_active(
-            state.implementation, continuation_rounds=continuation_rounds
+        implementation = state.implementation
+        return hypothesis_cadence.keeps_hypothesis_active(
+            outcome=implementation.hypothesis_outcome if implementation is not None else None,
+            next_step=implementation.next_step if implementation is not None else "",
+            continuation_rounds=continuation_rounds,
+            max_continuation_rounds=self.config.max_continuation_rounds,
         )
 
     def terminal_success_needs_parent_choice(
@@ -176,7 +178,15 @@ class MultiSession:
         self.workspace = ctx.workspaces.root
         self.turns = MultiAgentTurns(ctx, options)
         self._gate_recorder = issue_board.GateBoardRecorder(self.turns.progress_path)
-        self.terminal_policy = _TerminalPolicy()
+        self.search = HypothesisSearch(
+            HypothesisConfig(
+                max_rounds=options.max_rounds,
+                judge_every=options.judge_every,
+                official_eval_every=options.official_eval_every,
+                max_retries_per_round=options.max_retries_per_round,
+            )
+        )
+        self.terminal_policy = _TerminalPolicy(self.search.config)
         self.framework_benchmark_configured = (
             ctx.request.input_bundle.benchmark_result is not None
             or ctx.request.input_bundle.benchmark_result_protocol is not None
@@ -205,15 +215,12 @@ class MultiSession:
         issue_board.ensure_progress_file(turns.progress_path)
         issue_board.ensure_roadmap_file(turns.roadmap_path)
         issue_board.write_validation_recipe_schema(turns.progress_path)
-        previous = await ctx.state.load(AgentRunState)
-        state = adopt_metric_space(previous or AgentRunState(), self.options.metric_space)
+        previous = await ctx.state.load(HypothesisState)
+        state = adopt_metric_space(previous or self.search.initial(), self.options.metric_space)
         self.state = state
-        self.records = state.rounds
-        self.history = RoundHistory(records=self.records)
-        self.carry = CarryOver(regression_info=_terminal_workspace_notice(self.records))
+        self.carry = CarryOver(regression_info=terminal_workspace_notice(self.records))
         self.round_number = len(self.records) + 1
         self.last_profile_focus = "general latency hotspots on /v1/completions"
-        self.engine = HypothesisEngine.create(state)
         if previous != state:
             await self.ctx.state.commit(
                 sequence=self.round_number,
@@ -222,6 +229,11 @@ class MultiSession:
                 label="multi: initialize policy state",
                 publish=state,
             )
+
+    @property
+    def records(self) -> list[RoundRecord]:
+        """The active state's completed rounds, in recorded order."""
+        return self.state.rounds
 
     @property
     def has_next_round(self) -> bool:
@@ -243,56 +255,46 @@ class MultiSession:
 
     async def select_hypothesis(self) -> MultiRound:
         """Choose a designer plan or continue the active hypothesis."""
-        state = self.state
-        engine = self.engine
-        hypothesis = state.active_hypothesis
         number = self.round_number
-        if hypothesis is None:
-            provisional = _provisional_candidates_since_official(self.records)
+        decision = self.search.next_round(
+            self.state, round_number=number, records=self.records, carry=self.carry
+        )
+        if isinstance(decision, Finished):
+            raise MultiSessionError.missing_active()
+        if isinstance(decision, NewHypothesis):
             summary = await self._pre_round_profile()
+            context = decision.context
             plan = await self.turns.plan(
                 PlanRequest(
-                    round_number=number,
-                    state=state,
-                    records=self.records,
-                    carry=self.carry,
+                    round_number=context.round_number,
+                    state=self.state,
+                    records=list(context.records),
+                    carry=context.carry,
                     profiler_summary=summary,
-                    plateau_warning=_detect_plateau(self.records),
-                    provisional_candidates=provisional,
-                    profile_guidance=engine.controller.guidance,
+                    plateau_warning=context.plateau_warning,
+                    provisional_candidates=context.provisional_candidates,
+                    profile_guidance=PlainGuidance(),
                 )
             )
-            parent_round = plan.revert_to_round or (number - 1 if number > 1 else None)
-            parent = next(
-                (
-                    record
-                    for record in reversed(self.records)
-                    if record.round_number == parent_round
-                ),
-                None,
-            )
-            engine = engine.replace_state(state).start(
+            started = self.search.start(
+                self.state,
                 plan,
-                started_round=number,
-                parent_round=parent_round,
-                parent_commit=(
-                    parent.commit
-                    if parent is not None and parent.commit is not None
-                    else self.workspace.revision
-                ),
+                round_number=number,
+                current_commit=self.workspace.revision,
+                records=self.records,
             )
-            state = engine.state
-            hypothesis = state.active_hypothesis
-            if hypothesis is None:
-                raise MultiSessionError.missing_active()
+            self.state = started.state
+            hypothesis = started.hypothesis
             await self.ctx.state.commit(
                 sequence=self.round_number,
-                writes={"state.json": state},
+                writes={"state.json": self.state},
                 candidate=False,
                 label=f"multi: start hypothesis {plan.hypothesis_id}",
-                publish=state,
+                publish=self.state,
             )
         else:
+            assert isinstance(decision, Continue)  # noqa: S101  # only remaining variant
+            hypothesis = decision.hypothesis
             plan = hypothesis.plan
             issue_board.append_hypothesis_continuation(
                 self.turns.progress_path,
@@ -304,31 +306,20 @@ class MultiSession:
             self.ctx.log(
                 f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
             )
-        self.engine = engine
-        self.state = state
-        reason = official_evaluation_reason(
+        reason = self.search.official_due(
             records=self.records,
             round_number=number,
-            max_rounds=self.options.max_rounds,
-            official_eval_every=self.options.official_eval_every,
             requested=plan.request_official_evaluation,
             candidate_ready=True,
         )
-        selected = RoundSelection(
-            engine=engine,
-            state=state,
-            hypothesis=hypothesis,
-            plan=plan,
-            planned_official_reason=reason,
-        )
-        await self._apply_rollback(selected)
+        await self._apply_rollback(hypothesis)
         request = AttemptRequest(
             round_number=number,
             plan=plan,
             planned_official_reason=reason,
             records=self.records,
             active_hypothesis=hypothesis,
-            engine=self.engine,
+            engine=STATIC_GUIDANCE,
             last_profile_focus=self.last_profile_focus,
         )
         attempt = AttemptState(
@@ -336,7 +327,7 @@ class MultiSession:
             feedback=hypothesis.feedback,
             revalidation_required=hypothesis.gate_revalidation_pending,
         )
-        return MultiRound(selected, request, attempt)
+        return MultiRound(request=request, attempt=attempt)
 
     async def _pre_round_profile(self) -> ProfilerSummary | None:
         decision = await self.turns.pre_round_decision(
@@ -351,9 +342,8 @@ class MultiSession:
             decision.profile_focus or "general steady-state benchmark hotspots",
         )
 
-    async def _apply_rollback(self, selection: RoundSelection) -> None:
-        parent_round = selection.plan.revert_to_round
-        hypothesis = selection.hypothesis
+    async def _apply_rollback(self, hypothesis: Hypothesis) -> None:
+        parent_round = hypothesis.plan.revert_to_round
         if parent_round is None or hypothesis.revert_applied:
             return
         target = next(
@@ -362,8 +352,8 @@ class MultiSession:
         if target is None or not target.commit:
             self.ctx.log(f"cannot revert: no commit recorded for round {parent_round}")
             return
-        rollback, failed_child = self.history.resolve_rollback_commit(
-            target, _FAILED_HYPOTHESIS_OUTCOMES
+        rollback, failed_child = RoundHistory(records=self.records).resolve_rollback_commit(
+            target, FAILED_HYPOTHESIS_OUTCOMES
         )
         if rollback is None:
             raise MultiSessionError.missing_rollback()
@@ -380,16 +370,14 @@ class MultiSession:
         hypothesis.revert_applied = True
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback
-        state = update_active_hypothesis(selection.state, hypothesis)
+        self.state = update_active_hypothesis(self.state, hypothesis)
         await self.ctx.state.commit(
             sequence=self.round_number,
-            writes={"state.json": state},
+            writes={"state.json": self.state},
             candidate=False,
             label=f"multi: set hypothesis {hypothesis.hypothesis_id} parent",
-            publish=state,
+            publish=self.state,
         )
-        self.state = state
-        self.engine = self.engine.replace_state(state)
         if failed_child is None:
             self.ctx.log(f"Reverted workspace to round {parent_round} ({rollback[:8]}).")
         else:
@@ -441,32 +429,31 @@ class MultiSession:
 
     async def review(self, selected: MultiRound) -> AttemptDecision:
         """Apply sparse review, independent judge, and local validation."""
-        request, state = selected.request, selected.attempt
+        state = selected.attempt
         implementation = state.implementation
         if implementation is None:
             raise MultiSessionError.missing_implementation()
-        due = review_due(
-            round_number=request.round_number,
-            max_rounds=self.options.max_rounds,
-            judge_every=self.options.judge_every,
+        due = self.search.review_due(
+            round_number=selected.request.round_number,
             outcome=implementation.hypothesis_outcome,
-            candidate_evidence_fresh=candidate_evidence_is_fresh(implementation, request.records),
+            candidate_evidence_is_fresh=hypothesis_cadence.candidate_evidence_fresh(
+                candidate_metrics=implementation.candidate_metrics,
+                candidate_evaluation_artifact=implementation.candidate_evaluation_artifact,
+                records=self.records,
+            ),
+            review_started=state.review_started,
+            requests_continuation=hypothesis_cadence.continuation_requested(
+                outcome=implementation.hypothesis_outcome, next_step=implementation.next_step
+            ),
+            pareto_frontier_claim=implementation.candidate_disposition
+            is CandidateDisposition.PARETO_FRONTIER,
+            revalidation_required=state.revalidation_required,
         )
-        if state.review_started and not implementation_requests_continuation(implementation):
-            due = True
-        if (
-            state.review_started
-            and request.round_number != self.options.max_rounds
-            and implementation_requests_continuation(implementation)
-            and implementation.candidate_disposition is not CandidateDisposition.PARETO_FRONTIER
-            and not state.revalidation_required
-        ):
-            due = False
         if not due:
             state.judge = JudgeSkipped(JudgeSkipReason.SPARSE_REVIEW_POLICY)
             issue_board.append_judge_skipped(
                 self.turns.progress_path,
-                request.round_number,
+                selected.request.round_number,
                 outcome=implementation.hypothesis_outcome.value,
                 judge_every=self.options.judge_every,
             )
@@ -474,46 +461,26 @@ class MultiSession:
             return AttemptDecision.FINISH
         state.review_started = True
         state.revalidation_required = False
-        conflict = _pareto_archive_conflict(
-            candidate_disposition=implementation.candidate_disposition,
-            candidate_metrics=dict(implementation.candidate_metrics),
-            records=request.records,
+        conflict = self.search.pareto_conflict(
+            disposition=implementation.candidate_disposition,
+            metrics=dict(implementation.candidate_metrics),
+            records=self.records,
             space=state.agent_run_state.metrics,
         )
-        verdict = await self.turns.review(request, state, conflict)
+        verdict = await self.turns.review(selected.request, selected.attempt, conflict)
         state.judge = JudgeReviewed(verdict.verdict)
         if verdict.verdict is not Verdict.PASS:
             state.feedback = verdict.feedback
-            request.active_hypothesis.feedback = verdict.feedback
-            agent_state = update_active_hypothesis(
-                selected.attempt.agent_run_state, selected.request.active_hypothesis
-            )
-            selected.attempt.agent_run_state = agent_state
-            await self.ctx.state.commit(
-                sequence=self.round_number,
-                writes={"state.json": agent_state},
-                candidate=False,
-                label=f"multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
-                publish=agent_state,
-            )
+            selected.request.active_hypothesis.feedback = verdict.feedback
+            await self._checkpoint_hypothesis(selected)
             return AttemptDecision.RETRY
         validation_feedback = await self._validate_local(
             selected, implementation.validation_recipe_artifact
         )
         if validation_feedback is not None:
             state.feedback = validation_feedback
-            request.active_hypothesis.feedback = validation_feedback
-            agent_state = update_active_hypothesis(
-                selected.attempt.agent_run_state, selected.request.active_hypothesis
-            )
-            selected.attempt.agent_run_state = agent_state
-            await self.ctx.state.commit(
-                sequence=self.round_number,
-                writes={"state.json": agent_state},
-                candidate=False,
-                label=f"multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
-                publish=agent_state,
-            )
+            selected.request.active_hypothesis.feedback = validation_feedback
+            await self._checkpoint_hypothesis(selected)
             return AttemptDecision.RETRY
         await self._approve_candidate(selected)
         candidate_ready = (
@@ -521,12 +488,10 @@ class MultiSession:
             in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
             or implementation.candidate_disposition is CandidateDisposition.PARETO_FRONTIER
         )
-        reason = official_evaluation_reason(
-            records=request.records,
-            round_number=request.round_number,
-            max_rounds=self.options.max_rounds,
-            official_eval_every=self.options.official_eval_every,
-            requested=request.plan.request_official_evaluation,
+        reason = self.search.official_due(
+            records=self.records,
+            round_number=selected.request.round_number,
+            requested=selected.request.plan.request_official_evaluation,
             candidate_ready=candidate_ready,
         )
         if reason is None:
@@ -538,6 +503,19 @@ class MultiSession:
         await self._approve_perf(selected)
         state.official_reason = reason
         return AttemptDecision.OFFICIAL
+
+    async def _checkpoint_hypothesis(self, selected: MultiRound) -> None:
+        state = update_active_hypothesis(
+            selected.attempt.agent_run_state, selected.request.active_hypothesis
+        )
+        selected.attempt.agent_run_state = state
+        await self.ctx.state.commit(
+            sequence=self.round_number,
+            writes={"state.json": state},
+            candidate=False,
+            label=f"multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
+            publish=state,
+        )
 
     async def _approve_candidate(self, selected: MultiRound) -> None:
         implementation = selected.attempt.implementation
@@ -558,17 +536,7 @@ class MultiSession:
         hypothesis.gate_approved_candidate_retention_reason = (
             implementation.candidate_retention_reason
         )
-        state = update_active_hypothesis(
-            selected.attempt.agent_run_state, selected.request.active_hypothesis
-        )
-        selected.attempt.agent_run_state = state
-        await self.ctx.state.commit(
-            sequence=self.round_number,
-            writes={"state.json": state},
-            candidate=False,
-            label=f"multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
-            publish=state,
-        )
+        await self._checkpoint_hypothesis(selected)
 
     async def _validate_local(  # noqa: C901  # bounded framework recipe gate
         self, selected: MultiRound, recipe_artifact: str | None
@@ -688,17 +656,7 @@ class MultiSession:
         hypothesis.gate_approved_perf_unit = implementation.perf_unit
         hypothesis.gate_approved_metrics = dict(implementation.metrics)
         hypothesis.gate_approved_evaluation_artifact = implementation.evaluation_artifact
-        state = update_active_hypothesis(
-            selected.attempt.agent_run_state, selected.request.active_hypothesis
-        )
-        selected.attempt.agent_run_state = state
-        await self.ctx.state.commit(
-            sequence=self.round_number,
-            writes={"state.json": state},
-            candidate=False,
-            label=f"multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
-            publish=state,
-        )
+        await self._checkpoint_hypothesis(selected)
 
     async def official_gates(self, selected: MultiRound) -> bool:
         """Evaluate a candidate only after independent review passes."""
@@ -712,7 +670,7 @@ class MultiSession:
             run=run,
             reason=reason,
             official_eval_every=self.options.official_eval_every,
-            provisional_candidates=_provisional_candidates_since_official(self.records),
+            provisional_candidates=provisional_candidates_since_official(self.records),
         )
 
     async def _official_gates(self, selected: MultiRound) -> bool:
@@ -749,23 +707,15 @@ class MultiSession:
         hypothesis.gate_candidate_commit = commit
         hypothesis.gate_accuracy_passed = result.accuracy_passed
         hypothesis.feedback = result.feedback
-        state = update_active_hypothesis(
-            selected.attempt.agent_run_state, selected.request.active_hypothesis
-        )
-        selected.attempt.agent_run_state = state
-        await self.ctx.state.commit(
-            sequence=self.round_number,
-            writes={"state.json": state},
-            candidate=False,
-            label=f"multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
-            publish=state,
-        )
+        await self._checkpoint_hypothesis(selected)
         return False
 
     async def commit_round(self, selected: MultiRound) -> None:
         """Commit the completed round and publish its observable record."""
         attempt = selected.attempt
-        projection = self.terminal_policy.project_performance(selected.request, attempt)
+        hypothesis = selected.request.active_hypothesis
+        implementation = attempt.implementation
+        projection = self.terminal_policy.project_performance(hypothesis, attempt)
         candidate_commit = await self.workspace.snapshot(f"round-{self.round_number}-record-input")
         worker = self.turns.worker
         record = build_round_record(
@@ -773,8 +723,8 @@ class MultiSession:
                 state=attempt.agent_run_state,
                 records=self.records,
                 round_number=self.round_number,
-                hypothesis=selected.selection.hypothesis,
-                plan=selected.selection.plan,
+                hypothesis=hypothesis,
+                plan=selected.request.plan,
                 attempt=attempt,
                 projection=projection,
                 reviewed=self.terminal_policy.reviewed(attempt),
@@ -787,37 +737,47 @@ class MultiSession:
                 model=worker.model,
             )
         )
-        terminal = transition_round(
-            self.terminal_policy,
-            TerminalRequest(
-                engine=self.engine,
-                state=attempt.agent_run_state,
-                hypothesis=selected.selection.hypothesis,
-                attempt=attempt,
-                record=record,
-                records=self.records,
-                carry=self.carry,
-                reviewed=self.terminal_policy.reviewed(attempt),
-                max_retries_per_round=self.options.max_retries_per_round,
-            ),
+        keeps_active = self.terminal_policy.keeps_hypothesis_active(
+            attempt, hypothesis.continuation_rounds
         )
-        if terminal.exhaustion_feedback is not None:
+        reviewed = self.terminal_policy.reviewed(attempt)
+        next_step = implementation.next_step if implementation is not None else None
+        requests_continuation = hypothesis_cadence.continuation_requested(
+            outcome=implementation.hypothesis_outcome if implementation is not None else None,
+            next_step=next_step or "",
+        )
+        terminal_needs_parent_choice = self.terminal_policy.terminal_success_needs_parent_choice(
+            attempt, hypothesis.continuation_rounds
+        )
+        closed = self.search.close_round(
+            self.state,
+            hypothesis=hypothesis,
+            record=record,
+            records=self.records,
+            carry=self.carry,
+            passed=attempt.passed,
+            reviewed=reviewed,
+            feedback=attempt.feedback,
+            keeps_active=keeps_active,
+            requests_continuation=requests_continuation,
+            next_step=next_step,
+            terminal_needs_parent_choice=terminal_needs_parent_choice,
+            has_implementation=implementation is not None,
+        )
+        if closed.exhaustion_feedback is not None:
             issue_board.append_exhaustion_note(
                 self.turns.progress_path,
                 self.round_number,
                 self.options.max_retries_per_round,
-                terminal.exhaustion_feedback,
+                closed.exhaustion_feedback,
             )
         await self.ctx.state.commit(
             sequence=self.round_number,
-            writes={"state.json": terminal.state},
-            publish=terminal.state,
+            writes={"state.json": closed.state},
+            publish=closed.state,
         )
-        self.engine = terminal.engine
-        self.state = terminal.state
-        self.records = terminal.state.rounds
-        self.history = RoundHistory(records=self.records)
-        self.carry = terminal.carry
+        self.state = closed.state
+        self.carry = closed.carry
         self.round_number += 1
 
     async def finish(self) -> bool:
@@ -827,7 +787,7 @@ class MultiSession:
             self.turns.progress_path, _pareto_archive_summary(self.records, self.state.metrics)
         )
         if self.state.metrics.objectives:
-            frontier = _pareto_frontier_records(self.records, self.state.metrics)
+            frontier = self.search.frontier(self.records, space=self.state.metrics)
             self.ctx.log(f"\nFinal Pareto frontier ({len(frontier)} rounds):")
             for record in frontier:
                 self.ctx.log(
@@ -835,7 +795,7 @@ class MultiSession:
                     f"{_format_metric_row(_record_candidate_metrics(record), self.state.metrics.objectives)} "
                     f"(commit {(record.commit or 'n/a')[:12]})"
                 )
-        winner = _select_final_candidate(self.records, self.state.metrics)
+        winner = self.search.best(self.records, space=self.state.metrics)
         if winner is None:
             baseline = self.workspace.trusted_input_baseline
             if baseline is None:

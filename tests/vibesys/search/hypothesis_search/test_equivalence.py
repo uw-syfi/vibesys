@@ -20,17 +20,9 @@ import vibesys.agent_run.evidence as old_evidence
 import vibesys.agent_run.hypotheses as old_hypotheses
 from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
-from vibesys.loops.multi.decisions import (
-    candidate_evidence_is_fresh as old_candidate_evidence_is_fresh,
-)
-from vibesys.loops.multi.decisions import (
-    official_evaluation_reason as old_official_evaluation_reason,
-)
-from vibesys.loops.multi.decisions import review_due as old_review_due
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
-    ImplementerResponse,
     OrchestratorPlan,
 )
 from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
@@ -262,27 +254,26 @@ def test_frontier_and_best_match_old_evidence_helpers() -> None:
     outcome=st.sampled_from(list(HypothesisOutcome)),
     candidate_evidence_fresh=st.booleans(),
 )
-def test_review_due_matches_old(
+def test_review_due_at_cadence_final_round_or_fresh_claim(
     round_number: int,
     max_rounds: int,
     judge_every: int,
     outcome: HypothesisOutcome,
     candidate_evidence_fresh: bool,  # noqa: FBT001
 ) -> None:
-    old = old_review_due(
-        round_number=round_number,
-        max_rounds=max_rounds,
-        judge_every=judge_every,
-        outcome=outcome,
-        candidate_evidence_fresh=candidate_evidence_fresh,
-    )
     search = HypothesisSearch(HypothesisConfig(max_rounds=max_rounds, judge_every=judge_every))
-    new = search.review_due(
+    due = search.review_due(
         round_number=round_number,
         outcome=outcome,
         candidate_evidence_is_fresh=candidate_evidence_fresh,
     )
-    assert old == new
+    expected = (
+        round_number == max_rounds
+        or round_number % judge_every == 0
+        or outcome in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
+        or candidate_evidence_fresh
+    )
+    assert due == expected
 
 
 @given(
@@ -293,7 +284,7 @@ def test_review_due_matches_old(
     candidate_ready=st.booleans(),
     provisional=st.integers(min_value=0, max_value=5),
 )
-def test_official_due_matches_old(  # noqa: PLR0913
+def test_official_due_matches_expected_cadence(  # noqa: PLR0913
     round_number: int,
     max_rounds: int,
     official_eval_every: int,
@@ -307,39 +298,36 @@ def test_official_due_matches_old(  # noqa: PLR0913
         )
         for n in range(1, provisional + 1)
     ]
-    old = old_official_evaluation_reason(
-        records=records,
-        round_number=round_number,
-        max_rounds=max_rounds,
-        official_eval_every=official_eval_every,
-        requested=requested,
-        candidate_ready=candidate_ready,
-    )
     search = HypothesisSearch(
         HypothesisConfig(max_rounds=max_rounds, official_eval_every=official_eval_every)
     )
-    new = search.official_due(
+    reason = search.official_due(
         records=records,
         round_number=round_number,
         requested=requested,
         candidate_ready=candidate_ready,
     )
-    assert old == new
+    if round_number == max_rounds:
+        assert reason == "final_round"
+    elif not candidate_ready:
+        assert reason is None
+    elif requested:
+        assert reason == "orchestrator_request"
+    elif provisional + 1 >= official_eval_every:
+        assert reason == "cadence"
+    else:
+        assert reason is None
 
 
-def test_candidate_evidence_fresh_matches_old() -> None:
+def test_candidate_evidence_fresh_requires_metrics_and_detects_new_artifacts() -> None:
     candidate_metrics = {"a": 1.0}
     candidate_evaluation_artifact = "artifact-1"
-    implementation = ImplementerResponse(
-        summary="did the thing",
-        expected_behavior="it works",
-        candidate_metrics=candidate_metrics,
-        candidate_evaluation_artifact=candidate_evaluation_artifact,
-    )
 
-    records: list[RoundRecord] = []
-    assert old_candidate_evidence_is_fresh(implementation, records) == new_candidate_evidence_fresh(
+    assert not new_candidate_evidence_fresh(
+        candidate_metrics={}, candidate_evaluation_artifact=None, records=[]
+    )
+    assert new_candidate_evidence_fresh(
         candidate_metrics=candidate_metrics,
         candidate_evaluation_artifact=candidate_evaluation_artifact,
-        records=records,
+        records=[],
     )

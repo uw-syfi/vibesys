@@ -21,11 +21,6 @@ from vibesys.agent_run.evidence import (
 )
 from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.loops.multi.decisions import (
-    candidate_evidence_is_fresh as _candidate_evidence_is_fresh,
-)
-from vibesys.loops.multi.decisions import official_evaluation_reason as _official_evaluation_reason
-from vibesys.loops.multi.decisions import review_due as _review_due
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.schemas import (
     CandidateDisposition,
@@ -39,6 +34,8 @@ from vibesys.schemas import (
     ValidationRecipeArtifact,
     Verdict,
 )
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis import cadence as _cadence
 from vs_loop_state.api import RoundRecord
 
 _THROUGHPUT_LATENCY = MetricSpace(
@@ -47,6 +44,52 @@ _THROUGHPUT_LATENCY = MetricSpace(
         Objective(name="latency", direction="min"),
     )
 )
+
+
+def _official_evaluation_reason(  # noqa: PLR0913
+    *,
+    records: list[RoundRecord],
+    round_number: int,
+    max_rounds: int,
+    official_eval_every: int,
+    requested: bool,
+    candidate_ready: bool,
+) -> str | None:
+    search = HypothesisSearch(
+        HypothesisConfig(max_rounds=max_rounds, official_eval_every=official_eval_every)
+    )
+    return search.official_due(
+        records=records,
+        round_number=round_number,
+        requested=requested,
+        candidate_ready=candidate_ready,
+    )
+
+
+def _review_due(
+    *,
+    round_number: int,
+    max_rounds: int,
+    judge_every: int,
+    outcome: HypothesisOutcome,
+    candidate_evidence_fresh: bool = False,
+) -> bool:
+    search = HypothesisSearch(HypothesisConfig(max_rounds=max_rounds, judge_every=judge_every))
+    return search.review_due(
+        round_number=round_number,
+        outcome=outcome,
+        candidate_evidence_is_fresh=candidate_evidence_fresh,
+    )
+
+
+def _candidate_evidence_is_fresh(
+    implementation: ImplementerResponse, records: list[RoundRecord]
+) -> bool:
+    return _cadence.candidate_evidence_fresh(
+        candidate_metrics=implementation.candidate_metrics,
+        candidate_evaluation_artifact=implementation.candidate_evaluation_artifact,
+        records=records,
+    )
 
 
 def test_orchestration_descriptor_contains_only_policy_settings() -> None:

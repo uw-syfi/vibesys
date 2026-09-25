@@ -1,25 +1,22 @@
-"""Hypothesis scheduling and review cadence owned by the multi strategy."""
+"""Prompt-shaping carriers the multi strategy passes to its turns.
+
+Hypothesis scheduling (when to start, continue, or retire a claim, and when
+review or an official evaluation is due) now lives in
+``vibesys.search.hypothesis`` and is driven directly by ``session.py``. This
+module keeps only what ``turns.py`` renders prompts from: the small request
+objects, and the no-op guidance chain multi has always rendered through.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
-
-from vibesys.agent_run.evidence import (
-    CarryOver,
-    _provisional_candidates_since_official,
-    _terminal_workspace_notice,
-)
-from vibesys.agent_run.hypotheses import append_round, start_hypothesis, update_active_hypothesis
-from vibesys.schemas import HypothesisOutcome
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vibesys.agent_run.attempts import AttemptState
+    from vibesys.agent_run.evidence import CarryOver
     from vibesys.agent_run.state import AgentRunState, Hypothesis
-    from vibesys.schemas import ImplementerResponse, OrchestratorPlan, ProfilerSummary
+    from vibesys.schemas import OrchestratorPlan, ProfilerSummary
     from vs_loop_state.api import RoundRecord
-
-_MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW = 2
 
 
 @dataclass(frozen=True)
@@ -36,23 +33,17 @@ class PlainGuidance:
 
 
 @dataclass(frozen=True)
-class HypothesisEngine:
-    """Apply the multi strategy's plain hypothesis lifecycle."""
+class _StaticGuidance:
+    """Fixed stand-in for the old mutable hypothesis engine's guidance chain.
 
-    _state: AgentRunState
-
-    @classmethod
-    def create(cls, state: AgentRunState) -> HypothesisEngine:
-        """Detach policy state from the durable aggregate."""
-        return cls(state.clone())
-
-    @property
-    def state(self) -> AgentRunState:
-        """Return a detached aggregate for a typed checkpoint."""
-        return self._state.clone()
+    ``turns.py`` renders ``request.engine.controller.guidance...``. Multi no
+    longer carries a stateful engine (``session.py`` holds one
+    ``HypothesisState`` value instead), so every request shares this single
+    handle exposing the same no-op guidance the engine always returned.
+    """
 
     @property
-    def controller(self) -> HypothesisEngine:
+    def controller(self) -> _StaticGuidance:
         """Expose prompt guidance through the existing engine vocabulary."""
         return self
 
@@ -61,35 +52,8 @@ class HypothesisEngine:
         """Return empty component guidance."""
         return PlainGuidance()
 
-    def replace_state(self, state: AgentRunState) -> HypothesisEngine:
-        """Adopt newer authoritative lifecycle state."""
-        return HypothesisEngine(state.clone())
 
-    def start(
-        self,
-        plan: OrchestratorPlan,
-        *,
-        started_round: int,
-        parent_round: int | None = None,
-        parent_commit: str | None = None,
-    ) -> HypothesisEngine:
-        """Start a designer hypothesis with a retained parent revision."""
-        return HypothesisEngine(
-            start_hypothesis(
-                self.state,
-                plan,
-                started_round=started_round,
-                parent_round=parent_round,
-                parent_commit=parent_commit,
-            )
-        )
-
-    def complete_round(
-        self, record: RoundRecord, *, next_active: Hypothesis | None
-    ) -> HypothesisEngine:
-        """Append one completed record and its continuation decision."""
-        state = update_active_hypothesis(self.state, next_active) if next_active else self.state
-        return HypothesisEngine(append_round(state, record, keep_active=next_active is not None))
+STATIC_GUIDANCE = _StaticGuidance()
 
 
 @dataclass(frozen=True)
@@ -107,17 +71,6 @@ class PlanRequest:
 
 
 @dataclass(frozen=True)
-class RoundSelection:
-    """Selected designer claim and planned official cadence."""
-
-    engine: HypothesisEngine
-    state: AgentRunState
-    hypothesis: Hypothesis
-    plan: OrchestratorPlan
-    planned_official_reason: str | None
-
-
-@dataclass(frozen=True)
 class AttemptRequest:
     """Multi strategy facts for one bounded implementer attempt."""
 
@@ -126,201 +79,5 @@ class AttemptRequest:
     planned_official_reason: str | None
     records: list[RoundRecord]
     active_hypothesis: Hypothesis
-    engine: HypothesisEngine
+    engine: _StaticGuidance
     last_profile_focus: str
-
-
-@dataclass(frozen=True)
-class TerminalRequest:
-    """Completed evidence for the next multi hypothesis decision."""
-
-    engine: HypothesisEngine
-    state: AgentRunState
-    hypothesis: Hypothesis
-    attempt: AttemptState
-    record: RoundRecord
-    records: list[RoundRecord]
-    carry: CarryOver
-    reviewed: bool
-    max_retries_per_round: int
-
-
-@dataclass(frozen=True)
-class TerminalTransition:
-    """State and carry committed after a multi round."""
-
-    engine: HypothesisEngine
-    state: AgentRunState
-    carry: CarryOver
-    exhaustion_feedback: str | None
-
-
-class TerminalPolicy(Protocol):
-    """Multi-specific terminal facts consumed by its scheduler."""
-
-    def keeps_hypothesis_active(self, state: AttemptState, continuation_rounds: int) -> bool:
-        """Report whether the implementer retains its lease."""
-        ...
-
-    def terminal_success_needs_parent_choice(
-        self, state: AttemptState, continuation_rounds: int
-    ) -> bool:
-        """Report whether the next designer must choose a parent."""
-        ...
-
-
-def implementation_requests_continuation(implementation: ImplementerResponse | None) -> bool:
-    """Require a concrete unfinished same-hypothesis step."""
-    return bool(
-        implementation is not None
-        and implementation.hypothesis_outcome
-        in {
-            HypothesisOutcome.CONTINUE,
-            HypothesisOutcome.IMPLEMENTATION_FAILED,
-            HypothesisOutcome.INCONCLUSIVE,
-        }
-        and implementation.next_step.strip()
-    )
-
-
-def implementation_keeps_hypothesis_active(
-    implementation: ImplementerResponse | None, *, continuation_rounds: int = 0
-) -> bool:
-    """Bound the implementer's continuation lease to two rounds."""
-    return implementation_requests_continuation(implementation) and (
-        continuation_rounds < _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW
-    )
-
-
-def review_due(
-    *,
-    round_number: int,
-    max_rounds: int,
-    judge_every: int,
-    outcome: HypothesisOutcome,
-    candidate_evidence_fresh: bool = False,
-) -> bool:
-    """Require review at cadence, final round, or on a new candidate claim."""
-    return (
-        round_number == max_rounds
-        or round_number % judge_every == 0
-        or outcome in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
-        or candidate_evidence_fresh
-    )
-
-
-def candidate_evidence_is_fresh(
-    implementation: ImplementerResponse, records: list[RoundRecord]
-) -> bool:
-    """Detect a previously unseen objective row requiring review."""
-    if not implementation.candidate_metrics:
-        return False
-    artifact = implementation.candidate_evaluation_artifact
-    if not artifact:
-        return True
-    metrics = dict(implementation.candidate_metrics)
-    return not any(
-        (record.candidate_evaluation_artifact or record.evaluation_artifact) == artifact
-        and record.candidate_metrics == metrics
-        for record in records
-    )
-
-
-def official_evaluation_reason(  # noqa: PLR0913
-    *,
-    records: list[RoundRecord],
-    round_number: int,
-    max_rounds: int,
-    official_eval_every: int,
-    requested: bool,
-    candidate_ready: bool,
-) -> str | None:
-    """Schedule gates by accepted candidates and the final round."""
-    if round_number == max_rounds:
-        return "final_round"
-    if not candidate_ready:
-        return None
-    if requested:
-        return "orchestrator_request"
-    if _provisional_candidates_since_official(records) + 1 >= official_eval_every:
-        return "cadence"
-    return None
-
-
-def transition_round(policy: TerminalPolicy, request: TerminalRequest) -> TerminalTransition:
-    """Advance one multi hypothesis and choose the next designer handoff."""
-    attempt = request.attempt
-    passed = attempt.passed
-    feedback = attempt.feedback
-    implementation = attempt.implementation
-    next_active = request.hypothesis.clone()
-    if policy.keeps_hypothesis_active(attempt, next_active.continuation_rounds):
-        next_active.feedback = feedback if request.reviewed and not passed else None
-        assert implementation is not None  # noqa: S101  # lease requires an implementation
-        next_active.next_step = implementation.next_step
-        next_active.continuation_rounds += 1
-    elif passed:
-        next_active = None
-    elif (
-        request.reviewed
-        and next_active.continuation_rounds < _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW
-    ):
-        next_active.feedback = feedback
-        next_active.next_step = (
-            implementation.next_step
-            if implementation is not None and implementation_requests_continuation(implementation)
-            else None
-        )
-        next_active.continuation_rounds += 1
-    elif request.reviewed or (
-        implementation is not None
-        and not implementation_keeps_hypothesis_active(
-            implementation, continuation_rounds=next_active.continuation_rounds
-        )
-    ):
-        next_active = None
-    else:
-        next_active.feedback = None
-        next_active.next_step = implementation.next_step if implementation is not None else None
-    engine = request.engine.replace_state(request.state).complete_round(
-        request.record, next_active=next_active
-    )
-    records = [*request.records, request.record]
-    carry = CarryOver(
-        regression_info=request.carry.regression_info,
-        exhaustion_info=request.carry.exhaustion_info,
-    )
-    exhaustion_feedback: str | None = None
-    if not passed and request.record.reviewed:
-        exhaustion_feedback = feedback or ""
-        carry.exhaustion_info = (
-            f"Round {request.record.round_number} did not pass after "
-            f"{request.max_retries_per_round} attempts. Last judge feedback: "
-            f"{feedback or '(empty)'}"
-        )
-        carry.regression_info = None
-    elif passed:
-        carry.exhaustion_info = None
-        if policy.terminal_success_needs_parent_choice(
-            attempt, request.hypothesis.continuation_rounds
-        ):
-            carry.regression_info = _terminal_workspace_notice(records)
-        elif request.record.official_evaluation and request.record.candidate_retained is False:
-            carry.regression_info = (
-                f"Round {request.record.round_number}'s official candidate was not retained: "
-                f"{request.record.perf_metric}"
-                f"{(' ' + request.record.perf_unit) if request.record.perf_unit else ''}. "
-                "Use its recorded parent and objective directions when choosing the next checkpoint."
-            )
-        else:
-            carry.regression_info = None
-    else:
-        carry.exhaustion_info = None
-        carry.regression_info = (
-            None
-            if implementation_keeps_hypothesis_active(
-                implementation, continuation_rounds=request.hypothesis.continuation_rounds
-            )
-            else _terminal_workspace_notice(records)
-        )
-    return TerminalTransition(engine, engine.state, carry, exhaustion_feedback)

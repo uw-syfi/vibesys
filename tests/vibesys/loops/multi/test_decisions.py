@@ -5,11 +5,10 @@ from __future__ import annotations
 import pytest
 
 from vibesys.agent_run.attempts import AttemptState
-from vibesys.agent_run.evidence import CarryOver
-from vibesys.agent_run.state import AgentRunState
-from vibesys.loops.multi.decisions import HypothesisEngine, TerminalRequest, transition_round
 from vibesys.loops.multi.session import _TerminalPolicy
 from vibesys.schemas import HypothesisOutcome, ImplementerResponse, OrchestratorPlan
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis.transitions import CarryOver
 from vs_loop_state.api import RoundRecord
 
 
@@ -41,12 +40,12 @@ def test_completed_round_controls_lease_and_designer_handoff(  # noqa: PLR0913
         pass_criteria="Candidate responds",  # noqa: S106
         reasoning="Decode is expensive",
     )
-    engine = HypothesisEngine.create(AgentRunState()).start(
-        plan, started_round=1, parent_commit="a" * 40
+    search = HypothesisSearch(HypothesisConfig(max_rounds=5, max_retries_per_round=2))
+    started = search.start(
+        search.initial(), plan, round_number=1, current_commit="a" * 40, records=[]
     )
-    state = engine.state
-    hypothesis = state.active_hypothesis
-    assert hypothesis is not None
+    state = started.state
+    hypothesis = started.hypothesis
     hypothesis.continuation_rounds = continuations
     attempt = AttemptState(agent_run_state=state, feedback="repair needed")
     attempt.implementation = ImplementerResponse(
@@ -67,31 +66,44 @@ def test_completed_round_controls_lease_and_designer_handoff(  # noqa: PLR0913
         official_evaluation=passed,
         candidate_retained=retained,
     )
-    transition = transition_round(
-        _TerminalPolicy(),
-        TerminalRequest(
-            engine=engine,
-            state=state,
-            hypothesis=hypothesis,
-            attempt=attempt,
-            record=record,
-            records=[],
-            carry=CarryOver(regression_info="stale", exhaustion_info="stale"),
-            reviewed=reviewed,
-            max_retries_per_round=2,
-        ),
+    policy = _TerminalPolicy(search.config)
+    keeps_active = policy.keeps_hypothesis_active(attempt, continuations)
+    terminal_needs_parent_choice = policy.terminal_success_needs_parent_choice(
+        attempt, continuations
     )
-    assert len(transition.state.rounds) == 1
-    assert (transition.state.active_hypothesis is not None) is active
+    closed = search.close_round(
+        state,
+        hypothesis=hypothesis,
+        record=record,
+        records=[],
+        carry=CarryOver(regression_info="stale", exhaustion_info="stale"),
+        passed=passed,
+        reviewed=reviewed,
+        feedback=attempt.feedback,
+        keeps_active=keeps_active,
+        requests_continuation=bool(
+            outcome
+            in {
+                HypothesisOutcome.CONTINUE,
+                HypothesisOutcome.IMPLEMENTATION_FAILED,
+                HypothesisOutcome.INCONCLUSIVE,
+            }
+            and next_step.strip()
+        ),
+        next_step=next_step,
+        terminal_needs_parent_choice=terminal_needs_parent_choice,
+    )
+    assert len(closed.state.rounds) == 1
+    assert (closed.state.active_hypothesis is not None) is active
     if reviewed and not passed:
-        assert transition.exhaustion_feedback == "repair needed"
-        assert "2 attempts" in (transition.carry.exhaustion_info or "")
+        assert closed.exhaustion_feedback == "repair needed"
+        assert "2 attempts" in (closed.carry.exhaustion_info or "")
     else:
-        assert transition.exhaustion_feedback is None
-        assert transition.carry.exhaustion_info is None
+        assert closed.exhaustion_feedback is None
+        assert closed.carry.exhaustion_info is None
     if passed and outcome is HypothesisOutcome.NOMINATED:
-        assert "not retained" in (transition.carry.regression_info or "")
+        assert "not retained" in (closed.carry.regression_info or "")
     elif passed and outcome is HypothesisOutcome.SUPPORTED:
-        assert transition.carry.regression_info != "stale"
+        assert closed.carry.regression_info != "stale"
     elif active and not reviewed:
-        assert transition.carry.regression_info is None
+        assert closed.carry.regression_info is None

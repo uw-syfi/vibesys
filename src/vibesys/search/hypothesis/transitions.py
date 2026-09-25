@@ -13,6 +13,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
+# Re-exported, not copied: ``vibesys.loops.multi.turns`` still type-hints its
+# ``CarryOver`` parameter from ``agent_run.evidence``. Re-exporting keeps both
+# call sites the same class rather than nominally distinct twins.
+from vibesys.agent_run.evidence import CarryOver  # noqa: F401
 from vibesys.evaluators.metrics import Measurement, MetricComparison, MetricSpace
 from vibesys.schemas import (
     CandidateDisposition,
@@ -858,14 +862,6 @@ def detect_plateau(
         f"— a {spread_pct:.2f}% spread, well within bench noise. Whatever you've "
         f"been working on for those rounds is not actually moving the headline metric."
     )
-
-
-@dataclass
-class CarryOver:
-    """Record-derived guidance passed to the next planning turn."""
-
-    regression_info: str | None = None
-    exhaustion_info: str | None = None
 
 
 def provisional_candidates_since_official(records: Sequence[RoundRecord]) -> int:

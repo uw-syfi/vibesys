@@ -144,6 +144,7 @@ graph TD
     vibesys.loops.multi --> vibesys.render
     vibesys.loops.multi --> vibesys.roles
     vibesys.loops.multi --> vibesys.runtime
+    vibesys.loops.multi --> vibesys.search.hypothesis
     vibesys.loops.profile_multi --> vibesys
     vibesys.loops.profile_multi --> vibesys.agent_run
     vibesys.loops.profile_multi --> vibesys.context
@@ -458,6 +459,7 @@ graph TD
     vibesys.loops.multi --> vibesys.render
     vibesys.loops.multi --> vibesys.roles
     vibesys.loops.multi --> vibesys.runtime
+    vibesys.loops.multi --> vibesys.search.hypothesis
     vibesys.loops.multi --> vs_agent
     vibesys.loops.multi --> vs_loop_state
     vibesys.loops.multi --> vs_project
