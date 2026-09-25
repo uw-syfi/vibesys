@@ -10,7 +10,6 @@ are patched out, the same pattern as ``tests/vibesys/loops/multi/test_orchestrat
 from __future__ import annotations
 
 import asyncio
-import json
 import shlex
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,21 +31,10 @@ from vibesys.loops.evolve.loop import (
     _candidate_code,
     _candidate_runtime_notes,
     _evaluate_in_subcontext,
-    _initialize_search_policy,
-    _latest_wip_seed,
-    _recent_failure_lessons,
     _teardown_candidate_deployment,
 )
 from vibesys.loops.evolve.orchestration import EvolveOptions, descriptor_from_options
-from vibesys.loops.evolve.population import (
-    Individual,
-    Population,
-)
-from vibesys.loops.evolve.run import EvolveRun
-from vibesys.loops.evolve.search_policy import (
-    OpenEvolveSearchConfig,
-    OpenEvolveSearchPolicy,
-)
+from vibesys.loops.evolve.run import EvolveRun, _resolve_selector
 from vibesys.loops.evolve.state import EvolutionStateStore
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.runner import run_orchestration
@@ -57,6 +45,8 @@ from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentSpec
 from vibesys.schemas import JudgeResponse, ProfilerSummary, Verdict
+from vibesys.search.population import vibesys_selector
+from vibesys.search.population.models import Individual, OpenEvolveSelectorConfig
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import (
     OrchestrationDescriptor,
@@ -70,7 +60,6 @@ if TYPE_CHECKING:
 
     from vibesys.constants import ComputeBackend
     from vibesys.evaluators.input_manifest import BenchmarkResult, WorkspaceSource
-    from vibesys.loops.evolve.search_policy import SearchPolicyName
     from vibesys.orchestration.runtime import RunContext
     from vibesys.run import RepositoryVisibility
 
@@ -123,8 +112,8 @@ class _EvolveLoopKwargs(TypedDict, total=False):
     bootstrap_max_attempts: int
     keep_deployments: bool
     max_parallelism: int
-    search_policy: SearchPolicyName | str | None
-    openevolve_config: OpenEvolveSearchConfig | None
+    search_policy: str | None
+    openevolve_config: OpenEvolveSelectorConfig | None
     remote_repo: str | None
     repo_visibility: RepositoryVisibility
 
@@ -460,7 +449,10 @@ def _invoke_bootstrap(
     """Exercise bootstrap through a valid one-generation run contract."""
     overrides: _EvolveLoopKwargs = {"max_generations": 1}
     overrides.update(kwargs)
-    with patch("vibesys.loops.evolve.run.EvolveRun._sample_candidate", return_value=None):
+    with patch(
+        "vibesys.loops.evolve.run.EvolveRun._proposals",
+        lambda self, generation_start: [None] * self.options.children_per_generation,  # noqa: ARG005
+    ):
         return _invoke_loop(
             tmp_path,
             ref_file,
@@ -471,9 +463,19 @@ def _invoke_bootstrap(
         )
 
 
-def _load_population(tmp_path) -> Population:  # noqa: ANN001  # tracked: #288
+def _load_population(tmp_path) -> tuple[Individual, ...]:  # noqa: ANN001  # tracked: #288
     """Load the canonical portable population for the single test run."""
-    return _evolution_state_store(_project_dir(tmp_path)).load_population()
+    state = _evolution_state_store(_project_dir(tmp_path)).load()
+    assert state is not None
+    return state.population.individuals
+
+
+def _best(individuals: tuple[Individual, ...], space: MetricSpace) -> Individual | None:
+    return vibesys_selector.best(individuals, space)
+
+
+def _frontier(individuals: tuple[Individual, ...], space: MetricSpace) -> list[Individual]:
+    return vibesys_selector.frontier(individuals, space)
 
 
 def _project_dir(tmp_path: Path) -> Path:
@@ -518,7 +520,7 @@ def test_bootstrap_succeeds_first_try(tmp_path, ref_file):  # noqa: ANN001, ANN2
 
     pop = _load_population(tmp_path)
     assert len(pop) == 1
-    seed = pop.all[0]
+    seed = pop[0]
     assert seed.id == 1
     assert seed.generation == 0
     assert seed.parent_id is None
@@ -546,11 +548,11 @@ def test_bootstrap_fails_all_attempts_returns_false(tmp_path, ref_file):  # noqa
 
     pop = _load_population(tmp_path)
     assert len(pop) == 2
-    for ind in pop.all:
+    for ind in pop:
         assert ind.passed is False
         assert ind.generation == 0
         assert ind.commit is None  # no edits → no WIP snapshot
-    assert "needs work" in pop.all[0].feedback
+    assert "needs work" in pop[0].feedback
 
 
 def test_bootstrap_failed_attempt_records_wip_seed_commit(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
@@ -568,7 +570,7 @@ def test_bootstrap_failed_attempt_records_wip_seed_commit(tmp_path, ref_file):  
 
     pop = _load_population(tmp_path)
     assert len(pop) == 1
-    failed = pop.all[0]
+    failed = pop[0]
     assert failed.passed is False
     assert failed.generation == 0
     assert failed.parent_id is None
@@ -591,7 +593,7 @@ def test_bootstrap_repairs_wip_seed_across_attempts(tmp_path, ref_file):  # noqa
 
     pop = _load_population(tmp_path)
     assert len(pop) == 2
-    first, second = pop.all
+    first, second = pop
     assert first.passed is False and second.passed is False  # noqa: PT018  # tracked: #288
     assert first.generation == 0 and second.generation == 0  # noqa: PT018  # tracked: #288
     assert first.parent_id is None and second.parent_id is None  # noqa: PT018  # tracked: #288
@@ -617,7 +619,7 @@ def test_bootstrap_succeeds_after_repair(tmp_path, ref_file):  # noqa: ANN001, A
 
     pop = _load_population(tmp_path)
     assert len(pop) == 2
-    failed, seed = pop.all
+    failed, seed = pop
     assert failed.passed is False and failed.commit  # noqa: PT018  # tracked: #288
     assert seed.passed is True
     assert seed.generation == 0
@@ -654,7 +656,7 @@ def test_bootstrap_repairs_after_framework_accuracy_failure(tmp_path, ref_file):
         37,
     ]
 
-    failed, seed = _load_population(tmp_path).all
+    failed, seed = _load_population(tmp_path)
     assert failed.passed is False
     assert failed.feedback == failure
     assert failed.commit
@@ -711,7 +713,7 @@ def test_evolve_with_preexisting_passing_seed_skips_bootstrap(tmp_path, ref_file
 
     pop = _load_population(tmp_path)
     assert len(pop) == 2  # gen-0 seed + one gen-2 child (same exp dir, resumed)
-    seed, child = pop.all
+    seed, child = pop
     assert seed.generation == 0 and seed.parent_id is None  # noqa: PT018  # tracked: #288
     assert child.parent_id == seed.id
     assert child.generation == 2
@@ -737,7 +739,7 @@ def test_first_generation_uses_bootstrap_seed_as_parent(tmp_path, ref_file):  # 
 
     pop = _load_population(tmp_path)
     assert len(pop) == 2  # bootstrap seed + one gen-1 child
-    seed, child = pop.all
+    seed, child = pop
     assert seed.generation == 0
     assert seed.parent_id is None
     assert child.parent_id == seed.id
@@ -781,7 +783,7 @@ def test_final_project_tree_is_the_deterministic_scalar_best(tmp_path, ref_file)
     )
 
     assert result is True
-    best = _load_population(tmp_path).best(MetricSpace())
+    best = _best(_load_population(tmp_path), MetricSpace())
     assert best is not None and best.perf_metric == 100.0  # noqa: PT018  # tracked: #288
     project = _project_dir(tmp_path)
     assert (project / "mutant_2.py").is_file()
@@ -810,7 +812,7 @@ def test_failed_child_excluded_from_future_parent_pool(tmp_path, ref_file):  # n
 
     pop = _load_population(tmp_path)
     assert len(pop) == 3
-    seed, g1, g2 = pop.all
+    seed, g1, g2 = pop
     assert seed.passed is True
     assert g1.passed is False
     assert g1.commit is None
@@ -838,7 +840,7 @@ def test_accuracy_rejected_child_is_not_profiled_or_selected(tmp_path, ref_file)
     assert len(runner.calls_for("profiler")) == 2
     assert accuracy_gate.call_count == 3
 
-    seed, rejected, accepted = _load_population(tmp_path).all
+    seed, rejected, accepted = _load_population(tmp_path)
     assert rejected.passed is False
     assert rejected.commit is None
     assert rejected.perf_metric is None
@@ -899,12 +901,12 @@ def test_pareto_mode_records_metrics_dict_on_individuals(tmp_path, ref_file):  #
 
     pop = _load_population(tmp_path)
     assert len(pop) == 2
-    seed, child = pop.all
+    seed, child = pop
     assert seed.metrics == {"tput": 100.0, "lat_ms": 80.0}
     assert child.metrics == {"tput": 80.0, "lat_ms": 50.0}
 
     # The two individuals trade off — both should be on the frontier.
-    front_ids = {i.id for i in pop.frontier(space)}
+    front_ids = {i.id for i in _frontier(pop, space)}
     assert front_ids == {seed.id, child.id}
 
 
@@ -956,7 +958,7 @@ def test_no_objectives_keeps_metrics_empty_and_legacy_behavior(tmp_path, ref_fil
     assert result is True
     pop = _load_population(tmp_path)
     assert len(pop) == 1
-    assert pop.all[0].metrics == {}
+    assert pop[0].metrics == {}
 
 
 def test_second_child_prompt_includes_parent_block(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
@@ -1007,7 +1009,10 @@ def test_generic_domain_prompts_exclude_llm_serving_contracts(tmp_path, ref_file
     assert "OpenAI-compatible" not in combined
 
 
-def test_openevolve_policy_persists_multi_file_search_state(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+def test_openevolve_policy_persists_state_as_data(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
+    """OpenEvolve state is held entirely inside the committed ``PopulationState``
+    (see ``vibesys.search.population``): no on-disk snapshot directory, so it
+    cannot grow unbounded across a run's lifetime (R4)."""
     runner = FakeAgentClient()
     runner.on_invoke(_mutator_writes_callback(runner))
 
@@ -1019,7 +1024,7 @@ def test_openevolve_policy_persists_multi_file_search_state(tmp_path, ref_file):
         modality=None,
         profiler_kind=ProfilerKind.NONE,
         search_policy="openevolve",
-        openevolve_config=OpenEvolveSearchConfig(
+        openevolve_config=OpenEvolveSelectorConfig(
             population_size=10,
             archive_size=5,
             num_islands=2,
@@ -1032,17 +1037,15 @@ def test_openevolve_policy_persists_multi_file_search_state(tmp_path, ref_file):
 
     assert result is True
     state_store = _evolution_state_store(_project_dir(tmp_path))
-    state_dir = state_store.namespace.external_directory("openevolve")
-    snapshot_dir = state_dir / "snapshots" / (state_dir / "CURRENT").read_text()
-    metadata = json.loads((snapshot_dir / "metadata.json").read_text())
-    programs = [json.loads(path.read_text()) for path in (snapshot_dir / "programs").glob("*.json")]
-    mapped = [program for program in programs if program["id"].startswith("vibesys-")]
+    state = state_store.load()
+    assert state is not None
+    selector_state = state.population.selector_state
+    assert selector_state is not None
+    assert not (state_store.namespace.external_directory("openevolve") / "snapshots").exists()
     child = next(
-        individual for individual in state_store.load_population().all if individual.generation == 1
+        individual for individual in state.population.individuals if individual.generation == 1
     )
-    assert {program["metadata"]["vibesys_individual_id"] for program in mapped} == {1, 2}
-    assert all("diff --git" in program["code"] for program in mapped)
-    assert metadata["island_generations"] == [1, 0]
+    assert set(selector_state.admitted_individual_ids) == {1, 2}
     assert child.policy_parent_id == "vibesys-1"
     assert child.policy_target_island == 0
 
@@ -1089,95 +1092,55 @@ def test_candidate_code_is_multi_file_but_excludes_framework_state(tmp_path):  #
     assert "population.json" not in code
 
 
-def test_programmatic_openevolve_config_infers_policy(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    ctx, state_store = _stateful_context(tmp_path)
-    config = OpenEvolveSearchConfig(num_islands=1)
-
-    name, policy = asyncio.run(
-        _initialize_search_policy(
-            _as_run_context(ctx),
-            Population(),
-            state_store,
-            requested=None,
-            seed=1,
-            config=config,
-            space=MetricSpace(),
-        )
+def _make_options(
+    *, search_policy: str | None, openevolve_config: OpenEvolveSelectorConfig | None
+) -> EvolveOptions:
+    return EvolveOptions(
+        max_generations=1,
+        children_per_generation=1,
+        k_top_inspirations=0,
+        k_random_inspirations=0,
+        selection_temperature=0.5,
+        search_policy=cast('Literal["vibesys", "openevolve"] | None', search_policy),
+        openevolve_population_size=(
+            openevolve_config.population_size if openevolve_config else None
+        ),
+        openevolve_archive_size=openevolve_config.archive_size if openevolve_config else None,
+        openevolve_num_islands=openevolve_config.num_islands if openevolve_config else None,
+        openevolve_migration_interval=(
+            openevolve_config.migration_interval if openevolve_config else None
+        ),
+        openevolve_migration_rate=(openevolve_config.migration_rate if openevolve_config else None),
+        frontier_bias=0.7,
+        bootstrap_max_attempts=1,
+        keep_deployments=False,
+        max_parallelism=1,
     )
 
-    assert name.value == "openevolve"
-    assert isinstance(policy, OpenEvolveSearchPolicy)
-    assert policy.config == config
+
+def test_programmatic_openevolve_config_infers_policy():  # noqa: ANN201  # tracked: #288
+    options = _make_options(
+        search_policy=None, openevolve_config=OpenEvolveSelectorConfig(num_islands=1)
+    )
+
+    selector, config = _resolve_selector(options, existing=None)
+
+    assert selector == "openevolve"
+    assert config is not None
+    assert config.num_islands == 1
 
 
-def test_programmatic_openevolve_config_rejects_vibesys_policy(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    ctx, state_store = _stateful_context(tmp_path)
+def test_programmatic_openevolve_config_rejects_vibesys_policy():  # noqa: ANN201  # tracked: #288
+    # ``EvolveOptions`` itself already forbids constructing this combination
+    # (see its ``_validate_search_policy_settings`` validator); ``model_copy``
+    # bypasses that validator, so it can still build one to exercise
+    # ``_resolve_selector``'s own defensive check.
+    options = _make_options(search_policy=None, openevolve_config=None).model_copy(
+        update={"search_policy": "vibesys", "openevolve_num_islands": 3},
+    )
 
     with pytest.raises(ValueError, match="requires the OpenEvolve search policy"):
-        asyncio.run(
-            _initialize_search_policy(
-                _as_run_context(ctx),
-                Population(),
-                state_store,
-                requested="vibesys",
-                seed=1,
-                config=OpenEvolveSearchConfig(),
-                space=MetricSpace(),
-            )
-        )
-
-
-# ---------------------------------------------------------------------------
-# Helper units: failure lessons, WIP-seed lookup, per-candidate deployment
-# ---------------------------------------------------------------------------
-
-
-def _ind(id_, *, passed=False, parent_id=None, commit=None, feedback=""):  # noqa: ANN001, ANN202  # tracked: #288
-    return Individual(
-        id=id_,
-        generation=1,
-        parent_id=parent_id,
-        passed=passed,
-        commit=commit,
-        feedback=feedback,
-    )
-
-
-def test_recent_failure_lessons_dedupes_and_orders_most_recent_first():  # noqa: ANN201  # tracked: #288
-    pop = Population()
-    pop.add(_ind(1, feedback="crash: CUDA out of memory"))
-    pop.add(_ind(2, feedback="crash: CUDA out of memory"))  # duplicate → collapsed
-    pop.add(_ind(3, feedback="server never bound to port"))
-    pop.add(_ind(4, passed=True, feedback="ignored because it passed"))
-
-    lessons = _recent_failure_lessons(pop, limit=3)
-    assert lessons == ["server never bound to port", "crash: CUDA out of memory"]
-
-
-def test_recent_failure_lessons_truncates_long_feedback():  # noqa: ANN201  # tracked: #288
-    pop = Population()
-    pop.add(_ind(1, feedback="x" * 5000))
-    (lesson,) = _recent_failure_lessons(pop, limit=1, max_chars=100)
-    assert lesson.endswith("…")
-    assert len(lesson) <= 102  # 100 chars + space + ellipsis
-
-
-def test_latest_wip_seed_returns_most_recent_failed_seed_with_commit():  # noqa: ANN201  # tracked: #288
-    pop = Population()
-    pop.add(_ind(1, commit="aaa"))  # failed cold-start seed
-    pop.add(_ind(2, commit="bbb"))  # newer failed cold-start seed
-    pop.add(_ind(3, passed=True, commit="ccc"))  # passing → not a WIP seed
-    pop.add(_ind(4, parent_id=2, commit="ddd"))  # has a parent → not cold-start
-
-    seed = _latest_wip_seed(pop)
-    assert seed is not None and seed.id == 2  # noqa: PT018  # tracked: #288
-
-
-def test_latest_wip_seed_none_when_no_snapshotted_failure():  # noqa: ANN201  # tracked: #288
-    pop = Population()
-    pop.add(_ind(1, commit=None))  # failed but never snapshotted
-    pop.add(_ind(2, passed=True, commit="ccc"))
-    assert _latest_wip_seed(pop) is None
+        _resolve_selector(options, existing=None)
 
 
 def test_candidate_runtime_notes_delegates_deployment_naming_to_environment():  # noqa: ANN201  # tracked: #288
@@ -1247,29 +1210,6 @@ def test_teardown_candidate_deployment_noop_when_kept_or_absent():  # noqa: ANN2
 # ---------------------------------------------------------------------------
 # Parallel generation orchestration
 # ---------------------------------------------------------------------------
-
-
-def _stateful_context(
-    tmp_path: Path,
-    log=None,  # noqa: ANN001  # tracked: #288
-) -> tuple[_FakeRunContext, EvolutionStateStore]:
-    project = Project.open(tmp_path)
-    project.state.create_project("test")
-    run = project.state.new_run_manifest(
-        "test",
-        run_id="run-1",
-        branch="vibesys/run-1",
-        vibesys_version="test",
-        trusted_input_baseline="a" * 40,
-        run_environment=RunEnvironmentRecord(name="local"),
-        execution=run_execution_record(),
-        orchestration=_evolution_descriptor(),
-    )
-    project.state.create_run(run)
-    git = MagicMock(history_root=project.root, run_id=run.run_id)
-    state = RunState(project, git, run.run_id)
-    ctx = _FakeRunContext(git=git, state=state, log=log or _discard_log)
-    return ctx, EvolutionStateStore(state.portable(RunStateNamespace.EVOLVE))
 
 
 # ---------------------------------------------------------------------------
@@ -1428,11 +1368,11 @@ def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path, ref_file):  # 
     assert gate.call_count == 2
     assert gate.call_args.kwargs["result_spec"].metric == "total_ops_per_sec"
     pop = _load_population(tmp_path)
-    assert [item.perf_metric for item in pop.all] == [42.5, 43.75]
+    assert [item.perf_metric for item in pop] == [42.5, 43.75]
     # The scalar contract declares a metric name, not a unit, so the recorded
     # unit stays the profiler's. A metric name is not a unit.
-    assert {item.perf_unit for item in pop.all} == {"tok/s"}
-    assert pop.all[0].metrics == {"total_ops_per_sec": 42.5}
+    assert {item.perf_unit for item in pop} == {"tok/s"}
+    assert pop[0].metrics == {"total_ops_per_sec": 42.5}
     # The profiler still ran for diagnostics; its self-report was not recorded.
     assert len(runner.calls_for("profiler")) == 2
 
@@ -1466,7 +1406,7 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_pat
     assert len(runner.calls_for("profiler")) == 0
     pop = _load_population(tmp_path)
     assert len(pop) == 1
-    failed = pop.all[0]
+    failed = pop[0]
     assert failed.passed is False
     assert "Framework benchmark failed." in (failed.feedback or "")
 
@@ -1479,7 +1419,7 @@ def test_no_benchmark_contract_keeps_profiler_fitness(tmp_path, ref_file):  # no
 
     assert result is True
     gate.assert_not_called()
-    seed = _load_population(tmp_path).all[0]
+    seed = _load_population(tmp_path)[0]
     assert seed.perf_metric == 10.0
     assert seed.perf_unit == "tok/s"
 
@@ -1536,14 +1476,14 @@ def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(tmp_path
 
     assert result is True
     pop = _load_population(tmp_path)
-    seed, child = pop.all
+    seed, child = pop
     # The contract owns the axis it measures; the profiler keeps the other.
     assert seed.metrics == {"total_ops_per_sec": 42.5, "p99_latency_ns": 500.0}
     assert child.metrics == {"total_ops_per_sec": 43.75, "p99_latency_ns": 800.0}
     # The two trade off on the second axis, so neither dominates and both are
     # on the frontier. Before the fix neither carried `p99_latency_ns` at all
     # and the frontier was empty.
-    assert {item.id for item in pop.frontier(space)} == {seed.id, child.id}
+    assert {item.id for item in _frontier(pop, space)} == {seed.id, child.id}
 
 
 def test_protocol_contract_records_the_evaluator_declared_unit(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
@@ -1559,7 +1499,7 @@ def test_protocol_contract_records_the_evaluator_declared_unit(tmp_path, ref_fil
         )
 
     assert result is True
-    seed = _load_population(tmp_path).all[0]
+    seed = _load_population(tmp_path)[0]
     assert seed.perf_metric == 42.5
     assert seed.perf_unit == "ops/s"
 

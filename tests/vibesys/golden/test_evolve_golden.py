@@ -375,7 +375,7 @@ def _assert_prompt_calls(runner: FakeAgentClient, *, scenario: str, workspace: P
         )
 
 
-_POPULATION_FILES = ("population.json", "metrics.json", "generation.json")
+_POPULATION_FILES = ("state.json", "metrics.json")
 
 
 def _assert_population_files(project_dir: Path, *, scenario: str, workspace: Path) -> None:

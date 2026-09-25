@@ -18,8 +18,8 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.loops.evolve.loop import _render
-from vibesys.loops.evolve.population import Individual
 from vibesys.profilers import ProfilerKind, profiler_definition
+from vibesys.search.population.models import Individual
 
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompt_snapshots"
 _ROLES = ("mutator", "judge", "profiler")
@@ -98,7 +98,7 @@ def _parent() -> Individual:
         id=7,
         generation=2,
         parent_id=3,
-        inspiration_ids=[5],
+        inspiration_ids=(5,),
         commit="abc123",
         perf_metric=125.0,
         perf_unit="ops/s",

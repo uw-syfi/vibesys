@@ -442,66 +442,6 @@
     "type": "workspace_snapshot"
   },
   {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
-      "commit": "<SHA>",
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
-      "label": "vibesys(round 1): record result",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
-  },
-  {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
-      "commit": null,
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
-      "label": "vibesys(round 1): record result",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
-  },
-  {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
-      "commit": "<SHA>",
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
-      "label": "vibesys(round 1): record result",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
-  },
-  {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
-      "commit": "<SHA>",
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
-      "label": "vibesys(round 1): record result",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
-  },
-  {
     "agent_kind": "implementer",
     "data": {
       "activity": {
@@ -745,22 +685,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": "<SHA>",
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
-      "label": "vibesys(round 1): record result",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
-  },
-  {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
-      "commit": "<SHA>",
+      "commit": null,
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "evolve: select individual 1",

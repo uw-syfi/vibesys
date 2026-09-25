@@ -115,8 +115,6 @@ graph TD
     vibesys.loops.evolve --> vibesys.orchestration
     vibesys.loops.evolve --> vibesys.orchestration.runtime
     vibesys.loops.evolve --> vibesys.prompts
-    vibesys.loops.evolve --> vibesys.render
-    vibesys.loops.evolve --> vibesys.run
     vibesys.loops.evolve --> vibesys.runtime
     vibesys.loops.evolve --> vibesys.search.population
     vibesys.loops.evolve.entrypoint --> vibesys.context
@@ -124,6 +122,7 @@ graph TD
     vibesys.loops.evolve.entrypoint --> vibesys.loops.evolve
     vibesys.loops.evolve.entrypoint --> vibesys.orchestration.runtime
     vibesys.loops.evolve.entrypoint --> vibesys.orchestration.view
+    vibesys.loops.evolve.entrypoint --> vibesys.search.population
     vibesys.loops.issue_queue --> vibesys
     vibesys.loops.issue_queue --> vibesys.context
     vibesys.loops.issue_queue --> vibesys.orchestration
@@ -376,19 +375,16 @@ graph TD
     vibesys.loops.evolve --> vibesys.orchestration
     vibesys.loops.evolve --> vibesys.orchestration.runtime
     vibesys.loops.evolve --> vibesys.prompts
-    vibesys.loops.evolve --> vibesys.render
-    vibesys.loops.evolve --> vibesys.run
     vibesys.loops.evolve --> vibesys.runtime
     vibesys.loops.evolve --> vibesys.search.population
     vibesys.loops.evolve --> vs_agent
-    vibesys.loops.evolve --> vs_loop_state
     vibesys.loops.evolve --> vs_project
     vibesys.loops.evolve.entrypoint --> vibesys.context
     vibesys.loops.evolve.entrypoint --> vibesys.evaluators
     vibesys.loops.evolve.entrypoint --> vibesys.loops.evolve
     vibesys.loops.evolve.entrypoint --> vibesys.orchestration.runtime
     vibesys.loops.evolve.entrypoint --> vibesys.orchestration.view
-    vibesys.loops.evolve.entrypoint --> vs_loop_state
+    vibesys.loops.evolve.entrypoint --> vibesys.search.population
     vibesys.loops.evolve.entrypoint --> vs_project
     vibesys.loops.issue_queue --> vibesys
     vibesys.loops.issue_queue --> vibesys.context

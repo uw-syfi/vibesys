@@ -10,7 +10,9 @@ from vibesys.api import OrchestrationRegistry
 from vibesys.api.contracts import RunStatus
 from vibesys.api.store import open_run_store, portable_history_snapshots
 from vibesys.context import RunSetup
-from vibesys.loops.evolve.state import EvolutionStateStore
+from vibesys.loops.evolve.state import EvolutionStateStore, EvolveState
+from vibesys.search.population.models import PopulationConfig
+from vibesys.search.population.search import PopulationSearch
 from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
@@ -73,9 +75,11 @@ def test_evolve_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     assert direct.loop == "evolve"
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
-    expected = EvolutionStateStore(
-        project.state.portable_namespace(manifest.run_id, "evolve")
-    ).projection()
+    store_ = EvolutionStateStore(project.state.portable_namespace(manifest.run_id, "evolve"))
+    state = store_.load() or EvolveState(
+        population=PopulationSearch(PopulationConfig(seed=0)).initial()
+    )
+    expected = store_.projection(state)
     assert direct.projection == expected.model_dump(mode="json")
     assert store.list_runs() == [direct]
 
