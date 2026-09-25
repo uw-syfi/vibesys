@@ -9,6 +9,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
+import vs_agent.api as _agent_api
+
 # AgentOutputChannel, AgentStatusData, TodoItemData, and ToolResultPayload are
 # used directly below. CommandResultPayload and JsonResultPayload are only the
 # ToolResultPayload union members; re-exported here (like vs_loop_state's
@@ -16,11 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from vs_agent.api import (
     AgentOutputChannel,
     AgentStatusData,
-    CommandResultPayload,  # noqa: F401
-    JsonResultPayload,  # noqa: F401
     TodoItemData,
     ToolResultPayload,
 )
+
+CommandResultPayload = _agent_api.CommandResultPayload
+JsonResultPayload = _agent_api.JsonResultPayload
 
 
 class CoreEventType(StrEnum):
@@ -110,26 +113,34 @@ class EventPayload(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
-class InvocationStartedData(EventPayload):  # noqa: D101
+class InvocationStartedData(EventPayload):
+    """Prompts submitted at the start of a model invocation."""
+
     kind: Literal["invocation_started"] = "invocation_started"
     system_prompt: str
     user_prompt: str
 
 
-class InvocationFinishedData(EventPayload):  # noqa: D101
+class InvocationFinishedData(EventPayload):
+    """Result or error recorded when a model invocation ends."""
+
     kind: Literal["invocation_finished"] = "invocation_finished"
     result: Any = None
     error: str | None = None
 
 
-class AgentExecutionActivityData(EventPayload):  # noqa: D101
+class AgentExecutionActivityData(EventPayload):
+    """Current activity reported for an agent execution."""
+
     kind: Literal["agent_execution_activity_changed"] = "agent_execution_activity_changed"
     mode: ExecutionActivityMode
     summary: str
     tool: str | None = None
 
 
-class AgentExecutionStartedData(EventPayload):  # noqa: D101
+class AgentExecutionStartedData(EventPayload):
+    """Semantic context for a prompt-to-result agent execution."""
+
     kind: Literal["agent_execution_started"] = "agent_execution_started"
     stage: str
     attempt: int | None = None
@@ -141,13 +152,17 @@ class AgentExecutionStartedData(EventPayload):  # noqa: D101
     model: str | None = None
 
 
-class AgentExecutionFinishedData(EventPayload):  # noqa: D101
+class AgentExecutionFinishedData(EventPayload):
+    """Terminal result or error for an agent execution."""
+
     kind: Literal["agent_execution_finished"] = "agent_execution_finished"
     result: Any = None
     error: str | None = None
 
 
-class RunStartedData(EventPayload):  # noqa: D101
+class RunStartedData(EventPayload):
+    """Initial input and loop settings for a core run."""
+
     kind: Literal["run_started"] = "run_started"
     outer_loop: str
     input: str
@@ -162,7 +177,9 @@ ExperimentsChangeReason = Literal[
 ]
 
 
-class ExperimentsChangedData(EventPayload):  # noqa: D101
+class ExperimentsChangedData(EventPayload):
+    """Reason and revision for a changed experiment projection."""
+
     kind: Literal["experiments_changed"] = "experiments_changed"
     reason: ExperimentsChangeReason
     # Persisted experiment projection revision. None preserves events recorded
@@ -170,20 +187,26 @@ class ExperimentsChangedData(EventPayload):  # noqa: D101
     revision: int | None = Field(default=None, ge=0)
 
 
-class PhaseData(EventPayload):  # noqa: D101
+class PhaseData(EventPayload):
+    """Name and optional attempt number for a loop phase."""
+
     kind: Literal["phase"] = "phase"
     phase: str
     attempt: int | None = None
 
 
-class AgentOutputChunkData(EventPayload):  # noqa: D101
+class AgentOutputChunkData(EventPayload):
+    """Incremental text emitted during agent execution."""
+
     kind: Literal["agent_output_chunk"] = "agent_output_chunk"
     channel: AgentOutputChannel
     content: str
     status: AgentStatusData | None = None
 
 
-class ToolCallData(EventPayload):  # noqa: D101
+class ToolCallData(EventPayload):
+    """Tool name, call identity, and arguments emitted by an agent."""
+
     kind: Literal["tool_call"] = "tool_call"
     tool: str
     call_id: str | None = None
@@ -191,7 +214,9 @@ class ToolCallData(EventPayload):  # noqa: D101
     status: AgentStatusData | None = None
 
 
-class ToolResultData(EventPayload):  # noqa: D101
+class ToolResultData(EventPayload):
+    """Raw tool result and optional structured payload."""
+
     kind: Literal["tool_result"] = "tool_result"
     tool: str
     call_id: str | None = None
@@ -200,19 +225,25 @@ class ToolResultData(EventPayload):  # noqa: D101
     payload: ToolResultPayload | None = None
 
 
-class TodoUpdateData(EventPayload):  # noqa: D101
+class TodoUpdateData(EventPayload):
+    """Current todo list reported by an agent."""
+
     kind: Literal["todo_update"] = "todo_update"
     todos: list[TodoItemData] = Field(default_factory=list)
 
 
-class UsageUpdateData(EventPayload):  # noqa: D101
+class UsageUpdateData(EventPayload):
+    """Token usage reported by the active model."""
+
     kind: Literal["usage_update"] = "usage_update"
     input_tokens: int
     context_window: int | None = None
     model: str | None = None
 
 
-class SubprocessOutputData(EventPayload):  # noqa: D101
+class SubprocessOutputData(EventPayload):
+    """Captured output from a managed subprocess."""
+
     kind: Literal["subprocess_output"] = "subprocess_output"
     process_id: str
     process_kind: str
@@ -220,21 +251,27 @@ class SubprocessOutputData(EventPayload):  # noqa: D101
     content: str
 
 
-class JudgeResultData(EventPayload):  # noqa: D101
+class JudgeResultData(EventPayload):
+    """Verdict and feedback returned by the judge."""
+
     kind: Literal["judge_result"] = "judge_result"
     verdict: Literal["pass", "fail"]
     feedback: str
     attempt: int
 
 
-class BenchmarkResultData(EventPayload):  # noqa: D101
+class BenchmarkResultData(EventPayload):
+    """Metric result emitted by a benchmark stage."""
+
     kind: Literal["benchmark_result"] = "benchmark_result"
     metric: str
     value: FiniteFloat
     unit: str
 
 
-class RoundFinishedData(EventPayload):  # noqa: D101
+class RoundFinishedData(EventPayload):
+    """Summary of attempt, judge, and performance outcomes for a round."""
+
     kind: Literal["round_finished"] = "round_finished"
     attempts: int
     judge_verdict: Literal["pass", "fail", "skipped"]
@@ -375,13 +412,15 @@ class CoreEvent(BaseModel):
 def make_core_event(
     event_type: CoreEventType,
     text: str = "",
-    **fields: Any,  # noqa: ANN401
+    **fields: object,
 ) -> CoreEvent:
     """Create an unrecorded event using the current UTC time."""
-    return CoreEvent(timestamp=datetime.now(UTC), type=event_type, text=text, **fields)
+    return CoreEvent.model_validate(
+        {"timestamp": datetime.now(UTC), "type": event_type, "text": text, **fields}
+    )
 
 
-def json_value(value: Any) -> Any:  # noqa: ANN401
+def json_value(value: object) -> object:
     """Return a JSON-compatible value without losing useful diagnostics."""
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")

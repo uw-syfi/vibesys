@@ -18,7 +18,7 @@ def test_generic_api_import_does_not_load_builtin_policies() -> None:
         "'vibesys.loops.profile_single', 'vibesys.loops.issue_queue', "
         "'vibesys.loops.evolve')) for name in sys.modules)"
     )
-    subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603
+    subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603  # LW-030001; The subprocess runs the current interpreter on a fixed script literal.
 
 
 def test_agent_projection_names_are_explicitly_owned_by_agent_facade() -> None:

@@ -30,7 +30,7 @@ _HARNESS_DIRS = frozenset({"accuracy_checker", "benchmark", "reference"})
 _TEXT_SUFFIXES = frozenset({".sh", ".txt", ".toml", ".cfg", ".yaml", ".yml", ".sbatch"})
 
 
-def _files(root: Path):  # noqa: ANN202
+def _files(root: Path):
     for path in sorted(root.rglob("*")):
         parts = path.relative_to(root).parts
         if any(part in _SKIP_DIRS for part in parts) or parts[0] in _HARNESS_DIRS:

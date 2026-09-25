@@ -20,8 +20,10 @@ environment, so it depends only on the standard library.
 from __future__ import annotations
 
 import shutil
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from pathlib import Path
 #: Subtrees of ``resources/`` staged into the wheel.
 STAGED_TREES: tuple[str, ...] = ("evaluators", "profilers", "skills")
 

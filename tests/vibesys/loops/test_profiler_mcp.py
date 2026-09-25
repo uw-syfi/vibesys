@@ -10,17 +10,30 @@ import importlib.util
 import json
 import sqlite3
 import sys
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import ModuleType
+from typing import Protocol
 
 import pytest
 
 from vibesys.profilers import ProfilerKind, mcp_spec
 
 
+class _ToolInfo(Protocol):
+    name: str
+
+
+class _McpServer(Protocol):
+    async def list_tools(self) -> Sequence[_ToolInfo]: ...
+    async def call_tool(
+        self, name: str, arguments: dict[str, object]
+    ) -> tuple[Sequence[object], dict[str, object]]: ...
+
+
 # The servers live under resources/ (co-located with the analysis scripts) so
 # importing them by file path keeps the tests decoupled from sys.path state.
-def _load_module(name: str, path: Path):  # noqa: ANN202  # tracked: #288
+def _load_module(name: str, path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, str(path))
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -44,7 +57,7 @@ def _load_module(name: str, path: Path):  # noqa: ANN202  # tracked: #288
 _REPO = Path(__file__).resolve().parents[3]
 
 
-def test_profiler_mcp_spec_maps_known_kinds_exactly():  # noqa: ANN201  # tracked: #288
+def test_profiler_mcp_spec_maps_known_kinds_exactly() -> None:
     assert mcp_spec(ProfilerKind.NONE) is None
 
     nsys = mcp_spec(ProfilerKind.NSYS)
@@ -73,7 +86,7 @@ def test_profiler_mcp_spec_maps_known_kinds_exactly():  # noqa: ANN201  # tracke
     assert macos.args == ("macos_cpu_profiler/server.py",)
 
 
-def test_profiler_mcp_spec_rejects_unknown_kind():  # noqa: ANN201  # tracked: #288
+def test_profiler_mcp_spec_rejects_unknown_kind() -> None:
     # The rejection is a runtime guard against a value the annotation forbids,
     # so route the bad argument through an untyped mapping.
     invalid_kwargs: dict = {"profiler_kind": "bogus"}
@@ -82,7 +95,7 @@ def test_profiler_mcp_spec_rejects_unknown_kind():  # noqa: ANN201  # tracked: #
 
 
 @pytest.fixture(scope="module")
-def nsys_server_mod():  # noqa: ANN201  # tracked: #288
+def nsys_server_mod() -> ModuleType:
     return _load_module(
         "_nsys_server",
         _REPO / "resources" / "profilers" / "nsys" / "server.py",
@@ -90,7 +103,7 @@ def nsys_server_mod():  # noqa: ANN201  # tracked: #288
 
 
 @pytest.fixture(scope="module")
-def torch_server_mod():  # noqa: ANN201  # tracked: #288
+def torch_server_mod() -> ModuleType:
     return _load_module(
         "_torch_server",
         _REPO / "resources" / "profilers" / "torch" / "server.py",
@@ -98,7 +111,7 @@ def torch_server_mod():  # noqa: ANN201  # tracked: #288
 
 
 @pytest.fixture(scope="module")
-def otel_server_mod():  # noqa: ANN201  # tracked: #288
+def otel_server_mod() -> ModuleType:
     return _load_module(
         "_otel_server",
         _REPO / "resources" / "profilers" / "otel" / "server.py",
@@ -106,26 +119,46 @@ def otel_server_mod():  # noqa: ANN201  # tracked: #288
 
 
 @pytest.fixture(scope="module")
-def headroom_server_mod():  # noqa: ANN201  # tracked: #288
+def headroom_server_mod() -> ModuleType:
     return _load_module(
         "_headroom_server",
         _REPO / "resources" / "profilers" / "headroom" / "server.py",
     )
 
 
-async def _list_tool_names(server) -> set[str]:  # noqa: ANN001  # tracked: #288
+async def _list_tool_names(server: _McpServer) -> set[str]:
     tools = await server.list_tools()
     return {t.name for t in tools}
 
 
-async def _call_tool(server, name: str, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
+async def _call_tool(server: _McpServer, name: str, **kwargs: object) -> str:
     _, structured = await server.call_tool(name, kwargs)
-    return structured["result"]
+    result = structured["result"]
+    if not isinstance(result, str):
+        raise TypeError
+    return result
 
 
-async def _call_structured_tool(server, name: str, **kwargs) -> dict:  # noqa: ANN001, ANN003  # tracked: #288
+async def _call_structured_tool(
+    server: _McpServer, name: str, **kwargs: object
+) -> dict[str, object]:
     _, structured = await server.call_tool(name, kwargs)
     return structured
+
+
+def _json_value_at(value: object, *path: str | int) -> object:
+    """Read a JSON path while checking each container at the contract boundary."""
+    current = value
+    for key in path:
+        if isinstance(current, dict):
+            assert isinstance(key, str)
+            current = current[key]
+        elif isinstance(current, list):
+            assert isinstance(key, int)
+            current = current[key]
+        else:
+            raise TypeError
+    return current
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +167,7 @@ async def _call_structured_tool(server, name: str, **kwargs) -> dict:  # noqa: A
 
 
 class TestNsysMcpServer:
-    def test_registers_expected_tools(self, nsys_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_registers_expected_tools(self, nsys_server_mod: ModuleType) -> None:
         server = nsys_server_mod.build_server()
         names = asyncio.run(_list_tool_names(server))
         assert names == {
@@ -150,7 +183,9 @@ class TestNsysMcpServer:
             "summary",
         }
 
-    def test_tables_tool_reports_empty_db(self, nsys_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_tables_tool_reports_empty_db(
+        self, nsys_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         """Against an empty SQLite file, ``tables`` returns a no-output marker."""
         db = tmp_path / "empty.sqlite"
         sqlite3.connect(str(db)).close()
@@ -161,7 +196,9 @@ class TestNsysMcpServer:
         # coerces that to "(no output)".
         assert out == "(no output)"
 
-    def test_kernels_tool_reports_no_data(self, nsys_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_kernels_tool_reports_no_data(
+        self, nsys_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         """A SQLite file without a CUPTI_ACTIVITY_KIND_KERNEL table returns a friendly message."""
         db = tmp_path / "nokernels.sqlite"
         sqlite3.connect(str(db)).close()
@@ -170,7 +207,9 @@ class TestNsysMcpServer:
         out = asyncio.run(_call_tool(server, "kernels", report=str(db)))
         assert "No kernel data" in out
 
-    def test_query_tool_runs_arbitrary_sql(self, nsys_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_query_tool_runs_arbitrary_sql(
+        self, nsys_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         db = tmp_path / "q.sqlite"
         conn = sqlite3.connect(str(db))
         conn.execute("CREATE TABLE t (x INTEGER, y TEXT)")
@@ -193,7 +232,7 @@ class TestNsysMcpServer:
 
 
 class TestOtelMcpServer:
-    def test_registers_expected_tools(self, otel_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_registers_expected_tools(self, otel_server_mod: ModuleType) -> None:
         server = otel_server_mod.build_server()
         names = asyncio.run(_list_tool_names(server))
         assert names == {
@@ -205,7 +244,9 @@ class TestOtelMcpServer:
             "trace_breakdown",
         }
 
-    def test_discovers_and_summarizes_critical_path(self, otel_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_discovers_and_summarizes_critical_path(
+        self, otel_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         report_path = tmp_path / "telemetry.json"
         graph_path = tmp_path / "trace-graph.json"
         report_path.write_text(json.dumps(_otel_report(20.0)))
@@ -227,7 +268,9 @@ class TestOtelMcpServer:
         assert root.representative.segments[0].node_id == "node-001"
         assert root.representative.omitted_segment_count == 1
 
-    def test_critical_path_tool_returns_structured_summary(self, otel_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_critical_path_tool_returns_structured_summary(
+        self, otel_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         graph_path = tmp_path / "trace-graph.json"
         report_path = tmp_path / "telemetry.json"
         graph_path.write_text(json.dumps(_trace_graph()))
@@ -245,7 +288,7 @@ class TestOtelMcpServer:
         )
 
         assert result["workload_name"] == "hotel"
-        assert result["roots"][0]["nodes_by_contribution"][0]["service"] == "search"
+        assert _json_value_at(result, "roots", 0, "nodes_by_contribution", 0, "service") == "search"
 
     def test_trace_breakdown_returns_call_graph_and_waterfall(
         self, otel_server_mod: ModuleType, tmp_path: Path
@@ -329,8 +372,8 @@ class TestOtelMcpServer:
         )
 
         assert result["workload_name"] == "hotel"
-        assert result["roots"][0]["representative_trace"]["trace_id"] == "trace-a"
-        assert result["roots"][0]["nodes"][1]["service"] == "search"
+        assert _json_value_at(result, "roots", 0, "representative_trace", "trace_id") == "trace-a"
+        assert _json_value_at(result, "roots", 0, "nodes", 1, "service") == "search"
 
     def test_critical_path_rejects_graph_from_another_measurement_window(
         self, otel_server_mod: ModuleType, tmp_path: Path
@@ -370,7 +413,9 @@ class TestOtelMcpServer:
 
         assert otel_server_mod.find_trace_graphs(str(tmp_path)) == [valid.as_posix()]
 
-    def test_summary_and_compare_use_normalized_service_rows(self, otel_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_summary_and_compare_use_normalized_service_rows(
+        self, otel_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         before = tmp_path / "before.json"
         after = tmp_path / "after.json"
         before.write_text(json.dumps(_otel_report(20.0)))
@@ -397,7 +442,7 @@ class TestOtelMcpServer:
             before.as_posix(),
         ]
 
-    def test_accepts_report_produced_by_go_otelcapture(self, otel_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_accepts_report_produced_by_go_otelcapture(self, otel_server_mod: ModuleType) -> None:
         """Round-trip a report generated by the Go otelcapture binary.
 
         Pins the cross-language contract: the JSON the evaluator writes must
@@ -424,7 +469,9 @@ class TestOtelMcpServer:
         assert otel_server_mod.find_reports(str(fixture.parent)) == [fixture.as_posix()]
 
     @pytest.mark.parametrize("identity_field", ["workload_name", "workload_hash"])
-    def test_compare_rejects_incompatible_reports(self, otel_server_mod, tmp_path, identity_field):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_compare_rejects_incompatible_reports(
+        self, otel_server_mod: ModuleType, tmp_path: Path, identity_field: str
+    ) -> None:
         before = tmp_path / "before.json"
         after = tmp_path / "after.json"
         before.write_text(json.dumps(_otel_report(20.0)))
@@ -435,7 +482,9 @@ class TestOtelMcpServer:
         with pytest.raises(ValueError, match="matching workload identity"):
             otel_server_mod.compare_reports(str(before), str(after))
 
-    def test_compare_allows_run_specific_measurement_timestamps(self, otel_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_compare_allows_run_specific_measurement_timestamps(
+        self, otel_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         before = tmp_path / "before.json"
         after = tmp_path / "after.json"
         before.write_text(json.dumps(_otel_report(20.0)))
@@ -449,7 +498,9 @@ class TestOtelMcpServer:
 
         assert comparison.service_p95_changes[0].delta_p95_ms == -8.0
 
-    def test_load_report_rejects_invalid_aggregate_error_count(self, otel_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_load_report_rejects_invalid_aggregate_error_count(
+        self, otel_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         report = _otel_report(20.0)
         report["span_count"] = 1
         report["error_count"] = 2
@@ -482,28 +533,39 @@ class TestOtelMcpServer:
             "non-finite-latency",
         ],
     )
-    def test_load_report_rejects_malformed_contract(self, otel_server_mod, tmp_path, mutate):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_load_report_rejects_malformed_contract(
+        self,
+        otel_server_mod: ModuleType,
+        tmp_path: Path,
+        mutate: Callable[[dict[str, object]], None],
+    ) -> None:
         report = _otel_report(20.0)
         mutate(report)
         path = tmp_path / "invalid.json"
         path.write_text(json.dumps(report))
 
-        with pytest.raises(ValueError):  # noqa: PT011  # tracked: #288
+        with pytest.raises(ValueError, match=r"\S"):
             otel_server_mod.load_report(str(path))
 
-    def test_summary_rejects_non_positive_top(self, otel_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_summary_rejects_non_positive_top(
+        self, otel_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         path = tmp_path / "report.json"
         path.write_text(json.dumps(_otel_report(20.0)))
 
         with pytest.raises(ValueError, match="top must be positive"):
             otel_server_mod.summarize_report(str(path), top=0)
 
-    def test_compare_rejects_non_positive_top_before_reading_files(self, otel_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_compare_rejects_non_positive_top_before_reading_files(
+        self, otel_server_mod: ModuleType
+    ) -> None:
         # top is validated before any file I/O, so unreadable paths do not matter.
         with pytest.raises(ValueError, match="top must be positive"):
             otel_server_mod.compare_reports("missing-before.json", "missing-after.json", top=0)
 
-    def test_find_reports_skips_hostile_json(self, otel_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_find_reports_skips_hostile_json(
+        self, otel_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         valid = tmp_path / "valid.json"
         valid.write_text(json.dumps(_otel_report(20.0)))
         # A candidate under evaluation controls workspace files; none of these
@@ -515,7 +577,9 @@ class TestOtelMcpServer:
 
         assert otel_server_mod.find_reports(str(tmp_path)) == [valid.as_posix()]
 
-    def test_compare_surfaces_rows_present_in_one_report(self, otel_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_compare_surfaces_rows_present_in_one_report(
+        self, otel_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         def service_row(name: str, p95: float) -> dict:
             return {
                 "name": name,
@@ -710,7 +774,7 @@ def _trace_graph() -> dict:
 
 
 class TestTorchMcpServer:
-    def test_registers_expected_tools(self, torch_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_registers_expected_tools(self, torch_server_mod: ModuleType) -> None:
         server = torch_server_mod.build_server()
         names = asyncio.run(_list_tool_names(server))
         assert names == {
@@ -722,7 +786,9 @@ class TestTorchMcpServer:
             "summary",
         }
 
-    def test_tables_tool_reports_prof_json_overview(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_tables_tool_reports_prof_json_overview(
+        self, torch_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         prof = tmp_path / "prof.json"
         prof.write_text(
             json.dumps(
@@ -762,7 +828,9 @@ class TestTorchMcpServer:
         assert "kernel" in out
         assert "operator" in out
 
-    def test_kernels_tool_ranks_by_self_cuda(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_kernels_tool_ranks_by_self_cuda(
+        self, torch_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         prof = tmp_path / "prof.json"
         prof.write_text(
             json.dumps(
@@ -841,7 +909,7 @@ def _headroom_report(observed_copy: float = 10.9) -> dict:
 
 
 class TestHeadroomMcpServer:
-    def test_registers_expected_tools(self, headroom_server_mod):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_registers_expected_tools(self, headroom_server_mod: ModuleType) -> None:
         server = headroom_server_mod.build_server()
         names = asyncio.run(_list_tool_names(server))
         assert names == {
@@ -853,7 +921,9 @@ class TestHeadroomMcpServer:
             "summary",
         }
 
-    def test_waterfall_reports_buckets_and_definitions(self, headroom_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_waterfall_reports_buckets_and_definitions(
+        self, headroom_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         report = tmp_path / "report.json"
         report.write_text(json.dumps(_headroom_report()))
 
@@ -863,7 +933,9 @@ class TestHeadroomMcpServer:
         assert "estimated_floor" in out
         assert "measured device time per step" in out
 
-    def test_top_ranks_by_opportunity_and_filters_by_class(self, headroom_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_top_ranks_by_opportunity_and_filters_by_class(
+        self, headroom_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         report = tmp_path / "report.json"
         report.write_text(json.dumps(_headroom_report()))
 
@@ -879,7 +951,9 @@ class TestHeadroomMcpServer:
         assert "nvjet_gemm" in only_quality
         assert "big_copy_kernel" not in only_quality
 
-    def test_kernel_tool_matches_substring(self, headroom_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_kernel_tool_matches_substring(
+        self, headroom_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         report = tmp_path / "report.json"
         report.write_text(json.dumps(_headroom_report()))
 
@@ -893,7 +967,9 @@ class TestHeadroomMcpServer:
         assert "nvjet_gemm" in out
         assert "big_copy_kernel" not in out
 
-    def test_compare_reports_per_kernel_delta(self, headroom_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_compare_reports_per_kernel_delta(
+        self, headroom_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         old = tmp_path / "old.json"
         new = tmp_path / "new.json"
         old.write_text(json.dumps(_headroom_report(observed_copy=10.9)))
@@ -904,7 +980,9 @@ class TestHeadroomMcpServer:
         assert "big_copy_kernel" in out
         assert "-8.900" in out
 
-    def test_malformed_report_is_a_structured_error(self, headroom_server_mod, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_malformed_report_is_a_structured_error(
+        self, headroom_server_mod: ModuleType, tmp_path: Path
+    ) -> None:
         bogus = tmp_path / "bogus.json"
         bogus.write_text(json.dumps({"not_kernels": []}))
 

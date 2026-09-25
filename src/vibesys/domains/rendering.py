@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 from vibesys.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
 from vibesys.prompts import render_string
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _coerce_role(role: DomainRole | str) -> DomainRole:
     try:
         return role if isinstance(role, DomainRole) else DomainRole(role)
     except ValueError as exc:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"Unknown domain role {role!r}. Choose from: "
-            f"{', '.join(domain_role.value for domain_role in DOMAIN_ROLES)}."
-        ) from exc
+        message = f"Unknown domain role {role!r}. Choose from: {', '.join(domain_role.value for domain_role in DOMAIN_ROLES)}."
+        raise ValueError(message) from exc
 
 
 def _load_role_file(domain_dir: Path, role: DomainRole) -> str | None:

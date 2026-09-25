@@ -5,9 +5,9 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING, Any, Literal
 
+from vibesys.events import RunConfiguredData
 from vibesys.loops.issue_queue.render import render_all
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
 from vibesys.prompts import PROMPTS_DIR, Prompt
@@ -32,6 +32,7 @@ _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "issue_queue"
 IssueQueuePhase = Literal["implementer", "judge", "perf_eval"]
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
     from vibesys.config import LoadLevelCfg
     from vibesys.loops.issue_queue.orchestration import IssueQueueOptions
@@ -194,9 +195,11 @@ class IssueQueueRun:
     async def open(cls, host: RunContext, options: IssueQueueOptions) -> IssueQueueRun:
         """Open issue memory in the host's workspace and load its durable cursor."""
         output_sink().run_configured(
-            run_log_path=str(host.environment.run_log_path),
-            project_root=str(host.workspaces.root.path),
-            model=host.environment.model_name,
+            RunConfiguredData(
+                run_log_path=str(host.environment.run_log_path),
+                project_root=str(host.workspaces.root.path),
+                model=host.environment.model_name,
+            )
         )
         prompt = Prompt(_TEMPLATE_DIR, host.request.backend)
         portable = host.state.namespace
@@ -344,9 +347,8 @@ class _IssueQueueTurns:
     ) -> list[MCPServerSpec]:
         agent = self.judge_agent if creator == "judge" else self.perf_agent
         if not agent.capabilities.mcp_servers:
-            raise RuntimeError(  # noqa: TRY003
-                f"agent backend {agent.backend_name!r} cannot expose issue-board tools"
-            )
+            message = f"agent backend {agent.backend_name!r} cannot expose issue-board tools"
+            raise RuntimeError(message)
         return [
             build_issue_mcp_spec(
                 store_relpath="issues.json",

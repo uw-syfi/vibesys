@@ -8,7 +8,8 @@ A target answers two questions for a token-id prompt:
 
 `HttpTarget` needs only the OpenAI completions surface plus the vLLM extensions
 `ignore_eos`, `return_token_ids`, and `echo` + `logprobs` with
-`return_tokens_as_token_ids` (vLLM itself satisfies it too).
+`return_tokens_as_token_ids` (vLLM itself satisfies it too). Its `complete`
+also returns `usage.prompt_tokens_details.cached_tokens` for the resume check.
 """
 
 from __future__ import annotations
@@ -26,6 +27,13 @@ import httpx
 class ForcedStep:
     logprob: float  # candidate logprob of the given token
     argmax: int  # candidate's top-1 token
+
+
+@dataclass(frozen=True)
+class Completion:
+    token_ids: list[int]
+    # usage.prompt_tokens_details.cached_tokens; None if the server omitted it.
+    cached_tokens: int | None
 
 
 class Target(Protocol):
@@ -69,7 +77,7 @@ class HttpTarget:
             raise RuntimeError(f"{r.status_code} from server: {r.text[:500]}")
         return r.json()
 
-    def greedy(self, prompt: list[int], n: int) -> list[int]:
+    def complete(self, prompt: list[int], n: int) -> Completion:
         body = {
             "prompt": prompt,
             "max_tokens": n,
@@ -77,12 +85,17 @@ class HttpTarget:
             "ignore_eos": True,
             "return_token_ids": True,
         }
-        ids = self._post(body)["choices"][0].get("token_ids")
+        resp = self._post(body)
+        ids = resp["choices"][0].get("token_ids")
         if ids is None:
             raise RuntimeError(
                 "server did not return choices[0].token_ids (needs return_token_ids support)"
             )
-        return ids
+        details = (resp.get("usage") or {}).get("prompt_tokens_details") or {}
+        return Completion(ids, details.get("cached_tokens"))
+
+    def greedy(self, prompt: list[int], n: int) -> list[int]:
+        return self.complete(prompt, n).token_ids
 
     def teacher_forced(self, prompt: list[int], cont: list[int]) -> list[ForcedStep]:
         body = {

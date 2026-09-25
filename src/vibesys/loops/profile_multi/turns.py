@@ -351,7 +351,7 @@ class ProfileMultiTurns:
             raise UnsupportedProfilerError
         return definition
 
-    async def _read_only(  # noqa: PLR0913
+    async def _read_only(  # noqa: PLR0913  # lint-waiver: LW-020025 [PLR0913]; the read-only agent turn forwards independent prompt, response, and session options.
         self,
         agent: AgentHandle,
         *,
@@ -481,7 +481,7 @@ Write bounded durable profile evidence only below
                 allowed=(artifact,),
                 mcp_servers=[spec] if spec is not None else None,
             )
-        except Exception as error:  # noqa: BLE001  # profile evidence is optional
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-020026 [BLE001]; profile evidence is optional, so a profiler failure is reported and the round proceeds without it.
             output_sink().framework_warning(
                 "profiler failed",
                 detail=str(error),

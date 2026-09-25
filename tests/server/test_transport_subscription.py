@@ -2,13 +2,14 @@
 
 import json
 import socket
+import tempfile
 import threading
 import uuid
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict, Unpack
+from typing import Never, TypedDict, Unpack
 
 import pytest
 from tests.server.support import ServerParts, build_server_parts
@@ -31,6 +32,23 @@ from server.transport.unix_jsonl import UnixJsonlServer
 
 _TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 _ROUND_EVERY = 25
+
+
+def _track_event_parses(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
+    parsed = 0
+    parse = RunEvent.model_validate_json
+
+    def counting_parse(raw: str | bytes | bytearray) -> RunEvent:
+        nonlocal parsed
+        parsed += 1
+        return parse(raw)
+
+    monkeypatch.setattr(RunEvent, "model_validate_json", counting_parse)
+
+    def count_parses() -> int:
+        return parsed
+
+    return count_parses
 
 
 class _EventFields(TypedDict, total=False):
@@ -138,7 +156,7 @@ def _subscribed_client(
 
 @contextmanager
 def _live_subscription(api: RunApi, request: SubscribeRequest) -> Generator[Callable[[], dict]]:
-    socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
+    socket_path = Path(tempfile.gettempdir()) / f"vibesys-test-{uuid.uuid4().hex}.sock"
     with UnixJsonlServer(socket_path, api), _subscribed_client(socket_path, request) as read:
         yield read
 
@@ -149,7 +167,7 @@ def _subscribe(api: RunApi, request: SubscribeRequest) -> tuple[dict, dict]:
 
 
 @pytest.mark.parametrize("tail", [None, 40])
-def test_subscription_replays_requested_history(tmp_path, tail):  # noqa: ANN001, ANN201
+def test_subscription_replays_requested_history(tmp_path: Path, tail: int | None) -> None:
     parts = _attach(tmp_path, _round_log(200))
     latest = parts.api.snapshot().sequence
 
@@ -163,7 +181,7 @@ def test_subscription_replays_requested_history(tmp_path, tail):  # noqa: ANN001
     assert replayed_tail == list(range(floor + 1, latest + 1))
 
 
-def test_tail_replays_pre_floor_run_spine_in_order(tmp_path):  # noqa: ANN001, ANN201
+def test_tail_replays_pre_floor_run_spine_in_order(tmp_path: Path) -> None:
     parts = _attach(tmp_path, _round_log(200))
     latest = parts.api.snapshot().sequence
     floor = latest - 40
@@ -178,7 +196,7 @@ def test_tail_replays_pre_floor_run_spine_in_order(tmp_path):  # noqa: ANN001, A
     ]
 
 
-def test_tail_without_spine_events_delivers_only_suffix(tmp_path):  # noqa: ANN001, ANN201
+def test_tail_without_spine_events_delivers_only_suffix(tmp_path: Path) -> None:
     events = [
         _event(
             sequence,
@@ -199,17 +217,17 @@ def _spine_type_values() -> set[str]:
     return {event_type.value for event_type in _BOOTSTRAP_SPINE_TYPES}
 
 
-def test_bootstrap_tail_stays_bounded_when_events_land_mid_bootstrap(  # noqa: ANN201
+def test_bootstrap_tail_stays_bounded_when_events_land_mid_bootstrap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     tail = 40
     parts = _attach(tmp_path, _round_log(200))
     original_bootstrap = parts.api.subscription_bootstrap
     pre_burst_watermarks: list[int] = []
 
-    def bursty_bootstrap(  # noqa: ANN202
+    def bursty_bootstrap(
         after_sequence: int, tail_bound: int | None, *, store_id: str | None = None
-    ):
+    ) -> object:
         # Reproduce the bootstrap race deterministically: a burst of appends
         # lands after the handler commits to bootstrapping but before the
         # bootstrap's own locked read.
@@ -240,13 +258,13 @@ def test_bootstrap_tail_stays_bounded_when_events_land_mid_bootstrap(  # noqa: A
     assert all(event["sequence"] <= through for event in batch["events"]), context
 
 
-def test_bootstrap_failure_surfaces_after_the_handshake(  # noqa: ANN201
+def test_bootstrap_failure_surfaces_after_the_handshake(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
+) -> None:
     parts = _attach(tmp_path, _round_log(50))
     latest = parts.api.latest_sequence
 
-    def failing_bootstrap(_after_sequence: int, _tail: int | None):  # noqa: ANN202
+    def failing_bootstrap(_after_sequence: int, _tail: int | None) -> Never:
         raise RuntimeError
 
     monkeypatch.setattr(parts.api, "subscription_bootstrap", failing_bootstrap)
@@ -264,7 +282,7 @@ def test_bootstrap_failure_surfaces_after_the_handshake(  # noqa: ANN201
     assert failure["code"] == "stream_failed"
 
 
-def test_subscription_bootstrap_captures_one_atomic_state(tmp_path):  # noqa: ANN001, ANN201
+def test_subscription_bootstrap_captures_one_atomic_state(tmp_path: Path) -> None:
     parts = _attach(tmp_path, _round_log(200))
     latest = parts.api.latest_sequence
 
@@ -287,7 +305,7 @@ def test_subscription_bootstrap_captures_one_atomic_state(tmp_path):  # noqa: AN
     assert [event.sequence for event in full.events] == list(range(1, latest + 1))
 
 
-def test_bootstrap_tail_stays_bounded_under_concurrent_appends(tmp_path):  # noqa: ANN001, ANN201
+def test_bootstrap_tail_stays_bounded_under_concurrent_appends(tmp_path: Path) -> None:
     tail = 10
     parts = _attach(tmp_path, _round_log(200))
     stop = threading.Event()
@@ -315,22 +333,22 @@ def test_bootstrap_tail_stays_bounded_under_concurrent_appends(tmp_path):  # noq
     assert all(event["sequence"] <= batch["through_sequence"] for event in batch["events"])
 
 
-def test_checkpoint_parses_only_tail_and_spine(tmp_path):  # noqa: ANN001, ANN201
+def test_checkpoint_parses_only_tail_and_spine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     count = 12_000
     parts = _attach(tmp_path, _round_log(count))
-    store = parts.journal._store  # noqa: SLF001
-    assert store is not None
-    parsed_at_attach = store.parsed_record_count
+    parsed_count = _track_event_parses(monkeypatch)
 
     checkpoint = parts.api.subscription_checkpoint(count - 500, bootstrap_spine=True)
 
-    assert store.parsed_record_count <= (parsed_at_attach + 500 + _spine_records(count - 500))
-    assert store.parsed_record_count < count
+    assert parsed_count() <= (500 + _spine_records(count - 500))
+    assert parsed_count() < count
     assert checkpoint.through_sequence >= count
     assert len(checkpoint.events) < count
 
 
-def test_events_query_is_half_open_and_backfills_without_gaps(tmp_path):  # noqa: ANN001, ANN201
+def test_events_query_is_half_open_and_backfills_without_gaps(tmp_path: Path) -> None:
     parts = _attach(tmp_path, _round_log(200))
     response = parts.api.execute(EventsQuery(after_sequence=50, before_sequence=60))
     assert [event.sequence for event in response.events] == list(range(51, 60))
@@ -346,12 +364,12 @@ def test_events_query_is_half_open_and_backfills_without_gaps(tmp_path):  # noqa
 
 
 @pytest.mark.parametrize("before_sequence", [0, -1])
-def test_events_query_rejects_meaningless_upper_bound(before_sequence):  # noqa: ANN001, ANN201
-    with pytest.raises(ValueError):  # noqa: PT011
+def test_events_query_rejects_meaningless_upper_bound(before_sequence: int) -> None:
+    with pytest.raises(ValueError, match="greater than or equal to 1"):
         EventsQuery(after_sequence=0, before_sequence=before_sequence)
 
 
-def test_snapshot_reconstructs_chat_threads_from_full_history(tmp_path):  # noqa: ANN001, ANN201
+def test_snapshot_reconstructs_chat_threads_from_full_history(tmp_path: Path) -> None:
     parts = _attach(tmp_path, _round_log(200, with_threads=True))
 
     response = parts.api.execute(SnapshotQuery())
@@ -363,7 +381,7 @@ def test_snapshot_reconstructs_chat_threads_from_full_history(tmp_path):  # noqa
     assert response.snapshot.chat_threads[0].provider == "claude"
 
 
-def test_late_attach_rebootstraps_at_fresh_tail_with_spine(tmp_path):  # noqa: ANN001, ANN201
+def test_late_attach_rebootstraps_at_fresh_tail_with_spine(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "server")
 
     with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
@@ -384,7 +402,7 @@ def test_late_attach_rebootstraps_at_fresh_tail_with_spine(tmp_path):  # noqa: A
     assert len(batch["events"]) <= 40 + _spine_records(floor)
 
 
-def test_late_attach_rebootstraps_a_run_log_shorter_than_the_tail(tmp_path):  # noqa: ANN001, ANN201
+def test_late_attach_rebootstraps_a_run_log_shorter_than_the_tail(tmp_path: Path) -> None:
     # The watermark check alone cannot see this attach: the whole run log fits
     # inside the tail, so ``latest_sequence - cursor`` never exceeds it. Without
     # the store's identity on the batch, the durable events at or below the
@@ -410,7 +428,7 @@ def test_late_attach_rebootstraps_a_run_log_shorter_than_the_tail(tmp_path):  # 
     assert batch["events"][0]["type"] == "run_started"
 
 
-def test_resume_across_a_store_swap_rebootstraps(tmp_path):  # noqa: ANN001, ANN201
+def test_resume_across_a_store_swap_rebootstraps(tmp_path: Path) -> None:
     # A reconnect that redials with the client's cursor and the store it last
     # saw must not resume that cursor against a log attached while it was gone:
     # the cursor numbers the retired store. The server drops it and replays the
@@ -441,7 +459,7 @@ def test_resume_across_a_store_swap_rebootstraps(tmp_path):  # noqa: ANN001, ANN
     assert batch["events"][0]["type"] == "run_started"
 
 
-def test_resume_within_the_same_store_extends_from_the_cursor(tmp_path):  # noqa: ANN001, ANN201
+def test_resume_within_the_same_store_extends_from_the_cursor(tmp_path: Path) -> None:
     # The mirror: a resume that names the store still live keeps its cursor, so a
     # reconnect with no swap streams incrementally rather than re-bootstrapping.
     parts = _attach(tmp_path, _round_log(50))
@@ -462,7 +480,7 @@ def test_resume_within_the_same_store_extends_from_the_cursor(tmp_path):  # noqa
     assert batch["events"] == []
 
 
-def test_attach_into_an_empty_log_keeps_the_subscription_streaming(tmp_path):  # noqa: ANN001, ANN201
+def test_attach_into_an_empty_log_keeps_the_subscription_streaming(tmp_path: Path) -> None:
     # A fresh run's attach re-appends the bootstrap events into an empty log,
     # which preserves every sequence. The client's fold is still correct, so
     # the store keeps its identity and the stream stays incremental.
@@ -480,7 +498,7 @@ def test_attach_into_an_empty_log_keeps_the_subscription_streaming(tmp_path):  #
     assert batch["events"][0]["sequence"] == bootstrap["through_sequence"] + 1
 
 
-def test_live_batches_carry_the_store_they_were_read_from(tmp_path):  # noqa: ANN001, ANN201
+def test_live_batches_carry_the_store_they_were_read_from(tmp_path: Path) -> None:
     parts = _attach(tmp_path, _round_log(50))
 
     with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
@@ -495,7 +513,7 @@ def test_live_batches_carry_the_store_they_were_read_from(tmp_path):  # noqa: AN
     assert batch["store_id"] == store_id
 
 
-def test_checkpoint_reads_nothing_from_a_store_the_cursor_predates(tmp_path):  # noqa: ANN001, ANN201
+def test_checkpoint_reads_nothing_from_a_store_the_cursor_predates(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "server")
     bootstrap_store = parts.journal.store_id_locked()
     cursor = parts.api.latest_sequence
@@ -511,28 +529,27 @@ def test_checkpoint_reads_nothing_from_a_store_the_cursor_predates(tmp_path):  #
     assert current.events != []
 
 
-def test_late_attach_does_not_parse_skipped_history(tmp_path):  # noqa: ANN001, ANN201
+def test_late_attach_does_not_parse_skipped_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     count = 8_000
     log_dir = _write_log(tmp_path / "logs", _round_log(count))
     parts = build_server_parts(tmp_path / "server")
+    attach_only = EventStore(log_dir / "run-events.jsonl", run_id="persisted-run")
 
     with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
         read()
         read()
+        parsed_count = _track_event_parses(monkeypatch)
         parts.attach(log_dir)
         batch = read()
 
-    store = parts.journal._store  # noqa: SLF001
-    assert store is not None
     floor = batch["history_after_sequence"]
-    attach_only = EventStore(log_dir / "run-events.jsonl", run_id="persisted-run")
-    assert store.parsed_record_count <= (
-        attach_only.parsed_record_count + 40 + _spine_records(floor) + 5
-    )
-    assert store.parsed_record_count < count // 2
+    assert parsed_count() <= attach_only.parsed_record_count + 40 + _spine_records(floor) + 5
+    assert parsed_count() < count // 2
 
 
-def test_live_append_keeps_existing_tail_floor(tmp_path):  # noqa: ANN001, ANN201
+def test_live_append_keeps_existing_tail_floor(tmp_path: Path) -> None:
     parts = _attach(tmp_path, _round_log(200))
     floor = parts.api.snapshot().sequence - 40
 
@@ -546,9 +563,11 @@ def test_live_append_keeps_existing_tail_floor(tmp_path):  # noqa: ANN001, ANN20
     assert [event["type"] for event in batch["events"]] == ["output"]
 
 
-def test_disconnect_wait_blocks_until_last_subscriber_closes(tmp_path: Path) -> None:
+def test_disconnect_wait_blocks_until_last_subscriber_closes(
+    tmp_path: Path, socket_dir: Path
+) -> None:
     parts = build_server_parts(tmp_path / "logs")
-    socket_path = Path("/tmp") / f"vibesys-test-{uuid.uuid4().hex}.sock"  # noqa: S108
+    socket_path = socket_dir / "server.sock"
     request = SubscribeRequest(after_sequence=0)
 
     with UnixJsonlServer(socket_path, parts.api) as server:
@@ -578,12 +597,13 @@ def test_disconnect_wait_blocks_until_last_subscriber_closes(tmp_path: Path) -> 
         assert not waiter.is_alive()
 
 
-def test_wait_for_change_does_not_parse_events(tmp_path):  # noqa: ANN001, ANN201
+def test_wait_for_change_does_not_parse_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     parts = _attach(tmp_path, _round_log(200))
-    store = parts.journal._store  # noqa: SLF001
-    assert store is not None
-    parsed = store.parsed_record_count
+    parsed_count = _track_event_parses(monkeypatch)
+    parsed = parsed_count()
 
     assert parts.api.wait_for_change(0, timeout=0.5) is True
     assert parts.api.wait_for_change(parts.api.latest_sequence, timeout=0.01) is False
-    assert store.parsed_record_count == parsed
+    assert parsed_count() == parsed

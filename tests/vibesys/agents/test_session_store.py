@@ -298,9 +298,10 @@ class _FakeSession:
 
     def run_turn(
         self,
-        request: AgentTurnRequest,  # noqa: ARG002
-        observer: AgentObserver | None = None,  # noqa: ARG002
+        request: AgentTurnRequest,
+        observer: AgentObserver | None = None,
     ) -> AgentTurnResult:
+        del request, observer
         if self.error is not None:
             raise self.error
         return self.results.pop(0)

@@ -74,7 +74,7 @@ async def send_request(
                     output_tokens += 1
                     if first_token is None:
                         first_token = time.perf_counter()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {
             "error": str(exc),
             "total_latency": time.perf_counter() - started,

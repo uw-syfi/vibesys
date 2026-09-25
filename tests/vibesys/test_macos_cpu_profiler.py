@@ -1,5 +1,7 @@
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Never
 from unittest.mock import patch
 
 from vibesys.macos_cpu_profiler import (
@@ -20,7 +22,7 @@ class Result(subprocess.CompletedProcess[str]):
         super().__init__(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def test_command_line_tools_shim_falls_back_to_sample():  # noqa: ANN201  # tracked: #288
+def test_command_line_tools_shim_falls_back_to_sample() -> None:
     capability = detect_capability(
         system="Darwin",
         which=lambda name: "/usr/bin/sample" if name == "sample" else None,
@@ -30,8 +32,8 @@ def test_command_line_tools_shim_falls_back_to_sample():  # noqa: ANN201  # trac
     assert DiagnosticCode.COMMAND_LINE_TOOLS_ONLY in capability.diagnostics
 
 
-def test_missing_time_profiler_template_falls_back_to_sample():  # noqa: ANN201  # tracked: #288
-    def run(command, **_kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
+def test_missing_time_profiler_template_falls_back_to_sample() -> None:
+    def run(command: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if command[:2] == ["xcode-select", "-p"]:
             return Result(stdout="/Applications/Xcode.app/Contents/Developer\n")
         return Result(stdout="Activity Monitor\n")
@@ -41,8 +43,8 @@ def test_missing_time_profiler_template_falls_back_to_sample():  # noqa: ANN201 
     assert DiagnosticCode.TIME_PROFILER_UNAVAILABLE in capability.diagnostics
 
 
-def test_functional_time_profiler_selects_instruments():  # noqa: ANN201  # tracked: #288
-    def run(command, **_kwargs):  # noqa: ANN001, ANN003, ANN202  # tracked: #288
+def test_functional_time_profiler_selects_instruments() -> None:
+    def run(command: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if command[:2] == ["xcode-select", "-p"]:
             return Result(stdout="/Applications/Xcode.app/Contents/Developer\n")
         if command[-2:] == ["list", "templates"]:
@@ -54,9 +56,10 @@ def test_functional_time_profiler_selects_instruments():  # noqa: ANN201  # trac
     assert capability.tool_version == "xctrace version 26.0"
 
 
-def test_detection_reports_unavailable_tools_after_xcode_select_failure():  # noqa: ANN201  # tracked: #288
-    def fail(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202  # tracked: #288
-        raise OSError("xcode-select unavailable")  # noqa: TRY003  # tracked: #288
+def test_detection_reports_unavailable_tools_after_xcode_select_failure() -> None:
+    def fail(*_args: object, **_kwargs: object) -> Never:
+        _failure_message = "xcode-select unavailable"
+        raise OSError(_failure_message)
 
     with patch("vibesys.macos_cpu_profiler.Path.is_file", return_value=False):
         capability = detect_capability(system="Darwin", which=lambda _name: None, run=fail)
@@ -67,12 +70,12 @@ def test_detection_reports_unavailable_tools_after_xcode_select_failure():  # no
     )
 
 
-def test_descendants_returns_nested_processes_and_ignores_malformed_rows():  # noqa: ANN201  # tracked: #288
+def test_descendants_returns_nested_processes_and_ignores_malformed_rows() -> None:
     result = Result(stdout="10 1\n20 10\nmalformed\n30 20\n40 10\n10 30\n")
     assert _descendants(10, run=lambda *_args, **_kwargs: result) == [20, 40, 30]
 
 
-def test_collection_persists_reproduction_metadata(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_collection_persists_reproduction_metadata(tmp_path: Path) -> None:
     result = collect(["./benchmark"], tmp_path, capability=detect_capability(system="Linux"))
     metadata = Path(result.metadata).read_text()
     assert result.status == "error"
@@ -80,7 +83,7 @@ def test_collection_persists_reproduction_metadata(tmp_path: Path):  # noqa: ANN
     assert '"scored_benchmark": false' in metadata
 
 
-def test_instruments_collection_builds_bounded_launch_command(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_instruments_collection_builds_bounded_launch_command(tmp_path: Path) -> None:
     capability = Capability(
         MacOSProfilerTool.XCTRACE,
         "/Applications/Xcode.app/Contents/Developer",
@@ -116,7 +119,7 @@ def test_instruments_collection_builds_bounded_launch_command(tmp_path: Path):  
     assert run.call_args.kwargs["timeout"] == 37
 
 
-def test_collection_converts_profiler_launch_error_to_diagnostic(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_collection_converts_profiler_launch_error_to_diagnostic(tmp_path: Path) -> None:
     capability = Capability(MacOSProfilerTool.XCTRACE, None, "/usr/bin/xctrace", None, None)
     with patch(
         "vibesys.macos_cpu_profiler.subprocess.run",
@@ -128,7 +131,7 @@ def test_collection_converts_profiler_launch_error_to_diagnostic(tmp_path: Path)
     assert "cannot execute" in Path(result.metadata).read_text()
 
 
-def test_permission_failure_and_child_target_are_structured(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_permission_failure_and_child_target_are_structured(tmp_path: Path) -> None:
     capability = detect_capability(
         system="Darwin",
         which=lambda name: "/usr/bin/sample" if name == "sample" else None,
@@ -139,9 +142,9 @@ def test_permission_failure_and_child_target_are_structured(tmp_path: Path):  # 
         (),
         {
             "pid": 123,
-            "terminate": lambda self: None,  # noqa: ARG005  # tracked: #288
-            "wait": lambda self, timeout: 0,  # noqa: ARG005  # tracked: #288
-            "kill": lambda self: None,  # noqa: ARG005  # tracked: #288
+            "terminate": lambda _self: None,
+            "wait": lambda _self, **_kwargs: 0,
+            "kill": lambda _self: None,
         },
     )()
     with (
@@ -158,15 +161,15 @@ def test_permission_failure_and_child_target_are_structured(tmp_path: Path):  # 
     assert DiagnosticCode.ATTACH_DENIED in result.diagnostics
 
 
-def test_sample_kills_launcher_when_graceful_wait_times_out(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_sample_kills_launcher_when_graceful_wait_times_out(tmp_path: Path) -> None:
     capability = Capability(MacOSProfilerTool.SAMPLE, None, None, "/usr/bin/sample", None)
     process = type(
         "Process",
         (),
         {
             "pid": 123,
-            "terminate": lambda self: None,  # noqa: ARG005  # tracked: #288
-            "wait": lambda self, timeout: (_ for _ in ()).throw(  # noqa: ARG005  # tracked: #288
+            "terminate": lambda _self: None,
+            "wait": lambda _self, timeout: (_ for _ in ()).throw(
                 __import__("subprocess").TimeoutExpired("benchmark", timeout)
             ),
             "kill": lambda self: setattr(self, "killed", True),
@@ -185,7 +188,7 @@ def test_sample_kills_launcher_when_graceful_wait_times_out(tmp_path: Path):  # 
     assert process.killed
 
 
-def test_parse_command_preserves_quoted_arguments_without_shell_execution():  # noqa: ANN201  # tracked: #288
+def test_parse_command_preserves_quoted_arguments_without_shell_execution() -> None:
     assert parse_command('python bench.py --label "queue run"') == [
         "python",
         "bench.py",

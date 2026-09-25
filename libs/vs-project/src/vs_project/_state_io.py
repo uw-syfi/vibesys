@@ -1,9 +1,5 @@
 """Serialization and atomic I/O for typed VibeSys project state."""
 
-# TRY003: these boundary errors deliberately embed the offending metadata path
-# and value.
-# ruff: noqa: TRY003
-
 from __future__ import annotations
 
 import json
@@ -26,7 +22,7 @@ def _serialize_state_model(model: BaseModel) -> bytes:
             sort_keys=True,
         )
     except (TypeError, ValueError) as exc:
-        raise ProjectStateError("Could not serialize VibeSys state model") from exc
+        raise ProjectStateError.state_serialization_failed() from exc
     return f"{content}\n".encode()
 
 
@@ -35,7 +31,7 @@ def _serialize_json_object(value: dict[str, object], *, subject: str) -> bytes:
     try:
         content = json.dumps(value, allow_nan=False, indent=2, sort_keys=True)
     except (TypeError, ValueError) as exc:
-        raise ProjectStateError(f"Could not serialize {subject}") from exc
+        raise ProjectStateError.json_serialization_failed(subject) from exc
     return f"{content}\n".encode()
 
 
@@ -94,11 +90,11 @@ def _read_json_object(path: Path) -> dict[str, object]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise ProjectStateError(f"VibeSys metadata file does not exist: {path}") from exc
+        raise ProjectStateError.metadata_file_missing(path) from exc
     except (OSError, json.JSONDecodeError) as exc:
-        raise ProjectStateError(f"Could not read VibeSys metadata at {path}: {exc}") from exc
+        raise ProjectStateError.metadata_read_failed(path, exc) from exc
     if not isinstance(raw, dict):
-        raise ProjectStateError(f"Expected a JSON object in VibeSys metadata at {path}")
+        raise ProjectStateError.metadata_not_object(path)
     return raw
 
 
@@ -108,13 +104,11 @@ def _load_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> Mode
         content = path.read_text(encoding="utf-8")
         return model_type.model_validate_json(content, strict=True)
     except FileNotFoundError as exc:
-        raise ProjectStateError(f"VibeSys metadata file does not exist: {path}") from exc
+        raise ProjectStateError.metadata_file_missing(path) from exc
     except (OSError, UnicodeError) as exc:
-        raise ProjectStateError(f"Could not read VibeSys metadata at {path}: {exc}") from exc
+        raise ProjectStateError.metadata_read_failed(path, exc) from exc
     except ValidationError as exc:
-        raise ProjectStateError(
-            f"Invalid VibeSys metadata at {path}: {_validation_message(exc)}"
-        ) from exc
+        raise ProjectStateError.invalid_metadata(path, _validation_message(exc)) from exc
 
 
 def _load_state_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> ModelT:
@@ -123,13 +117,11 @@ def _load_state_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -
         content = path.read_text(encoding="utf-8")
         return model_type.model_validate_json(content, strict=True)
     except FileNotFoundError as exc:
-        raise StateModelNotFoundError(f"VibeSys state model does not exist: {path}") from exc
+        raise StateModelNotFoundError.missing(path) from exc
     except (OSError, UnicodeError) as exc:
-        raise ProjectStateError(f"Could not read VibeSys state model at {path}: {exc}") from exc
+        raise ProjectStateError.state_read_failed(path, exc) from exc
     except ValidationError as exc:
-        raise ProjectStateError(
-            f"Invalid VibeSys state model at {path}: {_validation_message(exc)}"
-        ) from exc
+        raise ProjectStateError.invalid_state_model(path, _validation_message(exc)) from exc
 
 
 def _validation_message(error: ValidationError) -> str:

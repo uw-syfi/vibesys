@@ -81,7 +81,7 @@ def _collect_until(socket_path: Path, terminal_type: str, received: list[dict]) 
                 return
 
 
-def test_runtime_explicitly_composes_server_components(tmp_path):  # noqa: ANN001, ANN201
+def test_runtime_explicitly_composes_server_components(tmp_path: Path) -> None:
     runtime = ServerRuntime(socket_path=tmp_path / "control.sock")
 
     assert isinstance(runtime.journal, EventJournal)
@@ -95,7 +95,7 @@ def test_runtime_explicitly_composes_server_components(tmp_path):  # noqa: ANN00
     runtime.integration.close()
 
 
-def test_runtime_streams_success_before_client_disconnect(tmp_path):  # noqa: ANN001, ANN201
+def test_runtime_streams_success_before_client_disconnect(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
     runtime = ServerRuntime(socket_path=socket_path)
     received: list[dict] = []
@@ -155,7 +155,7 @@ def test_runtime_waits_for_reconnected_subscriber_before_teardown(tmp_path: Path
     assert not socket_path.exists()
 
 
-def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path):  # noqa: ANN001, ANN201
+def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path: Path) -> None:
     """An in-band `/stop` ends the backend without a failure record.
 
     The journal's terminal record is the `stopped` status change; no
@@ -215,7 +215,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path):  # noqa: ANN0
     assert not socket_path.exists()
 
 
-def test_runtime_does_not_duplicate_core_terminal_event(tmp_path):  # noqa: ANN001, ANN201
+def test_runtime_does_not_duplicate_core_terminal_event(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
     runtime = ServerRuntime(socket_path=socket_path)
     received: list[dict] = []
@@ -242,7 +242,7 @@ def test_runtime_does_not_duplicate_core_terminal_event(tmp_path):  # noqa: ANN0
     assert sum(event.type.value == "run_finished" for event in runtime.journal.read()) == 1
 
 
-def test_runtime_streams_configuration_failure_without_run_failure(tmp_path):  # noqa: ANN001, ANN201
+def test_runtime_streams_configuration_failure_without_run_failure(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
     runtime = ServerRuntime(socket_path=socket_path)
     received: list[dict] = []

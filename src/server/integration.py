@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
@@ -11,7 +11,6 @@ from server.chat.factory import (
     ExperimentChatFactory,
     build_chat_agent,
 )
-from server.chat.options import ChatRunSettings
 from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
 from server.events import (
     AgentExecutionFinishedData,
@@ -28,7 +27,6 @@ from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
 from vibesys.api import CoreEventType, output_sink
-from vs_agent.api import Driver, agent_catalog
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -236,7 +234,7 @@ class RunIntegrationAdapter:
         self._failure_diagnostics.clear()
         self.controller.attach(log_dir, project=project, run_id=run_id)
 
-    def _handle_run_resources(self, session: RunSession, handoff: RunResourceHandoff) -> None:
+    def handle_run_resources(self, session: RunSession, handoff: RunResourceHandoff) -> None:
         """Convert a core resource handoff into durable attach plus experiment chat.
 
         Registered as this run's sole `RunSession.on_run_resources` listener,
@@ -267,36 +265,6 @@ class RunIntegrationAdapter:
         self, attachment: RunAttachment, session: RunSession
     ) -> Callable[[], None] | None:
         """Start the optional experiment-chat surface and return its cleanup callback."""
-        defaults = ChatRunSettings(
-            driver=attachment.agent_defaults.driver,
-            provider=attachment.agent_defaults.provider,
-            model=attachment.agent_defaults.model,
-            role_models=attachment.agent_defaults.role_models,
-        )
-
-        def resolve(
-            *, driver: str | None, provider: str | None, model: str | None
-        ) -> AgentSelection:
-            if attachment.agent_backend != "cli":
-                raise ValueError(  # noqa: TRY003
-                    "experiment chat threads require the CLI agent backend, "
-                    f"but this run uses agent backend {attachment.agent_backend!r}"
-                )
-            resolved_driver = driver or defaults.driver
-            resolved_provider = provider or defaults.provider
-            resolved_model = model or defaults.model
-            supported = agent_catalog()[Driver(resolved_driver)].providers
-            if resolved_provider not in supported:
-                raise ValueError(  # noqa: TRY003
-                    f"agent driver {resolved_driver!r} does not support provider "
-                    f"{resolved_provider!r}; supported providers: {', '.join(supported)}"
-                )
-            return AgentSelection(
-                driver=resolved_driver,
-                provider=resolved_provider,
-                model=resolved_model,
-            )
-
         previous = self._chat_factory
         if previous is not None:
             previous.close()
@@ -304,11 +272,6 @@ class RunIntegrationAdapter:
             manager=self.chat,
             controller=self.controller,
             executions=self.executions,
-            project=attachment.project,
-            run_id=attachment.run_id,
-            workspace=attachment.workspace,
-            defaults=defaults,
-            resolve_selection=resolve,
             session=session,
             attachment=attachment,
             build_agent=self._chat_agent_builder,
@@ -317,7 +280,7 @@ class RunIntegrationAdapter:
         self._chat_factory = factory
         try:
             factory.start()
-        except Exception as exc:  # optional server feature  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009031 [BLE001]; optional experiment chat startup failures are reported without failing the core run.
             self.journal.publish_output(
                 "stderr",
                 f"Experiment chat is unavailable: {type(exc).__name__}: {exc}\n",
@@ -348,7 +311,7 @@ class RunIntegrationAdapter:
         text: str = "",
         *,
         data: EventData | None = None,
-        **fields: Any,  # noqa: ANN401
+        **fields: object,
     ) -> RunEvent:
         """Record a server-only wire event."""
         return self.journal.record(event_type, text, data=data, **fields)

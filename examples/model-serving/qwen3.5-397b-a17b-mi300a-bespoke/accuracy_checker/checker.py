@@ -35,7 +35,10 @@ from pathlib import Path
 
 BUNDLE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BUNDLE_DIR / "benchmark"))
+# lint-waiver: LW-008009 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 import launcher  # noqa: E402
+
+# lint-waiver: LW-008010 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from engine_scan import scan as scan_for_engine_code  # noqa: E402
 
 DEFAULT_PINS_PATH = BUNDLE_DIR / "reference" / "pins.json"
@@ -139,7 +142,7 @@ async def gate_holdout_sessions(client, base_url: str) -> list[GateOutcome]:
             history.append({"role": "user", "content": _paragraph(rng)})
             try:
                 response = await _chat(client, base_url, history, HOLDOUT_MAX_TOKENS)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 session_ok, session_detail = False, f"turn {turn_index}: request failed: {exc}"
                 break
             choice = (response.get("choices") or [{}])[0]
@@ -198,7 +201,7 @@ async def gate_history_probes(client, base_url: str) -> list[GateOutcome]:
                 messages.append({"role": "user", "content": follow_up})
             try:
                 reply = _content(await _chat(client, base_url, messages, 32))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 failure = f"turn {turn} failed: {exc}"
                 break
             messages.append({"role": "assistant", "content": reply})
@@ -220,7 +223,7 @@ async def gate_arithmetic(client, base_url: str) -> list[GateOutcome]:
         name = f"arithmetic[{prompt_id}]"
         try:
             response = await _chat(client, base_url, [{"role": "user", "content": prompt}], 16)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             outcomes.append(GateOutcome(name, False, f"request failed: {exc}"))
             continue
         text = _content(response)
@@ -314,7 +317,7 @@ async def gate_pins(client, base_url: str, pins: list[Pin], tokenizer) -> list[G
             response = await _chat(
                 client, base_url, pin.messages, EXACT_PREFIX_TOKENS, ignore_eos=True
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return [GateOutcome("greedy_pins", False, f"{pin.pin_id}: request failed: {exc}")]
         got = tokenizer.encode(_content(response), add_special_tokens=False)
         divergences[pin.pin_id] = first_divergence(pin.expected_token_ids, got)
@@ -362,7 +365,7 @@ async def main_async(args: argparse.Namespace) -> int:
             startup_timeout_seconds=args.startup_timeout_seconds,
         ) as base_url:
             outcomes = await run_checks(base_url, pins, tokenizer)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"accuracy check could not run: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 

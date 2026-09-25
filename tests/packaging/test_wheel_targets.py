@@ -23,7 +23,7 @@ EXPECTED_BUN_SHA256 = {
 
 
 @pytest.mark.parametrize("key", EXPECTED_PLATFORMS)
-def test_supported_target_round_trip(key):  # noqa: ANN001, ANN201
+def test_supported_target_round_trip(key: str) -> None:
     target = TARGETS[key]
 
     resolved = resolve_wheel_target(
@@ -39,12 +39,12 @@ def test_supported_target_round_trip(key):  # noqa: ANN001, ANN201
     assert resolved.bun_sha256 == EXPECTED_BUN_SHA256[key]
 
 
-def test_target_resolution_rejects_an_unknown_target():  # noqa: ANN201
+def test_target_resolution_rejects_an_unknown_target() -> None:
     with pytest.raises(WheelTargetError, match="Unsupported wheel target"):
         resolve_wheel_target("windows-x86_64", host_system="Windows", host_machine="AMD64")
 
 
-def test_target_resolution_rejects_cross_compilation():  # noqa: ANN201
+def test_target_resolution_rejects_cross_compilation() -> None:
     with pytest.raises(WheelTargetError, match="must be built natively"):
         resolve_wheel_target(
             "linux-aarch64",

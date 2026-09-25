@@ -506,7 +506,7 @@ def test_scoped_workspace_adopts_candidate_and_closes_its_agent(
     async def exercise() -> None:
         async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
             # Local worktrees provide a cheap substrate for the generic parallel capability.
-            ctx._resources.run_environment_view = replace(  # noqa: SLF001
+            ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-030003; This test reads one private attribute to check internal wiring that has no public accessor.
                 ctx.environment.view, supports_parallel_candidate_evaluation=True
             )
             parent_revision = ctx.workspaces.root.revision

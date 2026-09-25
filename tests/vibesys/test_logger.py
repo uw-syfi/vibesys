@@ -3,23 +3,27 @@
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 from vibesys.run import RunLogger
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_tee_logger_owns_and_restores_stderr(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+
+def test_tee_logger_owns_and_restores_stderr(tmp_path: Path) -> None:
     original = sys.stderr
     logger = RunLogger(tmp_path)
     try:
         assert sys.stderr is not original  # tee installed
-        print("diagnostic", file=sys.stderr)  # noqa: T201  # tracked: #288
+        sys.stderr.write("diagnostic\n")
     finally:
         logger.close()
     assert sys.stderr is original  # restored on close
     assert "diagnostic" in logger.path.read_text()
 
 
-def test_tee_logger_preserves_real_stderr_file_descriptor(tmp_path):  # noqa: ANN001, ANN201
+def test_tee_logger_preserves_real_stderr_file_descriptor(tmp_path: Path) -> None:
     original = sys.stderr
     logger = RunLogger(tmp_path)
     try:
@@ -28,7 +32,7 @@ def test_tee_logger_preserves_real_stderr_file_descriptor(tmp_path):  # noqa: AN
         logger.close()
 
 
-def test_no_tee_logger_leaves_stderr_untouched(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_no_tee_logger_leaves_stderr_untouched(tmp_path: Path) -> None:
     original = sys.stderr
     logger = RunLogger(tmp_path, tee_stderr=False)
     try:
@@ -44,7 +48,7 @@ def test_no_tee_logger_leaves_stderr_untouched(tmp_path):  # noqa: ANN001, ANN20
     assert "candidate line" in logger.path.read_text()
 
 
-def test_switch_closes_each_superseded_log_file(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_switch_closes_each_superseded_log_file(tmp_path: Path) -> None:
     logger = RunLogger(tmp_path, tee_stderr=False)
     first = logger.file
 
@@ -61,7 +65,7 @@ def test_switch_closes_each_superseded_log_file(tmp_path):  # noqa: ANN001, ANN2
     logger.close()  # Cleanup remains idempotent.
 
 
-def test_stable_writer_follows_switch_after_old_file_is_closed(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_stable_writer_follows_switch_after_old_file_is_closed(tmp_path: Path) -> None:
     logger = RunLogger(tmp_path, tee_stderr=False)
     writer = logger.writer
     first = logger.file

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
@@ -351,3 +352,116 @@ def test_bundled_request_factory_package_pins_cargo_git_tool() -> None:
     assert tool.rev == "118da6137275fda3a290e9012853214dc437c6c0"
     assert tool.package == "req-frontend"
     assert tool.bins == ("session_runner",)
+
+
+def test_load_package_reports_missing_directory_and_metadata(tmp_path: Path) -> None:
+    with pytest.raises(EvaluatorPackageError, match="evaluator package is not a directory"):
+        load_evaluator_package(tmp_path / "absent")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(EvaluatorPackageError, match="evaluator package metadata not found"):
+        load_evaluator_package(empty)
+
+
+def test_load_package_wraps_unparseable_metadata(tmp_path: Path) -> None:
+    root = tmp_path / "bad"
+    root.mkdir()
+    (root / "vibesys.evaluator.toml").write_text("not = [valid", encoding="utf-8")
+
+    with pytest.raises(EvaluatorPackageError, match="invalid evaluator package metadata"):
+        load_evaluator_package(root)
+
+
+def test_registry_reports_missing_collection_without_available_list(tmp_path: Path) -> None:
+    requirement = EvaluatorPackageRequirement(name="pkg", version="1")
+    with pytest.raises(EvaluatorPackageNotFoundError, match="collection does not exist"):
+        EvaluatorPackageRegistry(tmp_path / "nowhere").resolve(requirement)
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(EvaluatorPackageNotFoundError) as excinfo:
+        EvaluatorPackageRegistry(empty).resolve(requirement)
+    assert "pkg==1 not found" in str(excinfo.value)
+    assert "available packages" not in str(excinfo.value)
+
+
+def test_resolve_package_without_bundled_resources_requires_packages_root() -> None:
+    requirement = EvaluatorPackageRequirement(name="pkg", version="1")
+    with (
+        patch("vibesys.evaluators.packages.evaluator_packages_dir", return_value=None),
+        pytest.raises(EvaluatorPackageNotFoundError, match="pass packages_root"),
+    ):
+        resolve_evaluator_package(requirement)
+
+
+_TOOL_HEAD = """[tools.tool]
+kind = "cargo-git"
+git = "{git}"
+rev = "1111111111111111111111111111111111111111"
+package = "{package}"
+bins = [{bins}]
+"""
+
+
+@pytest.mark.parametrize(
+    ("git", "package", "bins", "error"),
+    [
+        ("http://example.com/tool", "package", '"runner"', "HTTPS URL without credentials"),
+        ("https://user:pw@example.com/tool", "package", '"runner"', "HTTPS URL without"),
+        ("https://example.com/tool?x=1", "package", '"runner"', "HTTPS URL without"),
+        ("https://example.com/tool", "Bad Name", '"runner"', "canonical Cargo package name"),
+        ("https://example.com/tool", "package", '"Bad Bin"', "invalid Cargo binary name"),
+    ],
+)
+def test_cargo_git_tool_rejects_invalid_git_package_and_bins(
+    tmp_path: Path, git: str, package: str, bins: str, error: str
+) -> None:
+    root = _write_package(
+        tmp_path / "package",
+        extra_metadata=_TOOL_HEAD.format(git=git, package=package, bins=bins),
+    )
+
+    with pytest.raises(EvaluatorPackageError, match=error):
+        load_evaluator_package(root)
+
+
+def test_metadata_rejects_duplicate_toolchains_and_bad_tool_names(tmp_path: Path) -> None:
+    dup = _write_package(tmp_path / "dup", extra_metadata='toolchains = ["go", "go"]\n')
+    with pytest.raises(EvaluatorPackageError, match="toolchains must not contain duplicates"):
+        load_evaluator_package(dup)
+
+    tool = _TOOL_HEAD.format(git="https://example.com/t", package="p", bins='"r"')
+    bad = _write_package(
+        tmp_path / "bad", extra_metadata=tool.replace("[tools.tool]", "[tools.Bad_Tool]")
+    )
+    with pytest.raises(EvaluatorPackageError, match="invalid evaluator tool name: 'Bad_Tool'"):
+        load_evaluator_package(bad)
+
+
+def _write_raw_entrypoints(root: Path, entrypoints: str) -> Path:
+    root.mkdir(parents=True)
+    (root / "vibesys.evaluator.toml").write_text(
+        f'schema_version = 1\nname = "pkg"\nversion = "1"\nprotocol_version = 1\n{entrypoints}',
+        encoding="utf-8",
+    )
+    return root
+
+
+@pytest.mark.parametrize(
+    ("entrypoints", "error"),
+    [
+        ("[entrypoints]\n", "entrypoints must define at least one command"),
+        ('[entrypoints]\nBad_Name = ["x"]\n', "entrypoint 'Bad_Name' must contain lowercase"),
+        ("[entrypoints]\nok = []\n", "entrypoint 'ok' must contain at least one argv element"),
+        ('[entrypoints]\nok = ["x", ""]\n', "entrypoint 'ok' contains an empty argv element"),
+        (
+            '[entrypoints]\nok = ["a${PYTHON}"]\n',
+            "malformed Python token; ..PYTHON. must occupy one complete argv element",
+        ),
+    ],
+)
+def test_metadata_rejects_invalid_entrypoints(tmp_path: Path, entrypoints: str, error: str) -> None:
+    root = _write_raw_entrypoints(tmp_path / "pkg", entrypoints)
+
+    with pytest.raises(EvaluatorPackageError, match=error):
+        load_evaluator_package(root)

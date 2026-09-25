@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import errno
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -97,8 +99,12 @@ def is_example_repository_path(path: Path) -> bool:
 
 
 def _git(*args: str, cwd: Path) -> str:
+    git = shutil.which("git")
+    if git is None:
+        raise FileNotFoundError(errno.ENOENT, "git executable was not found on PATH", "git")
+    # lint-waiver: LW-008045 [S603]; The resolved Git executable receives repo-configured path arguments without a shell.
     result = subprocess.run(  # noqa: S603
-        ["git", *args],  # noqa: S607
+        [git, *args],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -106,7 +112,7 @@ def _git(*args: str, cwd: Path) -> str:
     )
     if result.returncode != 0:
         raise ExampleRepositoryError.command_failed(
-            " ".join(("git", *args)), cwd, result.stderr.strip()
+            " ".join((git, *args)), cwd, result.stderr.strip()
         )
     return result.stdout
 

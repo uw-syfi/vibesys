@@ -27,25 +27,29 @@ __all__ = [
 class CoreGitTrackerEvents:
     """Publish tracker observations as typed core events on the output sink."""
 
-    def snapshot_recorded(self, label: str, *, commit: str | None) -> None:  # noqa: D102
+    def snapshot_recorded(self, label: str, *, commit: str | None) -> None:
+        """Publish a recorded workspace snapshot event."""
         output_sink().emit(
             CoreEventType.WORKSPACE_SNAPSHOT,
             data=WorkspaceSnapshotData(label=label, commit=commit),
         )
 
-    def baseline_configured(self, commit: str) -> None:  # noqa: D102
+    def baseline_configured(self, commit: str) -> None:
+        """Publish the selected baseline commit as a workspace event."""
         output_sink().emit(
             CoreEventType.WORKSPACE_SNAPSHOT,
             data=WorkspaceSnapshotData(baseline=commit),
         )
 
-    def paths_excluded(self, paths: tuple[str, ...]) -> None:  # noqa: D102
+    def paths_excluded(self, paths: tuple[str, ...]) -> None:
+        """Publish the workspace paths excluded from source tracking."""
         output_sink().emit(
             CoreEventType.WORKSPACE_SNAPSHOT,
             data=WorkspaceSnapshotData(excluded_paths=paths),
         )
 
-    def warning(self, summary: str, *, detail: str | None = None) -> None:  # noqa: D102
+    def warning(self, summary: str, *, detail: str | None = None) -> None:
+        """Publish a Git-tracking warning through the framework event sink."""
         output_sink().framework_warning(
             summary,
             detail=detail,
