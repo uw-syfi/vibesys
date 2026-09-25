@@ -87,6 +87,7 @@ class ProfileGuidedMultiAgentOrchestrator:
                 max_rounds=self.options.max_rounds,
                 expected_roles=("orchestrator", "implementer", "judge"),
             ),
+            memory_paths=issue_board.declared_memory_paths(),
         )
 
     async def run(self, ctx: RunContext) -> bool:

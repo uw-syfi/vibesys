@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from vibesys.loops.issue_queue.render import render_all
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
+from vibesys.orchestration.tools import mcp_spec_from_descriptor
 from vibesys.prompts import PROMPTS_DIR, Prompt
 from vibesys.schemas import (
     IssueImplementerResponse,
@@ -19,7 +20,7 @@ from vibesys.schemas import (
     PerfTrend,
     Verdict,
 )
-from vs_agent.api import MCPServerSpec, RoundProgress
+from vs_agent.api import MCPServerSpec, RoundProgress, expose_as_tools
 from vs_issue_board.api import (
     Issue,
     IssueBoard,
@@ -46,10 +47,13 @@ def build_issue_mcp_spec(
     cap: int | None,
     allowed_types: set[IssueType],
 ) -> MCPServerSpec:
-    """Describe the issue-board MCP server and its per-phase policy."""
-    args = [
-        "-m",
-        "vs_issue_board.mcp",
+    """Describe the issue-board MCP server and its per-phase policy.
+
+    Goes through the host's generic tool-serving descriptor
+    (``vs_agent.expose_as_tools``) instead of hand-building an
+    ``MCPServerSpec``; only the issue-board-specific argv stays here.
+    """
+    entrypoint_args = [
         store_relpath,
         "--creator",
         creator,
@@ -59,8 +63,13 @@ def build_issue_mcp_spec(
         ",".join(sorted(issue_type.value for issue_type in allowed_types)),
     ]
     if cap is not None:
-        args += ["--cap", str(cap)]
-    return MCPServerSpec(name="vibesys-issues", command="python", args=tuple(args))
+        entrypoint_args += ["--cap", str(cap)]
+    descriptor = expose_as_tools(
+        name="vibesys-issues",
+        entrypoint_module="vs_issue_board.mcp",
+        entrypoint_args=tuple(entrypoint_args),
+    )
+    return mcp_spec_from_descriptor(descriptor)
 
 
 # ---------------------------------------------------------------------------

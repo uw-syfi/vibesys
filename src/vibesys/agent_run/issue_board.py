@@ -237,6 +237,19 @@ def framework_memory_paths(workspace: Path) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(paths))
 
 
+def declared_memory_paths() -> tuple[str, ...]:
+    """Return :func:`framework_memory_paths` as workspace-relative strings.
+
+    Every memory location is already workspace-relative in shape (it is
+    built by joining fixed names under the workspace root), so resolving it
+    against ``Path(".")`` and stringifying gives the same paths a strategy
+    would compute per-run with ``path.relative_to(workspace_root)``. This is
+    the form ``RunSetup.memory_paths`` declares once, before the run's
+    workspace path is known.
+    """
+    return tuple(str(path) for path in framework_memory_paths(Path()))
+
+
 def write_pareto_archive(progress_path: Path, summary: str) -> Path:
     """Materialize the derived frontier so agents can inspect it on demand."""
     document = pareto_archive_path(progress_path)

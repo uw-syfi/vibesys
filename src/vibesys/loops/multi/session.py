@@ -367,9 +367,10 @@ class MultiSession:
         )
         if rollback is None:
             raise MultiSessionError.missing_rollback()
-        memory = self._memory_paths()
         try:
-            await self.workspace.restore(rollback, clean=True, preserve_paths=memory)
+            async with self.workspace.transaction() as tx:
+                await self.workspace.restore(rollback, clean=True)
+                tx.commit()
         except WorkspaceRestoreError:
             self.ctx.warning(
                 f"could not check out rollback revision {rollback[:8]} for round "
@@ -584,82 +585,82 @@ class MultiSession:
         names = [recipe.name for recipe in recipes]
         if len(names) != len(set(names)):
             return "Framework local validation recipes contain duplicate names."
-        revision = await self.workspace.snapshot(
-            f"round-{number}-retry-{retry}-framework-validation-input"
-        )
         results: list[FrameworkValidationResult] = []
         restore_required = False
-        for recipe in recipes:
-            try:
-                digest = _validation_input_digest(self.workspace.path, recipe)
-            except (OSError, ValueError) as error:
-                results.append(
-                    FrameworkValidationResult(
-                        recipe=recipe, input_digest="", passed=False, error=str(error)
+        async with self.workspace.transaction(
+            label=f"round-{number}-retry-{retry}-framework-validation-input"
+        ) as tx:
+            for recipe in recipes:
+                try:
+                    digest = _validation_input_digest(self.workspace.path, recipe)
+                except (OSError, ValueError) as error:
+                    results.append(
+                        FrameworkValidationResult(
+                            recipe=recipe, input_digest="", passed=False, error=str(error)
+                        )
                     )
-                )
-                break
-            reused = _reusable_validation_result(self.turns.progress_path, recipe, digest)
-            emit_gate_started(
-                GateKind.VALIDATION,
-                recipe=recipe.name,
-                command=recipe.command,
-                round_label=f"round-{number}",
-            )
-            if reused is not None:
-                results.append(reused)
-                emit_gate_finished(
+                    break
+                reused = _reusable_validation_result(self.turns.progress_path, recipe, digest)
+                emit_gate_started(
                     GateKind.VALIDATION,
-                    passed=True,
                     recipe=recipe.name,
-                    reused=True,
+                    command=recipe.command,
                     round_label=f"round-{number}",
                 )
-                continue
-            try:
-                execution = await self.ctx.environment.execute(
-                    recipe.command, timeout_seconds=recipe.timeout_seconds
+                if reused is not None:
+                    results.append(reused)
+                    emit_gate_finished(
+                        GateKind.VALIDATION,
+                        passed=True,
+                        recipe=recipe.name,
+                        reused=True,
+                        round_label=f"round-{number}",
+                    )
+                    continue
+                try:
+                    execution = await self.ctx.environment.execute(
+                        recipe.command, timeout_seconds=recipe.timeout_seconds
+                    )
+                    output = execution.output.strip()
+                    result = FrameworkValidationResult(
+                        recipe=recipe,
+                        input_digest=digest,
+                        passed=execution.exit_code == 0,
+                        exit_code=execution.exit_code,
+                        output=output[-GATE_RECORD_TAIL_CHARS:],
+                        error=None if execution.exit_code == 0 else "command exited nonzero",
+                    )
+                except Exception as error:  # noqa: BLE001  # report execution failure as gate feedback
+                    result = FrameworkValidationResult(
+                        recipe=recipe,
+                        input_digest=digest,
+                        passed=False,
+                        error=f"command could not be executed: {error}",
+                    )
+                changes = await self.workspace.pending_changes()
+                if changes:
+                    restore_required = True
+                    result = result.model_copy(
+                        update={
+                            "passed": False,
+                            "error": f"validation command mutated the workspace: {', '.join(changes[:8])}",
+                        }
+                    )
+                results.append(result)
+                failure = (
+                    None if result.passed else (result.error or result.output or "unknown failure")
                 )
-                output = execution.output.strip()
-                result = FrameworkValidationResult(
-                    recipe=recipe,
-                    input_digest=digest,
-                    passed=execution.exit_code == 0,
-                    exit_code=execution.exit_code,
-                    output=output[-GATE_RECORD_TAIL_CHARS:],
-                    error=None if execution.exit_code == 0 else "command exited nonzero",
+                emit_gate_finished(
+                    GateKind.VALIDATION,
+                    passed=result.passed,
+                    recipe=recipe.name,
+                    output_tail=None if failure is None else failure[-GATE_LOG_TAIL_CHARS:],
+                    round_label=f"round-{number}",
                 )
-            except Exception as error:  # noqa: BLE001  # report execution failure as gate feedback
-                result = FrameworkValidationResult(
-                    recipe=recipe,
-                    input_digest=digest,
-                    passed=False,
-                    error=f"command could not be executed: {error}",
-                )
-            changes = await self.workspace.pending_changes()
-            if changes:
-                restore_required = True
-                result = result.model_copy(
-                    update={
-                        "passed": False,
-                        "error": f"validation command mutated the workspace: {', '.join(changes[:8])}",
-                    }
-                )
-            results.append(result)
-            failure = (
-                None if result.passed else (result.error or result.output or "unknown failure")
-            )
-            emit_gate_finished(
-                GateKind.VALIDATION,
-                passed=result.passed,
-                recipe=recipe.name,
-                output_tail=None if failure is None else failure[-GATE_LOG_TAIL_CHARS:],
-                round_label=f"round-{number}",
-            )
-            if not result.passed:
-                break
-        if restore_required:
-            await self.workspace.restore(revision, clean=True)
+                if not result.passed:
+                    break
+            if not restore_required:
+                tx.commit()
         artifact = issue_board.write_validation_result_artifact(
             self.turns.progress_path, number, retry, results
         )
@@ -819,12 +820,6 @@ class MultiSession:
         self.carry = terminal.carry
         self.round_number += 1
 
-    def _memory_paths(self) -> tuple[str, ...]:
-        root = self.workspace.path
-        return tuple(
-            str(path.relative_to(root)) for path in issue_board.framework_memory_paths(root)
-        )
-
     async def finish(self) -> bool:
         """Restore the best trusted candidate or the trusted input baseline."""
         self.ctx.log(f"Reached max_rounds={self.options.max_rounds}. Stopping.")
@@ -845,14 +840,14 @@ class MultiSession:
             baseline = self.workspace.trusted_input_baseline
             if baseline is None:
                 raise MultiSessionError.missing_baseline()
-            await self.workspace.restore(baseline, clean=True, preserve_paths=self._memory_paths())
+            await self.workspace.restore(baseline, clean=True)
             await self.workspace.snapshot("multi: restore trusted input baseline")
             self.ctx.log(f"\nNo evaluated winner was retained. Restored baseline {baseline[:12]}.")
             return True
         if winner.commit is None:
             raise MultiSessionError.missing_winner_commit()
         await self.workspace.retain(f"selected-round-{winner.round_number:04d}", winner.commit)
-        await self.workspace.restore(winner.commit, clean=True, preserve_paths=self._memory_paths())
+        await self.workspace.restore(winner.commit, clean=True)
         await self.workspace.snapshot(f"multi: select round {winner.round_number}")
         metrics = (
             _format_metric_row(_record_candidate_metrics(winner), self.state.metrics.objectives)

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import nullcontext
+from contextlib import asynccontextmanager, nullcontext
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -42,6 +42,7 @@ from vibesys.schemas import (
 from vs_loop_state.api import RoundHistory, RoundRecord
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
 
@@ -71,6 +72,36 @@ def _selected() -> ProfileMultiRound:
     return ProfileMultiRound(
         selection, request, AttemptState(agent_run_state=engine.state, feedback=None)
     )
+
+
+class _FakeTx:
+    """Mirror ``WorkspaceTransaction``'s commit flag for the fake workspace below."""
+
+    def __init__(self) -> None:
+        self.committed = False
+
+    def commit(self) -> None:
+        self.committed = True
+
+
+@asynccontextmanager
+async def _fake_transaction(
+    workspace: SimpleNamespace, *, preserve: tuple[str, ...] = (), label: str = "tx"
+) -> AsyncIterator[_FakeTx]:
+    """Match ``WorkspaceHandle.transaction``'s snapshot/restore-on-exit semantics
+    against the same mocked ``snapshot``/``restore`` the fake workspace exposes.
+    """
+    revision = await workspace.snapshot(label)
+    tx = _FakeTx()
+    try:
+        yield tx
+    except BaseException:
+        if not tx.committed:
+            await workspace.restore(revision, clean=True, preserve_paths=preserve)
+        raise
+    else:
+        if not tx.committed:
+            await workspace.restore(revision, clean=True, preserve_paths=preserve)
 
 
 def _session(tmp_path: Path) -> ProfileMultiSession:
@@ -103,6 +134,7 @@ def _session(tmp_path: Path) -> ProfileMultiSession:
         retain=AsyncMock(),
         pending_changes=AsyncMock(return_value=[]),
     )
+    session.workspace.transaction = lambda **kwargs: _fake_transaction(session.workspace, **kwargs)
     progress = tmp_path / "progress.md"
     progress.write_text("# Progress\n")
     session._gate_recorder = issue_board.GateBoardRecorder(progress)
