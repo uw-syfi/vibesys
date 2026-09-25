@@ -13,3 +13,6 @@
 
 # VibeSys prompts (Jinja templates + renderer)
 /src/vibesys/prompts/   @vic-lsh @kamahori
+
+# VibeSys agent role catalog (Role declarations: template + reply + policy)
+/src/vibesys/roles/   @vic-lsh @kamahori

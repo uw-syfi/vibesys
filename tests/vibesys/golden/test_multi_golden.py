@@ -296,9 +296,7 @@ def test_rollback_scenario_golden(tmp_path: Path) -> None:
     )
     runner.enqueue("judge", _judge(Verdict.PASS), _judge(Verdict.PASS))
 
-    descriptor = descriptor_from_options(
-        _options(max_rounds=2), orchestration_id="multi-agent"
-    )
+    descriptor = descriptor_from_options(_options(max_rounds=2), orchestration_id="multi-agent")
     run = run_scripted(
         tmp_path,
         orchestration_id="multi-agent",

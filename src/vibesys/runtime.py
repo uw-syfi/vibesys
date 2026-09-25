@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from pydantic import BaseModel
@@ -11,7 +11,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vs_agent.api import AgentCapabilities, AgentSessionKey, AgentSpec, MCPServerSpec
+    from vs_agent.api import (
+        AgentCapabilities,
+        AgentSessionKey,
+        AgentSpec,
+        MCPServerSpec,
+        SessionScope,
+    )
     from vs_sandbox.api import HostResource
 
 T = TypeVar("T", bound=BaseModel)
@@ -91,6 +97,87 @@ class AgentHandle(Protocol):
     async def close(self) -> None:
         """Release this agent and its sandbox; safe to call more than once."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class ReadOnly:
+    """A role may only read the workspace; ``ctx.agents.turn`` reverts the rest.
+
+    ``allow`` names paths (files or directories, matched by prefix) the role
+    may still write, e.g. the designer's own roadmap index or a profiler's
+    bounded evidence directory.
+    """
+
+    allow: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Writes:
+    """A role may freely modify the workspace (an implementer, most agents)."""
+
+
+@dataclass(frozen=True, slots=True)
+class Fresh:
+    """Start a new agent session for every turn; never reused."""
+
+
+@dataclass(frozen=True, slots=True)
+class Keyed:
+    """Reuse one session across turns that share a caller-derived key.
+
+    ``scope`` names the session's namespace (e.g. one session per
+    hypothesis); the caller supplies the per-call key via ``session_key`` on
+    ``ctx.agents.turn``.
+    """
+
+    scope: SessionScope
+
+
+@dataclass(frozen=True, slots=True)
+class Role:
+    """One agent role: its prompt, reply contract, and turn policy.
+
+    Declared once per role family in ``vibesys.roles``; strategies invoke it
+    through ``ctx.agents.turn(role, ...)`` and never hand-roll rendering,
+    isolation, timeout fallback, or correction retries themselves.
+
+    ``check`` validates the reply in isolation (no external state): it is a
+    pure function of the parsed reply, run up to ``max_corrections`` times.
+    A correction that depends on run state (e.g. "this hypothesis ID was
+    already used this run") is not expressible here and stays a strategy-
+    level retry around plain ``ctx.agents.turn`` calls.
+    """
+
+    id: str
+    template: str
+    reply: type[BaseModel]
+    fallback: Callable[[], BaseModel]
+    access: ReadOnly | Writes = field(default_factory=Writes)
+    session: Fresh | Keyed = field(default_factory=Fresh)
+    paid: bool = False
+    check: Callable[[BaseModel], str | None] | None = None
+    max_corrections: int = 0
+    filter_skills: bool = False
+    message: str = "Return only the JSON object."
+
+
+class RoleIsolationError(RuntimeError):
+    """A read-only role left unauthorized workspace changes after restoration."""
+
+    def __init__(self, remaining: list[str], *, role: str) -> None:
+        """Name the role and paths that could not be isolated."""
+        super().__init__(
+            f"Cannot isolate {role}: workspace is still modified after restore: "
+            + ", ".join(remaining[:8])
+        )
+
+
+class CorrectionExhaustedError(RuntimeError):
+    """A role's correction loop ended without a reply that passed ``check``."""
+
+    def __init__(self, role: str) -> None:
+        """Name the role whose correction budget was exhausted."""
+        super().__init__(f"{role}: correction loop exited without a valid reply")
 
 
 class VibeSysRuntime(Protocol):

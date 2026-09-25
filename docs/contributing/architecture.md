@@ -197,12 +197,15 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
     vibesys.orchestration.runtime --> vibesys.orchestration.request
     vibesys.orchestration.runtime --> vibesys.orchestration.view
+    vibesys.orchestration.runtime --> vibesys.prompts
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
     vibesys.orchestration.runtime --> vibesys.sandbox
     vibesys.prompts --> vibesys
     vibesys.render --> vibesys
+    vibesys.roles --> vibesys
+    vibesys.roles --> vibesys.runtime
     vibesys.run --> vibesys
     vibesys.run --> vibesys.backends
     vibesys.run --> vibesys.evaluators
@@ -480,6 +483,7 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
     vibesys.orchestration.runtime --> vibesys.orchestration.request
     vibesys.orchestration.runtime --> vibesys.orchestration.view
+    vibesys.orchestration.runtime --> vibesys.prompts
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
@@ -490,6 +494,9 @@ graph TD
     vibesys.prompts --> vibesys
     vibesys.prompts --> vs_prompts
     vibesys.render --> vibesys
+    vibesys.roles --> vibesys
+    vibesys.roles --> vibesys.runtime
+    vibesys.roles --> vs_agent
     vibesys.run --> vibesys
     vibesys.run --> vibesys.backends
     vibesys.run --> vibesys.evaluators
