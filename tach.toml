@@ -135,11 +135,11 @@ depends_on = ["vs_feature_flags", "vs_loop_state", "vs_agent"]
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.loops.registry", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.agent_run"]
+depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.loops.registry", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.loops.hypothesis_readmodel"]
 
 [[modules]]
 path = "vibesys.api.agent"
-depends_on = ["vibesys.loops.registry", "vs_project", "vibesys.orchestration.memory", "vibesys.loops"]
+depends_on = ["vibesys.loops.registry", "vs_project", "vibesys.orchestration.memory", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel"]
 
 [[modules]]
 path = "vibesys.api.evolve"
@@ -195,11 +195,13 @@ path = "vibesys.orchestration.state"
 depends_on = ["vibesys", "vibesys.orchestration.view", "vs_project", "vibesys.orchestration._host", "vibesys.orchestration.progress_log"]
 
 [[modules]]
-# TODO(stack PR 07): this is an interim, role-independent slice of the real
-# module (see the module docstring); the full version needs
-# ["vibesys", "vibesys.roles", "vibesys.evaluators", "vibesys.search.hypothesis"].
+# Pure framework-log renderers (job 2 of the progress board) plus the one
+# function that writes them to disk. Lives here (not agent_run) so the
+# host itself -- state.commit and gates.run -- can call it without agent_run
+# depending on orchestration, which would cycle (agent_run already depends
+# on orchestration.view/orchestration).
 path = "vibesys.orchestration.progress_log"
-depends_on = ["vibesys.evaluators", "vibesys.roles", "vibesys.search.hypothesis"]
+depends_on = ["vibesys", "vibesys.roles", "vibesys.evaluators", "vibesys.search.hypothesis"]
 
 [[modules]]
 path = "vibesys.orchestration.gates"
@@ -230,10 +232,6 @@ path = "vibesys.context"
 depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.orchestration", "vibesys.orchestration.request"]
 
 [[modules]]
-path = "vibesys.agent_run"
-depends_on = ["vs_project", "vibesys", "vs_loop_state", "vibesys.orchestration.view", "vibesys.orchestration", "vibesys.evaluators", "vibesys.search.hypothesis", "vibesys.search.profile_focus"]
-
-[[modules]]
 # Pure, deterministic search policy packages: no RunContext, agents, prompts,
 # filesystem, clocks, or global RNG (enforced by
 # tests/vibesys/architecture/test_search_purity.py). Each of hypothesis/,
@@ -260,15 +258,15 @@ depends_on = ["vibesys", "vibesys.orchestration.view", "vs_project", "vibesys.se
 
 [[modules]]
 path = "vibesys.loops.single"
-depends_on = ["vs_agent", "vibesys.evaluators", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.prompts", "vs_project", "vibesys.search.hypothesis", "vibesys.roles", "vibesys.orchestration.artifacts", "vibesys.orchestration.memory", "vibesys.loops", "vibesys.orchestration.progress_log", "vibesys.search.profile_focus", "vibesys.runtime"]
+depends_on = ["vs_agent", "vibesys.evaluators", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.prompts", "vs_project", "vibesys.search.hypothesis", "vibesys.roles", "vibesys.orchestration.artifacts", "vibesys.orchestration.memory", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.orchestration.progress_log", "vibesys.search.profile_focus", "vibesys.runtime"]
 
 [[modules]]
 path = "vibesys.loops.multi"
-depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.search.hypothesis", "vibesys.roles", "vibesys.loops", "vibesys.orchestration.memory", "vibesys.search.profile_focus", "vibesys.orchestration.progress_log", "vibesys.orchestration.artifacts"]
+depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.search.hypothesis", "vibesys.roles", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.orchestration.memory", "vibesys.search.profile_focus", "vibesys.orchestration.progress_log", "vibesys.orchestration.artifacts"]
 
 [[modules]]
 path = "vibesys.loops.issue_queue"
-depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.render", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vs_agent", "vibesys.roles", "vibesys.evaluators"]
+depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.render", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vs_agent", "vibesys.roles", "vibesys.evaluators", "vibesys.orchestration.tools"]
 
 [[modules]]
 path = "vibesys.loops.evolve"
@@ -413,6 +411,20 @@ depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.runtime", "vibe
 [[modules]]
 path = "vibesys.orchestration._common"
 depends_on = ["vibesys.orchestration.request"]
+
+[[modules]]
+# Shared strategy-option validation for the four hypothesis-driven
+# strategies. Sits directly under vibesys.loops (not inside any one
+# strategy folder) because strategies never import each other.
+path = "vibesys.loops.agent_options"
+depends_on = ["vibesys", "vibesys.evaluators", "vibesys.orchestration", "vs_project"]
+
+[[modules]]
+# Shared hypothesis-search read model for the four hypothesis-driven
+# strategies' registered projectors. Sits directly under vibesys.loops for
+# the same reason as vibesys.loops.agent_options.
+path = "vibesys.loops.hypothesis_readmodel"
+depends_on = ["vibesys", "vibesys.orchestration.view", "vibesys.search.hypothesis", "vs_loop_state"]
 
 [[modules]]
 path = "vibesys.loops.registry"

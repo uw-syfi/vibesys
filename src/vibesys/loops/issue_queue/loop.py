@@ -6,21 +6,18 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-from vibesys.evaluators.perf_reply import (
-    IssuePerfEvalResponse,
-    PerfMetrics,
-)
+from pydantic import BaseModel, ConfigDict
+
 from vibesys.loops.issue_queue.render import render_all
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
+from vibesys.orchestration.tools import mcp_spec_from_descriptor
 from vibesys.prompts import PROMPTS_DIR, Prompt
-from vibesys.render.sink import output_sink
-from vibesys.roles.common import Verdict
-from vibesys.roles.implementer import IssueImplementerResponse
-from vibesys.roles.judge import IssueJudgeResponse
-from vibesys.schemas import PerfTrend
-from vs_agent.api import MCPServerSpec, RoundProgress
+from vibesys.roles.implementer import ISSUE_IMPLEMENTER, IssueImplementerContext
+from vibesys.roles.judge import ISSUE_JUDGE, IssueJudgeContext
+from vibesys.roles.perf_eval import ISSUE_PERF_EVAL, IssuePerfEvalContext
+from vs_agent.api import MCPServerSpec, RoundProgress, expose_as_tools
 from vs_issue_board.api import (
     Issue,
     IssueBoard,
@@ -30,12 +27,45 @@ from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "issue_queue"
 IssueQueuePhase = Literal["implementer", "judge", "perf_eval"]
+
+
+class ImplementerUserContext(BaseModel):
+    """Context for issue_queue's implementer ``user.j2`` (the turn's message text)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    issue: Issue
+    prior_judge_review: dict[str, Any] | None
+
+
+class JudgeUserContext(BaseModel):
+    """Context for issue_queue's judge ``user.j2``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    issue: Issue
+
+
+class BootstrapContext(BaseModel):
+    """Context for issue_queue's ``bootstrap_issue.j2``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    reference_path: str
+    accuracy_command: str | None
+    benchmark_command: str | None
+    runtime_notes: str
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from vibesys.config import LoadLevelCfg
+    from vibesys.evaluators.perf_reply import IssuePerfEvalResponse
     from vibesys.loops.issue_queue.orchestration import IssueQueueOptions
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.roles.implementer import IssueImplementerResponse
+    from vibesys.roles.judge import IssueJudgeResponse
     from vibesys.runtime import AgentHandle
 
 
@@ -47,10 +77,13 @@ def build_issue_mcp_spec(
     cap: int | None,
     allowed_types: set[IssueType],
 ) -> MCPServerSpec:
-    """Describe the issue-board MCP server and its per-phase policy."""
-    args = [
-        "-m",
-        "vs_issue_board.mcp",
+    """Describe the issue-board MCP server and its per-phase policy.
+
+    Goes through the host's generic tool-serving descriptor
+    (``vs_agent.expose_as_tools``) instead of hand-building an
+    ``MCPServerSpec``; only the issue-board-specific argv stays here.
+    """
+    entrypoint_args = [
         store_relpath,
         "--creator",
         creator,
@@ -60,8 +93,13 @@ def build_issue_mcp_spec(
         ",".join(sorted(issue_type.value for issue_type in allowed_types)),
     ]
     if cap is not None:
-        args += ["--cap", str(cap)]
-    return MCPServerSpec(name="vibesys-issues", command="python", args=tuple(args))
+        entrypoint_args += ["--cap", str(cap)]
+    descriptor = expose_as_tools(
+        name="vibesys-issues",
+        entrypoint_module="vs_issue_board.mcp",
+        entrypoint_args=tuple(entrypoint_args),
+    )
+    return mcp_spec_from_descriptor(descriptor)
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +231,7 @@ class IssueQueueRun:
     @classmethod
     async def open(cls, host: RunContext, options: IssueQueueOptions) -> IssueQueueRun:
         """Open issue memory in the host's workspace and load its durable cursor."""
-        output_sink().run_configured(
+        host.run_configured(
             run_log_path=str(host.environment.run_log_path),
             project_root=str(host.workspaces.root.path),
             model=host.environment.model_name,
@@ -240,13 +278,13 @@ class IssueQueueRun:
         """Create the first candidate-facing issue and commit the cursor."""
         if self.state.bootstrap_done:
             return
-        description = self.prompt.render(
-            "bootstrap_issue.j2",
+        context = BootstrapContext(
             reference_path=self.host.environment.reference_path,
             accuracy_command=self.host.environment.view.paths.accuracy_command,
             benchmark_command=self.host.environment.view.paths.benchmark_command,
             runtime_notes=self.host.environment.view.prompt_notes,
         )
+        description = self.prompt.render("bootstrap_issue.j2", **context.model_dump())
         issue = self.board.create(
             type=IssueType.FEATURE,
             title="Build FastAPI inference server for the reference model",
@@ -360,32 +398,29 @@ class _IssueQueueTurns:
     async def implement(self, issue: Issue) -> IssueImplementerResponse:
         host = self.host
         await host.environment.reselect_device()
-        system_prompt = self.prompt.render(
-            "implementer/system.j2",
-            reference_path=host.environment.reference_path,
-            runtime_notes=host.environment.view.prompt_notes,
-            issue=issue,
-        )
-        user_prompt = self.prompt.render(
-            "implementer/user.j2",
+        user_context = ImplementerUserContext(
             issue=issue,
             prior_judge_review=_latest_judge_review(issue),
         )
+        user_prompt = self.prompt.render("implementer/user.j2", **user_context.model_dump())
         await host.control.debug_step(f"Implementer step on issue #{issue.id}")
         host.log(f">>> Implementer working on issue #{issue.id}...")
-        issue_id = issue.id
-        return await self.implementer.turn_structured(
-            user_prompt,
-            system_prompt=system_prompt,
-            response_cls=IssueImplementerResponse,
-            fallback_factory=lambda: IssueImplementerResponse(
-                issue_id=issue_id,
-                summary="Implementer did not produce a structured response.",
-                files_touched=[],
-                self_check="No structured response received.",
+        reply = cast(
+            "IssueImplementerResponse",
+            await host.agents.turn(
+                ISSUE_IMPLEMENTER,
+                agent=self.implementer,
+                context=IssueImplementerContext(
+                    reference_path=host.environment.reference_path,
+                    runtime_notes=host.environment.view.prompt_notes,
+                    issue=issue,
+                ),
+                message=user_prompt,
+                label=f"impl issue #{issue.id} att{issue.attempts + 1}",
+                backend=host.request.backend,
             ),
-            label=f"impl issue #{issue.id} att{issue.attempts + 1}",
         )
+        return reply.model_copy(update={"issue_id": issue.id})
 
     async def record_implementation(
         self, issue: Issue, response: IssueImplementerResponse, iteration: int
@@ -399,35 +434,33 @@ class _IssueQueueTurns:
     async def judge(self, issue: Issue, iteration: int) -> IssueJudgeResponse:
         host = self.host
         await host.environment.reselect_device()
-        system_prompt = self.prompt.render(
-            "judge/system.j2",
-            accuracy_command=host.environment.view.paths.accuracy_command,
-            benchmark_command=host.environment.view.paths.benchmark_command,
-            issue=issue,
+        user_prompt = self.prompt.render(
+            "judge/user.j2", **JudgeUserContext(issue=issue).model_dump()
         )
-        user_prompt = self.prompt.render("judge/user.j2", issue=issue)
         await host.control.debug_step(f"Judge step on issue #{issue.id}")
         host.log(f"\n>>> Judge reviewing issue #{issue.id}...")
-        issue_id = issue.id
-        response = await self.judge_agent.turn_structured(
-            user_prompt,
-            mcp_servers=self._issue_mcp_spec(
-                creator="judge",
-                iteration=iteration,
-                cap=1,
-                allowed_types={IssueType.BUG},
+        reply = cast(
+            "IssueJudgeResponse",
+            await host.agents.turn(
+                ISSUE_JUDGE,
+                agent=self.judge_agent,
+                context=IssueJudgeContext(
+                    accuracy_command=host.environment.view.paths.accuracy_command,
+                    benchmark_command=host.environment.view.paths.benchmark_command,
+                    issue=issue,
+                ),
+                message=user_prompt,
+                label=f"judge issue #{issue.id} att{issue.attempts}",
+                mcp_servers=self._issue_mcp_spec(
+                    creator="judge",
+                    iteration=iteration,
+                    cap=1,
+                    allowed_types={IssueType.BUG},
+                ),
+                backend=host.request.backend,
             ),
-            system_prompt=system_prompt,
-            response_cls=IssueJudgeResponse,
-            fallback_factory=lambda: IssueJudgeResponse(
-                issue_id=issue_id,
-                analysis="No structured response received from judge.",
-                feedback="Judge did not produce a structured response.",
-                verdict=Verdict.FAIL,
-                new_issues_filed=[],
-            ),
-            label=f"judge issue #{issue.id} att{issue.attempts}",
         )
+        response = reply.model_copy(update={"issue_id": issue.id})
         self.board.reload()
         render_all(self.issues_dir, self.board)
         _update_progress_from_judge(self.progress_path, iteration, issue, response)
@@ -442,37 +475,32 @@ class _IssueQueueTurns:
     ) -> IssuePerfEvalResponse:
         host = self.host
         await host.environment.reselect_device()
-        system_prompt = self.prompt.render(
-            "perf_eval/system.j2",
-            load_levels=self.load_levels,
-            progress_path=None,
-            perf_metrics_path=self.perf_metrics_location,
-            issue_create_cap=self.max_issues_per_perf_eval,
-            benchmark_command=host.environment.view.paths.benchmark_command,
-            runtime_notes=host.environment.view.prompt_notes,
-        )
         user_prompt = self.prompt.render("perf_eval/user.j2")
         await host.control.debug_step("Perf evaluator step")
         host.log("\n>>> Performance Evaluator benchmarking...")
-        response = await self.perf_agent.turn_structured(
-            user_prompt,
-            mcp_servers=self._issue_mcp_spec(
-                creator="perf_eval",
-                iteration=iteration,
-                cap=self.max_issues_per_perf_eval,
-                allowed_types={IssueType.BUG, IssueType.FEATURE, IssueType.PERF},
+        response = cast(
+            "IssuePerfEvalResponse",
+            await host.agents.turn(
+                ISSUE_PERF_EVAL,
+                agent=self.perf_agent,
+                context=IssuePerfEvalContext(
+                    load_levels=self.load_levels,
+                    progress_path=None,
+                    perf_metrics_path=self.perf_metrics_location,
+                    issue_create_cap=self.max_issues_per_perf_eval,
+                    benchmark_command=host.environment.view.paths.benchmark_command,
+                    runtime_notes=host.environment.view.prompt_notes,
+                ),
+                message=user_prompt,
+                label=f"perf_eval iter {iteration}",
+                mcp_servers=self._issue_mcp_spec(
+                    creator="perf_eval",
+                    iteration=iteration,
+                    cap=self.max_issues_per_perf_eval,
+                    allowed_types={IssueType.BUG, IssueType.FEATURE, IssueType.PERF},
+                ),
+                backend=host.request.backend,
             ),
-            system_prompt=system_prompt,
-            response_cls=IssuePerfEvalResponse,
-            fallback_factory=lambda: IssuePerfEvalResponse(
-                analysis="No structured response received from perf evaluator.",
-                metrics=PerfMetrics(load_levels=[]),
-                evaluator_feedback=[],
-                new_issue_ids=[],
-                throughput_trend=PerfTrend.MIXED,
-                latency_trend=PerfTrend.MIXED,
-            ),
-            label=f"perf_eval iter {iteration}",
         )
         self.board.reload()
         render_all(self.issues_dir, self.board)

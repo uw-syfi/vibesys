@@ -1,220 +1,178 @@
-"""Plain orchestration decisions against a real issue board and fake turns."""
+"""``IssueQueueOrchestrator``'s drain/round control flow against a real
+``IssueBoard``, driven through the real orchestrator (``_support.run_plain``,
+which uses ``run_orchestration``'s ``agent_client_factory``/``backend_factory``
+seams with ``FakeAgentClient``/``FakeComputeBackend``, never
+``unittest.mock.patch`` on a collaborator).
+
+The clean pass / retry-then-pass / perf-eval-with-metrics scenarios (and
+every board file / prompt / event they produce) are golden-snapshotted in
+``tests/vibesys/golden/test_issue_queue_golden.py``; blocking after
+exhausted attempts and resume-after-crash mechanics are covered in
+``test_plain_loop.py``. This module covers the control-flow edges those
+suites don't: stopping before the round budget is exhausted once the board
+drains cleanly, resuming mid-judge without repeating the implementer,
+issues perf_eval files getting processed in the next round, and a
+round-budget expiry preserving a still-open perf-eval-filed issue.
+"""
 
 from __future__ import annotations
 
-import asyncio
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Literal, cast
-from unittest.mock import AsyncMock, patch
+from typing import TYPE_CHECKING
 
-from vibesys.evaluators.perf_reply import (
-    IssuePerfEvalResponse,
-    PerfMetrics,
+from tests.vibesys.loops.issue_queue._support import (
+    implementer_response,
+    issue_queue_options,
+    judge_response,
+    perf_eval_files_issue_callback,
+    perf_eval_response,
+    plain_state_store,
+    run_plain,
+    run_plain_expect_crash,
 )
-from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
-from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
+
+from vibesys.loops.issue_queue.orchestration import descriptor_from_options
 from vibesys.roles.common import Verdict
-from vibesys.roles.implementer import IssueImplementerResponse
-from vibesys.roles.judge import IssueJudgeResponse
-from vibesys.schemas import PerfTrend
-from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
-from vs_loop_state.api import PlainLoopCursor
+from vs_agent.api import AgentCapabilities
+from vs_agent.api.testing import FakeAgentClient
+from vs_issue_board.api import IssueBoard, IssueStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
-    from vibesys.orchestration.runtime import RunContext
-    from vs_issue_board.api import Issue
 
-PlainPhase = Literal["implementer", "judge", "perf_eval"]
-
-
-class _Context:
-    def __init__(self) -> None:
-        self.control = self
-
-    async def boundary(self) -> None:
-        return
+class _JudgeCrashError(Exception):
+    """Stand-in for a killed process, raised mid-judge-turn."""
 
 
-class _PlainRun:
-    def __init__(
-        self,
-        path: Path,
-        verdicts: list[Verdict],
-        perf_issues: list[list[int]],
-        *,
-        state: PlainLoopCursor | None = None,
-        resuming: bool = False,
-    ) -> None:
-        self.host = _Context()
-        self.board = IssueBoard(path / "issues.json")
-        self.turns = self
-        self.state = state or PlainLoopCursor()
-        self.resuming = resuming
-        self.verdicts = iter(verdicts)
-        self.perf_issues = iter(perf_issues)
-        self.calls: list[str] = []
-        self.checkpoints: list[tuple[str, PlainLoopCursor]] = []
-
-    async def bootstrap(self) -> None:
-        if self.state.bootstrap_done:
-            return
-        self.board.create(
-            type=IssueType.FEATURE,
-            title="Initial issue",
-            description="Improve the candidate",
-            created_by="loop:bootstrap",
-            iteration=1,
-        )
-        self.state = self.state.model_copy(update={"bootstrap_done": True})
-        self.calls.append("bootstrap")
-        await self.checkpoint(0, "implementer", None, "plain: initialize issue board")
-
-    async def prepare_resume(self) -> None:
-        if self.resuming:
-            self.board.reopen_blocked(actor="loop:resume", iteration=self.state.round_idx + 1)
-
-    async def checkpoint(
-        self, round_idx: int, phase: PlainPhase, issue_id: int | None, label: str
-    ) -> None:
-        self.state = self.state.transition(
-            round_idx=round_idx, phase=phase, current_issue_id=issue_id
-        )
-        self.checkpoints.append((label, self.state.model_copy(deep=True)))
-
-    def performance_record(self, iteration: int) -> None:
-        del iteration
-
-    @contextmanager
-    def progress(self, iteration: int, total: int) -> Iterator[None]:
-        self.calls.append(f"round:{iteration}/{total}")
-        yield
-
-    def log(self, message: str) -> None:
-        self.calls.append(message)
-
-    async def implement(self, issue: Issue) -> IssueImplementerResponse:
-        self.calls.append(f"implement:{issue.id}")
-        return IssueImplementerResponse(
-            issue_id=issue.id, summary="changed", files_touched=[], self_check="ok"
-        )
-
-    async def record_implementation(
-        self, issue: Issue, response: IssueImplementerResponse, iteration: int
-    ) -> None:
-        del response, iteration
-        self.calls.append(f"snapshot:{issue.id}")
-
-    async def judge(self, issue: Issue, iteration: int) -> IssueJudgeResponse:
-        del iteration
-        self.calls.append(f"judge:{issue.id}")
-        verdict = next(self.verdicts)
-        return IssueJudgeResponse(
-            issue_id=issue.id,
-            analysis="checked",
-            feedback="needs work" if verdict == Verdict.FAIL else "",
-            verdict=verdict,
-            new_issues_filed=[],
-        )
-
-    async def evaluate_performance(
-        self, iteration: int, cursor: PlainLoopCursor
-    ) -> IssuePerfEvalResponse:
-        del cursor
-        self.calls.append(f"perf:{iteration}")
-        new_ids = next(self.perf_issues)
-        for issue_id in new_ids:
-            issue = self.board.create(
-                type=IssueType.BUG,
-                title=f"Issue {issue_id}",
-                description="Improve the candidate",
-                created_by="perf_eval",
-                iteration=iteration,
-            )
-            assert issue.id == issue_id
-        return IssuePerfEvalResponse(
-            analysis="measured",
-            metrics=PerfMetrics(load_levels=[]),
-            evaluator_feedback=[],
-            new_issue_ids=new_ids,
-            throughput_trend=PerfTrend.MIXED,
-            latency_trend=PerfTrend.MIXED,
-        )
+def _client() -> FakeAgentClient:
+    return FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True))
 
 
-def _run_policy(run: _PlainRun, *, max_rounds: int, max_attempts: int = 3) -> bool:
-    options = IssueQueueOptions(
-        max_rounds=max_rounds,
-        max_attempts_per_issue=max_attempts,
-        max_issues_per_perf_eval=3,
+def _board(project_dir: Path) -> IssueBoard:
+    return IssueBoard(project_dir / "issues.json")
+
+
+def test_stops_after_clean_perf_eval_before_round_budget_exhausted(tmp_path: Path) -> None:
+    """A clean drain returns early, without spending the full round budget."""
+    fake = _client()
+    fake.enqueue("implementer", implementer_response(1))
+    fake.enqueue("judge", judge_response(1, Verdict.PASS))
+    fake.enqueue("perf_eval", perf_eval_response())
+    run = run_plain(
+        tmp_path,
+        fake,
+        descriptor=descriptor_from_options(issue_queue_options(max_rounds=2)),
+        exp_name="stops-early",
     )
-    policy = IssueQueueOrchestrator(descriptor_from_options(options))
-    with patch(
-        "vibesys.loops.issue_queue.entrypoint.IssueQueueRun.open",
-        new=AsyncMock(return_value=run),
-    ):
-        return asyncio.run(policy.run(cast("RunContext", run.host)))
 
-
-def test_policy_runs_issue_handoffs_and_stops_after_clean_perf_eval(tmp_path: Path) -> None:
-    run = _PlainRun(tmp_path, [Verdict.PASS], [[]])
-    assert _run_policy(run, max_rounds=2)
-    assert run.calls[:4] == ["bootstrap", "round:1/2", "implement:1", "snapshot:1"]
-    assert "judge:1" in run.calls
-    assert "perf:1" in run.calls
-    issue = run.board.get(1)
+    assert run.result is True
+    assert [call.kind for call in fake.calls] == ["implementer", "judge", "perf_eval"]
+    issue = _board(run.project_dir).get(1)
     assert issue is not None
     assert issue.status == IssueStatus.CLOSED
-    assert run.checkpoints[-1][1].round_idx == 1
+    cursor = plain_state_store(run.project_dir, run.run_id).load_cursor()
+    assert cursor is not None
+    assert cursor.round_idx == 1  # stopped after round 1 of a 2-round budget
 
 
-def test_policy_retries_failed_issue_then_blocks_without_perf_eval(tmp_path: Path) -> None:
-    run = _PlainRun(tmp_path, [Verdict.FAIL, Verdict.FAIL], [])
-    assert not _run_policy(run, max_rounds=1, max_attempts=2)
-    assert run.calls.count("implement:1") == 2
-    assert run.calls.count("judge:1") == 2
-    assert "perf:1" not in run.calls
-    issue = run.board.get(1)
+def test_blocked_board_skips_performance_evaluation(tmp_path: Path) -> None:
+    """When every remaining issue is blocked, perf_eval is never invoked."""
+    fake = _client()
+    fake.enqueue("implementer", implementer_response(1), implementer_response(1))
+    fake.enqueue(
+        "judge",
+        judge_response(1, Verdict.FAIL, feedback="nope"),
+        judge_response(1, Verdict.FAIL, feedback="still nope"),
+    )
+    run = run_plain(
+        tmp_path,
+        fake,
+        descriptor=descriptor_from_options(issue_queue_options(max_attempts_per_issue=2)),
+        exp_name="blocked-skips-perf",
+    )
+
+    assert run.result is False
+    assert fake.calls_for("perf_eval") == []
+    issue = _board(run.project_dir).get(1)
     assert issue is not None
     assert issue.status == IssueStatus.BLOCKED
-    assert run.checkpoints[-1][1].phase == "perf_eval"
 
 
-def test_policy_resumes_at_judge_without_repeating_implementation(tmp_path: Path) -> None:
-    state = PlainLoopCursor(bootstrap_done=True, phase="judge", current_issue_id=1)
-    run = _PlainRun(tmp_path, [Verdict.PASS], [[]], state=state, resuming=True)
-    issue = run.board.create(
-        type=IssueType.FEATURE,
-        title="Issue 1",
-        description="Improve the candidate",
-        created_by="test",
-        iteration=1,
+def test_resumes_at_judge_without_repeating_implementation(tmp_path: Path) -> None:
+    """A crash after the implementer, mid-judge-turn, resumes at judge only.
+
+    Injected through ``FakeAgentClient.fail`` (a real client seam), not
+    ``unittest.mock.patch``: the judge-phase checkpoint commits before the
+    judge turn runs, so a crash there leaves the same on-disk state a real
+    kill mid-judge would.
+    """
+    crasher = _client()
+    crasher.enqueue("implementer", implementer_response(1))
+    crasher.fail("judge", _JudgeCrashError())
+    crashed = run_plain_expect_crash(
+        tmp_path, crasher, _JudgeCrashError, exp_name="resume-at-judge"
     )
-    run.board.update_status(issue.id, IssueStatus.IN_PROGRESS, actor="loop", iteration=1)
-    run.board.increment_attempts(issue.id, actor="implementer", iteration=1)
-    assert _run_policy(run, max_rounds=1)
-    assert "implement:1" not in run.calls
-    assert "judge:1" in run.calls
-    assert "perf:1" in run.calls
+    issue = _board(crashed.project_dir).get(1)
+    assert issue is not None
+    assert issue.status == IssueStatus.IN_PROGRESS
+    assert issue.attempts == 1
+
+    resumer = _client()
+    resumer.enqueue("judge", judge_response(1, Verdict.PASS))
+    resumer.enqueue("perf_eval", perf_eval_response())
+    resumed = run_plain(tmp_path, resumer, resume_from=crashed)
+
+    assert resumed.result is True
+    assert resumer.calls_for("implementer") == []
+    assert len(resumer.calls_for("judge")) == 1
+    assert len(resumer.calls_for("perf_eval")) == 1
+    issue = _board(resumed.project_dir).get(1)
+    assert issue is not None
+    assert issue.status == IssueStatus.CLOSED
+    assert issue.attempts == 1  # the crashed attempt was not redone
 
 
-def test_policy_runs_next_round_for_perf_filed_issue(tmp_path: Path) -> None:
-    run = _PlainRun(tmp_path, [Verdict.PASS, Verdict.PASS], [[2], []])
-    assert _run_policy(run, max_rounds=2)
-    assert run.calls.index("perf:1") < run.calls.index("implement:2")
-    assert run.calls.count("perf:2") == 1
-    issue = run.board.get(2)
+def test_perf_eval_filed_issue_is_processed_in_next_round(tmp_path: Path) -> None:
+    fake = _client()
+    fake.on_invoke(perf_eval_files_issue_callback(fake))
+    fake.enqueue("implementer", implementer_response(1), implementer_response(2))
+    fake.enqueue("judge", judge_response(1, Verdict.PASS), judge_response(2, Verdict.PASS))
+    fake.enqueue("perf_eval", perf_eval_response(), perf_eval_response())
+    run = run_plain(
+        tmp_path,
+        fake,
+        descriptor=descriptor_from_options(issue_queue_options(max_rounds=2)),
+        exp_name="perf-files-issue",
+    )
+
+    assert run.result is True
+    assert [call.kind for call in fake.calls] == [
+        "implementer",
+        "judge",
+        "perf_eval",
+        "implementer",
+        "judge",
+        "perf_eval",
+    ]
+    issue = _board(run.project_dir).get(2)
     assert issue is not None
     assert issue.status == IssueStatus.CLOSED
 
 
-def test_policy_preserves_filed_issue_when_round_budget_expires(tmp_path: Path) -> None:
-    run = _PlainRun(tmp_path, [Verdict.PASS], [[2]])
-    assert not _run_policy(run, max_rounds=1)
-    issue = run.board.get(2)
+def test_perf_eval_filed_issue_preserved_when_round_budget_expires(tmp_path: Path) -> None:
+    fake = _client()
+    fake.on_invoke(perf_eval_files_issue_callback(fake))
+    fake.enqueue("implementer", implementer_response(1))
+    fake.enqueue("judge", judge_response(1, Verdict.PASS))
+    fake.enqueue("perf_eval", perf_eval_response())
+    run = run_plain(tmp_path, fake, exp_name="perf-files-issue-budget")  # max_rounds=1 by default
+
+    assert run.result is False
+    assert fake.calls_for("implementer") == fake.calls_for("implementer")[:1]
+    issue = _board(run.project_dir).get(2)
     assert issue is not None
     assert issue.status == IssueStatus.OPEN
-    assert "implement:2" not in run.calls
-    assert run.checkpoints[-1][0] == "plain: complete round 1"
+    cursor = plain_state_store(run.project_dir, run.run_id).load_cursor()
+    assert cursor is not None
+    assert cursor.round_idx == 1
+    assert cursor.phase == "implementer"
