@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import threading
+    from collections.abc import Callable
 
 _HERE = Path(__file__).resolve().parent
 
@@ -285,10 +286,74 @@ def discover_traces(out_dir: Path) -> list[Path]:
 
 
 _POST_STOP_TRACE_POLL_S = 1.0
+_WINDOW_POLL_S = 0.05
+
+
+_WINDOW_MARKER_GLOB = ".window-*-*.started"
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def unfinished_windows(
+    out_dir: Path, *, pid_alive: Callable[[int], bool] = _pid_alive
+) -> list[str]:
+    """Windows under *out_dir* that started but whose process still owes a trace.
+
+    A window (``.window-<pid>-<n>.started``, written by the injection when
+    recording begins) is finished once ``<pid>-<n>.pt.trace.json.gz`` exists
+    (renamed into place only when complete), its ``.failed`` marker exists,
+    or process ``<pid>`` has exited (nothing more can arrive from it).
+    """
+    pending = []
+    for marker in sorted(out_dir.glob(_WINDOW_MARKER_GLOB)):
+        stem = marker.name.removeprefix(".window-").removesuffix(".started")
+        pid_text, _, window = stem.partition("-")
+        if not pid_text.isdigit():
+            continue
+        if (out_dir / f"{stem}.pt.trace.json.gz").is_file():
+            continue
+        if (out_dir / f".window-{stem}.failed").is_file():
+            continue
+        if pid_alive(int(pid_text)):
+            pending.append(f"pid {pid_text} window {window}")
+    return pending
+
+
+def wait_for_started_windows(
+    out_dir: Path, *, grace_s: float, pid_alive: Callable[[int], bool] = _pid_alive
+) -> list[str]:
+    """Wait until every started window has exported, failed, or lost its process.
+
+    Replaces guessing when sibling processes are done: a multi-process
+    target's other processes (e.g. a serving engine's separate GPU worker
+    process) export on their own schedule after the directly launched
+    process exits, and on ROCm that export can hang for minutes (see
+    ``inject/sitecustomize.py``). *grace_s* is only a failure bound; returns
+    the windows still unfinished when it ran out (empty on success).
+    """
+    deadline = time.monotonic() + grace_s
+    while True:
+        pending = unfinished_windows(out_dir, pid_alive=pid_alive)
+        if not pending or time.monotonic() >= deadline:
+            return pending
+        time.sleep(_WINDOW_POLL_S)
 
 
 def wait_for_additional_traces(out_dir: Path, *, grace_s: float) -> None:
-    """Give sibling/descendant target processes a bounded window to export.
+    """Heuristic wait for traces written by a profiler this tool did not arm.
+
+    Only for ``inject=False``, where the target's own profiler writes traces
+    and there is no handshake to wait on; injected windows use
+    ``wait_for_started_windows`` instead. Background, from before that
+    handshake existed:
 
     ``capture_runtime.run_capture`` only waits for the *one* process it
     directly launched (``command``, e.g. a serving engine's API-server
@@ -698,9 +763,10 @@ def profile_ops(  # noqa: PLR0913  # LW-910115; this function's parameters mirro
     independent stop/export afterward, on its own schedule -- observed on
     real ROCm hardware to still be writing its trace after the directly
     launched process had already exited and ``run_capture`` returned. Before
-    picking the primary trace, this function gives any such sibling process
-    a bounded window (``wait_for_additional_traces``, capped at ``grace_s``)
-    to finish, rather than finalizing the trace list immediately and
+    picking the primary trace, this function waits until every process that
+    started recording has exported (or failed, or exited), using the
+    injection's per-process window markers (``wait_for_started_windows``;
+    ``grace_s`` is only a failure bound), rather than finalizing the trace list immediately and
     silently missing the process that actually did the GPU work (this can
     otherwise fall back to a driver-only process's near-empty trace with no
     error at all).
@@ -780,7 +846,16 @@ def profile_ops(  # noqa: PLR0913  # LW-910115; this function's parameters mirro
 
     lines = [capture_runtime.format_result(result)]
 
-    wait_for_additional_traces(out_dir, grace_s=grace_s)
+    if inject:
+        unfinished = wait_for_started_windows(out_dir, grace_s=grace_s)
+        if unfinished:
+            lines.append(
+                f"\nwarning: {len(unfinished)} profiled process(es) had not exported within "
+                f"grace_s={grace_s:g}s ({', '.join(unfinished)}); their traces are missing below. "
+                "Raise grace_s: the ROCm post-export hang can take minutes."
+            )
+    else:
+        wait_for_additional_traces(out_dir, grace_s=grace_s)
     traces = discover_traces(out_dir)
     if not traces:
         _record_traces_in_manifest(out_dir, primary=None, traces=[])

@@ -18,6 +18,7 @@ import json
 import os
 import socket
 import sys
+import tempfile
 import textwrap
 import threading
 import time
@@ -141,7 +142,7 @@ def test_pick_primary_trace_is_the_max_kernel_trace(
 
 
 # ---------------------------------------------------------------------------
-# wait_for_additional_traces
+# Waiting for sibling processes' traces
 #
 # Regression for a real MI210 finding (vllm-serve topology, multi-process
 # target): capture_runtime.run_capture only waits for the *one* process it
@@ -149,67 +150,99 @@ def test_pick_primary_trace_is_the_max_kernel_trace(
 # via the process-group broadcast (e.g. vLLM V1's EngineCore worker, the
 # one actually doing GPU work) runs its own independent stop/export on its
 # own schedule and can still be writing its trace file after run_capture
-# has already returned. Without a bounded wait, primary-trace selection ran
-# immediately and silently missed it, falling back to a near-empty
-# driver-process trace with no error.
+# has already returned. The first fix waited until the trace set stopped
+# changing for one poll interval, which still missed any export slower than
+# that; the injection's per-process window markers now say exactly which
+# processes still owe a trace.
 # ---------------------------------------------------------------------------
 
+_WINDOW_STATES = ("exported", "failed", "exited", "pending")
 
-def test_wait_for_additional_traces_returns_immediately_with_nothing_pending(
+
+def _write_window(out_dir: Path, pid: int, window: int, state: str) -> None:
+    (out_dir / f".window-{pid}-{window}.started").write_text("")
+    if state == "exported":
+        _write_trace(out_dir / f"{pid}-{window}.pt.trace.json.gz", n_kernels=1)
+    elif state == "failed":
+        (out_dir / f".window-{pid}-{window}.failed").write_text("export: boom")
+
+
+@FAST
+@given(states=st.lists(st.sampled_from(_WINDOW_STATES), max_size=8))
+def test_unfinished_windows_are_exactly_the_live_unresolved_ones(
+    capture_ops: ModuleType, states: list[str]
+) -> None:
+    """A started window is finished iff it exported, failed, or its process exited."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out_dir = Path(tmp)
+        alive: set[int] = set()
+        expected = []
+        for i, state in enumerate(states):
+            pid = 1000 + i
+            _write_window(out_dir, pid, 1, state)
+            if state != "exited":
+                alive.add(pid)
+            if state == "pending":
+                expected.append(f"pid {pid} window 1")
+
+        unfinished = capture_ops.unfinished_windows(out_dir, pid_alive=alive.__contains__)
+        assert unfinished == expected
+
+
+def test_wait_for_started_windows_returns_once_the_last_window_exports(
     capture_ops: ModuleType, tmp_path: Path
 ) -> None:
-    t0 = time.monotonic()
-    capture_ops.wait_for_additional_traces(tmp_path, grace_s=5.0)
-    assert time.monotonic() - t0 < 2.0
+    """The wait ends on the export itself; grace_s is only a failure bound."""
+    _write_window(tmp_path, 4242, 1, "pending")
+    polling = threading.Event()
+
+    def pid_alive(_pid: int) -> bool:
+        polling.set()  # the wait has observed the window as pending
+        return True
+
+    def export_later() -> None:
+        polling.wait()
+        _write_trace(tmp_path / "4242-1.pt.trace.json.gz", n_kernels=2)
+
+    writer = threading.Thread(target=export_later)
+    writer.start()
+    try:
+        assert capture_ops.wait_for_started_windows(tmp_path, grace_s=60, pid_alive=pid_alive) == []
+    finally:
+        writer.join()
+    assert capture_ops.discover_traces(tmp_path) == [tmp_path / "4242-1.pt.trace.json.gz"]
+
+
+def test_wait_for_started_windows_reports_what_is_still_missing(
+    capture_ops: ModuleType, tmp_path: Path
+) -> None:
+    _write_window(tmp_path, 4242, 3, "pending")
+    unfinished = capture_ops.wait_for_started_windows(
+        tmp_path, grace_s=0, pid_alive=lambda _pid: True
+    )
+    assert unfinished == ["pid 4242 window 3"]
 
 
 def test_wait_for_additional_traces_zero_grace_is_a_no_op(
     capture_ops: ModuleType, tmp_path: Path
 ) -> None:
+    """The inject=False fallback (no handshake with a foreign profiler) still honors grace 0."""
     t0 = time.monotonic()
     capture_ops.wait_for_additional_traces(tmp_path, grace_s=0.0)
-    assert time.monotonic() - t0 < 0.1
+    assert time.monotonic() - t0 < 5.0
 
 
-@FAST_SHORT
-@given(
-    delay_s=st.floats(min_value=0.0, max_value=0.4, allow_nan=False),
-    n_kernels=st.integers(min_value=0, max_value=5),
-)
-def test_wait_for_additional_traces_eventually_sees_a_delayed_file(
-    capture_ops: ModuleType, tmp_path: Path, delay_s: float, n_kernels: int
-) -> None:
-    """For any arrival delay comfortably inside grace_s, the delayed file is
-    visible via discover_traces once the wait returns -- regardless of how
-    late (within budget) a sibling process finishes exporting.
-    """
-    case_dir = tmp_path / f"case-{delay_s}-{n_kernels}"
-    case_dir.mkdir()
-    path = case_dir / "555555.pt.trace.json.gz"
-
-    def _delayed_writer() -> None:
-        time.sleep(delay_s)
-        _write_trace(path, n_kernels=n_kernels)
-
-    writer = threading.Thread(target=_delayed_writer)
-    writer.start()
-    try:
-        capture_ops.wait_for_additional_traces(case_dir, grace_s=1.5)
-        assert path.is_file()
-        assert capture_ops.discover_traces(case_dir) == [path]
-    finally:
-        writer.join(timeout=5.0)
-
-
-def test_profile_ops_finds_a_sibling_trace_that_exports_after_the_tracked_process_exits(
+def test_profile_ops_waits_for_a_sibling_whose_export_outlasts_the_launched_process(
     capture_ops: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """End-to-end regression: ``command`` exits almost immediately (like the
-    vllm-serve API server), but spawns a detached sibling process that keeps
-    running and writes its own trace ~0.6s later (like EngineCore's own,
-    independently-scheduled stop/export). ``profile_ops`` must still find
-    it, because a multi-process target's traces are not all produced by the
-    time the one directly-launched process exits.
+    """End-to-end regression with real armed processes.
+
+    The launched process (like the vllm-serve API server) exits first; its
+    sibling (like EngineCore) is still recording and exports only after
+    that, slowly (the fake export takes 2.5s, longer than the old
+    "unchanged for one 1s poll" heuristic tolerated). Ordering comes from
+    state, not sleeps: the parent exits only once both window markers
+    exist, and the sibling exits only once the parent is gone.
     """
     fake_torch = write_fake_torch(tmp_path / "fake_torch")
     profiles_dir = tmp_path / "profiles"
@@ -219,17 +252,16 @@ def test_profile_ops_finds_a_sibling_trace_that_exports_after_the_tracked_proces
     sibling_script.write_text(
         textwrap.dedent(
             """
-            import gzip, json, os, sys, time
+            import os, sys, time
+            import torch  # noqa: F401  (arms this process's injection)
 
-            time.sleep(0.6)
-            out_dir = os.environ["VIBESYS_TORCH_PROFILE_OUT_DIR"]
-            events = [
-                {"ph": "X", "cat": "kernel", "name": "late_sibling_kernel", "ts": 0, "dur": 5, "args": {}}
-            ]
-            data = {"traceEvents": events, "deviceProperties": []}
-            path = os.path.join(out_dir, "999999999.pt.trace.json.gz")
-            with gzip.open(path, "wt", encoding="utf-8") as f:
-                json.dump(data, f)
+            parent = int(sys.argv[1])
+            while True:  # exit (and so export) only after the parent is gone
+                try:
+                    os.kill(parent, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.01)
             """
         )
     )
@@ -237,10 +269,14 @@ def test_profile_ops_finds_a_sibling_trace_that_exports_after_the_tracked_proces
     script.write_text(
         textwrap.dedent(
             f"""
-            import subprocess, sys
+            import glob, os, subprocess, sys, time
             import torch  # noqa: F401  (arms this process's own injection too)
 
-            subprocess.Popen([sys.executable, {str(sibling_script)!r}])
+            env = dict(os.environ, FAKE_TORCH_EXPORT_DELAY_S="2.5")
+            subprocess.Popen([sys.executable, {str(sibling_script)!r}, str(os.getpid())], env=env)
+            out_dir = os.environ["VIBESYS_TORCH_PROFILE_OUT_DIR"]
+            while len(glob.glob(os.path.join(out_dir, ".window-*.started"))) < 2:
+                time.sleep(0.01)
             """
         )
     )
@@ -249,16 +285,16 @@ def test_profile_ops_finds_a_sibling_trace_that_exports_after_the_tracked_proces
         command=f"{sys.executable} {script}",
         env={"PYTHONPATH": str(fake_torch)},
         delay_s=0.0,
-        duration_s=0.05,
-        timeout_s=20,
-        grace_s=3,
+        timeout_s=60,
+        grace_s=60,
     )
 
     assert ": ok" in output, output
+    assert "had not exported" not in output, output
     captures = list(profiles_dir.iterdir())
     assert len(captures) == 1
     manifest = json.loads((captures[0] / "manifest.json").read_text())
-    assert "999999999.pt.trace.json.gz" in manifest["trace_files"], manifest
+    assert len(manifest["trace_files"]) == 2, manifest
 
 
 # ---------------------------------------------------------------------------
@@ -418,11 +454,15 @@ def test_profile_ops_bounded_script_produces_certified_summary(
     monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(profiles_dir))
 
     script = tmp_path / "workload.py"
-    script.write_text("import torch\nimport time\ntime.sleep(0.5)\n")
+    # Exits once its window is exported, not after a guessed sleep.
+    script.write_text(
+        "import torch\nfrom torch._log import wait_for_event\n"
+        "wait_for_event('profile.export_chrome_trace')\n"
+    )
 
     output = capture_ops.profile_ops(
         command=f"{sys.executable} {script}",
-        env={"PYTHONPATH": str(fake_torch)},
+        env={"PYTHONPATH": str(fake_torch), "FAKE_TORCH_CALL_LOG": str(tmp_path / "calls.log")},
         delay_s=0.0,
         duration_s=0.2,
         record_shapes=True,
@@ -527,11 +567,17 @@ def test_profile_ops_reports_no_traces_when_no_gpu(
     monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(profiles_dir))
 
     script = tmp_path / "workload.py"
-    script.write_text("import torch\nimport time\ntime.sleep(0.2)\n")
+    script.write_text(
+        "import torch\nfrom torch._log import wait_for_event\nwait_for_event('cuda.is_available')\n"
+    )
 
     output = capture_ops.profile_ops(
         command=f"{sys.executable} {script}",
-        env={"PYTHONPATH": str(fake_torch), "FAKE_TORCH_GPU": "0"},
+        env={
+            "PYTHONPATH": str(fake_torch),
+            "FAKE_TORCH_GPU": "0",
+            "FAKE_TORCH_CALL_LOG": str(tmp_path / "calls.log"),
+        },
         delay_s=0.0,
         duration_s=0.1,
         timeout_s=20,
@@ -585,20 +631,43 @@ def test_profile_ops_server_load_sigint_lifecycle(
     server_script = tmp_path / "server.py"
     server_script.write_text(_SERVER_SOURCE)
     port = _free_port()
+    call_log = tmp_path / "calls.log"
+    # The first request makes the server import torch (arming the
+    # injection); the load then waits for recording to start before the
+    # rest, so the stop signal can never beat the window's start.
+    load_script = tmp_path / "load.py"
+    load_script.write_text(
+        textwrap.dedent(
+            f"""
+            import time
+            import urllib.request as u
+
+            url = "http://127.0.0.1:{port}/"
+            u.urlopen(url, timeout=10)
+            log = {str(call_log)!r}
+            while True:
+                try:
+                    with open(log, encoding="utf-8") as handle:
+                        if any(line.rstrip().endswith("profile.start") for line in handle):
+                            break
+                except FileNotFoundError:
+                    pass
+                time.sleep(0.01)
+            for _ in range(2):
+                u.urlopen(url, timeout=10)
+            """
+        )
+    )
 
     output = capture_ops.profile_ops(
         command=f"{sys.executable} {server_script} {port}",
-        env={"PYTHONPATH": str(fake_torch)},
+        env={"PYTHONPATH": str(fake_torch), "FAKE_TORCH_CALL_LOG": str(call_log)},
         ready_command=(
             f'{sys.executable} -c "import urllib.request as u; '
             f'u.urlopen(\\"http://127.0.0.1:{port}/\\", timeout=2)"'
         ),
         ready_timeout_s=10,
-        load_command=(
-            f'{sys.executable} -c "import urllib.request as u\n'
-            f"for _ in range(3):\n"
-            f'    u.urlopen(\\"http://127.0.0.1:{port}/\\", timeout=2)"'
-        ),
+        load_command=f"{sys.executable} {load_script}",
         stop_signal="SIGINT",
         grace_s=10,
         timeout_s=30,
