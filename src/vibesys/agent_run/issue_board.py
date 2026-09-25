@@ -23,7 +23,6 @@ from vibesys.schemas import (
     FrameworkValidationResult,
     ImplementerResponse,
     JudgeResponse,
-    OrchestratorPlan,
     PreRoundDecision,
     ProfilerSummary,
     SingleAgentRoundResponse,
@@ -32,6 +31,7 @@ from vibesys.schemas import (
 
 if TYPE_CHECKING:
     from vibesys.evaluators.gates import AccuracyGateResult, BenchmarkGateResult
+    from vibesys.search.hypothesis import OrchestratorPlan
 
 MEMORY_LAYOUTS = ("files", "directories")
 #: Workspace-relative roots of the loop's durable memory, layout aside.

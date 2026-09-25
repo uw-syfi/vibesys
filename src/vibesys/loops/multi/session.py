@@ -479,7 +479,7 @@ class MultiSession:
             space=state.agent_run_state.metrics,
         )
         verdict = await self.turns.review(request, state, conflict)
-        state.judge = JudgeReviewed(verdict.verdict)
+        state.judge = JudgeReviewed(verdict.verdict.value)
         if verdict.verdict is not Verdict.PASS:
             state.feedback = verdict.feedback
             request.active_hypothesis.feedback = verdict.feedback

@@ -31,7 +31,6 @@ from vibesys.loops.single.session import SingleSession
 from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,
-    OrchestratorPlan,
     PreRoundDecision,
     ProfilerSummary,
     SingleAgentRoundResponse,
@@ -44,6 +43,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import pytest
+
+    from vibesys.search.hypothesis import OrchestratorPlan
 
 
 @dataclass

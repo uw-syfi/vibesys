@@ -298,7 +298,7 @@
 {"id": "LW-010199", "path": "libs/vs-sandbox/src/vs_sandbox/modal_model_setup.py", "rules": ["PLC0415"]}
 {"id": "LW-010200", "path": "src/entrypoints/cli/loops.py", "rules": ["TRY004"]}
 {"id": "LW-010201", "path": "src/vibesys/features.py", "rules": ["TRY004"]}
-{"id": "LW-010202", "path": "src/vibesys/agent_run/state.py", "rules": ["S105"]}
+{"id": "LW-010202", "path": "src/vibesys/search/hypothesis/state.py", "rules": ["S105"]}
 {"id": "LW-010203", "path": "src/vibesys/schemas.py", "rules": ["S105"]}
 {"id": "LW-010204", "path": "src/vibesys/loops/evolve/run.py", "rules": ["S311"]}
 {"id": "LW-010207", "path": "src/vibesys/evaluators/gates.py", "rules": ["S108"]}
@@ -462,3 +462,53 @@
 {"id": "LW-040033", "path": "tests/vibesys/api/test_public_runtime.py", "rules": ["SLF001"]}
 {"id": "LW-040034", "path": "tests/vibesys/api/test_public_runtime.py", "rules": ["SLF001"]}
 {"id": "LW-040035", "path": "libs/vs-project/tests/test_store.py", "rules": ["SLF001"]}
+{"id": "LW-040036", "path": "src/vibesys/loops/multi/turns.py", "rules": ["FIX002", "TD003"]}
+{"id": "LW-040037", "path": "src/vibesys/loops/profile_multi/turns.py", "rules": ["FIX002", "TD003"]}
+{"id": "LW-040038", "path": "src/vibesys/schemas.py", "rules": ["FIX002", "TD003"]}
+{"id": "LW-040039", "path": "src/vibesys/search/hypothesis/cadence.py", "rules": ["PLR0913"]}
+{"id": "LW-040040", "path": "src/vibesys/search/hypothesis/search.py", "rules": ["S101"]}
+{"id": "LW-040041", "path": "src/vibesys/search/hypothesis/search.py", "rules": ["PLR0913"]}
+{"id": "LW-040042", "path": "src/vibesys/search/hypothesis/search.py", "rules": ["PLR0913"]}
+{"id": "LW-040043", "path": "src/vibesys/search/hypothesis/search.py", "rules": ["SLF001"]}
+{"id": "LW-040044", "path": "src/vibesys/search/hypothesis/search.py", "rules": ["PLR0913"]}
+{"id": "LW-040045", "path": "src/vibesys/search/hypothesis/search.py", "rules": ["PLR0913"]}
+{"id": "LW-040046", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["ANN204"]}
+{"id": "LW-040047", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["SLF001"]}
+{"id": "LW-040048", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["SLF001"]}
+{"id": "LW-040049", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["SLF001"]}
+{"id": "LW-040050", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["C901", "PLR0912"]}
+{"id": "LW-040051", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["ARG001"]}
+{"id": "LW-040052", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["S311"]}
+{"id": "LW-040053", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["PLR0913"]}
+{"id": "LW-040054", "path": "src/vibesys/search/population/openevolve_selector.py", "rules": ["S311"]}
+{"id": "LW-040055", "path": "src/vibesys/search/population/search.py", "rules": ["FIX002", "TD003"]}
+{"id": "LW-040056", "path": "src/vibesys/search/population/search.py", "rules": ["S311"]}
+{"id": "LW-040057", "path": "src/vibesys/search/population/search.py", "rules": ["S311"]}
+{"id": "LW-040058", "path": "src/vibesys/search/population/search.py", "rules": ["S311"]}
+{"id": "LW-040059", "path": "src/vibesys/search/population/vibesys_selector.py", "rules": ["PLR0913"]}
+{"id": "LW-040060", "path": "src/vibesys/search/population/vibesys_selector.py", "rules": ["PLR0913"]}
+{"id": "LW-040061", "path": "tests/vibesys/search/hypothesis/test_record.py", "rules": ["FIX002", "TD003"]}
+{"id": "LW-040062", "path": "tests/vibesys/search/hypothesis/test_record.py", "rules": ["S106"]}
+{"id": "LW-040063", "path": "tests/vibesys/search/hypothesis/test_record.py", "rules": ["ANN001", "ANN202"]}
+{"id": "LW-040064", "path": "tests/vibesys/search/hypothesis/test_reprojection.py", "rules": ["S106"]}
+{"id": "LW-040065", "path": "tests/vibesys/search/hypothesis/test_reprojection.py", "rules": ["PLR0913"]}
+{"id": "LW-040066", "path": "tests/vibesys/search/hypothesis/test_state.py", "rules": ["S106"]}
+{"id": "LW-040067", "path": "tests/vibesys/search/hypothesis/test_state.py", "rules": ["S106"]}
+{"id": "LW-040068", "path": "tests/vibesys/search/hypothesis/test_state_store.py", "rules": ["ANN001", "ANN202"]}
+{"id": "LW-040069", "path": "tests/vibesys/search/hypothesis/test_state_store.py", "rules": ["S106"]}
+{"id": "LW-040070", "path": "tests/vibesys/search/hypothesis/test_state_store.py", "rules": ["ANN001"]}
+{"id": "LW-040071", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["FIX002", "TD003"]}
+{"id": "LW-040072", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["FIX002", "TD003"]}
+{"id": "LW-040073", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["S106"]}
+{"id": "LW-040074", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["PLR0913"]}
+{"id": "LW-040075", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["PLR0913"]}
+{"id": "LW-040076", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["FBT001"]}
+{"id": "LW-040077", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["PLR0913"]}
+{"id": "LW-040078", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["FBT001"]}
+{"id": "LW-040079", "path": "tests/vibesys/search/hypothesis_search/test_search.py", "rules": ["FBT001"]}
+{"id": "LW-040080", "path": "tests/vibesys/search/population/test_openevolve_selector_equivalence.py", "rules": ["SLF001"]}
+{"id": "LW-040081", "path": "tests/vibesys/search/population/test_openevolve_selector_equivalence.py", "rules": ["SLF001"]}
+{"id": "LW-040082", "path": "tests/vibesys/search/population/test_openevolve_selector_equivalence.py", "rules": ["SLF001"]}
+{"id": "LW-040083", "path": "tests/vibesys/search/population/test_openevolve_selector_equivalence.py", "rules": ["SLF001"]}
+{"id": "LW-040084", "path": "tests/vibesys/search/profile_focus/test_focus.py", "rules": ["ANN001", "ANN202"]}
+{"id": "LW-040085", "path": "tests/vibesys/search/profile_focus/test_focus.py", "rules": ["ANN001", "ANN202"]}

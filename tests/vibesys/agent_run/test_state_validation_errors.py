@@ -22,7 +22,7 @@ from vibesys.agent_run.state import (
     ProfileGuidedComponent,
     ProfileImprovementSample,
 )
-from vibesys.schemas import HypothesisStrategyUpdate, OrchestratorPlan
+from vibesys.search.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 
 

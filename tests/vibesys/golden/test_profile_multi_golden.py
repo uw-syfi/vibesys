@@ -69,11 +69,11 @@ from vibesys.profilers import ProfilerKind
 from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,
-    OrchestratorPlan,
     PreRoundDecision,
     ProfilerSummary,
     Verdict,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:

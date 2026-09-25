@@ -12,7 +12,7 @@ from vibesys.loops.profile_single.hypothesis import (
     ProfileGuidanceOutcome,
     ProfileGuidedHypothesisController,
 )
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 
 

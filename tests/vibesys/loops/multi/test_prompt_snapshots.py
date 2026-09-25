@@ -23,10 +23,10 @@ from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,
-    OrchestratorPlan,
     PreRoundDecision,
     SingleAgentRoundResponse,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.cli_common import build_schema_hint
 
 _ROOT = Path(__file__).resolve().parents[4]

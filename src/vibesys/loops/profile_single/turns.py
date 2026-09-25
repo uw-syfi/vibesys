@@ -27,12 +27,12 @@ from vibesys.profilers import (
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.render.sink import output_sink
 from vibesys.schemas import (
-    OrchestratorPlan,
     SingleAgentRoundResponse,
     SkillResourceSelection,
     Verdict,
     normalize_hypothesis_title,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
 from vs_agent.api import AgentSessionKey, SessionScope
 

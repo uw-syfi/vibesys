@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from tests.support import make_orchestrator_plan
 
 from vibesys.agent_run.state import AgentRunState, Hypothesis
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
 
 
 def _plan() -> OrchestratorPlan:

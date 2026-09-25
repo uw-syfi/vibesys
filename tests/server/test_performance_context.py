@@ -18,7 +18,7 @@ from vibesys.agent_run.state import (
 )
 from vibesys.api.contracts import RunStatus
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
 

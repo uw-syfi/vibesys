@@ -31,15 +31,14 @@ from vibesys.loops.profile_multi.turns import (
 from vibesys.profilers import ProfilerKind
 from vibesys.schemas import (
     HypothesisOutcome,
-    HypothesisStrategyUpdate,
     ImplementerResponse,
     JudgeResponse,
-    OrchestratorPlan,
     PreRoundDecision,
     ProfilerSummary,
     SkillResourceSelection,
     Verdict,
 )
+from vibesys.search.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
 
 if TYPE_CHECKING:
     from pathlib import Path

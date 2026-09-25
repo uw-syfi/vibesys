@@ -21,7 +21,7 @@ from vibesys.schemas import Verdict
     [(Verdict.PASS, "pass"), (Verdict.FAIL, "fail")],
 )
 def test_reviewed_attempt_records_its_verdict(verdict: Verdict, expected: str) -> None:
-    outcome = JudgeReviewed(verdict)
+    outcome = JudgeReviewed(verdict.value)
 
     assert attempt_was_reviewed(outcome) is True
     assert recorded_judge_verdict(outcome) == expected
@@ -39,13 +39,13 @@ def test_skipped_attempt_records_deferred_whatever_the_reason(reason: JudgeSkipR
 def test_a_skipped_attempt_cannot_carry_a_verdict() -> None:
     """The two variants are disjoint, so 'verdict without review' has no value."""
     assert not hasattr(JudgeSkipped(JudgeSkipReason.NOT_REACHED), "verdict")
-    assert not hasattr(JudgeReviewed(Verdict.PASS), "reason")
+    assert not hasattr(JudgeReviewed(Verdict.PASS.value), "reason")
 
 
 def test_an_attempt_outcome_is_immutable() -> None:
     """An attempt's result is replaced by the next attempt, never updated."""
-    outcome = JudgeReviewed(Verdict.PASS)
+    outcome = JudgeReviewed(Verdict.PASS.value)
     attribute = "verdict"
 
     with pytest.raises(dataclasses.FrozenInstanceError):
-        setattr(outcome, attribute, Verdict.FAIL)
+        setattr(outcome, attribute, Verdict.FAIL.value)

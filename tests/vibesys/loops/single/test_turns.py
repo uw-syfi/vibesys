@@ -19,12 +19,13 @@ from vibesys.loops.single.hypothesis import HypothesisEngine
 from vibesys.loops.single.session import AttemptRequest, PlanRequest
 from vibesys.loops.single.turns import InvalidPlanError, SingleAgentTurns
 from vibesys.profilers import ProfilerKind
-from vibesys.schemas import OrchestratorPlan, SingleAgentRoundResponse, Verdict
+from vibesys.schemas import SingleAgentRoundResponse, Verdict
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.search.hypothesis import OrchestratorPlan
 
 
 def _plan(hypothesis_id: str) -> OrchestratorPlan:

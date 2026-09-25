@@ -19,7 +19,7 @@ from vibesys.agent_run.state import (
 if TYPE_CHECKING:
     from vibesys.agent_run.state import Hypothesis
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
-    from vibesys.schemas import OrchestratorPlan
+    from vibesys.search.hypothesis import OrchestratorPlan
     from vs_loop_state.api import RoundRecord
 
 

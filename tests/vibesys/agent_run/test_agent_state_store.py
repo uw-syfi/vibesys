@@ -5,7 +5,7 @@ from pathlib import Path
 from tests.support import make_orchestrator_plan
 
 from vibesys.agent_run.state import AgentRunState, AgentRunStateStore, Hypothesis
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_project.api import (
     OrchestrationDescriptor,
     Project,

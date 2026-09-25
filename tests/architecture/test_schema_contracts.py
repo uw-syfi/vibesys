@@ -13,7 +13,6 @@ from vibesys.schemas import (
     JudgeResponse,
     LatencyStats,
     LoadLevelMetrics,
-    OrchestratorPlan,
     ProfilerSummary,
     SingleAgentRoundResponse,
     SkillResourceSelection,
@@ -22,6 +21,7 @@ from vibesys.schemas import (
     derive_hypothesis_title,
     normalize_hypothesis_title,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 
 
 def _profiler_summary(

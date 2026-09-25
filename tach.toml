@@ -176,7 +176,28 @@ depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vib
 
 [[modules]]
 path = "vibesys.agent_run"
-depends_on = ["vs_project", "vibesys", "vs_loop_state", "vibesys.orchestration.view", "vibesys.orchestration", "vibesys.evaluators"]
+depends_on = ["vs_project", "vibesys", "vs_loop_state", "vibesys.orchestration.view", "vibesys.orchestration", "vibesys.evaluators", "vibesys.search.hypothesis", "vibesys.search.profile_focus"]
+
+[[modules]]
+# Pure, deterministic search policy packages: no RunContext, agents, prompts,
+# filesystem, clocks, or global RNG (enforced by
+# tests/vibesys/architecture/test_search_purity.py). Each of hypothesis/,
+# profile_focus/, and population/ is its own API; there is no shared
+# interface across them.
+path = "vibesys.search"
+depends_on = []
+
+[[modules]]
+path = "vibesys.search.hypothesis"
+depends_on = ["vibesys", "vibesys.evaluators", "vibesys.search.profile_focus", "vs_loop_state", "vs_project"]
+
+[[modules]]
+path = "vibesys.search.profile_focus"
+depends_on = []
+
+[[modules]]
+path = "vibesys.search.population"
+depends_on = ["vibesys.evaluators", "vibesys"]
 
 [[modules]]
 path = "vibesys.loops"
@@ -184,19 +205,19 @@ depends_on = []
 
 [[modules]]
 path = "vibesys.loops.single"
-depends_on = ["vs_agent", "vibesys.evaluators", "vibesys.render", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.agent_run", "vibesys.prompts", "vs_project"]
+depends_on = ["vs_agent", "vibesys.evaluators", "vibesys.render", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.agent_run", "vibesys.prompts", "vs_project", "vibesys.search.hypothesis"]
 
 [[modules]]
 path = "vibesys.loops.multi"
-depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view"]
+depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.search.hypothesis"]
 
 [[modules]]
 path = "vibesys.loops.profile_single"
-depends_on = ["vs_loop_state", "vibesys.orchestration.runtime", "vibesys.render", "vibesys.context", "vibesys", "vibesys.prompts", "vs_project", "vibesys.agent_run", "vibesys.domains", "vs_agent", "vibesys.evaluators", "vibesys.orchestration.view"]
+depends_on = ["vs_loop_state", "vibesys.orchestration.runtime", "vibesys.render", "vibesys.context", "vibesys", "vibesys.prompts", "vs_project", "vibesys.agent_run", "vibesys.domains", "vs_agent", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.search.hypothesis"]
 
 [[modules]]
 path = "vibesys.loops.profile_multi"
-depends_on = ["vibesys.render", "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.prompts", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent"]
+depends_on = ["vibesys.render", "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.prompts", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent", "vibesys.search.hypothesis"]
 
 [[modules]]
 path = "vibesys.loops.issue_queue"

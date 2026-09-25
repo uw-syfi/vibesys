@@ -26,11 +26,13 @@ from vibesys.loops.profile_single.session import (
     ProfileSingleSessionError,
     RoundSelection,
 )
-from vibesys.schemas import OrchestratorPlan, SingleAgentRoundResponse, Verdict
+from vibesys.schemas import SingleAgentRoundResponse, Verdict
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vibesys.search.hypothesis import OrchestratorPlan
 
 
 def _plan() -> OrchestratorPlan:
@@ -321,7 +323,7 @@ async def test_passed_profile_round_commits_record_and_publishes_finished_event(
     selected.attempt.passed = True
     selected.attempt.retry = 1
     selected.attempt.single_agent_response = _response(Verdict.PASS)
-    selected.attempt.judge = JudgeReviewed(Verdict.PASS)
+    selected.attempt.judge = JudgeReviewed(Verdict.PASS.value)
     checkpoint = AsyncMock(return_value="state-revision")
     events = MagicMock()
     monkeypatch.setattr(

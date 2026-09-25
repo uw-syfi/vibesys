@@ -34,13 +34,13 @@ from vibesys.schemas import (
     HypothesisOutcome,
     ImplementerResponse,
     JudgeResponse,
-    OrchestratorPlan,
     PreRoundDecision,
     ProfilerSummary,
     ValidationRecipe,
     ValidationRecipeArtifact,
     Verdict,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
