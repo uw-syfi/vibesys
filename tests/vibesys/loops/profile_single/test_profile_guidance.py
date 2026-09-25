@@ -52,10 +52,7 @@ def _config() -> ProfileGuidedInput:
 
 
 def _framed(payload: str) -> str:
-    return (
-        f"diagnostic\n{runner._BEGIN}\n{payload}\n"  # noqa: SLF001
-        f"{runner._END}\n"  # noqa: SLF001
-    )
+    return f"diagnostic\n__VIBESYS_ATTRIBUTION_BEGIN__\n{payload}\n__VIBESYS_ATTRIBUTION_END__\n"
 
 
 @pytest.mark.asyncio

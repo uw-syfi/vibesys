@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from server.chat.manager import ChatAnswer, TerminalChatResource
 
 
-def test_installing_handler_takes_over_from_fallback(tmp_path):  # noqa: ANN001, ANN201
+def test_installing_handler_takes_over_from_fallback(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     assert parts.chat.default_agent_available() is False
 
@@ -32,7 +32,7 @@ def test_installing_handler_takes_over_from_fallback(tmp_path):  # noqa: ANN001,
     assert "chat agent is not available" in parts.chat.chat("and round 4?")
 
 
-def test_retained_resource_remains_available_until_explicit_close(tmp_path):  # noqa: ANN001, ANN201
+def test_retained_resource_remains_available_until_explicit_close(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.chat.enable_terminal_retention()
     closed = threading.Event()
@@ -51,7 +51,7 @@ def test_retained_resource_remains_available_until_explicit_close(tmp_path):  # 
     assert parts.chat.default_agent_available() is False
 
 
-def test_terminal_cleanup_waits_for_in_flight_answer(tmp_path):  # noqa: ANN001, ANN201
+def test_terminal_cleanup_waits_for_in_flight_answer(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.chat.enable_terminal_retention()
     handler_started = threading.Event()

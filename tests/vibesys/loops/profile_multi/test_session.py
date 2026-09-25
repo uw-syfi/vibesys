@@ -1,6 +1,6 @@
 """Profile multi durable decisions with fake host capabilities."""
 
-# ruff: noqa: SLF001  # These tests exercise the strategy's owned decision seams.
+# ruff: noqa: SLF001  # LW-030011; These tests exercise the strategy's owned decision seams.
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from tests.support import make_orchestrator_plan
 
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed, JudgeSkipped
 from vibesys.agent_run.evidence import CarryOver
@@ -50,11 +51,11 @@ def _config() -> ProfileGuidedInput:
 
 
 def _plan(*, hypothesis_id: str = "h1") -> OrchestratorPlan:
-    return OrchestratorPlan(
+    return make_orchestrator_plan(
         hypothesis_id=hypothesis_id,
         hypothesis="Cache decode",
         task="Implement cache",
-        pass_criteria="Candidate behaves correctly",  # noqa: S106
+        criteria="Candidate behaves correctly",
         reasoning="The profile identifies decode overhead",
     )
 
@@ -171,7 +172,9 @@ def test_initialize_and_pre_round_cursor_checkpoint_before_plan(
 
     order: list[str] = []
 
-    async def attribution(_ctx: object, _config: ProfileGuidedInput, *, round_number: int):  # noqa: ANN202
+    async def attribution(
+        _ctx: object, _config: ProfileGuidedInput, *, round_number: int
+    ) -> tuple[()]:
         order.append(f"attribution:{round_number}")
         return ()
 

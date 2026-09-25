@@ -27,7 +27,7 @@ from vibesys.skypilot.runner import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
 
 def _resources(**overrides: object) -> ResolvedSkyPilotResources:
@@ -58,11 +58,12 @@ class FakeCommandRunner:
         self,
         argv: Sequence[str],
         *,
-        timeout: float | None = None,  # noqa: ARG002
-        cwd: Path | None = None,  # noqa: ARG002
+        timeout: float | None = None,
+        cwd: Path | None = None,
         stdout_sink: Callable[[str], None] | None = None,
         stderr_sink: Callable[[str], None] | None = None,
     ) -> ProcessResult:
+        del timeout, cwd
         normalized = tuple(argv)
         self.calls.append(normalized)
         if normalized[-1].endswith("task.yaml"):
@@ -362,3 +363,201 @@ def test_process_boundary_failures_are_typed(
 
     with pytest.raises(error):
         runner.inspect_cluster("lease", timeout=1)
+
+
+def _queue(*jobs: Mapping[str, object], cluster: str = "lease") -> ProcessResult:
+    return _result(stdout=json.dumps({cluster: list(jobs)}))
+
+
+def test_missing_executable_error_names_the_executable() -> None:
+    runner = SkyPilotJobRunner(FakeCommandRunner([FileNotFoundError("sky")]), executable="my-sky")
+
+    with pytest.raises(SkyPilotCLIError, match="'my-sky' was not found"):
+        runner.release("lease")
+
+
+def test_command_timeout_error_reports_the_timeout() -> None:
+    runner = SkyPilotJobRunner(FakeCommandRunner([subprocess.TimeoutExpired(("sky", "down"), 5)]))
+
+    with pytest.raises(SkyPilotTimeoutError, match="timed out after 5 seconds"):
+        runner.release("lease", timeout=5)
+
+
+def test_control_failure_reports_operation_and_exit_code() -> None:
+    runner = SkyPilotJobRunner(FakeCommandRunner([_result(3)]))
+
+    with pytest.raises(SkyPilotControlPlaneError, match="SkyPilot cancel failed with exit code 3"):
+        runner.cancel("lease", 7)
+
+
+@pytest.mark.parametrize(
+    ("stdout", "message"),
+    [
+        ('{"clusters": "nope"}', "must contain a cluster list"),
+        ("7", "must contain a cluster list"),
+    ],
+)
+def test_inspect_cluster_rejects_status_without_cluster_list(stdout: str, message: str) -> None:
+    runner = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=stdout)]))
+
+    with pytest.raises(SkyPilotOutputError, match=message):
+        runner.inspect_cluster("lease")
+
+
+def test_inspect_cluster_rejects_invalid_json_with_message() -> None:
+    runner = SkyPilotJobRunner(FakeCommandRunner([_result(stdout="{")]))
+
+    with pytest.raises(SkyPilotOutputError, match="status returned invalid JSON"):
+        runner.inspect_cluster("lease")
+
+
+def test_ensure_rejects_unknown_cluster_status() -> None:
+    fake = FakeCommandRunner([_result(stdout=json.dumps([{"name": "lease", "status": "ODD"}]))])
+
+    with pytest.raises(SkyPilotClusterNotReadyError, match="'lease' has an unknown status"):
+        SkyPilotJobRunner(fake).ensure_cluster("lease", _resources())
+
+
+def test_ensure_reports_cluster_that_disappears_while_initializing() -> None:
+    fake = FakeCommandRunner(
+        [
+            _result(stdout=json.dumps([{"name": "lease", "status": "INIT"}])),
+            _result(stdout="[]"),
+        ]
+    )
+
+    with pytest.raises(SkyPilotClusterNotReadyError, match="became absent while initializing"):
+        SkyPilotJobRunner(fake).ensure_cluster("lease", _resources())
+
+
+def _ticking_clock() -> Callable[[], float]:
+    ticks = iter(range(1000))
+    return lambda: float(next(ticks))
+
+
+def test_ensure_times_out_when_cluster_stays_initializing() -> None:
+    init = json.dumps([{"name": "lease", "status": "INIT"}])
+    fake = FakeCommandRunner([_result(stdout=init) for _ in range(10)])
+    sleeps: list[float] = []
+    runner = SkyPilotJobRunner(fake, sleep=sleeps.append, monotonic=_ticking_clock())
+
+    with pytest.raises(SkyPilotTimeoutError, match="'lease' remained INIT"):
+        runner.ensure_cluster("lease", _resources(), timeout=3)
+
+    assert not sleeps
+
+
+def test_operation_deadline_is_enforced_before_the_next_command() -> None:
+    now = [0.0]
+    fake = FakeCommandRunner([_result(stdout="[]")])
+
+    def clock() -> float:
+        value = now[0]
+        now[0] += 100
+        return value
+
+    runner = SkyPilotJobRunner(fake, monotonic=clock)
+
+    with pytest.raises(SkyPilotTimeoutError, match="operation exceeded its deadline"):
+        runner.ensure_cluster("lease", _resources(), timeout=50)
+
+
+def test_run_rejects_negative_log_tail(tmp_path: Path) -> None:
+    runner = SkyPilotJobRunner(FakeCommandRunner([]))
+
+    with pytest.raises(ValueError, match="log tail must be nonnegative"):
+        runner.run("lease", _resources(), workdir=tmp_path, command=("x",), log_tail=-1)
+
+
+def test_run_with_existing_job_skips_submission_and_reports_job(tmp_path: Path) -> None:
+    fake = FakeCommandRunner([_result(0, "out")])
+    started: list[int] = []
+
+    result = SkyPilotJobRunner(fake).run(
+        "lease",
+        _resources(),
+        workdir=tmp_path,
+        command=("x",),
+        existing_job_id=9,
+        job_started=started.append,
+        log_tail=5,
+    )
+
+    assert started == [9]
+    assert result.remote_job_id == 9
+    assert fake.calls == [("sky", "logs", "lease", "9", "--tail", "5")]
+
+
+@pytest.mark.parametrize(
+    ("returncode", "expected", "message"),
+    [
+        (101, SkyPilotJobStateError, "job state code 101 for job 7"),
+        (102, SkyPilotJobStateError, "job state code 102 for job 7"),
+        (2, SkyPilotControlPlaneError, "logs failed with exit code 2"),
+    ],
+)
+def test_run_log_failures_carry_code_and_job(
+    tmp_path: Path, returncode: int, expected: type[Exception], message: str
+) -> None:
+    fake = FakeCommandRunner([_result(returncode)])
+
+    with pytest.raises(expected, match=message):
+        SkyPilotJobRunner(fake).run(
+            "lease", _resources(), workdir=tmp_path, command=("x",), existing_job_id=7
+        )
+
+
+@pytest.mark.parametrize(
+    ("stdout", "message"),
+    [
+        ("not-json", "queue returned invalid JSON"),
+        ('{"other": []}', "must map the cluster name to a job list"),
+        ('{"lease": [1]}', "must map the cluster name to a job list"),
+        ('{"lease": [{"job_name": "j", "job_id": "7"}]}', "non-integer job ID"),
+        ('{"lease": [{"job_name": "j", "job_id": true}]}', "non-integer job ID"),
+        ('{"lease": [{"job_name": "j", "job_id": 7, "status": "???"}]}', "unknown job status"),
+    ],
+)
+def test_query_job_rejects_malformed_queue_output(stdout: str, message: str) -> None:
+    runner = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=stdout)]))
+
+    with pytest.raises(SkyPilotOutputError, match=message):
+        runner.query_job("lease", job_name="j")
+
+
+def test_query_job_rejects_duplicates_and_changed_ids() -> None:
+    job = {"job_name": "j", "job_id": 7}
+    fake = FakeCommandRunner([_queue(job, job), _queue(job)])
+    runner = SkyPilotJobRunner(fake)
+
+    with pytest.raises(SkyPilotOutputError, match="duplicate jobs named 'j'"):
+        runner.query_job("lease", job_name="j")
+    with pytest.raises(SkyPilotOutputError, match="'j' changed ID from 3 to 7"):
+        runner.query_job("lease", job_name="j", job_id=3)
+
+
+def test_query_job_returns_none_when_absent_and_parses_status() -> None:
+    fake = FakeCommandRunner(
+        [_queue(), _queue({"job_name": "j", "job_id": 7, "status": "succeeded"})]
+    )
+    runner = SkyPilotJobRunner(fake)
+
+    assert runner.query_job("lease", job_name="j") is None
+    found = runner.query_job("lease", job_name="j", job_id=7)
+    assert found is not None
+    assert (found.job_id, found.job_name) == (7, "j")
+
+
+def test_run_times_out_when_job_never_appears_in_queue(tmp_path: Path) -> None:
+    fake = FakeCommandRunner([_result(), _queue()])
+    runner = SkyPilotJobRunner(
+        fake, monotonic=_ticking_clock(), sleep=lambda _: None, job_name_factory=lambda: "j"
+    )
+
+    with pytest.raises(SkyPilotTimeoutError, match="did not expose job 'j'"):
+        runner.run("lease", _resources(), workdir=tmp_path, command=("x",), timeout=4)
+
+
+def test_task_document_rejects_empty_command() -> None:
+    with pytest.raises(ValueError, match="command must not be empty"):
+        build_task_document(_resources(), command=())

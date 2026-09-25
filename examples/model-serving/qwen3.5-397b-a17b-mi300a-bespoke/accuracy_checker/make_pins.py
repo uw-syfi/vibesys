@@ -28,6 +28,7 @@ from pathlib import Path
 
 BUNDLE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# lint-waiver: LW-008011 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from checker import EXACT_PREFIX_TOKENS, HOLDOUT_WORD_BANK, PINS_SCHEMA_VERSION  # noqa: E402
 
 PINS_SEED = 20260301  # distinct from the benchmark and holdout seeds.

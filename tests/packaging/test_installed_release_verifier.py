@@ -101,11 +101,17 @@ def test_sdk_sync_uses_the_running_isolated_interpreter(tmp_path: Path) -> None:
 
 def test_required_system_tools_reject_missing_git(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(verifier.shutil, "which", lambda _executable: None)
+    monkeypatch.setattr(verifier.site, "ENABLE_USER_SITE", False)
+    monkeypatch.setattr(verifier, "_RUNTIME_ROOT", Path.cwd().resolve())
+    monkeypatch.setenv("PYTHONNOUSERSITE", "1")
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
 
     with pytest.raises(verifier.InstalledReleaseError, match="git"):
-        verifier._verify_required_system_tools()  # noqa: SLF001
+        verifier.verify_installed_release()
 
 
 def test_tui_verification_checks_controller_startup_and_completed_headless_run(
@@ -175,8 +181,14 @@ observed_path.write_text(json.dumps(observed))
     monkeypatch.setenv("PATH", str(fake_bin))
     monkeypatch.setenv("VIBESYS_TEST_OBSERVED", str(observed))
     monkeypatch.setattr(verifier, "_verify_project_state", lambda _root: None)
+    monkeypatch.setattr(verifier, "_verify_isolated_interpreter", lambda: None)
+    monkeypatch.setattr(verifier, "_verify_framework_imports", lambda: None)
+    monkeypatch.setattr(verifier, "verify_console_entry_point", lambda: None)
+    monkeypatch.setattr(verifier, "verify_first_launch_defaults", lambda: None)
+    monkeypatch.setattr(verifier, "_verify_resources", lambda: None)
+    monkeypatch.setattr(verifier, "_verify_materialized_sdk", lambda: None)
 
-    verifier._verify_tui()  # noqa: SLF001
+    verifier.verify_installed_release()
 
     common_arguments = [
         "--stub-agent",
@@ -294,7 +306,12 @@ def test_project_smoke_requires_exactly_one_run(
 
     monkeypatch.setattr(verifier, "Project", _ProjectWithoutRuns)
     with pytest.raises(verifier.InstalledReleaseError, match="exactly one run"):
-        verifier._verify_project_state(tmp_path)  # noqa: SLF001
+        _verify_project_state_in_isolation(tmp_path)
+
+
+def _verify_project_state_in_isolation(project_root: Path) -> None:
+    # lint-waiver: LW-010042 [SLF001]; focused installed-release tests call this internal verifier directly to isolate persisted-project-state checks from the subprocess smoke test.
+    verifier._verify_project_state(project_root)  # noqa: SLF001
 
 
 def test_project_smoke_reads_rounds_from_authoritative_agent_state(
@@ -342,4 +359,4 @@ def test_project_smoke_reads_rounds_from_authoritative_agent_state(
     monkeypatch.setattr(verifier, "Project", _Project)
     monkeypatch.setattr(verifier, "AgentRunStateStore", _AgentStateStore)
 
-    verifier._verify_project_state(tmp_path)  # noqa: SLF001
+    _verify_project_state_in_isolation(tmp_path)

@@ -12,7 +12,7 @@ from vs_agent.callbacks import AgentLogger
 
 
 class TestProviderShapes:
-    def test_claude_code_todo_write(self):  # noqa: ANN201  # tracked: #288
+    def test_claude_code_todo_write(self) -> None:
         items = todos_from_tool_call(
             "TodoWrite",
             {
@@ -27,18 +27,18 @@ class TestProviderShapes:
             TodoItemData(content="Vectorize", status="in_progress"),
         ]
 
-    def test_opencode_and_gemini_share_the_todos_shape(self):  # noqa: ANN201  # tracked: #288
+    def test_opencode_and_gemini_share_the_todos_shape(self) -> None:
         for tool in ("todowrite", "write_todos"):
             items = todos_from_tool_call(tool, {"todos": [{"content": "A", "status": "pending"}]})
             assert items == [TodoItemData(content="A", status="pending")]
 
-    def test_gemini_description_key(self):  # noqa: ANN201  # tracked: #288
+    def test_gemini_description_key(self) -> None:
         items = todos_from_tool_call(
             "write_todos", {"todos": [{"description": "Read the ABI contract"}]}
         )
         assert items == [TodoItemData(content="Read the ABI contract", status="pending")]
 
-    def test_codex_update_plan(self):  # noqa: ANN201  # tracked: #288
+    def test_codex_update_plan(self) -> None:
         items = todos_from_tool_call(
             "update_plan",
             {
@@ -54,7 +54,7 @@ class TestProviderShapes:
             TodoItemData(content="Tune the queue size", status="pending"),
         ]
 
-    def test_codex_todo_list_item_with_completed_booleans(self):  # noqa: ANN201  # tracked: #288
+    def test_codex_todo_list_item_with_completed_booleans(self) -> None:
         items = todos_from_tool_call(
             "todo_list",
             {"items": [{"text": "Build", "completed": True}, {"text": "Test", "completed": False}]},
@@ -66,16 +66,16 @@ class TestProviderShapes:
 
 
 class TestDegradation:
-    def test_unrelated_tools_are_not_todo_updates(self):  # noqa: ANN201  # tracked: #288
+    def test_unrelated_tools_are_not_todo_updates(self) -> None:
         assert todos_from_tool_call("Bash", {"command": "ls"}) is None
         assert todos_from_tool_call("Write", {"content": "todos: []"}) is None
 
-    def test_payload_without_the_expected_list_is_no_update(self):  # noqa: ANN201  # tracked: #288
+    def test_payload_without_the_expected_list_is_no_update(self) -> None:
         assert todos_from_tool_call("TodoWrite", {}) is None
         assert todos_from_tool_call("TodoWrite", {"todos": "not-a-list"}) is None
         assert todos_from_tool_call("update_plan", {"plan": {"step": "x"}}) is None
 
-    def test_malformed_entries_are_skipped_not_fatal(self):  # noqa: ANN201  # tracked: #288
+    def test_malformed_entries_are_skipped_not_fatal(self) -> None:
         items = todos_from_tool_call(
             "TodoWrite",
             {
@@ -89,19 +89,19 @@ class TestDegradation:
         )
         assert items == [TodoItemData(content="Real item", status="pending")]
 
-    def test_unknown_status_strings_pass_through(self):  # noqa: ANN201  # tracked: #288
+    def test_unknown_status_strings_pass_through(self) -> None:
         items = todos_from_tool_call(
             "TodoWrite", {"todos": [{"content": "Odd", "status": "deferred"}]}
         )
         assert items == [TodoItemData(content="Odd", status="deferred")]
 
-    def test_missing_status_defaults_to_pending(self):  # noqa: ANN201  # tracked: #288
+    def test_missing_status_defaults_to_pending(self) -> None:
         items = todos_from_tool_call("TodoWrite", {"todos": [{"content": "Bare"}]})
         assert items == [TodoItemData(content="Bare", status="pending")]
 
 
 class TestAgentLoggerPublishing:
-    def test_cli_todo_tool_call_publishes_a_todo_update(self):  # noqa: ANN201  # tracked: #288
+    def test_cli_todo_tool_call_publishes_a_todo_update(self) -> None:
         seen: list[CoreEvent] = []
         unsubscribe = output_sink().subscribe(seen.append)
         try:
@@ -113,7 +113,7 @@ class TestAgentLoggerPublishing:
         assert len(updates) == 1
         assert updates[0].todos == [TodoItemData(content="A", status="pending")]
 
-    def test_non_todo_tool_call_publishes_no_todo_update(self):  # noqa: ANN201  # tracked: #288
+    def test_non_todo_tool_call_publishes_no_todo_update(self) -> None:
         seen: list[CoreEvent] = []
         unsubscribe = output_sink().subscribe(seen.append)
         try:
@@ -123,7 +123,7 @@ class TestAgentLoggerPublishing:
             unsubscribe()
         assert not any(isinstance(e.data, TodoUpdateData) for e in seen)
 
-    def test_empty_snapshot_is_extracted_but_not_published(self):  # noqa: ANN201  # tracked: #288
+    def test_empty_snapshot_is_extracted_but_not_published(self) -> None:
         # The sink drops empty lists, so a cleared plan is a no-op on the
         # wire rather than an event with no payload.
         seen: list[CoreEvent] = []

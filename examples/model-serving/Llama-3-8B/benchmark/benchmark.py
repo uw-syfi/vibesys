@@ -89,7 +89,10 @@ async def run_benchmark(args: argparse.Namespace) -> dict:
 
         # Warmup
         if args.warmup_requests > 0:
-            warmup_send = lambda i: send(i)  # noqa: E731
+
+            async def warmup_send(index: int) -> dict[str, object]:
+                return await send(index)
+
             from vs_bench.schedule import closed_loop
 
             warmup_result = await run(

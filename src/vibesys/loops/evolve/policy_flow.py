@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.loops.evolve.population import Individual
+from vibesys.loops.evolve.search_policy import SearchSelectionParameters
 
 if TYPE_CHECKING:
     import random
@@ -84,12 +85,14 @@ class EvolveSearch:
         """Select from current population and checkpoint the policy's sampler state."""
         selection = self.search_policy.select(
             self.population,
-            rng=rng,
-            k_top_inspirations=settings.top_inspirations,
-            k_random_inspirations=settings.random_inspirations,
-            selection_temperature=settings.temperature,
-            space=self.space,
-            frontier_bias=settings.frontier_bias,
+            SearchSelectionParameters(
+                rng=rng,
+                k_top_inspirations=settings.top_inspirations,
+                k_random_inspirations=settings.random_inspirations,
+                selection_temperature=settings.temperature,
+                space=self.space,
+                frontier_bias=settings.frontier_bias,
+            ),
         )
         await effects.checkpoint("evolve: record search selection")
         if selection is None:

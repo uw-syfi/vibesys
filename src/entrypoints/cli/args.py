@@ -31,7 +31,8 @@ def _parse_profiler_kind(value: str) -> ProfilerKind:
 
 def _parse_runs_dir(value: str) -> Path:
     if not value.strip():
-        raise argparse.ArgumentTypeError("must not be empty")  # noqa: TRY003  # tracked: #288
+        message = "must not be empty"
+        raise argparse.ArgumentTypeError(message)
     return Path(value)
 
 
@@ -596,16 +597,19 @@ def _parse_command_flag(raw: str, flag: str) -> tuple[str, ...]:
 def _parse_cli_objective(spec: str) -> Objective:
     """Parse a ``--objective`` flag value (``name:direction``)."""
     if ":" not in spec:
-        raise argparse.ArgumentTypeError(f"--objective {spec!r} must be 'name:max' or 'name:min'")  # noqa: TRY003  # tracked: #288
+        message = f"--objective {spec!r} must be 'name:max' or 'name:min'"
+        raise argparse.ArgumentTypeError(message)
     name, _, direction = spec.partition(":")
     name = name.strip()
     direction = direction.strip().lower()
     if not name:
-        raise argparse.ArgumentTypeError(f"--objective {spec!r}: metric name is empty")  # noqa: TRY003  # tracked: #288
+        _exception_message = f"--objective {spec!r}: metric name is empty"
+        raise argparse.ArgumentTypeError(_exception_message)
     if direction not in ("max", "min"):
-        raise argparse.ArgumentTypeError(  # noqa: TRY003  # tracked: #288
+        _exception_message_2 = (
             f"--objective {spec!r}: direction must be 'max' or 'min', got {direction!r}"
         )
+        raise argparse.ArgumentTypeError(_exception_message_2)
     return Objective(name=name, direction=direction)
 
 

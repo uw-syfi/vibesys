@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 try:
     import checker
-except Exception as exc:  # noqa: BLE001 -- env-dependent import; skip, don't fail.
+except Exception as exc:
     checker = None
     _IMPORT_ERROR = exc
 else:
@@ -125,7 +125,7 @@ class LoadPinsTests(unittest.TestCase):
 class _FakeTokenizer:
     """Maps chr(65 + id) text back to ids, so the fake server can emit text."""
 
-    def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:  # noqa: FBT001, FBT002
+    def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
         return [ord(c) - 65 for c in text]
 
 
@@ -151,7 +151,7 @@ class _FakeClient:
         self._text = text
         self.bodies: list[dict] = []
 
-    def post(self, url: str, json: dict, timeout: object) -> _FakePost:  # noqa: A002
+    def post(self, url: str, json: dict, timeout: object) -> _FakePost:
         self.bodies.append(json)
         return _FakePost(
             {"choices": [{"message": {"content": self._text}, "finish_reason": "length"}]}

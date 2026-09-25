@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
-from vibesys.constants import DomainName  # noqa: TC001  # tracked: #288
-from vibesys.domains.environment import EnvironmentHooks  # noqa: TC001  # tracked: #288
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from vibesys.constants import DomainName
+    from vibesys.domains.environment import EnvironmentHooks
 
 
-class DomainRole(StrEnum):  # noqa: D101  # tracked: #288
+class DomainRole(StrEnum):
+    """Agent roles a domain may define prompt content for."""
+
     IMPLEMENTER = "implementer"
     JUDGE = "judge"
     SINGLE_AGENT = "single_agent"
@@ -25,7 +30,9 @@ DOMAIN_ROLES: tuple[DomainRole, ...] = tuple(DomainRole)
 
 
 @dataclass(frozen=True)
-class DomainDefinition:  # noqa: D101  # tracked: #288
+class DomainDefinition:
+    """Prompt and environment metadata registered for one domain."""
+
     name: DomainName
     prompt_dir: Path
     environment_hooks: EnvironmentHooks

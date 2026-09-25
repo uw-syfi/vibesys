@@ -18,19 +18,29 @@ from vibesys.events import (
 )
 
 
-def _render(*payloads: tuple[CoreEventType, CoreEventData], **kwargs) -> str:  # noqa: ANN003  # tracked: #288
+def _render(
+    *payloads: tuple[CoreEventType, CoreEventData],
+    color: bool = True,
+    max_result_len: int | None = HeadlessRenderer.DEFAULT_MAX_RESULT_LEN,
+    max_text_len: int | None = HeadlessRenderer.DEFAULT_MAX_TEXT_LEN,
+) -> str:
     out = StringIO()
-    renderer = HeadlessRenderer(out=out, **kwargs)
+    renderer = HeadlessRenderer(
+        out=out,
+        color=color,
+        max_result_len=max_result_len,
+        max_text_len=max_text_len,
+    )
     for event_type, data in payloads:
         renderer.handle(make_core_event(event_type, data=data))
     return out.getvalue()
 
 
-def _chunk(  # noqa: ANN202  # tracked: #288
+def _chunk(
     content: str,
     channel: AgentOutputChannel = "assistant",
     status: AgentStatusData | None = None,
-):
+) -> tuple[CoreEventType, CoreEventData]:
     return (
         CoreEventType.AGENT_OUTPUT_CHUNK,
         AgentOutputChunkData(channel=channel, content=content, status=status),
@@ -46,48 +56,48 @@ _STATUS = AgentStatusData(
 
 
 class TestAssistantStreaming:
-    def test_tokens_stream_without_newlines(self):  # noqa: ANN201  # tracked: #288
+    def test_tokens_stream_without_newlines(self) -> None:
         assert _render(_chunk("hel"), _chunk("lo")) == "hello"
 
-    def test_prefix_written_once_at_line_start(self):  # noqa: ANN201  # tracked: #288
+    def test_prefix_written_once_at_line_start(self) -> None:
         out = _render(_chunk("hel", status=_STATUS), _chunk("lo", status=_STATUS))
         assert out == "[Implementer | 12.3s | 20k/1.0M] hello"
 
-    def test_no_prefix_for_anonymous_status(self):  # noqa: ANN201  # tracked: #288
+    def test_no_prefix_for_anonymous_status(self) -> None:
         assert _render(_chunk("hi")) == "hi"
 
-    def test_line_broken_before_next_surface(self):  # noqa: ANN201  # tracked: #288
+    def test_line_broken_before_next_surface(self) -> None:
         out = _render(_chunk("partial"), _chunk("diag\n", channel="diagnostic"))
         assert out == "partial\ndiag\n"
 
 
 class TestAnalysisChannel:
-    def test_rendered_as_prefixed_line(self):  # noqa: ANN201  # tracked: #288
+    def test_rendered_as_prefixed_line(self) -> None:
         out = _render(_chunk("thinking hard", channel="analysis", status=_STATUS))
         assert out == "[Implementer | 12.3s | 20k/1.0M] thinking hard\n"
 
 
 class TestBlockChannels:
-    def test_diagnostic_rendered_verbatim(self):  # noqa: ANN201  # tracked: #288
+    def test_diagnostic_rendered_verbatim(self) -> None:
         out = _render(_chunk("=== ROUND START ===\n", channel="diagnostic"))
         assert out == "=== ROUND START ===\n"
 
-    def test_prompt_truncated_with_pointer_to_log(self):  # noqa: ANN201  # tracked: #288
+    def test_prompt_truncated_with_pointer_to_log(self) -> None:
         out = _render(_chunk("x" * 30 + "\n", channel="prompt"), max_text_len=20)
         assert out == "x" * 20 + "\n... [10 more chars, see log for full text]\n"
 
-    def test_short_prompt_not_truncated(self):  # noqa: ANN201  # tracked: #288
+    def test_short_prompt_not_truncated(self) -> None:
         out = _render(_chunk("short\n", channel="prompt"), max_text_len=20)
         assert out == "short\n"
 
 
 class TestToolEvents:
-    def test_tool_channel_chunks_are_ignored(self):  # noqa: ANN201  # tracked: #288
+    def test_tool_channel_chunks_are_ignored(self) -> None:
         # Tool traffic renders from the typed events; tool-channel chunks
         # (legacy event files only) must not double-render.
         assert _render(_chunk("→ shell({})\n", channel="tool")) == ""
 
-    def test_tool_call_line(self):  # noqa: ANN201  # tracked: #288
+    def test_tool_call_line(self) -> None:
         out = _render(
             (
                 CoreEventType.TOOL_CALL,
@@ -96,21 +106,21 @@ class TestToolEvents:
         )
         assert out == '\n[Implementer | 12.3s | 20k/1.0M] → shell(cmd="ls")\n'
 
-    def test_tool_call_args_truncated(self):  # noqa: ANN201  # tracked: #288
+    def test_tool_call_args_truncated(self) -> None:
         long = "x" * 200
         out = _render((CoreEventType.TOOL_CALL, ToolCallData(tool="shell", args={"cmd": long})))
         assert long not in out
         assert "x" * 80 + "..." in out
 
-    def test_non_string_args_rendered_as_json(self):  # noqa: ANN201  # tracked: #288
+    def test_non_string_args_rendered_as_json(self) -> None:
         out = _render((CoreEventType.TOOL_CALL, ToolCallData(tool="t", args={"n": 3})))
         assert "n=3" in out
 
-    def test_tool_result_indented(self):  # noqa: ANN201  # tracked: #288
+    def test_tool_result_indented(self) -> None:
         out = _render((CoreEventType.TOOL_RESULT, ToolResultData(tool="shell", content="a\nb")))
         assert out == "  a\n  b\n"
 
-    def test_tool_result_truncated(self):  # noqa: ANN201  # tracked: #288
+    def test_tool_result_truncated(self) -> None:
         out = _render(
             (CoreEventType.TOOL_RESULT, ToolResultData(tool="shell", content="a" * 30)),
             max_result_len=10,
@@ -119,39 +129,39 @@ class TestToolEvents:
 
 
 class TestTodoRendering:
-    def _todos(self):  # noqa: ANN202  # tracked: #288
+    def _todos(self) -> list[TodoItemData]:
         return [
             TodoItemData(content="Set up project", status="completed"),
             TodoItemData(content="Implement handlers", status="in_progress"),
             TodoItemData(content="Add tests", status="pending"),
         ]
 
-    def test_renders_box_with_items(self):  # noqa: ANN201  # tracked: #288
+    def test_renders_box_with_items(self) -> None:
         out = _render((CoreEventType.TODO_UPDATE, TodoUpdateData(todos=self._todos())))
         assert "┌─ Todo" in out
         assert "Set up project" in out
         assert "Implement handlers" in out
         assert "Add tests" in out
 
-    def test_status_indicators(self):  # noqa: ANN201  # tracked: #288
+    def test_status_indicators(self) -> None:
         out = _render((CoreEventType.TODO_UPDATE, TodoUpdateData(todos=self._todos())))
         assert "✓" in out  # completed
         assert "▶" in out  # in_progress
         assert "○" in out  # pending
 
-    def test_unknown_status_degrades(self):  # noqa: ANN201  # tracked: #288
+    def test_unknown_status_degrades(self) -> None:
         todos = [TodoItemData(content="odd", status="unknown-state")]
         out = _render((CoreEventType.TODO_UPDATE, TodoUpdateData(todos=todos)))
         assert "? odd" in out
 
-    def test_plain_mode_has_no_ansi_colors(self):  # noqa: ANN201  # tracked: #288
+    def test_plain_mode_has_no_ansi_colors(self) -> None:
         out = _render((CoreEventType.TODO_UPDATE, TodoUpdateData(todos=self._todos())), color=False)
         assert "\033[3" not in out  # no color codes
         assert "✓" in out
 
 
 class TestTodoDisplay:
-    def test_clears_previous_lines(self):  # noqa: ANN201  # tracked: #288
+    def test_clears_previous_lines(self) -> None:
         buf = StringIO()
         td = TodoDisplay(file=buf)
         td.update([TodoItemData(content="task one", status="pending")])
@@ -168,18 +178,18 @@ class TestTodoDisplay:
         assert "\033[" in second_output
         assert "A" in second_output
 
-    def test_empty_list_prints_nothing(self):  # noqa: ANN201  # tracked: #288
+    def test_empty_list_prints_nothing(self) -> None:
         buf = StringIO()
         TodoDisplay(file=buf).update([])
         assert buf.getvalue() == ""
 
 
 class TestIgnoredEvents:
-    def test_usage_update_produces_no_output(self):  # noqa: ANN201  # tracked: #288
+    def test_usage_update_produces_no_output(self) -> None:
         out = _render((CoreEventType.USAGE_UPDATE, UsageUpdateData(input_tokens=5)))
         assert out == ""
 
-    def test_event_without_data_produces_no_output(self):  # noqa: ANN201  # tracked: #288
+    def test_event_without_data_produces_no_output(self) -> None:
         out = StringIO()
         renderer = HeadlessRenderer(out=out)
         renderer.handle(make_core_event(CoreEventType.RUN_STARTED))

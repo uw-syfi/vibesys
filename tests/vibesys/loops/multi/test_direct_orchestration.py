@@ -112,7 +112,8 @@ class _Session:
     async def review(self, _selected: str) -> AttemptDecision:
         self.calls.append("review")
         if self.fail_review:
-            raise RuntimeError("judge failed")  # noqa: TRY003  # test-only failure seam
+            message = "judge failed"
+            raise RuntimeError(message)
         return AttemptDecision.OFFICIAL
 
     async def official_gates(self, _selected: str) -> bool:

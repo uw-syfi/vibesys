@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import http.server
 import io
+import threading
 import zipfile
 from typing import TYPE_CHECKING
 
 import pytest
-from fetch_bun import BunFetchError, fetch_bun
+from fetch_bun import BunFetchError, _download, fetch_bun
 from wheel_targets import TARGETS
 
 if TYPE_CHECKING:
@@ -76,3 +78,29 @@ def test_fetch_bun_rejects_an_archive_without_the_expected_runtime(tmp_path: Pat
             downloader=lambda _url: payload,
             expected_sha256=hashlib.sha256(payload).hexdigest(),
         )
+
+
+def test_download_follows_redirects_like_github_release_assets() -> None:
+    body = b"archive bytes"
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path == "/release":
+                self.send_response(302)
+                self.send_header("Location", "/cdn")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        assert _download(f"http://127.0.0.1:{server.server_port}/release") == body
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()

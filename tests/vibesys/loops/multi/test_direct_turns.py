@@ -1,6 +1,6 @@
 """Multi role ordering, isolation, and durable role evidence."""
 
-# ruff: noqa: SLF001  # Read-only guards and role turns are the policy under test.
+# ruff: noqa: SLF001  # LW-030007; Read-only guards and role turns are the policy under test.
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from tests.support import make_orchestrator_plan
 
 from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptState
@@ -61,12 +62,12 @@ def _options() -> AgentOrchestrationOptions:
 
 
 def _plan(*, hypothesis_id: str = "h1") -> OrchestratorPlan:
-    return OrchestratorPlan(
+    return make_orchestrator_plan(
         hypothesis_id=hypothesis_id,
         hypothesis="Cache decode",
         title="Decode cache",
         task="Implement the cache",
-        pass_criteria="Candidate still responds",  # noqa: S106
+        criteria="Candidate still responds",
         reasoning="Decode is expensive",
     )
 

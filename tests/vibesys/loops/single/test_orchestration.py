@@ -109,7 +109,8 @@ class _Session:
     async def combined_turn(self, _selected: str) -> AttemptDecision:
         self.calls.append("combined")
         if self.fail_turn:
-            raise RuntimeError("combined turn failed")  # noqa: TRY003  # test-only failure seam
+            message = "combined turn failed"
+            raise RuntimeError(message)
         return (
             AttemptDecision.RETRY if self.calls.count("combined") == 1 else AttemptDecision.OFFICIAL
         )

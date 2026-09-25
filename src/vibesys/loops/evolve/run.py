@@ -1,7 +1,6 @@
 """Evolve-owned operations used by the small orchestration scheduler."""
 
 # Cursor errors include the exact unsafe state at each recovery boundary.
-# ruff: noqa: TRY003
 
 from __future__ import annotations
 
@@ -14,7 +13,7 @@ from typing import TYPE_CHECKING, cast
 from vibesys.domains.registry import resolve_domain
 from vibesys.evaluators.gates import BenchmarkContract
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.events import FrameworkSource
+from vibesys.events import FrameworkSource, RunConfiguredData
 from vibesys.loops.evolve.loop import (
     _bootstrap_seed,
     _discard_working_tree,
@@ -131,21 +130,25 @@ def _validate_cursor(
     completed = cursor.completed if cursor is not None else 0
     active = cursor.active if cursor is not None else None
     if cursor is not None and cursor.rng_state is None:
-        raise EvolveResumeError("evolve cursor lacks sampler state; replay would diverge")
+        message = "evolve cursor lacks sampler state; replay would diverge"
+        raise EvolveResumeError(message)
     if active is None:
         if any(individual.generation > completed for individual in population.all):
-            raise EvolveResumeError(
+            message = (
                 "evolve state has candidates beyond its completed generation cursor; "
                 "resuming could repeat paid work"
             )
+            raise EvolveResumeError(message)
         return
     if active.generation != completed + 1 or active.next_child > children_per_generation + 1:
-        raise EvolveResumeError("evolve generation cursor does not match the run budget")
+        message = "evolve generation cursor does not match the run budget"
+        raise EvolveResumeError(message)
     if active.phase in {"planning", "evaluating"}:
-        raise EvolveResumeError(
+        message = (
             f"evolve generation {active.generation} stopped during {active.phase}; "
             "the child may have consumed paid work without a durable result"
         )
+        raise EvolveResumeError(message)
     recorded_ids = set(active.recorded.values())
     population_ids = {
         individual.id for individual in population.all if individual.generation == active.generation
@@ -153,11 +156,11 @@ def _validate_cursor(
     if population_ids != recorded_ids or any(
         slot < 1 or slot >= active.next_child for slot in active.recorded
     ):
-        raise EvolveResumeError(
-            "evolve population and child cursor disagree; resuming could duplicate candidates"
-        )
+        message = "evolve population and child cursor disagree; resuming could duplicate candidates"
+        raise EvolveResumeError(message)
     if active.phase == "recording" and any(slot not in active.outcomes for slot in active.plans):
-        raise EvolveResumeError("evolve generation has missing paid candidate outcomes")
+        message = "evolve generation has missing paid candidate outcomes"
+        raise EvolveResumeError(message)
 
 
 @dataclass(slots=True)
@@ -186,18 +189,18 @@ class EvolveRun:
         population = state_store.load_population()
         cursor = state_store.load_cursor()
         if cursor is None and request.resume is not None:
-            raise EvolveResumeError(
-                "this evolve run has no child journal; its previous paid work cannot be replayed safely"
-            )
+            message = "this evolve run has no child journal; its previous paid work cannot be replayed safely"
+            raise EvolveResumeError(message)
         _validate_cursor(cursor, population, options.children_per_generation)
-        rng = random.Random(options.seed)  # noqa: S311  # sampling, not security
+        rng = random.Random(options.seed)  # noqa: S311  # lint-waiver: LW-010204 [S311]; fixed-seed search selection must resume reproducibly, and no security token is drawn from it.
         if cursor is None:
             state_store.save_cursor(GenerationCursor(rng_state=rng.getstate()))
         else:
             rng.setstate(cast("tuple[int, tuple[int, ...], float | None]", cursor.rng_state))
         recorded_space = state_store.load_metric_space()
         if recorded_space not in {space, MetricSpace()}:
-            raise ValueError("recorded evolve metric space differs from the run descriptor")
+            message = "recorded evolve metric space differs from the run descriptor"
+            raise ValueError(message)
         state_store.save_population(population)
         state_store.save_metric_space(space)
         policy_name, policy = await _initialize_search_policy(
@@ -224,12 +227,14 @@ class EvolveRun:
                 f"tolerance={space.relative_noise:.0%}"
             )
         output_sink().run_configured(
-            run_log_path=str(host.environment.run_log_path),
-            project_root=str(host.workspaces.root.path),
-            objective=objective,
-            search_policy=policy_name.value,
-            benchmark_contract=benchmark.declared,
-            pareto_objectives=pareto,
+            RunConfiguredData(
+                run_log_path=str(host.environment.run_log_path),
+                project_root=str(host.workspaces.root.path),
+                objective=objective,
+                search_policy=policy_name.value,
+                benchmark_contract=benchmark.declared,
+                pareto_objectives=pareto,
+            )
         )
         agents = {
             role: await host.agents.spawn(host.agents.default_definition(role))
@@ -264,7 +269,8 @@ class EvolveRun:
     def _journal(self, generation: int) -> GenerationJournal:
         cursor = self.state_store.load_cursor()
         if cursor is None or cursor.active is None or cursor.active.generation != generation:
-            raise EvolveResumeError(f"evolve generation {generation} has no active journal")
+            message = f"evolve generation {generation} has no active journal"
+            raise EvolveResumeError(message)
         return cursor.active
 
     def next_child(self, generation: int) -> int:
@@ -285,7 +291,8 @@ class EvolveRun:
                 target_island=record.target_island,
             )
         except KeyError as exc:
-            raise EvolveResumeError("recorded evolve plan references a missing individual") from exc
+            message = "recorded evolve plan references a missing individual"
+            raise EvolveResumeError(message) from exc
 
     def report_parallel_mode(self) -> None:
         """Explain when requested concurrency falls back to serial work."""
@@ -319,7 +326,8 @@ class EvolveRun:
         cursor = self.state_store.load_cursor() or GenerationCursor()
         if cursor.active is None:
             if generation != cursor.completed + 1:
-                raise EvolveResumeError("evolve generation would skip the committed budget cursor")
+                message = "evolve generation would skip the committed budget cursor"
+                raise EvolveResumeError(message)
             journal = GenerationJournal(
                 generation=generation, mode="parallel" if self.parallel else "serial"
             )
@@ -327,7 +335,8 @@ class EvolveRun:
         elif cursor.active.generation != generation or cursor.active.mode != (
             "parallel" if self.parallel else "serial"
         ):
-            raise EvolveResumeError("evolve generation or evaluation mode changed on resume")
+            message = "evolve generation or evaluation mode changed on resume"
+            raise EvolveResumeError(message)
         self.host.switch_log(f"gen{generation:03d}")
         self.host.log(
             f"\n{'=' * 60}\n  Generation {generation}/{self.options.max_generations} — "
@@ -362,11 +371,13 @@ class EvolveRun:
         """Recover a recorded selection or save a new one before evaluation."""
         journal = self._journal(generation)
         if child_idx != journal.next_child or journal.mode != "serial":
-            raise EvolveResumeError("serial evolve child slot is out of order")
+            message = "serial evolve child slot is out of order"
+            raise EvolveResumeError(message)
         if journal.phase in {"planned", "recording"}:
             return self._selection(journal.plans[child_idx])
         if journal.phase != "ready":
-            raise EvolveResumeError("serial evolve child cannot be safely replanned")
+            message = "serial evolve child cannot be safely replanned"
+            raise EvolveResumeError(message)
         await self._save_journal(
             journal.model_copy(update={"phase": "planning"}),
             label=f"evolve: plan g{generation}c{child_idx}",
@@ -390,11 +401,13 @@ class EvolveRun:
         """Plan parallel children from one pre-generation population snapshot."""
         journal = self._journal(generation)
         if journal.mode != "parallel":
-            raise EvolveResumeError("parallel plan requested for a serial generation")
+            message = "parallel plan requested for a serial generation"
+            raise EvolveResumeError(message)
         if journal.phase in {"planned", "recording"}:
             return [(slot, self._selection(plan)) for slot, plan in sorted(journal.plans.items())]
         if journal.phase != "ready" or journal.next_child != 1:
-            raise EvolveResumeError("parallel evolve generation cannot be safely replanned")
+            message = "parallel evolve generation cannot be safely replanned"
+            raise EvolveResumeError(message)
         await self._save_journal(
             journal.model_copy(update={"phase": "planning"}),
             label=f"evolve: plan generation {generation}",
@@ -429,12 +442,14 @@ class EvolveRun:
         """Evaluate once, then durably stage the outcome before admission."""
         journal = self._journal(generation)
         if child_idx != journal.next_child or journal.mode != "serial":
-            raise EvolveResumeError("serial evolve evaluation is out of order")
+            message = "serial evolve evaluation is out of order"
+            raise EvolveResumeError(message)
         if journal.phase == "recording":
             record = journal.outcomes.get(child_idx)
             return _record_outcome(record) if record is not None else None
         if journal.phase != "planned" or journal.plans.get(child_idx) != _plan_record(plan):
-            raise EvolveResumeError("serial evolve plan differs from its durable selection")
+            message = "serial evolve plan differs from its durable selection"
+            raise EvolveResumeError(message)
         await self._save_journal(
             journal.model_copy(update={"phase": "evaluating"}),
             label=f"evolve: evaluate g{generation}c{child_idx}",
@@ -444,7 +459,7 @@ class EvolveRun:
         try:
             if parent_commit:
                 await self.host.workspaces.root.restore(parent_commit, clean=True)
-        except Exception:  # noqa: BLE001  # preserve the skipped-candidate policy
+        except Exception:  # noqa: BLE001  # lint-waiver: LW-020016 [BLE001]; a parent that cannot be checked out skips its candidate instead of failing the generation.
             output_sink().framework_warning(
                 f"could not check out parent {parent.id} "
                 f"(commit {parent_commit[:8] if parent_commit else 'n/a'}); skipping candidate",
@@ -489,7 +504,8 @@ class EvolveRun:
         """Evaluate isolated children once and durably stage all outcomes."""
         journal = self._journal(generation)
         if journal.mode != "parallel":
-            raise EvolveResumeError("parallel evaluation requested for a serial generation")
+            message = "parallel evaluation requested for a serial generation"
+            raise EvolveResumeError(message)
         if journal.phase == "recording":
             return {
                 slot: _record_outcome(outcome)
@@ -500,7 +516,8 @@ class EvolveRun:
             journal.phase != "planned"
             or {slot: _plan_record(plan) for slot, plan in plans} != journal.plans
         ):
-            raise EvolveResumeError("parallel evolve plans differ from their durable selection")
+            message = "parallel evolve plans differ from their durable selection"
+            raise EvolveResumeError(message)
         await self._save_journal(
             journal.model_copy(update={"phase": "evaluating"}),
             label=f"evolve: evaluate generation {generation}",
@@ -567,12 +584,14 @@ class EvolveRun:
         """Admit one durable result and advance its child slot in the same checkpoint."""
         journal = self._journal(generation)
         if journal.phase != "recording" or journal.next_child != child_idx:
-            raise EvolveResumeError("evolve candidate recording is out of order")
+            message = "evolve candidate recording is out of order"
+            raise EvolveResumeError(message)
         record = journal.outcomes.get(child_idx)
         if (record is None) != (outcome is None) or (
             record is not None and outcome is not None and record != _outcome_record(outcome)
         ):
-            raise EvolveResumeError("evolve result differs from its durable paid outcome")
+            message = "evolve result differs from its durable paid outcome"
+            raise EvolveResumeError(message)
         individual = None
         recorded = dict(journal.recorded)
         if outcome is not None:
@@ -614,9 +633,8 @@ class EvolveRun:
             "ready",
             "recording",
         }:
-            raise EvolveResumeError(
-                "evolve generation ended before every child slot was accounted for"
-            )
+            message = "evolve generation ended before every child slot was accounted for"
+            raise EvolveResumeError(message)
         self.search.search_policy.finish_generation(generation)
         self.state_store.save_completed_generation(generation, self.rng.getstate())
         await _persist_evolve_state(

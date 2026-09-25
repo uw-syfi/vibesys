@@ -80,6 +80,34 @@ _TOOL_NAME = "Bash"
 class FakeDriverError(RuntimeError):
     """A fake driver turn was configured with something it cannot run."""
 
+    @classmethod
+    def session_closed(cls) -> FakeDriverError:
+        """Describe a turn requested after its fake session was closed."""
+        return cls("fake agent session is closed")
+
+    @classmethod
+    def conflicting_turn_inputs(cls) -> FakeDriverError:
+        """Describe both mutually exclusive turn inputs being supplied."""
+        return cls("FakeDriver accepts `turn` or `turns`, not both")
+
+    @classmethod
+    def no_turns(cls) -> FakeDriverError:
+        """Describe an empty per-turn script."""
+        return cls("`turns` must contain at least one turn")
+
+    @classmethod
+    def driver_closed(cls) -> FakeDriverError:
+        """Describe session creation after the fake driver was closed."""
+        return cls("fake agent driver is closed")
+
+    @classmethod
+    def missing_scripted_artifact(cls, schema_name: str) -> FakeDriverError:
+        """Describe an output schema without a corresponding scripted artifact."""
+        return cls(
+            f"no scripted artifact for response schema {schema_name!r}; add one to "
+            "vs_agent.scripted_rounds so scripted runs keep covering this role"
+        )
+
 
 class FakeSession:
     """One fake conversation. Its state is which scripted turn runs next."""
@@ -106,7 +134,7 @@ class FakeSession:
     ) -> AgentTurnResult:
         """Emit the next scripted turn's events, then answer it."""
         if self._closed:
-            raise FakeDriverError("fake agent session is closed")  # noqa: TRY003  # tracked: #288
+            raise FakeDriverError.session_closed()
         self._invocations += 1
         # A labelled turn keeps the loop's own round numbering, so scripted
         # artifacts line up with the round the caller thinks it is running.
@@ -169,15 +197,13 @@ class FakeDriver:
         event stream need not pass one.
         """
         if turn is not None and turns is not None:
-            raise FakeDriverError(  # noqa: TRY003  # tracked: #288
-                "FakeDriver accepts `turn` or `turns`, not both"
-            )
+            raise FakeDriverError.conflicting_turn_inputs()
         if turn is not None:
             resolved_turns: tuple[tuple[AgentEvent, ...], ...] = (tuple(turn),)
         elif turns is not None:
             resolved_turns = tuple(tuple(one_turn) for one_turn in turns)
             if not resolved_turns:
-                raise FakeDriverError("`turns` must contain at least one turn")  # noqa: TRY003  # tracked: #288
+                raise FakeDriverError.no_turns()
         else:
             resolved_turns = ((),)
         self._turns = resolved_turns
@@ -193,7 +219,7 @@ class FakeDriver:
     def create_session(self, spec: AgentSessionSpec) -> AgentSession:
         """Create one fake conversation for ``spec``."""
         if self._closed:
-            raise FakeDriverError("fake agent driver is closed")  # noqa: TRY003  # tracked: #288
+            raise FakeDriverError.driver_closed()
         session = FakeSession(spec=spec, turns=self._turns, answer=self._answer)
         self._sessions.append(session)
         return session
@@ -317,10 +343,7 @@ def _turn_text(
         return f"Fake agent completed {request.label or 'a turn'} with no workspace changes."
     payload = scripted_round_payload(schema.__name__, round_index)
     if payload is None:
-        raise FakeDriverError(  # noqa: TRY003  # tracked: #288
-            f"no scripted artifact for response schema {schema.__name__!r}; add one to "
-            "vs_agent.scripted_rounds so scripted runs keep covering this role"
-        )
+        raise FakeDriverError.missing_scripted_artifact(schema.__name__)
     return json.dumps(payload)
 
 

@@ -1,7 +1,10 @@
 """Validation tests for shared structured agent-response schemas."""
 
+from typing import Literal
+
 import pytest
 from pydantic import ValidationError
+from tests.support import make_orchestrator_plan
 
 from server.api.protocol import PerformanceRound
 from vibesys.schemas import (
@@ -35,7 +38,7 @@ def _profiler_summary(
     )
 
 
-def test_skill_resource_selection_forbids_unknown_fields():  # noqa: ANN201  # tracked: #288
+def test_skill_resource_selection_forbids_unknown_fields() -> None:
     unknown_field = {"unexpected": True}
     with pytest.raises(ValidationError, match="unexpected"):
         SkillResourceSelection(
@@ -47,7 +50,9 @@ def test_skill_resource_selection_forbids_unknown_fields():  # noqa: ANN201  # t
 
 
 @pytest.mark.parametrize("field", ["skill", "purpose"])
-def test_skill_resource_selection_rejects_whitespace_required_fields(field):  # noqa: ANN001, ANN201  # tracked: #288
+def test_skill_resource_selection_rejects_whitespace_required_fields(
+    field: Literal["skill", "purpose"],
+) -> None:
     values = {"skill": "portable", "purpose": "Useful for this task."}
     values[field] = "   "
 
@@ -55,8 +60,8 @@ def test_skill_resource_selection_rejects_whitespace_required_fields(field):  # 
         SkillResourceSelection(**values)
 
 
-def test_agent_skill_selection_fields_are_zero_to_many_by_default():  # noqa: ANN201  # tracked: #288
-    plan = OrchestratorPlan(task="work", pass_criteria="passes", reasoning="reason")  # noqa: S106  # tracked: #288
+def test_agent_skill_selection_fields_are_zero_to_many_by_default() -> None:
+    plan = make_orchestrator_plan(task="work", criteria="passes", reasoning="reason")
     implementer = ImplementerResponse(summary="done", expected_behavior="works")
     judge = JudgeResponse(analysis="clean", feedback="", verdict=Verdict.PASS)
     single_agent = SingleAgentRoundResponse(
@@ -77,19 +82,19 @@ def test_agent_skill_selection_fields_are_zero_to_many_by_default():  # noqa: AN
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_profiler_summary_rejects_non_finite_perf_metric(value):  # noqa: ANN001, ANN201  # tracked: #288
+def test_profiler_summary_rejects_non_finite_perf_metric(value: float) -> None:
     with pytest.raises(ValidationError, match="finite number"):
         _profiler_summary(perf_metric=value)
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_profiler_summary_rejects_non_finite_multi_objective_metric(value):  # noqa: ANN001, ANN201  # tracked: #288
+def test_profiler_summary_rejects_non_finite_multi_objective_metric(value: float) -> None:
     with pytest.raises(ValidationError, match="finite number"):
         _profiler_summary(metrics={"throughput": value})
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_single_agent_response_rejects_non_finite_perf_metric(value):  # noqa: ANN001, ANN201  # tracked: #288
+def test_single_agent_response_rejects_non_finite_perf_metric(value: float) -> None:
     with pytest.raises(ValidationError, match="finite number"):
         SingleAgentRoundResponse(
             summary="summary",
@@ -106,7 +111,7 @@ def test_single_agent_response_rejects_non_finite_perf_metric(value):  # noqa: A
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_performance_stats_reject_non_finite_values(value):  # noqa: ANN001, ANN201  # tracked: #288
+def test_performance_stats_reject_non_finite_values(value: float) -> None:
     with pytest.raises(ValidationError, match="finite number"):
         LatencyStats(
             mean_ms=value,
@@ -139,13 +144,13 @@ def test_performance_stats_reject_non_finite_values(value):  # noqa: ANN001, ANN
         )
 
 
-def test_orchestrator_plan_title_defaults_to_empty_string():  # noqa: ANN201  # tracked: #288
-    plan = OrchestratorPlan(task="work", pass_criteria="passes", reasoning="reason")  # noqa: S106  # tracked: #288
+def test_orchestrator_plan_title_defaults_to_empty_string() -> None:
+    plan = make_orchestrator_plan(task="work", criteria="passes", reasoning="reason")
 
     assert plan.title == ""
 
 
-def test_orchestrator_plan_loads_old_shaped_data_without_a_title_key():  # noqa: ANN201  # tracked: #288
+def test_orchestrator_plan_loads_old_shaped_data_without_a_title_key() -> None:
     """A state file persisted before the title field existed has no ``title`` key."""
     legacy_payload = {
         "hypothesis_id": "legacy",
@@ -161,15 +166,15 @@ def test_orchestrator_plan_loads_old_shaped_data_without_a_title_key():  # noqa:
 
 
 @pytest.mark.parametrize("raw", ["", "   ", "\n\t "])
-def test_normalize_hypothesis_title_passes_through_empty_input(raw):  # noqa: ANN001, ANN201  # tracked: #288
+def test_normalize_hypothesis_title_passes_through_empty_input(raw: str) -> None:
     assert normalize_hypothesis_title(raw) == ""
 
 
-def test_normalize_hypothesis_title_strips_and_collapses_whitespace():  # noqa: ANN201  # tracked: #288
+def test_normalize_hypothesis_title_strips_and_collapses_whitespace() -> None:
     assert normalize_hypothesis_title("  Batch   the\n\tdecode   path  ") == "Batch the decode path"
 
 
-def test_normalize_hypothesis_title_truncates_on_a_word_boundary_with_ellipsis():  # noqa: ANN201  # tracked: #288
+def test_normalize_hypothesis_title_truncates_on_a_word_boundary_with_ellipsis() -> None:
     title = "A" * 50 + " " + "B" * 20
 
     result = normalize_hypothesis_title(title)
@@ -178,7 +183,7 @@ def test_normalize_hypothesis_title_truncates_on_a_word_boundary_with_ellipsis()
     assert len(result) <= HYPOTHESIS_TITLE_MAX_LEN
 
 
-def test_normalize_hypothesis_title_truncates_without_a_boundary():  # noqa: ANN201  # tracked: #288
+def test_normalize_hypothesis_title_truncates_without_a_boundary() -> None:
     title = "A" * 65
 
     result = normalize_hypothesis_title(title)
@@ -187,30 +192,30 @@ def test_normalize_hypothesis_title_truncates_without_a_boundary():  # noqa: ANN
     assert len(result) == HYPOTHESIS_TITLE_MAX_LEN
 
 
-def test_normalize_hypothesis_title_leaves_a_title_within_budget_untouched():  # noqa: ANN201  # tracked: #288
+def test_normalize_hypothesis_title_leaves_a_title_within_budget_untouched() -> None:
     title = "Batch decode requests by KV-cache page"
 
     assert normalize_hypothesis_title(title) == title
 
 
 @pytest.mark.parametrize("claim", ["", "   ", "\n\t "])
-def test_derive_hypothesis_title_returns_none_for_empty_claim(claim):  # noqa: ANN001, ANN201  # tracked: #288
+def test_derive_hypothesis_title_returns_none_for_empty_claim(claim: str) -> None:
     assert derive_hypothesis_title(claim) is None
 
 
-def test_derive_hypothesis_title_takes_the_first_sentence():  # noqa: ANN201  # tracked: #288
+def test_derive_hypothesis_title_takes_the_first_sentence() -> None:
     claim = "Batching decode requests reduces overhead. It also raises latency variance."
 
     assert derive_hypothesis_title(claim) == "Batching decode requests reduces overhead"
 
 
-def test_derive_hypothesis_title_takes_the_first_line_when_there_is_no_sentence_break():  # noqa: ANN201  # tracked: #288
+def test_derive_hypothesis_title_takes_the_first_line_when_there_is_no_sentence_break() -> None:
     claim = "Batching decode requests reduces overhead\nfurther detail on the mechanism"
 
     assert derive_hypothesis_title(claim) == "Batching decode requests reduces overhead"
 
 
-def test_derive_hypothesis_title_truncates_long_claims():  # noqa: ANN201  # tracked: #288
+def test_derive_hypothesis_title_truncates_long_claims() -> None:
     claim = ("A" * 50 + " " + "B" * 20) + "."
 
     result = derive_hypothesis_title(claim)

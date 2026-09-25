@@ -1,5 +1,9 @@
 """Filesystem contract for the single agent policy state slot."""
 
+from pathlib import Path
+
+from tests.support import make_orchestrator_plan
+
 from vibesys.agent_run.state import AgentRunState, AgentRunStateStore, Hypothesis
 from vibesys.schemas import OrchestratorPlan
 from vs_project.api import (
@@ -11,7 +15,7 @@ from vs_project.api import (
 )
 
 
-def _project(tmp_path):  # noqa: ANN001, ANN202
+def _project(tmp_path: Path) -> Project:
     (tmp_path / "OBJECTIVE.md").write_text("Make it fast.\n")
     project = Project.open(tmp_path)
     project.state.create_project("test")
@@ -36,16 +40,16 @@ def _project(tmp_path):  # noqa: ANN001, ANN202
 
 
 def _plan(identifier: str) -> OrchestratorPlan:
-    return OrchestratorPlan(
+    return make_orchestrator_plan(
         hypothesis_id=identifier,
         hypothesis=f"claim {identifier}",
         task=f"implement {identifier}",
-        pass_criteria="tests pass",  # noqa: S106
+        criteria="tests pass",
         reasoning="test the claim",
     )
 
 
-def test_store_round_trips_and_prepares_exact_state_transition(tmp_path) -> None:  # noqa: ANN001
+def test_store_round_trips_and_prepares_exact_state_transition(tmp_path: Path) -> None:
     project = _project(tmp_path)
     namespace = project.state.portable_namespace("run-1", "agent")
     store = AgentRunStateStore(namespace)

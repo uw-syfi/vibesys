@@ -35,7 +35,7 @@ import vs_protocol
 
 try:
     import run
-except Exception as exc:  # noqa: BLE001 -- env-dependent import; skip, don't fail.
+except Exception as exc:
     run = None
     _IMPORT_ERROR = exc
 else:
@@ -450,7 +450,7 @@ class _FakeClient:
         self._plan = list(plan)
         self.send_times: list[float] = []
 
-    def post(self, url: str, json: object, timeout: object) -> _FakeResponse:  # noqa: A002
+    def post(self, url: str, json: object, timeout: object) -> _FakeResponse:
         self.send_times.append(time.perf_counter())
         ttft_s, total_s, n_tokens = self._plan.pop(0)
         return _FakeResponse(ttft_s, total_s, n_tokens)
@@ -693,7 +693,7 @@ class _SpeedFakeClient:
         self._ttft_s = ttft_s
         self._tpot_s = tpot_s
 
-    def post(self, url: str, json: dict, timeout: object) -> _SpeedFakeResponse:  # noqa: A002
+    def post(self, url: str, json: dict, timeout: object) -> _SpeedFakeResponse:
         max_tokens = json["max_tokens"]
         total_s = self._ttft_s + self._tpot_s * (max_tokens - 1)
         return _SpeedFakeResponse(self._ttft_s, total_s, max_tokens)
@@ -815,7 +815,10 @@ class AdmissionQueueEndToEndTest(unittest.TestCase):
         second = await _run_all_sessions_with_virtual_clock(
             sessions, start_delays, schedule, run.CONCURRENCY, client
         )
-        key = lambda r: (r.session_id, r.turn_index)  # noqa: E731
+
+        def key(result: run.TurnResult) -> tuple[str, int]:
+            return result.session_id, result.turn_index
+
         self.assertEqual(
             {key(r): r.schedule_bound for r in first},
             {key(r): r.schedule_bound for r in second},
