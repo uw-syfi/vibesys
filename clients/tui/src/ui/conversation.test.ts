@@ -128,7 +128,7 @@ function shapeOf(view: ConversationView): string {
  * These render through the real OpenTUI test renderer rather than computing
  * expected row counts by hand: a pure-function test would not catch a stray
  * margin or an extra border side reappearing, which is exactly the class of
- * bug this issue is about (docs/contributing/coding-best-practices.md).
+ * bug this issue is about (.agents/skills/testing/references/typescript.md).
  */
 describe('conversation entry row cost (#565)', () => {
   // 'status', 'analysis' and 'result' all skip both the markdown pipeline and
@@ -691,7 +691,7 @@ describe('styleTranscriptText', () => {
  * The two colour changes wired into `#renderEntry`: the run id and the
  * plain-text content `TextRenderable` (~480-491 and ~513-517). These render
  * through the real OpenTUI test renderer, per
- * docs/contributing/coding-best-practices.md, rather than asserting on the
+ * .agents/skills/testing/references/typescript.md, rather than asserting on the
  * helper alone, so a future refactor that stops passing the styled result to
  * either `TextRenderable` still fails here.
  */
