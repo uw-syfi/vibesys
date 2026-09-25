@@ -16,6 +16,7 @@ Launch:
 from __future__ import annotations
 
 import argparse
+import atexit
 import contextlib
 import io
 import sys
@@ -85,7 +86,7 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
 
     @mcp.tool()
     async def profile_ops(  # noqa: PLR0913  # tracked: #288
-        command: str,
+        command: str | None = None,
         cwd: str | None = None,
         env: dict | None = None,
         ready_command: str | None = None,
@@ -98,6 +99,8 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
         delay_s: float = 0.0,
         duration_s: float | None = None,
         record_shapes: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
+        inject: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
+        target: str | None = None,
     ) -> str:
         """Generic in-process torch.profiler capture of any candidate program.
 
@@ -111,6 +114,25 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
         trace; sibling processes get a bounded grace window to finish
         exporting before this picks the one with the most GPU kernel events
         as primary and runs certify + a compact summary against it.
+
+        Pass `target` (a target_id from `start_target`) instead of `command`
+        to take one signal-driven window against an already-running warm
+        target rather than launching a fresh process: `load_command` is
+        then required (it bounds the window), and `command`/`ready_command`/
+        `setup_command`/`delay_s`/`record_shapes`/`inject` do not apply. Use
+        this to take repeated before/after windows on the same running
+        server without restarting it -- see `start_target`'s docstring for
+        when this is (and is not) worth the extra step over a fresh capture.
+
+        Set `inject=False` when `command` already manages its own, separate
+        torch.profiler session (e.g. a serving engine's native
+        profiler_config/start_profile() path): running two independent
+        torch.profiler.profile() sessions in one process is unsupported and
+        has crashed the profiling backend outright (SIGSEGV, empty trace)
+        on real ROCm/MI210 hardware rather than raising cleanly. With
+        inject=False, VIBESYS_TORCH_PROFILE_OUT_DIR is still exported so
+        the engine's own profiler can write there and still flow through
+        this tool's normal discovery/certify/summary pipeline.
 
         Measured on real ROCm hardware: prof.start() itself takes ~2s to
         actually begin recording after the signal fires, and `duration_s`
@@ -128,7 +150,7 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
         returns "busy: ..." immediately instead of queuing.
 
         Args:
-            command: Target command, run via bash -lc.
+            command: Target command, run via bash -lc. Omit when target= is given.
             cwd: Working directory for command/load_command.
             env: Extra environment variables for the target process.
             ready_command: Polled until it exits 0 before load_command runs
@@ -136,7 +158,8 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
                 exits on its own.
             ready_timeout_s: Max seconds to wait for ready_command.
             load_command: Run once ready_command succeeds; command is
-                stopped via stop_signal once this returns.
+                stopped via stop_signal once this returns. Required when
+                target= is given (it bounds the window instead).
             setup_command: Runs to completion BEFORE command, outside the
                 profiler injection entirely. Use it for anything (e.g.
                 picking a free port) whose own output or child processes
@@ -154,9 +177,15 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
                 a capture commonly runs 10-25 minutes.
             delay_s: Seconds after arming before the profiler starts.
             duration_s: Seconds to profile before auto-stopping; omit to
-                profile until process exit / SIGINT.
+                profile until process exit / SIGINT. With target=, bounds
+                the window instead (alongside load_command finishing).
             record_shapes: Capture per-op input shapes. Required for
                 gemm_shapes/roofline and for certify to pass.
+            inject: Set False when command already manages its own separate
+                torch.profiler session. See above.
+            target: A target_id from start_target, to window an
+                already-running warm target instead of launching a fresh
+                process. See above.
         """
         cancel_event = threading.Event()
         try:
@@ -176,9 +205,88 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
                 delay_s=delay_s,
                 duration_s=duration_s,
                 record_shapes=record_shapes,
+                inject=inject,
+                target=target,
             )
         except capture_runtime.CaptureBusyError as exc:
             return capture_runtime.format_busy(exc.active)
+
+    @mcp.tool()
+    def start_target(  # noqa: PLR0913  # tracked: #288
+        command: str,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        setup_command: str | None = None,
+        ready_command: str | None = None,
+        ready_timeout_s: float = 60.0,
+        stop_signal: str = "SIGINT",
+        grace_s: float = 10.0,
+        timeout_s: float = 300.0,
+    ) -> str:
+        """Launch a reusable, warm target process armed for repeated profile_ops windows.
+
+        Use this instead of a fresh profile_ops(command=...) call when you
+        need more than one op-level window on the *same* running process
+        (e.g. before/after a code change on the same warm server, or
+        several windows over a long-running benchmark) rather than one
+        window per process lifetime. Measured overhead of leaving a target
+        armed but idle (no window open) is negligible on real MI210
+        hardware. Once started, call profile_ops(target=<id>, load_command=...)
+        for each window, and stop_target(<id>) when done -- every target
+        still running when this server process exits is stopped
+        automatically.
+
+        Args:
+            command: Command to launch, run via bash -lc; must keep running
+                (a server, or a script that loops/sleeps) rather than exit
+                on its own.
+            cwd: Working directory for command/ready_command.
+            env: Extra environment variables for the target process.
+            setup_command: Runs to completion BEFORE command, outside the
+                profiler injection entirely (see profile_ops' setup_command
+                for why). A nonzero exit here means no target is started.
+            ready_command: Polled until it exits 0 before this call returns.
+                Omit to return as soon as command is launched.
+            ready_timeout_s: Max seconds to wait for ready_command.
+            stop_signal: Signal name stop_target sends (default SIGINT).
+            grace_s: Seconds stop_target waits after stop_signal before
+                escalating to SIGTERM/SIGKILL.
+            timeout_s: Hard wall-clock budget for setup_command plus the
+                ready-wait only (the target itself keeps running afterward).
+        """
+        try:
+            target_id = capture_ops.start_target(
+                command,
+                cwd=cwd,
+                env=env,
+                setup_command=setup_command,
+                ready_command=ready_command,
+                ready_timeout_s=ready_timeout_s,
+                stop_signal=stop_signal,
+                grace_s=grace_s,
+                timeout_s=timeout_s,
+            )
+        except RuntimeError as exc:
+            return f"error: {exc}"
+        return f"started target {target_id}"
+
+    @mcp.tool()
+    def stop_target(target: str) -> str:
+        """Stop a warm target started with start_target: stop_signal -> grace -> escalate.
+
+        Args:
+            target: The target_id returned by start_target.
+        """
+        try:
+            capture_runtime.stop_target(target)
+        except KeyError as exc:
+            return f"error: {exc}"
+        return f"stopped target {target}"
+
+    @mcp.tool()
+    def targets() -> str:
+        """List targets currently running in this server process (from start_target)."""
+        return capture_runtime.format_targets(capture_runtime.list_targets())
 
     @mcp.tool()
     def tables(report: str) -> str:
@@ -309,6 +417,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
         description="Stdio MCP server exposing torch.profiler analyses.",
     )
     parser.parse_args(argv)
+    # Any warm target started via start_target() and still running when this
+    # process exits (normal exit, or an uncaught error unwinding to here)
+    # must not be left running -- see capture_runtime.stop_all_targets.
+    atexit.register(capture_runtime.stop_all_targets)
     mcp = build_server()
     mcp.run(transport="stdio")
 

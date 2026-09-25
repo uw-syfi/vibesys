@@ -25,7 +25,15 @@ tests and ad hoc use without the MCP server)::
         [--ready-command CMD] [--ready-timeout-s N]
         [--load-command CMD] [--stop-signal SIGINT]
         [--grace-s N] [--timeout-s N]
-        [--delay-s N] [--duration-s N] [--no-record-shapes]
+        [--delay-s N] [--duration-s N] [--no-record-shapes] [--no-inject]
+
+Pass ``--no-inject`` when ``--command`` manages its own, separate
+``torch.profiler`` session (e.g. a serving engine's native
+``profiler_config``/``start_profile()`` path) instead of relying on this
+module's injection: running two independent ``torch.profiler.profile()``
+sessions in one process is unsupported and has crashed the profiling
+backend outright (SIGSEGV, empty trace) on real ROCm hardware rather than
+raising a catchable error. See ``profile_ops``'s ``inject`` argument.
 """
 
 from __future__ import annotations
@@ -34,6 +42,8 @@ import argparse
 import contextlib
 import io
 import os
+import signal
+import subprocess
 import sys
 import time
 import types
@@ -62,7 +72,17 @@ _INJECT_DIR = _HERE / "inject"
 _TRACE_GLOB = "*.pt.trace.json.gz"
 _SUMMARY_TOP = 5
 
-__all__ = ["profile_ops"]
+# Fixed subdirectory names under a warm target's own out_dir (see
+# start_target): the injection's default VIBESYS_TORCH_PROFILE_OUT_DIR (used
+# only if a window's control file is somehow never consumed) and the
+# control-file directory each profile_ops(target=...) window writes its
+# desired per-window out_dir into before signaling (see
+# inject/sitecustomize.py's "Repeated windows and warm targets" section).
+_TARGET_TRACES_SUBDIR = "traces"
+_TARGET_CONTROL_SUBDIR = "control"
+_TARGET_CONTROL_FILE = "next_window"
+
+__all__ = ["profile_ops", "start_target"]
 
 
 # ---------------------------------------------------------------------------
@@ -70,36 +90,147 @@ __all__ = ["profile_ops"]
 # ---------------------------------------------------------------------------
 
 
-def _build_capture_env(
+def _build_capture_env(  # noqa: PLR0913  # tracked: #288
     *,
     user_env: dict[str, str] | None,
     out_dir: Path,
     delay_s: float,
     duration_s: float | None,
     record_shapes: bool,
+    inject: bool = True,
 ) -> dict[str, str]:
     """Layer the injection's env controls under any caller-supplied ``env``.
 
     ``PYTHONPATH`` is prepended (not replaced) with the inject directory so
     the target's own module search path still works; every other key the
     caller passes wins over our defaults on conflict.
+
+    ``inject=False`` (see ``profile_ops``'s ``inject`` argument) skips
+    arming ``sitecustomize.py`` entirely (no ``VIBESYS_TORCH_PROFILE=1``, no
+    ``PYTHONPATH`` prepend): use this when ``command`` already manages its
+    own, separate ``torch.profiler`` session (e.g. a serving engine's native
+    ``profiler_config``/``start_profile()``/``stop_profile()`` path).
+    Running *two* independent ``torch.profiler.profile()`` sessions in one
+    process is unsupported and has been observed to crash the profiling
+    backend outright (SIGSEGV, empty trace) on real ROCm/MI210 hardware
+    rather than raise a catchable Python error -- see the module docstring's
+    "inject=False" section. ``VIBESYS_TORCH_PROFILE_OUT_DIR`` is still set
+    even when ``inject`` is false, so a self-profiling target can write its
+    trace where this module's discovery/analysis pipeline will find it.
     """
-    merged: dict[str, str] = {
-        "VIBESYS_TORCH_PROFILE": "1",
-        "VIBESYS_TORCH_PROFILE_OUT_DIR": str(out_dir),
-        "VIBESYS_TORCH_PROFILE_DELAY_S": str(delay_s),
-        "VIBESYS_TORCH_PROFILE_RECORD_SHAPES": "1" if record_shapes else "0",
-    }
-    if duration_s is not None:
-        merged["VIBESYS_TORCH_PROFILE_DURATION_S"] = str(duration_s)
+    merged: dict[str, str] = {"VIBESYS_TORCH_PROFILE_OUT_DIR": str(out_dir)}
+    if inject:
+        merged["VIBESYS_TORCH_PROFILE"] = "1"
+        merged["VIBESYS_TORCH_PROFILE_DELAY_S"] = str(delay_s)
+        merged["VIBESYS_TORCH_PROFILE_RECORD_SHAPES"] = "1" if record_shapes else "0"
+        if duration_s is not None:
+            merged["VIBESYS_TORCH_PROFILE_DURATION_S"] = str(duration_s)
     merged.update(user_env or {})
 
-    existing_pythonpath = merged.get("PYTHONPATH") or os.environ.get("PYTHONPATH", "")
+    if inject:
+        existing_pythonpath = merged.get("PYTHONPATH") or os.environ.get("PYTHONPATH", "")
+        parts = [str(_INJECT_DIR)]
+        if existing_pythonpath:
+            parts.append(existing_pythonpath)
+        merged["PYTHONPATH"] = os.pathsep.join(parts)
+    return merged
+
+
+def _target_arm_env(
+    out_dir: Path, *, record_shapes: bool, existing_pythonpath: str
+) -> dict[str, str]:
+    """Env additions that arm a warm target for repeated signal windows.
+
+    ``VIBESYS_TORCH_PROFILE_TRIGGER=signal`` (see inject/sitecustomize.py)
+    means the injection never self-triggers a window; every window here is
+    driven explicitly by ``_profile_ops_on_target`` sending SIGUSR1/SIGUSR2
+    directly. ``VIBESYS_TORCH_PROFILE_CONTROL_DIR`` is the directory each
+    window writes its desired output directory into before signaling
+    SIGUSR1 (the control-file protocol); ``VIBESYS_TORCH_PROFILE_OUT_DIR``
+    is only the fallback used if a window somehow starts without consuming
+    a control file. *existing_pythonpath* is prepended with (not replaced
+    by) the inject directory, mirroring ``_build_capture_env``: it must be
+    resolved from the caller's own ``env``/``PYTHONPATH`` before this
+    callable runs (``capture_runtime.start_target`` invokes it with only the
+    allocated ``out_dir``, not the caller's ``env`` dict), since ``arm``
+    always wins over ``env`` on key conflicts.
+    """
+    control_dir = out_dir / _TARGET_CONTROL_SUBDIR
+    control_dir.mkdir(parents=True, exist_ok=True)
+    env = {
+        "VIBESYS_TORCH_PROFILE": "1",
+        "VIBESYS_TORCH_PROFILE_TRIGGER": "signal",
+        "VIBESYS_TORCH_PROFILE_OUT_DIR": str(out_dir / _TARGET_TRACES_SUBDIR),
+        "VIBESYS_TORCH_PROFILE_CONTROL_DIR": str(control_dir),
+        "VIBESYS_TORCH_PROFILE_RECORD_SHAPES": "1" if record_shapes else "0",
+    }
     parts = [str(_INJECT_DIR)]
     if existing_pythonpath:
         parts.append(existing_pythonpath)
-    merged["PYTHONPATH"] = os.pathsep.join(parts)
-    return merged
+    env["PYTHONPATH"] = os.pathsep.join(parts)
+    return env
+
+
+def start_target(  # noqa: PLR0913  # tracked: #288
+    command: str,
+    *,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    setup_command: str | None = None,
+    ready_command: str | None = None,
+    ready_timeout_s: float = 60.0,
+    stop_signal: str = "SIGINT",
+    grace_s: float = 10.0,
+    timeout_s: float = 300.0,
+    record_shapes: bool = True,  # tracked: #288
+) -> str:
+    """Launch *command* as a warm target armed for repeated torch.profiler signal windows.
+
+    Thin wrapper over ``capture_runtime.start_target``: composes the
+    injection env (``inject/sitecustomize.py``'s ``VIBESYS_TORCH_PROFILE_*``
+    controls, in "signal"-trigger mode) and keeps the target running.
+    Returns a ``target_id``; call ``profile_ops(target=target_id, ...)`` to
+    take a window against it, and ``stop_target(target_id)`` when done.
+
+    A signal sent before the target process has actually installed its
+    SIGUSR1/SIGUSR2 handlers (interpreter/site startup) is dropped, not
+    queued -- so this call does not return until sitecustomize.py's own
+    "armed" marker file confirms the handlers are live, ANDed with
+    *ready_command* when the caller also supplies one (e.g. a server health
+    check): the target is only ever reported ready once both are true.
+
+    Overhead of leaving a target armed but idle (no window open) is
+    negligible: measured within run-to-run noise on real MI210 hardware
+    (see ``docs/contributing/amd-profiler-worklog.md``).
+    """
+    existing_pythonpath = (env or {}).get("PYTHONPATH") or os.environ.get("PYTHONPATH", "")
+    return capture_runtime.start_target(
+        command,
+        cwd=cwd,
+        env=env,
+        setup_command=setup_command,
+        ready_command=lambda out_dir: _armed_ready_command(out_dir, ready_command),
+        ready_timeout_s=ready_timeout_s,
+        stop_signal=stop_signal,
+        grace_s=grace_s,
+        timeout_s=timeout_s,
+        arm=lambda out_dir: _target_arm_env(
+            out_dir, record_shapes=record_shapes, existing_pythonpath=existing_pythonpath
+        ),
+    )
+
+
+def _armed_ready_command(out_dir: Path, user_ready_command: str | None) -> str:
+    """The target is ready once sitecustomize's "armed" marker exists (see its docstring).
+
+    ANDed with *user_ready_command* when given, so a caller's own readiness
+    check (e.g. a server health probe) still applies on top.
+    """
+    marker = out_dir / _TARGET_CONTROL_SUBDIR / "armed"
+    check = f"test -f '{marker}'"
+    if user_ready_command:
+        return f"{check} && ( {user_ready_command} )"
+    return check
 
 
 # ---------------------------------------------------------------------------
@@ -242,12 +373,190 @@ def _analyze_primary(trace_path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
+# profile_ops(target=...): a signal-triggered window on an already-running
+# warm target (see start_target above), instead of a fresh process.
+# ---------------------------------------------------------------------------
+
+_LOAD_POLL_CHUNK_S = 1.0
+
+
+def _tail_text(path: Path, *, max_chars: int = 4000) -> str:
+    if not path.is_file():
+        return ""
+    text = path.read_bytes().decode("utf-8", errors="replace")
+    return text if len(text) <= max_chars else text[-max_chars:]
+
+
+def _run_load_command(
+    load_command: str,
+    *,
+    cwd: str | None,
+    timeout_s: float,
+    log_path: Path,
+    cancel_event: threading.Event | None,
+) -> tuple[int | None, str, bool]:
+    """Run *load_command* to completion (or timeout/cancellation), for one target window.
+
+    Mirrors ``capture_runtime``'s own unprofiled-step runner (``setup_command``/
+    ``load_command`` in the full ``run_capture`` lifecycle) but stays local
+    to this module: a target-mode window signals an already-running target
+    directly rather than driving a ``capture_runtime.Lifecycle``, so there
+    is no ``Lifecycle`` object here to reuse that helper against. Returns
+    ``(returncode, log_tail, cancelled)``; always leaves no process running
+    (SIGTERM, then SIGKILL, on timeout/cancellation).
+    """
+    script_path = log_path.parent / "load.sh"
+    script_path.write_text("#!/usr/bin/env bash\n" + load_command)
+    script_path.chmod(script_path.stat().st_mode | 0o111)
+    with log_path.open("wb") as handle:
+        proc = subprocess.Popen(  # noqa: S603  # tracked: #288
+            ["bash", str(script_path)],  # noqa: S607  # tracked: #288
+            cwd=cwd,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    deadline = time.monotonic() + max(timeout_s, 0.0)
+    cancelled = False
+    while True:
+        if cancel_event is not None and cancel_event.is_set():
+            cancelled = True
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            proc.wait(timeout=min(_LOAD_POLL_CHUNK_S, remaining))
+            break
+        except subprocess.TimeoutExpired:
+            continue
+    if proc.poll() is None:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        try:
+            proc.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=5.0)
+    return proc.returncode, _tail_text(log_path), cancelled
+
+
+def _profile_ops_on_target(  # noqa: PLR0913  # tracked: #288
+    target: str,
+    *,
+    load_command: str,
+    cwd: str | None,
+    duration_s: float | None,
+    grace_s: float,
+    timeout_s: float,
+    cancel_event: threading.Event | None,
+) -> str:
+    """One signal-triggered torch.profiler window against an already-running warm target.
+
+    Requires *target* to have been started via ``start_target`` (armed for
+    signal-driven windows). Writes this window's own capture directory to
+    the target's control file, signals SIGUSR1 to open the window, runs
+    *load_command* against the already-running target (bounded by
+    ``duration_s`` if given, else ``timeout_s``), signals SIGUSR2 to close
+    the window and trigger export, then analyzes the resulting trace
+    exactly like the fresh-process ``profile_ops`` path. The target process
+    itself is left running: call ``stop_target`` separately when done
+    taking windows against it.
+    """
+    info = capture_runtime.get_target(target)
+    capture_id, out_dir = capture_runtime.new_capture("ops")
+    control_dir = info.out_dir / _TARGET_CONTROL_SUBDIR
+    control_dir.mkdir(parents=True, exist_ok=True)
+    (control_dir / _TARGET_CONTROL_FILE).write_text(f"{out_dir}\n")
+
+    with capture_runtime.exclusive_capture("ops", capture_id):
+        capture_runtime.signal_target(target, "SIGUSR1")
+        load_budget = min(duration_s, timeout_s) if duration_s is not None else timeout_s
+        load_rc, load_tail, cancelled = _run_load_command(
+            load_command,
+            cwd=cwd,
+            timeout_s=load_budget,
+            log_path=out_dir / "load.log",
+            cancel_event=cancel_event,
+        )
+        capture_runtime.signal_target(target, "SIGUSR2")
+        status = "cancelled" if cancelled else ("ok" if load_rc == 0 else "load_failed")
+        capture_runtime.write_manifest(
+            out_dir,
+            {
+                "capture_id": capture_id,
+                "kind": "ops",
+                "target": target,
+                "load_returncode": load_rc,
+                "status": status,
+            },
+        )
+
+    lines = [f"capture {capture_id} (ops, target={target}): {status} load_rc={load_rc}"]
+    if load_tail:
+        lines.append("  load log tail:")
+        lines.extend(f"    {ln}" for ln in load_tail.splitlines()[-20:])
+
+    wait_for_additional_traces(out_dir, grace_s=grace_s)
+    traces = discover_traces(out_dir)
+    if not traces:
+        _record_traces_in_manifest(out_dir, primary=None, traces=[])
+        lines.append(
+            f"\nno {_TRACE_GLOB} trace files were produced for this window; confirm the target "
+            "was started with start_target (armed with VIBESYS_TORCH_PROFILE_TRIGGER=signal) and "
+            "that it has imported torch and shows a GPU"
+        )
+        return "\n".join(lines)
+
+    primary = pick_primary_trace(traces)
+    _record_traces_in_manifest(out_dir, primary=primary, traces=traces)
+    if primary is None:
+        lines.append(
+            f"\n{len(traces)} trace file(s) found but none were readable Kineto/Chrome traces"
+        )
+        return "\n".join(lines)
+
+    lines.append(f"\nprimary trace: {primary.relative_to(out_dir)} ({len(traces)} trace(s) total)")
+    lines.append(_analyze_primary(primary))
+    return "\n".join(lines)
+
+
+def _dispatch_profile_ops_target(  # noqa: PLR0913  # tracked: #288
+    target: str,
+    *,
+    load_command: str | None,
+    cwd: str | None,
+    duration_s: float | None,
+    grace_s: float,
+    timeout_s: float,
+    cancel_event: threading.Event | None,
+) -> str:
+    """``profile_ops(target=...)``'s validation + dispatch, split out to keep that function's own branch count small."""
+    if not load_command:
+        return "error: profile_ops(target=...) requires load_command (it bounds the window)."
+    try:
+        return _profile_ops_on_target(
+            target,
+            load_command=load_command,
+            cwd=cwd,
+            duration_s=duration_s,
+            grace_s=grace_s,
+            timeout_s=timeout_s,
+            cancel_event=cancel_event,
+        )
+    except KeyError as exc:
+        return f"error: {exc}"
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 
 def profile_ops(  # noqa: PLR0913  # tracked: #288
-    command: str,
+    command: str | None = None,
     cwd: str | None = None,
     env: dict | None = None,
     ready_command: str | None = None,
@@ -260,9 +569,40 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
     delay_s: float = 0.0,
     duration_s: float | None = None,
     record_shapes: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
+    inject: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
+    target: str | None = None,
     cancel_event: threading.Event | None = None,
 ) -> str:
     """Run *command* under the in-process torch.profiler injection.
+
+    Two modes: pass ``command`` to launch a fresh, single-use process for
+    this capture (the original behavior, below); pass ``target`` (a
+    ``target_id`` from ``start_target``) instead to take one signal-driven
+    window against an already-running warm target -- ``load_command`` is
+    then required (it bounds the window) and ``command``/``ready_command``/
+    ``setup_command``/``delay_s``/``record_shapes``/``inject`` do not apply
+    (the target was already armed with its own ``record_shapes`` when
+    started). See ``_profile_ops_on_target`` for the target-mode mechanics.
+
+    ``inject=False``: **do not** combine this module's own injected
+    ``torch.profiler`` session with a ``command`` that manages its own,
+    separate one (e.g. a serving engine's native ``profiler_config`` +
+    ``start_profile()``/``stop_profile()`` path). Running two independent
+    ``torch.profiler.profile()`` sessions in one process is unsupported and
+    has crashed the profiling backend outright on real ROCm/MI210 hardware
+    (SIGSEGV, empty trace, no catchable Python error -- confirmed against a
+    real eval transcript) rather than raising cleanly. When ``command``
+    already produces its own trace this way, pass ``inject=False``: this
+    skips arming the injection entirely (no ``VIBESYS_TORCH_PROFILE``, no
+    ``PYTHONPATH`` prepend) but still exports
+    ``VIBESYS_TORCH_PROFILE_OUT_DIR`` in ``command``'s env, so the engine's
+    own profiler can be pointed at it (e.g.
+    ``torch_profiler_dir=os.environ["VIBESYS_TORCH_PROFILE_OUT_DIR"]``) and
+    the resulting trace still flows through this function's normal
+    discovery/certify/summary pipeline below. Default (``inject=True``) is
+    unchanged and is the right choice whenever ``command`` does not manage
+    its own separate profiler session -- the common case this tool exists
+    for.
 
     Wraps ``capture_runtime.run_capture`` (kind ``"ops"``) with
     ``inject/sitecustomize.py`` armed via ``PYTHONPATH`` + env, then picks
@@ -316,6 +656,22 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
     ``capture_runtime.run_capture`` so a caller can stop this capture from
     another thread (see ``resources/profilers/_common/mcp_async.py``).
     """
+    if target is not None:
+        return _dispatch_profile_ops_target(
+            target,
+            load_command=load_command,
+            cwd=cwd,
+            duration_s=duration_s,
+            grace_s=grace_s,
+            timeout_s=timeout_s,
+            cancel_event=cancel_event,
+        )
+    if command is None:
+        return (
+            "error: profile_ops requires either command= (launch a fresh process for this "
+            "capture) or target= (an already-running warm target from start_target)."
+        )
+
     capture_id, out_dir = capture_runtime.new_capture("ops")
     lifecycle = capture_runtime.Lifecycle(
         command=command,
@@ -326,6 +682,7 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
             delay_s=delay_s,
             duration_s=duration_s,
             record_shapes=record_shapes,
+            inject=inject,
         ),
         ready_command=ready_command,
         ready_timeout_s=ready_timeout_s,
@@ -341,7 +698,12 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
             lifecycle,
             kind="ops",
             out_dir=out_dir,
-            meta={"delay_s": delay_s, "duration_s": duration_s, "record_shapes": record_shapes},
+            meta={
+                "delay_s": delay_s,
+                "duration_s": duration_s,
+                "record_shapes": record_shapes,
+                "inject": inject,
+            },
             cancel_event=cancel_event,
         )
 
@@ -351,10 +713,15 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
     traces = discover_traces(out_dir)
     if not traces:
         _record_traces_in_manifest(out_dir, primary=None, traces=[])
+        cause = (
+            "inject=False: the process must write its own trace under "
+            "$VIBESYS_TORCH_PROFILE_OUT_DIR (e.g. via its native profiler_config) -- confirm it did"
+            if not inject
+            else "the process never imported torch, or torch.cuda.is_available() was false in it"
+        )
         lines.append(
             f"\nno {_TRACE_GLOB} trace files were produced; see the target log tail above "
-            "(common cause: the process never imported torch, or torch.cuda.is_available() "
-            "was false in it)"
+            f"(common cause: {cause})"
         )
         return "\n".join(lines)
 
@@ -390,7 +757,12 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Generic in-process torch.profiler capture (see profile_ops docstring)."
     )
-    parser.add_argument("--command", required=True, help="Target command, run via bash -lc")
+    parser.add_argument(
+        "--command", default=None, help="Target command, run via bash -lc (or use --target)"
+    )
+    parser.add_argument(
+        "--target", default=None, help="A start_target target_id to window instead of --command"
+    )
     parser.add_argument("--cwd", default=None)
     parser.add_argument(
         "--env", action="append", default=[], metavar="KEY=VALUE", help="May be repeated"
@@ -406,11 +778,21 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--no-record-shapes", dest="record_shapes", action="store_false", default=True
     )
+    parser.add_argument(
+        "--no-inject",
+        dest="inject",
+        action="store_false",
+        default=True,
+        help="Don't arm this module's own torch.profiler session; use when --command already "
+        "manages its own (e.g. a serving engine's native profiler_config path) -- combining both "
+        "crashes the profiling backend.",
+    )
     args = parser.parse_args(argv)
 
     print(  # noqa: T201  # tracked: #288
         profile_ops(
             command=args.command,
+            target=args.target,
             cwd=args.cwd,
             env=_parse_env_args(args.env) or None,
             ready_command=args.ready_command,
@@ -422,6 +804,7 @@ def main(argv: list[str] | None = None) -> None:
             delay_s=args.delay_s,
             duration_s=args.duration_s,
             record_shapes=args.record_shapes,
+            inject=args.inject,
         )
     )
 
