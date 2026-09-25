@@ -37,11 +37,7 @@ from vibesys.context import (
     open_scoped_agent_environment,
 )
 from vibesys.events import FrameworkSource
-from vibesys.orchestration.agents import (
-    _active_progress,  # noqa: F401  # re-export, see below
-    _Agents,
-    _LocalAgentHandle,
-)
+from vibesys.orchestration.agents import _Agents, _LocalAgentHandle
 from vibesys.orchestration.control import _RunControl
 from vibesys.orchestration.environment import _Environment
 from vibesys.orchestration.gates import (

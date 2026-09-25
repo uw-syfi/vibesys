@@ -23,10 +23,7 @@ from hypothesis import strategies as st
 from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.loops.multi.session import _TerminalPolicy
 from vibesys.roles.implementer import ImplementerResponse
-from vibesys.schemas import (
-    CandidateDisposition,
-    HypothesisOutcome,
-)
+from vibesys.schemas import CandidateDisposition, HypothesisOutcome
 from vibesys.search.hypothesis import (
     CarryOver,
     ClosedRound,

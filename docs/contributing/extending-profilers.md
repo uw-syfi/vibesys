@@ -39,7 +39,9 @@ necessary.
 ## Add the profiler prompt
 
 Add `<kind>.j2` under each strategy that uses the profiler, currently
-`src/vibesys/prompts/loops/{multi,profile_multi,evolve}/profilers/`. Explain how
+`src/vibesys/prompts/loops/{multi,evolve}/profilers/` (`profile-guided-multi-agent`
+reuses `multi`'s prompts; it is a preset of `multi`, not a separate strategy
+folder). Explain how
 that strategy's agent should collect and interpret evidence, which limitations
 it must report, and how it should produce `ProfilerSummary`. Review each
 strategy's prompt separately; there is no cross-strategy fallback.
