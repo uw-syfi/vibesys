@@ -91,6 +91,12 @@ waits on is announced by a file, written only once the step has happened:
   directory the controller named in ``next_window``, so each window's
   acknowledgements are its own.
 
+- ``<window_dir>/.window-<pid>-<n>.started`` / ``.failed``: per process,
+  so a controller of a multi-process program knows which processes still
+  owe a trace. A window is finished once its ``<pid>-<n>.pt.trace.json.gz``
+  exists (renamed into place only when complete), its ``.failed`` marker
+  exists, or process ``<pid>`` has exited.
+
 A ``SIGUSR1`` that arrives after ``armed`` but before ``ready`` (including
 mid-``import torch``, where a handler running on the importing thread would
 see a half-initialized module) is queued, not dropped: the watcher delivers
@@ -188,6 +194,7 @@ than forking them after GPU init.
 from __future__ import annotations
 
 import atexit
+import collections
 import contextlib
 import gzip
 import importlib.machinery
@@ -199,6 +206,10 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _ENV_ENABLE = "VIBESYS_TORCH_PROFILE"
 _ENV_OUT_DIR = "VIBESYS_TORCH_PROFILE_OUT_DIR"
@@ -219,6 +230,17 @@ _CONTROL_UNAVAILABLE_NAME = "unavailable"
 _ACK_STARTED_NAME = "window.started"
 _ACK_EXPORTED_NAME = "window.exported"
 _ACK_FAILED_NAME = "window.failed"
+# Per-process window markers, in the window's output directory: how a
+# controller knows which processes still owe a trace (see the handshake
+# section).
+_WINDOW_STARTED_STATE = "started"
+_WINDOW_FAILED_STATE = "failed"
+
+
+def _window_marker(window: int, state: str) -> str:
+    return f".window-{os.getpid()}-{window}.{state}"
+
+
 # Not part of the documented capture_ops.py contract: an internal knob so
 # tests can exercise the "bounded wait, never block exit" path in well under
 # a second instead of the real-world default below.
@@ -404,6 +426,7 @@ class _Capture:
                 f"profiling started (record_shapes={self._record_shapes}, "
                 f"window={self._window_index}, out_dir={out_dir})"
             )
+            _write_marker(out_dir, _window_marker(self._window_index, _WINDOW_STARTED_STATE), "")
             _write_marker(ack_dir, _ACK_STARTED_NAME, str(self._window_index))
             _ = torch  # keep the import alive via closure; no further use here
 
@@ -426,7 +449,7 @@ class _Capture:
                 prof.stop()
             except Exception as exc:  # noqa: BLE001  # LW-910122; this boundary code deliberately catches any exception from an external tool or subprocess call
                 _log(f"torch.profiler stop() raised (continuing): {exc!r}")
-                _write_marker(ack_dir, _ACK_FAILED_NAME, f"stop: {exc!r}")
+                self._window_failed(out_dir, window, ack_dir, f"stop: {exc!r}")
                 return
             self._export(prof, out_dir=out_dir, window=window, ack_dir=ack_dir)
 
@@ -435,27 +458,38 @@ class _Capture:
             out_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             _log(f"could not create output dir {out_dir}: {exc!r}")
-            _write_marker(ack_dir, _ACK_FAILED_NAME, f"export: {exc!r}")
+            self._window_failed(out_dir, window, ack_dir, f"export: {exc!r}")
             return
         pid = os.getpid()
         raw_path = out_dir / f"{pid}-{window}.pt.trace.json"
         gz_path = out_dir / f"{pid}-{window}.pt.trace.json.gz"
+        # The final name appears only once complete (rename), so a reader
+        # that sees it never sees a partial trace.
+        gz_tmp = out_dir / f".{gz_path.name}.tmp"
         try:
             # Export BEFORE anything that could hang (see module docstring):
             # this is the point where the trace becomes durable.
             prof.export_chrome_trace(str(raw_path))
-            with raw_path.open("rb") as src, gzip.open(gz_path, "wb") as dst:
+            with raw_path.open("rb") as src, gzip.open(gz_tmp, "wb") as dst:
                 shutil.copyfileobj(src, dst)
+            gz_tmp.replace(gz_path)
         except Exception as exc:  # noqa: BLE001  # LW-910124; this boundary code deliberately catches any exception from an external tool or subprocess call
             _log(f"failed to export chrome trace: {exc!r}")
-            _write_marker(ack_dir, _ACK_FAILED_NAME, f"export: {exc!r}")
+            self._window_failed(out_dir, window, ack_dir, f"export: {exc!r}")
             return
         finally:
             with contextlib.suppress(OSError):
                 raw_path.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                gz_tmp.unlink(missing_ok=True)
         _log(f"exported trace to {gz_path} ({gz_path.stat().st_size} bytes)")
         _write_marker(ack_dir, _ACK_EXPORTED_NAME, gz_path.name)
         self._bounded_synchronize()
+
+    @staticmethod
+    def _window_failed(out_dir: Path, window: int, ack_dir: Path | None, reason: str) -> None:
+        _write_marker(out_dir, _window_marker(window, _WINDOW_FAILED_STATE), reason)
+        _write_marker(ack_dir, _ACK_FAILED_NAME, reason)
 
     def _bounded_synchronize(self) -> None:
         """Best-effort post-export sync, never allowed to block process exit.
@@ -489,16 +523,49 @@ class _Capture:
 # ---------------------------------------------------------------------------
 
 
+class _SerialHandlers:
+    """Run signal work one item at a time, never nested inside another item.
+
+    Python runs signal handlers on the main thread between bytecodes, so a
+    second signal can interrupt a handler that is still running (e.g. a
+    SIGINT during the multi-second ``prof.start()`` of a SIGUSR1). Running
+    the second handler right there would re-enter ``_Capture`` while it
+    holds its lock (a deadlock that hangs the host process) or unwind it
+    halfway via ``KeyboardInterrupt``. Instead, work that arrives while a
+    handler is running is queued and runs, in arrival order, once the
+    running one returns. Main-thread only, so no locking is needed here.
+    """
+
+    def __init__(self) -> None:
+        self._queue: collections.deque[Callable[[], None]] = collections.deque()
+        self._running = False
+
+    def submit(self, work: Callable[[], None]) -> None:
+        self._queue.append(work)
+        if self._running:
+            return
+        self._running = True
+        try:
+            while self._queue:
+                self._queue.popleft()()
+        finally:
+            self._running = False
+
+
+_SERIAL_HANDLERS = _SerialHandlers()
+
+
 def _install_chained_handler(sig: signal.Signals, handler) -> None:  # noqa: ANN001  # LW-910126; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     """Install *handler* for *sig*, calling any prior handler after it runs.
 
     Only callable from the main thread (a Python restriction on
     ``signal.signal`` itself); this module is only ever imported there, at
-    interpreter startup.
+    interpreter startup. Both run through ``_SERIAL_HANDLERS``, so neither
+    ever runs nested inside another signal's handling.
     """
     previous = signal.getsignal(sig)
 
-    def _wrapped(signum: int, frame) -> None:  # noqa: ANN001  # LW-910127; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
+    def _run(signum: int, frame) -> None:  # noqa: ANN001  # LW-910127; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
         handler(signum, frame)
         if callable(previous):
             previous(signum, frame)
@@ -509,7 +576,7 @@ def _install_chained_handler(sig: signal.Signals, handler) -> None:  # noqa: ANN
             signal.signal(signal.SIGINT, signal.SIG_DFL)
             os.kill(os.getpid(), signal.SIGINT)
 
-    signal.signal(sig, _wrapped)
+    signal.signal(sig, lambda signum, frame: _SERIAL_HANDLERS.submit(lambda: _run(signum, frame)))
 
 
 def _arm(capture: _Capture, *, delay_s: float, duration_s: float | None, trigger: str) -> None:

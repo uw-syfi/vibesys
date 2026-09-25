@@ -19,13 +19,19 @@ shape its behavior without editing the package:
   returning (default ``0``); used to simulate the ROCm post-export hang.
 - ``FAKE_TORCH_START_DELAY_S``: seconds ``profile.start()`` takes (default
   ``0``); models ROCm's multi-second profiler backend initialization.
+- ``FAKE_TORCH_EXPORT_DELAY_S``: seconds ``export_chrome_trace()`` takes
+  (default ``0``); models a slow export on a large trace.
+- ``FAKE_TORCH_START_GATE``: if set, ``profile.start()`` returns only once
+  this path exists (after logging ``profile.start``).
 - ``FAKE_TORCH_IMPORT_GATE``: if set, ``import torch`` blocks after logging
   ``torch.imported`` until this path exists (a signal can then be delivered
   deterministically mid-import).
 - ``FAKE_TORCH_CALL_LOG``: path to append one ``"<monotonic>\\t<event>"``
   line per call the fake module makes (``torch.imported``, ``torch.import_done``,
-  ``cuda.is_available``, ``profile.start``, ``profile.stop``,
-  ``profile.export_chrome_trace``), used to assert ordering and timing.
+  ``cuda.is_available``, ``profile.start``, ``profile.start_failed``,
+  ``profile.stop``, ``profile.export_chrome_trace``), used to assert
+  ordering. A child program can block on one with
+  ``from torch._log import wait_for_event``.
 """
 
 from __future__ import annotations
@@ -92,6 +98,24 @@ _FAKE_TORCH_LOG_SOURCE = textwrap.dedent(
             return
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(f"{time.monotonic()}\\t{event}\\n")
+
+
+    def wait_for_event(event: str, count: int = 1) -> None:
+        """Block until *event* appears *count* times in the call log.
+
+        Lets a test's child program stay alive exactly until the profiler
+        step it depends on has happened, instead of sleeping a guessed time.
+        """
+        path = os.environ["FAKE_TORCH_CALL_LOG"]
+        while True:
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    seen = sum(line.rstrip("\\n").endswith("\\t" + event) for line in handle)
+            except FileNotFoundError:
+                seen = 0
+            if seen >= count:
+                return
+            time.sleep(0.01)
     '''
 )
 
@@ -124,9 +148,15 @@ _FAKE_TORCH_PROFILER_SOURCE = textwrap.dedent(
 
         def start(self):
             if os.environ.get("FAKE_TORCH_START_FAIL") == "1":
+                _log_event("profile.start_failed")
                 raise RuntimeError("fake torch: start() failure")
             time.sleep(float(os.environ.get("FAKE_TORCH_START_DELAY_S", "0")))
             _log_event("profile.start")
+            # Hold start() open until the gate file exists, so a test can
+            # deliver another signal while this handler is still running.
+            gate = os.environ.get("FAKE_TORCH_START_GATE")
+            while gate and not os.path.exists(gate):
+                time.sleep(0.01)
 
         def stop(self):
             _log_event("profile.stop")
@@ -134,6 +164,7 @@ _FAKE_TORCH_PROFILER_SOURCE = textwrap.dedent(
         def export_chrome_trace(self, path):
             if os.environ.get("FAKE_TORCH_EXPORT_FAIL") == "1":
                 raise RuntimeError("fake torch: export_chrome_trace() failure")
+            time.sleep(float(os.environ.get("FAKE_TORCH_EXPORT_DELAY_S", "0")))
             events = [
                 {
                     "ph": "X",
