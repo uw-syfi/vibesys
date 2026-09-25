@@ -344,7 +344,7 @@ class _Workspaces:
                 except BaseException as exc:  # noqa: BLE001  # finish scope cleanup
                     errors.append(exc)
             async with (
-                self._host.evaluator._lock_for(scope),
+                self._host.gates._lock_for(scope),
                 self._scope_lock(scope),
                 self._host._parent_mutation_lock,
             ):
@@ -354,7 +354,7 @@ class _Workspaces:
                     errors.append(exc)
                 finally:
                     if scope.id not in self._scopes:
-                        self._host.evaluator._forget(scope)
+                        self._host.gates._forget(scope)
             if errors:
                 raise BaseExceptionGroup("scoped agent cleanup failed", errors)  # noqa: TRY003
 
@@ -392,7 +392,7 @@ class _Workspaces:
         for scope in reversed(tuple(self._scopes.values())):
             try:
                 async with (
-                    self._host.evaluator._lock_for(scope),
+                    self._host.gates._lock_for(scope),
                     self._scope_lock(scope),
                     self._host._parent_mutation_lock,
                 ):

@@ -9,7 +9,7 @@ capability live in a sibling module, split out of this one by what they own:
 - `workspaces.py`: `ctx.workspaces` (root/isolated worktrees, snapshots,
   transactions, adoption).
 - `state.py`: `ctx.state` (checkpoint/commit and the events they derive).
-- `gates.py`: `ctx.gates`/`ctx.evaluator` (trusted accuracy/benchmark checks).
+- `gates.py`: `ctx.gates` (trusted accuracy/benchmark checks).
 - `control.py`: `ctx.control` (the stop/pause/debug boundary).
 - `environment.py`: `ctx.environment` (execution facts, candidate deployment).
 
@@ -182,11 +182,7 @@ class RunContext:
         self._close_task: asyncio.Task[None] | None = None
         self.control = _RunControl(integration, debug=request.debug)
         self.state = _RunState(self)
-        self.evaluator = _Evaluator(self)
-        # `gates` is the same instance as `evaluator`, under the name the
-        # `run` gate API is meant to be reached by; `evaluator` stays for
-        # `check`/`measure`/`reuse_accuracy` callers until they migrate too.
-        self.gates = self.evaluator
+        self.gates = _Evaluator(self)
         self.workspaces = _Workspaces(self)
         self.agents = _Agents(self)
         self.environment = _Environment(self)

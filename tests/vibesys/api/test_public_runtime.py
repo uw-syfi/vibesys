@@ -481,12 +481,12 @@ def test_root_environment_and_trusted_evaluator_capabilities(tmp_path: Path) -> 
             assert execution.exit_code == 0
             assert "host-ok" in execution.output
 
-            accuracy = await ctx.evaluator.check("host-probe", label="host-probe")
+            accuracy = await ctx.gates.check("host-probe", label="host-probe")
             assert accuracy.passed
-            reused = await ctx.evaluator.reuse_accuracy(label="host-probe")
+            reused = await ctx.gates.reuse_accuracy(label="host-probe")
             assert reused.passed
             assert not reused.executed
-            benchmark = await ctx.evaluator.measure("host-probe")
+            benchmark = await ctx.gates.measure("host-probe")
             assert not benchmark.executed
 
     try:
@@ -711,7 +711,7 @@ def test_gate_lock_shares_the_parent_mutation_lock_domain() -> None:
 
 def test_gate_and_adopt_cannot_interleave_on_the_parent_tree() -> None:
     """R6 regression: a gate and an adopt/checkpoint on the parent tree
-    must fully serialize. Old code let ``ctx.evaluator.check``/``measure``
+    must fully serialize. Old code let ``ctx.gates.check``/``measure``
     run concurrently with ``ctx.workspaces.adopt``/``ctx.state.checkpoint``
     because they held different lock objects; this asserts the order is
     never interleaved.

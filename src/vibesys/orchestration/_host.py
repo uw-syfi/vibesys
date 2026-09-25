@@ -11,7 +11,7 @@ build ``RunContext``, so none of them can import ``RunContext`` back
 Before this module, ``host`` was typed ``Any`` to sidestep the cycle.
 ``HostResources`` names exactly the attributes the capability classes read
 off ``host`` (including the cross-capability ones, e.g. ``workspaces``
-reading ``host.evaluator``), so ``runtime.RunContext`` satisfies it
+reading ``host.gates``), so ``runtime.RunContext`` satisfies it
 structurally with no import from this module to any capability module.
 This mirrors ``state.py``'s own ``_CommittedStateProjector`` and
 ``_EventSink``: a small Protocol declared locally, at the base of the
@@ -112,7 +112,7 @@ class _EnvironmentLike(Protocol):
 
 
 class _EvaluatorLike(Protocol):
-    """What ``workspaces.py`` needs from ``ctx.evaluator`` (== ``ctx.gates``)."""
+    """What ``workspaces.py`` needs from ``ctx.gates``."""
 
     def _lock_for(self, scope: WorkspaceScope | None) -> asyncio.Lock:
         """Return the lock guarding a scope's gates and adopt/checkpoint."""
@@ -160,13 +160,8 @@ class HostResources(Protocol):
         ...
 
     @property
-    def evaluator(self) -> _EvaluatorLike:
-        """Return this run's trusted-gate capability."""
-        ...
-
-    @property
     def gates(self) -> _EvaluatorLike:
-        """Return this run's trusted-gate capability (alias of ``evaluator``)."""
+        """Return this run's trusted-gate capability."""
         ...
 
     _setup: RunSetup

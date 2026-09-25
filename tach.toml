@@ -53,6 +53,24 @@ exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources",
 ignore_type_checking_imports = false
 forbid_circular_dependencies = true
 
+# Orchestration-simplification target direction (loops > roles/search >
+# orchestration host > prompts + lower libs), enforced only where a module
+# already carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`/
+# `vibesys.agent_run` stay unlayered; their order is still pinned by the
+# explicit edges above). `vibesys.prompts` (templates + renderer) sits in the
+# bottom layer with the other mechanics libraries: the host and lower layers
+# render prompts, they don't hand policy to the template layer, so `prompts`
+# is a leaf every layer above it may reach downward into.
+# `layers_explicit_depends_on = true` keeps this ratchet's rule that every
+# edge, same-layer or cross-layer, must still be listed in `depends_on`;
+# layers add one more check on top: no module may list a dependency on a
+# module in a strictly higher layer.
+# `vibesys.roles` (roles_search) also imports `vibesys.search.hypothesis` and
+# `vibesys.search.population` (same layer); roles and search should not
+# import each other per the target design, but this edge is already needed.
+layers = ["loops", "roles_search", "orchestration_host", "prompts_and_lower_libs"]
+layers_explicit_depends_on = true
+
 [[modules]]
 path = "entrypoints"
 depends_on = ["vs_project", "vs_github", "vibesys.api", "vs_agent", "server.runtime", "server.settings", "headless", "vibesys.api.evolve"]
@@ -127,6 +145,7 @@ depends_on = [ "vs_agent"]
 
 [[modules]]
 path = "vibesys"
+layer = "prompts_and_lower_libs"
 depends_on = ["vs_feature_flags", "vs_loop_state", "vs_agent"]
 
 [[modules]]
@@ -156,30 +175,37 @@ depends_on = ["vs_agent", "vibesys", "vs_project", "vibesys.orchestration.enviro
 
 [[modules]]
 path = "vibesys.orchestration"
+layer = "orchestration_host"
 depends_on = ["vibesys.orchestration.resume"]
 
 [[modules]]
 path = "vibesys.orchestration.request"
+layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.evaluators", "vibesys.sandbox", "vs_project"]
 
 [[modules]]
 path = "vibesys.orchestration.view"
+layer = "orchestration_host"
 depends_on = []
 
 [[modules]]
 path = "vibesys.orchestration.environment"
+layer = "orchestration_host"
 depends_on = ["vibesys", "vs_agent", "vs_sandbox", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.sandbox", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.tools"
+layer = "orchestration_host"
 depends_on = ["vs_agent"]
 
 [[modules]]
 path = "vibesys.runtime"
+layer = "prompts_and_lower_libs"
 depends_on = ["vs_agent", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.context"
+layer = "orchestration_host"
 depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.orchestration", "vibesys.orchestration.request"]
 
 [[modules]]
@@ -195,14 +221,17 @@ depends_on = ["vibesys.evaluators", "vibesys.roles", "vibesys.search.hypothesis"
 # Forbidden: vibesys.loops, vibesys.orchestration, vibesys.roles,
 # vibesys.prompts, vs_agent (agents/runtime).
 path = "vibesys.search"
+layer = "roles_search"
 depends_on = []
 
 [[modules]]
 path = "vibesys.search.hypothesis"
+layer = "roles_search"
 depends_on = ["vibesys", "vibesys.evaluators", "vibesys.search.profile_focus", "vs_loop_state", "vs_project"]
 
 [[modules]]
 path = "vibesys.search.profile_focus"
+layer = "roles_search"
 depends_on = []
 
 [[modules]]
@@ -210,110 +239,137 @@ depends_on = []
 # execution, sequencing, or state transitions -- those stay in
 # vibesys.orchestration.runtime (ctx.agents.turn) and loops/.
 path = "vibesys.roles"
+layer = "roles_search"
 depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state", "vs_issue_board", "vibesys.search.population", "vibesys.search.hypothesis"]
 
 [[modules]]
 path = "vibesys.loops"
+layer = "loops"
 depends_on = []
 
 [[modules]]
 path = "vibesys.loops.single"
+layer = "loops"
 depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.agent_run", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors"]
 
 [[modules]]
 path = "vibesys.loops.multi"
+layer = "loops"
 depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors"]
 
 [[modules]]
 path = "vibesys.loops.profile_single"
+layer = "loops"
 depends_on = ["vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys", "vibesys.prompts", "vs_project", "vibesys.agent_run", "vibesys.domains", "vs_agent", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors"]
 
 [[modules]]
 path = "vibesys.loops.profile_multi"
+layer = "loops"
 depends_on = [ "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent", "vibesys.roles", "vibesys.prompts", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors"]
 
 [[modules]]
 path = "vibesys.loops.issue_queue"
+layer = "loops"
 depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.orchestration.tools", "vs_agent", "vibesys.roles", "vibesys.evaluators"]
 
 [[modules]]
 path = "vibesys.loops.evolve"
+layer = "loops"
 depends_on = [ "vs_project", "vibesys.prompts", "vibesys", "vibesys.domains", "vs_agent", "vibesys.orchestration", "vibesys.orchestration.runtime", "vibesys.evaluators", "vibesys.runtime", "vibesys.search.population", "vibesys.roles"]
 
 [[modules]]
 path = "vibesys.run"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.evaluators", "vibesys.render", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_project"]
 
 [[modules]]
 path = "vibesys.domains"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vibesys.prompts"]
 
 [[modules]]
 path = "vibesys.backends"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.sandbox"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vibesys.skypilot", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.skypilot"
+layer = "prompts_and_lower_libs"
 depends_on = [ "vs_project"]
 
 [[modules]]
 path = "vibesys.render"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys"]
 
 [[modules]]
 path = "vibesys.evaluators"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vibesys.render", "vs_evaluator_protocol", "vs_loop_state", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.search.population"
+layer = "roles_search"
 depends_on = [ "vibesys.evaluators"]
 
 [[modules]]
 path = "vibesys.prompts"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_prompts", "vibesys.evaluators"]
 
 [[modules]]
 path = "vibesys._model_config"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_sandbox"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_agent"
+layer = "prompts_and_lower_libs"
 depends_on = ["vs_sandbox", "vs_loop_state", "vs_project"]
 
 [[modules]]
 path = "vs_project"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_loop_state"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_issue_board"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_evaluator_protocol"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_prompts"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_feature_flags"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_github"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 # Each library exposes only its `api` subpackage and its submodules. External
@@ -357,42 +413,52 @@ from = ["vs_sandbox"]
 
 [[modules]]
 path = "vibesys.orchestration.resume"
+layer = "orchestration_host"
 depends_on = ["vs_project"]
 
 [[modules]]
 path = "vibesys.orchestration.contracts"
+layer = "orchestration_host"
 depends_on = [ "vs_project", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.context"]
 
 [[modules]]
 path = "vibesys.orchestration.runner"
+layer = "orchestration_host"
 depends_on = ["vibesys.orchestration.contracts", "vibesys.run", "vibesys.orchestration.runtime", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.backends", "vs_agent"]
 
 [[modules]]
 path = "vibesys.orchestration.runtime"
+layer = "orchestration_host"
 depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.runtime", "vibesys.run", "vibesys.render", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.orchestration.agents", "vibesys.orchestration.control", "vibesys.orchestration.gates", "vibesys.orchestration.state", "vibesys.orchestration.workspaces", "vibesys.backends"]
 
 [[modules]]
 path = "vibesys.orchestration.agents"
+layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.context", "vibesys.prompts", "vibesys.run", "vibesys.runtime", "vs_agent", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.workspaces"
+layer = "orchestration_host"
 depends_on = ["vibesys.context", "vibesys.runtime", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.state"
+layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.orchestration.view", "vs_project", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.gates"
+layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_sandbox", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.control"
+layer = "orchestration_host"
 depends_on = ["vibesys.run"]
 
 [[modules]]
 path = "vibesys.orchestration._common"
+layer = "orchestration_host"
 depends_on = ["vibesys.orchestration.request"]
 
 [[modules]]
@@ -401,6 +467,7 @@ depends_on = ["vibesys.orchestration.request"]
 # it must never depend on (and is never depended on by anything that would
 # create a cycle back through) agents/workspaces/gates/state/environment.
 path = "vibesys.orchestration._host"
+layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.context", "vibesys.orchestration.request", "vibesys.orchestration.view", "vibesys.run", "vibesys.runtime", "vibesys.sandbox"]
 
 [[modules]]
@@ -408,6 +475,7 @@ depends_on = ["vibesys", "vibesys.context", "vibesys.orchestration.request", "vi
 # strategies. Sits directly under vibesys.loops (not inside any one
 # strategy folder) because strategies never import each other.
 path = "vibesys.loops.agent_options"
+layer = "loops"
 depends_on = ["vibesys", "vibesys.errors", "vibesys.evaluators", "vibesys.orchestration", "vs_project"]
 
 [[modules]]
@@ -415,12 +483,15 @@ depends_on = ["vibesys", "vibesys.errors", "vibesys.evaluators", "vibesys.orches
 # strategies' registered projectors. Sits directly under vibesys.loops for
 # the same reason as vibesys.loops.agent_options.
 path = "vibesys.loops.hypothesis_readmodel"
+layer = "loops"
 depends_on = ["vibesys", "vibesys.orchestration.view", "vibesys.search.hypothesis", "vs_loop_state"]
 
 [[modules]]
 path = "vibesys.loops.registry"
+layer = "loops"
 depends_on = [ "vibesys.loops.evolve.entrypoint", "vibesys.orchestration.contracts", "vibesys.loops.multi", "vibesys.loops.single", "vibesys.loops.issue_queue", "vibesys.loops.profile_multi", "vibesys.loops.profile_single"]
 
 [[modules]]
 path = "vibesys.loops.evolve.entrypoint"
+layer = "loops"
 depends_on = ["vibesys.loops.evolve", "vs_project", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.evaluators", "vibesys.search.population"]
