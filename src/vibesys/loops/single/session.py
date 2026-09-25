@@ -1,4 +1,13 @@
-"""Durable round control for the single strategy over public host capabilities."""
+"""Durable round control for the single strategy over public host capabilities.
+
+Profiling is a configuration option of this strategy
+(``options.profile_guided``), not a separate strategy: when set, this
+session composes ``search.profile_focus.ProfileFocus`` (attribution,
+component focus selection, and plateau tracking) around the same round
+control plain ``single`` uses. ``ORCHESTRATION_ID`` /
+``PROFILE_ORCHESTRATION_ID`` in ``single/orchestration.py`` register the
+two presets (profiling off/on) under their stable IDs and state namespaces.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +17,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from vibesys.agent_run import issue_board
 from vibesys.errors import StrategySessionError
+from vibesys.loops.single.attribution import run_attribution
 from vibesys.loops.single.turns import SingleAgentTurns
 from vibesys.orchestration import progress_log
 from vibesys.orchestration.runtime import WorkspaceRestoreError
@@ -34,6 +44,7 @@ from vibesys.search.hypothesis.transitions import (
     terminal_workspace_notice,
     update_active_hypothesis,
 )
+from vibesys.search.profile_focus import ProfileFocus, ProfileFocusConfig
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 
@@ -42,10 +53,12 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.orchestration.runtime import RunContext
     from vibesys.search.hypothesis.plan import OrchestratorPlan
     from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.search.profile_focus.state import ProfileFocusState
 
 
 SingleSessionError = StrategySessionError
@@ -69,6 +82,19 @@ class _StaticGuidance:
 
 
 STATIC_GUIDANCE = _StaticGuidance()
+
+
+class _ProfilePolicy:
+    """Component measurement and advancement decisions for profiling-on runs."""
+
+    def __init__(self, config: ProfileGuidedInput) -> None:
+        self.config = config
+
+    def official_reason(self, reason: str | None, *, active_component: str) -> str | None:
+        """Measure an active component even when the regular cadence defers."""
+        if active_component:
+            return reason or "profile-guided component measurement"
+        return reason
 
 
 @dataclass(frozen=True)
@@ -152,6 +178,23 @@ class SingleSession:
             )
         )
         self.terminal_policy = _TerminalPolicy()
+        config = options.profile_guided
+        # Commit labels are part of the durable event log (see golden
+        # snapshots); keep the profiling-on preset's "profile_single:"
+        # prefix it always had, now driven by the option instead of a
+        # separate strategy folder.
+        self._label_prefix = "profile_single" if config is not None else "single"
+        self.profile = _ProfilePolicy(config) if config is not None else None
+        self.profile_focus = (
+            ProfileFocus(
+                ProfileFocusConfig(
+                    plateau_min_rounds=config.min_measured_rounds,
+                    min_relative_improvement=config.min_relative_improvement,
+                )
+            )
+            if config is not None
+            else None
+        )
         self.framework_benchmark_configured = (
             ctx.request.input_bundle.benchmark_result is not None
             or ctx.request.input_bundle.benchmark_result_protocol is not None
@@ -230,7 +273,7 @@ class SingleSession:
                 sequence=self.round_number,
                 writes={"state.json": state},
                 candidate=False,
-                label="single: initialize policy state",
+                label=f"{self._label_prefix}: initialize policy state",
                 publish=state,
             )
 
@@ -257,6 +300,15 @@ class SingleSession:
         with self.ctx.agents.progress(progress):
             yield
 
+    def _focus_state(self) -> ProfileFocusState:
+        assert self.profile_focus is not None  # noqa: S101  # only called when profiling is on
+        return self.state.profile_guidance or self.profile_focus.initial()
+
+    def _with_focus(self, focus_state: ProfileFocusState) -> HypothesisState:
+        """Embed a new profile-focus state, normalized like the ported controller did."""
+        updated = self.state.model_copy(update={"profile_guidance": focus_state}, deep=True)
+        return HypothesisState.model_validate(updated.model_dump())
+
     async def select_hypothesis(self) -> SingleRound:
         """Choose a designer plan or continue the active hypothesis."""
         number = self.round_number
@@ -267,6 +319,23 @@ class SingleSession:
             raise SingleSessionError.missing_active()
         if isinstance(decision, NewHypothesis):
             context = decision.context
+            guidance = STATIC_GUIDANCE
+            if self.profile is not None and self.profile_focus is not None:
+                attribution = await run_attribution(
+                    self.ctx, self.profile.config, round_number=number
+                )
+                focus_state = self.profile_focus.observe(
+                    self._focus_state(), round_number=number, bottlenecks=attribution
+                )
+                self.state = self._with_focus(focus_state)
+                await self._commit(
+                    sequence=self.round_number,
+                    writes={"state.json": self.state},
+                    candidate=False,
+                    label=f"profile-guided: prepare round {number}",
+                    publish=self.state,
+                )
+                guidance = self.profile_focus.focus(focus_state)
             summary = self._previous_profile()
             plan = await self.turns.plan(
                 PlanRequest(
@@ -277,7 +346,7 @@ class SingleSession:
                     profiler_summary=summary,
                     plateau_warning=context.plateau_warning,
                     provisional_candidates=context.provisional_candidates,
-                    profile_guidance=STATIC_GUIDANCE,
+                    profile_guidance=guidance,
                 )
             )
             started = self.search.start(
@@ -293,7 +362,7 @@ class SingleSession:
                 sequence=self.round_number,
                 writes={"state.json": self.state},
                 candidate=False,
-                label=f"single: start hypothesis {plan.hypothesis_id}",
+                label=f"{self._label_prefix}: start hypothesis {plan.hypothesis_id}",
                 publish=self.state,
             )
         else:
@@ -317,6 +386,10 @@ class SingleSession:
             requested=plan.request_official_evaluation,
             candidate_ready=True,
         )
+        if self.profile is not None:
+            reason = self.profile.official_reason(
+                reason, active_component=self._focus_state().active_component or ""
+            )
         await self._apply_rollback(hypothesis)
         request = AttemptRequest(
             round_number=number,
@@ -378,7 +451,7 @@ class SingleSession:
             sequence=self.round_number,
             writes={"state.json": self.state},
             candidate=False,
-            label=f"single: set hypothesis {hypothesis.hypothesis_id} parent",
+            label=f"{self._label_prefix}: set hypothesis {hypothesis.hypothesis_id} parent",
             publish=self.state,
         )
         if failed_child is None:
@@ -411,7 +484,7 @@ class SingleSession:
             sequence=self.round_number,
             writes={"state.json": attempt.agent_run_state},
             candidate=False,
-            label=f"single: start round {self.round_number} attempt {retry}",
+            label=f"{self._label_prefix}: start round {self.round_number} attempt {retry}",
             publish=attempt.agent_run_state,
         )
         # The paid-work marker is written by `turns.combined`'s `before_paid`
@@ -508,7 +581,7 @@ class SingleSession:
             sequence=self.round_number,
             writes={"state.json": state},
             candidate=False,
-            label=f"single: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
+            label=f"{self._label_prefix}: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
             publish=state,
         )
 
@@ -539,8 +612,21 @@ class SingleSession:
                 model=worker.model,
             )
         )
+        state = self.state
+        if self.profile_focus is not None:
+            official = record.official_evaluation
+            relative_improvement = (
+                record.perf_delta_pct / 100 if record.perf_delta_pct is not None else None
+            )
+            focus_state = self.profile_focus.record(
+                self._focus_state(),
+                round_number=record.round_number,
+                passed=attempt.passed and official,
+                relative_improvement=relative_improvement,
+            )
+            state = self._with_focus(focus_state)
         closed = self.search.close_round(
-            self.state,
+            state,
             hypothesis=hypothesis,
             record=record,
             records=self.records,
@@ -591,14 +677,14 @@ class SingleSession:
             if baseline is None:
                 raise SingleSessionError.missing_baseline()
             await self.workspace.restore(baseline, clean=True)
-            await self.workspace.snapshot("single: restore trusted input baseline")
+            await self.workspace.snapshot(f"{self._label_prefix}: restore trusted input baseline")
             self.ctx.log(f"\nNo evaluated winner was retained. Restored baseline {baseline[:12]}.")
             return True
         if winner.commit is None:
             raise SingleSessionError.missing_winner_commit()
         await self.workspace.retain(f"selected-round-{winner.round_number:04d}", winner.commit)
         await self.workspace.restore(winner.commit, clean=True)
-        await self.workspace.snapshot(f"single: select round {winner.round_number}")
+        await self.workspace.snapshot(f"{self._label_prefix}: select round {winner.round_number}")
         metrics = (
             _format_metric_row(record_candidate_metrics(winner), self.state.metrics.objectives)
             if self.state.metrics.objectives

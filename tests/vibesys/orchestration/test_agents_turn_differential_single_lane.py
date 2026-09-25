@@ -52,8 +52,10 @@ from vibesys.loops.issue_queue.orchestration import (
 from vibesys.loops.issue_queue.orchestration import (
     descriptor_from_options as issue_queue_descriptor_from_options,
 )
-from vibesys.loops.profile_single.orchestration import ProfileGuidedSingleAgentOrchestrator
-from vibesys.loops.single.orchestration import SingleAgentOrchestrator
+from vibesys.loops.single.orchestration import (
+    ProfileGuidedSingleAgentOrchestrator,
+    SingleAgentOrchestrator,
+)
 from vibesys.orchestration.agents import _Agents
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import IssueImplementerResponse
@@ -210,7 +212,7 @@ def test_profile_single_roles_replay_identically(tmp_path: Path) -> None:
     with (
         patch.object(_Agents, "turn", _record_agents_turn_calls(recorded)),
         patch(
-            "vibesys.loops.profile_single.session.run_attribution",
+            "vibesys.loops.single.session.run_attribution",
             side_effect=lambda *_a, **_k: (),
         ),
     ):

@@ -1,9 +1,9 @@
 """Single-agent role family: one agent does implement + judge + profile.
 
-Used by the ``single`` and ``profile_single`` strategies' inner-loop
-ablation. ``profile_single``'s templates add component guidance/attribution
-context ``single`` doesn't have, so it gets its own role (different prompt
-=> different role), even though both reply with the same shape.
+Used by the ``single`` strategy's inner-loop ablation, in both its plain
+and profile-guided (``profile-guided-single-agent``) presets. Both presets
+render the same template and reply shape; profiling is a context value
+(``ctx.options.profile_guided``), not a different role.
 """
 
 from __future__ import annotations
@@ -19,9 +19,8 @@ from vs_loop_state.api import CandidateDisposition
 class SingleAgentRoundContext(BaseModel):
     """Shared context for the single-agent combined role.
 
-    ``single`` and ``profile_single`` each declare their own ``Role``
-    (different template files), but both templates read the exact same
-    free-variable set, so one context model serves both.
+    ``single`` serves both its plain and profile-guided presets from this
+    one context model and template.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -156,21 +155,4 @@ SINGLE_COMBINED = Role(
     ),
 )
 
-PROFILE_SINGLE_COMBINED = Role(
-    id="implementer",
-    template="loops/profile_single/single_agent_round_prompt.j2",
-    reply=SingleAgentRoundResponse,
-    fallback=_fallback_combined,
-    context=SingleAgentRoundContext,
-    timeout_fallback=_timeout_fallback_combined,
-    access=Writes(),
-    session=Keyed(scope=SessionScope.HYPOTHESIS),
-    paid=True,
-    filter_skills=True,
-    message=(
-        "Carry out the orchestrator's task above end-to-end "
-        "(implement, self-judge, profile) and return only the JSON object."
-    ),
-)
-
-ALL_ROLES = (SINGLE_COMBINED, PROFILE_SINGLE_COMBINED)
+ALL_ROLES = (SINGLE_COMBINED,)

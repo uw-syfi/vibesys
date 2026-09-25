@@ -1,4 +1,4 @@
-"""Focused tests for the profile-guided attribution process adapter."""
+"""Focused tests for the profile-guided attribution process adapter (single strategy)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
-from vibesys.loops.profile_single import attribution as runner
+from vibesys.loops.single import attribution as runner
 from vibesys.search.profile_focus.state import ProfileBottleneck
 
 if TYPE_CHECKING:
