@@ -53,22 +53,22 @@ exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources",
 ignore_type_checking_imports = false
 forbid_circular_dependencies = true
 
-# Orchestration-simplification target direction (loops > roles/search/prompts >
-# orchestration host > lower libs), enforced only where a module already
-# carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`/
+# Orchestration-simplification target direction (loops > roles/search >
+# orchestration host > prompts + lower libs), enforced only where a module
+# already carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`/
 # `vibesys.agent_run` stay unlayered; their order is still pinned by the
-# explicit edges above). `layers_explicit_depends_on = true` keeps this
-# ratchet's rule that every edge, same-layer or cross-layer, must still be
-# listed in `depends_on`; layers add one more check on top: no module may list
-# a dependency on a module in a strictly higher layer. Known violations of the
-# target direction that already exist in code (kept, not fixed, by design):
-# `vibesys.sandbox` and `vibesys.domains` (lower_libs) import
-# `vibesys.prompts` (roles_search_prompts), and `vibesys.orchestration.agents`
-# (orchestration_host) imports `vibesys.prompts` (roles_search_prompts) too.
-# `vibesys.roles` (roles_search_prompts) also imports `vibesys.search.hypothesis`
-# and `vibesys.search.population` (same layer); roles and search should not
+# explicit edges above). `vibesys.prompts` (templates + renderer) sits in the
+# bottom layer with the other mechanics libraries: the host and lower layers
+# render prompts, they don't hand policy to the template layer, so `prompts`
+# is a leaf every layer above it may reach downward into.
+# `layers_explicit_depends_on = true` keeps this ratchet's rule that every
+# edge, same-layer or cross-layer, must still be listed in `depends_on`;
+# layers add one more check on top: no module may list a dependency on a
+# module in a strictly higher layer.
+# `vibesys.roles` (roles_search) also imports `vibesys.search.hypothesis` and
+# `vibesys.search.population` (same layer); roles and search should not
 # import each other per the target design, but this edge is already needed.
-layers = ["loops", "roles_search_prompts", "orchestration_host", "lower_libs"]
+layers = ["loops", "roles_search", "orchestration_host", "prompts_and_lower_libs"]
 layers_explicit_depends_on = true
 
 [[modules]]
@@ -145,7 +145,7 @@ depends_on = [ "vs_agent"]
 
 [[modules]]
 path = "vibesys"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = ["vs_feature_flags", "vs_loop_state", "vs_agent"]
 
 [[modules]]
@@ -200,7 +200,7 @@ depends_on = ["vs_agent"]
 
 [[modules]]
 path = "vibesys.runtime"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = ["vs_agent", "vs_sandbox"]
 
 [[modules]]
@@ -221,17 +221,17 @@ depends_on = ["vibesys.evaluators", "vibesys.roles", "vibesys.search.hypothesis"
 # Forbidden: vibesys.loops, vibesys.orchestration, vibesys.roles,
 # vibesys.prompts, vs_agent (agents/runtime).
 path = "vibesys.search"
-layer = "roles_search_prompts"
+layer = "roles_search"
 depends_on = []
 
 [[modules]]
 path = "vibesys.search.hypothesis"
-layer = "roles_search_prompts"
+layer = "roles_search"
 depends_on = ["vibesys", "vibesys.evaluators", "vibesys.search.profile_focus", "vs_loop_state", "vs_project"]
 
 [[modules]]
 path = "vibesys.search.profile_focus"
-layer = "roles_search_prompts"
+layer = "roles_search"
 depends_on = []
 
 [[modules]]
@@ -239,7 +239,7 @@ depends_on = []
 # execution, sequencing, or state transitions -- those stay in
 # vibesys.orchestration.runtime (ctx.agents.turn) and loops/.
 path = "vibesys.roles"
-layer = "roles_search_prompts"
+layer = "roles_search"
 depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state", "vs_issue_board", "vibesys.search.population", "vibesys.search.hypothesis"]
 
 [[modules]]
@@ -279,97 +279,97 @@ depends_on = [ "vs_project", "vibesys.prompts", "vibesys", "vibesys.domains", "v
 
 [[modules]]
 path = "vibesys.run"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.evaluators", "vibesys.render", "vibesys.sandbox", "vs_github", "vs_sandbox", "vs_project"]
 
 [[modules]]
 path = "vibesys.domains"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vibesys.prompts"]
 
 [[modules]]
 path = "vibesys.backends"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.sandbox"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.prompts", "vibesys.skypilot", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.skypilot"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = [ "vs_project"]
 
 [[modules]]
 path = "vibesys.render"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys"]
 
 [[modules]]
 path = "vibesys.evaluators"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vibesys.render", "vs_evaluator_protocol", "vs_loop_state", "vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.search.population"
-layer = "roles_search_prompts"
+layer = "roles_search"
 depends_on = [ "vibesys.evaluators"]
 
 [[modules]]
 path = "vibesys.prompts"
-layer = "roles_search_prompts"
+layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_prompts", "vibesys.evaluators"]
 
 [[modules]]
 path = "vibesys._model_config"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_sandbox"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_agent"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = ["vs_sandbox", "vs_loop_state", "vs_project"]
 
 [[modules]]
 path = "vs_project"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_loop_state"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_issue_board"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_evaluator_protocol"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_prompts"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_feature_flags"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 path = "vs_github"
-layer = "lower_libs"
+layer = "prompts_and_lower_libs"
 depends_on = []
 
 # Each library exposes only its `api` subpackage and its submodules. External

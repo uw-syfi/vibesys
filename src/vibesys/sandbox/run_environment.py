@@ -55,7 +55,7 @@ from vibesys.evaluators import (
 )
 from vibesys.evaluators.input_manifest import WorkspaceSource  # noqa: TC001  # tracked: #288
 from vibesys.profilers import ProfilerKind
-from vibesys.prompts import PROMPTS_DIR, render_template  # tach-ignore(pre-existing edge)
+from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.sandbox.modal_evaluator import encode_setup_command
 from vibesys.skypilot.bridge import SkyPilotBridge
 from vibesys.skypilot.config import load_cluster_profiles, resolve_profile
