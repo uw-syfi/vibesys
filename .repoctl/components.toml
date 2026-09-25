@@ -74,6 +74,7 @@ files = [
   "conftest.py",
   "MANIFEST.in",
   "lint_waivers.jsonl",
+  "test_isolation_baseline.jsonl",
   ".github/delegated-merge.toml",
   ".github/workflows/delegated-merge.yml",
 ]
