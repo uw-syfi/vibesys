@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,6 +34,7 @@ from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from types import ModuleType
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -41,6 +43,8 @@ _MODULE_PATH = _REPO / "resources" / "profilers" / "_common" / "capture_runtime.
 # Real subprocesses + signal round-trips: keep example counts tiny so the
 # whole property-test slice stays well under the ~20s budget.
 PROC_SETTINGS = settings(max_examples=5, deadline=None)
+# Pure in-process logic (no subprocesses): can afford more examples.
+FAST = settings(max_examples=20, deadline=None)
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -56,7 +60,19 @@ def _load_module(name: str, path: Path) -> ModuleType:
     return module
 
 
-cr = _load_module("capture_runtime", _MODULE_PATH)
+# NOT registered under the bare "capture_runtime" name: that name is
+# deliberately pre-claimed by test_rocprof_capture.py's own module-level
+# load (see its comment) so that capture.py's internal `import
+# capture_runtime` resolves to the *same* object that test file's own
+# tests use. sys.modules is process-global and collection order across
+# test files is not something either file controls; clobbering that name
+# here would silently split module identity for every test that relies on
+# it (server.py's `import capture_runtime`, lazily resolved by
+# test_profiler_mcp.py's server fixtures, ends up with whichever module
+# last won the shared slot) -- this file only needs its own private
+# capture_runtime.py instance to test in isolation, so it gets one under a
+# name nothing else claims.
+cr = _load_module("_test_capture_runtime_standalone", _MODULE_PATH)
 
 
 def _is_alive(pid: int) -> bool:
@@ -336,6 +352,362 @@ def test_timeout_kills_setsid_grandchild_via_proc_walk(fake_profiler: Path, tmp_
     assert result.escalated is True
     grandchild_pid = int((out_dir / "grandchild.pid").read_text().strip())
     assert _wait_until(lambda: not _is_alive(grandchild_pid))
+
+
+# -- setup_command: an unprofiled step that runs before the target --------------
+#
+# rocprofv3 LD_PRELOADs its SDK into the entire environment handed to the
+# profiled process tree, and nothing suppresses the resulting init/banner
+# print (confirmed on real MI210 hardware -- see
+# docs/contributing/amd-profiler-worklog.md). setup_command exists so a step
+# whose own output must stay clean (e.g. picking a free port) can run
+# entirely outside that tree. _FAKE_INJECTING_PROFILER_SOURCE below models
+# the real mechanism generically: an env var standing in for LD_PRELOAD,
+# propagated to every descendant of the *wrapped* command via ordinary env
+# inheritance, with no "quiet" setting that turns it off.
+
+
+def test_setup_command_runs_before_target_and_both_succeed(tmp_path: Path) -> None:
+    out_dir = tmp_path / "c"
+    setup_marker = tmp_path / "setup.marker"
+    target_marker = tmp_path / "target.marker"
+    lifecycle = cr.Lifecycle(
+        command=f"touch {target_marker}",
+        setup_command=f"touch {setup_marker}",
+        timeout_s=5.0,
+    )
+
+    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
+
+    assert result.status is cr.CaptureStatus.OK
+    assert result.setup_returncode == 0
+    assert result.target_returncode == 0
+    assert setup_marker.is_file()
+    assert target_marker.is_file()
+
+
+def test_setup_command_failure_stops_capture_before_target_starts(tmp_path: Path) -> None:
+    """Regression: a nonzero setup_command must never let the target start.
+
+    Fails on code with no setup-gating at all (setup_command ignored, or the
+    target runs regardless of setup's outcome): verified by temporarily
+    making the setup-failure branch in ``run_capture`` a no-op (always fall
+    through to starting the target) and re-running this test, per the
+    repo's regression-test policy -- the target marker then exists and the
+    status reads ``ok``, not ``setup_failed``.
+    """
+    out_dir = tmp_path / "c"
+    target_marker = tmp_path / "target.marker"
+    lifecycle = cr.Lifecycle(
+        command=f"touch {target_marker}",
+        setup_command="exit 9",
+        timeout_s=5.0,
+    )
+
+    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
+
+    assert result.status is cr.CaptureStatus.SETUP_FAILED
+    assert result.setup_returncode == 9
+    assert result.target_returncode is None
+    assert not target_marker.exists()
+    manifest = json.loads(result.manifest_path.read_text())
+    assert manifest["status"] == "setup_failed"
+    assert manifest["setup_returncode"] == 9
+    assert manifest["target_returncode"] is None
+
+
+def test_setup_command_timeout_stops_capture_before_target_starts(tmp_path: Path) -> None:
+    out_dir = tmp_path / "c"
+    target_marker = tmp_path / "target.marker"
+    lifecycle = cr.Lifecycle(
+        command=f"touch {target_marker}",
+        setup_command="sleep 100",
+        timeout_s=0.3,
+    )
+
+    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
+
+    assert result.status is cr.CaptureStatus.TIMED_OUT
+    assert result.target_returncode is None
+    assert not target_marker.exists()
+
+
+def test_setup_command_output_is_reported_in_format_result(tmp_path: Path) -> None:
+    out_dir = tmp_path / "c"
+    lifecycle = cr.Lifecycle(
+        command="true", setup_command="echo setup-output-marker", timeout_s=5.0
+    )
+
+    result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
+
+    assert "setup-output-marker" in (result.setup_log_tail or "")
+    assert "setup log tail" in cr.format_result(result)
+
+
+_FAKE_INJECTING_PROFILER_SOURCE = textwrap.dedent(
+    """
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ)
+    env[os.environ["FAKE_MARKER_NAME"]] = "1"
+    rc = subprocess.Popen(sys.argv[1:], env=env).wait()
+    sys.exit(rc)
+    """
+)
+
+_FAKE_BANNERING_HELPER_SOURCE = textwrap.dedent(
+    """
+    import os
+    import sys
+
+    if os.environ.get(os.environ["FAKE_MARKER_NAME"]) == "1":
+        sys.stdout.write("UNSUPPRESSIBLE BANNER\\n")
+    sys.stdout.write("VALUE\\n")
+    """
+)
+
+
+def _write_executable(path: Path, source: str) -> Path:
+    path.write_text(f"#!{sys.executable}\n{source}")
+    path.chmod(path.stat().st_mode | 0o111)
+    return path
+
+
+def test_setup_command_output_never_leaks_the_profilers_injected_banner(tmp_path: Path) -> None:
+    """Regression, models the real mechanism directly (see the section docstring above).
+
+    ``profiler_prefix`` here stands in for rocprofv3: it injects a marker
+    env var into everything it launches, and a helper that sees that marker
+    always prints a banner ahead of the real value -- there is no quiet
+    setting to check, matching the confirmed-on-hardware finding. Reading
+    the value via ``setup_command`` (never wrapped in ``profiler_prefix``)
+    must come back clean. Fails on any change that runs ``setup_command``
+    through ``profiler_prefix`` instead of plain ``bash``: verified by
+    temporarily changing ``_run_setup``'s ``subprocess.Popen`` call to
+    prepend ``profiler_prefix`` and re-running this test -- the marker then
+    shows up in the setup output.
+    """
+    profiler = _write_executable(
+        tmp_path / "fake_injecting_profiler.py", _FAKE_INJECTING_PROFILER_SOURCE
+    )
+    helper = _write_executable(tmp_path / "helper.py", _FAKE_BANNERING_HELPER_SOURCE)
+    out_dir = tmp_path / "c"
+    marker_env = {"FAKE_MARKER_NAME": "FAKE_ROCPROFV3_INJECTED"}
+    setup_out = tmp_path / "setup_output.txt"
+    lifecycle = cr.Lifecycle(
+        command="true",
+        setup_command=f"{helper} > {setup_out}",
+        env=marker_env,
+        timeout_s=5.0,
+    )
+
+    result = cr.run_capture(
+        [sys.executable, str(profiler)], lifecycle, kind="unit", out_dir=out_dir, meta={}
+    )
+
+    assert result.status is cr.CaptureStatus.OK
+    assert setup_out.read_text() == "VALUE\n"
+    assert "UNSUPPRESSIBLE BANNER" not in setup_out.read_text()
+
+
+@given(
+    marker_name=st.text(
+        alphabet=st.characters(whitelist_categories=("Lu",)), min_size=3, max_size=16
+    ).map(lambda s: "FAKE_MARKER_" + s)
+)
+@PROC_SETTINGS
+def test_property_setup_command_never_observes_whatever_env_var_the_profiler_injects(
+    tmp_path_factory: pytest.TempPathFactory, marker_name: str
+) -> None:
+    """Generalizes the fix over any injected-env-var name, not just one hardcoded name.
+
+    A real profiler's injection channel (LD_PRELOAD-set env, in rocprofv3's
+    case) is an implementation detail this module must not assume a
+    specific name for; the property that must hold is structural --
+    setup_command never runs inside profiler_prefix's process tree at all,
+    so it can never observe *any* var the profiler injects into that tree.
+    """
+    tmp_path = tmp_path_factory.mktemp("cr")
+    profiler = _write_executable(tmp_path / "profiler.py", _FAKE_INJECTING_PROFILER_SOURCE)
+    helper = _write_executable(tmp_path / "helper.py", _FAKE_BANNERING_HELPER_SOURCE)
+    out_dir = tmp_path / "c"
+    setup_out = tmp_path / "setup_output.txt"
+    lifecycle = cr.Lifecycle(
+        command="true",
+        setup_command=f"{helper} > {setup_out}",
+        env={"FAKE_MARKER_NAME": marker_name},
+        timeout_s=5.0,
+    )
+
+    result = cr.run_capture(
+        [sys.executable, str(profiler)], lifecycle, kind="unit", out_dir=out_dir, meta={}
+    )
+
+    assert result.status is cr.CaptureStatus.OK
+    assert setup_out.read_text() == "VALUE\n"
+
+
+# -- cancellation: cancel_event stops an in-flight capture -----------------------
+
+
+def test_no_load_cancel_event_stops_target_and_returns_cancelled(tmp_path: Path) -> None:
+    out_dir = tmp_path / "c"
+    pidfile = tmp_path / "target.pid"
+    lifecycle = cr.Lifecycle(command=f"echo $$ > {pidfile}; sleep 100", timeout_s=30.0)
+    cancel_event = threading.Event()
+
+    def _cancel_soon() -> None:
+        assert _wait_until(pidfile.is_file, timeout=3.0)
+        cancel_event.set()
+
+    canceller = threading.Thread(target=_cancel_soon)
+    canceller.start()
+    start = time.monotonic()
+    result = cr.run_capture(
+        [], lifecycle, kind="unit", out_dir=out_dir, meta={}, cancel_event=cancel_event
+    )
+    elapsed = time.monotonic() - start
+    canceller.join()
+
+    assert result.status is cr.CaptureStatus.CANCELLED
+    assert result.escalated is True
+    # Bounded by _POLL_CHUNK_S plus escalation, not by the target's own
+    # (never reached) sleep -- proves cancellation actually interrupted the
+    # wait instead of the target just happening to exit.
+    assert elapsed < 10.0
+    pid = _read_pid(pidfile)
+    assert _wait_until(lambda: not _is_alive(pid))
+
+
+def test_load_cancel_event_during_load_command_stops_both_and_returns_cancelled(
+    fake_profiler: Path, tmp_path: Path
+) -> None:
+    out_dir = tmp_path / "c"
+    out_dir.mkdir()
+    load_pidfile = tmp_path / "load.pid"
+    lifecycle = cr.Lifecycle(
+        command="sleep 100",
+        env={"FAKE_PROFILER_OUT_DIR": str(out_dir)},
+        ready_command=f"test -f {out_dir}/profiler.pid",
+        ready_timeout_s=5.0,
+        ready_interval_s=0.02,
+        load_command=f"echo $$ > {load_pidfile}; sleep 100",
+        grace_s=5.0,
+        timeout_s=30.0,
+    )
+    cancel_event = threading.Event()
+
+    def _cancel_soon() -> None:
+        assert _wait_until(load_pidfile.is_file, timeout=5.0)
+        cancel_event.set()
+
+    canceller = threading.Thread(target=_cancel_soon)
+    canceller.start()
+    start = time.monotonic()
+    result = cr.run_capture(
+        [sys.executable, str(fake_profiler)],
+        lifecycle,
+        kind="unit",
+        out_dir=out_dir,
+        meta={},
+        cancel_event=cancel_event,
+    )
+    elapsed = time.monotonic() - start
+    canceller.join()
+
+    assert result.status is cr.CaptureStatus.CANCELLED
+    assert elapsed < 10.0
+    load_pid = _read_pid(load_pidfile)
+    assert _wait_until(lambda: not _is_alive(load_pid))
+    profiler_pid = int((out_dir / "profiler.pid").read_text().strip())
+    assert _wait_until(lambda: not _is_alive(profiler_pid))
+
+
+# -- exclusive_capture / CaptureBusyError: one capture at a time per process -----
+
+
+@pytest.fixture(autouse=True)
+def _reset_capture_slot() -> Iterator[None]:
+    """Every test starts and ends with no capture holding the in-process slot."""
+    cr.release_capture_slot()
+    yield
+    cr.release_capture_slot()
+
+
+def test_acquire_capture_slot_then_second_acquire_raises_busy() -> None:
+    active = cr.acquire_capture_slot("timeline", "timeline-abc")
+
+    assert cr.active_capture() == active
+    with pytest.raises(cr.CaptureBusyError) as excinfo:
+        cr.acquire_capture_slot("counters", "counters-xyz")
+    assert excinfo.value.active == active
+
+
+def test_release_capture_slot_is_idempotent() -> None:
+    cr.acquire_capture_slot("timeline", "timeline-abc")
+    cr.release_capture_slot()
+    cr.release_capture_slot()
+
+    assert cr.active_capture() is None
+    # A fresh acquire after release must succeed (the slot isn't stuck).
+    cr.acquire_capture_slot("counters", "counters-xyz")
+
+
+def test_exclusive_capture_releases_slot_on_exception() -> None:
+    def _run_and_raise() -> None:
+        with cr.exclusive_capture("timeline", "t-1"):
+            assert cr.active_capture() is not None
+            raise ValueError("boom")
+
+    with pytest.raises(ValueError, match="boom"):
+        _run_and_raise()
+
+    assert cr.active_capture() is None
+
+
+def test_exclusive_capture_raises_busy_immediately_before_running_anything() -> None:
+    calls = []
+    with cr.exclusive_capture("timeline", "t-1"):
+        try:
+            with cr.exclusive_capture("counters", "t-2"):
+                calls.append("ran")
+        except cr.CaptureBusyError:
+            pass
+
+    assert calls == []  # the second capture's body never ran
+
+
+def test_format_busy_names_the_capture_id_and_kind() -> None:
+    active = cr.ActiveCapture(
+        capture_id="timeline-20260101-000000-ab12", kind="timeline", started_at=0.0
+    )
+
+    message = cr.format_busy(active)
+
+    assert "timeline-20260101-000000-ab12" in message
+    assert "(timeline)" in message
+    assert message.startswith("busy: capture ")
+
+
+@given(
+    kind=st.sampled_from(["timeline", "counters", "kernel_deep", "instructions", "ops"]),
+    capture_id=st.text(
+        alphabet=st.characters(whitelist_categories=("Ll", "Nd")), min_size=1, max_size=20
+    ),
+)
+@FAST
+def test_property_capture_busy_error_always_names_the_holder(kind: str, capture_id: str) -> None:
+    active = cr.acquire_capture_slot(kind, capture_id)
+    try:
+        with pytest.raises(cr.CaptureBusyError) as excinfo:
+            cr.acquire_capture_slot("other-kind", "other-id")
+        assert excinfo.value.active is active
+        assert capture_id in cr.format_busy(active)
+        assert kind in cr.format_busy(active)
+    finally:
+        cr.release_capture_slot()
 
 
 # -- manifest / secrets ---------------------------------------------------------
