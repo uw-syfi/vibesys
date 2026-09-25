@@ -15,7 +15,7 @@ def test_generic_api_import_does_not_load_builtin_policies() -> None:
         "assert 'vibesys.loops.registry' not in sys.modules; "
         "assert not any(name.startswith(('vibesys.loops.multi', "
         "'vibesys.loops.single', 'vibesys.loops.profile_multi', "
-        "'vibesys.loops.profile_single', 'vibesys.loops.issue_queue', "
+        "'vibesys.loops.issue_queue', "
         "'vibesys.loops.evolve')) for name in sys.modules)"
     )
     subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603

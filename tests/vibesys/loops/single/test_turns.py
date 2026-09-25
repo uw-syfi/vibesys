@@ -9,7 +9,11 @@ timeout->fallback regression and its Hypothesis property test). These tests
 cover only what's specific to ``single``: the context dict each role
 renders from, the state-dependent plan-ID retry that wraps
 ``ctx.agents.turn`` (not expressible as ``Role.check``), and the board
-writes around each turn.
+writes around each turn. ``turns.py`` itself is the same for both the plain
+and profile-guided presets (only ``session.py`` chooses the
+``profile_guidance`` value it puts on ``PlanRequest``), so one extra test
+here exercises the profile-focus guidance path through
+``PlanContext.plan_prompt_context``.
 """
 
 # ruff: noqa: SLF001  # Fixtures construct turns via __new__ and poke the board buffer.
@@ -34,6 +38,7 @@ from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.attempts import AttemptState
 from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.hypothesis.transitions import CarryOver, start_hypothesis
+from vibesys.search.profile_focus import FocusView, ProfileBottleneck
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -123,6 +128,28 @@ def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path
     assert combined_context.objective_location == "OBJECTIVE.md"
     assert combined_context.official_evaluation_reason == "cadence"
     assert (tmp_path / "progress-artifacts" / "plans" / "round-0001.json").exists()
+
+
+def test_plan_context_renders_profile_focus_guidance_when_present(tmp_path: Path) -> None:
+    turns = _configured_turns(tmp_path)
+    plan = _plan("h1")
+    state = start_hypothesis(HypothesisState(), plan, started_round=1)
+    guidance = FocusView(
+        active_component="decode",
+        ledger_text="decode: 2 rounds without improvement",
+        ranked_bottlenecks=(
+            ProfileBottleneck(name="decode", cost=1.0, share=0.6, evidence=["scripted"]),
+        ),
+    )
+    plan_request = PlanRequest(1, state, [], CarryOver(), None, None, 1, guidance)
+
+    designer_context = turns._plan_context(plan_request)
+
+    assert designer_context.active_component == "decode"
+    assert designer_context.ledger_text == "decode: 2 rounds without improvement"
+    assert designer_context.ranked_bottlenecks == [
+        {"component": "decode", "cost_share": 60.0, "evidence": ["scripted"]}
+    ]
 
 
 @pytest.mark.asyncio

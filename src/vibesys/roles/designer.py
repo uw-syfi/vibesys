@@ -18,14 +18,16 @@ from vibesys.search.hypothesis import OrchestratorPlan
 class PlanContext(BaseModel):
     """Shared context for every strategy's designer/plan role.
 
-    ``multi``, ``single``, and ``profile_single`` each declare their own
-    ``Role`` (different template files), but all three templates read the
-    exact same free-variable set, including the optional profile-focus
-    addendum (``active_component``/``ledger_text``/``ranked_bottlenecks``):
-    a plain strategy passes ``PlainGuidance``'s empty ``{}``, so those three
-    fields default to their "no focus" values here instead. One context
-    model serves all three roles (and ``profile_multi``, which reuses
-    ``MULTI_ORCHESTRATOR_PLAN`` outright).
+    ``multi`` and ``single`` each declare their own ``Role`` (different
+    template files), but both templates read the exact same free-variable
+    set, including the optional profile-focus addendum
+    (``active_component``/``ledger_text``/``ranked_bottlenecks``): a plain
+    strategy passes ``PlainGuidance``'s empty ``{}``, so those three fields
+    default to their "no focus" values here instead. ``single`` serves both
+    the plain and profile-guided presets (profile-guided-single-agent) from
+    the same role and template; the profiling knob only changes the context
+    values, never the template. One context model serves both roles (and
+    ``profile_multi``, which reuses ``MULTI_ORCHESTRATOR_PLAN`` outright).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -82,19 +84,7 @@ SINGLE_ORCHESTRATOR_PLAN = Role(
     message="Produce this round's plan. Return only the JSON object.",
 )
 
-PROFILE_SINGLE_ORCHESTRATOR_PLAN = Role(
-    id="orchestrator",
-    template="loops/profile_single/orchestrator_plan_prompt.j2",
-    reply=OrchestratorPlan,
-    fallback=_fallback_plan,
-    context=PlanContext,
-    access=ReadOnly(),  # allow-list (roadmap index) resolved per call by the caller
-    session=Fresh(),
-    message="Produce this round's plan. Return only the JSON object.",
-)
-
 ALL_ROLES = (
     MULTI_ORCHESTRATOR_PLAN,
     SINGLE_ORCHESTRATOR_PLAN,
-    PROFILE_SINGLE_ORCHESTRATOR_PLAN,
 )
