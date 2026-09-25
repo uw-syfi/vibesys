@@ -590,17 +590,39 @@ def _load_counter_rows(files: list[Path]) -> list[CounterRow]:
 
 
 def _discover(dirs: list[str], substring: str, suffixes: tuple[str, ...]) -> list[Path]:
+    """Find every matching file under *dirs*, each physical file counted once.
+
+    Callers may legitimately pass the same physical directory more than
+    once: a packed rocprofv3 pass shares one output directory across every
+    counter set it bundled (see ``dedupe_preserve_order``'s docstring), and
+    a manifest's ``set_dirs`` maps each of those set names back to that one
+    path, so ``list(set_dirs.values())`` repeats it. Two *different* strings
+    can also resolve to the same physical directory (a trailing slash, a
+    symlink, one path nested inside another already-listed one). Dedupe by
+    each file's resolved path rather than trusting *dirs* to already be
+    unique -- reading the same ``*_counter_collection.csv`` twice would
+    double-count every counter for every dispatch in it (bytes, instruction
+    counts, ...) while ``_duration_from_counter_rows`` keeps the correct
+    single-counted duration (it dedupes by dispatch, not by row count), so
+    every duration-normalized rate (achieved HBM bandwidth, MFMA issue
+    rate, ...) would come out roughly N-times too high for N duplicate
+    reads of the same file.
+    """
     found: list[Path] = []
+    seen: set[Path] = set()
     for raw in dirs:
         base = Path(raw)
         if not base.exists():
             print(f"warning: directory not found: {raw}", file=sys.stderr)  # noqa: T201  # tracked: #288
             continue
-        found.extend(
-            path
-            for path in sorted(base.rglob("*"))
-            if path.is_file() and substring in path.name and path.suffix in suffixes
-        )
+        for path in sorted(base.rglob("*")):
+            if not (path.is_file() and substring in path.name and path.suffix in suffixes):
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            found.append(path)
     return found
 
 

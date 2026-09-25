@@ -22,6 +22,7 @@ import io
 import itertools
 import json
 import math
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,7 @@ from resources.profilers.rocprof.counters import (
     counter_block,
     dedupe_preserve_order,
     derive_metrics,
+    kernel_metrics_by_name,
     looks_like_packed_pass_rejection,
     normalize_arch,
     pass_counters,
@@ -710,6 +712,230 @@ def test_flops_hint_scales_achieved_throughput_with_dispatch_count(  # noqa: ANN
         assert doubled_metrics.mfma_busy_fraction is not None
         assert metrics.mfma_busy_fraction is not None
         assert doubled_metrics.mfma_busy_fraction > metrics.mfma_busy_fraction
+
+
+# ---------------------------------------------------------------------------
+# Real MI210 packed-pass (hbm+mfma) regression: a capture manifest's
+# `set_dirs` maps every counter set sharing one packed rocprofv3 pass to the
+# SAME physical output directory (e.g. `{"hbm": ".../hbm+mfma", "mfma":
+# ".../hbm+mfma"}`); `resolve_counter_dirs`/`_counters_triage_from_manifest`/
+# `compare` (capture.py) all build `dirs` from `set_dirs.values()` without
+# deduping. `_discover` must treat the same physical directory as one source
+# regardless of how many times it's listed, or every counter in that pass's
+# CSV (HBM bytes, MFMA instructions, ...) gets summed once per repeat while
+# `_duration_from_counter_rows`'s dispatch-keyed dedup keeps duration single-
+# counted -- inflating every duration-normalized rate (achieved HBM
+# bandwidth in particular) by roughly the repeat count.
+#
+# `real_mi210_gfx90a_packed/hbm+mfma/` is 3 real dispatches (Dispatch_Id
+# 149682/149718/149754), all 8 real counter values and Start/End_Timestamp
+# columns, trimmed from a real MI210 (gfx90a, ROCm 6.4.1) capture
+# (`counters-20260925-010217-c7a2`, packed `hbm+mfma` pass) of a Tensile
+# `Cijk_...MT128x32x64...` GEMM kernel from a vLLM Qwen3.5-9B decode
+# workload -- the same capture whose *unrimmed* full-kernel aggregate
+# (3824 dispatches) hit this bug in an e2e eval: achieved HBM bandwidth
+# reported as 1749 GB/s, above the gfx90a 1600 GB/s spec peak, because
+# `dirs` for that lookup had the packed pass's directory listed twice.
+# ---------------------------------------------------------------------------
+
+_REAL_MI210_PACKED = _FIXTURES / "pmc" / "real_mi210_gfx90a_packed" / "hbm+mfma"
+_REAL_PACKED_KERNEL = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT128x32x64_MI32x32x1"
+# Independently summed straight from the trimmed CSV's 3 dispatches:
+# TCC_EA_RDREQ_sum=1708399, TCC_EA_RDREQ_32B_sum=0 (all-64B reads) ->
+# 1708399*64 = 109337536 bytes; duration = sum of the 3 dispatches' own
+# (End_Timestamp - Start_Timestamp) = 199361 ns.
+_REAL_PACKED_HBM_BYTES = 109_337_536.0
+_REAL_PACKED_DURATION_NS = 199_361.0
+_REAL_PACKED_BW_GB_S = _REAL_PACKED_HBM_BYTES / (_REAL_PACKED_DURATION_NS / 1e9) / 1e9
+
+
+def test_real_mi210_packed_pass_discover_counts_the_shared_directory_once():  # noqa: ANN201  # tracked: #288
+    # Lowest-layer reproduction: `_discover` must not add the same physical
+    # counter_collection.csv twice just because the caller's `dirs` list
+    # repeats its directory (mirroring `set_dirs.values()` for a packed
+    # pass backing 2+ requested sets).
+    single = _discover([str(_REAL_MI210_PACKED)], "counter_collection", (".csv",))
+    repeated = _discover(
+        [str(_REAL_MI210_PACKED), str(_REAL_MI210_PACKED)], "counter_collection", (".csv",)
+    )
+    assert len(single) == 1
+    assert repeated == single
+
+
+def test_real_mi210_packed_pass_report_matches_between_single_and_repeated_dirs():  # noqa: ANN201  # tracked: #288
+    # End-to-end: cmd_report on a `dirs` list with the packed pass directory
+    # listed once vs. twice (as `list({"hbm": d, "mfma": d}.values())` would
+    # produce) must report identical HBM bytes/achieved BW, not double.
+    single = _run(
+        cmd_report,
+        dirs=[str(_REAL_MI210_PACKED)],
+        kernel=_REAL_PACKED_KERNEL,
+        top=15,
+        arch="gfx90a",
+    )
+    repeated = _run(
+        cmd_report,
+        dirs=[str(_REAL_MI210_PACKED), str(_REAL_MI210_PACKED)],
+        kernel=_REAL_PACKED_KERNEL,
+        top=15,
+        arch="gfx90a",
+    )
+    assert repeated == single
+    assert "3 dispatch(es)" in single
+    assert f"HBM bytes: {_REAL_PACKED_HBM_BYTES:.0f} B" in single
+    assert f"achieved BW: {_REAL_PACKED_BW_GB_S:.1f} GB/s" in single
+    # The pre-fix doubled numbers must not appear anywhere.
+    doubled_bytes = _REAL_PACKED_HBM_BYTES * 2
+    doubled_bw = _REAL_PACKED_BW_GB_S * 2
+    assert f"HBM bytes: {doubled_bytes:.0f} B" not in repeated
+    assert f"achieved BW: {doubled_bw:.1f} GB/s" not in repeated
+
+
+def test_real_mi210_packed_pass_kernel_metrics_by_name_matches_manual_arithmetic():  # noqa: ANN201  # tracked: #288
+    metrics = kernel_metrics_by_name(
+        [str(_REAL_MI210_PACKED)], kernel=_REAL_PACKED_KERNEL, arch="gfx90a"
+    )
+    (kernel_metrics,) = metrics.values()
+    assert kernel_metrics.hbm_bytes == pytest.approx(_REAL_PACKED_HBM_BYTES)
+    assert kernel_metrics.duration_ns == pytest.approx(_REAL_PACKED_DURATION_NS)
+    assert kernel_metrics.achieved_bw_gb_s == pytest.approx(_REAL_PACKED_BW_GB_S)
+
+
+# ---------------------------------------------------------------------------
+# Property tests generalizing the packed-pass double-counting bug above.
+# ---------------------------------------------------------------------------
+
+
+@given(repeat=st.integers(min_value=1, max_value=6))
+@FAST
+def test_discover_is_invariant_to_how_many_times_a_directory_is_repeated(  # noqa: ANN201
+    repeat: int,
+):
+    # Generalizes the fixture regression above: for ANY repeat count (not
+    # just the 2-copy case a 2-set packed pass produces) and an arbitrary
+    # single physical file, `_discover` must find it exactly once. A fresh
+    # TemporaryDirectory per example (not the function-scoped `tmp_path`
+    # fixture, which hypothesis warns is not reset between examples).
+    with tempfile.TemporaryDirectory() as raw_dir:
+        tmp_dir = Path(raw_dir)
+        (tmp_dir / "x_counter_collection.csv").write_text(
+            "Kernel_Name,Counter_Name,Counter_Value\n"
+        )
+        found = _discover([str(tmp_dir)] * repeat, "counter_collection", (".csv",))
+        assert len(found) == 1
+
+
+@given(repeat=st.integers(min_value=1, max_value=5))
+@FAST
+def test_packing_sets_into_one_pass_is_invariant_to_dirs_list_repetition(  # noqa: ANN201
+    repeat: int,
+):
+    # "Packed into one pass" (dirs=[d]) and "N sets happened to share that
+    # pass's dir" (dirs=[d]*N, what set_dirs.values() produces) must derive
+    # identical per-kernel metrics -- packing sets into fewer rocprofv3
+    # passes must never change a kernel's reported counter values.
+    dirs = [str(_REAL_MI210_PACKED)] * repeat
+    metrics = kernel_metrics_by_name(dirs, kernel=_REAL_PACKED_KERNEL, arch="gfx90a")
+    (kernel_metrics,) = metrics.values()
+    assert kernel_metrics.hbm_bytes == pytest.approx(_REAL_PACKED_HBM_BYTES)
+    assert kernel_metrics.achieved_bw_gb_s == pytest.approx(_REAL_PACKED_BW_GB_S)
+
+
+@given(
+    dispatch_count=st.integers(min_value=1, max_value=20),
+    bytes_per_dispatch=st.floats(
+        min_value=1e6, max_value=1e9, allow_nan=False, allow_infinity=False
+    ),
+    duration_per_dispatch_ns=st.floats(
+        min_value=1e3, max_value=1e7, allow_nan=False, allow_infinity=False
+    ),
+)
+@FAST
+def test_aggregating_n_identical_dispatches_preserves_per_dispatch_bandwidth(  # noqa: ANN201
+    dispatch_count: int, bytes_per_dispatch: float, duration_per_dispatch_ns: float
+):
+    # N separate, genuinely distinct dispatches of the same kernel (distinct
+    # dispatch_ids, each with its own Start/End window) must aggregate to
+    # the SAME achieved bandwidth as 1 dispatch of that shape, since both
+    # the byte total and the duration total scale by N together. This is
+    # the legitimate counterpart to the bug above: real multi-dispatch
+    # aggregation (many genuine dispatches) must not move the ratio, only
+    # counting one physical dispatch's data extra times should.
+    rd_req_per_dispatch = bytes_per_dispatch / 64.0  # all-64B reads, so bytes = rd_req * 64
+    rows: list[CounterRow] = []
+    t = 0.0
+    for i in range(dispatch_count):
+        start, end = t, t + duration_per_dispatch_ns
+        t = end
+        rows.append(
+            CounterRow(
+                kernel_name="k",
+                dispatch_id=str(i),
+                grid_size=0,
+                workgroup_size=0,
+                lds_block_size=0,
+                scratch_size=0,
+                vgpr_count=0,
+                sgpr_count=0,
+                counter_name="TCC_EA_RDREQ_sum",
+                counter_value=rd_req_per_dispatch,
+                start_ns=start,
+                end_ns=end,
+            )
+        )
+    aggs = _aggregate_by_kernel(rows)
+    durations = _duration_from_counter_rows(rows)
+    (agg,) = aggs.values()
+    assert agg.dispatch_count == dispatch_count
+    metrics = derive_metrics(agg, durations["k"])
+    expected_bw = bytes_per_dispatch / (duration_per_dispatch_ns / 1e9) / 1e9
+    assert metrics.achieved_bw_gb_s == pytest.approx(expected_bw, rel=1e-9)
+
+
+@given(
+    rd_req=st.integers(min_value=1, max_value=10_000_000_000),
+    rd_32b=st.integers(min_value=0, max_value=10_000_000_000),
+    duration_ns=st.floats(min_value=1.0, max_value=1e12, allow_nan=False, allow_infinity=False),
+    repeat=st.integers(min_value=1, max_value=8),
+)
+@FAST
+def test_counting_the_same_counters_n_times_scales_achieved_bandwidth_by_n(  # noqa: ANN201
+    rd_req: int, rd_32b: int, duration_ns: float, repeat: int
+):
+    # Derived bandwidth must stay exactly consistent with hbm_bytes/duration:
+    # summing a kernel's own counters `repeat` times (what a duplicated
+    # directory read does) over the SAME duration must scale achieved_bw_gb_s
+    # by exactly `repeat` -- never more (would mean stray double-counting
+    # elsewhere), never less (would mean an incorrect clamp/rounding masking
+    # it). Pins the exact linear relationship the fixed `_discover` now
+    # protects upstream of this arithmetic.
+    rd_32b = min(rd_32b, rd_req)  # a valid capture never reports more 32B than total requests
+    base = KernelAgg(
+        name="k",
+        dispatch_ids={"0"},
+        counters={"TCC_EA_RDREQ_sum": float(rd_req), "TCC_EA_RDREQ_32B_sum": float(rd_32b)},
+    )
+    scaled = KernelAgg(
+        name="k",
+        dispatch_ids={"0"},
+        counters={
+            "TCC_EA_RDREQ_sum": float(rd_req * repeat),
+            "TCC_EA_RDREQ_32B_sum": float(rd_32b * repeat),
+        },
+    )
+    base_metrics = derive_metrics(base, duration_ns)
+    scaled_metrics = derive_metrics(scaled, duration_ns)
+    assert base_metrics.achieved_bw_gb_s is not None
+    assert scaled_metrics.achieved_bw_gb_s is not None
+    assert scaled_metrics.hbm_bytes is not None
+    assert scaled_metrics.achieved_bw_gb_s == pytest.approx(
+        base_metrics.achieved_bw_gb_s * repeat, rel=1e-9
+    )
+    # And the derived bandwidth is always exactly bytes/duration -- never
+    # drifts from that definition regardless of scale.
+    assert scaled_metrics.achieved_bw_gb_s == pytest.approx(
+        scaled_metrics.hbm_bytes / (duration_ns / 1e9) / 1e9, rel=1e-9
+    )
 
 
 # ---------------------------------------------------------------------------
