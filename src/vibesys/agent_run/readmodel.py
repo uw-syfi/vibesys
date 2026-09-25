@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.agent_run.hypotheses import measurement_delta_reason
-from vibesys.orchestration.view import RunStatus, RunView
+from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -180,6 +180,8 @@ def project_run_view(
         loop=loop,
         status=status,
         projection=projection.model_dump(mode="json"),
+        rounds=tuple(_round_summary(record) for record in projection.rounds),
+        experiment_revision=experiment_revision,
     )
 
 
@@ -280,6 +282,23 @@ def _round_view(record: RoundRecord) -> RoundView:
         official_evaluation=record.official_evaluation,
         attempts=record.attempts,
         judge_verdict=_round_finished_verdict(record.judge_verdict),
+    )
+
+
+def _round_summary(view: RoundView) -> RoundSummary:
+    """Reshape a `RoundView` into the host's strategy-agnostic `RoundSummary`.
+
+    `status` mirrors what the strategies used to emit by hand for
+    `RoundFinishedData`: only a "fail" verdict is a failed round.
+    """
+    return RoundSummary(
+        number=view.round_number,
+        status="failed" if view.judge_verdict == "fail" else "completed",
+        attempts=view.attempts,
+        judge_verdict=view.judge_verdict,
+        perf_metric=view.perf_metric,
+        perf_unit=view.perf_unit,
+        profile_skipped=view.profile_skipped,
     )
 
 

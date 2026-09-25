@@ -15,7 +15,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import partial
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Literal, NotRequired, Protocol, TypedDict, TypeVar, Unpack
+from typing import TYPE_CHECKING, NotRequired, Protocol, TypedDict, TypeVar, Unpack
 
 from pydantic import BaseModel
 
@@ -79,14 +79,12 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
-    from pydantic import JsonValue
-
     from vibesys.context import _RunResources
     from vibesys.evaluators.input_manifest import WorkspaceSource
     from vibesys.evaluators.metrics import Objective
     from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.request import RunRequest
-    from vibesys.orchestration.view import RunView
+    from vibesys.orchestration.view import RoundSummary, RunView
     from vibesys.profilers import ProfilerKind
     from vibesys.run.event_journal import EventJournal
     from vibesys.run.git_tracker import GitTracker
@@ -661,86 +659,54 @@ class _RunState:
         return revision, committed
 
 
-def _agent_projection(view: RunView | None) -> dict[str, JsonValue] | None:
-    """Read *view*'s projection if it carries the generic round/revision shape.
-
-    `"kind": "agent"` is the read-model's own discriminator (see
-    `vibesys.agent_run.readmodel.AgentRunProjection`), not a strategy ID: any
-    orchestration that publishes rounds and an experiment revision through
-    that shape gets events derived here, whichever strategy it is. A
-    projection under a different kind (or none) yields no derived events.
-    """
-    if view is None or view.projection is None:
-        return None
-    if view.projection.get("kind") != "agent":
-        return None
-    return view.projection
-
-
-def _round_entries(projection: Mapping[str, JsonValue] | None) -> dict[int, dict[str, JsonValue]]:
-    rounds = projection.get("rounds") if projection is not None else None
-    if not isinstance(rounds, list):
+def _round_entries(view: RunView | None) -> dict[int, RoundSummary]:
+    if view is None:
         return {}
-    return {
-        int(entry["round_number"]): entry
-        for entry in rounds
-        if isinstance(entry, dict) and isinstance(entry.get("round_number"), int)
-    }
+    return {round_summary.number: round_summary for round_summary in view.rounds}
 
 
 def _emit_commit_events(events: _EventSink, before: RunView | None, after: RunView | None) -> None:
-    """Emit the round/experiment events one `commit` newly made observable."""
-    after_projection = _agent_projection(after)
-    if after_projection is None:
+    """Emit the round/experiment events one `commit` newly made observable.
+
+    Diffs `RunView.rounds`/`experiment_revision`, the typed fields every
+    strategy projector populates (see `vibesys.orchestration.view.RunView`);
+    a strategy that leaves them empty/`None` (no round concept) naturally
+    yields no diff, so this holds no knowledge of any one policy's shape.
+    """
+    if after is None:
         return
-    before_projection = _agent_projection(before)
-    before_rounds = _round_entries(before_projection)
-    after_rounds = _round_entries(after_projection)
+    before_rounds = _round_entries(before)
+    after_rounds = _round_entries(after)
     new_round_numbers = sorted(number for number in after_rounds if number not in before_rounds)
     for number in new_round_numbers:
         _emit_round_finished(events, after_rounds[number])
-    # A run's very first commit has no prior projection to diff against (see
+    # A run's very first commit has no prior view to diff against (see
     # `_previous_view`): nothing has been observed yet, so nothing changed,
-    # regardless of the revision value that first projection happens to carry.
-    if before_projection is None:
+    # regardless of the revision value that first view happens to carry.
+    if before is None:
         return
-    before_revision = before_projection.get("experiment_revision")
-    after_revision = after_projection.get("experiment_revision")
+    before_revision = before.experiment_revision
+    after_revision = after.experiment_revision
     if after_revision is not None and after_revision != before_revision:
         reason = "round_persisted" if new_round_numbers else "active_hypothesis_changed"
-        revision = after_revision if isinstance(after_revision, int) else None
         events.emit(
             CoreEventType.EXPERIMENTS_CHANGED,
-            data=ExperimentsChangedData(reason=reason, revision=revision),
+            data=ExperimentsChangedData(reason=reason, revision=after_revision),
         )
 
 
-def _emit_round_finished(events: _EventSink, round_entry: Mapping[str, JsonValue]) -> None:
-    raw_verdict = round_entry.get("judge_verdict")
-    verdict: Literal["pass", "fail", "skipped"]
-    if raw_verdict == "pass":
-        verdict = "pass"
-    elif raw_verdict == "fail":
-        verdict = "fail"
-    else:
-        verdict = "skipped"
-    status = EventStatus.FAILED if verdict == "fail" else EventStatus.COMPLETED
-    raw_attempts = round_entry.get("attempts")
-    attempts = raw_attempts if isinstance(raw_attempts, int) else 1
-    raw_perf_metric = round_entry.get("perf_metric")
-    perf_metric = raw_perf_metric if isinstance(raw_perf_metric, (int, float)) else None
-    raw_perf_unit = round_entry.get("perf_unit")
-    perf_unit = raw_perf_unit if isinstance(raw_perf_unit, str) else None
+def _emit_round_finished(events: _EventSink, round_summary: RoundSummary) -> None:
+    status = EventStatus.FAILED if round_summary.status == "failed" else EventStatus.COMPLETED
     events.emit(
         CoreEventType.ROUND_FINISHED,
         status=status,
-        round_label=f"round-{round_entry['round_number']}",
+        round_label=f"round-{round_summary.number}",
         data=RoundFinishedData(
-            attempts=attempts,
-            judge_verdict=verdict,
-            perf_metric=perf_metric,
-            perf_unit=perf_unit,
-            profile_skipped=bool(round_entry.get("profile_skipped", False)),
+            attempts=round_summary.attempts,
+            judge_verdict=round_summary.judge_verdict or "skipped",
+            perf_metric=round_summary.perf_metric,
+            perf_unit=round_summary.perf_unit,
+            profile_skipped=round_summary.profile_skipped,
         ),
     )
 

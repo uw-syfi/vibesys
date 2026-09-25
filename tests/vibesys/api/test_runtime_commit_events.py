@@ -25,7 +25,7 @@ from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.events import CoreEventType, ExperimentsChangedData
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.runtime import RunContext, _emit_commit_events
-from vibesys.orchestration.view import RunStatus, RunView
+from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
@@ -51,26 +51,7 @@ class _FakeProjector:
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
         if namespace != "commit_probe" or not isinstance(state, _FakeAgentState):
             return None
-        return RunView(
-            run_id=run_id,
-            loop="commit-probe",
-            status=RunStatus.ACTIVE,
-            projection={
-                "kind": "agent",
-                "experiment_revision": state.experiment_revision,
-                "rounds": [
-                    {
-                        "round_number": number,
-                        "attempts": 1,
-                        "judge_verdict": "pass",
-                        "perf_metric": None,
-                        "perf_unit": None,
-                        "profile_skipped": False,
-                    }
-                    for number in state.round_numbers
-                ],
-            },
-        )
+        return _agent_view(state.round_numbers, state.experiment_revision, run_id=run_id)
 
 
 def _write_project(root: Path) -> None:
@@ -217,26 +198,16 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
     assert len(round_finished_events) == 1  # only round 2 -- round 1 is not replayed
 
 
-def _agent_view(round_numbers: Sequence[int], revision: int) -> RunView:
+def _agent_view(round_numbers: Sequence[int], revision: int, *, run_id: str = "probe") -> RunView:
     return RunView(
-        run_id="probe",
+        run_id=run_id,
         loop="commit-probe",
         status=RunStatus.ACTIVE,
-        projection={
-            "kind": "agent",
-            "experiment_revision": revision,
-            "rounds": [
-                {
-                    "round_number": number,
-                    "attempts": 1,
-                    "judge_verdict": "pass",
-                    "perf_metric": None,
-                    "perf_unit": None,
-                    "profile_skipped": False,
-                }
-                for number in round_numbers
-            ],
-        },
+        rounds=tuple(
+            RoundSummary(number=number, status="completed", attempts=1, judge_verdict="pass")
+            for number in round_numbers
+        ),
+        experiment_revision=revision,
     )
 
 
@@ -307,12 +278,9 @@ def test_commit_events_property_no_double_emission_and_revision_iff_changed(
     changed_count = sum(
         1 for event_type, _ in events.calls if event_type is CoreEventType.EXPERIMENTS_CHANGED
     )
-    expected_changes = 0
-    for index in range(1, len(views)):
-        prev = views[index - 1].projection
-        cur = views[index].projection
-        assert prev is not None
-        assert cur is not None
-        if prev["experiment_revision"] != cur["experiment_revision"]:
-            expected_changes += 1
+    expected_changes = sum(
+        1
+        for index in range(1, len(views))
+        if views[index - 1].experiment_revision != views[index].experiment_revision
+    )
     assert changed_count == expected_changes
