@@ -34,7 +34,7 @@ class HypothesisReview(StrEnum):
     """Independent review state, separate from empirical resolution."""
 
     PENDING = "pending"
-    PASS = "pass"  # noqa: S105  # tracked: #288
+    PASS = "pass"  # noqa: S105  # LW-010202 [S105]; this is the public judge verdict value, not a credential.
     FAIL = "fail"
     DEFERRED = "deferred"
 
@@ -110,18 +110,15 @@ class Hypothesis(BaseModel):
     @model_validator(mode="after")
     def _valid_identity(self) -> Self:
         if self.plan.hypothesis_id != self.hypothesis_id:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "plan hypothesis_id must match its owning hypothesis"
-            )
+            message = "plan hypothesis_id must match its owning hypothesis"
+            raise ValueError(message)
         round_numbers = [record.round_number for record in self.rounds]
         if round_numbers != sorted(set(round_numbers)):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "hypothesis rounds must be unique and ordered"
-            )
+            message = "hypothesis rounds must be unique and ordered"
+            raise ValueError(message)
         if any(record.hypothesis_id != self.hypothesis_id for record in self.rounds):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "round hypothesis_id must match its owning hypothesis"
-            )
+            message = "round hypothesis_id must match its owning hypothesis"
+            raise ValueError(message)
         return self
 
     def clone(self) -> Hypothesis:
@@ -156,22 +153,22 @@ class HypothesisState(BaseModel):
     def _valid_identity(self) -> Self:
         identifiers = [item.hypothesis_id for item in self.hypotheses]
         if len(set(identifiers)) != len(identifiers):
-            raise ValueError("hypothesis IDs must be unique")  # noqa: TRY003  # tracked: #288
+            message = "hypothesis IDs must be unique"
+            raise ValueError(message)
         if self.active_hypothesis_id is not None:
             active = self.by_id(self.active_hypothesis_id)
             if active is None:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
-                    "active_hypothesis_id must name a known hypothesis"
-                )
+                message = "active_hypothesis_id must name a known hypothesis"
+                raise ValueError(message)
             if active.strategy is not HypothesisStrategy.AVAILABLE:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
-                    "the active hypothesis must be strategically available"
-                )
+                message = "the active hypothesis must be strategically available"
+                raise ValueError(message)
         round_numbers = [
             record.round_number for hypothesis in self.hypotheses for record in hypothesis.rounds
         ]
         if len(set(round_numbers)) != len(round_numbers):
-            raise ValueError("round numbers must be globally unique")  # noqa: TRY003  # tracked: #288
+            message = "round numbers must be globally unique"
+            raise ValueError(message)
         return self
 
     def by_id(self, hypothesis_id: str) -> Hypothesis | None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 from vibesys.constants import ComputeBackend
@@ -35,28 +35,29 @@ class _FakeBackend:
     def __init__(self, selected_device: _FakeDevice | None = None) -> None:
         self.selected_device = selected_device
 
-    def make_sandbox(self, kind: SandboxKind, **kwargs: Any) -> Sandbox:  # noqa: ANN401  # tracked: #288
+    def make_sandbox(self, kind: SandboxKind, **kwargs: object) -> Sandbox:
         raise NotImplementedError
 
-    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:  # noqa: ARG002  # tracked: #288
+    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
+        del log_dir
         return None
 
     def reselect_device(self) -> None:
         return
 
 
-def test_gpu_env_pins_selected_device(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_gpu_env_pins_selected_device(tmp_path: Path) -> None:
     backend = _FakeBackend(_FakeDevice(3))
     lease = DeviceLease(backend, log_dir=tmp_path)
     assert lease.gpu_env() == {"CUDA_VISIBLE_DEVICES": "3"}
 
 
-def test_gpu_env_empty_without_device(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_gpu_env_empty_without_device(tmp_path: Path) -> None:
     lease = DeviceLease(_FakeBackend(), log_dir=tmp_path)
     assert lease.gpu_env() == {}
 
 
-def test_reselect_skipped_when_view_disallows_host_reselect(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_reselect_skipped_when_view_disallows_host_reselect(tmp_path: Path) -> None:
     backend = MagicMock()
     view = RunEnvironmentView(paths=AgentPaths(), host_device_reselect=False)
     lease = DeviceLease(backend, log_dir=tmp_path, run_environment_view=view)
@@ -64,7 +65,7 @@ def test_reselect_skipped_when_view_disallows_host_reselect(tmp_path):  # noqa: 
     backend.reselect_device.assert_not_called()
 
 
-def test_close_stops_monitor_and_finalizes_gpu_json(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_close_stops_monitor_and_finalizes_gpu_json(tmp_path: Path) -> None:
     (tmp_path / "gpu.json").write_text(json.dumps({"name": "H100"}))
     (tmp_path / "gpu_contention.jsonl").write_text('{"is_contended": true}\n' * 2)
 
@@ -82,7 +83,7 @@ def test_close_stops_monitor_and_finalizes_gpu_json(tmp_path):  # noqa: ANN001, 
     assert "finished_at" in data
 
 
-def test_close_without_gpu_json_is_a_noop(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_close_without_gpu_json_is_a_noop(tmp_path: Path) -> None:
     lease = DeviceLease(MagicMock(), log_dir=tmp_path)
     lease.close()
     assert not (tmp_path / "gpu.json").exists()

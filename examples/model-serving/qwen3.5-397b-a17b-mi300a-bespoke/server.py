@@ -56,13 +56,13 @@ class Engine:
             model = Model(a.model_path, devices, dtype, a.max_seq_len)
             model.warmup()
             self.model = model
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.error = repr(e)
             raise
         while True:
             self.jobs.get()()  # each job is a closure that generates and reports back
 
-    def submit(self, job) -> None:  # noqa: ANN001
+    def submit(self, job) -> None:
         self.jobs.put(job)
 
 
@@ -74,7 +74,7 @@ def _default_devices() -> list[str]:
 class Detok:
     """Incremental detokenizer: text delta per token, holding back incomplete UTF-8."""
 
-    def __init__(self, tok) -> None:  # noqa: ANN001
+    def __init__(self, tok) -> None:
         self.tok, self.ids, self.sent = tok, [], ""
 
     def push(self, token: int) -> str:
@@ -106,7 +106,7 @@ def make_job(
     temperature = float(body.get("temperature") or 0.0)
     stop = frozenset() if body.get("ignore_eos") else engine.stop_ids
 
-    def put(item) -> None:  # noqa: ANN001
+    def put(item) -> None:
         loop.call_soon_threadsafe(out.put_nowait, item)
 
     def job() -> None:
@@ -119,7 +119,7 @@ def make_job(
                     break
                 put(("tok", detok.push(token)))
             put(("end", (reason, n)))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             put(("error", repr(e)))
 
     return job
@@ -181,7 +181,7 @@ async def chat(request: web.Request) -> web.StreamResponse:
     return web.json_response(resp)
 
 
-async def stream_reply(request, out, prompt, rid, name, include_usage) -> web.StreamResponse:  # noqa: ANN001, FBT001
+async def stream_reply(request, out, prompt, rid, name, include_usage) -> web.StreamResponse:
     resp = web.StreamResponse(
         headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache"}
     )
@@ -234,7 +234,7 @@ def make_app(args: argparse.Namespace) -> web.Application:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--model-path", default=os.environ.get("MODEL_PATH"))
-    p.add_argument("--host", default="0.0.0.0")  # noqa: S104
+    p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument(
         "--devices", default="", help="comma list, e.g. cuda:0,cuda:1 (default: all GPUs, else cpu)"

@@ -33,7 +33,7 @@ def test_internal_dtos_do_not_import_public_api() -> None:
         "vibesys.orchestration.environment; "
         "assert 'vibesys.api' not in sys.modules"
     )
-    subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603
+    subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603  # LW-030002; The subprocess runs the current interpreter on a fixed script literal.
 
 
 def test_internal_orchestration_and_policies_do_not_import_public_api() -> None:

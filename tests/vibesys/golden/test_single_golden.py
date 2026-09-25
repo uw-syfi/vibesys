@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import subprocess
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import patch  # test-isolation: seams scripted below
 
 import pytest
 from tests.vibesys.golden.harness import run_scripted
@@ -49,6 +49,7 @@ from vibesys.evaluators.gates import (
     emit_gate_started,
 )
 from vibesys.evaluators.metrics import MetricSpace
+from vibesys.events import GateFinishedData
 from vibesys.loops.single.orchestration import SingleAgentOrchestrator
 from vibesys.schemas import (
     SingleAgentRoundResponse,
@@ -83,7 +84,7 @@ def _plan() -> OrchestratorPlan:
         hypothesis_id="H-01",
         hypothesis="batching the prefill step removes per-request launch overhead",
         task="batch the prefill step",
-        pass_criteria="throughput improves without regressing accuracy",  # noqa: S106  # tracked: #288
+        pass_criteria="throughput improves without regressing accuracy",  # noqa: S106  # LW-040020 [S106]; the argument is a fixture literal, not a credential.
         reasoning="scripted golden fixture",
     )
 
@@ -158,7 +159,7 @@ def test_retry_then_pass_scenario_golden(tmp_path: Path) -> None:
     )
 
 
-def _scripted_accuracy_gate(*, passed: bool):  # noqa: ANN202  # tracked: #288
+def _scripted_accuracy_gate(*, passed: bool):  # noqa: ANN202  # LW-040021 [ANN202]; the helper is private to this test module and its return type is the local closure type.
     """Replace only the trusted command execution inside the accuracy gate.
 
     Keeps the real ``run_accuracy_gate`` call site in
@@ -167,10 +168,12 @@ def _scripted_accuracy_gate(*, passed: bool):  # noqa: ANN202  # tracked: #288
     removes the dependency on a real sandboxed subprocess.
     """
 
-    def _run(ctx, *, process_id, timeout_seconds=None, execution_command=None, round_label=None):  # noqa: ANN001, ARG001, ANN202  # tracked: #288
+    def _run(ctx, *, process_id, timeout_seconds=None, execution_command=None, round_label=None):  # noqa: ANN001, ARG001, ANN202  # LW-040022 [ANN001, ANN202, ARG001]; this scripted double mirrors a production signature whose parameters are not annotated here. The helper is private to this test module and its return type is the local closure type. This scripted double accepts the production keyword arguments and ignores the ones it does not need.
         command = ctx.judge_accuracy_command
         emit_gate_started(GateKind.ACCURACY, command=command, round_label=round_label)
-        emit_gate_finished(GateKind.ACCURACY, passed=passed, round_label=round_label)
+        emit_gate_finished(
+            GateFinishedData(gate=GateKind.ACCURACY), passed=passed, round_label=round_label
+        )
         return AccuracyGateResult(
             command=command,
             passed=passed,
@@ -188,6 +191,7 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
     runner.enqueue("implementer", _combined())
 
     descriptor = descriptor_from_options(_options(), orchestration_id=_ORCHESTRATION_ID)
+    # test-isolation: no injectable gate seam yet; a gate-executor fake replaces this patch
     with patch(
         "vibesys.orchestration.gates.run_accuracy_gate",
         side_effect=_scripted_accuracy_gate(passed=True),

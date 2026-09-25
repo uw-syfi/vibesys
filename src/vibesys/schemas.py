@@ -29,29 +29,34 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
 
+import vs_loop_state.api as _loop_state_api
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
-    PerfDeltaReason,  # noqa: F401
 )
+
+PerfDeltaReason = _loop_state_api.PerfDeltaReason
 
 # HypothesisOutcome, CandidateDisposition, and PerfDeltaReason live in
 # vs_loop_state so that server code can import them without deep-importing
 # vibesys internals. Re-exported here so existing core call sites keep
-# working unchanged. PerfDeltaReason needs the explicit re-export waiver
-# because nothing else in this module references it directly.
+# working unchanged.
 
 # ===========================================================================
 # Enums
 # ===========================================================================
 
 
-class Verdict(StrEnum):  # noqa: D101  # tracked: #288
-    PASS = "pass"  # noqa: S105  # tracked: #288
+class Verdict(StrEnum):
+    """Binary outcome returned by a judge or validation stage."""
+
+    PASS = "pass"  # noqa: S105  # lint-waiver: LW-010203 [S105]; this is the public result enum value, not a credential.
     FAIL = "fail"
 
 
-class PerfTrend(StrEnum):  # noqa: D101  # tracked: #288
+class PerfTrend(StrEnum):
+    """Direction of observed performance change across rounds."""
+
     IMPROVED = "improved"
     REGRESSED = "regressed"
     MIXED = "mixed"
@@ -86,7 +91,8 @@ class SkillResourceSelection(BaseModel):
     def _strip_required_text(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("must contain non-whitespace text")  # noqa: TRY003  # tracked: #288
+            message = "must contain non-whitespace text"
+            raise ValueError(message)
         return value
 
 
@@ -141,7 +147,8 @@ class ValidationRecipe(BaseModel):
     def _strip_recipe_text(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("must contain non-whitespace text")  # noqa: TRY003  # tracked: #288
+            message = "must contain non-whitespace text"
+            raise ValueError(message)
         return value
 
     @field_validator("input_paths")
@@ -152,13 +159,12 @@ class ValidationRecipe(BaseModel):
             value = raw.strip()
             path = PurePosixPath(value)
             if not value or path.is_absolute() or value == "." or ".." in path.parts:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
-                    "input_paths must contain non-empty workspace-relative paths "
-                    "without parent traversal"
-                )
+                _exception_message = "input_paths must contain non-empty workspace-relative paths without parent traversal"
+                raise ValueError(_exception_message)
             normalized.append(path.as_posix())
         if len(set(normalized)) != len(normalized):
-            raise ValueError("input_paths must not contain duplicates")  # noqa: TRY003  # tracked: #288
+            message = "input_paths must not contain duplicates"
+            raise ValueError(message)
         return normalized
 
 
@@ -581,7 +587,7 @@ def derive_hypothesis_title(claim: str) -> str | None:
 # HYPOTHESIS_TITLE_MAX_LEN/SkillResourceSelection back from this module), so
 # every construction site imports OrchestratorPlan/HypothesisStrategyUpdate
 # from vibesys.search.hypothesis.plan directly.
-# TODO(stack PR 06): delete this comment once schemas.py dissolves.  # noqa: FIX002  # tracked: #288
+# TODO(stack PR 06): delete this comment once schemas.py dissolves.  # noqa: FIX002, TD003  # LW-040038 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
 
 
 # ===========================================================================

@@ -165,6 +165,7 @@ class _LocalRunSession:
         self._request = request
         self._sink = sink
         if registry is None:
+            # lint-waiver: LW-020004 [PLC0415]; the built-in orchestration registry imports every loop implementation, so it loads only when a caller needs it.
             from vibesys.loops.registry import (  # noqa: PLC0415
                 built_in_orchestrations,
             )
@@ -246,10 +247,8 @@ class _LocalRunSession:
         """
         handoff = self._resource_handoff
         if handoff is None:
-            raise RuntimeError(  # noqa: TRY003
-                "open_agent_environment() called before this run published its resources "
-                "(register a listener via on_run_resources first)"
-            )
+            message = "open_agent_environment() called before this run published its resources (register a listener via on_run_resources first)"
+            raise RuntimeError(message)
         request = replace(
             handoff.environment_request,
             agent_backend=(

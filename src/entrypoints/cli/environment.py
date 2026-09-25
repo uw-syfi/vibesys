@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     import argparse
 
 
-def run_environment_spec_from_args(  # tracked: #288
+def run_environment_spec_from_args(
     args: argparse.Namespace,
     *,
     build_task_docker_image: bool = False,
@@ -26,16 +26,16 @@ def run_environment_spec_from_args(  # tracked: #288
     selected = getattr(args, "run_environment", None)
     explicit = getattr(args, "explicit_cli_dests", frozenset())
     if "run_environment" in explicit and {"docker", "modal", "skypilot"} & explicit:
-        raise ValueError(  # noqa: TRY003
-            "--run-environment cannot be combined with --docker, --modal, or --skypilot"
-        )
+        message = "--run-environment cannot be combined with --docker, --modal, or --skypilot"
+        raise ValueError(message)
     compatibility_selections = (
         args.docker,
         args.modal,
         getattr(args, "skypilot", False),
     )
     if sum(compatibility_selections) > 1:
-        raise ValueError("--docker, --modal, and --skypilot are mutually exclusive")  # noqa: TRY003
+        _exception_message = "--docker, --modal, and --skypilot are mutually exclusive"
+        raise ValueError(_exception_message)
 
     dockerfile_path = bundle.dockerfile_path if bundle is not None else None
     resuming = getattr(args, "resume", None) is not None
@@ -58,9 +58,10 @@ def run_environment_spec_from_args(  # tracked: #288
             conflicts.append("--docker-image")
         if conflicts:
             joined = ", ".join(conflicts)
-            raise ValueError(  # noqa: TRY003
+            _exception_message_2 = (
                 f"task Dockerfile {dockerfile_path} cannot be combined with {joined}"
             )
+            raise ValueError(_exception_message_2)
         requested_environment = "docker"
 
     task_image = None

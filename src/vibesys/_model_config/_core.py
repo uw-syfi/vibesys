@@ -55,6 +55,35 @@ _SLASH_PREFIX_MAP: list[tuple[str, str]] = [
 ]
 
 
+def _resolve_provider_model_string(model_str: str, provider_hint: str | None) -> tuple[str, str]:
+    """Resolve the provider and bare model name using the documented priority."""
+    lower = model_str.lower()
+    for prefix, canonical in _COLON_PREFIX_MAP:
+        if lower.startswith(prefix):
+            return canonical, model_str[len(prefix) :]
+    for prefix, canonical in _SLASH_PREFIX_MAP:
+        if lower.startswith(prefix):
+            return canonical, model_str[len(prefix) :]
+
+    if provider_hint is not None and provider_hint.lower() not in _UNRESOLVABLE_ALIASES:
+        canonical = _ALIAS_TO_CANONICAL.get(provider_hint.lower())
+        if canonical is not None:
+            return canonical, model_str
+
+    return _heuristic_provider(lower), model_str
+
+
+def _heuristic_provider(lower: str) -> str:
+    """Apply the model-name provider heuristics after explicit identifiers."""
+    if "claude" in lower:
+        return "anthropic"
+    if "gpt" in lower or "o1" in lower or "o3" in lower:
+        return "openai"
+    if "gemini" in lower:
+        return "gemini"
+    return "openai"
+
+
 # ---------------------------------------------------------------------------
 # ModelConfig dataclass
 # ---------------------------------------------------------------------------
@@ -78,18 +107,18 @@ class ModelConfig:
 
     def __post_init__(self) -> None:
         if self.provider not in _CANONICAL_PROVIDERS:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"provider must be one of {sorted(_CANONICAL_PROVIDERS)}, got {self.provider!r}. "
-                "Use from_provider_and_model() or from_string() to map SDS aliases."
-            )
+            message = f"provider must be one of {sorted(_CANONICAL_PROVIDERS)}, got {self.provider!r}. Use from_provider_and_model() or from_string() to map SDS aliases."
+            raise ValueError(message)
         if not self.model or not self.model.strip():
-            raise ValueError("model must be a non-empty string")  # noqa: TRY003  # tracked: #288
+            _exception_message = "model must be a non-empty string"
+            raise ValueError(_exception_message)
         if self.thinking_budget is not None and (
             not isinstance(self.thinking_budget, int) or self.thinking_budget <= 0
         ):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            _exception_message_2 = (
                 f"thinking_budget must be a positive int, got {self.thinking_budget!r}"
             )
+            raise ValueError(_exception_message_2)
 
     # ------------------------------------------------------------------
     # Factory: from SDS provider alias + bare model name
@@ -111,15 +140,14 @@ class ModelConfig:
         """
         alias = provider.lower()
         if alias in _UNRESOLVABLE_ALIASES:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"Provider {provider!r} has no canonical family mapping. "
-                "Use from_string() with provider_hint for heuristic resolution."
-            )
+            message = f"Provider {provider!r} has no canonical family mapping. Use from_string() with provider_hint for heuristic resolution."
+            raise ValueError(message)
         canonical = _ALIAS_TO_CANONICAL.get(alias)
         if canonical is None:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            _exception_message = (
                 f"Unknown provider alias {provider!r}. Known aliases: {sorted(_ALIAS_TO_CANONICAL)}"
             )
+            raise ValueError(_exception_message)
         return cls(
             provider=canonical, model=model, location=location, thinking_budget=thinking_budget
         )
@@ -129,7 +157,7 @@ class ModelConfig:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_string(  # noqa: PLR0911  # tracked: #288
+    def from_string(
         cls,
         model_str: str,
         *,
@@ -148,67 +176,12 @@ class ModelConfig:
         4. Heuristic: substring match on model name.
         5. Fallback: ``openai`` (preserves existing behaviour for unknown models).
         """
-        lower = model_str.lower()
-
-        # Step 1: colon-prefix
-        for prefix, canonical in _COLON_PREFIX_MAP:
-            if lower.startswith(prefix):
-                bare = model_str[len(prefix) :]
-                return cls(
-                    provider=canonical,
-                    model=bare,
-                    location=location,
-                    thinking_budget=thinking_budget,
-                )
-
-        # Step 2: slash-prefix
-        for prefix, canonical in _SLASH_PREFIX_MAP:
-            if lower.startswith(prefix):
-                bare = model_str[len(prefix) :]
-                return cls(
-                    provider=canonical,
-                    model=bare,
-                    location=location,
-                    thinking_budget=thinking_budget,
-                )
-
-        # Step 3: provider_hint
-        if provider_hint is not None and provider_hint.lower() not in _UNRESOLVABLE_ALIASES:
-            canonical = _ALIAS_TO_CANONICAL.get(provider_hint.lower())
-            if canonical is not None:
-                return cls(
-                    provider=canonical,
-                    model=model_str,
-                    location=location,
-                    thinking_budget=thinking_budget,
-                )
-
-        # Step 4: heuristics
-        if "claude" in lower:
-            return cls(
-                provider="anthropic",
-                model=model_str,
-                location=location,
-                thinking_budget=thinking_budget,
-            )
-        if "gpt" in lower or "o1" in lower or "o3" in lower:
-            return cls(
-                provider="openai",
-                model=model_str,
-                location=location,
-                thinking_budget=thinking_budget,
-            )
-        if "gemini" in lower:
-            return cls(
-                provider="gemini",
-                model=model_str,
-                location=location,
-                thinking_budget=thinking_budget,
-            )
-
-        # Step 5: fallback
+        provider, model = _resolve_provider_model_string(model_str, provider_hint)
         return cls(
-            provider="openai", model=model_str, location=location, thinking_budget=thinking_budget
+            provider=provider,
+            model=model,
+            location=location,
+            thinking_budget=thinking_budget,
         )
 
     # ------------------------------------------------------------------
@@ -263,7 +236,25 @@ class ModelConfig:
     # Environment validation
     # ------------------------------------------------------------------
 
-    def validate_env(self) -> None:  # noqa: C901  # tracked: #288
+    def _missing_vertex_environment(self) -> list[str]:
+        """Return missing Vertex credentials, project, and location settings."""
+        missing: list[str] = []
+        if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+            missing.append("GOOGLE_APPLICATION_CREDENTIALS")
+        if not os.environ.get("GOOGLE_CLOUD_PROJECT"):
+            missing.append("GOOGLE_CLOUD_PROJECT")
+        location = (
+            self.location
+            or os.environ.get("GOOGLE_CLOUD_LOCATION")
+            or os.environ.get("VERTEX_LOCATION")
+        )
+        if not location:
+            missing.append(
+                "location (set ModelConfig.location, GOOGLE_CLOUD_LOCATION, or VERTEX_LOCATION)"
+            )
+        return missing
+
+    def validate_env(self) -> None:
         """Check that required environment variables are present for this provider.
 
         Raises:
@@ -284,20 +275,7 @@ class ModelConfig:
                 missing.append("GEMINI_API_KEY or GOOGLE_API_KEY")
 
         elif self.provider == "vertex":
-            if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-                missing.append("GOOGLE_APPLICATION_CREDENTIALS")
-            if not os.environ.get("GOOGLE_CLOUD_PROJECT"):
-                missing.append("GOOGLE_CLOUD_PROJECT")
-            # Location: self.location → GOOGLE_CLOUD_LOCATION → VERTEX_LOCATION
-            location = (
-                self.location
-                or os.environ.get("GOOGLE_CLOUD_LOCATION")
-                or os.environ.get("VERTEX_LOCATION")
-            )
-            if not location:
-                missing.append(
-                    "location (set ModelConfig.location, GOOGLE_CLOUD_LOCATION, or VERTEX_LOCATION)"
-                )
+            missing.extend(self._missing_vertex_environment())
 
         if missing:
             raise OSError(
@@ -319,10 +297,14 @@ def normalize_provider(alias: str) -> str:
     """
     a = alias.lower()
     if a in _UNRESOLVABLE_ALIASES:
-        raise ValueError(f"Provider {alias!r} has no canonical family mapping.")  # noqa: TRY003  # tracked: #288
+        message = f"Provider {alias!r} has no canonical family mapping."
+        raise ValueError(message)
     canonical = _ALIAS_TO_CANONICAL.get(a)
     if canonical is None:
-        raise ValueError(f"Unknown provider alias {alias!r}. Known: {sorted(_ALIAS_TO_CANONICAL)}")  # noqa: TRY003  # tracked: #288
+        _exception_message = (
+            f"Unknown provider alias {alias!r}. Known: {sorted(_ALIAS_TO_CANONICAL)}"
+        )
+        raise ValueError(_exception_message)
     return canonical
 
 

@@ -4,6 +4,7 @@ Split from ``runtime.py`` by capability; see that module's docstring.
 """
 
 # Capabilities in this module share one private owner for resource lifetime.
+# lint-waiver: LW-040111 [SLF001]; capabilities in this module share one private owner for resource lifetime.
 # ruff: noqa: SLF001
 
 from __future__ import annotations
@@ -105,7 +106,8 @@ class _RunState:
         """Return the policy's portable namespace for existing paid-work journals."""
         setup = self._host._setup
         if setup.state_namespace is None:
-            raise TypeError("policy did not declare a portable state namespace")  # noqa: TRY003
+            message = "policy did not declare a portable state namespace"
+            raise TypeError(message)
         context = self._host._resources
         return context.state.portable(setup.state_namespace)
 
@@ -114,7 +116,8 @@ class _RunState:
         """Return machine-local state for uncommitted paid-work cursors."""
         setup = self._host._setup
         if setup.state_namespace is None:
-            raise TypeError("policy did not declare a state namespace")  # noqa: TRY003
+            message = "policy did not declare a state namespace"
+            raise TypeError(message)
         return self._host._resources.state.local(setup.state_namespace)
 
     def local_path(self, name: str) -> Path:
@@ -125,7 +128,8 @@ class _RunState:
             None if parent == PurePosixPath(".") else parent
         )
         if relative.name in {"", ".", ".."} or relative.is_absolute():
-            raise ValueError(f"invalid local state path {name!r}")  # noqa: TRY003
+            message = f"invalid local state path {name!r}"
+            raise ValueError(message)
         return directory / relative.name
 
     def artifact_path(self, name: str) -> Path:
@@ -137,7 +141,8 @@ class _RunState:
         setup = self._host._setup
         declared = setup.state_slots or {}
         if declared.get(name) is not model:
-            raise TypeError(f"policy state slot {name!r} is not declared with {model.__name__}")  # noqa: TRY003
+            message = f"policy state slot {name!r} is not declared with {model.__name__}"
+            raise TypeError(message)
         return _TypedRunStateSlot(self._host, self.namespace.slot(name, model))
 
     async def load(self, model: type[T]) -> T | None:
@@ -250,17 +255,20 @@ class _RunState:
         context = self._host._resources
         namespace = self._host._setup.state_namespace
         if namespace is None:
-            raise TypeError("policy did not declare a durable state slot")  # noqa: TRY003
+            message = "policy did not declare a durable state slot"
+            raise TypeError(message)
         coordinator = context._round_transaction_coordinator
         if coordinator is None:
-            raise TypeError("policy did not declare checkpoint slots")  # noqa: TRY003
+            message = "policy did not declare checkpoint slots"
+            raise TypeError(message)
         coordinator.begin(sequence, writes=writes, candidate=candidate, label=label).complete()
         committed = publish or writes.get("state.json")
         if committed is not None:
             context.publish_committed_state(namespace, committed)
         revision = context.git.current_sha()
         if revision is None:
-            raise RuntimeError("checkpoint completed without a Git revision")  # noqa: TRY003
+            message = "checkpoint completed without a Git revision"
+            raise RuntimeError(message)
         return revision, committed
 
 

@@ -17,17 +17,19 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import Literal, Self, TypeVar
+from typing import TYPE_CHECKING, Literal, Self, TypeVar
 
 from pydantic import BaseModel
 
 from vs_agent.contracts import AgentCapabilities, MCPServerSpec
-from vs_agent.progress import AgentProgress  # noqa: TC001  # tracked: #288
 from vs_agent.scripted_rounds import round_number_from_label, scripted_round_payload
-from vs_agent.session_key import AgentSessionKey  # noqa: TC001  # tracked: #288
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from vs_agent.progress import AgentProgress
+    from vs_agent.session_key import AgentSessionKey
 T = TypeVar("T", bound=BaseModel)
 
 #: Default answer :meth:`FakeAgentClient.invoke_text` returns when nothing is
@@ -121,7 +123,7 @@ class FakeAgentClient:
 
     backend_name = "fake"
 
-    def __init__(  # noqa: PLR0913  # tracked: #288
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-010177 [PLR0913]; Preserve FakeAgentClient.__init__'s named-argument contract because callers pass these independent settings directly.
         self,
         *,
         backend_name: str = "fake",
@@ -333,7 +335,7 @@ class FakeAgentClient:
 
     # -- AgentClientProtocol: turns ------------------------------------------
 
-    def invoke(  # noqa: PLR0913
+    def invoke(  # noqa: PLR0913  # lint-waiver: LW-010178 [PLR0913]; Preserve FakeAgentClient.invoke's named-argument contract because callers pass these independent settings directly.
         self,
         *,
         kind: str,
@@ -371,7 +373,7 @@ class FakeAgentClient:
         self._emit_stream(kind, invocation)
         return self._resolve_response(kind, invocation, response_cls, fallback_factory)
 
-    def invoke_text(  # noqa: PLR0913
+    def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-010179 [PLR0913]; Preserve FakeAgentClient.invoke_text's named-argument contract because callers pass these independent settings directly.
         self,
         *,
         kind: str,
@@ -409,7 +411,7 @@ class FakeAgentClient:
 
     # -- internals ------------------------------------------------------------
 
-    def _record(  # noqa: PLR0913
+    def _record(  # noqa: PLR0913  # lint-waiver: LW-010180 [PLR0913]; Preserve FakeAgentClient._record's named-argument contract because callers pass these independent settings directly.
         self,
         *,
         method: Literal["invoke", "invoke_text"],
@@ -504,7 +506,7 @@ class FakeAgentClient:
         if isinstance(value, BaseModel):
             # A model instance is returned as-is; the caller enqueued it (rather
             # than a dict) and owns it matching ``response_cls``.
-            return value  # ty: ignore[invalid-return-type]  # tracked: #288
+            return value  # ty: ignore[invalid-return-type]
         return response_cls.model_validate(value)
 
     def _resolve_text(self, kind: str, invocation: FakeInvocation) -> str:

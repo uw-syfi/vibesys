@@ -28,7 +28,7 @@ from vibesys.search.population.models import (
 if TYPE_CHECKING:
     from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 
-    # TODO(stack PR 06): import from vibesys.evaluators.perf_reply once  # noqa: FIX002  # tracked: #288
+    # TODO(stack PR 06): import from vibesys.evaluators.perf_reply once  # noqa: FIX002, TD003  # LW-040055 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
     # schemas.py dissolves; at BASE, ProfilerSummary still lives in
     # vibesys.schemas.
     from vibesys.schemas import ProfilerSummary
@@ -80,15 +80,16 @@ def candidate_fitness(
 class PopulationSearch:
     """Bind one run's deterministic selection policy to its config."""
 
-    def __init__(self, config: PopulationConfig) -> None:  # noqa: D107  # tracked: #288
+    def __init__(self, config: PopulationConfig) -> None:
+        """Store the run's population search configuration."""
         self.config = config
 
     def initial(self) -> PopulationState:
         """Return the state a fresh run starts from."""
-        rng = random.Random(self.config.seed)  # noqa: S311  # sampling, not security
+        rng = random.Random(self.config.seed)  # noqa: S311  # sampling, not security  # LW-040056 [S311]; the generator only seeds deterministic search sampling and is not used for security.
         selector_state: OpenEvolveSelectorState | None = None
         if self.config.selector == "openevolve":
-            oe_rng = random.Random(self.config.seed)  # noqa: S311
+            oe_rng = random.Random(self.config.seed)  # noqa: S311  # LW-040057 [S311]; the generator only seeds deterministic search sampling and is not used for security.
             selector_state = OpenEvolveSelectorState(
                 config=self.config.openevolve or OpenEvolveSelectorConfig(),
                 objective_signature=openevolve_selector.objective_signature(self.config.space),
@@ -111,7 +112,7 @@ class PopulationSearch:
         """Select a parent and inspirations; ``None`` when nothing has passed."""
         if self.config.selector == "openevolve":
             return self._propose_openevolve(state)
-        rng = random.Random()  # noqa: S311
+        rng = random.Random()  # noqa: S311  # LW-040058 [S311]; the generator only seeds deterministic search sampling and is not used for security.
         rng.setstate(state.rng_state)
         proposal = vibesys_selector.select(
             state.individuals,
@@ -129,7 +130,8 @@ class PopulationSearch:
         self, state: PopulationState
     ) -> tuple[Proposal | None, PopulationState]:
         if state.selector_state is None:
-            raise ValueError("openevolve selector requires PopulationState.selector_state")  # noqa: TRY003
+            message = "openevolve selector requires PopulationState.selector_state"
+            raise ValueError(message)
         proposal, selector_state = openevolve_selector.select(
             state.selector_state,
             state.individuals,
@@ -167,7 +169,8 @@ class PopulationSearch:
         selector_state = state.selector_state
         if outcome.passed and self.config.selector == "openevolve" and individual.commit:
             if selector_state is None:
-                raise ValueError("openevolve selector requires PopulationState.selector_state")  # noqa: TRY003
+                message = "openevolve selector requires PopulationState.selector_state"
+                raise ValueError(message)
             selector_state = openevolve_selector.admit(
                 selector_state,
                 individual,

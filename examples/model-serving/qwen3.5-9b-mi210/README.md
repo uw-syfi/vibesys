@@ -238,6 +238,11 @@ VLLM_SIF=/path/to/vllm-openai-rocm.sif VLLM_CACHE_DIR=/path/to/cache \
 Tuned config: `--attention-backend TRITON_ATTN --gpu-memory-utilization 0.95
 --max-num-seqs 256 --max-num-batched-tokens 16384 --max-model-len 16384
 --async-scheduling --enable-prefix-caching --enable-prompt-tokens-details`.
-On vLLM v0.3.1.dev190+g3df4ae153 (ROCm nightly) it measured ~500 output tok/s
-on `quick` and 580.9 on `full` (server prefix-hit rate 0.49 vs 0.78 planned),
-against 390.7 on `full` for vLLM's defaults.
+On vLLM v0.3.1.dev190+g3df4ae153 (ROCm nightly), on the current harness
+(disjoint warmup, same launch config as `benchmark/vllm_baseline.sh`):
+
+| Mode | Output tok/s | Server prefix-hit rate | Planned |
+|:--|--:|--:|--:|
+| `quick` | ~500 (495.6-505.2) | 0.648 | 0.769 |
+| `full` | ~576 | 0.492 | 0.773 |
+| `holdout` | ~532 | 0.442 | 0.783 |

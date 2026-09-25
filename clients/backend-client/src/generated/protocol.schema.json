@@ -248,6 +248,7 @@
       "type": "object"
     },
     "AgentOutputChunkData": {
+      "description": "Incremental output produced during agent execution.",
       "properties": {
         "kind": {
           "const": "agent_output_chunk",
@@ -343,6 +344,7 @@
       "type": "object"
     },
     "BenchmarkResultData": {
+      "description": "Metric result emitted by a benchmark stage.",
       "properties": {
         "kind": {
           "const": "benchmark_result",
@@ -383,6 +385,7 @@
       "type": "string"
     },
     "ChatData": {
+      "description": "Completed answer and optional thread-turn identity.",
       "properties": {
         "kind": {
           "const": "chat",
@@ -523,6 +526,7 @@
     },
     "ChatQuery": {
       "additionalProperties": false,
+      "description": "Send a message to an experiment-chat thread.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -570,6 +574,7 @@
     },
     "ChatResult": {
       "additionalProperties": false,
+      "description": "Answer and thread identity returned by experiment chat.",
       "properties": {
         "question": {
           "title": "Question",
@@ -769,6 +774,7 @@
     },
     "CommandAck": {
       "additionalProperties": false,
+      "description": "Acknowledgment of a requested run command.",
       "properties": {
         "action": {
           "enum": [
@@ -846,6 +852,7 @@
       "type": "object"
     },
     "ConfigurationFailedData": {
+      "description": "Diagnostic details for configuration-stage failure.",
       "properties": {
         "kind": {
           "const": "configuration_failed",
@@ -1245,6 +1252,7 @@
     },
     "EventBatchMessage": {
       "additionalProperties": false,
+      "description": "Event batch and cursor metadata sent to subscribers.",
       "properties": {
         "type": {
           "const": "event_batch",
@@ -1292,6 +1300,7 @@
     },
     "EventMessage": {
       "additionalProperties": false,
+      "description": "Single-event message for the legacy streaming protocol.",
       "properties": {
         "type": {
           "const": "event",
@@ -1310,6 +1319,7 @@
       "type": "object"
     },
     "EventStatus": {
+      "description": "Lifecycle and command states reported in events.",
       "enum": [
         "active",
         "answered",
@@ -1324,6 +1334,7 @@
       "type": "string"
     },
     "EventType": {
+      "description": "Wire event kinds persisted in the event log.",
       "enum": [
         "server_started",
         "server_ready",
@@ -1366,6 +1377,7 @@
     },
     "EventsQuery": {
       "additionalProperties": false,
+      "description": "Request run events in a sequence interval.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -1536,6 +1548,7 @@
       "type": "object"
     },
     "ExperimentsChangedData": {
+      "description": "Reason and revision for a changed experiment projection.",
       "properties": {
         "kind": {
           "const": "experiments_changed",
@@ -1804,6 +1817,7 @@
     },
     "HistoryQuery": {
       "additionalProperties": false,
+      "description": "Request persisted run history.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -2288,6 +2302,7 @@
       "type": "object"
     },
     "InvocationFinishedData": {
+      "description": "Result or error recorded when a model invocation ends.",
       "properties": {
         "kind": {
           "const": "invocation_finished",
@@ -2316,6 +2331,7 @@
       "type": "object"
     },
     "InvocationStartedData": {
+      "description": "Prompts submitted at the start of a model invocation.",
       "properties": {
         "kind": {
           "const": "invocation_started",
@@ -2369,6 +2385,7 @@
       "type": "object"
     },
     "JudgeResultData": {
+      "description": "Verdict and feedback returned by the judge.",
       "properties": {
         "kind": {
           "const": "judge_result",
@@ -2402,6 +2419,7 @@
       "type": "object"
     },
     "OutputData": {
+      "description": "Captured line of server output and its stream.",
       "properties": {
         "kind": {
           "const": "output",
@@ -2436,6 +2454,7 @@
     },
     "PauseCommand": {
       "additionalProperties": false,
+      "description": "Request pausing after the active agent call.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -2576,6 +2595,7 @@
     },
     "PerformanceQuery": {
       "additionalProperties": false,
+      "description": "Request the run's performance history.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -2604,6 +2624,7 @@
     },
     "PerformanceRound": {
       "additionalProperties": false,
+      "description": "One measured performance result in a run.",
       "properties": {
         "round": {
           "title": "Round",
@@ -2637,6 +2658,7 @@
       "type": "object"
     },
     "PhaseData": {
+      "description": "Name and optional attempt number for a loop phase.",
       "properties": {
         "kind": {
           "const": "phase",
@@ -2669,6 +2691,7 @@
     },
     "ProtocolErrorMessage": {
       "additionalProperties": false,
+      "description": "Structured error envelope for protocol failures.",
       "properties": {
         "type": {
           "const": "protocol_error",
@@ -2727,6 +2750,7 @@
     },
     "Response": {
       "additionalProperties": false,
+      "description": "Response envelope for all protocol requests.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -2931,6 +2955,7 @@
     },
     "ResumeCommand": {
       "additionalProperties": false,
+      "description": "Request resuming a paused run.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -2958,6 +2983,7 @@
       "type": "object"
     },
     "RoundFinishedData": {
+      "description": "Summary of attempt, judge, and performance outcomes for a round.",
       "properties": {
         "kind": {
           "const": "round_finished",
@@ -3356,6 +3382,7 @@
       "type": "object"
     },
     "RunInterruptedData": {
+      "description": "Reason and optional signal for an interrupted run.",
       "properties": {
         "kind": {
           "const": "run_interrupted",
@@ -3388,6 +3415,7 @@
     },
     "RunSnapshot": {
       "additionalProperties": false,
+      "description": "Current server projection of a run's public state.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -3454,6 +3482,7 @@
       "type": "object"
     },
     "RunStartedData": {
+      "description": "Initial input and loop settings for a run.",
       "properties": {
         "kind": {
           "const": "run_started",
@@ -3536,6 +3565,7 @@
       "type": "object"
     },
     "ServerReadyData": {
+      "description": "Transport details emitted once the server is ready.",
       "properties": {
         "kind": {
           "const": "server_ready",
@@ -3555,6 +3585,7 @@
     },
     "SnapshotQuery": {
       "additionalProperties": false,
+      "description": "Request the current run snapshot.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -3583,6 +3614,7 @@
     },
     "SteerCommand": {
       "additionalProperties": false,
+      "description": "Send steering text to the active run.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -3619,6 +3651,7 @@
     },
     "StopCommand": {
       "additionalProperties": false,
+      "description": "Request stopping after the active agent call.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -3652,6 +3685,7 @@
       "type": "object"
     },
     "SubprocessOutputData": {
+      "description": "Captured output from a managed subprocess.",
       "properties": {
         "kind": {
           "const": "subprocess_output",
@@ -3691,6 +3725,7 @@
     },
     "SubscribeRequest": {
       "additionalProperties": false,
+      "description": "Subscribe to run events, optionally replaying a recent tail.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -3743,6 +3778,7 @@
     },
     "SubscribedMessage": {
       "additionalProperties": false,
+      "description": "Initial acknowledgment for an event subscription.",
       "properties": {
         "type": {
           "const": "subscribed",
@@ -3772,6 +3808,7 @@
       "type": "object"
     },
     "TodoItemData": {
+      "description": "One item in the agent's reported todo list.",
       "properties": {
         "content": {
           "title": "Content",
@@ -3790,6 +3827,7 @@
       "type": "object"
     },
     "TodoUpdateData": {
+      "description": "Current todo list reported by an agent.",
       "properties": {
         "kind": {
           "const": "todo_update",
@@ -3809,6 +3847,7 @@
       "type": "object"
     },
     "ToolCallData": {
+      "description": "Tool name, call identity, and arguments emitted by an agent.",
       "properties": {
         "kind": {
           "const": "tool_call",
@@ -3856,6 +3895,7 @@
       "type": "object"
     },
     "ToolResultData": {
+      "description": "Raw tool result and optional structured rendering payload.",
       "properties": {
         "kind": {
           "const": "tool_result",
@@ -3967,6 +4007,7 @@
       "type": "string"
     },
     "UsageUpdateData": {
+      "description": "Token usage reported by the active model.",
       "properties": {
         "kind": {
           "const": "usage_update",
@@ -4064,6 +4105,7 @@
       "type": "object"
     }
   },
+  "description": "Root schema document for the public server protocol.",
   "properties": {
     "request": {
       "discriminator": {

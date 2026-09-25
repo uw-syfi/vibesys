@@ -47,6 +47,7 @@ def test_a_skipped_attempt_cannot_carry_a_verdict() -> None:
 def test_an_attempt_outcome_is_immutable() -> None:
     """An attempt's result is replaced by the next attempt, never updated."""
     outcome = JudgeReviewed("pass")
+    attribute = "verdict"
 
     with pytest.raises(dataclasses.FrozenInstanceError):
-        setattr(outcome, "verdict", "fail")  # noqa: B010  # tracked: #288
+        setattr(outcome, attribute, "fail")

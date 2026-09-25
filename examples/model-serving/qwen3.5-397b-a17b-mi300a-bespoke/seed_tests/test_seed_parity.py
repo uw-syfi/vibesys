@@ -20,7 +20,10 @@ from transformers import Qwen3_5MoeForCausalLM, Qwen3_5MoeTextConfig
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# lint-waiver: LW-008012 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 import model as seed_model  # noqa: E402
+
+# lint-waiver: LW-008013 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 from mxfp4 import dequant_mxfp4  # noqa: E402
 
 FP4 = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
@@ -55,7 +58,7 @@ def quantize_mxfp4(w: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.T
 def build_hf(seed: int = 0) -> Qwen3_5MoeForCausalLM:
     torch.manual_seed(seed)
     cfg = tiny_config()
-    cfg._attn_implementation = "eager"  # noqa: SLF001
+    cfg._attn_implementation = "eager"
     m = Qwen3_5MoeForCausalLM(cfg).eval()
     with torch.no_grad():
         for name, p in m.named_parameters():
@@ -170,8 +173,8 @@ def test_prefill_and_greedy_decode_match_hf(
 
 
 def test_http_smoke(tmp_path: Path) -> None:
-    from tokenizers import Tokenizer, models, pre_tokenizers  # noqa: PLC0415
-    from transformers import PreTrainedTokenizerFast  # noqa: PLC0415
+    from tokenizers import Tokenizer, models, pre_tokenizers
+    from transformers import PreTrainedTokenizerFast
 
     write_checkpoint(build_hf(), tmp_path, mxfp4=False)
     words = [
@@ -186,7 +189,7 @@ def test_http_smoke(tmp_path: Path) -> None:
         "think",
     ]
     vocab = {w: i for i, w in enumerate(words + [f"w{i}" for i in range(VOCAB - len(words))])}
-    core = Tokenizer(models.WordLevel(vocab, unk_token="<unk>"))  # noqa: S106
+    core = Tokenizer(models.WordLevel(vocab, unk_token="<unk>"))
     core.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
     template = (
         "{% for m in messages %}<|im_start|> {{ m.role }} {{ m.content }} <|im_end|> {% endfor %}"
@@ -194,7 +197,8 @@ def test_http_smoke(tmp_path: Path) -> None:
     )
     tok = PreTrainedTokenizerFast(
         tokenizer_object=core, unk_token="<unk>", eos_token="<|im_end|>", chat_template=template
-    )  # noqa: S106
+    )
+
     tok.save_pretrained(tmp_path)
 
     with socket.socket() as s:
@@ -202,7 +206,7 @@ def test_http_smoke(tmp_path: Path) -> None:
         port = s.getsockname()[1]
     cmd = [sys.executable, str(ROOT / "server.py"), "--model-path", str(tmp_path), "--host", "127.0.0.1", "--port", str(port),
            "--devices", "cpu", "--dtype", "float32", "--max-seq-len", "64"]  # fmt: skip
-    proc = subprocess.Popen(cmd, cwd=ROOT)  # noqa: S603
+    proc = subprocess.Popen(cmd, cwd=ROOT)
     try:
         wait_healthy(port)
         body = {"messages": [{"role": "user", "content": "hello world"}], "max_tokens": 6, "temperature": 0, "ignore_eos": True,

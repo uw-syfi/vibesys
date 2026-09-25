@@ -1,4 +1,5 @@
 """Single strategy terminal decisions over completed round evidence."""
+# ruff: noqa: SLF001  # LW-030015; These tests pin the scheduler policy's private round and command seams.
 
 from __future__ import annotations
 
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from tests.support import make_orchestrator_plan
 
 from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed
@@ -24,19 +26,20 @@ from vibesys.loops.single.session import (
     SingleSessionError,
 )
 from vibesys.schemas import SingleAgentRoundResponse, Verdict
-from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.search.hypothesis import OrchestratorPlan
+
 
 def _plan() -> OrchestratorPlan:
-    return OrchestratorPlan(
+    return make_orchestrator_plan(
         hypothesis_id="h1",
         hypothesis="cache decode",
         task="implement cache",
-        pass_criteria="tests pass",  # noqa: S106
+        criteria="tests pass",
         reasoning="measure decode",
     )
 
@@ -280,7 +283,7 @@ async def test_passed_round_commits_record_and_publishes_one_finished_event(
     session.records = []
     session.state = session.engine.state
     session.framework_benchmark_configured = False
-    session.terminal_policy = single_session._TerminalPolicy()  # noqa: SLF001
+    session.terminal_policy = single_session._TerminalPolicy()
     selected.attempt.passed = True
     selected.attempt.retry = 1
     selected.attempt.single_agent_response = _response(Verdict.PASS)
@@ -338,14 +341,14 @@ def test_retry_cursor_and_official_command_keep_policy_boundaries(
         session, "turns", SimpleNamespace(progress_path=tmp_path / "progress.md"), raising=False
     )
     assert list(session.remaining_attempts(selected)) == [1, 2, 3]
-    assert session._official_reason(requested=False) is None  # noqa: SLF001
-    assert session._official_reason(requested=True) == "orchestrator_request"  # noqa: SLF001
+    assert session._official_reason(requested=False) is None
+    assert session._official_reason(requested=True) == "orchestrator_request"
     session.round_number = 3
-    assert session._official_reason(requested=False) == "final_round"  # noqa: SLF001
-    assert SingleSession._command("run benchmark", "a b", "RELEASE") == (  # noqa: SLF001
+    assert session._official_reason(requested=False) == "final_round"
+    assert SingleSession._command("run benchmark", "a b", "RELEASE") == (
         "env VIBESYS_CANDIDATE_REVISION='a b' RELEASE=1 run benchmark"
     )
-    assert SingleSession._command(None, "revision", "RELEASE") is None  # noqa: SLF001
+    assert SingleSession._command(None, "revision", "RELEASE") is None
     session.options = session.options.model_copy(update={"max_retries_per_round": 0})
     with pytest.raises(SingleSessionError, match="exhausting"):
         session.remaining_attempts(selected)

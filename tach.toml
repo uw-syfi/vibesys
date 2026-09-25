@@ -13,18 +13,19 @@
 # modeled the same way: `server.api`, `server.runtime`, ... are modules, and
 # bare `server` is its package `__init__`.
 #
-# Cycles are forbidden (`forbid_circular_dependencies = true`). The core layers,
-# bottom to top: `vibesys` (top-level vibesys/*.py: config, schemas, ...); then
-# backends, evaluators, prompts, render, skypilot; then agents and domains;
-# then sandbox; then run; then `vibesys.context` (per-run lifecycle context,
-# imported only by loops and entrypoints); then loops. Do not add an upward
-# edge; move the shared code down instead.
+# Cycles are forbidden (`forbid_circular_dependencies = true`). The `vibesys`
+# core modules are ordered by their explicit edges, bottom to top: `vibesys`
+# (top-level vibesys/*.py: config, schemas, ...); then backends, evaluators,
+# prompts, render, skypilot; then domains; then sandbox; then run; then
+# `vibesys.context` (per-run lifecycle context, imported only by loops and
+# entrypoints); then loops; `vibesys.api` is the facade on top. Do not add an
+# upward edge; move the shared code down instead.
 #
-# No layers. Every edge is listed, including those of `entrypoints` and each
-# `server.*` module. Order is enforced by the explicit edges: `server.runtime`
-# sits on top, then transport, api, integration, chat, controller, execution,
-# journal, events, diagnostics at the bottom; a lower module must not list a
-# higher one. `entrypoints` is the composition root: it reaches core only
+# Tach `layers` are not used. Every edge is listed, including those of
+# `entrypoints` and each `server.*` module. Order is enforced by the explicit
+# edges: `server.runtime` sits on top, then transport, api, integration, chat,
+# controller, execution, journal, events, diagnostics at the bottom; a lower
+# module must not list a higher one. `entrypoints` is the composition root: it reaches core only
 # through the `vibesys.api` facade, for both the server path and the headless
 # path, so it lists no core-internal module. Upward imports (core importing
 # server/entrypoints, server importing entrypoints) fail because the edge is

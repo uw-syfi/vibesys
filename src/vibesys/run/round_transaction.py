@@ -10,7 +10,6 @@ release to recover them.
 """
 
 # These boundary errors deliberately name the relevant path or transaction.
-# ruff: noqa: TRY003
 
 from __future__ import annotations
 
@@ -19,7 +18,7 @@ import binascii
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -45,6 +44,101 @@ _SHA256_PATTERN = r"^[0-9a-f]{64}$"
 class RoundTransactionError(RuntimeError):
     """Raised when a completed-round transaction cannot proceed safely."""
 
+    @classmethod
+    def already_completed(cls, sequence: int) -> Self:
+        """Describe a transaction handle completed more than once."""
+        return cls(f"Checkpoint {sequence} has already completed")
+
+    @classmethod
+    def participants_disagree(cls) -> Self:
+        """Describe project, Git tracker, and run identities that do not match."""
+        return cls("Checkpoint project, Git tracker, and run must agree")
+
+    @classmethod
+    def no_declared_slots(cls) -> Self:
+        """Describe a coordinator created without typed slots."""
+        return cls("Checkpoint requires at least one declared typed slot")
+
+    @classmethod
+    def invalid_sequence(cls, sequence: int) -> Self:
+        """Describe a checkpoint requested for a non-positive sequence."""
+        return cls(f"Checkpoint sequence must be positive, got {sequence}")
+
+    @classmethod
+    def unfinished_checkpoint(cls) -> Self:
+        """Describe an existing checkpoint that must be recovered first."""
+        return cls("An unfinished checkpoint already exists; recover it first")
+
+    @classmethod
+    def empty_writes(cls) -> Self:
+        """Describe a checkpoint requested without any writes."""
+        return cls("Checkpoint writes must not be empty")
+
+    @classmethod
+    def missing_head(cls) -> Self:
+        """Describe a repository without an accessible HEAD commit."""
+        return cls("Checkpoint requires an initialized Git HEAD")
+
+    @classmethod
+    def staged_index_changes(cls) -> Self:
+        """Describe staged user changes that make a candidate checkpoint unsafe."""
+        return cls("Cannot checkpoint candidate while the Git index has staged changes")
+
+    @classmethod
+    def journal_sequence_mismatch(cls, sequence: int) -> Self:
+        """Describe a journal that belongs to another sequence."""
+        return cls(f"Checkpoint journal is not for sequence {sequence}")
+
+    @classmethod
+    def undeclared_slot(cls, name: str) -> Self:
+        """Describe a write to a slot the coordinator does not declare."""
+        return cls(f"Undeclared checkpoint slot {name!r}")
+
+    @classmethod
+    def invalid_journal(cls, error: Exception) -> Self:
+        """Describe a journal that could not be loaded as valid state."""
+        return cls(f"Invalid checkpoint journal: {error}")
+
+    @classmethod
+    def journal_run_mismatch(cls, run_id: str) -> Self:
+        """Describe a journal belonging to another run."""
+        return cls(f"Checkpoint journal belongs to run {run_id!r}")
+
+    @classmethod
+    def journal_digest_mismatch(cls) -> Self:
+        """Describe a journal whose payload digest does not match."""
+        return cls("Checkpoint journal digest does not match")
+
+    @classmethod
+    def journal_duplicate_slot(cls, name: str) -> Self:
+        """Describe a journal that lists one slot as both transition and file."""
+        return cls(f"Checkpoint journal duplicates slot {name!r}")
+
+    @classmethod
+    def journal_undeclared_slot(cls, name: str) -> Self:
+        """Describe a journal naming a slot the coordinator does not declare."""
+        return cls(f"Checkpoint journal names undeclared slot {name!r}")
+
+    @classmethod
+    def history_moved(cls, pre_commit: str) -> Self:
+        """Describe history that no longer contains the checkpoint's base."""
+        return cls(f"Git history moved away from checkpoint starting commit {pre_commit}")
+
+    @classmethod
+    def committed_state_conflict(cls) -> Self:
+        """Describe committed state that differs from the journal."""
+        return cls("Committed state differs from the checkpoint journal")
+
+    @classmethod
+    def snapshot_not_exact(cls) -> Self:
+        """Describe a Git snapshot that did not commit the exact state."""
+        return cls("Git snapshot did not commit exact checkpoint state")
+
+    @classmethod
+    def inaccessible_head(cls) -> Self:
+        """Describe a snapshot operation that left no accessible HEAD."""
+        return cls("Checkpoint completed without an accessible HEAD")
+
 
 class RoundRecoveryOutcome(StrEnum):
     """Observable result of checking for an interrupted round transaction."""
@@ -66,7 +160,8 @@ class _StrictJournal(BaseModel):
     @classmethod
     def _require_run_id(cls, value: str) -> str:
         if not value:
-            raise ValueError("run_id must not be empty")
+            message = "run_id must not be empty"
+            raise ValueError(message)
         return value
 
 
@@ -84,7 +179,8 @@ class _MultiSlotJournal(_StrictJournal):
     @classmethod
     def _validate_transitions(cls, value: dict[str, str]) -> dict[str, str]:
         if not value:
-            raise ValueError("checkpoint must contain at least one state transition")
+            message = "checkpoint must contain at least one state transition"
+            raise ValueError(message)
         for payload in value.values():
             _decode_base64(payload)
         return value
@@ -116,7 +212,8 @@ class MultiSlotRoundTransaction:
     def complete(self) -> CompletedRound:
         """Apply and commit the prepared replacements exactly once."""
         if self._closed:
-            raise RoundTransactionError(f"Checkpoint {self.sequence} has already completed")
+            raise RoundTransactionError.already_completed(self.sequence)
+        # lint-waiver: LW-007067 [SLF001]; the transaction handle uses its coordinator's private commit seam
         result = self._coordinator._complete(self.sequence)  # noqa: SLF001
         self._closed = True
         return result
@@ -142,9 +239,9 @@ class MultiSlotRoundTransactionCoordinator:
     ) -> None:
         """Validate the run identity and bind its declared typed slots."""
         if project.root.resolve() != git.root.resolve() or git.run_id != run_id:
-            raise RoundTransactionError("Checkpoint project, Git tracker, and run must agree")
+            raise RoundTransactionError.participants_disagree()
         if not models:
-            raise RoundTransactionError("Checkpoint requires at least one declared typed slot")
+            raise RoundTransactionError.no_declared_slots()
         project.state.load_run(run_id)
         self._git = git
         self.run_id = run_id
@@ -164,20 +261,18 @@ class MultiSlotRoundTransactionCoordinator:
     ) -> MultiSlotRoundTransaction:
         """Validate all requested writes, then durably journal their transitions."""
         if sequence < 1:
-            raise RoundTransactionError(f"Checkpoint sequence must be positive, got {sequence}")
+            raise RoundTransactionError.invalid_sequence(sequence)
         if self._load_journal() is not None:
-            raise RoundTransactionError("An unfinished checkpoint already exists; recover it first")
+            raise RoundTransactionError.unfinished_checkpoint()
         if not writes:
-            raise RoundTransactionError("Checkpoint writes must not be empty")
+            raise RoundTransactionError.empty_writes()
         pre_commit = self._git.current_sha()
         if pre_commit is None:
-            raise RoundTransactionError("Checkpoint requires an initialized Git HEAD")
+            raise RoundTransactionError.missing_head()
         if candidate:
             staged = self._git.run(["git", "diff", "--cached", "--quiet"], check=False)
             if staged.returncode != 0:
-                raise RoundTransactionError(
-                    "Cannot checkpoint candidate while the Git index has staged changes"
-                )
+                raise RoundTransactionError.staged_index_changes()
         payloads = self._serialize_writes(writes)
         namespace_files = {
             item.relative_path.as_posix(): item.contents
@@ -218,7 +313,7 @@ class MultiSlotRoundTransactionCoordinator:
     def _complete(self, sequence: int) -> CompletedRound:
         journal = self._load_journal()
         if journal is None or journal.round_number != sequence:
-            raise RoundTransactionError(f"Checkpoint journal is not for sequence {sequence}")
+            raise RoundTransactionError.journal_sequence_mismatch(sequence)
         result = self._commit(journal)
         self._journal_slot.save(None)
         return result
@@ -228,7 +323,7 @@ class MultiSlotRoundTransactionCoordinator:
         for name, value in sorted(writes.items()):
             slot = self._slots.get(name)
             if slot is None:
-                raise RoundTransactionError(f"Undeclared checkpoint slot {name!r}")
+                raise RoundTransactionError.undeclared_slot(name)
             transition = slot.transition(value)
             payloads[name] = slot.serialize_transition(transition)
         return payloads
@@ -237,11 +332,11 @@ class MultiSlotRoundTransactionCoordinator:
         try:
             journal = self._journal_slot.load_optional()
         except ProjectStateError as exc:
-            raise RoundTransactionError(f"Invalid checkpoint journal: {exc}") from exc
+            raise RoundTransactionError.invalid_journal(exc) from exc
         if journal is None:
             return None
         if journal.run_id != self.run_id:
-            raise RoundTransactionError(f"Checkpoint journal belongs to run {journal.run_id!r}")
+            raise RoundTransactionError.journal_run_mismatch(journal.run_id)
         payloads = {
             name: _decode_base64(payload) for name, payload in journal.transitions_base64.items()
         }
@@ -258,15 +353,15 @@ class MultiSlotRoundTransactionCoordinator:
             )
             != journal.transitions_sha256
         ):
-            raise RoundTransactionError("Checkpoint journal digest does not match")
+            raise RoundTransactionError.journal_digest_mismatch()
         for name, payload in namespace_files.items():
             if name in payloads:
-                raise RoundTransactionError(f"Checkpoint journal duplicates slot {name!r}")
+                raise RoundTransactionError.journal_duplicate_slot(name)
             self.namespace.snapshot_bytes(name, payload)
         for name, payload in payloads.items():
             slot = self._slots.get(name)
             if slot is None:
-                raise RoundTransactionError(f"Checkpoint journal names undeclared slot {name!r}")
+                raise RoundTransactionError.journal_undeclared_slot(name)
             slot.deserialize_transition(payload)
         return journal
 
@@ -275,9 +370,7 @@ class MultiSlotRoundTransactionCoordinator:
             ["git", "merge-base", "--is-ancestor", journal.pre_commit, "HEAD"], check=False
         )
         if ancestor.returncode != 0:
-            raise RoundTransactionError(
-                f"Git history moved away from checkpoint starting commit {journal.pre_commit}"
-            )
+            raise RoundTransactionError.history_moved(journal.pre_commit)
         self._apply_journal(journal)
         snapshot = self.namespace.snapshot()
         if self._git.current_sha() == journal.pre_commit:
@@ -287,12 +380,12 @@ class MultiSlotRoundTransactionCoordinator:
             else:
                 self._git.snapshot_framework_state(label, snapshot)
         elif self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
-            raise RoundTransactionError("Committed state differs from the checkpoint journal")
+            raise RoundTransactionError.committed_state_conflict()
         if self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
-            raise RoundTransactionError("Git snapshot did not commit exact checkpoint state")
+            raise RoundTransactionError.snapshot_not_exact()
         revision = self._git.current_sha()
         if revision is None:
-            raise RoundTransactionError("Checkpoint completed without an accessible HEAD")
+            raise RoundTransactionError.inaccessible_head()
         return CompletedRound(checkpoint=revision)
 
     def _apply_journal(self, journal: _MultiSlotJournal) -> None:
@@ -335,4 +428,5 @@ def _decode_base64(value: str) -> bytes:
     try:
         return base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise ValueError("must contain canonical base64-encoded bytes") from exc
+        message = "must contain canonical base64-encoded bytes"
+        raise ValueError(message) from exc

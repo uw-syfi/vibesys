@@ -57,7 +57,7 @@ class _FakeOwner:
         self.restore_calls: list[str] = []
         self.fail_restore_to: str | None = None
 
-    async def _snapshot(self, label: str, scope: Any = None) -> str:  # noqa: ANN401
+    async def _snapshot(self, label: str, scope: Any = None) -> str:  # noqa: ANN401  # LW-040120 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         del label, scope
         self._next_id += 1
         revision = f"r{self._next_id}"
@@ -68,7 +68,7 @@ class _FakeOwner:
         self,
         revision: str,
         *,
-        scope: Any = None,  # noqa: ANN401
+        scope: Any = None,  # noqa: ANN401  # LW-040121 [ANN401]; the value crosses an untyped boundary, so Any is the accurate type.
         clean: bool = True,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
@@ -218,7 +218,7 @@ _edits_strategy = st.dictionaries(_keys, st.text(min_size=1, max_size=4), max_si
 def test_transaction_outcome_matches_commit_or_snapshot(
     entry: dict[str, str],
     edits: dict[str, str],
-    commit: bool,  # noqa: FBT001  # a hypothesis-generated scenario parameter
+    commit: bool,  # noqa: FBT001  # LW-040122 [FBT001]; a hypothesis-generated scenario parameter.
     raise_mode: str | None,
     preserve: list[str],
 ) -> None:
@@ -311,7 +311,7 @@ def test_transaction_restore_is_exact_over_real_git(
     tmp_path_factory: pytest.TempPathFactory,
     baseline: dict[str, str],
     edits: dict[str, tuple[str, ...]],
-    commit: bool,  # noqa: FBT001  # a hypothesis-generated scenario parameter
+    commit: bool,  # noqa: FBT001  # LW-040123 [FBT001]; a hypothesis-generated scenario parameter.
 ) -> None:
     """Content edits, brand-new (untracked) files, and deletions all revert
     exactly on an uncommitted transaction exit, over a real Git-backed

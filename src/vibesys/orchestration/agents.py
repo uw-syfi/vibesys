@@ -3,7 +3,7 @@
 Split from ``runtime.py`` by capability; see that module's docstring.
 """
 
-# Capabilities in this module share one private owner for resource lifetime.
+# lint-waiver: LW-020038 [SLF001]; capabilities in this module share one private owner for resource lifetime.
 # ruff: noqa: SLF001
 
 from __future__ import annotations
@@ -110,7 +110,7 @@ def _split_template(template: str) -> tuple[Path, str]:
     fallback) still searches the same roots ``turns.py`` does today.
     """
     parts = Path(template).parts
-    if len(parts) >= 3:  # noqa: PLR2004  # "loops"/"<strategy>"/<name...>
+    if len(parts) >= 3:  # noqa: PLR2004  # LW-040096 [PLR2004]; "loops"/"<strategy>"/<name...>.
         return PROMPTS_DIR / parts[0] / parts[1], "/".join(parts[2:])
     return PROMPTS_DIR, template
 
@@ -189,7 +189,7 @@ class _AgentClosedError(RuntimeError):
 
 
 class _LocalAgentHandle:
-    def __init__(  # noqa: PLR0913  # independently owned agent resources
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-020029 [PLR0913]; independently owned agent resources are injected by the host, and bundling them would hide ownership.
         self,
         definition: AgentDefinition,
         context: _RunResources,
@@ -262,7 +262,7 @@ class _LocalAgentHandle:
             ),
         )
 
-    async def turn_structured(  # noqa: PLR0913
+    async def turn_structured(  # noqa: PLR0913  # lint-waiver: LW-020030 [PLR0913]; this method mirrors AgentHandle.turn_structured, whose independent keyword options are its public contract.
         self,
         message: str,
         *,
@@ -449,7 +449,7 @@ class _Agents:
         finally:
             _active_progress.reset(token)
 
-    async def turn(  # noqa: PLR0913
+    async def turn(  # noqa: PLR0913  # LW-040097 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,
         role: Role,
         *,

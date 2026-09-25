@@ -20,6 +20,7 @@ domain = "llm-serving"
 |---------------|--------------|
 | `llm-serving` | LLM inference server context: the `serving-systems` skill/references, `/model` weights, the accuracy + benchmark + reward-hack judge gates. |
 | `microservices` | Microservice workload context: service lifecycle, protocol correctness, and workload-specific evaluator guidance. |
+| `database`    | Database / dataflow engine context: in-place optimization of a vendored engine, judged by output-equivalence against a pristine round-0 copy of the same engine. |
 | `generic`     | Empty — no domain prose injected. The neutral baseline; copy it to start your own. |
 
 ## Anatomy of a domain package

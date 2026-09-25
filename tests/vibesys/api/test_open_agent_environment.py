@@ -15,16 +15,24 @@ from typing import TYPE_CHECKING, Any, cast
 from vibesys.api.session import _LocalRunSession
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
+from vibesys.context import RunSetup
 from vibesys.domains.environment import EnvironmentBindMount
+from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.run.integration import RunResourceHandoff
 from vibesys.sandbox.run_environment import _cli_container_env, _cli_provider_env_and_auth_files
 from vibesys.skills import platform_skill_selection
+from vs_project.api import OrchestrationDescriptor
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     import pytest
+
+    from vibesys.api.contracts import EventSink
+    from vibesys.orchestration.request import RunRequest
+    from vibesys.orchestration.runtime import RunContext
+    from vs_project.api import Project
 
 
 @dataclass(frozen=True)
@@ -55,10 +63,10 @@ def _handoff(
     environment_request: _EnvironmentRequest,
     *,
     sandboxed: bool = False,
-    project: Any = None,  # noqa: ANN401  # Stand-in for vs_project.Project; only .root is used.
+    project: Project | SimpleNamespace | None = None,
 ) -> RunResourceHandoff:
     return RunResourceHandoff(
-        project=project,
+        project=cast("Project", project if project is not None else object()),
         run_id="run-1",
         workspace=tmp_path / "workspace",
         log_dir=tmp_path / "logs",
@@ -83,9 +91,28 @@ def _handoff(
     )
 
 
+class _StubOrchestrator:
+    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
+        del descriptor
+        self.setup = RunSetup()
+
+    async def run(self, ctx: RunContext) -> bool:
+        del ctx
+        return True
+
+
 def _session_with_handoff(handoff: RunResourceHandoff) -> _LocalRunSession:
-    session = object.__new__(_LocalRunSession)
-    cast("Any", session)._resource_handoff = handoff  # noqa: SLF001
+    registry = OrchestrationRegistry()
+    registry.register("stub", _StubOrchestrator)
+    request = SimpleNamespace(
+        orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={})
+    )
+    session = _LocalRunSession(
+        cast("RunRequest", request),
+        sink=cast("EventSink", lambda _event: None),
+        registry=registry,
+    )
+    session._handle_resources(handoff)  # noqa: SLF001  # lint-waiver: LW-008501 [SLF001]; simulate the core resource handoff without running an agent loop.
     return session
 
 
@@ -143,11 +170,9 @@ def test_agent_override_reaches_docker_and_modal_auth_selection(
     environment = _Environment()
     handoff = _handoff(tmp_path, environment, _EnvironmentRequest())
     session = _session_with_handoff(handoff)
-    monkeypatch.setattr(
-        "vs_agent.api.auth_env_passthrough", lambda provider: {"SELECTED": provider}
-    )
-    monkeypatch.setattr("vs_agent.api.auth_paths", lambda _provider: ())
-    monkeypatch.setattr("vs_agent.api.auth_copy_paths", lambda provider: [(provider, "/auth")])
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("OPENAI_API_KEY", "codex-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "claude-key")
 
     opened = session.open_agent_environment(agent_backend="cli", cli_provider="codex")
     selected = environment.requests[-1]
@@ -159,9 +184,10 @@ def test_agent_override_reaches_docker_and_modal_auth_selection(
     assert handoff.environment_request.cli_provider == "claude"
     assert docker_auth is not None
     assert docker_auth[0] == "codex"
-    assert docker_auth[1]["SELECTED"] == "codex"
-    assert modal_env["SELECTED"] == "codex"
-    assert modal_files == [("codex", "/auth")]
+    assert docker_auth[1]["OPENAI_API_KEY"] == "codex-key"
+    assert "ANTHROPIC_API_KEY" not in docker_auth[1]
+    assert modal_env["OPENAI_API_KEY"] == "codex-key"
+    assert modal_files == []
     opened.close()
 
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import subprocess
 from typing import TYPE_CHECKING
+
+from tests.support import run_test_command
 
 import vibesys.api.request
 from vibesys.api.request import (
@@ -97,9 +98,9 @@ def test_supported_profilers_matches_the_live_run_environment() -> None:
 
 def test_experiment_origin_matches_is_false_for_a_non_matching_repo(tmp_path: Path) -> None:
     """A directory with no matching `origin` remote never matches."""
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)  # noqa: S607
-    subprocess.run(
-        ["git", "remote", "add", "origin", "https://github.com/example/other-repo.git"],  # noqa: S607
+    run_test_command(["git", "init", "-q"], cwd=tmp_path, check=True)
+    run_test_command(
+        ["git", "remote", "add", "origin", "https://github.com/example/other-repo.git"],
         cwd=tmp_path,
         check=True,
     )

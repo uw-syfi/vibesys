@@ -1,7 +1,5 @@
 """Driver-owned asynchronous runtime for Omnigent sessions."""
 
-# ruff: noqa: TRY003, TRY301
-
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +12,13 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine
 
 
+def _wait_until_started(ready: threading.Event, timeout: float) -> None:
+    """Wait for the runtime thread to publish readiness."""
+    if not ready.wait(timeout=timeout):
+        message = "Omnigent event loop did not start"
+        raise RuntimeError(message)
+
+
 def _publish_completion[Result](
     task: asyncio.Task[Result],
     completion: concurrent.futures.Future[Result],
@@ -24,7 +29,7 @@ def _publish_completion[Result](
         return
     try:
         completion.set_result(task.result())
-    except BaseException as exc:  # noqa: BLE001
+    except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010133 [BLE001]; _publish_completion must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
         completion.set_exception(exc)
 
 
@@ -78,8 +83,7 @@ class OmnigentAsyncRuntime:
         try:
             self._thread.start()
             started = True
-            if not self._ready.wait(timeout=start_timeout):
-                raise RuntimeError("Omnigent event loop did not start")
+            _wait_until_started(self._ready, start_timeout)
         except BaseException:
             if started:
                 with contextlib.suppress(BaseException):
@@ -98,7 +102,8 @@ class OmnigentAsyncRuntime:
         with self._state_lock:
             if self._closed:
                 awaitable.close()
-                raise RuntimeError("Omnigent async runtime is closed")
+                message = "Omnigent async runtime is closed"
+                raise RuntimeError(message)
             return asyncio.run_coroutine_threadsafe(awaitable, self._loop)
 
     def start_task[Result](
@@ -108,11 +113,13 @@ class OmnigentAsyncRuntime:
         """Create a loop-owned task whose cancellation can be drained exactly."""
         if self.is_current_thread():
             awaitable.close()
-            raise RuntimeError("Omnigent task cannot be started synchronously on its event loop")
+            message = "Omnigent task cannot be started synchronously on its event loop"
+            raise RuntimeError(message)
         with self._state_lock:
             if self._closed:
                 awaitable.close()
-                raise RuntimeError("Omnigent async runtime is closed")
+                message = "Omnigent async runtime is closed"
+                raise RuntimeError(message)
             completion: concurrent.futures.Future[Result] = concurrent.futures.Future()
             spawn = asyncio.run_coroutine_threadsafe(
                 self._spawn(awaitable, completion),
@@ -129,10 +136,11 @@ class OmnigentAsyncRuntime:
         """Return whether the caller is executing on the runtime loop."""
         return threading.current_thread() is self._thread
 
-    def close(self) -> None:  # noqa: C901  # cleanup continues after every failure
+    def close(self) -> None:  # cleanup continues after every failure
         """Drain loop-owned facilities, stop the thread, and close the loop."""
         if self.is_current_thread():
-            raise RuntimeError("Omnigent async runtime cannot close from its event-loop thread")
+            message = "Omnigent async runtime cannot close from its event-loop thread"
+            raise RuntimeError(message)
         with self._state_lock:
             if self._closed:
                 return
@@ -142,11 +150,17 @@ class OmnigentAsyncRuntime:
         try:
             cleanup = asyncio.run_coroutine_threadsafe(self._shutdown(), self._loop)
             first_error = cleanup.result()
-        except BaseException as exc:  # noqa: BLE001
+        except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010134 [BLE001]; OmnigentAsyncRuntime.close must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
             first_error = exc
+        first_error = self._stop_loop(first_error)
+        if first_error is not None:
+            raise first_error
+
+    def _stop_loop(self, first_error: BaseException | None) -> BaseException | None:
+        """Stop the loop thread and close its loop, preserving the first failure."""
         try:
             self._loop.call_soon_threadsafe(self._loop.stop)
-        except BaseException as exc:  # noqa: BLE001
+        except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010135 [BLE001]; OmnigentAsyncRuntime._stop_loop must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
             if first_error is None:
                 first_error = exc
         self._thread.join()
@@ -155,11 +169,10 @@ class OmnigentAsyncRuntime:
         if not self._thread.is_alive():
             try:
                 self._loop.close()
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010136 [BLE001]; OmnigentAsyncRuntime._stop_loop must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
                 if first_error is None:
                     first_error = exc
-        if first_error is not None:
-            raise first_error
+        return first_error
 
     async def _shutdown(self) -> BaseException | None:
         first_error: BaseException | None = None
@@ -175,7 +188,7 @@ class OmnigentAsyncRuntime:
         ):
             try:
                 await cleanup()
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010137 [BLE001]; OmnigentAsyncRuntime._shutdown must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
                 if first_error is None:
                     first_error = exc
         return first_error

@@ -29,12 +29,12 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-# TODO(stack PR 06): import from vibesys.evaluators.validation_recipe once that  # noqa: TD003, FIX002
+# TODO(stack PR 06): import from vibesys.evaluators.validation_recipe once that  # noqa: TD003, FIX002  # LW-040098 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
 # module lands (evaluators/{perf_reply,validation_recipe}.py, PR 06); today these
 # still live in the not-yet-dissolved vibesys.schemas.
 from vibesys.orchestration.memory import structured_artifact_root
 from vibesys.schemas import (
-    FrameworkValidationResult,  # tracked: #288
+    FrameworkValidationResult,
     ValidationRecipeArtifact,
 )
 

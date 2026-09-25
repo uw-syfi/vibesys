@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import subprocess
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import patch  # test-isolation: workspace methods patched below
 
 import pytest
 from hypothesis import given, settings
@@ -69,7 +69,7 @@ def _write_fixture_templates(root: Path) -> None:
     (root / "shared").mkdir(parents=True, exist_ok=True)
 
 
-def _role(  # noqa: PLR0913  # test helper mirroring every Role field
+def _role(  # noqa: PLR0913  # LW-040115 [PLR0913]; test helper mirroring every Role field.
     *,
     reply: type[BaseModel] = _Reply,
     fallback: Callable[[], BaseModel] = _fallback,
@@ -97,14 +97,15 @@ def _role(  # noqa: PLR0913  # test helper mirroring every Role field
     )
 
 
-async def _spawn(ctx: RunContext, role_id: str = "testrole"):  # noqa: ANN202  # tracked: #288
+async def _spawn(ctx: RunContext, role_id: str = "testrole"):  # noqa: ANN202  # LW-040116 [ANN202];  tracked: #288.
     return await ctx.agents.spawn(ctx.agents.default_definition(role_id))
 
 
-def _with_fixture_prompts_dir(tmp_path: Path, fn):  # noqa: ANN001, ANN202  # tracked: #288
+def _with_fixture_prompts_dir(tmp_path: Path, fn):  # noqa: ANN001, ANN202  # LW-040117 [ANN001, ANN202];  tracked: #288.
     """Patch ``PROMPTS_DIR`` to an isolated fixture tree for one call."""
     prompts_root = tmp_path / "prompts_fixture"
     _write_fixture_templates(prompts_root)
+    # test-isolation: PROMPTS_DIR is a module constant with no injection seam; the test points it at fixture templates
     with patch("vibesys.orchestration.agents.PROMPTS_DIR", prompts_root):
         return fn()
 
@@ -231,6 +232,7 @@ def test_readonly_raises_when_unrevertable(tmp_path: Path) -> None:
             await original_pending_changes()
             return ["always-unauthorized.txt"]
 
+        # test-isolation: the test swaps one workspace method to script a dirty or tracked state, with no fake workspace yet
         with patch.object(workspace, "pending_changes", _always_dirty):
             try:
                 with pytest.raises(RoleIsolationError):
@@ -570,6 +572,7 @@ def test_post_turn_snapshot_skipped_for_readonly_with_no_changes(tmp_path: Path)
             calls.append(label)
             return await original_snapshot(label)
 
+        # test-isolation: the test swaps one workspace method to script a dirty or tracked state, with no fake workspace yet
         with patch.object(workspace, "snapshot", _tracked_snapshot):
             try:
                 await ctx.agents.turn(
@@ -602,6 +605,7 @@ def test_post_turn_snapshot_always_runs_for_writes(tmp_path: Path) -> None:
             calls.append(label)
             return await original_snapshot(label)
 
+        # test-isolation: the test swaps one workspace method to script a dirty or tracked state, with no fake workspace yet
         with patch.object(workspace, "snapshot", _tracked_snapshot):
             try:
                 await ctx.agents.turn(
@@ -643,6 +647,7 @@ def test_post_turn_snapshot_runs_when_readonly_role_has_pending_changes(tmp_path
             calls.append(label)
             return await original_snapshot(label)
 
+        # test-isolation: the test swaps one workspace method to script a dirty or tracked state, with no fake workspace yet
         with patch.object(workspace, "snapshot", _tracked_snapshot):
             try:
                 await ctx.agents.turn(

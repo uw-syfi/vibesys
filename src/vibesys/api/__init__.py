@@ -38,7 +38,7 @@ from vibesys.api.store import (
     open_run_store,
 )
 from vibesys.api.store import (
-    portable_history_snapshots as _portable_history_snapshots,  # noqa: F401
+    portable_history_snapshots as _portable_history_snapshots,  # noqa: F401  # lint-waiver: LW-020001 [F401]; server.controller imports this private facade helper by name, so the alias is a deliberate re-export.
 )
 from vibesys.constants import KNOWN_COMPUTE_BACKENDS, ComputeBackend, DomainName
 from vibesys.events import (

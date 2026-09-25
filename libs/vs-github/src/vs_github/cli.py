@@ -5,7 +5,10 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -52,7 +55,8 @@ class GitHubCLI:
         result = self._run(["api", "user", "--jq", ".login"])
         login = result.stdout.strip()
         if not login:
-            raise GitHubCLIError("GitHub CLI returned an empty authenticated user.")  # noqa: TRY003  # tracked: #288
+            message = "GitHub CLI returned an empty authenticated user."
+            raise GitHubCLIError(message)
         return login
 
     def create_repository(
@@ -95,13 +99,15 @@ class GitHubCLI:
         try:
             result = self._runner(command, cwd=cwd, capture_output=True, text=True)
         except FileNotFoundError as exc:
-            raise GitHubCLIUnavailableError(  # noqa: TRY003  # tracked: #288
+            message = (
                 "GitHub CLI (`gh`) is required for remote experiment repositories. "
                 "Install it from https://cli.github.com/ and retry."
-            ) from exc
+            )
+            raise GitHubCLIUnavailableError(message) from exc
         if check and result.returncode != 0:
             detail = _command_detail(result) or "unknown error"
-            raise GitHubCLIError(f"GitHub CLI command failed ({' '.join(command)}): {detail}")  # noqa: TRY003  # tracked: #288
+            message = f"GitHub CLI command failed ({' '.join(command)}): {detail}"
+            raise GitHubCLIError(message)
         return result
 
 

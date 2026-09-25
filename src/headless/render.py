@@ -46,7 +46,8 @@ _PLAIN_STATUS_INDICATORS = {
 class TodoDisplay:
     """Renders a persistent todo list box using ANSI cursor control."""
 
-    def __init__(self, file: TextIO | None = None, *, color: bool = True):  # noqa: ANN204, D107  # tracked: #288
+    def __init__(self, file: TextIO | None = None, *, color: bool = True) -> None:
+        """Set the output stream and ANSI color behavior for todo rendering."""
         self._file = file
         self._color = color
         self._prev_lines = 0
@@ -55,7 +56,8 @@ class TodoDisplay:
     def _out(self) -> TextIO:
         return self._file if self._file is not None else sys.stdout
 
-    def update(self, todos: list[TodoItemData]) -> None:  # noqa: D102  # tracked: #288
+    def update(self, todos: list[TodoItemData]) -> None:
+        """Redraw the todo list in place, clearing rows left by the last update."""
         if not todos:
             return
         indicators = _COLOR_STATUS_INDICATORS if self._color else _PLAIN_STATUS_INDICATORS
@@ -66,7 +68,7 @@ class TodoDisplay:
         top = f"┌─ Todo {'─' * (width - 8)}┐"
         bot = f"└{'─' * (width - 1)}┘"
         padded = [line + " " * (width - len(self._strip_ansi(line)) - 1) + "│" for line in items]
-        box = [top] + padded + [bot]  # noqa: RUF005  # tracked: #288
+        box = [top, *padded, bot]
 
         out = self._out
         # Clear previous block
@@ -97,14 +99,15 @@ class HeadlessRenderer:
     # Maximum chars shown per tool-call argument.
     _MAX_ARG_LEN = 80
 
-    def __init__(  # noqa: ANN204, D107  # tracked: #288
+    def __init__(
         self,
         out: TextIO | None = None,
         *,
         color: bool = True,
         max_result_len: int | None = DEFAULT_MAX_RESULT_LEN,
         max_text_len: int | None = DEFAULT_MAX_TEXT_LEN,
-    ):
+    ) -> None:
+        """Configure tool-output truncation, stream routing, and color behavior."""
         self._explicit_out = out
         self._color = color
         self.max_result_len = max_result_len
@@ -116,7 +119,8 @@ class HeadlessRenderer:
     def _out(self) -> TextIO:
         return self._explicit_out if self._explicit_out is not None else sys.stdout
 
-    def handle(self, event: CoreEvent) -> None:  # noqa: D102  # tracked: #288
+    def handle(self, event: CoreEvent) -> None:
+        """Render one core event to the configured terminal stream."""
         data = event.data
         if isinstance(data, AgentOutputChunkData):
             self._render_chunk(data)

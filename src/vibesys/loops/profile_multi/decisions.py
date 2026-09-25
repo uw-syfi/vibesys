@@ -167,7 +167,7 @@ def candidate_evidence_is_fresh(
     )
 
 
-def official_evaluation_reason(  # noqa: PLR0913
+def official_evaluation_reason(  # noqa: PLR0913  # lint-waiver: LW-020022 [PLR0913]; the scheduling inputs are independent facts read from records and options, and a wrapper object would only repack them.
     *,
     records: list[RoundRecord],
     round_number: int,
@@ -197,7 +197,9 @@ def transition_round(policy: TerminalPolicy, request: TerminalRequest) -> Termin
     next_active = request.hypothesis.clone()
     if policy.keeps_hypothesis_active(attempt, next_active.continuation_rounds):
         next_active.feedback = feedback if request.reviewed and not passed else None
-        assert implementation is not None  # noqa: S101  # lease requires an implementation
+        if implementation is None:
+            message = "a kept-active hypothesis requires an implementation result"
+            raise RuntimeError(message)
         next_active.next_step = implementation.next_step
         next_active.continuation_rounds += 1
     elif passed:
@@ -225,9 +227,9 @@ def transition_round(policy: TerminalPolicy, request: TerminalRequest) -> Termin
         next_active.next_step = implementation.next_step if implementation is not None else None
     profile_outcome = ProfileGuidanceOutcome.from_round(
         request.record.round_number,
-        passed,
-        request.record.official_evaluation,
-        request.record.perf_delta_pct,
+        passed=passed,
+        official=request.record.official_evaluation,
+        delta_pct=request.record.perf_delta_pct,
     )
     engine = request.engine.replace_state(request.state).complete_round(
         request.record,
