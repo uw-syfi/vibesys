@@ -27,7 +27,8 @@ from vibesys.roles.implementer import ImplementerResponse  # noqa: TC001  # trac
 from vibesys.roles.judge import JudgeResponse  # noqa: TC001  # tracked: #288
 from vibesys.roles.pre_round import PreRoundDecision  # noqa: TC001  # tracked: #288
 from vibesys.roles.single_agent import SingleAgentRoundResponse  # noqa: TC001  # tracked: #288
-from vibesys.schemas import OrchestratorPlan  # noqa: TC001  # tracked: #288
+from vibesys.search.hypothesis import OrchestratorPlan  # noqa: TC001  # tracked: #288
+from vibesys.search.hypothesis.attempts import ImplementerReply  # noqa: TC001  # tracked: #288
 
 MEMORY_LAYOUTS = ("files", "directories")
 #: Workspace-relative roots of the loop's durable memory, layout aside.
@@ -119,7 +120,7 @@ def write_implementer_artifact(
     progress_path: Path,
     round_number: int,
     retry: int,
-    response: ImplementerResponse,
+    response: ImplementerReply,
 ) -> Path:
     """Persist parsed implementer claims as untrusted data for Judge audit."""
     path = _implementer_evidence_root(progress_path) / (

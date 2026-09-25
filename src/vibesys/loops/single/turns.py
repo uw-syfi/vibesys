@@ -7,16 +7,14 @@ from typing import TYPE_CHECKING, cast
 
 from vibesys import constants
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.errors import (
+from vibesys.domains.base import DomainRole
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
+from vibesys.errors import (
     InvalidPlanError,
     PlanCorrectionExhaustedError,
     UnsupportedProfilerError,
 )
-from vibesys.agent_run.evidence import _pareto_archive_conflict
-from vibesys.agent_run.hypotheses import apply_strategy_updates
-from vibesys.domains.base import DomainRole
-from vibesys.domains.registry import resolve_domain
-from vibesys.domains.rendering import render_domain_section
 from vibesys.events import FrameworkSource
 from vibesys.profilers import (
     ProfilerDefinition,
@@ -34,19 +32,17 @@ from vibesys.roles.single_agent import (
     SingleAgentRoundResponse,
 )
 from vibesys.runtime import ReadOnly, Role
-from vibesys.schemas import (
-    OrchestratorPlan,
-    SkillResourceSelection,
-    normalize_hypothesis_title,
-)
+from vibesys.schemas import SkillResourceSelection, normalize_hypothesis_title
+from vibesys.search.hypothesis.transitions import apply_strategy_updates, pareto_archive_conflict
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
 
 if TYPE_CHECKING:
-    from vibesys.agent_run.attempts import AttemptState
-    from vibesys.agent_run.options import AgentOrchestrationOptions
-    from vibesys.agent_run.state import AgentRunState
+    from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.loops.single.session import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.search.hypothesis.attempts import AttemptState
+    from vibesys.search.hypothesis.plan import OrchestratorPlan
+    from vibesys.search.hypothesis.state import HypothesisState
     from vibesys.skills import ResolvedSkillSelection
 
 
@@ -134,7 +130,7 @@ class SingleAgentTurns:
             **plan_focus_kwargs(request.profile_guidance.plan_prompt_context()),
         )
 
-    def _validate_plan(self, plan: OrchestratorPlan, state: AgentRunState) -> None:
+    def _validate_plan(self, plan: OrchestratorPlan, state: HypothesisState) -> None:
         updates = [item.hypothesis_id for item in plan.hypothesis_updates]
         if len(updates) != len(set(updates)):
             raise InvalidPlanError.duplicate_updates()
@@ -323,7 +319,7 @@ class SingleAgentTurns:
                 [*plan.recommended_skills, *response.skill_context_updates]
             )
             issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-        conflict = _pareto_archive_conflict(
+        conflict = pareto_archive_conflict(
             candidate_disposition=response.candidate_disposition,
             candidate_metrics=dict(response.candidate_metrics),
             records=request.records,

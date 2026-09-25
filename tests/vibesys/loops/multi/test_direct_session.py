@@ -16,8 +16,6 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed, JudgeSkipped
-from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.validation_recipe import ValidationRecipeArtifact
 from vibesys.loops.multi.decisions import STATIC_GUIDANCE, AttemptRequest
@@ -33,9 +31,15 @@ from vibesys.roles.implementer import ImplementerResponse
 from vibesys.roles.judge import JudgeResponse
 from vibesys.schemas import (
     HypothesisOutcome,
-    OrchestratorPlan,
 )
-from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
+from vibesys.search.hypothesis.attempts import (
+    AttemptDecision,
+    AttemptState,
+    JudgeReviewed,
+    JudgeSkipped,
+)
+from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.hypothesis.transitions import CarryOver
 from vs_loop_state.api import RoundRecord
 
@@ -115,7 +119,7 @@ async def _fake_transaction(
 
 def _session(tmp_path: Path) -> MultiSession:
     session = cast("Any", MultiSession.__new__(MultiSession))
-    state = AgentRunState()
+    state = HypothesisState()
     session.options = SimpleNamespace(
         max_rounds=3,
         max_retries_per_round=2,
@@ -398,7 +402,7 @@ def test_completed_reviewed_round_checkpoints_record_before_advancing(tmp_path: 
     selected.attempt.retry = 2
     selected.attempt.passed = True
     selected.attempt.official_reason = "final_round"
-    selected.attempt.judge = JudgeReviewed(Verdict.PASS)
+    selected.attempt.judge = JudgeReviewed("pass")
     selected.attempt.implementation = ImplementerResponse(
         summary="cache added",
         expected_behavior="faster",
@@ -420,7 +424,7 @@ def test_completed_reviewed_round_checkpoints_record_before_advancing(tmp_path: 
     assert commit.kwargs["writes"]["state.json"].rounds == session.records
 
 
-def _rollback_state(*, parent_round: int, started_round: int) -> tuple[AgentRunState, Hypothesis]:
+def _rollback_state(*, parent_round: int, started_round: int) -> tuple[HypothesisState, Hypothesis]:
     """Build a state with a completed prior round plus an active hypothesis
     requesting a rollback to it, so ``_apply_rollback`` has a real commit to
     resolve through ``self.records``/``self.state``.

@@ -36,8 +36,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vibesys.evaluators.metrics import MetricSpace
-    from vibesys.schemas import CandidateDisposition, HypothesisOutcome, OrchestratorPlan
+    from vibesys.schemas import CandidateDisposition, HypothesisOutcome
     from vibesys.search.hypothesis.config import HypothesisConfig
+    from vibesys.search.hypothesis.plan import OrchestratorPlan
     from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
 
 __all__ = ["HypothesisSearch"]

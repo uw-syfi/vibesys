@@ -14,21 +14,31 @@ from dataclasses import replace
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.agent_run.attempts import AttemptState, JudgeReviewed, JudgeSkipped, JudgeSkipReason
-from vibesys.agent_run.evidence import _FAILED_HYPOTHESIS_OUTCOMES as OLD_FAILED_HYPOTHESIS_OUTCOMES
-from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.multi.session import _TerminalPolicy
-from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import (
     HypothesisOutcome,
+)
+from vibesys.search.hypothesis import (
+    ClosedRound,
+    HypothesisConfig,
+    HypothesisSearch,
     OrchestratorPlan,
 )
-from vibesys.search.hypothesis import ClosedRound, HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis.attempts import (
+    AttemptState,
+    JudgeReviewed,
+    JudgeSkipped,
+    JudgeSkipReason,
+)
+from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.hypothesis.transitions import (
     FAILED_HYPOTHESIS_OUTCOMES,
     record_candidate_metrics,
+)
+from vibesys.search.hypothesis.transitions import (
+    FAILED_HYPOTHESIS_OUTCOMES as OLD_FAILED_HYPOTHESIS_OUTCOMES,
 )
 from vibesys.search.hypothesis.transitions import CarryOver as NewCarryOver
 from vs_loop_state.api import RoundHistory, RoundRecord
@@ -132,7 +142,7 @@ def test_frontier_never_dominated() -> None:
 
 def test_start_resolves_rollback_to_earlier_committed_round() -> None:
     search = HypothesisSearch(HypothesisConfig(max_rounds=10))
-    state = AgentRunState()
+    state = HypothesisState()
     records = [
         _round(1, hypothesis_id="H-1", commit="a" * 40, outcome="proven"),
         _round(
@@ -195,10 +205,10 @@ def _attempt_state(
         expected_behavior="it works",
     )
     return AttemptState(
-        agent_run_state=AgentRunState(),
+        agent_run_state=HypothesisState(),
         feedback=feedback,
         implementation=implementation,
-        judge=JudgeReviewed(Verdict.PASS) if passed else JudgeSkipped(JudgeSkipReason.NOT_REACHED),
+        judge=JudgeReviewed("pass") if passed else JudgeSkipped(JudgeSkipReason.NOT_REACHED),
         passed=passed,
     )
 

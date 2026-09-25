@@ -13,11 +13,11 @@ from server.execution import ExecutionTracker
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
-from vibesys.agent_run.options import (
+from vibesys.evaluators.metrics import MetricSpace
+from vibesys.loops.agent_options import (
     AgentOrchestrationOptions,
     descriptor_from_options,
 )
-from vibesys.evaluators.metrics import MetricSpace
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.run_control import RunControlChannel
 

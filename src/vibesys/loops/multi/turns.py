@@ -16,16 +16,15 @@ from typing import TYPE_CHECKING, cast
 
 from vibesys import constants
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.errors import (
+from vibesys.domains.base import DomainRole
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
+from vibesys.errors import (
     InvalidPlanError,
     MissingImplementationError,
     PlanCorrectionExhaustedError,
     UnsupportedProfilerError,
 )
-from vibesys.agent_run.hypotheses import apply_strategy_updates
-from vibesys.domains.base import DomainRole
-from vibesys.domains.registry import resolve_domain
-from vibesys.domains.rendering import render_domain_section
 from vibesys.events import CoreEventType, EventStatus, FrameworkSource, JudgeResultData
 from vibesys.profilers import (
     ProfilerDefinition,
@@ -50,20 +49,19 @@ from vibesys.roles.judge import MULTI_JUDGE, JudgeContext, JudgeResponse
 from vibesys.roles.pre_round import MULTI_PRE_ROUND_DECISION, PreRoundContext, PreRoundDecision
 from vibesys.roles.profiler import MULTI_PROFILERS, ProfilerContext, ProfilerSummary
 from vibesys.runtime import ReadOnly
-from vibesys.schemas import (
-    OrchestratorPlan,
-    normalize_hypothesis_title,
-)
+from vibesys.schemas import normalize_hypothesis_title
+from vibesys.search.hypothesis.transitions import apply_strategy_updates
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
 
 if TYPE_CHECKING:
-    from vibesys.agent_run.attempts import AttemptState
-    from vibesys.agent_run.evidence import CarryOver
-    from vibesys.agent_run.options import AgentOrchestrationOptions
-    from vibesys.agent_run.state import AgentRunState
+    from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
     from vibesys.schemas import SkillResourceSelection
+    from vibesys.search.hypothesis.attempts import AttemptState
+    from vibesys.search.hypothesis.plan import OrchestratorPlan
+    from vibesys.search.hypothesis.state import HypothesisState
+    from vibesys.search.hypothesis.transitions import CarryOver
     from vibesys.skills import ResolvedSkillSelection
 
 # The implementer's fallback texts are the sentinel that identifies a
@@ -156,7 +154,7 @@ class MultiAgentTurns:
             **plan_focus_kwargs(request.profile_guidance.plan_prompt_context()),
         )
 
-    def _validate_plan(self, plan: OrchestratorPlan, state: AgentRunState) -> None:
+    def _validate_plan(self, plan: OrchestratorPlan, state: HypothesisState) -> None:
         updates = [item.hypothesis_id for item in plan.hypothesis_updates]
         if len(updates) != len(set(updates)):
             raise InvalidPlanError.duplicate_updates()

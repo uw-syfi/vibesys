@@ -16,11 +16,11 @@ from vibesys.roles.profiler import ProfilerSummary
 from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.schemas import (
     HYPOTHESIS_TITLE_MAX_LEN,
-    OrchestratorPlan,
     SkillResourceSelection,
     derive_hypothesis_title,
     normalize_hypothesis_title,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 
 
 def _profiler_summary(

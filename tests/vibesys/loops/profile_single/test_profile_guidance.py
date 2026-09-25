@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from vibesys.agent_run.state import ProfileBottleneck
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.loops.profile_single import attribution as runner
+from vibesys.search.profile_focus.state import ProfileBottleneck
 
 if TYPE_CHECKING:
     from vibesys.orchestration.runtime import RunContext

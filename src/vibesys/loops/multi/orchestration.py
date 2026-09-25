@@ -6,19 +6,19 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.attempts import AttemptDecision
-from vibesys.agent_run.errors import InvalidStrategyOptionsError
-from vibesys.agent_run.options import (
+from vibesys.context import RunSetup, RunStartHints
+from vibesys.errors import InvalidStrategyOptionsError
+from vibesys.loops.agent_options import (
     AgentOrchestrationOptions,
     UnsupportedAgentOrchestrationError,
     compare_resume_descriptors,
     options_from_descriptor,
 )
-from vibesys.agent_run.readmodel import project_run_view
-from vibesys.agent_run.state import AgentRunState, load_agent_run_state
-from vibesys.context import RunSetup, RunStartHints
+from vibesys.loops.hypothesis_readmodel import project_run_view
 from vibesys.loops.multi.session import MultiSession
 from vibesys.orchestration.view import RunStatus, RunView
+from vibesys.search.hypothesis.attempts import AttemptDecision
+from vibesys.search.hypothesis.state import HypothesisState, load_hypothesis_state
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -51,7 +51,7 @@ class MultiProjector:
 
     def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
         """Project one persisted run into a generic view envelope."""
-        state = load_agent_run_state(project, run_id, namespace="multi") or AgentRunState()
+        state = load_hypothesis_state(project, run_id, namespace="multi") or HypothesisState()
         return project_run_view(
             state,
             run_id=run_id,
@@ -62,7 +62,7 @@ class MultiProjector:
 
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
         """Project a just-committed strategy state."""
-        if namespace != "multi" or not isinstance(state, AgentRunState):
+        if namespace != "multi" or not isinstance(state, HypothesisState):
             return None
         return project_run_view(
             state,
@@ -83,7 +83,7 @@ class MultiAgentOrchestrator:
         self.options = load_options(descriptor)
         self.setup = RunSetup(
             state_namespace="multi",
-            state_slots={"state.json": AgentRunState},
+            state_slots={"state.json": HypothesisState},
             resume_policy=compare_resume_descriptors,
             start_hints=RunStartHints(
                 max_rounds=self.options.max_rounds,

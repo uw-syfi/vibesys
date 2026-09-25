@@ -10,10 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from vibesys.agent_run.attempts import AttemptDecision
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
-from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.profile_single.orchestration import (
     InvalidStrategyOptionsError,
     ProfileGuidedSingleAgentOrchestrator,
@@ -22,6 +20,8 @@ from vibesys.loops.profile_single.orchestration import (
 )
 from vibesys.loops.profile_single.session import ProfileSingleSession
 from vibesys.orchestration.view import RunStatus
+from vibesys.search.hypothesis.attempts import AttemptDecision
+from vibesys.search.hypothesis.state import HypothesisState
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -74,10 +74,10 @@ def test_options_reject_wrong_strategy_and_incompatible_settings() -> None:
 def test_projector_uses_profile_single_namespace_and_ignores_other_commits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = AgentRunState()
+    state = HypothesisState()
     load = MagicMock(return_value=state)
     projected = MagicMock(return_value="view")
-    monkeypatch.setattr("vibesys.loops.profile_single.orchestration.load_agent_run_state", load)
+    monkeypatch.setattr("vibesys.loops.profile_single.orchestration.load_hypothesis_state", load)
     monkeypatch.setattr("vibesys.loops.profile_single.orchestration.project_run_view", projected)
     projector = ProfileSingleProjector()
     project = MagicMock()

@@ -1,12 +1,9 @@
-"""Equivalence tests: old ``agent_run``/``loops`` logic vs. ``search.hypothesis``.
+"""Property tests for the pure hypothesis-lifecycle transitions and cadence.
 
-The rewiring phase deletes ``vibesys.agent_run`` and the shared logic in
-``loops/{multi,profile_multi}/decisions.py`` once every strategy is wired
-onto ``search.hypothesis``. Until then, these tests are the contract: both
-implementations must agree on every input. Once the old code is deleted,
-each ``test_*_matches_old_*`` here should be trimmed to a plain unit test of
-the new function alone (drop the old-side call and the equality assertion
-against it).
+Formerly cross-checked the ported ``search.hypothesis`` logic against the
+original ``vibesys.agent_run`` implementation it was ported from; agent_run
+has since dissolved (its logic now lives only in ``search.hypothesis``), so
+these are plain property tests of that logic alone.
 """
 
 from __future__ import annotations
@@ -16,20 +13,11 @@ from typing import Literal
 from hypothesis import given
 from hypothesis import strategies as st
 
-import vibesys.agent_run.evidence as old_evidence
-import vibesys.agent_run.hypotheses as old_hypotheses
-from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
-from vibesys.schemas import (
-    CandidateDisposition,
-    HypothesisOutcome,
-    OrchestratorPlan,
-)
-from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
-from vibesys.search.hypothesis import transitions as new_transitions
-from vibesys.search.hypothesis.cadence import (
-    candidate_evidence_fresh as new_candidate_evidence_fresh,
-)
+from vibesys.schemas import CandidateDisposition, HypothesisOutcome
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch, transitions
+from vibesys.search.hypothesis.cadence import candidate_evidence_fresh
+from vibesys.search.hypothesis.plan import OrchestratorPlan
 from vibesys.search.hypothesis.state import HypothesisState
 from vs_loop_state.api import RoundRecord
 
@@ -96,52 +84,58 @@ _COMPARISONS = st.sampled_from([None, *MetricComparison])
     reviewed=st.booleans(),
     comparison=_COMPARISONS,
 )
-def test_resolve_hypothesis_outcome_matches_old(
+def test_resolve_hypothesis_outcome(
     declared: HypothesisOutcome | None,
     passed: bool,  # noqa: FBT001
     reviewed: bool,  # noqa: FBT001
     comparison: MetricComparison | None,
 ) -> None:
-    old = old_hypotheses.resolve_hypothesis_outcome(
-        old_hypotheses.ResolutionEvidence(
+    result = transitions.resolve_hypothesis_outcome(
+        transitions.ResolutionEvidence(
             declared=declared, passed=passed, reviewed=reviewed, comparison=comparison
         )
     )
-    new = new_transitions.resolve_hypothesis_outcome(
-        new_transitions.ResolutionEvidence(
-            declared=declared, passed=passed, reviewed=reviewed, comparison=comparison
-        )
-    )
-    assert old == new
+    if not reviewed:
+        assert result is None
+    elif not passed:
+        assert result is transitions.HypothesisResolution.REJECTED
+    elif declared is None or declared is HypothesisOutcome.CONTINUE:
+        assert result is None
 
 
 @given(comparison=st.sampled_from(list(MetricComparison)))
-def test_scalar_candidate_retained_matches_old(comparison: MetricComparison) -> None:
-    assert old_hypotheses.scalar_candidate_retained(
-        comparison
-    ) == new_transitions.scalar_candidate_retained(comparison)
+def test_scalar_candidate_retained(comparison: MetricComparison) -> None:
+    result = transitions.scalar_candidate_retained(comparison)
+    match comparison:
+        case MetricComparison.BETTER:
+            assert result is True
+        case MetricComparison.WORSE | MetricComparison.WITHIN_NOISE:
+            assert result is False
+        case MetricComparison.INCOMPARABLE:
+            assert result is None
 
 
-def test_trusted_perf_provenance_matches_old() -> None:
-    for provenance in (None, "framework", "implementer"):
-        assert old_hypotheses.trusted_perf_provenance(
-            provenance
-        ) == new_transitions.trusted_perf_provenance(provenance)
+def test_trusted_perf_provenance() -> None:
+    assert transitions.trusted_perf_provenance(None)
+    assert transitions.trusted_perf_provenance("framework")
+    assert not transitions.trusted_perf_provenance("implementer")
 
 
 # --- start_hypothesis / append_round / project_round_evidence round trip ---
 
 
-def test_start_and_append_round_matches_old_agent_run_state() -> None:
+def test_start_and_append_round() -> None:
     plan = _plan("H-1")
-    old_state = old_hypotheses.start_hypothesis(AgentRunState(), plan, started_round=1)
-    new_state = new_transitions.start_hypothesis(HypothesisState(), plan, started_round=1)
-    assert old_state.model_dump() == new_state.model_dump()
+    state = transitions.start_hypothesis(HypothesisState(), plan, started_round=1)
+    assert state.active_hypothesis is not None
+    assert state.active_hypothesis.hypothesis_id == "H-1"
 
     record = _round(1, 12.0)
-    old_next = old_hypotheses.append_round(old_state, record, keep_active=False)
-    new_next = new_transitions.append_round(new_state, record, keep_active=False)
-    assert old_next.model_dump() == new_next.model_dump()
+    next_state = transitions.append_round(state, record, keep_active=False)
+    assert next_state.active_hypothesis_id is None
+    next_hypothesis = next_state.by_id("H-1")
+    assert next_hypothesis is not None
+    assert next_hypothesis.rounds[0].round_number == 1
 
 
 @given(
@@ -152,7 +146,7 @@ def test_start_and_append_round_matches_old_agent_run_state() -> None:
     reviewed=st.booleans(),
     judge_verdict=st.sampled_from([None, "pass", "fail", "deferred"]),
 )
-def test_project_round_evidence_matches_old(  # noqa: PLR0913
+def test_project_round_evidence(  # noqa: PLR0913
     metric: float | None,
     outcome: str,
     declared: str | None,
@@ -161,8 +155,7 @@ def test_project_round_evidence_matches_old(  # noqa: PLR0913
     judge_verdict: Literal["pass", "fail", "deferred"] | None,
 ) -> None:
     plan = _plan("H-1")
-    old_state = old_hypotheses.start_hypothesis(AgentRunState(), plan, started_round=1)
-    new_state = new_transitions.start_hypothesis(HypothesisState(), plan, started_round=1)
+    state = transitions.start_hypothesis(HypothesisState(), plan, started_round=1)
     record = _round(
         1,
         metric,
@@ -172,17 +165,12 @@ def test_project_round_evidence_matches_old(  # noqa: PLR0913
         reviewed=reviewed,
         judge_verdict=judge_verdict,
     )
-    old_active = old_state.active_hypothesis
-    new_active = new_state.active_hypothesis
-    assert old_active is not None
-    assert new_active is not None
-    old_hypothesis = old_hypotheses.project_round_evidence(
-        old_active, record, prior_rounds=[], space=old_state.metrics
+    active = state.active_hypothesis
+    assert active is not None
+    projected = transitions.project_round_evidence(
+        active, record, prior_rounds=[], space=state.metrics
     )
-    new_hypothesis = new_transitions.project_round_evidence(
-        new_active, record, prior_rounds=[], space=new_state.metrics
-    )
-    assert old_hypothesis.model_dump() == new_hypothesis.model_dump()
+    assert projected.rounds[-1].round_number == 1
 
 
 # --- frontier / best / pareto_conflict ---
@@ -209,7 +197,7 @@ def _official_round(number: int, ops: float, latency: float) -> RoundRecord:
     )
 
 
-def test_frontier_and_best_match_old_evidence_helpers() -> None:
+def test_frontier_and_best_evidence_helpers() -> None:
     space = MetricSpace(
         objectives=(
             Objective(name="ops_per_sec", direction="max"),
@@ -219,29 +207,20 @@ def test_frontier_and_best_match_old_evidence_helpers() -> None:
     )
     records = [_official_round(1, 100, 50), _official_round(2, 120, 40), _official_round(3, 90, 60)]
 
-    old_frontier = old_evidence._pareto_frontier_records(records, space)  # noqa: SLF001
-    new_frontier = new_transitions.pareto_frontier_records(records, space)
-    assert [r.round_number for r in old_frontier] == [r.round_number for r in new_frontier]
+    frontier = transitions.pareto_frontier_records(records, space)
+    assert [r.round_number for r in frontier] == [2]
 
-    old_best = old_evidence._select_final_candidate(records, space)  # noqa: SLF001
-    new_best = new_transitions.select_final_candidate(records, space)
-    assert (old_best.round_number if old_best else None) == (
-        new_best.round_number if new_best else None
-    )
+    best = transitions.select_final_candidate(records, space)
+    assert best is not None
+    assert best.round_number == 2
 
-    old_conflict = old_evidence._pareto_archive_conflict(  # noqa: SLF001
+    conflict = transitions.pareto_archive_conflict(
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER,
         candidate_metrics={"ops_per_sec": 80, "latency_ms": 70},
         records=records,
         space=space,
     )
-    new_conflict = new_transitions.pareto_archive_conflict(
-        candidate_disposition=CandidateDisposition.PARETO_FRONTIER,
-        candidate_metrics={"ops_per_sec": 80, "latency_ms": 70},
-        records=records,
-        space=space,
-    )
-    assert old_conflict == new_conflict
+    assert conflict is not None
 
 
 # --- review_due / official_due / candidate_evidence_fresh cadence ---
@@ -323,10 +302,10 @@ def test_candidate_evidence_fresh_requires_metrics_and_detects_new_artifacts() -
     candidate_metrics = {"a": 1.0}
     candidate_evaluation_artifact = "artifact-1"
 
-    assert not new_candidate_evidence_fresh(
+    assert not candidate_evidence_fresh(
         candidate_metrics={}, candidate_evaluation_artifact=None, records=[]
     )
-    assert new_candidate_evidence_fresh(
+    assert candidate_evidence_fresh(
         candidate_metrics=candidate_metrics,
         candidate_evaluation_artifact=candidate_evaluation_artifact,
         records=[],

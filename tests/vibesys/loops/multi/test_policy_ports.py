@@ -12,8 +12,6 @@ from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
 
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.attempts import AttemptDecision, AttemptState
-from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.validation_recipe import (
     ValidationRecipe,
@@ -36,8 +34,9 @@ from vibesys.roles.judge import JudgeResponse
 from vibesys.roles.pre_round import PreRoundDecision
 from vibesys.roles.profiler import ProfilerSummary
 from vibesys.roles.single_agent import SingleAgentRoundResponse
-from vibesys.schemas import OrchestratorPlan
-from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
+from vibesys.search.hypothesis.attempts import AttemptDecision, AttemptState
+from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.hypothesis.transitions import CarryOver
 
 if TYPE_CHECKING:
@@ -119,7 +118,7 @@ def test_multi_prepass_profiles_only_when_requested_and_enabled() -> None:
     session = cast("Any", MultiSession.__new__(MultiSession))
     session.turns = turns
     session.round_number = 1
-    session.state = AgentRunState()
+    session.state = HypothesisState()
     session.carry = CarryOver()
 
     assert asyncio.run(session._pre_round_profile()) is not None
@@ -166,7 +165,7 @@ def test_profile_guidance_prepares_cursor_before_designer(
         events=SimpleNamespace(emit=lambda *_args, **_kwargs: None),
         state=SimpleNamespace(commit=fake_commit),
     )
-    session.state = AgentRunState()
+    session.state = HypothesisState()
     session.search = _search()
     session.carry = CarryOver()
     session.round_number = 1

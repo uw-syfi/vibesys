@@ -1,6 +1,11 @@
-"""Project authoritative agent state into typed run views.
+"""Project authoritative hypothesis-search state into typed run views.
 
-The boundary models copy recorded facts without inferring resolutions.
+The boundary models copy recorded facts without inferring resolutions. Lives
+next to :mod:`vibesys.loops.registry`, not inside any one strategy folder,
+because every hypothesis-driven strategy's registered projector
+(``MultiProjector``, ``SingleProjector``, ``ProfileMultiProjector``,
+``ProfileSingleProjector``) shares it; strategies never import each other, so
+shared read-model logic cannot live inside one strategy's package.
 """
 
 from __future__ import annotations
@@ -9,7 +14,6 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.agent_run.hypotheses import measurement_delta_reason
 from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
 from vibesys.schemas import (
     CandidateDisposition,
@@ -17,10 +21,11 @@ from vibesys.schemas import (
     PerfDeltaReason,
     derive_hypothesis_title,
 )
+from vibesys.search.hypothesis.transitions import measurement_delta_reason
 from vs_loop_state.api import HypothesisResolution
 
 if TYPE_CHECKING:
-    from vibesys.agent_run.state import AgentRunState, Hypothesis
+    from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
     from vs_loop_state.api import RoundRecord
 
 
@@ -56,9 +61,10 @@ class HypothesisView(BaseModel):
     """One hypothesis's full history, matching `server.api.experiments.HypothesisEntry`.
 
     `title`, `resolved_outcome`, `strategy_disposition`, and `perf_delta_reason`
-    are precomputed from `vibesys.agent_run.state.Hypothesis` (core-private:
-    `plan: OrchestratorPlan`, `strategy: HypothesisStrategy`, ...) so this DTO
-    exposes only plain strings and the already-boundary-safe `PerfDeltaReason`.
+    are precomputed from `vibesys.search.hypothesis.state.Hypothesis`
+    (core-private: `plan: OrchestratorPlan`, `strategy: HypothesisStrategy`,
+    ...) so this DTO exposes only plain strings and the already-boundary-safe
+    `PerfDeltaReason`.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -143,7 +149,7 @@ def agent_projection(view: RunView) -> AgentRunProjection | None:
 
 
 def project_run_view(
-    state: AgentRunState,
+    state: HypothesisState,
     *,
     run_id: str,
     status: RunStatus,
@@ -156,7 +162,7 @@ def project_run_view(
     read off `state` unconditionally: `RunStore.get_run` has no lifecycle
     signal at all (see `RunStatus`), and a live `RunQuery.view()` may report a
     revision newer than the last snapshot this function was handed. `loop` is
-    not in `state` either (`AgentRunState` carries no outer-loop field); the
+    not in `state` either (`HypothesisState` carries no outer-loop field); the
     caller already knows it from the run manifest or its own `RunRequest`.
 
     `current_round` is `len(state.rounds)`: the count of completed rounds
@@ -193,7 +199,7 @@ def project_committed_run_view(state: BaseModel, *, run_id: str, loop: str) -> R
     this function reshapes the value without a disk read. Active publication
     uses `RunStatus.ACTIVE` and the state's experiment revision.
     """
-    agent_state = cast("AgentRunState", state)
+    agent_state = cast("HypothesisState", state)
     return project_run_view(
         agent_state,
         run_id=run_id,
