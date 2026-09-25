@@ -272,7 +272,8 @@ def test_single_uses_only_combined_turn_and_its_own_verdict() -> None:
     selected = SimpleNamespace(request=request, attempt=state)
     session = cast("Any", SingleSession.__new__(SingleSession))
     session.options = SimpleNamespace(max_rounds=1, official_eval_every=1)
-    session.records = []
+    session.state = state.agent_run_state
+    session.search = _search()
     session.round_number = 1
 
     async def combined(_request: AttemptRequest, _state: AttemptState) -> SingleAgentRoundResponse:

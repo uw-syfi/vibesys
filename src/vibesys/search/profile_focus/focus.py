@@ -60,10 +60,13 @@ class ProfileFocus:
     def focus(self, state: ProfileFocusState) -> FocusView:
         """Render prompt guidance solely from the persisted cursor.
 
-        ``ranked_bottlenecks`` is rebuilt from each component's latest
-        attribution sample rather than held as a separate ephemeral field
-        (as the ported ``ProfileGuidedHypothesisController`` did), so
-        ``focus`` is a pure function of the persisted state alone.
+        ``ranked_bottlenecks`` is rebuilt from ``state.ranking_round``, the
+        round of the most recent :meth:`observe` call, rather than held as a
+        separate ephemeral field (as the ported
+        ``ProfileGuidedHypothesisController`` did), so ``focus`` stays a pure
+        function of the persisted state alone while still showing only that
+        round's freshly observed attribution: a component observed in an
+        earlier round but not the most recent one does not appear.
         """
         return FocusView(
             active_component=state.active_component or "",
@@ -101,6 +104,10 @@ class ProfileFocus:
         if component.stalled_rounds >= self.config.plateau_min_rounds:
             component.status = ProfileGuidanceStatus.EXHAUSTED
             updated.active_component = None
+        # Mirror the ported controller's ranking reset: a measured round
+        # applied to the active component clears the ranking until the next
+        # ``observe()`` call.
+        updated.ranking_round = None
         return ProfileFocusState.model_validate(updated.model_dump())
 
 
@@ -126,7 +133,9 @@ def _merge_attribution(
         )
         ordered.append(component)
     ordered.extend(existing.values())
-    return ProfileFocusState(active_component=state.active_component, components=ordered)
+    return ProfileFocusState(
+        active_component=state.active_component, components=ordered, ranking_round=round_number
+    )
 
 
 def _select_component(state: ProfileFocusState, *, override: str | None) -> ProfileFocusState:
@@ -185,22 +194,28 @@ def _format_ledger(state: ProfileFocusState) -> str:
 
 
 def _ranked_bottlenecks(state: ProfileFocusState) -> list[ProfileBottleneck]:
-    """Rebuild the last-observed attribution ranking from persisted components.
+    """Rebuild the most recently observed round's attribution ranking.
 
-    Mirrors ``parse_attribution``'s ordering (cost descending, then name) so
-    a round that never called :meth:`ProfileFocus.observe` again still shows
-    the same ranking it last saw.
+    Only components with a sample recorded for ``state.ranking_round``
+    appear: a component observed in an earlier round but absent from the
+    most recent :meth:`ProfileFocus.observe` call does not resurface here.
+    Mirrors ``parse_attribution``'s ordering (cost descending, then name).
     """
-    bottlenecks = [
-        ProfileBottleneck(
-            name=component.name,
-            cost=component.latest_cost,
-            share=component.latest_share,
-            evidence=list(component.attribution_history[-1].evidence)
-            if component.attribution_history
-            else [],
+    if state.ranking_round is None:
+        return []
+    bottlenecks = []
+    for component in state.components:
+        sample = next(
+            (s for s in component.attribution_history if s.round == state.ranking_round), None
         )
-        for component in state.components
-        if component.latest_cost is not None and component.latest_share is not None
-    ]
+        if sample is None:
+            continue
+        bottlenecks.append(
+            ProfileBottleneck(
+                name=component.name,
+                cost=sample.cost,
+                share=sample.share,
+                evidence=list(sample.evidence),
+            )
+        )
     return sorted(bottlenecks, key=lambda item: (-item.cost, item.name))
