@@ -61,6 +61,7 @@ from vs_agent.api import AgentExecutionPolicy, AgentSessionState, build_agent_cl
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
+    from vibesys.backends.base import ComputeBackendImpl
     from vibesys.context import RunSetup, _RunResources
     from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.request import RunRequest
@@ -68,6 +69,7 @@ if TYPE_CHECKING:
     from vibesys.run.event_journal import EventJournal
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.runtime import AgentDefinition, WorkspaceScope
+    from vs_agent.api import AgentClientProtocol
 
 # Re-exported for callers that import these public names from this module
 # rather than from the capability module that now owns them.
@@ -141,7 +143,7 @@ async def _close_runtime(host: RunContext, error: BaseException | None) -> None:
 class RunContext:
     """One run's resources and focused host capabilities."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # tracked: #288
         self,
         request: RunRequest,
         integration: LocalRunIntegration,
@@ -149,13 +151,27 @@ class RunContext:
         setup: RunSetup,
         open_agent_environment: Callable[..., AgentEnvironment] | None,
         projector: _CommittedStateProjector | None = None,
+        agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
+        backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     ) -> None:
-        """Bind request, policy setup, and the application control channel."""
+        """Bind request, policy setup, and the application control channel.
+
+        ``agent_client_factory`` and ``backend_factory`` are injection seams a
+        test uses in place of monkeypatching this module's real client/backend
+        constructors (``build_agent_client``, ``vibesys.backends.get``). Each
+        defaults to the real implementation when omitted, so production call
+        sites are unchanged. ``agent_client_factory`` overrides
+        :func:`vs_agent.api.build_agent_client`, looked up as this module's
+        own (still independently patchable) ``build_agent_client`` global when
+        no override is given.
+        """
         self.request = request
         self._setup = setup
         self._integration = integration
         self._open_agent_environment = open_agent_environment
         self._projector = projector
+        self._agent_client_factory = agent_client_factory
+        self._backend_factory = backend_factory
         self._resource_owner: _RunResources | None = None
         self._session_store: SynchronizedSessionStore | None = None
         self._agents: dict[tuple[str | None, str], _LocalAgentHandle] = {}
@@ -251,7 +267,7 @@ class RunContext:
 
     @classmethod
     @asynccontextmanager
-    async def open(
+    async def open(  # noqa: PLR0913  # tracked: #288
         cls,
         request: RunRequest,
         integration: LocalRunIntegration,
@@ -259,6 +275,8 @@ class RunContext:
         setup: RunSetup,
         open_agent_environment: Callable[..., AgentEnvironment] | None = None,
         projector: _CommittedStateProjector | None = None,
+        agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
+        backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     ) -> AsyncIterator[RunContext]:
         """Construct and close the run, including after cancellation or setup failure."""
         host = cls(
@@ -267,6 +285,8 @@ class RunContext:
             setup=setup,
             open_agent_environment=open_agent_environment,
             projector=projector,
+            agent_client_factory=agent_client_factory,
+            backend_factory=backend_factory,
         )
         try:
             prepare = asyncio.create_task(asyncio.to_thread(host._prepare))
@@ -372,7 +392,8 @@ class RunContext:
             backends = (
                 {definition.id: opened.backends["chat"]} if opened.backends is not None else None
             )
-            client = build_agent_client(
+            agent_client_factory = self._agent_client_factory or build_agent_client
+            client = agent_client_factory(
                 spec=definition.spec,
                 session_store=self._session_store,
                 backends=backends,
@@ -404,7 +425,12 @@ class RunContext:
             raise _RuntimeClosedError
         if self._resource_owner is not None:
             return self._resource_owner
-        self._resource_owner = open_run_resources(self.request, self._setup, self._integration)
+        self._resource_owner = open_run_resources(
+            self.request,
+            self._setup,
+            self._integration,
+            backend_factory=self._backend_factory,
+        )
         self._session_store = SynchronizedSessionStore(
             self._resource_owner.state.local("agent").slot("sessions.json", AgentSessionState),
             log=self._resource_owner.logger.lprint,
