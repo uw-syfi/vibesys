@@ -255,12 +255,7 @@ depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vib
 [[modules]]
 path = "vibesys.loops.multi"
 layer = "loops"
-depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log"]
-
-[[modules]]
-path = "vibesys.loops.profile_multi"
-layer = "loops"
-depends_on = [ "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent", "vibesys.roles", "vibesys.prompts", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log"]
+depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log"]
 
 [[modules]]
 path = "vibesys.loops.issue_queue"
@@ -493,7 +488,7 @@ depends_on = ["vibesys", "vibesys.orchestration.view", "vibesys.search.hypothesi
 [[modules]]
 path = "vibesys.loops.registry"
 layer = "loops"
-depends_on = [ "vibesys.loops.evolve.entrypoint", "vibesys.orchestration.contracts", "vibesys.loops.multi", "vibesys.loops.single", "vibesys.loops.issue_queue", "vibesys.loops.profile_multi"]
+depends_on = [ "vibesys.loops.evolve.entrypoint", "vibesys.orchestration.contracts", "vibesys.loops.multi", "vibesys.loops.single", "vibesys.loops.issue_queue"]
 
 [[modules]]
 path = "vibesys.loops.evolve.entrypoint"

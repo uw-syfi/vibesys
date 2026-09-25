@@ -387,7 +387,7 @@ Write bounded durable profile evidence only below
                 self.progress_path, request.round_number
             )
         )
-        profile_extra = request.engine.controller.guidance.implementer_prompt_context()
+        profile_extra = request.profile_focus.implementer_prompt_context()
         return ImplementerContext(
             reference_path=self.ctx.environment.reference_path,
             modality=self.modality,

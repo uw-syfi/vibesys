@@ -17,15 +17,9 @@ from vibesys.evaluators.validation_recipe import (
     ValidationRecipe,
     ValidationRecipeArtifact,
 )
-from vibesys.loops.multi.decisions import (
-    STATIC_GUIDANCE,
-    AttemptRequest,
-    PlainGuidance,
-    PlanRequest,
-)
+from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
 from vibesys.loops.multi.session import MultiSession
 from vibesys.loops.multi.turns import MultiAgentTurns
-from vibesys.loops.profile_multi.session import ProfileMultiSession
 from vibesys.loops.single.session import SingleSession
 from vibesys.orchestration.runtime import GateRunResult
 from vibesys.roles.common import Verdict
@@ -38,6 +32,7 @@ from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch, Orches
 from vibesys.search.hypothesis.attempts import AttemptDecision, AttemptState
 from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.hypothesis.transitions import CarryOver
+from vibesys.search.profile_focus import FocusView
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -106,7 +101,7 @@ def _attempt() -> tuple[AttemptRequest, AttemptState]:
             planned_official_reason="final_round",
             records=[],
             active_hypothesis=hypothesis,
-            engine=STATIC_GUIDANCE,
+            profile_focus=FocusView(),
             last_profile_focus="decode",
         ),
         AttemptState(agent_run_state=started.state, feedback=None),
@@ -117,6 +112,7 @@ def test_multi_prepass_profiles_only_when_requested_and_enabled() -> None:
     calls: list[str] = []
     turns = _FakeTurns(calls)
     session = cast("Any", MultiSession.__new__(MultiSession))
+    session._label = "multi"
     session._board_log = []
     session.turns = turns
     session.round_number = 1
@@ -138,6 +134,17 @@ def test_multi_prepass_profiles_only_when_requested_and_enabled() -> None:
     assert calls == ["prepass"]
 
 
+def test_profile_policy_keeps_prompt_reason_separate_from_gate_cadence() -> None:
+    from vibesys.evaluators.input_manifest import ProfileGuidedInput  # noqa: PLC0415
+    from vibesys.loops.multi.session import _ProfilePolicy  # noqa: PLC0415
+    from vibesys.search.profile_focus import ProfileFocus, ProfileFocusConfig  # noqa: PLC0415
+
+    focus = ProfileFocus(ProfileFocusConfig()).focus(ProfileFocus(ProfileFocusConfig()).initial())
+    policy = _ProfilePolicy(ProfileGuidedInput(command=("fake-profiler",)))
+    assert policy.official_reason(None, focus) is None
+    assert policy.official_reason("final_round", focus) == "final_round"
+
+
 def test_profile_guidance_prepares_cursor_before_designer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -145,9 +152,10 @@ def test_profile_guidance_prepares_cursor_before_designer(
 
     calls: list[str] = []
     config = ProfileGuidedInput(command=("fake-profiler",))
-    session = cast("Any", ProfileMultiSession.__new__(ProfileMultiSession))
+    session = cast("Any", MultiSession.__new__(MultiSession))
+    session._label = "profile_multi"
     session._board_log = []
-    from vibesys.loops.profile_multi.session import _ProfilePolicy  # noqa: PLC0415
+    from vibesys.loops.multi.session import _ProfilePolicy  # noqa: PLC0415
 
     session.profile = _ProfilePolicy(config)
 
@@ -191,7 +199,7 @@ def test_profile_guidance_prepares_cursor_before_designer(
             reasoning="plan",
         )
 
-    monkeypatch.setattr("vibesys.loops.profile_multi.session.run_attribution", fake_attribution)
+    monkeypatch.setattr("vibesys.loops.multi.session.run_attribution", fake_attribution)
     session.turns = SimpleNamespace(plan=fake_plan, progress_path=None)
     session._pre_round_profile = AsyncMock(return_value=None)
     session._apply_rollback = AsyncMock()
@@ -209,6 +217,7 @@ def test_multi_validation_failure_checkpoints_before_retry_and_official_gate() -
     request, state = _attempt()
     selected = SimpleNamespace(request=request, attempt=state)
     session = cast("Any", MultiSession.__new__(MultiSession))
+    session._label = "multi"
     session.search = _search()
     session.turns = _FakeTurns(calls)
     session.round_number = 1
@@ -322,7 +331,7 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
         profiler_summary=None,
         plateau_warning=None,
         provisional_candidates=0,
-        profile_guidance=PlainGuidance(),
+        profile_guidance=FocusView(),
     )
     turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
     turns._board = []
@@ -470,6 +479,7 @@ def test_multi_local_validation_restores_mutated_candidate(tmp_path: Path) -> No
         source.write_text("VALUE = 1\n")
 
     session = cast("Any", MultiSession.__new__(MultiSession))
+    session._label = "multi"
     session._board_log = []
     session.round_number = 1
     session.turns = SimpleNamespace(progress_path=progress_path)
@@ -502,6 +512,7 @@ def test_multi_official_gate_failure_persists_revalidation_for_exact_commit() ->
     attempt.official_reason = "final_round"
     selected = SimpleNamespace(request=request, attempt=attempt)
     session = cast("Any", MultiSession.__new__(MultiSession))
+    session._label = "multi"
     session.workspace = SimpleNamespace(revision="a" * 40)
     session.turns = SimpleNamespace(worker=SimpleNamespace(backend_name="cli"), progress_path=None)
     session.state = attempt.agent_run_state

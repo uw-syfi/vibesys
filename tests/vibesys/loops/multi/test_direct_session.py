@@ -17,7 +17,7 @@ from hypothesis import strategies as st
 
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.validation_recipe import ValidationRecipeArtifact
-from vibesys.loops.multi.decisions import STATIC_GUIDANCE, AttemptRequest
+from vibesys.loops.multi.decisions import AttemptRequest
 from vibesys.loops.multi.session import (
     MultiRound,
     MultiSession,
@@ -40,6 +40,7 @@ from vibesys.search.hypothesis.attempts import (
 )
 from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.hypothesis.transitions import CarryOver
+from vibesys.search.profile_focus import FocusView
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
@@ -77,7 +78,7 @@ def _selected() -> MultiRound:
         planned_official_reason="final_round",
         records=[],
         active_hypothesis=hypothesis,
-        engine=STATIC_GUIDANCE,
+        profile_focus=FocusView(),
         last_profile_focus="decode",
     )
     return MultiRound(
@@ -130,6 +131,9 @@ def _session(tmp_path: Path) -> MultiSession:
     session.search = _search()
     session.carry = CarryOver()
     session.round_number = 1
+    session.profile = None
+    session.focus = None
+    session._label = "multi"
     session.framework_benchmark_configured = False
     session.terminal_policy = _TerminalPolicy(session.search.config)
     session.workspace = SimpleNamespace(
