@@ -140,9 +140,12 @@ def build_server() -> FastMCP:  # noqa: C901  # LW-910137; this function impleme
         this tool's normal discovery/certify/summary pipeline.
 
         Measured on real ROCm hardware: prof.start() itself takes ~2s to
-        actually begin recording after the signal fires, and `duration_s`
-        is measured from when the signal is *sent* -- pad short windows
-        accordingly. Also, a background thread that was already running
+        actually begin recording after the signal fires. Without target=,
+        `duration_s` is measured from when the signal is *sent*, so pad
+        short windows accordingly. With target=, no padding is needed:
+        load_command starts only after the target acknowledges that
+        recording has begun, and the call returns once it acknowledges the
+        trace is exported. Also, a background thread that was already running
         before the profiler started records GPU kernels fine but zero
         CPU-side ops (no record_shapes/gemm_shapes/roofline attribution for
         it); prefer `delay_s=0` so recording starts before the target

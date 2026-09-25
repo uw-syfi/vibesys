@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.vibesys.loops.torch_inject_fixtures import write_fake_torch
+from tests.vibesys.loops.torch_inject_fixtures import parse_call_log, write_fake_torch
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -166,6 +166,45 @@ def test_two_consecutive_windows_produce_two_traces_and_target_stays_up(  # noqa
 
     capture_ops.capture_runtime.stop_target(target_id)
     assert not _is_alive(pid)
+
+
+def test_target_load_runs_only_after_recording_started(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001
+    """Regression test: the load must not start before the window is recording.
+
+    Pre-fix, ``profile_ops(target=...)`` sent SIGUSR1 and started the load
+    immediately; ``profiler.start()`` takes ~2s on ROCm, so the first part
+    of the load went unrecorded. The load now waits for the target's
+    ``window.started`` acknowledgement. The call log is append-only across
+    processes, so line order is event order.
+    """
+    fake_torch = write_fake_torch(tmp_path / "fake_torch")
+    call_log = tmp_path / "calls.log"
+    command, env = _target_command(fake_torch)
+    env["FAKE_TORCH_CALL_LOG"] = str(call_log)
+    env["FAKE_TORCH_START_DELAY_S"] = "1.0"  # a slow start, as on ROCm
+    target_id = capture_ops.start_target(command, env=env)
+    load = f"echo '0\tload.begin' >> '{call_log}'"
+
+    out = capture_ops.profile_ops(target=target_id, load_command=load, duration_s=10)
+    capture_ops.capture_runtime.stop_target(target_id)
+
+    assert "primary trace" in out, out
+    events = [name for _ts, name in parse_call_log(call_log)]
+    assert events.index("profile.start") < events.index("load.begin")
+
+
+def test_gpu_less_target_is_reported_unavailable(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001
+    """start_target returns once the target reports it can never take a window."""
+    fake_torch = write_fake_torch(tmp_path / "fake_torch")
+    command, env = _target_command(fake_torch)
+    env["FAKE_TORCH_GPU"] = "0"
+    target_id = capture_ops.start_target(command, env=env)
+
+    out = capture_ops.profile_ops(target=target_id, load_command="true", duration_s=10)
+    capture_ops.capture_runtime.stop_target(target_id)
+
+    assert "cannot take a torch.profiler window" in out
+    assert "no GPU" in out
 
 
 def test_profile_ops_target_requires_load_command(capture_ops) -> None:  # noqa: ANN001  # LW-910376; this parameter's type is intentionally left loose; annotating it now is separate cleanup work

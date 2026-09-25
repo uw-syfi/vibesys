@@ -81,6 +81,15 @@ _SUMMARY_TOP = 5
 _TARGET_TRACES_SUBDIR = "traces"
 _TARGET_CONTROL_SUBDIR = "control"
 _TARGET_CONTROL_FILE = "next_window"
+# Handshake files written by inject/sitecustomize.py (see its "Handshake:
+# state files, never timing" section). Every wait below is on one of these;
+# the time bounds are only failure bounds.
+_TARGET_READY_FILE = "ready"
+_TARGET_UNAVAILABLE_FILE = "unavailable"
+_ACK_STARTED = "window.started"
+_ACK_EXPORTED = "window.exported"
+_ACK_FAILED = "window.failed"
+_ACK_POLL_S = 0.05
 
 __all__ = ["profile_ops", "start_target"]
 
@@ -192,12 +201,11 @@ def start_target(  # noqa: PLR0913  # LW-910108; this function's parameters mirr
     Returns a ``target_id``; call ``profile_ops(target=target_id, ...)`` to
     take a window against it, and ``stop_target(target_id)`` when done.
 
-    A signal sent before the target process has actually installed its
-    SIGUSR1/SIGUSR2 handlers (interpreter/site startup) is dropped, not
-    queued -- so this call does not return until sitecustomize.py's own
-    "armed" marker file confirms the handlers are live, ANDed with
-    *ready_command* when the caller also supplies one (e.g. a server health
-    check): the target is only ever reported ready once both are true.
+    Does not return until the injection's "ready" handshake file exists
+    (torch fully imported, GPU visible, so a window can start) or its
+    "unavailable" file does (no window can ever start; ``profile_ops``
+    reports why), ANDed with *ready_command* when the caller also supplies
+    one (e.g. a server health check).
 
     Overhead of leaving a target armed but idle (no window open) is
     negligible: measured within run-to-run noise on real MI210 hardware.
@@ -208,7 +216,7 @@ def start_target(  # noqa: PLR0913  # LW-910108; this function's parameters mirr
         cwd=cwd,
         env=env,
         setup_command=setup_command,
-        ready_command=lambda out_dir: _armed_ready_command(out_dir, ready_command),
+        ready_command=lambda out_dir: _target_ready_command(out_dir, ready_command),
         ready_timeout_s=ready_timeout_s,
         stop_signal=stop_signal,
         grace_s=grace_s,
@@ -219,17 +227,51 @@ def start_target(  # noqa: PLR0913  # LW-910108; this function's parameters mirr
     )
 
 
-def _armed_ready_command(out_dir: Path, user_ready_command: str | None) -> str:
-    """The target is ready once sitecustomize's "armed" marker exists (see its docstring).
+def _target_ready_command(out_dir: Path, user_ready_command: str | None) -> str:
+    """Ready once the injection has written "ready" or "unavailable" (see start_target).
 
     ANDed with *user_ready_command* when given, so a caller's own readiness
     check (e.g. a server health probe) still applies on top.
     """
-    marker = out_dir / _TARGET_CONTROL_SUBDIR / "armed"
-    check = f"test -f '{marker}'"
+    control = out_dir / _TARGET_CONTROL_SUBDIR
+    check = (
+        f"{{ test -f '{control / _TARGET_READY_FILE}' || "
+        f"test -f '{control / _TARGET_UNAVAILABLE_FILE}'; }}"
+    )
     if user_ready_command:
         return f"{check} && ( {user_ready_command} )"
     return check
+
+
+def _await_ack(
+    ack_dir: Path,
+    names: tuple[str, ...],
+    *,
+    target: str,
+    timeout_s: float,
+    cancel_event: threading.Event | None,
+) -> tuple[str | None, str]:
+    """Wait for the first of *names* to appear in *ack_dir*; return ``(name, content)``.
+
+    Returns ``(None, reason)`` if the target exits, the call is cancelled,
+    or *timeout_s* passes first. The timeout is a failure bound, not a
+    guess at how long the step takes: success is decided only by the file.
+    """
+    deadline = time.monotonic() + timeout_s
+    while True:
+        for name in names:
+            path = ack_dir / name
+            if path.is_file():
+                with contextlib.suppress(OSError):
+                    return name, path.read_text().strip()
+                return name, ""
+        if cancel_event is not None and cancel_event.is_set():
+            return None, "cancelled"
+        if not capture_runtime.get_target(target).alive:
+            return None, "target exited"
+        if time.monotonic() >= deadline:
+            return None, f"no acknowledgement within {timeout_s:g}s"
+        time.sleep(_ACK_POLL_S)
 
 
 # ---------------------------------------------------------------------------
@@ -465,23 +507,53 @@ def _profile_ops_on_target(  # noqa: PLR0913  # LW-910113; this function's param
     taking windows against it.
     """
     info = capture_runtime.get_target(target)
-    capture_id, out_dir = capture_runtime.new_capture("ops")
     control_dir = info.out_dir / _TARGET_CONTROL_SUBDIR
+    unavailable = control_dir / _TARGET_UNAVAILABLE_FILE
+    if unavailable.is_file():
+        return f"target {target} cannot take a torch.profiler window: {unavailable.read_text().strip()}"
+    capture_id, out_dir = capture_runtime.new_capture("ops")
     control_dir.mkdir(parents=True, exist_ok=True)
     (control_dir / _TARGET_CONTROL_FILE).write_text(f"{out_dir}\n")
 
+    load_rc: int | None = None
+    load_tail = ""
     with capture_runtime.exclusive_capture("ops", capture_id):
         capture_runtime.signal_target(target, "SIGUSR1")
-        load_budget = min(duration_s, timeout_s) if duration_s is not None else timeout_s
-        load_rc, load_tail, cancelled = _run_load_command(
-            load_command,
-            cwd=cwd,
-            timeout_s=load_budget,
-            log_path=out_dir / "load.log",
+        # Run the load only once recording has actually begun (starting the
+        # profiler takes seconds on ROCm), so none of it goes unrecorded.
+        started, detail = _await_ack(
+            out_dir,
+            (_ACK_STARTED, _ACK_FAILED),
+            target=target,
+            timeout_s=timeout_s,
             cancel_event=cancel_event,
         )
+        if started == _ACK_STARTED:
+            load_budget = min(duration_s, timeout_s) if duration_s is not None else timeout_s
+            load_rc, load_tail, cancelled = _run_load_command(
+                load_command,
+                cwd=cwd,
+                timeout_s=load_budget,
+                log_path=out_dir / "load.log",
+                cancel_event=cancel_event,
+            )
+            status = "cancelled" if cancelled else ("ok" if load_rc == 0 else "load_failed")
+        else:
+            status = "cancelled" if detail == "cancelled" else "start_failed"
+        # Also cancels a start still queued in the target (never left pending).
         capture_runtime.signal_target(target, "SIGUSR2")
-        status = "cancelled" if cancelled else ("ok" if load_rc == 0 else "load_failed")
+        if started == _ACK_STARTED:
+            exported, export_detail = _await_ack(
+                out_dir,
+                (_ACK_EXPORTED, _ACK_FAILED),
+                target=target,
+                timeout_s=grace_s,
+                cancel_event=None,
+            )
+            if exported != _ACK_EXPORTED:
+                detail = f"export: {export_detail}"
+                if status == "ok":
+                    status = "export_failed"
         capture_runtime.write_manifest(
             out_dir,
             {
@@ -494,18 +566,18 @@ def _profile_ops_on_target(  # noqa: PLR0913  # LW-910113; this function's param
         )
 
     lines = [f"capture {capture_id} (ops, target={target}): {status} load_rc={load_rc}"]
+    if status in ("start_failed", "export_failed"):
+        lines.append(f"  window acknowledgement: {detail}")
     if load_tail:
         lines.append("  load log tail:")
         lines.extend(f"    {ln}" for ln in load_tail.splitlines()[-20:])
 
-    wait_for_additional_traces(out_dir, grace_s=grace_s)
     traces = discover_traces(out_dir)
     if not traces:
         _record_traces_in_manifest(out_dir, primary=None, traces=[])
         lines.append(
             f"\nno {_TRACE_GLOB} trace files were produced for this window; confirm the target "
-            "was started with start_target (armed with VIBESYS_TORCH_PROFILE_TRIGGER=signal) and "
-            "that it has imported torch and shows a GPU"
+            "was started with start_target (armed with VIBESYS_TORCH_PROFILE_TRIGGER=signal)"
         )
         return "\n".join(lines)
 
