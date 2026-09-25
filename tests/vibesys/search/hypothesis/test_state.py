@@ -5,8 +5,10 @@ import math
 import pytest
 from pydantic import ValidationError
 
+from vibesys.evaluators.metrics import MetricSpace
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
+from vs_loop_state.api import RoundRecord
 
 
 def _plan() -> OrchestratorPlan:
@@ -72,3 +74,64 @@ def test_hypothesis_clone_has_independent_nested_state() -> None:
 
     assert state.gate_approved_metrics == {"throughput": 1.0}
     assert cloned.gate_approved_metrics == {"throughput": 2.0}
+
+
+def test_state_written_before_the_metric_space_field_loads_as_the_empty_strict_space() -> None:
+    """State from a run predating ``MetricSpace`` persistence still loads."""
+    legacy = HypothesisState.model_validate({"schema_version": 1, "hypotheses": []})
+    assert legacy.metrics == MetricSpace()
+
+
+def test_state_rejects_duplicate_hypothesis_ids() -> None:
+    one = Hypothesis(hypothesis_id="h1", plan=_plan(), started_round=1)
+    with pytest.raises(ValidationError, match="hypothesis IDs must be unique"):
+        HypothesisState(hypotheses=[one, one.clone()])
+
+
+def test_state_rejects_a_dangling_active_pointer() -> None:
+    with pytest.raises(ValidationError, match="active_hypothesis_id"):
+        HypothesisState(active_hypothesis_id="missing")
+
+
+def _plan_for(identifier: str) -> OrchestratorPlan:
+    return OrchestratorPlan(
+        hypothesis_id=identifier,
+        task="optimize the queue",
+        pass_criteria="the checker passes",  # noqa: S106
+        reasoning="reduce contention",
+    )
+
+
+def test_state_rejects_duplicate_round_numbers_across_hypotheses() -> None:
+    one = Hypothesis(
+        hypothesis_id="h1",
+        plan=_plan_for("h1"),
+        started_round=1,
+        rounds=[
+            RoundRecord(
+                round_number=1,
+                commit="a" * 40,
+                perf_metric=None,
+                perf_unit=None,
+                hypothesis_id="h1",
+                passed=True,
+            )
+        ],
+    )
+    two = Hypothesis(
+        hypothesis_id="h2",
+        plan=_plan_for("h2"),
+        started_round=1,
+        rounds=[
+            RoundRecord(
+                round_number=1,
+                commit="b" * 40,
+                perf_metric=None,
+                perf_unit=None,
+                hypothesis_id="h2",
+                passed=True,
+            )
+        ],
+    )
+    with pytest.raises(ValidationError, match="globally unique"):
+        HypothesisState(hypotheses=[one, two])
