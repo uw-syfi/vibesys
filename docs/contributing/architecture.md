@@ -199,7 +199,6 @@ graph TD
     vibesys.orchestration.agents --> vibesys.runtime
     vibesys.orchestration.artifacts --> vibesys.evaluators
     vibesys.orchestration.artifacts --> vibesys.orchestration.memory
-    vibesys.orchestration.artifacts --> vibesys.search.hypothesis
     vibesys.orchestration.contracts --> vibesys.context
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
@@ -531,7 +530,6 @@ graph TD
     vibesys.orchestration.agents --> vs_agent
     vibesys.orchestration.artifacts --> vibesys.evaluators
     vibesys.orchestration.artifacts --> vibesys.orchestration.memory
-    vibesys.orchestration.artifacts --> vibesys.search.hypothesis
     vibesys.orchestration.contracts --> vibesys.context
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view

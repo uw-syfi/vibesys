@@ -36,6 +36,8 @@ from vibesys.schemas import SkillResourceSelection, normalize_hypothesis_title
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.loops.single.session import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
@@ -79,6 +81,15 @@ class SingleAgentTurns:
             memory.pareto_archive_path(self.progress_path), self.workspace.path
         )
         self.template_dir = PROMPTS_DIR / "loops" / "single"
+
+    def _write_plan_artifact(self, round_number: int, plan: OrchestratorPlan) -> Path:
+        """Persist the exact typed plan used by the framework for one round.
+
+        The host (`vibesys.orchestration.artifacts`) only knows how to write
+        an arbitrary `BaseModel`; this strategy owns the plan's type.
+        """
+        path = artifacts.plan_artifact_path(self.progress_path, round_number)
+        return artifacts.write_model(path, plan)
 
     async def open(self) -> None:
         """Start the two roles this strategy can invoke."""
@@ -215,7 +226,7 @@ class SingleAgentTurns:
                 )
                 continue
             plan.recommended_skills, _ = self._skills(plan.recommended_skills)
-            artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
+            self._write_plan_artifact(request.round_number, plan)
             self.ctx.progress.note(
                 progress_log.render_orchestrator_plan(request.round_number, plan)
             )
@@ -275,9 +286,7 @@ class SingleAgentTurns:
         view = self.ctx.environment.view
         plan = request.plan
         profiler = self._profiler()
-        plan_artifact = artifacts.write_plan_artifact(
-            self.progress_path, request.round_number, plan
-        )
+        plan_artifact = self._write_plan_artifact(request.round_number, plan)
         domain_ctx = self._domain_context()
         return SingleAgentRoundContext(
             domain_single_agent=render_domain_section(
@@ -331,7 +340,7 @@ class SingleAgentTurns:
             plan.recommended_skills, _ = self._skills(
                 [*plan.recommended_skills, *response.skill_context_updates]
             )
-            artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
+            self._write_plan_artifact(request.round_number, plan)
         conflict = self.search.pareto_conflict(
             disposition=response.candidate_disposition,
             metrics=dict(response.candidate_metrics),

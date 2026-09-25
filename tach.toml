@@ -56,8 +56,11 @@ forbid_circular_dependencies = true
 # Orchestration-simplification target direction (loops > roles/search >
 # orchestration host > prompts + lower libs), enforced only where a module
 # already carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`/
-# `vibesys.orchestration.artifacts` stay unlayered; their order is still pinned by the
-# explicit edges above). `vibesys.prompts` (templates + renderer) sits in the
+# `vibesys.orchestration.progress_log` stay unlayered; their order is still pinned
+# by the explicit edges above -- progress_log renders typed role replies
+# (OrchestratorPlan, ImplementerResponse, ...) into Markdown, so unlike
+# `artifacts.py` it genuinely needs those roles_search-layer types, not just a
+# generic `BaseModel`). `vibesys.prompts` (templates + renderer) sits in the
 # bottom layer with the other mechanics libraries: the host and lower layers
 # render prompts, they don't hand policy to the template layer, so `prompts`
 # is a leaf every layer above it may reach downward into.
@@ -207,13 +210,15 @@ layer = "orchestration_host"
 depends_on = []
 
 [[modules]]
-# Host-owned turn artifacts (typed role handoffs: plan, implementer evidence,
-# validation ledger, profiler root), the other half of the dissolved
-# vibesys.agent_run.issue_board. Left unlayered like agent_run was: its typed
-# handoff payloads (OrchestratorPlan, ImplementerReply) are roles_search-layer
-# types, one layer above orchestration_host in the target direction.
+# Host-owned turn artifacts (generic BaseModel/JSON writers plus artifact
+# paths: plan, implementer evidence, validation ledger, profiler root), the
+# other half of the dissolved vibesys.agent_run.issue_board. Writes any
+# BaseModel generically (write_model); it never imports the roles_search-layer
+# payload types (OrchestratorPlan, ImplementerReply) themselves -- the caller
+# in loops/ supplies the typed value and owns that shaping.
 path = "vibesys.orchestration.artifacts"
-depends_on = ["vibesys.evaluators", "vibesys.orchestration.memory", "vibesys.search.hypothesis"]
+layer = "orchestration_host"
+depends_on = ["vibesys.evaluators", "vibesys.orchestration.memory"]
 
 [[modules]]
 path = "vibesys.runtime"
