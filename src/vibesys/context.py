@@ -120,6 +120,13 @@ class RunSetup:
     ) = None
     resume_recovery: Callable[[RecoveryWorkspace], None] | None = None
     start_hints: RunStartHints | None = None
+    memory_paths: tuple[str, ...] = ()
+    """Workspace-relative paths the strategy writes agent memory into.
+
+    The host preserves these across ``workspaces.adopt``/``restore``/``transaction``
+    so a rollback or isolation revert never destroys progress notes the agent wrote
+    since the revision being restored to.
+    """
 
     def __post_init__(self) -> None:
         """Reject incomplete policy-owned state slot declarations."""

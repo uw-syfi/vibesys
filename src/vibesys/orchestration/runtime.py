@@ -179,6 +179,36 @@ class WorkspaceRestoreError(RuntimeError):
         super().__init__(f"could not restore candidate revision {revision!r}")
 
 
+class WorkspaceTransactionKeep(Exception):  # noqa: N818  # a signal, not always an error
+    """Raise (or subclass) inside a transaction body to skip restore-on-error.
+
+    ``async with workspace.transaction():`` restores the workspace to its
+    entry snapshot when the body raises, unless the body called
+    ``tx.commit()`` first. Raising a ``WorkspaceTransactionKeep`` (or a
+    subclass) instead still propagates the exception but leaves the body's
+    mutations on disk, for callers that need the failed state preserved
+    (e.g. for diagnostics) rather than rolled back.
+    """
+
+
+class WorkspaceTransaction:
+    """A commit flag for one ``WorkspaceHandle.transaction()`` block."""
+
+    def __init__(self, revision: str) -> None:
+        """Record the snapshot revision the transaction restores to by default."""
+        self.revision = revision
+        self._committed = False
+
+    def commit(self) -> None:
+        """Keep the current tree; the transaction will not restore on exit."""
+        self._committed = True
+
+    @property
+    def committed(self) -> bool:
+        """Return whether ``commit()`` was called."""
+        return self._committed
+
+
 class _UnsupportedAgentExecutionPolicyError(ValueError):
     def __init__(self) -> None:
         super().__init__(
@@ -1121,6 +1151,34 @@ class WorkspaceHandle:
             raise ValueError("the run root cannot be discarded")  # noqa: TRY003
         await self._owner._discard_scope(self._scope)
 
+    @asynccontextmanager
+    async def transaction(
+        self, *, preserve: tuple[str, ...] = (), label: str = "transaction"
+    ) -> AsyncIterator[WorkspaceTransaction]:
+        """Snapshot on entry; restore to it on exit unless the body commits.
+
+        Declared agent memory paths (``RunSetup.memory_paths``) are always
+        preserved on the exit restore, in addition to *preserve*. A body
+        that calls ``tx.commit()`` keeps whatever tree it leaves behind. A
+        body that raises a :class:`WorkspaceTransactionKeep` still
+        propagates the exception but skips the restore. Any other exception,
+        or simply not committing, restores to the entry snapshot; a failed
+        restore raises :class:`WorkspaceRestoreError`.
+        """
+        revision = await self.snapshot(label)
+        tx = WorkspaceTransaction(revision)
+        try:
+            yield tx
+        except WorkspaceTransactionKeep:
+            raise
+        except BaseException:
+            if not tx.committed:
+                await self.restore(revision, clean=True, preserve_paths=preserve)
+            raise
+        else:
+            if not tx.committed:
+                await self.restore(revision, clean=True, preserve_paths=preserve)
+
 
 class _Workspaces:
     """Own isolated worktrees and parent adoption for one run."""
@@ -1206,6 +1264,13 @@ class _Workspaces:
         current.revision = revision
         return revision
 
+    def _with_declared_memory(self, preserve_paths: tuple[str, ...]) -> tuple[str, ...]:
+        """Merge in the strategy's declared agent memory paths, if any."""
+        memory = self._host._setup.memory_paths
+        if not memory:
+            return preserve_paths
+        return tuple(dict.fromkeys((*preserve_paths, *memory)))
+
     async def adopt(
         self,
         revision: str,
@@ -1214,6 +1279,7 @@ class _Workspaces:
         preserve_paths: tuple[str, ...] = (),
     ) -> None:
         """Materialize a retained candidate revision in the parent workspace."""
+        preserve_paths = self._with_declared_memory(preserve_paths)
         async with self._host._parent_mutation_lock:
             adopted = await self._host._run_blocking(
                 self._host._resources.git.checkout_tree,
@@ -1237,6 +1303,7 @@ class _Workspaces:
         if scope is None:
             await self.adopt(revision, clean=clean, preserve_paths=preserve_paths)
             return
+        preserve_paths = self._with_declared_memory(preserve_paths)
         async with self._scope_lock(scope):
             context = self._resources_for(scope)
             restored = await self._host._run_blocking(

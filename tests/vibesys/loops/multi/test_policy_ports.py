@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
@@ -35,6 +36,8 @@ from vibesys.schemas import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
+    from contextlib import AbstractAsyncContextManager
     from pathlib import Path
 
     import pytest
@@ -407,6 +410,38 @@ def test_multi_implementer_marks_paid_turn_before_invocation(tmp_path: Path) -> 
     ]
 
 
+def _fake_transaction_factory(
+    snapshot: Callable[[str], Awaitable[str]], restore: Callable[..., Awaitable[None]]
+) -> Callable[..., AbstractAsyncContextManager[Any]]:
+    """Match ``WorkspaceHandle.transaction``'s snapshot/restore-on-exit semantics
+    against a fake workspace's own ``snapshot``/``restore``.
+    """
+
+    @asynccontextmanager
+    async def transaction(
+        *, preserve: tuple[str, ...] = (), label: str = "tx"
+    ) -> AsyncIterator[Any]:
+        revision = await snapshot(label)
+        committed = False
+
+        def commit() -> None:
+            nonlocal committed
+            committed = True
+
+        tx = SimpleNamespace(commit=commit)
+        try:
+            yield tx
+        except BaseException:
+            if not committed:
+                await restore(revision, clean=True, preserve_paths=preserve)
+            raise
+        else:
+            if not committed:
+                await restore(revision, clean=True, preserve_paths=preserve)
+
+    return transaction
+
+
 def test_multi_local_validation_restores_mutated_candidate(tmp_path: Path) -> None:
     source = tmp_path / "server.py"
     source.write_text("VALUE = 1\n")
@@ -436,7 +471,8 @@ def test_multi_local_validation_restores_mutated_candidate(tmp_path: Path) -> No
     async def pending_changes() -> list[str]:
         return ["server.py"] if source.read_text() == "VALUE = 2\n" else []
 
-    async def restore(_revision: str, *, clean: bool) -> None:
+    async def restore(_revision: str, *, clean: bool, preserve_paths: tuple[str, ...] = ()) -> None:
+        del preserve_paths
         assert clean
         calls.append("restore")
         source.write_text("VALUE = 1\n")
@@ -445,7 +481,11 @@ def test_multi_local_validation_restores_mutated_candidate(tmp_path: Path) -> No
     session.round_number = 1
     session.turns = SimpleNamespace(progress_path=progress_path)
     session.workspace = SimpleNamespace(
-        path=tmp_path, snapshot=snapshot, pending_changes=pending_changes, restore=restore
+        path=tmp_path,
+        snapshot=snapshot,
+        pending_changes=pending_changes,
+        restore=restore,
+        transaction=_fake_transaction_factory(snapshot, restore),
     )
     session.ctx = SimpleNamespace(environment=SimpleNamespace(execute=execute))
     selected = SimpleNamespace(attempt=SimpleNamespace(retry=1))

@@ -377,9 +377,10 @@ class ProfileSingleSession:
         )
         if rollback is None:
             raise ProfileSingleSessionError.missing_rollback()
-        memory = self._memory_paths()
         try:
-            await self.workspace.restore(rollback, clean=True, preserve_paths=memory)
+            async with self.workspace.transaction() as tx:
+                await self.workspace.restore(rollback, clean=True)
+                tx.commit()
         except WorkspaceRestoreError:
             self.ctx.warning(
                 f"could not check out rollback revision {rollback[:8]} for round "
@@ -621,12 +622,6 @@ class ProfileSingleSession:
             )
         return engine, carry, exhaustion_feedback
 
-    def _memory_paths(self) -> tuple[str, ...]:
-        root = self.workspace.path
-        return tuple(
-            str(path.relative_to(root)) for path in issue_board.framework_memory_paths(root)
-        )
-
     async def finish(self) -> bool:
         """Restore the best trusted candidate or the trusted input baseline."""
         self.ctx.log(f"Reached max_rounds={self.options.max_rounds}. Stopping.")
@@ -647,14 +642,14 @@ class ProfileSingleSession:
             baseline = self.workspace.trusted_input_baseline
             if baseline is None:
                 raise ProfileSingleSessionError.missing_baseline()
-            await self.workspace.restore(baseline, clean=True, preserve_paths=self._memory_paths())
+            await self.workspace.restore(baseline, clean=True)
             await self.workspace.snapshot("profile_single: restore trusted input baseline")
             self.ctx.log(f"\nNo evaluated winner was retained. Restored baseline {baseline[:12]}.")
             return True
         if winner.commit is None:
             raise ProfileSingleSessionError.missing_winner_commit()
         await self.workspace.retain(f"selected-round-{winner.round_number:04d}", winner.commit)
-        await self.workspace.restore(winner.commit, clean=True, preserve_paths=self._memory_paths())
+        await self.workspace.restore(winner.commit, clean=True)
         await self.workspace.snapshot(f"profile_single: select round {winner.round_number}")
         metrics = (
             _format_metric_row(_record_candidate_metrics(winner), self.state.metrics.objectives)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
@@ -31,7 +32,46 @@ from vibesys.schemas import OrchestratorPlan, SingleAgentRoundResponse, Verdict
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from pathlib import Path
+
+
+class _FakeTx:
+    """Mirror ``WorkspaceTransaction``'s commit flag for a fake workspace."""
+
+    def __init__(self) -> None:
+        self.committed = False
+
+    def commit(self) -> None:
+        self.committed = True
+
+
+def _fake_workspace(*, restore: AsyncMock, path: Path) -> SimpleNamespace:
+    """A ``SimpleNamespace`` workspace whose ``transaction()`` mirrors the real
+    snapshot-then-restore-on-exit semantics against ``restore``/a stub snapshot.
+    """
+
+    async def snapshot(_label: str) -> str:
+        return "a" * 40
+
+    @asynccontextmanager
+    async def transaction(
+        *, preserve: tuple[str, ...] = (), label: str = "tx"
+    ) -> AsyncIterator[_FakeTx]:
+        del label
+        revision = await snapshot("tx")
+        tx = _FakeTx()
+        try:
+            yield tx
+        except BaseException:
+            if not tx.committed:
+                await restore(revision, clean=True, preserve_paths=preserve)
+            raise
+        else:
+            if not tx.committed:
+                await restore(revision, clean=True, preserve_paths=preserve)
+
+    return SimpleNamespace(restore=restore, path=path, snapshot=snapshot, transaction=transaction)
 
 
 def _plan() -> OrchestratorPlan:
@@ -419,13 +459,11 @@ def test_apply_rollback_warns_and_retries_on_checkout_failure(
     session.round_number = 2
     warnings: list[str] = []
     monkeypatch.setattr(session, "ctx", SimpleNamespace(warning=warnings.append), raising=False)
-    monkeypatch.setattr(session, "_memory_paths", lambda: (), raising=False)
     monkeypatch.setattr(
         session,
         "workspace",
-        SimpleNamespace(
-            restore=AsyncMock(side_effect=WorkspaceRestoreError("c" * 40)),
-            path=tmp_path,
+        _fake_workspace(
+            restore=AsyncMock(side_effect=WorkspaceRestoreError("c" * 40)), path=tmp_path
         ),
         raising=False,
     )
@@ -445,7 +483,6 @@ def test_apply_rollback_eventually_applies_once_checkout_succeeds(
     tmp_path = tmp_path_factory.mktemp("single-rollback")
     session, selection = _rollback_session(parent_round=1, started_round=2)
     session.ctx = SimpleNamespace(warning=lambda _message: None, log=lambda _message: None)
-    session._memory_paths = lambda: ()  # noqa: SLF001
 
     async def commit(**_kwargs: object) -> None:
         return None
@@ -455,11 +492,11 @@ def test_apply_rollback_eventually_applies_once_checkout_succeeds(
     for round_number, should_fail in enumerate(fails, start=2):
         session.round_number = round_number
         if should_fail:
-            session.workspace = SimpleNamespace(
+            session.workspace = _fake_workspace(
                 restore=AsyncMock(side_effect=WorkspaceRestoreError("c" * 40)), path=tmp_path
             )
         else:
-            session.workspace = SimpleNamespace(restore=AsyncMock(return_value=None), path=tmp_path)
+            session.workspace = _fake_workspace(restore=AsyncMock(return_value=None), path=tmp_path)
         asyncio.run(session._apply_rollback(selection))  # noqa: SLF001
         assert selection.hypothesis.revert_applied == (not should_fail)
         if selection.hypothesis.revert_applied:

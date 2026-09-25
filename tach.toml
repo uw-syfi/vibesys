@@ -166,6 +166,10 @@ path = "vibesys.orchestration.environment"
 depends_on = ["vibesys", "vs_agent", "vs_sandbox"]
 
 [[modules]]
+path = "vibesys.orchestration.tools"
+depends_on = ["vs_agent"]
+
+[[modules]]
 path = "vibesys.runtime"
 depends_on = ["vs_agent", "vs_sandbox"]
 
@@ -217,7 +221,7 @@ depends_on = ["vibesys.render", "vibesys.domains", "vibesys.context", "vibesys",
 
 [[modules]]
 path = "vibesys.loops.issue_queue"
-depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.render", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vs_agent"]
+depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.render", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.orchestration.tools", "vs_agent"]
 
 [[modules]]
 path = "vibesys.loops.evolve"
