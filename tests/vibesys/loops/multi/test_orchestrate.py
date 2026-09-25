@@ -7,7 +7,7 @@ from typing import Literal
 
 import pytest
 
-from vibesys.agent_run import board_log, issue_board
+from vibesys.agent_run import issue_board
 from vibesys.agent_run.evidence import (
     _detect_plateau,
     _pareto_archive_conflict,
@@ -25,6 +25,7 @@ from vibesys.evaluators.validation_recipe import (
     ValidationRecipe,
     ValidationRecipeArtifact,
 )
+from vibesys.orchestration import progress_log
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
@@ -853,7 +854,7 @@ def test_progress_writes_orchestrator_plan(tmp_path):  # noqa: ANN001, ANN201  #
         expected_effect="Forecast 1.3x to 1.6x throughput",
         minimum_acceptance_criteria="Retain at >=1.15x with no latency regression",
     )
-    board_log.write(progress, board_log.render_orchestrator_plan(1, plan))
+    progress_log.write(progress, progress_log.render_orchestrator_plan(1, plan))
     text = progress.read_text()
     assert "Round 1 — Orchestrator (plan)" in text
     assert "Build FastAPI server" in text
@@ -947,9 +948,9 @@ def test_agent_memory_paths_distinguish_files_from_directories(tmp_path):  # noq
 
 def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress"
-    board_log.write(
+    progress_log.write(
         progress,
-        board_log.render_pre_round_decision(
+        progress_log.render_pre_round_decision(
             7,
             PreRoundDecision(
                 need_profile=True,
@@ -958,9 +959,9 @@ def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path)
             ),
         ),
     )
-    board_log.write(
+    progress_log.write(
         progress,
-        board_log.render_orchestrator_plan(
+        progress_log.render_orchestrator_plan(
             7,
             OrchestratorPlan(
                 task="Keep this plan",
@@ -970,9 +971,9 @@ def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path)
         ),
     )
 
-    board_log.write(
+    progress_log.write(
         progress,
-        board_log.render_pre_round_decision(
+        progress_log.render_pre_round_decision(
             7,
             PreRoundDecision(
                 need_profile=False,
@@ -992,9 +993,9 @@ def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path)
 
 def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress"
-    board_log.write(
+    progress_log.write(
         progress,
-        board_log.render_hypothesis_continuation(
+        progress_log.render_hypothesis_continuation(
             7,
             plan=OrchestratorPlan(
                 hypothesis_id="transport",
@@ -1014,9 +1015,9 @@ def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # 
             "Exact measured bytes are retained at `recovery/source.py`.\n\n"
         )
 
-    board_log.write(
+    progress_log.write(
         progress,
-        board_log.render_hypothesis_continuation(
+        progress_log.render_hypothesis_continuation(
             7,
             plan=OrchestratorPlan(
                 hypothesis_id="transport",
@@ -1042,21 +1043,21 @@ def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # 
 
 def test_progress_preserves_distinct_attempts_but_replaces_same_attempt(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress.md"
-    board_log.write(
+    progress_log.write(
         progress,
-        board_log.render_implementer(
+        progress_log.render_implementer(
             3, 1, ImplementerResponse(summary="interrupted", expected_behavior="old")
         ),
     )
-    board_log.write(
+    progress_log.write(
         progress,
-        board_log.render_implementer(
+        progress_log.render_implementer(
             3, 1, ImplementerResponse(summary="resumed", expected_behavior="new")
         ),
     )
-    board_log.write(
+    progress_log.write(
         progress,
-        board_log.render_implementer(
+        progress_log.render_implementer(
             3, 2, ImplementerResponse(summary="retry", expected_behavior="newer")
         ),
     )
@@ -1078,7 +1079,7 @@ def test_progress_writes_profiler_summary_with_perf(tmp_path):  # noqa: ANN001, 
         perf_metric=8.2,
         perf_unit="req/s",
     )
-    board_log.write(progress, board_log.render_profiler_summary(2, summary))
+    progress_log.write(progress, progress_log.render_profiler_summary(2, summary))
     text = progress.read_text()
     assert "Round 2 — Profiler" in text
     assert "perf_metric**: 8.2 req/s" in text
@@ -1087,15 +1088,15 @@ def test_progress_writes_profiler_summary_with_perf(tmp_path):  # noqa: ANN001, 
 
 def test_progress_append_implementer_and_judge(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress.md"
-    board_log.write(
+    progress_log.write(
         progress,
-        board_log.render_implementer(
+        progress_log.render_implementer(
             3, 1, ImplementerResponse(summary="added cuda graph", expected_behavior="replay works")
         ),
     )
-    board_log.write(
+    progress_log.write(
         progress,
-        board_log.render_judge(
+        progress_log.render_judge(
             3, 1, JudgeResponse(analysis="good", feedback="", verdict=Verdict.PASS)
         ),
     )
@@ -1109,9 +1110,9 @@ def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path):  # no
     roadmap, progress = issue_board.resolve_paths(tmp_path, "directories")
     issue_board.ensure_roadmap_file(roadmap)
     for round_number in range(1, 16):
-        board_log.write(
+        progress_log.write(
             progress,
-            board_log.render_pre_round_decision(
+            progress_log.render_pre_round_decision(
                 round_number,
                 PreRoundDecision(
                     need_profile=False,

@@ -217,19 +217,19 @@ depends_on = []
 
 [[modules]]
 path = "vibesys.loops.single"
-depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.agent_run", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis"]
+depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.agent_run", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.orchestration.progress_log"]
 
 [[modules]]
 path = "vibesys.loops.multi"
-depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis"]
+depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.orchestration.progress_log"]
 
 [[modules]]
 path = "vibesys.loops.profile_single"
-depends_on = ["vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys", "vibesys.prompts", "vs_project", "vibesys.agent_run", "vibesys.domains", "vs_agent", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus"]
+depends_on = ["vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys", "vibesys.prompts", "vs_project", "vibesys.agent_run", "vibesys.domains", "vs_agent", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.orchestration.progress_log"]
 
 [[modules]]
 path = "vibesys.loops.profile_multi"
-depends_on = [ "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent", "vibesys.roles", "vibesys.prompts", "vibesys.search.hypothesis", "vibesys.search.profile_focus"]
+depends_on = [ "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent", "vibesys.roles", "vibesys.prompts", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.orchestration.progress_log"]
 
 [[modules]]
 path = "vibesys.loops.issue_queue"
@@ -380,11 +380,20 @@ depends_on = ["vibesys.context", "vibesys.runtime", "vibesys.orchestration._host
 
 [[modules]]
 path = "vibesys.orchestration.state"
-depends_on = ["vibesys", "vibesys.orchestration.view", "vs_project", "vibesys.orchestration._host"]
+depends_on = ["vibesys", "vibesys.orchestration.view", "vs_project", "vibesys.orchestration._host", "vibesys.orchestration.progress_log"]
+
+[[modules]]
+# Pure framework-log renderers (job 2 of the progress board) plus the one
+# function that writes them to disk. Lives here (not agent_run) so the
+# host itself -- state.commit and gates.run -- can call it without agent_run
+# depending on orchestration, which would cycle (agent_run already depends
+# on orchestration.view/orchestration).
+path = "vibesys.orchestration.progress_log"
+depends_on = ["vibesys", "vibesys.roles", "vibesys.evaluators"]
 
 [[modules]]
 path = "vibesys.orchestration.gates"
-depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_sandbox", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_sandbox", "vibesys.orchestration.workspaces", "vibesys.orchestration._host", "vibesys.orchestration.progress_log"]
 
 [[modules]]
 path = "vibesys.orchestration.control"

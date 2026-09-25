@@ -19,9 +19,10 @@ from vibesys.events import (
     ExperimentsChangedData,
     RoundFinishedData,
 )
+from vibesys.orchestration import progress_log
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
     from vibesys.events import CoreEventData
@@ -167,6 +168,8 @@ class _RunState:
         *,
         sequence: int,
         writes: Mapping[str, BaseModel],
+        board: Sequence[str] = (),
+        progress_path: Path | None = None,
         **options: Unpack[_CheckpointOptions],
     ) -> str:
         """Checkpoint typed writes, publish, then emit the events that follow.
@@ -177,6 +180,15 @@ class _RunState:
         experiment revision moved, so strategies stop hand-rolling that
         sequence themselves. Strategies whose read projection carries no
         rounds or revision (evolve, issue_queue) see no events derived here.
+
+        `board`/`progress_path` are the framework log's one write point: a
+        strategy hands the host whatever pre-rendered blocks became
+        available since its last commit (see `vibesys.orchestration.
+        progress_log`), and the host writes them here, after the checkpoint
+        durably lands and before this call returns -- always before the next
+        turn, which is the only ordering the board needs. Resume never
+        depends on this file: it is a derived, regenerable narration of
+        state that is already durable by the time this writes it.
         """
         async with self._host._parent_mutation_lock:
             before = await self._previous_view()
@@ -192,6 +204,9 @@ class _RunState:
         self._last_view = after
         self._last_view_loaded = True
         _emit_commit_events(self._host.events, before, after)
+        if board and progress_path is not None:
+            for block in board:
+                progress_log.write(progress_path, block)
         return revision
 
     async def _previous_view(self) -> RunView | None:

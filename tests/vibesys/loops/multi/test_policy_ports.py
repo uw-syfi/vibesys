@@ -54,6 +54,7 @@ class _FakeTurns:
     needs_profile: bool = True
     profiler_enabled: bool = True
     worker: SimpleNamespace = field(default_factory=lambda: SimpleNamespace(backend_name="cli"))
+    progress_path: Path | None = None
 
     async def pre_round_decision(
         self, _round_number: int, _carry: CarryOver, *, has_history: bool
@@ -213,7 +214,7 @@ def test_multi_validation_failure_checkpoints_before_retry_and_official_gate() -
     session.options = SimpleNamespace(max_rounds=1, judge_every=1, official_eval_every=1)
     session.workspace = SimpleNamespace(revision="a" * 40)
     session.state = state.agent_run_state
-    session._gate_recorder = None
+    session._board_log = []
     validation_feedback = ["bad recipe", None]
 
     async def validate(_selected: object, _recipe: str | None) -> str | None:
@@ -496,9 +497,9 @@ def test_multi_official_gate_failure_persists_revalidation_for_exact_commit() ->
     selected = SimpleNamespace(request=request, attempt=attempt)
     session = cast("Any", MultiSession.__new__(MultiSession))
     session.workspace = SimpleNamespace(revision="a" * 40)
-    session.turns = SimpleNamespace(worker=SimpleNamespace(backend_name="cli"))
+    session.turns = SimpleNamespace(worker=SimpleNamespace(backend_name="cli"), progress_path=None)
     session.state = attempt.agent_run_state
-    session._gate_recorder = None
+    session._board_log = []
     session.round_number = 1
     decisions: list[tuple[bool, str]] = []
     session._record_official_decision = lambda _selected, *, run, reason: decisions.append(

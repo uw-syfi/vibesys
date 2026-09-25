@@ -99,7 +99,7 @@ def _configured_turns(tmp_path: Path) -> SingleAgentTurns:
         official_eval_every=2,
         memory_layout="files",
     )
-    return SingleAgentTurns(cast("RunContext", context), options)
+    return SingleAgentTurns(cast("RunContext", context), options, [])
 
 
 def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path: Path) -> None:

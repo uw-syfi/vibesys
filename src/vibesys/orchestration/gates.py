@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import shlex
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from vibesys.evaluators.gates import (
     GATE_RECORD_TAIL_CHARS,
@@ -25,9 +25,11 @@ from vibesys.evaluators.gates import (
     run_benchmark_gate,
 )
 from vibesys.events import GateKind
+from vibesys.orchestration import progress_log
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
     from vibesys.context import _RunResources
     from vibesys.evaluators.metrics import Objective
@@ -78,35 +80,6 @@ class _GateInputs:
     def trusted_input_changes(self) -> list[str]:
         """Detect edits to evaluator-owned project inputs."""
         return self.git.trusted_input_changes()
-
-
-class GateRecorder(Protocol):
-    """Progress-board sink a strategy declares once for `_Evaluator.run`.
-
-    Each method receives the same typed gate result `run` computed, so a
-    strategy's board rendering never re-derives verdict/output/metric facts
-    from anything but that one result.
-    """
-
-    def accuracy(
-        self, round_number: int, retry: int, *, command: str, passed: bool, output: str
-    ) -> None:
-        """Record one accuracy-gate outcome."""
-        ...
-
-    def benchmark(  # noqa: PLR0913  # mirrors the typed gate result's own field count
-        self,
-        round_number: int,
-        retry: int,
-        *,
-        command: str,
-        passed: bool,
-        metric_name: str | None,
-        metric_value: float | None,
-        output: str,
-    ) -> None:
-        """Record one benchmark-gate outcome."""
-        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +190,32 @@ class _Evaluator:
                 round_label=options.label,
             )
 
+    @staticmethod
+    def _write_accuracy_gate(
+        progress_path: Path | None,
+        round_number: int,
+        retry: int,
+        *,
+        command: str,
+        passed: bool,
+        output: str,
+    ) -> None:
+        """Write one accuracy-gate outcome, if this strategy declared a board.
+
+        ``ctx.gates.run`` writes gate entries itself (synchronously, ahead of
+        the snapshot it already takes right after) rather than handing a
+        recorder back to the caller: a strategy just passes its progress
+        path, and never renders or writes anything for gates itself.
+        """
+        if progress_path is None:
+            return
+        progress_log.write(
+            progress_path,
+            progress_log.render_framework_accuracy_gate(
+                round_number, retry, command=command, passed=passed, output=output
+            ),
+        )
+
     async def run(  # noqa: PLR0913  # one call replaces four strategies' hand-rolled sequencing
         self,
         *,
@@ -224,7 +223,7 @@ class _Evaluator:
         retry: int,
         commit: str | None,
         objectives: Sequence[Objective],
-        record: GateRecorder,
+        progress_path: Path | None,
         reuse_accuracy: bool = False,
         agent_backend_name: str | None = None,
     ) -> GateRunResult:
@@ -250,7 +249,7 @@ class _Evaluator:
                 accuracy_passed=False,
             )
         accuracy = await self._run_accuracy_gate(
-            round_number, retry, commit, reuse=reuse_accuracy, record=record
+            round_number, retry, commit, reuse=reuse_accuracy, progress_path=progress_path
         )
         if accuracy.feedback is not None:
             return GateRunResult(
@@ -259,7 +258,7 @@ class _Evaluator:
                 accuracy_passed=False,
             )
         benchmark = await self._run_benchmark_gate(
-            round_number, retry, commit, objectives, record=record
+            round_number, retry, commit, objectives, progress_path=progress_path
         )
         return GateRunResult(feedback=benchmark.feedback, benchmark=benchmark, accuracy_passed=True)
 
@@ -270,12 +269,13 @@ class _Evaluator:
         commit: str | None,
         *,
         reuse: bool,
-        record: GateRecorder,
+        progress_path: Path | None,
     ) -> AccuracyGateResult:
         view = self._host.environment.view
         command = view.paths.accuracy_command
         if reuse:
-            record.accuracy(
+            self._write_accuracy_gate(
+                progress_path,
                 round_number,
                 retry,
                 command=command or "(not configured)",
@@ -300,7 +300,8 @@ class _Evaluator:
         )
         if result.passed and not result.executed:
             return result
-        record.accuracy(
+        self._write_accuracy_gate(
+            progress_path,
             round_number,
             retry,
             command=result.command or "(not configured)",
@@ -319,7 +320,7 @@ class _Evaluator:
         commit: str | None,
         objectives: Sequence[Objective],
         *,
-        record: GateRecorder,
+        progress_path: Path | None,
     ) -> FrameworkBenchmarkOutcome:
         view = self._host.environment.view
         execution = self._command(
@@ -336,15 +337,19 @@ class _Evaluator:
         if not result.executed:
             return result.outcome
         spec = self._host.request.input_bundle.benchmark_result
-        record.benchmark(
-            round_number,
-            retry,
-            command=result.command or "(not configured)",
-            passed=result.passed,
-            metric_name=result.outcome.metric_name or (spec.metric if spec else None),
-            metric_value=result.outcome.metric_value,
-            output=result.output[-GATE_RECORD_TAIL_CHARS:],
-        )
+        if progress_path is not None:
+            progress_log.write(
+                progress_path,
+                progress_log.render_framework_benchmark(
+                    round_number,
+                    retry,
+                    command=result.command or "(not configured)",
+                    passed=result.passed,
+                    metric_name=result.outcome.metric_name or (spec.metric if spec else None),
+                    metric_value=result.outcome.metric_value,
+                    output=result.output[-GATE_RECORD_TAIL_CHARS:],
+                ),
+            )
         await self._host.workspaces.root.snapshot(
             f"round-{round_number}-retry-{retry}-framework-benchmark"
         )

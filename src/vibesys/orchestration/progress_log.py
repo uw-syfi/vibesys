@@ -1,9 +1,10 @@
 """The progress board's framework log: plan, verdict, gates, exhaustion.
 
-This is job (2) of the progress board (see ``issue_board.py``'s module
-docstring for the other two jobs): the framework's own narration of what it
-decided and observed each round, distinct from role handoffs (job 1) and
-declared agent memory (job 2... job 3).
+This is job (2) of the progress board (see
+``vibesys.agent_run.issue_board``'s module docstring for the other two
+jobs): the framework's own narration of what it decided and observed each
+round, distinct from role handoffs (job 1) and declared agent memory
+(job 3).
 
 Every ``render_*`` function here is pure: it takes the same typed data a role
 turn or gate already produced and returns the exact Markdown block the board
@@ -12,23 +13,26 @@ rendered block into a file mutation, reusing the replace-by-heading merge the
 board has always used so a resumed round replaces its own stable heading
 instead of duplicating it.
 
-Callers (the strategy's turns/session modules) still call :func:`write` right
-where the block becomes available, rather than batching it until the next
-``ctx.state.commit`` -- the board is one of several git-tracked directories a
-round's own workspace snapshots capture as they happen (see
-``RunContext.workspace.snapshot``), so deferring the write past such a
-snapshot would silently drop it from that snapshot's diff. Splitting
-rendering (pure, and unit-testable on its own) from writing (the one place
-that touches disk) is what job (2) needed; batching the writes themselves
-is not.
+This module lives under ``vibesys.orchestration`` (not ``agent_run``) so the
+host itself -- ``orchestration.state``'s ``ctx.state.commit`` and
+``orchestration.gates``'s ``ctx.gates.run`` -- can call :func:`write`
+directly. Framework-log entries only need to exist before the next agent
+turn reads them; which workspace snapshot happens to record their git diff
+does not matter. Gate outcomes are written synchronously by ``ctx.gates.run``
+itself (matching the snapshot ``ctx.gates.run`` already takes right after).
+Every other entry is buffered by the strategy (a plain ``list[str]``, not
+persisted state) and flushed by ``ctx.state.commit`` -- the host -- right
+after it durably commits typed state, which is always before the next turn.
+Resume never depends on the board file: durable state alone decides what
+happens next, and a crash before a pending block is flushed just means that
+block is re-derived (recomputed by the same turn/decision) rather than
+replayed from disk.
 """
 
 from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING
-
-from vibesys.agent_run.issue_board import ensure_progress_file
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -45,6 +49,8 @@ if TYPE_CHECKING:
 #: number is recovered from it rather than threaded separately through the
 #: buffer, so the buffer stays a plain ``list[str]``.
 _HEADING_ROUND = re.compile(r"^## Round (\d+) — ")
+
+_PROGRESS_HEADER = "# Progress\n\n"
 
 
 def render_pre_round_decision(round_number: int, decision: PreRoundDecision) -> str:  # noqa: D103  # tracked: #288
@@ -220,7 +226,7 @@ def render_single_agent_round(  # noqa: D103  # tracked: #288
     )
 
 
-def render_framework_accuracy_gate(  # noqa: D103  # tracked: #288
+def render_framework_accuracy_gate(  # noqa: D103, PLR0913  # tracked: #288
     round_number: int,
     retry: int,
     *,
@@ -293,58 +299,6 @@ def render_exhaustion_note(round_number: int, attempts: int, last_feedback: str)
     )
 
 
-class GateBoardRecorder:
-    """The one `orchestration.gates.GateRecorder` for every agent strategy.
-
-    `ctx.gates.run` calls this back with the same typed gate result it
-    computed; the strategy declares one instance (bound to its own progress
-    file) instead of writing `render_framework_*` calls next to each gate
-    call site.
-    """
-
-    __slots__ = ("progress_path",)
-
-    def __init__(self, progress_path: Path) -> None:
-        """Bind this recorder to one strategy's progress file."""
-        self.progress_path = progress_path
-
-    def accuracy(
-        self, round_number: int, retry: int, *, command: str, passed: bool, output: str
-    ) -> None:
-        """Record one accuracy-gate outcome."""
-        write(
-            self.progress_path,
-            render_framework_accuracy_gate(
-                round_number, retry, command=command, passed=passed, output=output
-            ),
-        )
-
-    def benchmark(  # noqa: PLR0913  # mirrors GateRecorder.benchmark's own field count
-        self,
-        round_number: int,
-        retry: int,
-        *,
-        command: str,
-        passed: bool,
-        metric_name: str | None,
-        metric_value: float | None,
-        output: str,
-    ) -> None:
-        """Record one benchmark-gate outcome."""
-        write(
-            self.progress_path,
-            render_framework_benchmark(
-                round_number,
-                retry,
-                command=command,
-                passed=passed,
-                metric_name=metric_name,
-                metric_value=metric_value,
-                output=output,
-            ),
-        )
-
-
 def _round_number(block: str) -> int:
     heading = block.splitlines()[0]
     match = _HEADING_ROUND.match(heading)
@@ -356,14 +310,24 @@ def _round_number(block: str) -> int:
 def write(progress_path: Path, block: str) -> None:
     """Write one framework-owned progress section idempotently.
 
-    A run can be resumed after a process exits between recording a phase result
-    and finishing the round.  The resumed phase has the same stable Markdown
-    heading (round, role, and attempt), so replace that section instead of
-    appending a duplicate.  Distinct attempts retain distinct headings and
-    therefore remain separate audit entries.
+    A run can be resumed after a process exits between recording a phase
+    result and finishing the round. The resumed phase has the same stable
+    Markdown heading (round, role, and attempt), so replace that section
+    instead of appending a duplicate. Distinct attempts retain distinct
+    headings and therefore remain separate audit entries.
+
+    Self-contained (does not import ``vibesys.agent_run.issue_board``, which
+    itself depends on this package): ensures the progress document exists
+    the same way ``issue_board.ensure_progress_file`` does, in the ``.md``
+    or directory layout the caller already resolved.
     """
     round_number = _round_number(block)
-    ensure_progress_file(progress_path)
+    if progress_path.suffix == ".md":
+        if not progress_path.exists():
+            progress_path.parent.mkdir(parents=True, exist_ok=True)
+            progress_path.write_text(_PROGRESS_HEADER)
+    else:
+        progress_path.mkdir(parents=True, exist_ok=True)
     document = (
         progress_path
         if progress_path.suffix == ".md"
@@ -400,9 +364,9 @@ def write(progress_path: Path, block: str) -> None:
             fh.write(normalized_block)
         return
 
-    # Replacement rewrites an existing audit section.  Keep the prior file
-    # intact if the process exits during the write, then atomically publish the
-    # completed document.
+    # Replacement rewrites an existing audit section. Keep the prior file
+    # intact if the process exits during the write, then atomically publish
+    # the completed document.
     replacement = document.with_name(f".{document.name}.tmp")
     replacement.write_text("".join(output), encoding="utf-8")
     replacement.replace(document)

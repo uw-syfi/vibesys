@@ -100,7 +100,7 @@ def _configured_turns(tmp_path: Path) -> ProfileSingleTurns:
         memory_layout="files",
         profile_guided=ProfileGuidedInput(command=("profile",)),
     )
-    return ProfileSingleTurns(cast("RunContext", context), options)
+    return ProfileSingleTurns(cast("RunContext", context), options, [])
 
 
 def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path: Path) -> None:

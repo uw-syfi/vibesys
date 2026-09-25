@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.agent_run import board_log, issue_board
+from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import (
     AttemptDecision,
     AttemptState,
@@ -43,6 +43,7 @@ from vibesys.loops.multi.validation import (
     _reusable_validation_result,
     _validation_input_digest,
 )
+from vibesys.orchestration import progress_log
 from vibesys.orchestration.runtime import WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.profiler import ProfilerSummary  # noqa: TC001  # tracked: #288
@@ -176,8 +177,8 @@ class MultiSession:
         self.ctx = ctx
         self.options = options
         self.workspace = ctx.workspaces.root
-        self.turns = MultiAgentTurns(ctx, options)
-        self._gate_recorder = board_log.GateBoardRecorder(self.turns.progress_path)
+        self._board_log: list[str] = []
+        self.turns = MultiAgentTurns(ctx, options, self._board_log)
         self.search = HypothesisSearch(
             HypothesisConfig(
                 max_rounds=options.max_rounds,
@@ -204,6 +205,18 @@ class MultiSession:
             raise
         return session
 
+    async def _commit(self, **kwargs: object) -> str:
+        """Delegate to `ctx.state.commit`, draining any buffered board entries.
+
+        The host writes them to `progress.md` as part of this checkpoint,
+        which is always before the next turn; see
+        `vibesys.orchestration.state._RunState.commit`.
+        """
+        board, self._board_log = self._board_log, []
+        return await self.ctx.state.commit(  # type: ignore[no-any-return]
+            board=board, progress_path=self.turns.progress_path, **kwargs
+        )
+
     async def _initialize(self) -> None:
         ctx = self.ctx
         turns = self.turns
@@ -222,7 +235,7 @@ class MultiSession:
         self.round_number = len(self.records) + 1
         self.last_profile_focus = "general latency hotspots on /v1/completions"
         if previous != state:
-            await self.ctx.state.commit(
+            await self._commit(
                 sequence=self.round_number,
                 writes={"state.json": state},
                 candidate=False,
@@ -285,7 +298,7 @@ class MultiSession:
             )
             self.state = started.state
             hypothesis = started.hypothesis
-            await self.ctx.state.commit(
+            await self._commit(
                 sequence=self.round_number,
                 writes={"state.json": self.state},
                 candidate=False,
@@ -296,14 +309,13 @@ class MultiSession:
             assert isinstance(decision, Continue)  # noqa: S101  # only remaining variant
             hypothesis = decision.hypothesis
             plan = hypothesis.plan
-            board_log.write(
-                self.turns.progress_path,
-                board_log.render_hypothesis_continuation(
+            self._board_log.append(
+                progress_log.render_hypothesis_continuation(
                     number,
                     plan=plan,
                     started_round=hypothesis.started_round,
                     continuation_step=hypothesis.next_step or plan.task,
-                ),
+                )
             )
             self.ctx.log(
                 f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
@@ -373,7 +385,7 @@ class MultiSession:
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback
         self.state = update_active_hypothesis(self.state, hypothesis)
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": self.state},
             candidate=False,
@@ -407,7 +419,7 @@ class MultiSession:
         attempt.retry = retry
         attempt.official_reason = None
         attempt.judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": attempt.agent_run_state},
             candidate=False,
@@ -453,13 +465,12 @@ class MultiSession:
         )
         if not due:
             state.judge = JudgeSkipped(JudgeSkipReason.SPARSE_REVIEW_POLICY)
-            board_log.write(
-                self.turns.progress_path,
-                board_log.render_judge_skipped(
+            self._board_log.append(
+                progress_log.render_judge_skipped(
                     selected.request.round_number,
                     outcome=implementation.hypothesis_outcome.value,
                     judge_every=self.options.judge_every,
-                ),
+                )
             )
             self.ctx.log("[judge] deferred by sparse-review policy; official gates were not run")
             return AttemptDecision.FINISH
@@ -513,7 +524,7 @@ class MultiSession:
             selected.attempt.agent_run_state, selected.request.active_hypothesis
         )
         selected.attempt.agent_run_state = state
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": state},
             candidate=False,
@@ -637,11 +648,10 @@ class MultiSession:
             self.turns.progress_path, number, retry, results
         )
         location = issue_board.display_path(artifact, self.workspace.path)
-        board_log.write(
-            self.turns.progress_path,
-            board_log.render_framework_validation_gate(
+        self._board_log.append(
+            progress_log.render_framework_validation_gate(
                 number, retry, artifact=location, results=results
-            ),
+            )
         )
         await self.workspace.snapshot(f"round-{number}-retry-{retry}-framework-validation")
         failed = next((result for result in results if not result.passed), None)
@@ -666,16 +676,15 @@ class MultiSession:
         return await self._official_gates(selected)
 
     def _record_official_decision(self, selected: MultiRound, *, run: bool, reason: str) -> None:
-        board_log.write(
-            self.turns.progress_path,
-            board_log.render_official_evaluation_decision(
+        self._board_log.append(
+            progress_log.render_official_evaluation_decision(
                 self.round_number,
                 selected.attempt.retry,
                 run=run,
                 reason=reason,
                 official_eval_every=self.options.official_eval_every,
                 provisional_candidates=provisional_candidates_since_official(self.records),
-            ),
+            )
         )
 
     async def _official_gates(self, selected: MultiRound) -> bool:
@@ -697,7 +706,7 @@ class MultiSession:
             retry=attempt.retry,
             commit=commit,
             objectives=self.state.metrics.objectives,
-            record=self._gate_recorder,
+            progress_path=self.turns.progress_path,
             reuse_accuracy=reuse_accuracy,
             agent_backend_name=self.turns.worker.backend_name,
         )
@@ -770,15 +779,14 @@ class MultiSession:
             has_implementation=implementation is not None,
         )
         if closed.exhaustion_feedback is not None:
-            board_log.write(
-                self.turns.progress_path,
-                board_log.render_exhaustion_note(
+            self._board_log.append(
+                progress_log.render_exhaustion_note(
                     self.round_number,
                     self.options.max_retries_per_round,
                     closed.exhaustion_feedback,
-                ),
+                )
             )
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": closed.state},
             publish=closed.state,

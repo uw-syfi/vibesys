@@ -15,7 +15,6 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vibesys.agent_run import board_log
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed, JudgeSkipped
 from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
@@ -27,6 +26,7 @@ from vibesys.loops.multi.session import (
     MultiSessionError,
     _TerminalPolicy,
 )
+from vibesys.orchestration import progress_log
 from vibesys.orchestration.runtime import GateRunResult, WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
@@ -141,7 +141,7 @@ def _session(tmp_path: Path) -> MultiSession:
     session.workspace.transaction = lambda **kwargs: _fake_transaction(session.workspace, **kwargs)
     progress = tmp_path / "progress.md"
     progress.write_text("# Progress\n")
-    session._gate_recorder = board_log.GateBoardRecorder(progress)
+    session._board_log = []
     session.turns = SimpleNamespace(
         progress_path=progress,
         roadmap_path=tmp_path / "roadmap.md",
@@ -220,7 +220,7 @@ def test_initialize_and_select_checkpoint_after_plan(
     assert session.state.active_hypothesis is not None
 
     monkeypatch.setattr(
-        "vibesys.loops.multi.session.board_log.write",
+        "vibesys.loops.multi.session.progress_log.write",
         MagicMock(),
     )
     session.turns.plan = AsyncMock(side_effect=AssertionError("designer must be skipped"))

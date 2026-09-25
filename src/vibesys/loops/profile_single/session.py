@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.agent_run import board_log, issue_board
+from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import (
     AttemptDecision,
     AttemptState,
@@ -22,6 +22,7 @@ from vibesys.agent_run.evidence import (
 from vibesys.agent_run.record import RecordInput, build_round_record
 from vibesys.loops.profile_single.attribution import run_attribution
 from vibesys.loops.profile_single.turns import ProfileSingleTurns
+from vibesys.orchestration import progress_log
 from vibesys.orchestration.runtime import WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.profiler import ProfilerSummary
@@ -145,8 +146,8 @@ class ProfileSingleSession:
         self.ctx = ctx
         self.options = options
         self.workspace = ctx.workspaces.root
-        self.turns = ProfileSingleTurns(ctx, options)
-        self._gate_recorder = board_log.GateBoardRecorder(self.turns.progress_path)
+        self._board_log: list[str] = []
+        self.turns = ProfileSingleTurns(ctx, options, self._board_log)
         self.search = HypothesisSearch(
             HypothesisConfig(
                 max_rounds=options.max_rounds,
@@ -187,6 +188,18 @@ class ProfileSingleSession:
             raise
         return session
 
+    async def _commit(self, **kwargs: object) -> str:
+        """Delegate to `ctx.state.commit`, draining any buffered board entries.
+
+        The host writes them to `progress.md` as part of this checkpoint,
+        which is always before the next turn; see
+        `vibesys.orchestration.state._RunState.commit`.
+        """
+        board, self._board_log = self._board_log, []
+        return await self.ctx.state.commit(  # type: ignore[no-any-return]
+            board=board, progress_path=self.turns.progress_path, **kwargs
+        )
+
     async def _initialize(self) -> None:
         ctx = self.ctx
         turns = self.turns
@@ -206,7 +219,7 @@ class ProfileSingleSession:
         self.last_response = None
         self.last_profile_focus = "general latency hotspots on /v1/completions"
         if previous != state:
-            await self.ctx.state.commit(
+            await self._commit(
                 sequence=self.round_number,
                 writes={"state.json": state},
                 candidate=False,
@@ -260,7 +273,7 @@ class ProfileSingleSession:
                 self._focus_state(), round_number=number, bottlenecks=attribution
             )
             self.state = self._with_focus(focus_state)
-            await self.ctx.state.commit(
+            await self._commit(
                 sequence=self.round_number,
                 writes={"state.json": self.state},
                 candidate=False,
@@ -298,7 +311,7 @@ class ProfileSingleSession:
             )
             self.state = started.state
             hypothesis = started.hypothesis
-            await self.ctx.state.commit(
+            await self._commit(
                 sequence=self.round_number,
                 writes={"state.json": self.state},
                 candidate=False,
@@ -309,14 +322,13 @@ class ProfileSingleSession:
             assert isinstance(decision, Continue)  # noqa: S101  # only remaining variant
             hypothesis = decision.hypothesis
             plan = hypothesis.plan
-            board_log.write(
-                self.turns.progress_path,
-                board_log.render_hypothesis_continuation(
+            self._board_log.append(
+                progress_log.render_hypothesis_continuation(
                     number,
                     plan=plan,
                     started_round=hypothesis.started_round,
                     continuation_step=hypothesis.next_step or plan.task,
-                ),
+                )
             )
             self.ctx.log(
                 f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
@@ -387,7 +399,7 @@ class ProfileSingleSession:
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback
         self.state = update_active_hypothesis(self.state, hypothesis)
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": self.state},
             candidate=False,
@@ -420,7 +432,7 @@ class ProfileSingleSession:
         attempt = selected.attempt
         attempt.retry = retry
         attempt.official_reason = None
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": attempt.agent_run_state},
             candidate=False,
@@ -465,16 +477,15 @@ class ProfileSingleSession:
     def _record_official_decision(
         self, selected: ProfileSingleRound, *, run: bool, reason: str
     ) -> None:
-        board_log.write(
-            self.turns.progress_path,
-            board_log.render_official_evaluation_decision(
+        self._board_log.append(
+            progress_log.render_official_evaluation_decision(
                 self.round_number,
                 selected.attempt.retry,
                 run=run,
                 reason=reason,
                 official_eval_every=self.options.official_eval_every,
                 provisional_candidates=provisional_candidates_since_official(self.records),
-            ),
+            )
         )
 
     async def _official_gates(self, selected: ProfileSingleRound) -> bool:
@@ -496,7 +507,7 @@ class ProfileSingleSession:
             retry=attempt.retry,
             commit=commit,
             objectives=self.state.metrics.objectives,
-            record=self._gate_recorder,
+            progress_path=self.turns.progress_path,
             reuse_accuracy=reuse_accuracy,
             agent_backend_name=self.turns.worker.backend_name,
         )
@@ -519,7 +530,7 @@ class ProfileSingleSession:
             selected.attempt.agent_run_state, selected.request.active_hypothesis
         )
         selected.attempt.agent_run_state = state
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": state},
             candidate=False,
@@ -579,15 +590,14 @@ class ProfileSingleSession:
             terminal_needs_parent_choice=False,
         )
         if closed.exhaustion_feedback is not None:
-            board_log.write(
-                self.turns.progress_path,
-                board_log.render_exhaustion_note(
+            self._board_log.append(
+                progress_log.render_exhaustion_note(
                     self.round_number,
                     self.options.max_retries_per_round,
                     closed.exhaustion_feedback,
-                ),
+                )
             )
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": closed.state},
             publish=closed.state,
