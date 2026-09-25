@@ -169,6 +169,26 @@ Give `timeout_s`/`grace_s` a generous value and treat a timeout-forced exit
 as success-with-a-known-hang rather than a failure once the trace file is
 confirmed on disk; do not block indefinitely or leave a stuck GPU for the
 next round.
+
+### Warm targets: repeated windows without relaunching
+
+`start_target(command, ...)` launches a process once and keeps it running;
+`profile_ops(target=<id>, load_command=..., duration_s=...)` then takes a
+profiling window against it (`load_command` bounds the window: it must run
+long enough for real work to happen). Call `stop_target(target)` when done,
+or let the server's own exit stop it automatically. Use this when the same
+process needs several before/after windows (e.g. comparing two request
+shapes on one already-warmed-up server) rather than paying a fresh launch
+(weight load, warmup, KV init) per window; overhead of leaving a target
+armed but idle between windows is negligible. `record_shapes`/`delay_s`/
+`setup_command` are fixed when the target was started, not per-window.
+
+If `command` already opens its own, separate `torch.profiler` session
+in-process (check the candidate's declared profiler contract before
+assuming otherwise), pass `inject=False` to `profile_ops`: this skips
+arming a second, competing session, which otherwise crashes the
+CUPTI/roctracer/kineto backend outright rather than raising a catchable
+error.
 {% endif %}
 
 {% include "profilers/_observer_effect.j2" %}

@@ -145,6 +145,41 @@ whole run, and state which window they used in their output header; pass
 `window='all'` to see the whole run, or `window='startup'` to look at the
 excluded setup phase on its own.
 
+## Warm targets: repeated windows without relaunching
+
+Every `profile_*` capture tool above launches a fresh process for one
+capture's whole lifetime, then tears it down. `start_target(command, ...)`
+launches a process once and keeps it running across multiple, separate
+profiling windows against it; `profile_ops(target=<id>, load_command=...,
+duration_s=...)` takes one such window (`load_command` bounds it: it must
+run long enough for real work to happen). Call `stop_target(target)` when
+done, or let the MCP server's own exit stop it. Use this when the same
+already-warmed-up process needs several before/after windows (e.g.
+comparing two request shapes on the same server) instead of paying a fresh
+launch (weight load, warmup, KV init) per window; overhead of leaving a
+target armed but idle between windows is negligible.
+
+Two limits to know before reaching for it:
+
+- **Torch-level only.** A warm target only supports the torch plugin's
+  `profile_ops`, not a system-wide trace or PMC counters: rocprofv3-backed
+  capture tools always launch their own target for the capture's lifetime
+  (`profiling_capabilities` reports whether this host's rocprofv3 build
+  even supports attach at all; VibeSys does not implement attach-based
+  capture either way -- passing `target=` to a rocprofv3 tool returns a
+  clear error instead of attempting it).
+- **`inject=False` for engines that manage their own profiler session.** If
+  `command` already opens its own, separate `torch.profiler` session
+  in-process (check the engine's file under [`engines/`](../engines/) for
+  its actual contract before assuming one), pass `inject=False` to
+  `profile_ops`: running the tool's own injected session *and* the
+  engine's own session in the same process crashes the CUPTI/roctracer/
+  kineto backend outright (a SIGSEGV, not a catchable error) rather than
+  raising cleanly. `inject=False` skips arming the tool's own session while
+  still exporting `VIBESYS_TORCH_PROFILE_OUT_DIR` so the engine's own
+  profiler can write its trace where the discovery/analysis pipeline reads
+  from.
+
 ## Per-engine files
 
 | Engine | File | Status |

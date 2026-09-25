@@ -58,6 +58,7 @@ evidence demands; each altitude below costs more overhead than the last.
 | Counters (PMC) | which hardware ceiling one specific kernel is against | `profile_counters` | `counter_report`, `counter_triage` |
 | Kernel-internal | full Speed-of-Light + roofline for one targeted kernel | `profile_kernel_deep` | `compute_analyze` |
 | Instruction-level | per-instruction stalls inside one kernel, one compute unit (version-gated, see Pitfalls) | `profile_instructions` | `att_hotspots` |
+| In-process torch capture | per-op/kernel torch.profiler trace, optionally windowed on an already-running process | `profile_ops` (delegates to the torch plugin) | `certify`, `gemm_shapes`, `roofline`, `summary` |
 | Paired A/B | did a change actually move the needle, same session, drift-controlled | (compare two captures) | `compare`, `bench_verdict` |
 
 Every `profile_*` capture tool shares the same lifecycle arguments
@@ -175,6 +176,25 @@ compute unit, and costs the most overhead of any tool here.
 | Drill-down | Purpose |
 | ---------- | ------- |
 | `att_hotspots(dispatch_dir, top=15)` | Top stall hotspots (instructions + source lines) from a decoded ATT dispatch directory. |
+
+### Warm targets: repeated windows without relaunching a `rocprofv3` capture
+
+Every `profile_*` capture tool above launches its own target for the whole
+capture's lifetime; none of them accept `target=` (a real capability probe
+`profiling_capabilities` runs confirms whether the host's
+`librocprofiler-register` build even supports `rocprofv3 --attach`, but
+VibeSys does not implement attach-based capture regardless of what that
+probe reports -- passing `target=` returns a clear error naming this). For
+repeated windows against the same already-running process, use the torch
+plugin's `start_target(command, ...)` + `profile_ops(target=<id>,
+load_command=..., duration_s=...)` instead (delegated here, same as a
+direct `profile_ops` call): this launches once, keeps the process warm
+between windows, and costs one fresh launch total instead of one per
+window. `stop_target(target)` when done, or let the server's own exit stop
+it. This only gets an in-process torch.profiler trace, not a system-wide
+rocprofv3 trace or PMC counters -- use it to compare op-level shapes
+before/after on the same warmed-up process, not as a substitute for
+`profile_timeline`/`profile_counters`.
 
 ### Paired A/B: `compare` / `bench_verdict`: did the change actually help
 
