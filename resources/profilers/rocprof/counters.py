@@ -2,11 +2,17 @@
 """rocprofv3 PMC counter-set catalogue, report aggregation, and bottleneck triage.
 
 Hardware performance counters (PMC) on AMD Instinct GPUs are collected with
-``rocprofv3 --pmc <names...>``. Packing many counters into one job forces a
-multi-pass collection, which has been observed to hang the GPU on gfx942.
-This toolkit keeps every named counter set at or under 4 counters and drives
-one ``rocprofv3`` process (one hardware pass, one output directory) per set,
-so the agent never hand-builds an oversized ad-hoc counter list.
+``rocprofv3 --pmc <names...>``. Packing too many counters into one job has
+been observed to hang the GPU on gfx942, so every named counter set here is
+kept at or under 4 counters, and the agent never hand-builds an ad-hoc
+counter list. Multiple sets can still share one rocprofv3 pass when their
+counters fit a conservative per-hardware-block budget (see ``plan_passes``/
+``PER_BLOCK_COUNTER_LIMIT``): real MI210 validation packed mfma+hbm and
+mfma+l2 into one pass each, cutting the number of full workload re-runs
+``profile_counters`` needs. Each *pass*, not each requested set, costs one
+full re-run of the profiled workload -- ``profile_counters`` reports how
+many passes it planned vs. actually ran (a pass rocprofv3 rejects falls
+back to one pass per set, raising the run count above the plan).
 
 Usage:
     python counters.py list-sets [--arch gfx90a]
@@ -71,7 +77,10 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 WAVEFRONT_SIZE = 64
 SIMDS_PER_CU = 4
@@ -311,6 +320,129 @@ COUNTER_SETS: dict[str, dict[str, CounterSet]] = {
         ),
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Pass packing: pack requested counter sets into as few rocprofv3 --pmc
+# passes as possible
+# ---------------------------------------------------------------------------
+
+# Real MI210 (gfx90a) validation packed mfma+hbm and mfma+l2 into a single
+# rocprofv3 --pmc pass successfully (see docs/contributing/amd-profiler-worklog.md);
+# l2+hbm was not validated together. The counters in each of those sets sit
+# on different hardware counter blocks (SQ/GRBM for mfma; TCC/TCP for l2 and
+# hbm), which is what actually lets them share a pass: rocprofv3 allocates
+# counter slots per block, not one shared global budget, and this toolkit's
+# own <=4-counters-per-set rule already tracks the conservative per-block
+# ceiling one set alone can safely ask for. PER_BLOCK_COUNTER_LIMIT applies
+# that same ceiling to the *combined* per-block counter count across every
+# set sharing one pass: l2 (TCC:2, TCP:1) + hbm (TCC:3, TCP:1) would need
+# TCC:5, over the limit, so they are correctly kept apart by this model,
+# matching what was (and wasn't) validated on real hardware.
+#
+# This is a model, not a verified hardware limit for every block on every
+# architecture (only gfx90a mfma+hbm/mfma+l2 were validated on real
+# silicon): `profile_counters` treats a rocprofv3 rejection of a packed pass
+# as ground truth over this model and falls back to running the rejected
+# pass's sets one at a time (see its docstring).
+PER_BLOCK_COUNTER_LIMIT = 4
+
+
+def counter_block(counter_name: str) -> str:
+    """The hardware counter block a counter name belongs to (its prefix up to the first `_`).
+
+    e.g. ``SQ_INSTS_MFMA`` -> ``SQ``, ``TCC_EA_RDREQ_sum`` -> ``TCC``,
+    ``GRBM_COUNT`` -> ``GRBM``. Every counter in ``COUNTER_SETS`` follows
+    this AMD naming convention (block prefix, then a block-specific name).
+    """
+    return counter_name.split("_", 1)[0]
+
+
+def _block_counts(cset: CounterSet) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    for name in cset.counters:
+        counts[counter_block(name)] += 1
+    return dict(counts)
+
+
+def _fits(existing: dict[str, int], addition: dict[str, int]) -> bool:
+    return all(
+        existing.get(block, 0) + n <= PER_BLOCK_COUNTER_LIMIT for block, n in addition.items()
+    )
+
+
+def plan_passes(catalogue: dict[str, CounterSet], sets: list[str]) -> list[list[str]]:
+    """Greedily pack *sets* into as few rocprofv3 passes as the per-block limit allows.
+
+    Preserves the caller's set order within and across groups (deterministic
+    for a given input). A set never splits across passes; only whole sets
+    are packed together. Each returned group is a list of set names sharing
+    one rocprofv3 --pmc invocation; every counter across a group's sets must
+    stay at or under ``PER_BLOCK_COUNTER_LIMIT`` per hardware block (see
+    ``PER_BLOCK_COUNTER_LIMIT``'s docstring for why that's the right ceiling
+    to model, and why it's a model rather than a guarantee).
+    """
+    groups: list[list[str]] = []
+    group_blocks: list[dict[str, int]] = []
+    for set_name in sets:
+        counts = _block_counts(catalogue[set_name])
+        for group, blocks in zip(groups, group_blocks, strict=True):
+            if _fits(blocks, counts):
+                group.append(set_name)
+                for block, n in counts.items():
+                    blocks[block] = blocks.get(block, 0) + n
+                break
+        else:
+            groups.append([set_name])
+            group_blocks.append(dict(counts))
+    return groups
+
+
+def dedupe_preserve_order(items: Iterable[str]) -> list[str]:
+    """Deduplicate an iterable of strings, keeping first-seen order.
+
+    Used both for a packed pass's counter list (a counter present in two
+    packed sets must only be requested once) and for a set of directories
+    that may repeat when several sets share one packed pass's output
+    directory (counting the same physical CSV file twice would double every
+    merged counter value).
+    """
+    return list(dict.fromkeys(items))
+
+
+def pass_counters(catalogue: dict[str, CounterSet], group: list[str]) -> list[str]:
+    """The deduplicated, ordered ``--pmc`` counter list for one packed pass group."""
+    return dedupe_preserve_order(
+        name for set_name in group for name in catalogue[set_name].counters
+    )
+
+
+# rocprofv3's own error text for a pass it refuses to run because the
+# requested counters don't fit in one collection is unconfirmed against a
+# live rocprofv3 (no GPU/ROCm in this dev sandbox); these are candidate
+# phrases naming the failure mode a real message is expected to use
+# (insufficient hardware counter slots for one pass), checked against the
+# capture's log tail. `profile_counters` only falls back when both this
+# text matches AND the pass's overall lifecycle status is non-OK, so a
+# pass that merely logs one of these words in an unrelated context (e.g. a
+# workload's own stdout) without also failing cannot trigger a spurious
+# fallback.
+PACKED_PASS_REJECTION_RE = re.compile(
+    r"(do(?:es)?\s*n[o']?t fit|cannot fit|too many counters|exceeds[^\n]{0,40}(?:limit|counter)"
+    r"|requires? multiple passes|not supported (?:in|for) (?:a\s+)?single pass"
+    r"|insufficient[^\n]{0,40}counter)",
+    re.IGNORECASE,
+)
+
+
+def looks_like_packed_pass_rejection(*, status_ok: bool, log_tail: str) -> bool:
+    """Whether a non-OK pass's log tail looks like rocprofv3 rejecting a packed counter list.
+
+    ``status_ok`` gates this on the pass having actually failed (never
+    treats a clean pass as a rejection just because incidental log text
+    matches); ``log_tail`` is checked against ``PACKED_PASS_REJECTION_RE``.
+    """
+    return not status_ok and bool(PACKED_PASS_REJECTION_RE.search(log_tail))
 
 
 CANDIDATES: dict[str, tuple[str, ...]] = {
