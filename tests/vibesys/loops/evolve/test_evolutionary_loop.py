@@ -1396,7 +1396,7 @@ def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path, ref_file):  # 
 
     runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(2))
     gate = MagicMock(side_effect=[_passing_gate_result(42.5), _passing_gate_result(43.75)])
-    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.gates.run_benchmark_gate", gate):
         result = _invoke_loop(
             tmp_path,
             ref_file,
@@ -1435,7 +1435,7 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_pat
             feedback="Framework benchmark failed.\nbenchmark exploded"
         ),
     )
-    with patch("vibesys.orchestration.runtime.run_benchmark_gate", MagicMock(return_value=failing)):
+    with patch("vibesys.orchestration.gates.run_benchmark_gate", MagicMock(return_value=failing)):
         result = _invoke_bootstrap(
             tmp_path,
             ref_file,
@@ -1456,7 +1456,7 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_pat
 def test_no_benchmark_contract_keeps_profiler_fitness(tmp_path, ref_file):  # noqa: ANN001, ANN201  # tracked: #288
     runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(1))
     gate = MagicMock()
-    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.gates.run_benchmark_gate", gate):
         result = _invoke_bootstrap(tmp_path, ref_file, runner)
 
     assert result is True
@@ -1504,7 +1504,7 @@ def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(tmp_path
     ]
     runner = FakeAgentClient().enqueue("profiler", *profiler_responses)
     gate = MagicMock(side_effect=[_passing_gate_result(42.5), _passing_gate_result(43.75)])
-    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.gates.run_benchmark_gate", gate):
         result = _invoke_loop(
             tmp_path,
             ref_file,
@@ -1532,7 +1532,7 @@ def test_protocol_contract_records_the_evaluator_declared_unit(tmp_path, ref_fil
     """The recorded unit is the evaluator's declaration when it supplies one."""
     runner = FakeAgentClient()
     gate = MagicMock(return_value=_passing_gate_result(42.5, unit="ops/s"))
-    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.gates.run_benchmark_gate", gate):
         result = _invoke_bootstrap(
             tmp_path,
             ref_file,

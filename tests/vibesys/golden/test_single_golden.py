@@ -27,6 +27,7 @@ Three scenarios cover the main round path without every branch:
 
 from __future__ import annotations
 
+import subprocess
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -188,7 +189,7 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
 
     descriptor = descriptor_from_options(_options(), orchestration_id=_ORCHESTRATION_ID)
     with patch(
-        "vibesys.orchestration.runtime.run_accuracy_gate",
+        "vibesys.orchestration.gates.run_accuracy_gate",
         side_effect=_scripted_accuracy_gate(passed=True),
     ):
         run = run_scripted(
@@ -206,12 +207,32 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
     )
 
 
-# TODO(stack PR 05): restore test_timeout_scenario_golden (single/turns.py's  # noqa: TD003, FIX002
-# subprocess.TimeoutExpired -> synthesized FAIL response fallback) once the
-# runtime.py fix that catches it lands (see commit a6e361c1's "single timeout
-# fallback" half, alongside the R1 rollback-checkout fix this stack's PR 05
-# also owns). At BASE the combined turn's TimeoutExpired propagates instead
-# of being caught, so this scenario currently errors rather than completing.
+def test_timeout_scenario_golden(tmp_path: Path) -> None:
+    """The combined turn times out: single/turns.py catches
+    ``subprocess.TimeoutExpired`` and synthesizes a FAIL
+    ``SingleAgentRoundResponse`` instead of propagating the exception.
+    """
+    runner = FakeAgentClient(backend_name="stub")
+    runner.enqueue("orchestrator", _plan())
+    runner.fail("implementer", subprocess.TimeoutExpired(cmd="agent", timeout=30.0), times=1)
+
+    descriptor = descriptor_from_options(
+        _options(max_retries_per_round=1), orchestration_id=_ORCHESTRATION_ID
+    )
+    run = run_scripted(
+        tmp_path,
+        orchestration_id=_ORCHESTRATION_ID,
+        descriptor=descriptor,
+        orchestrator_factory=SingleAgentOrchestrator,
+        runner=runner,
+    )
+
+    assert run.result is True  # the run completes; no hypothesis is retained
+    _assert_prompt_calls(runner, scenario="timeout", workspace=tmp_path.parent)
+    _assert_board_files(run.workspace, scenario="timeout", workspace=tmp_path.parent)
+    assert_events_snapshot(
+        _STRATEGY, "timeout", read_events(run.events_path, workspace=tmp_path.parent)
+    )
 
 
 def _assert_prompt_calls(runner: FakeAgentClient, *, scenario: str, workspace: Path) -> None:

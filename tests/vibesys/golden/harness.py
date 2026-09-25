@@ -17,6 +17,7 @@ from unittest.mock import patch
 from vibesys.api.testing import FakeComputeBackend
 from vibesys.config import Config, as_config
 from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.loops.registry import built_in_orchestrations
 from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.runner import run_orchestration
 from vibesys.profilers import ProfilerKind
@@ -136,9 +137,7 @@ def run_scripted(  # noqa: PLR0913  # tracked: #288
         profiler_kind=profiler_kind,
     )
 
-    # TODO(stack PR 05): pass `projector=built_in_orchestrations().resolve(  # noqa: TD003, FIX002
-    # orchestration_id).projector` once run_orchestration/RunContext grow the
-    # committed-state projection seam.
+    projector = built_in_orchestrations().resolve(orchestration_id).projector
 
     async def execute() -> bool:
         integration = LocalRunIntegration()
@@ -147,6 +146,7 @@ def run_scripted(  # noqa: PLR0913  # tracked: #288
                 request,
                 integration,
                 orchestrator_factory(descriptor),
+                projector=projector,
                 agent_client_factory=cast(
                     "Callable[..., AgentClientProtocol]",
                     lambda **_kwargs: _SharedFakeClient(runner),

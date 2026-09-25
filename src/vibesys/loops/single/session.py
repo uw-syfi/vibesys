@@ -44,7 +44,7 @@ from vibesys.events import (
 )
 from vibesys.loops.single.hypothesis import HypothesisEngine
 from vibesys.loops.single.turns import SingleAgentTurns
-from vibesys.orchestration.runtime import MeasurementOptions
+from vibesys.orchestration.runtime import MeasurementOptions, WorkspaceRestoreError
 from vibesys.render.sink import output_sink
 from vibesys.schemas import ProfilerSummary, Verdict
 from vs_agent.api import RoundProgress
@@ -350,7 +350,14 @@ class SingleSession:
         if rollback is None:
             raise SingleSessionError.missing_rollback()
         memory = self._memory_paths()
-        await self.workspace.restore(rollback, clean=True, preserve_paths=memory)
+        try:
+            await self.workspace.restore(rollback, clean=True, preserve_paths=memory)
+        except WorkspaceRestoreError:
+            self.ctx.warning(
+                f"could not check out rollback revision {rollback[:8]} for round "
+                f"{parent_round}; will retry the rollback next round"
+            )
+            return
         hypothesis.revert_applied = True
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback
