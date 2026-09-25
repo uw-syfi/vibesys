@@ -1,11 +1,11 @@
 """Role catalog for the ``multi`` strategy.
 
-Independent designer, profiler, implementer, and judge. Fallback factories reproduce the content of the synthesized responses
-``vibesys/loops/multi/turns.py`` builds today, collapsed to one message per
-role: ``ctx.agents.turn`` uses the same ``role.fallback`` for both a
-structured-parse failure and a ``subprocess.TimeoutExpired`` (multi's
-implementer previously used two different messages for those two cases;
-see the phase-3a report for that intentional simplification).
+Independent designer, profiler, implementer, and judge. Fallback factories
+reproduce the content of the synthesized responses
+``vibesys/loops/multi/turns.py`` built before this catalog existed. The
+implementer role sets ``timeout_fallback`` distinctly from ``fallback``, so
+``ctx.agents.turn`` still sends the original, different text for a
+structured-parse failure versus a ``subprocess.TimeoutExpired``.
 """
 
 from __future__ import annotations
@@ -52,8 +52,21 @@ def _fallback_implementer() -> ImplementerResponse:
         summary="Implementer produced no structured response.",
         expected_behavior="unknown",
         hypothesis_outcome="inconclusive",
-        evidence="The implementer output could not be parsed, or the turn timed out.",
+        evidence="The implementer output could not be parsed.",
         next_step="Recover retained evidence and return a schema-valid response before review.",
+    )
+
+
+def _timeout_fallback_implementer(timeout: float) -> ImplementerResponse:
+    return ImplementerResponse(
+        summary="Implementer invocation timed out.",
+        expected_behavior="unknown",
+        hypothesis_outcome="inconclusive",
+        evidence=(
+            f"The framework stopped the implementer after {timeout:g} seconds "
+            "without a structured response."
+        ),
+        next_step="Inspect retained evidence and return a schema-valid response on retry.",
     )
 
 
@@ -72,6 +85,10 @@ MULTI_PRE_ROUND_DECISION = Role(
     fallback=_fallback_pre_round_decision,
     access=ReadOnly(),
     session=Fresh(),
+    message=(
+        "Decide whether a profiling pass is needed before planning this round. "
+        "Return only the JSON object."
+    ),
 )
 
 MULTI_ORCHESTRATOR_PLAN = Role(
@@ -81,6 +98,7 @@ MULTI_ORCHESTRATOR_PLAN = Role(
     fallback=_fallback_plan,
     access=ReadOnly(),  # allow-list (roadmap index) resolved per call by the caller
     session=Fresh(),
+    filter_skills=True,
     message="Produce this round's plan. Return only the JSON object.",
 )
 
@@ -114,6 +132,7 @@ MULTI_IMPLEMENTER = Role(
     template="loops/multi/implementer_prompt.j2",
     reply=ImplementerResponse,
     fallback=_fallback_implementer,
+    timeout_fallback=_timeout_fallback_implementer,
     access=Writes(),
     session=Keyed(scope=SessionScope.HYPOTHESIS),
     paid=True,
@@ -126,6 +145,7 @@ MULTI_IMPLEMENTER_CONTINUATION = Role(
     template="loops/multi/implementer_continuation_prompt.j2",
     reply=ImplementerResponse,
     fallback=_fallback_implementer,
+    timeout_fallback=_timeout_fallback_implementer,
     access=Writes(),
     session=Keyed(scope=SessionScope.HYPOTHESIS),
     paid=True,

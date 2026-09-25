@@ -217,6 +217,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             objective=context["objective"],
             profiler_support_name="nsys_profiler",
             profiler_mcp_name="vibesys-nsys-profiler",
+            profiler_campaign_context="",
         ),
         "profiler_torch": render_template(
             "profilers/torch.j2",
@@ -230,6 +231,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             objective=context["objective"],
             profiler_support_name="torch_profiler",
             profiler_mcp_name="vibesys-torch-profiler",
+            profiler_campaign_context="",
         ),
         "profiler_neuron": render_template(
             "profilers/neuron.j2",
@@ -243,6 +245,7 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
             objective=context["objective"],
             profiler_support_name="neuron_profiler",
             profiler_mcp_name="vibesys-neuron-profiler",
+            profiler_campaign_context="",
         ),
     }
 
@@ -295,6 +298,7 @@ def test_microservice_otel_profiler_uses_critical_path_as_diagnostic_evidence():
         objective=context["objective"],
         profiler_support_name="otel_profiler",
         profiler_mcp_name="vibesys-otel-profiler",
+        profiler_campaign_context="",
     )
 
     assert "trace_graphs()" in rendered

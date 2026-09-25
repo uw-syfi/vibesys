@@ -304,11 +304,10 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
     )
     turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
     turns.progress_path = tmp_path / "progress.md"
+    turns.roadmap_location = "roadmap.md"
+    turns._plan_context = lambda _request: {}
     issue_board.ensure_progress_file(turns.progress_path)
     calls: list[str] = []
-    turns.ctx = SimpleNamespace(log=calls.append)
-    turns._plan_prompt = lambda _request: "plan prompt"
-    turns._skills = lambda selections: (selections, [])
     plans = iter(
         [
             OrchestratorPlan(
@@ -326,88 +325,57 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
         ]
     )
 
-    async def designer(_prompt: str, message: str, _label: str) -> OrchestratorPlan:
-        calls.append(message)
+    async def agents_turn(_role: object, **kwargs: object) -> OrchestratorPlan:
+        message = kwargs.get("message")
+        if message is not None:
+            calls.append(cast("str", message))
         return next(plans)
 
-    turns._designer_turn = designer
+    turns.ctx = SimpleNamespace(log=calls.append, agents=SimpleNamespace(turn=agents_turn))
+    turns.designer = SimpleNamespace()
     result = asyncio.run(turns.plan(request))
     assert result.hypothesis_id == "fresh"
     assert "previous plan was rejected" in calls[-1]
     assert "fresh" in turns.progress_path.read_text()
 
 
-def test_multi_read_only_role_restores_unauthorized_edits() -> None:
-    calls: list[object] = []
-    pending = ["roadmap/index.md", "src/server.py"]
-
-    class Workspace:
-        async def snapshot(self, label: str) -> str:
-            calls.append(label)
-            return "baseline"
-
-        async def pending_changes(self) -> list[str]:
-            return pending.copy()
-
-        async def restore(
-            self, revision: str, *, clean: bool, preserve_paths: tuple[str, ...]
-        ) -> None:
-            calls.append((revision, clean, preserve_paths))
-            pending.remove("src/server.py")
-
-    agent = SimpleNamespace(
-        turn_structured=AsyncMock(
-            return_value=PreRoundDecision(need_profile=False, reasoning="enough evidence")
-        )
-    )
-    turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
-    turns.workspace = Workspace()
-    turns.ctx = SimpleNamespace(log=calls.append)
-    result = asyncio.run(
-        turns._read_only(
-            agent,
-            message="decide",
-            prompt="read only",
-            response_cls=PreRoundDecision,
-            fallback_factory=lambda: PreRoundDecision(need_profile=False, reasoning="fallback"),
-            label="prepass",
-            allowed=("roadmap/index.md",),
-        )
-    )
-    assert isinstance(result, PreRoundDecision)
-    assert ("baseline", True, ("roadmap/index.md",)) in calls
-    assert pending == ["roadmap/index.md"]
+# Role-isolation restoration (unauthorized-edit revert) is now host code:
+# ctx.agents.turn owns it for every strategy, covered by
+# tests/vibesys/orchestration/test_agents_turn.py. Multi's turns.py no
+# longer has a ``_read_only`` wrapper of its own to test here.
 
 
 def test_multi_implementer_marks_paid_turn_before_invocation(tmp_path: Path) -> None:
+    """``before_paid`` (the paid-work marker hook ``ctx.agents.turn`` runs
+    right before its pre-turn snapshot) must fire before the implementer
+    turn itself, so a crash mid-turn still resumes from a committed marker.
+    """
     request, state = _attempt()
     state.retry = 1
     calls: list[str] = []
 
-    async def snapshot(label: str) -> str:
-        calls.append(label)
-        return "revision"
-
-    async def implement(_message: str, **_kwargs: object) -> ImplementerResponse:
-        calls.append("paid-turn")
+    async def agents_turn(
+        _role: object,
+        *,
+        before_paid: Callable[[], Awaitable[None]] | None = None,
+        **_kwargs: object,
+    ) -> ImplementerResponse:
+        assert before_paid is not None
+        await before_paid()
         assert issue_board.next_implementer_attempt(tmp_path / "progress.md", 1) == 2
+        calls.append("paid-turn")
         return ImplementerResponse(summary="cache added", expected_behavior="faster")
 
     turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
     turns.progress_path = tmp_path / "progress.md"
     issue_board.ensure_progress_file(turns.progress_path)
-    turns.workspace = SimpleNamespace(snapshot=snapshot)
-    turns.worker = SimpleNamespace(turn_structured=implement)
-    turns._skills = lambda selections: (selections, [])
-    turns._implementer_prompt = lambda *_args: "implement prompt"
+    turns.ctx = SimpleNamespace(agents=SimpleNamespace(turn=agents_turn))
+    turns.worker = SimpleNamespace()
+    turns._implementer_context = lambda *_args: {}
     response, synthesized = asyncio.run(turns.implement(request, state))
     assert response.summary == "cache added"
     assert not synthesized
-    assert calls == [
-        "round-1-retry-1-paid-marker",
-        "paid-turn",
-        "round-1-retry-1-implementer",
-    ]
+    assert calls == ["paid-turn"]
 
 
 def _fake_transaction_factory(

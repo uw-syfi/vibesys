@@ -141,6 +141,7 @@ graph TD
     vibesys.loops.multi --> vibesys.orchestration.view
     vibesys.loops.multi --> vibesys.prompts
     vibesys.loops.multi --> vibesys.render
+    vibesys.loops.multi --> vibesys.roles
     vibesys.loops.multi --> vibesys.runtime
     vibesys.loops.profile_multi --> vibesys
     vibesys.loops.profile_multi --> vibesys.agent_run
@@ -151,6 +152,7 @@ graph TD
     vibesys.loops.profile_multi --> vibesys.orchestration.view
     vibesys.loops.profile_multi --> vibesys.prompts
     vibesys.loops.profile_multi --> vibesys.render
+    vibesys.loops.profile_multi --> vibesys.roles
     vibesys.loops.profile_multi --> vibesys.runtime
     vibesys.loops.profile_single --> vibesys
     vibesys.loops.profile_single --> vibesys.agent_run
@@ -436,6 +438,7 @@ graph TD
     vibesys.loops.multi --> vibesys.orchestration.view
     vibesys.loops.multi --> vibesys.prompts
     vibesys.loops.multi --> vibesys.render
+    vibesys.loops.multi --> vibesys.roles
     vibesys.loops.multi --> vibesys.runtime
     vibesys.loops.multi --> vs_agent
     vibesys.loops.multi --> vs_loop_state
@@ -449,6 +452,7 @@ graph TD
     vibesys.loops.profile_multi --> vibesys.orchestration.view
     vibesys.loops.profile_multi --> vibesys.prompts
     vibesys.loops.profile_multi --> vibesys.render
+    vibesys.loops.profile_multi --> vibesys.roles
     vibesys.loops.profile_multi --> vibesys.runtime
     vibesys.loops.profile_multi --> vs_agent
     vibesys.loops.profile_multi --> vs_loop_state

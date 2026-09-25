@@ -458,7 +458,8 @@ class _Agents:
         back to ``prompts/shared/``), a workspace snapshot before and after,
         reverting (and raising :class:`RoleIsolationError` if unrevertable)
         unauthorized edits from a :class:`~vibesys.runtime.ReadOnly` role,
-        ``role.fallback()`` on ``subprocess.TimeoutExpired`` (every role, not
+        ``role.fallback()`` (or ``role.timeout_fallback(seconds)`` when the
+        role declares one) on ``subprocess.TimeoutExpired`` (every role, not
         just today's multi/profile_multi implementer), up to
         ``role.max_corrections`` reprompts while ``role.check(reply)``
         returns an error, and skill-selection filtering when
@@ -511,7 +512,11 @@ class _Agents:
                     host.log(
                         f"[{role.id}] attempt {attempt} timed out after {error.timeout:g} seconds"
                     )
-                    reply = role.fallback()
+                    reply = (
+                        role.timeout_fallback(error.timeout)
+                        if role.timeout_fallback is not None
+                        else role.fallback()
+                    )
                     break
                 check_error = role.check(reply) if role.check is not None else None
                 if check_error is None:

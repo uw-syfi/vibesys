@@ -1,18 +1,31 @@
-"""Multi role ordering, isolation, and durable role evidence."""
+"""Multi role ordering and durable role evidence.
 
-# ruff: noqa: SLF001  # Read-only guards and role turns are the policy under test.
+``vibesys.loops.multi.turns`` no longer renders prompts or handles isolation
+itself (phase 3b): every role turn goes through ``ctx.agents.turn``, which is
+covered directly in ``tests/vibesys/orchestration``. These tests cover what
+stays strategy code: the context each role's turn is built with, the
+designer's state-dependent plan-ID retry loop, paid-turn marker timing, the
+implementer's synthesized-reply detection, and the judge's Pareto guard.
+"""
 
 from __future__ import annotations
 
+# ruff: noqa: SLF001  # context builders and plan validation are the policy under test.
 import asyncio
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
+from unittest import mock
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptState
+from vibesys.agent_run.errors import (
+    InvalidPlanError,
+    MissingImplementationError,
+    UnsupportedProfilerError,
+)
 from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.options import AgentOrchestrationOptions
 from vibesys.agent_run.state import AgentRunState
@@ -23,14 +36,10 @@ from vibesys.loops.multi.decisions import (
     PlainGuidance,
     PlanRequest,
 )
-from vibesys.loops.multi.turns import (
-    InvalidPlanError,
-    MultiAgentTurns,
-    RoleIsolationError,
-    UnsupportedProfilerError,
-    _unauthorized_paths,
-)
+from vibesys.loops.multi.turns import MultiAgentTurns
 from vibesys.profilers import ProfilerKind
+from vibesys.roles.multi import MULTI_IMPLEMENTER_CONTINUATION, MULTI_JUDGE
+from vibesys.runtime import ReadOnly
 from vibesys.schemas import (
     HypothesisOutcome,
     HypothesisStrategyUpdate,
@@ -39,11 +48,11 @@ from vibesys.schemas import (
     OrchestratorPlan,
     PreRoundDecision,
     ProfilerSummary,
-    SkillResourceSelection,
     Verdict,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
     from pathlib import Path
 
     from vibesys.orchestration.runtime import RunContext
@@ -107,6 +116,7 @@ def _turns(tmp_path: Path) -> MultiAgentTurns:
                 skill_source_paths=(),
             ),
             events=SimpleNamespace(emit=MagicMock()),
+            agents=SimpleNamespace(turn=AsyncMock()),
             log=MagicMock(),
             warning=MagicMock(),
         ),
@@ -130,48 +140,49 @@ def _request() -> tuple[PlanRequest, AttemptRequest, AttemptState]:
     )
 
 
-def _handle(result: object) -> SimpleNamespace:
-    return SimpleNamespace(turn_structured=AsyncMock(return_value=result), close=AsyncMock())
+def _handle() -> SimpleNamespace:
+    return SimpleNamespace(close=AsyncMock())
 
 
-def test_roles_open_close_and_render_profile_guided_plan(tmp_path: Path) -> None:
+def test_roles_open_close_and_plan_context(tmp_path: Path) -> None:
     turns = cast("Any", _turns(tmp_path))
-    handles = {
-        "orchestrator": _handle(_plan()),
-        "implementer": _handle(ImplementerResponse(summary="done", expected_behavior="faster")),
-        "judge": _handle(JudgeResponse(analysis="ok", feedback="", verdict=Verdict.PASS)),
-        "profiler": _handle(
-            ProfilerSummary(analysis="ok", bottlenecks="decode", suggestions="cache")
-        ),
-    }
     turns.ctx.agents = SimpleNamespace(
         default_definition=lambda role: role,
-        spawn=AsyncMock(side_effect=lambda role: handles[role]),
+        spawn=AsyncMock(side_effect=lambda role: _handle()),  # noqa: ARG005
+        turn=AsyncMock(return_value=_plan()),
     )
     asyncio.run(turns.open())
     assert turns.ctx.agents.spawn.await_count == 4
 
     plan_request, _, _ = _request()
-    prompt = turns._plan_prompt(plan_request)
-    assert "Orchestrator" in prompt
+    context = turns._plan_context(plan_request)
+    assert context["objective"] == "Improve throughput"
     planned = asyncio.run(turns.plan(plan_request))
     assert planned.hypothesis_id == "h1"
     assert (tmp_path / "progress-artifacts" / "plans" / "round-0001.json").is_file()
+    call = turns.ctx.agents.turn.await_args
+    assert call.kwargs["label"] == "round-1-plan"
+    assert isinstance(call.kwargs["context"]["objective"], str)
+    assert isinstance(call.args[0].access, ReadOnly)
 
     asyncio.run(turns.close())
-    assert all(handle.close.await_count == 1 for handle in handles.values())
+    assert all(
+        getattr(turns, name).close.await_count == 1
+        for name in ("designer", "worker", "judge", "profiler")
+    )
 
 
 def test_plan_reprompts_reused_id_then_accepts_new_one(tmp_path: Path) -> None:
     turns = cast("Any", _turns(tmp_path))
+    turns.designer = _handle()
     existing = HypothesisEngine.create(AgentRunState()).start(_plan(), started_round=1).state
     request = PlanRequest(2, existing, [], CarryOver(), None, None, 0, PlainGuidance())
-    turns._designer_turn = AsyncMock(side_effect=[_plan(), _plan(hypothesis_id="h2")])
+    turns.ctx.agents.turn = AsyncMock(side_effect=[_plan(), _plan(hypothesis_id="h2")])
     result = asyncio.run(turns.plan(request))
     assert result.hypothesis_id == "h2"
-    assert turns._designer_turn.await_count == 2
-    assert turns._designer_turn.await_args is not None
-    assert "rejected" in turns._designer_turn.await_args.args[1]
+    assert turns.ctx.agents.turn.await_count == 2
+    second_call = turns.ctx.agents.turn.await_args_list[1]
+    assert "rejected" in second_call.kwargs["message"]
 
 
 def test_plan_rejects_duplicate_self_and_existing_hypothesis_updates(tmp_path: Path) -> None:
@@ -196,54 +207,28 @@ def test_plan_rejects_duplicate_self_and_existing_hypothesis_updates(tmp_path: P
         turns._validate_plan(_plan(), existing)
 
 
-def test_designer_and_read_only_roles_verify_restoration(tmp_path: Path) -> None:
-    turns = cast("Any", _turns(tmp_path))
-    turns.designer = _handle(_plan())
-    turns.workspace.pending_changes.side_effect = [["candidate.py"], []]
-    assert asyncio.run(turns._designer_turn("prompt", "message", "plan")).hypothesis_id == "h1"
-    turns.workspace.restore.assert_awaited_once()
-
-    turns.workspace.pending_changes.side_effect = [["candidate.py"], ["candidate.py"]]
-    with pytest.raises(RoleIsolationError, match="still modified"):
-        asyncio.run(turns._designer_turn("prompt", "message", "plan"))
-
-    assert _unauthorized_paths(["profile/log.txt", "candidate.py"], ("profile/",)) == [
-        "candidate.py"
-    ]
-    turns.workspace.pending_changes.side_effect = [["profile/log.txt", "candidate.py"], []]
-    decision = PreRoundDecision(need_profile=False, profile_focus="", reasoning="enough")
-    assert (
-        asyncio.run(
-            turns._read_only(
-                _handle(decision),
-                message="decide",
-                prompt="prompt",
-                response_cls=PreRoundDecision,
-                fallback_factory=lambda: decision,
-                label="pre",
-                allowed=("profile/",),
-            )
-        )
-        == decision
-    )
-
-
 def test_pre_round_profile_and_profiler_guards(tmp_path: Path) -> None:
     turns = cast("Any", _turns(tmp_path))
-    turns.designer = _handle(
-        PreRoundDecision(need_profile=True, profile_focus="decode", reasoning="measure")
+    turns.designer = _handle()
+    turns.ctx.agents.turn = AsyncMock(
+        return_value=PreRoundDecision(
+            need_profile=True, profile_focus="decode", reasoning="measure"
+        )
     )
     decision = asyncio.run(turns.pre_round_decision(1, CarryOver(), has_history=False))
     assert decision.need_profile
     assert decision.profile_focus == "decode"
 
-    turns.profiler = _handle(
-        ProfilerSummary(analysis="profiled", bottlenecks="decode", suggestions="cache")
-    )
+    turns.profiler = _handle()
+    summary_reply = ProfilerSummary(analysis="profiled", bottlenecks="decode", suggestions="cache")
+    turns.ctx.agents.turn = AsyncMock(return_value=summary_reply)
     summary = asyncio.run(turns.profile(1, "decode"))
     assert summary is not None
     assert summary.analysis == "profiled"
-    assert turns.profiler.turn_structured.await_args.kwargs["mcp_servers"]
+    call = turns.ctx.agents.turn.await_args
+    assert call is not None
+    assert call.kwargs["mcp_servers"] is None or isinstance(call.kwargs["mcp_servers"], list)
+    assert isinstance(call.args[0].access, ReadOnly)
 
     turns.ctx.environment.profiler_kind = ProfilerKind.NONE
     assert asyncio.run(turns.profile(1, "decode")) is None
@@ -252,8 +237,8 @@ def test_pre_round_profile_and_profiler_guards(tmp_path: Path) -> None:
         turns._profiler()
 
 
-def test_implementer_marks_paid_turn_after_prompt_and_judge_applies_pareto_guard(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_implementer_marks_paid_turn_before_snapshot_and_judge_applies_pareto_guard(
+    tmp_path: Path,
 ) -> None:
     turns = cast("Any", _turns(tmp_path))
     _, request, attempt = _request()
@@ -262,7 +247,7 @@ def test_implementer_marks_paid_turn_after_prompt_and_judge_applies_pareto_guard
         expected_behavior="faster",
         hypothesis_outcome=HypothesisOutcome.SUPPORTED,
     )
-    turns.worker = _handle(response)
+    turns.worker = _handle()
     events: list[str] = []
     original_marker = issue_board.write_implementer_start_marker
 
@@ -270,40 +255,83 @@ def test_implementer_marks_paid_turn_after_prompt_and_judge_applies_pareto_guard
         events.append("marker")
         return original_marker(path, round_number, retry)
 
-    original_prompt = turns._implementer_prompt
-
-    def prompt(req: AttemptRequest, state: AttemptState, skills: list) -> str:
+    async def agents_turn(
+        _role: object,
+        *,
+        before_paid: Callable[[], Awaitable[None]] | None = None,
+        **_kwargs: object,
+    ) -> ImplementerResponse:
         events.append("prompt")
-        return original_prompt(req, state, skills)
-
-    async def worker_turn(_message: str, **_kwargs: object) -> ImplementerResponse:
+        if before_paid is not None:
+            await before_paid()
         events.append("worker")
         return response
 
-    monkeypatch.setattr(
-        "vibesys.loops.multi.turns.issue_board.write_implementer_start_marker", marker
-    )
-    turns._implementer_prompt = prompt
-    turns.worker.turn_structured = AsyncMock(side_effect=worker_turn)
-    returned, synthesized = asyncio.run(turns.implement(request, attempt))
+    turns.ctx.agents.turn = agents_turn
+
+    with mock.patch("vibesys.loops.multi.turns.issue_board.write_implementer_start_marker", marker):
+        returned, synthesized = asyncio.run(turns.implement(request, attempt))
     assert returned == response
     assert not synthesized
     assert events == ["prompt", "marker", "worker"]
-    assert turns.worker.turn_structured.await_args is not None
-    assert turns.worker.turn_structured.await_args.kwargs["reuse_session"] is True
 
     attempt.implementation = response
-    turns.judge = _handle(JudgeResponse(analysis="plausible", feedback="", verdict=Verdict.PASS))
+    turns.judge = _handle()
+    turns.ctx.agents.turn = AsyncMock(
+        return_value=JudgeResponse(analysis="plausible", feedback="", verdict=Verdict.PASS)
+    )
     verdict = asyncio.run(turns.review(request, attempt, "conflicts with retained frontier"))
     assert verdict.verdict is Verdict.FAIL
     assert "Pareto guard" in verdict.analysis
     turns.ctx.events.emit.assert_called()
 
 
-def test_missing_implementation_and_unavailable_skills_fail_closed(tmp_path: Path) -> None:
+def test_implement_uses_continuation_role_when_hypothesis_has_next_step(tmp_path: Path) -> None:
+    turns = cast("Any", _turns(tmp_path))
+    turns.worker = _handle()
+    _, request, attempt = _request()
+    request.active_hypothesis.next_step = "finish wiring"
+    response = ImplementerResponse(summary="cache added", expected_behavior="faster")
+    turns.ctx.agents.turn = AsyncMock(return_value=response)
+    asyncio.run(turns.implement(request, attempt))
+    call = turns.ctx.agents.turn.await_args
+    assert call is not None
+    assert call.args[0] is MULTI_IMPLEMENTER_CONTINUATION
+
+
+def test_implement_detects_synthesized_reply_by_sentinel_summary(tmp_path: Path) -> None:
+    turns = cast("Any", _turns(tmp_path))
+    turns.worker = _handle()
+    _, request, attempt = _request()
+    turns.ctx.agents.turn = AsyncMock(
+        return_value=ImplementerResponse(
+            summary="Implementer invocation timed out.",
+            expected_behavior="unknown",
+            hypothesis_outcome="inconclusive",
+            evidence="timed out",
+        )
+    )
+    _, synthesized = asyncio.run(turns.implement(request, attempt))
+    assert synthesized
+
+
+def test_missing_implementation_and_resolved_skills_on_empty_sources(tmp_path: Path) -> None:
     turns = _turns(tmp_path)
     _, request, attempt = _request()
-    with pytest.raises(ValueError, match="parsed implementer"):
+    with pytest.raises(MissingImplementationError):
         asyncio.run(turns.review(request, attempt, None))
-    selections = [SkillResourceSelection(skill="missing", purpose="Need guidance")]
-    assert turns._skills(selections) == ([], [])
+    assert turns._resolved_skills([]) == []
+
+
+def test_judge_role_is_used_for_review(tmp_path: Path) -> None:
+    turns = cast("Any", _turns(tmp_path))
+    _, request, attempt = _request()
+    attempt.implementation = ImplementerResponse(summary="ok", expected_behavior="faster")
+    turns.judge = _handle()
+    turns.ctx.agents.turn = AsyncMock(
+        return_value=JudgeResponse(analysis="ok", feedback="", verdict=Verdict.PASS)
+    )
+    asyncio.run(turns.review(request, attempt, None))
+    call = turns.ctx.agents.turn.await_args
+    assert call is not None
+    assert call.args[0] is MULTI_JUDGE

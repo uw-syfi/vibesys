@@ -199,6 +199,21 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-pre",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
       "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
@@ -329,6 +344,21 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-plan",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
       "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
@@ -374,7 +404,7 @@
       "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
-      "label": "round-1-retry-1-paid-marker",
+      "label": "round-1-retry-1-implementer-input",
       "source": "git_tracking"
     },
     "round_label": null,
@@ -503,7 +533,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": "<SHA>",
+      "commit": null,
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-retry-1-implementer",
@@ -518,7 +548,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": null,
+      "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-retry-1-judge-input",
@@ -623,6 +653,21 @@
     "type": "phase_finished"
   },
   {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-retry-1-judge",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
     "agent_kind": "judge",
     "data": {
       "attempt": 1,
@@ -634,21 +679,6 @@
     "status": "failed",
     "text": "",
     "type": "judge_result"
-  },
-  {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
-      "commit": "<SHA>",
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
-      "label": "round-1-retry-1-judge",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
   },
   {
     "agent_kind": null,
@@ -687,7 +717,7 @@
       "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
-      "label": "round-1-retry-2-paid-marker",
+      "label": "round-1-retry-2-implementer-input",
       "source": "git_tracking"
     },
     "round_label": null,
@@ -816,7 +846,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": "<SHA>",
+      "commit": null,
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-retry-2-implementer",
@@ -831,7 +861,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": null,
+      "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-retry-2-judge-input",
@@ -936,6 +966,21 @@
     "type": "phase_finished"
   },
   {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-retry-2-judge",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
     "agent_kind": "judge",
     "data": {
       "attempt": 2,
@@ -947,21 +992,6 @@
     "status": "completed",
     "text": "",
     "type": "judge_result"
-  },
-  {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
-      "commit": "<SHA>",
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
-      "label": "round-1-retry-2-judge",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
   },
   {
     "agent_kind": null,
