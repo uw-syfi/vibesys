@@ -157,6 +157,8 @@ graph TD
     vibesys.loops.profile_multi --> vibesys.prompts
     vibesys.loops.profile_multi --> vibesys.roles
     vibesys.loops.profile_multi --> vibesys.runtime
+    vibesys.loops.profile_multi --> vibesys.search.hypothesis
+    vibesys.loops.profile_multi --> vibesys.search.profile_focus
     vibesys.loops.profile_single --> vibesys
     vibesys.loops.profile_single --> vibesys.agent_run
     vibesys.loops.profile_single --> vibesys.context
@@ -471,6 +473,8 @@ graph TD
     vibesys.loops.profile_multi --> vibesys.prompts
     vibesys.loops.profile_multi --> vibesys.roles
     vibesys.loops.profile_multi --> vibesys.runtime
+    vibesys.loops.profile_multi --> vibesys.search.hypothesis
+    vibesys.loops.profile_multi --> vibesys.search.profile_focus
     vibesys.loops.profile_multi --> vs_agent
     vibesys.loops.profile_multi --> vs_loop_state
     vibesys.loops.profile_multi --> vs_project

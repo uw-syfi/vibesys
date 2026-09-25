@@ -1,31 +1,22 @@
-"""Equivalence and property tests for ``search.profile_focus``.
-
-Compares against ``ProfileGuidedHypothesisController`` and friends in
-``loops/profile_multi/controller.py``, and ``parse_attribution`` against the
-pure half of ``loops/profile_multi/attribution.py``. Once the rewiring phase
-deletes ``loops/profile_multi/controller.py``, the ``test_*_matches_old_*``
-tests should be trimmed to plain unit tests of ``search.profile_focus`` alone.
-"""
+"""Unit and property tests for ``search.profile_focus``."""
 
 from __future__ import annotations
 
-import json
-
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.agent_run.state import AgentRunState
-from vibesys.loops.profile_multi import attribution as old_attribution
-from vibesys.loops.profile_multi.controller import ProfileGuidedHypothesisController
 from vibesys.search.profile_focus import (
+    ProfileAttributionError,
     ProfileBottleneck,
     ProfileFocus,
     ProfileFocusConfig,
-    ProfileFocusState,
     parse_attribution,
 )
 
 _NAMES = st.sampled_from(["attn", "mlp", "kv_cache", "norm"])
+_BEGIN = "__VIBESYS_ATTRIBUTION_BEGIN__"
+_END = "__VIBESYS_ATTRIBUTION_END__"
 
 
 def _bottleneck_tuple(names: list[str]) -> tuple[ProfileBottleneck, ...]:
@@ -52,47 +43,38 @@ def _round_of_attribution(draw):  # noqa: ANN001, ANN202
         max_size=6,
     ),
 )
-def test_observe_and_record_match_old_controller(
+def test_observe_and_record_track_one_active_component_at_a_time(
     rounds: list[tuple[ProfileBottleneck, ...]],
     plateau_min_rounds: int,
     min_relative_improvement: float,
     improvements: list[float | None],
 ) -> None:
-    old = ProfileGuidedHypothesisController.create(
-        AgentRunState(),
-        enabled=True,
-        plateau_min_rounds=plateau_min_rounds,
-        min_relative_improvement=min_relative_improvement,
-    )
-    new_search = ProfileFocus(
+    search = ProfileFocus(
         ProfileFocusConfig(
             plateau_min_rounds=plateau_min_rounds, min_relative_improvement=min_relative_improvement
         )
     )
-    new_state = new_search.initial()
+    state = search.initial()
 
     for round_number, attribution in enumerate(rounds, start=1):
-        old = old.prepare_round(round_number=round_number, attribution=attribution)
-        new_state = new_search.observe(
-            new_state, round_number=round_number, bottlenecks=attribution
-        )
-        assert (
-            old.state.profile_guidance or ProfileFocusState()
-        ).model_dump() == new_state.model_dump()
+        state = search.observe(state, round_number=round_number, bottlenecks=attribution)
+        active = state.active_component
+        component_names = {component.name for component in state.components}
+        assert {item.name for item in attribution} <= component_names
+        if attribution and any(
+            component.status.value != "exhausted" for component in state.components
+        ):
+            assert active is not None
 
         improvement = (
             improvements[round_number - 1] if round_number - 1 < len(improvements) else None
         )
         passed = improvement is not None
-        old = old.advance_round(
-            round_number=round_number, passed=passed, relative_improvement=improvement
+        state = search.record(
+            state, round_number=round_number, passed=passed, relative_improvement=improvement
         )
-        new_state = new_search.record(
-            new_state, round_number=round_number, passed=passed, relative_improvement=improvement
-        )
-        assert (
-            old.state.profile_guidance or ProfileFocusState()
-        ).model_dump() == new_state.model_dump()
+        # ``focus`` stays a pure function of the persisted state alone.
+        assert search.focus(state).active_component == (state.active_component or "")
 
 
 def test_observe_never_reselects_an_exhausted_component() -> None:
@@ -113,33 +95,47 @@ def test_observe_never_reselects_an_exhausted_component() -> None:
         assert state.active_component != active_before
 
 
-# --- parse_attribution equivalence ---
+def test_focus_renders_latest_observed_ranking() -> None:
+    """``focus`` shows each component's latest attribution sample, matching
+    the old controller's ephemeral ranking (which only ever held the round
+    that just called ``prepare_round``), rebuilt as a pure function of the
+    persisted state instead. A profiler run reports every tracked component
+    each round, so re-observing the same components with a new ordering
+    replaces the prior round's ranking rather than accumulating alongside it.
+    """
+    search = ProfileFocus(ProfileFocusConfig())
+    state = search.initial()
+    state = search.observe(state, round_number=1, bottlenecks=_bottleneck_tuple(["attn", "mlp"]))
+    first_ranking = [item.name for item in search.focus(state).ranked_bottlenecks]
+    assert first_ranking == ["attn", "mlp"]
+
+    state = search.observe(state, round_number=2, bottlenecks=_bottleneck_tuple(["mlp", "attn"]))
+    second_ranking = [item.name for item in search.focus(state).ranked_bottlenecks]
+    assert second_ranking == ["mlp", "attn"]
 
 
-def _framed(payload: dict) -> str:
-    begin = old_attribution._BEGIN  # noqa: SLF001  # comparing framing against the old module's own markers
-    end = old_attribution._END  # noqa: SLF001
-    return f"noise before\n{begin}\n{json.dumps(payload)}\n{end}\nnoise after"
-
-
-def test_parse_attribution_matches_old_framed_payload_and_sort() -> None:
-    payload = {
-        "version": 1,
-        "cost_unit": "ms",
-        "components": [
-            {"name": "b", "cost": 5.0, "share": 0.5, "evidence": []},
-            {"name": "a", "cost": 5.0, "share": 0.5, "evidence": []},
-            {"name": "c", "cost": 10.0, "share": 0.9, "evidence": ["x"]},
-        ],
-    }
-    output = _framed(payload)
-    old_payload = old_attribution._framed_payload(output)  # noqa: SLF001
-    assert old_payload is not None
-    new_payload = parse_attribution(output)
-    old_parsed = old_attribution._ProfileResultV1.model_validate_json(  # noqa: SLF001
-        old_payload, strict=True
+def test_parse_attribution_extracts_framed_payload_sorted_by_cost() -> None:
+    payload = (
+        '{"version": 1, "cost_unit": "ms", "components": ['
+        '{"name": "b", "cost": 5.0, "share": 0.5, "evidence": []}, '
+        '{"name": "a", "cost": 5.0, "share": 0.5, "evidence": []}, '
+        '{"name": "c", "cost": 10.0, "share": 0.9, "evidence": ["x"]}]}'
     )
-    old_sorted = tuple(sorted(old_parsed.components, key=lambda item: (-item.cost, item.name)))
-    assert [c.model_dump() for c in old_sorted] == [c.model_dump() for c in new_payload]
+    output = f"noise before\n{_BEGIN}\n{payload}\n{_END}\nnoise after"
+    parsed = parse_attribution(output)
     # Sorted by cost desc, ties by name.
-    assert [c.name for c in new_payload] == ["c", "a", "b"]
+    assert [component.name for component in parsed] == ["c", "a", "b"]
+
+
+def test_parse_attribution_rejects_missing_and_duplicate_components() -> None:
+    with pytest.raises(ProfileAttributionError, match="no result artifact"):
+        parse_attribution("no framed payload here")
+
+    duplicate = (
+        '{"version": 1, "cost_unit": "ms", "components": ['
+        '{"name": "a", "cost": 1.0, "share": 0.5, "evidence": []}, '
+        '{"name": "a", "cost": 1.0, "share": 0.5, "evidence": []}]}'
+    )
+    output = f"{_BEGIN}\n{duplicate}\n{_END}"
+    with pytest.raises(ProfileAttributionError, match="unique"):
+        parse_attribution(output)

@@ -31,7 +31,6 @@ from vibesys.agent_run.options import AgentOrchestrationOptions
 from vibesys.agent_run.state import AgentRunState
 from vibesys.constants import DomainName
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
-from vibesys.loops.profile_multi.controller import HypothesisEngine, ProfileGuidanceView
 from vibesys.loops.profile_multi.decisions import AttemptRequest, PlanRequest
 from vibesys.loops.profile_multi.turns import ProfileMultiTurns
 from vibesys.profilers import ProfilerKind
@@ -46,6 +45,8 @@ from vibesys.schemas import (
     HypothesisStrategyUpdate,
     OrchestratorPlan,
 )
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.profile_focus import FocusView
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -124,18 +125,21 @@ def _turns(tmp_path: Path) -> ProfileMultiTurns:
     return turns
 
 
+def _search() -> HypothesisSearch:
+    return HypothesisSearch(HypothesisConfig(max_rounds=5))
+
+
 def _request() -> tuple[PlanRequest, AttemptRequest, AttemptState]:
     state = AgentRunState()
     plan = _plan()
-    engine = HypothesisEngine.create(state, config=ProfileGuidedInput(command=("profile",))).start(
-        plan, started_round=1
-    )
-    hypothesis = engine.state.active_hypothesis
+    search = _search()
+    started = search.start(state, plan, round_number=1, current_commit=None, records=[])
+    hypothesis = started.hypothesis
     assert hypothesis is not None
     return (
-        PlanRequest(1, state, [], CarryOver(), None, None, 0, ProfileGuidanceView()),
-        AttemptRequest(1, plan, "final_round", [], hypothesis, engine, "decode"),
-        AttemptState(agent_run_state=engine.state, feedback=None, retry=1),
+        PlanRequest(1, state, [], CarryOver(), None, None, 0, FocusView()),
+        AttemptRequest(1, plan, "final_round", [], hypothesis, FocusView(), "decode"),
+        AttemptState(agent_run_state=started.state, feedback=None, retry=1),
     )
 
 
@@ -174,10 +178,11 @@ def test_roles_open_close_and_plan_context(tmp_path: Path) -> None:
 def test_plan_reprompts_reused_id_then_accepts_new_one(tmp_path: Path) -> None:
     turns = cast("Any", _turns(tmp_path))
     turns.designer = _handle()
-    existing = (
-        HypothesisEngine.create(AgentRunState(), config=None).start(_plan(), started_round=1).state
-    )
-    request = PlanRequest(2, existing, [], CarryOver(), None, None, 0, ProfileGuidanceView())
+    search = _search()
+    existing = search.start(
+        search.initial(), _plan(), round_number=1, current_commit=None, records=[]
+    ).state
+    request = PlanRequest(2, existing, [], CarryOver(), None, None, 0, FocusView())
     turns.ctx.agents.turn = AsyncMock(side_effect=[_plan(), _plan(hypothesis_id="h2")])
     result = asyncio.run(turns.plan(request))
     assert result.hypothesis_id == "h2"
@@ -203,7 +208,8 @@ def test_plan_rejects_duplicate_self_and_existing_hypothesis_updates(tmp_path: P
             ),
             state,
         )
-    existing = HypothesisEngine.create(state, config=None).start(_plan(), started_round=1).state
+    search = _search()
+    existing = search.start(state, _plan(), round_number=1, current_commit=None, records=[]).state
     with pytest.raises(InvalidPlanError, match="already used"):
         turns._validate_plan(_plan(), existing)
 

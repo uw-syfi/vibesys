@@ -27,7 +27,6 @@ from vibesys.loops.multi.decisions import (
 )
 from vibesys.loops.multi.session import MultiSession
 from vibesys.loops.multi.turns import MultiAgentTurns
-from vibesys.loops.profile_multi.controller import HypothesisEngine as ProfileHypothesisEngine
 from vibesys.loops.profile_multi.session import ProfileMultiSession
 from vibesys.loops.single.session import SingleSession
 from vibesys.orchestration.runtime import GateRunResult
@@ -150,6 +149,15 @@ def test_profile_guidance_prepares_cursor_before_designer(
 
     session.profile = _ProfilePolicy(config)
 
+    from vibesys.search.profile_focus import ProfileFocus, ProfileFocusConfig  # noqa: PLC0415
+
+    session.focus = ProfileFocus(
+        ProfileFocusConfig(
+            plateau_min_rounds=config.min_measured_rounds,
+            min_relative_improvement=config.min_relative_improvement,
+        )
+    )
+
     async def fake_commit(*, sequence: int, writes: object, **kwargs: object) -> None:
         del sequence, writes
         calls.append(f"checkpoint:{kwargs['label']}")
@@ -159,8 +167,7 @@ def test_profile_guidance_prepares_cursor_before_designer(
         state=SimpleNamespace(commit=fake_commit),
     )
     session.state = AgentRunState()
-    session.engine = ProfileHypothesisEngine.create(session.state, config=config)
-    session.records = []
+    session.search = _search()
     session.carry = CarryOver()
     session.round_number = 1
     session.last_profile_focus = "decode"
