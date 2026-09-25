@@ -66,8 +66,23 @@ profiler injects into child processes, and something in that process tree
 can print a stray line to stdout (e.g. a capability warning) that lands
 inside `$PORT` via the substitution and gets word-split into `vllm serve`'s
 argv, producing an unrelated `unrecognized arguments` failure with no data
-captured. Prefer a fixed port chosen and checked in `ready_command`, or a
-bash builtin that spawns no profiled child, e.g.:
+captured. This is not fixed by moving the read to `$(cat ...)`: `cat` is
+still a forked process the profiler can inject into, so it reproduces the
+same failure one step later, and no profiler-side quiet setting suppresses
+it either (confirmed on real MI210 hardware). Pick the port in
+`setup_command` instead -- it runs to completion before `command`, entirely
+outside the profiler -- write it with a plain redirect, then read it back
+in `command` with the `read` builtin (no subshell, nothing to inject into):
+
+```bash
+# setup_command:
+python3 -c "..." > /tmp/port
+# command:
+read -r PORT < /tmp/port
+```
+
+Or prefer a fixed port chosen and checked in `ready_command`, or a bash
+builtin that spawns no profiled child, e.g.:
 
 ```bash
 for ((p=8100; p<9000; p++)); do

@@ -70,10 +70,68 @@ and using the result unquoted (`--port $PORT`) word-splits it into extra,
 unexpected arguments for the real target. Observed for real: a port-picker
 helper's `$(python3 -c "...")` output picked up a stray diagnostic line
 from the profiling tool, and the server rejected its own `--port` argument
-as a result. Write the value to a file and read it back, or use a plain
-bash loop/builtin with no subshell capturing stdout (e.g. an `/dev/tcp`
-probe loop for port selection), instead of `$(...)` inside a capture tool's
-lifecycle arguments.
+as a result.
+
+This is not just a quoting problem, and no profiler-side env var or CLI
+flag fixes it: on real MI210 hardware, no combination of log-level/quiet
+env vars (7 candidates tried, plus `rocprofv3 --log-level fatal`)
+suppressed the injected tool's own banner. The only reliable fix is to
+never let a value-computing helper run under the profiler in the first
+place.
+
+The safe pattern: pick the value in `setup_command` (every capture tool
+takes one; it runs to completion *before* `command` starts, entirely
+outside the profiler), write it with a plain redirect, then have `command`
+read it back with a shell builtin, never a command substitution:
+
+```bash
+# setup_command (runs unprofiled, before command):
+python3 -c "..." > /tmp/port   # plain redirect, not $(...)
+
+# command (runs under the profiler):
+read -r PORT < /tmp/port       # builtin read, not PORT=$(cat /tmp/port)
+```
+
+`read -r ... < file` is a shell builtin: it never forks a subprocess, so
+there is nothing for the profiling tool to inject into and nothing that can
+leak a diagnostic line into the value. `PORT=$(cat /tmp/port)` looks safer
+than the original `$(python3 -c "...")` but is not: `cat` is still a forked
+process the profiling tool can inject into, so it reintroduces the exact
+same risk one level removed. Never use any `$(...)` form for a value a
+profiled command needs, including `$(cat ...)`, whether it appears in
+`command`, `ready_command`, or `load_command` -- all three run under the
+profiler. `setup_command` is the one lifecycle step that does not: use it
+for any value-computing step, not just port selection.
+
+## MCP client tool-call timeout
+
+A `profile_*` capture tool call does not return until the whole lifecycle
+finishes: for a server capture this can take 10-25 minutes (weight load,
+warmup, the benchmark run, then the post-stop flush). Set the MCP client's
+own tool-call timeout above the capture's `timeout_s` (`profile_ops`
+defaults `timeout_s` to 1800s), not the framework's or model's default
+timeout for a "normal" tool call. A client that abandons the call (times
+out, or the session disconnects) does stop the capture -- the server
+notices the cancellation and tears down the target process tree the same
+way a timeout would, so nothing keeps running on the GPU unsupervised --
+but the abandoned call still loses the response text, and a second capture
+call made too soon after can find the first one's teardown still in
+progress. Use `captures()` (which returns immediately even while a capture
+is in flight) to check on a capture whose original tool call already timed
+out client-side, and expect a "busy: ..." reply, not a queued capture, if
+you call a `profile_*` tool again before the prior one's teardown settles:
+this server runs one GPU-using capture at a time per process.
+
+## `profile_counters` cost: one target run per packed pass, not per counter set
+
+`profile_counters` packs the requested counter sets into as few rocprofv3
+passes as it can (see `counters.py`'s packing model); each *pass*, not each
+*requested set*, re-runs the whole profiled workload from scratch. Two sets
+that pack into one pass cost one target run together; two sets that don't
+pack cost two. The tool's own output reports how many passes were planned
+and how many actually ran (a rejected packed pass falls back to one pass
+per set, raising the run count above the planned count) -- read that before
+assuming a given `sets=[...]` list costs `len(sets)` full workload runs.
 
 ## Server captures default to the load-phase window
 

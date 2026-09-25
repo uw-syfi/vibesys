@@ -116,11 +116,16 @@ different follow-up: replay timing and inter-replay gaps for graphed decode,
 
 ### PMC counters: `profile_counters` + drill-downs (`counters.py`): one hardware ceiling for one hot kernel
 
-`profile_counters` captures one hardware pass per requested counter set (at
-most **4 counters per pass**; a job that forces multi-pass collection has
-been reported to trigger a GPU hang on CDNA hardware). Give each requested
-counter set its own output; never combine sets into one pass. Target one
-already-identified hot kernel; this is not a whole-run tool.
+`profile_counters` packs the requested counter sets into as few rocprofv3
+hardware passes as it can (real MI210 validation: `mfma`+`hbm` and
+`mfma`+`l2` pack into one pass; `l2`+`hbm` do not and stay separate) instead
+of always spending one pass per set, then automatically falls back to
+splitting a pass rocprofv3 rejects. **Each pass, not each requested set,
+re-runs the whole profiled workload from scratch**: the tool's output
+states how many passes were planned vs. actually run (a fallback split
+raises the run count above the plan), so read that before assuming
+`len(sets)` full workload runs. Target one already-identified hot kernel;
+this is not a whole-run tool.
 
 | Drill-down | Purpose |
 | ---------- | ------- |
@@ -185,11 +190,22 @@ reference/candidate reps, never compare across sessions or boxes).
 ## Capturing a profile
 
 Capture is a long-running step; call the appropriate `profile_*` tool
-before calling any drill-down.
+before calling any drill-down. **A server capture can take 10-25 minutes**
+(weight load, warmup, the benchmark run, then the post-stop flush): if your
+MCP client enforces its own tool-call timeout, it must be set above the
+capture's `timeout_s`, not left at whatever default applies to a normal,
+fast tool call. Abandoning a call (a client-side timeout, or a disconnect)
+does stop the capture server-side -- the target process tree is torn down
+the same way a `timeout_s` expiry would be -- but you lose the response
+text, and calling a `profile_*` tool again immediately afterward can get a
+"busy: ..." reply while that teardown is still settling: this server runs
+one GPU-using capture at a time per process. `captures()` returns
+immediately (even while a capture is in flight) and can confirm what
+actually happened to a call whose response you lost.
 
 1. Read the objective, candidate contract, manifest, build/startup commands, and benchmark `--help` output to understand which implementation and process the workload exercises{% if benchmark_command is defined and benchmark_command %}: `{{ benchmark_command }} --help`{% endif %}. Do not assume a filename, language, or launcher.
 2. Stop any stale candidate processes from previous attempts.
-3. Fill `command`/`env`/`ready_command`/`load_command`/`stop_signal`/`grace_s` from the candidate's declared startup contract and, where the candidate is a known serving engine, that engine's file under `serving-systems/references/engines/` (start from the index at `serving-systems/references/tooling/profiling-serving-engines.md`). `command`/`ready_command`/`load_command` may be multi-line shell text (heredocs, embedded quotes, a multi-line `python3 -c "..."`): each is written to its own script file before being run, so nothing between here and the shell that executes it re-tokenizes it. **Avoid `$(...)` command substitution for a value the launch command needs (e.g. picking a free port)** inside these strings: the profiling tool can be injected into every process in the launched tree, including a small helper spawned just for that substitution, and a diagnostic line that helper's injected tool prints to its own stdout lands inside the captured value and corrupts it (seen for real: a port helper's `$(...)` output picked up an unrelated diagnostic line and the resulting `--port <corrupted>` argument made the real target reject its own arguments). Write the value to a file and read it back, or probe with a loop that has no subshell capturing stdout, instead. **Prefer a single-process, non-serving `command`** that exits on its own once the workload finishes over wrapping a long-running server: `rocprofv3` only flushes its trace buffers on a clean process exit, so a server that gets killed instead of exiting cleanly can silently lose the trace even though the run otherwise looked fine. If a server capture is unavoidable, set `stop_signal` to a graceful signal (never a hard kill of the process tree) and give `grace_s` a generous value: the post-exit flush to disk can itself take minutes and scales with how much was traced, not with how long the run took.
+3. Fill `command`/`env`/`ready_command`/`load_command`/`setup_command`/`stop_signal`/`grace_s` from the candidate's declared startup contract and, where the candidate is a known serving engine, that engine's file under `serving-systems/references/engines/` (start from the index at `serving-systems/references/tooling/profiling-serving-engines.md`). `command`/`ready_command`/`load_command`/`setup_command` may be multi-line shell text (heredocs, embedded quotes, a multi-line `python3 -c "..."`): each is written to its own script file before being run, so nothing between here and the shell that executes it re-tokenizes it. **Avoid `$(...)` command substitution for a value the launch command needs (e.g. picking a free port)** inside `command`/`ready_command`/`load_command`: the profiling tool is injected into every process in that launched tree, including a small helper spawned just for that substitution, and a diagnostic line that helper's injected tool prints to its own stdout lands inside the captured value and corrupts it (seen for real: a port helper's `$(...)` output picked up an unrelated diagnostic line and the resulting `--port <corrupted>` argument made the real target reject its own arguments; confirmed on real MI210 hardware that no profiler-side env var or flag suppresses this). The safe pattern: compute the value in `setup_command` -- it runs to completion *before* `command`, entirely outside the profiler -- with a plain redirect, then have `command` read it back with the `read` builtin: `setup_command` does `python3 -c "..." > /tmp/port`, `command` does `read -r PORT < /tmp/port`, never `$(cat /tmp/port)` or any other `$(...)` form, which reintroduces the same injection risk one step later since `cat` is itself a forked process running inside `command`'s tree. A nonzero `setup_command` exit stops the capture immediately (no target ever started) rather than letting a corrupted value reach the target. **Prefer a single-process, non-serving `command`** that exits on its own once the workload finishes over wrapping a long-running server: `rocprofv3` only flushes its trace buffers on a clean process exit, so a server that gets killed instead of exiting cleanly can silently lose the trace even though the run otherwise looked fine. If a server capture is unavoidable, set `stop_signal` to a graceful signal (never a hard kill of the process tree) and give `grace_s` a generous value: the post-exit flush to disk can itself take minutes and scales with how much was traced, not with how long the run took.
 4. Pre-warm under load before the traced window starts (CRITICAL on ROCm: first-time AITER/Triton JIT resolution and any `TunableOp`/AITER online tuning take minutes and must not land inside the captured window). This is also where HIP-graph capture happens for graph-mode serving; keep it outside the traced window so the trace holds only steady-state replay kernels, not one-time capture kernels. Use `load_command` for a separate untraced warmup phase if the tool supports one, or bake a warmup step into `command` itself.
 5. Identify the process that actually issues HIP kernels before scoping the capture. A serving engine's request-handling worker commonly runs in a process separate from its API server/driver; a driver-only capture shows near-zero GPU activity by construction: that is "wrong process," not "the GPU is idle." For tensor-parallel serving, capture each worker independently.
 6. Keep the traced window representative and request CSV-only output where the tool exposes that choice: a multi-minute full trace is unreadable, and JSON output duplicates every CSV's content inside one blob and can reach GB scale at serving-workload row counts for zero extra information. Request the extra HIP-runtime-trace kind only when `cpu_overhead`/`graphs`/launch-bound analysis is actually needed: it traces one HIP runtime API call per kernel launch/memcpy/event, so on a batched-decode workload it typically runs 2-4x the size of the kernel trace it's paired with.
