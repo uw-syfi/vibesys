@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 from pydantic import ValidationError
 
@@ -13,6 +15,8 @@ from vibesys.loops.evolve.orchestration import (
     descriptor_from_options,
     options_from_descriptor,
 )
+from vibesys.loops.evolve.run import _resolve_selector
+from vibesys.search.population.models import OpenEvolveSelectorConfig
 from vs_project.api import OrchestrationDescriptor
 
 
@@ -101,3 +105,58 @@ def test_evolve_descriptor_rejects_wrong_id_or_version() -> None:
 
     with pytest.raises(ConfigurationError, match="unsupported evolve"):
         options_from_descriptor(wrong)
+
+
+def _selector_options(
+    *,
+    search_policy: Literal["vibesys", "openevolve"] | None,
+    openevolve_config: OpenEvolveSelectorConfig | None,
+) -> EvolveOptions:
+    return EvolveOptions(
+        max_generations=1,
+        children_per_generation=1,
+        k_top_inspirations=0,
+        k_random_inspirations=0,
+        selection_temperature=0.5,
+        search_policy=search_policy,
+        openevolve_population_size=(
+            openevolve_config.population_size if openevolve_config else None
+        ),
+        openevolve_archive_size=openevolve_config.archive_size if openevolve_config else None,
+        openevolve_num_islands=openevolve_config.num_islands if openevolve_config else None,
+        openevolve_migration_interval=(
+            openevolve_config.migration_interval if openevolve_config else None
+        ),
+        openevolve_migration_rate=(openevolve_config.migration_rate if openevolve_config else None),
+        frontier_bias=0.7,
+        bootstrap_max_attempts=1,
+        keep_deployments=False,
+        max_parallelism=1,
+    )
+
+
+def test_programmatic_openevolve_config_infers_policy() -> None:
+    """A run built from an ``OpenEvolveSelectorConfig`` (not from CLI flags)
+    still resolves to the OpenEvolve selector without an explicit policy."""
+    options = _selector_options(
+        search_policy=None, openevolve_config=OpenEvolveSelectorConfig(num_islands=1)
+    )
+
+    selector, config = _resolve_selector(options, existing=None)
+
+    assert selector == "openevolve"
+    assert config is not None
+    assert config.num_islands == 1
+
+
+def test_programmatic_openevolve_config_rejects_vibesys_policy() -> None:
+    # ``EvolveOptions`` itself already forbids constructing this combination
+    # (its ``_validate_search_policy_settings`` validator); ``model_copy``
+    # bypasses that validator, so it can still build one to exercise
+    # ``_resolve_selector``'s own defensive check.
+    options = _selector_options(search_policy=None, openevolve_config=None).model_copy(
+        update={"search_policy": "vibesys", "openevolve_num_islands": 3},
+    )
+
+    with pytest.raises(ValueError, match="requires the OpenEvolve search policy"):
+        _resolve_selector(options, existing=None)

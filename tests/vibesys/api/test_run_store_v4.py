@@ -1,11 +1,4 @@
-"""Read-model compatibility for version 4 run manifests.
-
-# TODO(stack PR 08): import EvolveState from vibesys.loops.evolve.state and  # noqa: TD003, FIX002
-# build `expected` from it once evolve's migration lands the real
-# population/metric-space/generation triple behind that name; at this base
-# EvolutionStateStore.projection() takes no state argument and reads
-# whatever was committed to the namespace directly.
-"""
+"""Read-model compatibility for version 4 run manifests."""
 
 from __future__ import annotations
 
@@ -17,7 +10,9 @@ from vibesys.api import OrchestrationRegistry
 from vibesys.api.contracts import RunStatus
 from vibesys.api.store import open_run_store, portable_history_snapshots
 from vibesys.context import RunSetup
-from vibesys.loops.evolve.state import EvolutionStateStore
+from vibesys.loops.evolve.state import EvolutionStateStore, EvolveState
+from vibesys.search.population.models import PopulationConfig
+from vibesys.search.population.search import PopulationSearch
 from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
@@ -81,7 +76,10 @@ def test_evolve_v4_run_remains_visible_in_run_store(tmp_path: Path) -> None:
     assert direct.status is RunStatus.UNKNOWN
     assert direct.run_id == manifest.run_id
     store_ = EvolutionStateStore(project.state.portable_namespace(manifest.run_id, "evolve"))
-    expected = store_.projection()
+    state = store_.load() or EvolveState(
+        population=PopulationSearch(PopulationConfig(seed=0)).initial()
+    )
+    expected = store_.projection(state)
     assert direct.projection == expected.model_dump(mode="json")
     assert store.list_runs() == [direct]
 

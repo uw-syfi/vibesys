@@ -69,7 +69,6 @@ from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
 )
-from vibesys.run.recovery import RecoveryWorkspace
 from vibesys.run.round_transaction import (
     MultiSlotRoundTransactionCoordinator,
     RoundRecoveryOutcome,
@@ -118,7 +117,6 @@ class RunSetup:
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
     ) = None
-    resume_recovery: Callable[[RecoveryWorkspace], None] | None = None
     start_hints: RunStartHints | None = None
     memory_paths: tuple[str, ...] = ()
     """Workspace-relative paths the strategy writes agent memory into.
@@ -686,16 +684,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
                     recovery = round_transaction_coordinator.recover()
                     if recovery is not RoundRecoveryOutcome.NO_TRANSACTION:
                         logger.lprint(f"[project] recovered round transaction: {recovery.value}")
-                if setup.resume_recovery is not None:
-                    if setup.state_namespace is None:
-                        raise TypeError("resume recovery requires a state namespace")  # noqa: TRY003
-                    setup.resume_recovery(
-                        RecoveryWorkspace(
-                            project,
-                            git,
-                            project.state.portable_namespace(run_id, setup.state_namespace),
-                        )
-                    )
                 if decision.descriptor is not None:
                     if decision.requires_clean_workspace:
                         pending = git.pending_changes()

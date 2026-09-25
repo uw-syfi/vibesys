@@ -195,11 +195,6 @@ class RunContext:
         self.control = _RunControl(integration, debug=request.debug)
         self.state = _RunState(self)
         self.gates = _Evaluator(self)
-        # TODO(stack PR 08): remove. `ctx.evaluator` is the pre-rename spelling of  # noqa: TD003, FIX002
-        # `ctx.gates`; still called directly by unmigrated single/multi/profile_multi/
-        # profile_single (PR 07) and evolve (PR 08). Drop once evolve's migration
-        # removes the last caller.
-        self.evaluator = self.gates
         self.workspaces = _Workspaces(self)
         self.agents = _Agents(self)
         self.environment = _Environment(self)

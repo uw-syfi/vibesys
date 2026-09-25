@@ -272,7 +272,7 @@ depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestra
 
 [[modules]]
 path = "vibesys.loops.evolve"
-depends_on = [ "vs_project", "vibesys.prompts", "vibesys", "vibesys.domains", "vibesys.render", "vibesys.run", "vs_agent", "vs_loop_state", "vibesys.orchestration", "vibesys.orchestration.runtime", "vibesys.evaluators", "vibesys.runtime", "vibesys.roles"]
+depends_on = [ "vs_project", "vibesys.prompts", "vibesys", "vibesys.domains", "vibesys.render", "vibesys.run", "vs_agent", "vs_loop_state", "vibesys.orchestration", "vibesys.orchestration.runtime", "vibesys.evaluators", "vibesys.runtime", "vibesys.roles", "vibesys.search.population"]
 
 [[modules]]
 path = "vibesys.run"
@@ -420,4 +420,4 @@ depends_on = [ "vibesys.loops.evolve.entrypoint", "vibesys.orchestration.contrac
 
 [[modules]]
 path = "vibesys.loops.evolve.entrypoint"
-depends_on = ["vibesys.loops.evolve", "vs_project", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.evaluators", "vs_loop_state"]
+depends_on = ["vibesys.loops.evolve", "vs_project", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.evaluators", "vs_loop_state", "vibesys.search.population"]
