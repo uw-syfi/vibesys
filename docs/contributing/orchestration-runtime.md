@@ -18,21 +18,33 @@ layer imports only the ones below it.
 | `prompts/` | every Jinja template, under `roles/<role>/`, `loops/<strategy>/`, and a `shared/` fallback root | Python policy |
 | `orchestration/` (the host, `RunContext`) | all side effects and invariants | strategy knowledge |
 
+`tach.toml` enforces this direction as an import ratchet, grouped into four
+layers: `loops` > `roles_search` (`roles/` and `search/` together) >
+`orchestration_host` > `prompts_and_lower_libs` (`prompts/` and the
+mechanics libraries below it). A module in a layer may depend only on
+modules in the same or a strictly lower layer; `uv run tach check` fails a
+PR that adds an upward edge.
+
 ## loops/: strategy replaceability
 
-A strategy is its folder + one registry line + its own prompt folder. Six
-strategies are registered today, each a peer of the others: `multi-agent`
-(`loops/multi/`), `single-agent` (`loops/single/`), `profile-guided-multi-agent`
-(`loops/profile_multi/`), `profile-guided-single-agent`
-(`loops/profile_single/`), `plain` (`loops/issue_queue/`), and `evolve`
-(`loops/evolve/`). `loops/registry.py` is the only module that imports every
-strategy; peers never import each other and nothing outside `loops/` imports
-a strategy package directly (`vibesys.loops.registry.built_in_orchestrations()`
-is the only doorway in).
+A strategy is its folder + one registry line + its own prompt folder. Four
+strategy folders are registered today, each a peer of the others: `multi-agent`
+(`loops/multi/`), `single-agent` (`loops/single/`), `plain`
+(`loops/issue_queue/`), and `evolve` (`loops/evolve/`). `loops/registry.py`
+is the only module that imports every strategy; peers never import each
+other and nothing outside `loops/` imports a strategy package directly
+(`vibesys.loops.registry.built_in_orchestrations()` is the only doorway in).
 
-`profile_multi` and `profile_single` are deliberately kept as separate peers
-rather than folded into `multi`/`single`: they compose `roles/` with
-`search/hypothesis` and `search/profile_focus` directly, so they stay small.
+Profiling is an option of `multi` and `single`
+(`AgentOrchestrationOptions.profile_guided`), not a separate strategy
+folder: when set, a strategy composes `roles/` with `search/hypothesis` and
+`search/profile_focus` directly. `profile-guided-multi-agent` and
+`profile-guided-single-agent` stay registered as presets, each a peer
+registry entry that requires `profile_guided` and keeps its own
+orchestration ID and state namespace (`profile_multi`, `profile_single`) so
+existing runs and option files keep working unchanged; they run the same
+`Orchestrator` subclass and prompts as `multi`/`single`, not a separate
+folder.
 
 ## roles/: declarations, not execution
 
@@ -79,6 +91,15 @@ enforced by an architecture test:
   state value (module-level `random.*` calls are forbidden; a `random.Random()`
   instance must immediately restore its state from the persisted value), so
   resume is deterministic.
+
+`search/hypothesis/search.py`'s `HypothesisSearch` is the public facade over
+hypothesis-lifecycle transitions; `multi` and `single` hold one, built from a
+`HypothesisConfig`. `resume(state, metric_space)` recovers a run's last
+committed `HypothesisState` (or starts fresh from `initial()` when there is
+none) and reprojects it onto the current `MetricSpace`, a no-op when the
+metric space is unchanged so calling it unconditionally on every open is
+safe; `initial_carry(records)` seeds the resumed carry-over from any pending
+workspace rollback notice left in the round history.
 
 `search/population/openevolve_selector.py` follows this: it reconstructs
 OpenEvolve's `ProgramDatabase` from `OpenEvolveSelectorState.files` (an
@@ -137,12 +158,18 @@ body calls `tx.commit()`. Declared agent-memory paths
 addition to `preserve`. A failed restore raises `WorkspaceRestoreError`
 consistently, regardless of which strategy triggered it.
 
+**`ctx.workspaces.<handle>.restore_or_warn(revision, *, clean=True, preserve_paths=(), round_label=None)`**
+is for rollback-style restores that must not abort the run: it restores to
+*revision* like `restore`, but on a failed checkout it publishes a framework
+warning instead of raising `WorkspaceRestoreError`, returns `False`, and
+leaves the caller free to retry the same restore on a later round.
+
 **`ctx.gates.run(*, round_number, retry, commit, objectives, record, ...)`**
 runs the accuracy gate then the benchmark gate, recording each outcome once
 through the `GateRecorder` protocol the caller supplies, and returns a typed
 `GateRunResult`. It shares the same lock domain as
 checkpoint/adopt/snapshot, so gate execution and parent-tree Git mutation
-never race.
+never race. It also flushes `ctx.progress`'s pending blocks (see below).
 
 **`ctx.state.commit(*, sequence, writes, ...)`** checkpoints typed writes
 (journal, then Git commit, then publish) and, from the `RunView` diff
@@ -150,27 +177,58 @@ between the previous and newly published state, emits `ROUND_FINISHED` for
 every newly completed round and `EXPERIMENTS_CHANGED` when the experiment
 revision moved. Strategies with no round/revision concept (`evolve`,
 `issue_queue`) see no events derived here. `ctx.state.checkpoint` is the
-lower-level primitive without that event derivation.
+lower-level primitive without that event derivation. Like `ctx.gates.run`,
+it flushes `ctx.progress`'s pending blocks.
+
+**`ctx.progress`** is the host-owned pending framework-log buffer. A
+strategy calls `ctx.progress.declare(path)` once, early, to name its
+progress-board path, then `ctx.progress.note(block)` as pure
+`orchestration/progress_log.py` `render_*` blocks become available; only
+`ctx.state.commit` and `ctx.gates.run` drain and write those blocks to disk,
+so a strategy never renders or writes the board itself.
 
 **Declared agent memory**: `RunSetup.memory_paths` names workspace-relative
 paths a strategy writes agent memory into once; the host preserves them
 across `workspaces.transaction`/restore/adopt, instead of every call site
-passing `preserve_paths=...` itself.
+passing `preserve_paths=...` itself. `orchestration/memory.py` owns these
+paths: the roadmap and the per-round progress log, each supporting two
+layouts (`RunSetup.memory_paths`'s `layout` argument) so a run stays
+scannable at scale, `roadmap.md` + `progress.md` (compact) or
+`roadmap/index.md` + `progress/round-NNNN.md` (directory, one file per
+round). `memory.structured_artifact_root` resolves the framework-owned
+directory beside (or, for legacy `progress.md` runs, a sibling of) the
+progress log, shared with `orchestration/artifacts.py`.
+
+**Typed turn artifacts**: `orchestration/artifacts.py` is where a
+strategy's designer, implementer, and judge roles hand off large evidence
+through files instead of prompt text: a plan, parsed implementer claims,
+framework-executed validation results, and the profiler root, one category
+subdirectory per kind under the structured artifact root. Every typed
+writer goes through the same atomic-write primitive (`write_json` /
+`write_model`). `write_implementer_start_marker` writes an
+`ImplementerStartMarker` (round, attempt) *before* an implementer turn
+runs, so a crash mid-turn still leaves a durable record that the attempt
+began, letting resume recover cleanly instead of silently losing it.
 
 **Tool serving**: `orchestration/tools.py` turns a strategy's generic MCP
 tool descriptor (`vs_agent.expose_as_tools`, a `StdioServerDescriptor`) into
 the concrete `MCPServerSpec` a driver launches: the one place that
 construction happens, so no strategy hand-builds an `MCPServerSpec`.
 
-The former progress board (`agent_run/issue_board.py`) has split into three
-host-owned modules, `loops/` no longer calls it directly: declared agent
-memory (`orchestration/memory.py`: roadmap, progress log, Pareto archive),
-typed turn artifacts (`orchestration/artifacts.py`: plan, implementer
-evidence, validation ledger, profiler root), and the framework log
-(`orchestration/progress_log.py`, already split out earlier). `agent_run/`
-has dissolved entirely.
-
 ## Adding a strategy
+
+First check whether this is really a new strategy or a variant of an
+existing one. If it runs the same round control and prompts as an existing
+strategy with one policy toggle on (as `profile-guided-multi-agent` does
+for `multi`), add an option plus a registered preset instead: extend
+`AgentOrchestrationOptions`, branch on it inside the existing strategy
+folder, and register a second `registry.register(...)` line with its own
+orchestration ID, state namespace, and projector, pointing at an
+`Orchestrator` subclass in the *same* folder. Do not start a new
+`loops/<strategy>/` folder for a variant; that only earns its own folder
+when its round control or prompts genuinely diverge.
+
+For a genuinely new strategy:
 
 1. Create `loops/<strategy>/` with an `Orchestrator` implementing
    `run(ctx) -> bool` and (if it has durable state) a projector.
@@ -210,12 +268,15 @@ scans (no import of the scanned packages required):
 ## Testing
 
 Prefer injecting fakes through `run_orchestration`'s seams over
-monkeypatching: `agent_client_factory` and `backend_factory` are optional
-constructor overrides that default to the real `build_agent_client` and
-`vibesys.backends.get`. Pass a `FakeAgentClient`
+monkeypatching: `agent_client_factory`, `backend_factory`, and
+`gate_executor` are optional constructor overrides that default to the real
+`build_agent_client`, `vibesys.backends.get`, and the real trusted
+accuracy/benchmark command executor. Pass a `FakeAgentClient`
 (`vs_agent.api.testing`), a `FakeComputeBackend` (`vibesys.api.testing`,
-wrapping a `FakeSandbox` from `vs_sandbox.api.testing`) to drive a real
-strategy's `run(ctx)` end to end without a real agent CLI or sandbox.
+wrapping a `FakeSandbox` from `vs_sandbox.api.testing`), and/or a
+`FakeGateExecutor` (`vibesys.orchestration.fake_gates`, also re-exported
+from `vibesys.api.testing`) to drive a real strategy's `run(ctx)` end to end
+without a real agent CLI, sandbox, or gate command.
 
 `tests/vibesys/golden/` drives every registered strategy this way against a
 scripted `FakeAgentClient` and asserts the run's written state and emitted
