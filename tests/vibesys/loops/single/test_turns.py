@@ -34,10 +34,15 @@ from vibesys.orchestration import artifacts
 from vibesys.profilers import ProfilerKind
 from vibesys.roles.common import Verdict
 from vibesys.roles.single_agent import SINGLE_COMBINED, SingleAgentRoundResponse
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.hypothesis import (
+    CarryOver,
+    HypothesisConfig,
+    HypothesisSearch,
+    OrchestratorPlan,
+)
 from vibesys.search.hypothesis.attempts import AttemptState
 from vibesys.search.hypothesis.state import HypothesisState
-from vibesys.search.hypothesis.transitions import CarryOver, start_hypothesis
+from vibesys.search.hypothesis.transitions import start_hypothesis
 from vibesys.search.profile_focus import FocusView, ProfileBottleneck
 
 if TYPE_CHECKING:
@@ -61,6 +66,10 @@ def _plan(hypothesis_id: str) -> OrchestratorPlan:
         pass_criteria="Accuracy passes",  # noqa: S106
         reasoning="Decode is the bottleneck",
     )
+
+
+def _search() -> HypothesisSearch:
+    return HypothesisSearch(HypothesisConfig(max_rounds=2, official_eval_every=2))
 
 
 def _response() -> SingleAgentRoundResponse:
@@ -112,7 +121,7 @@ def _configured_turns(tmp_path: Path) -> SingleAgentTurns:
         official_eval_every=2,
         memory_layout="files",
     )
-    return SingleAgentTurns(cast("RunContext", context), options)
+    return SingleAgentTurns(cast("RunContext", context), options, _search())
 
 
 def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path: Path) -> None:
@@ -166,6 +175,7 @@ async def test_plan_reprompts_reused_hypothesis_and_records_corrected_plan(
 ) -> None:
     state = start_hypothesis(HypothesisState(), _plan("used"), started_round=1)
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
+    turns.search = _search()
     log: list[str] = []
     agent_turn = AsyncMock(side_effect=[_plan("used"), _plan("new")])
     monkeypatch.setattr(
@@ -202,6 +212,7 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     hypothesis = state.active_hypothesis
     assert hypothesis is not None
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
+    turns.search = _search()
     progress = _fake_progress()
     agent_turn = AsyncMock(return_value=_response())
     monkeypatch.setattr(
@@ -242,6 +253,7 @@ def test_validation_rejects_reused_id() -> None:
     plan = _plan("used")
     state = start_hypothesis(HypothesisState(), plan, started_round=1)
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
+    turns.search = _search()
 
     with pytest.raises(InvalidPlanError, match="already used"):
         turns._validate_plan(_plan("used"), state)
