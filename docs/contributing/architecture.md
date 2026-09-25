@@ -213,6 +213,10 @@ graph TD
     vibesys.sandbox --> vibesys.evaluators
     vibesys.sandbox --> vibesys.prompts
     vibesys.sandbox --> vibesys.skypilot
+    vibesys.search.hypothesis --> vibesys
+    vibesys.search.hypothesis --> vibesys.agent_run
+    vibesys.search.hypothesis --> vibesys.evaluators
+    vibesys.search.profile_focus --> vibesys.agent_run
 ```
 
 ## Full module graph
@@ -502,6 +506,12 @@ graph TD
     vibesys.sandbox --> vs_agent
     vibesys.sandbox --> vs_project
     vibesys.sandbox --> vs_sandbox
+    vibesys.search.hypothesis --> vibesys
+    vibesys.search.hypothesis --> vibesys.agent_run
+    vibesys.search.hypothesis --> vibesys.evaluators
+    vibesys.search.hypothesis --> vs_loop_state
+    vibesys.search.profile_focus --> vibesys.agent_run
+    vibesys.search.profile_focus --> vs_loop_state
     vibesys.skypilot --> vs_project
     vs_agent --> vs_loop_state
     vs_agent --> vs_project

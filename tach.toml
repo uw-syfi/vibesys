@@ -178,6 +178,24 @@ path = "vibesys.agent_run"
 depends_on = ["vs_project", "vibesys", "vs_loop_state", "vibesys.orchestration.view", "vibesys.orchestration", "vibesys.evaluators"]
 
 [[modules]]
+# Pure, deterministic search policy: never RunContext/agents/prompts/I/O.
+# `vibesys.agent_run` is an explicit, temporary exception: search.hypothesis
+# and search.profile_focus re-export (not copy) its pydantic state models so
+# persisted JSON stays byte-identical while both packages are live; it is
+# removed once agent_run dissolves into search/. Forbidden: vibesys.loops,
+# vibesys.orchestration, vibesys.prompts, vs_agent (agents/runtime).
+path = "vibesys.search"
+depends_on = []
+
+[[modules]]
+path = "vibesys.search.hypothesis"
+depends_on = ["vibesys", "vibesys.evaluators", "vibesys.agent_run", "vs_loop_state"]
+
+[[modules]]
+path = "vibesys.search.profile_focus"
+depends_on = ["vibesys.agent_run", "vs_loop_state"]
+
+[[modules]]
 path = "vibesys.loops"
 depends_on = []
 
