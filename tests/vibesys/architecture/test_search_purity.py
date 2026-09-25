@@ -4,11 +4,17 @@ Rules (see the orchestration-simplify design brief):
   - No imports of vibesys.orchestration, vibesys.loops, vibesys.roles,
     vibesys.prompts (search answers questions and returns new state; it never
     drives agents, renders prompts, or touches RunContext).
-  - No os / subprocess / pathlib I/O, no module-level ``random`` import (RNG
-    state must live inside the persisted state value), no time/datetime
-    clocks (search must be deterministic and resume-safe).
+  - No os / subprocess / pathlib / time / datetime imports (search must do no
+    I/O and touch no clock; every effect is deterministic and resume-safe).
+  - ``random`` may be imported freely (for the ``Random`` type and
+    ``getstate``/``setstate`` state plumbing), but the module-level RNG
+    functions (``random.random()``, ``random.choice()``, ...) may never be
+    called -- they read/mutate process-global state that resume can't see --
+    and every bare ``random.Random()`` construction must immediately restore
+    its state from the persisted state value, so RNG state always lives in
+    the state value, never in an unseeded instance or the global singleton.
 
-Both checks are pure ``ast`` scans, so they do not require importing
+All three checks are pure ``ast`` scans, so they do not require importing
 ``vibesys.search`` (which would pull in its third-party dependencies).
 """
 
@@ -33,17 +39,16 @@ _ALLOWED_AGENT_RUN_REEXPORTS = {
     "search/profile_focus/state.py",
 }
 
-_FORBIDDEN_CLOCK_OR_IO_MODULES = ("os", "subprocess", "pathlib", "random", "time", "datetime")
+_FORBIDDEN_CLOCK_OR_IO_MODULES = ("os", "subprocess", "pathlib", "time", "datetime")
 
-# Known debt: population/ has not yet moved to fully-deterministic,
-# state-carried RNG (design brief: "solved by state-as-data" for the
-# OpenEvolve selector; PopulationSearch itself still seeds an unseeded
-# `random.Random()` fallback in one path). Keep this allowlist empty over
-# time as RNG state moves entirely into the persisted PopulationState.
-_ALLOWED_IO_OR_RNG_IMPORTS = {
-    "search/population/search.py": {"random"},
-    "search/population/openevolve_selector.py": {"random", "pathlib"},
-}
+# Process-global RNG accessors upstream OpenEvolve code itself reads/writes.
+# ``_upstream_random`` (search/population/openevolve_selector.py) is the one
+# place search/ may call these directly: it swaps the global singleton's
+# state for an explicit, state-derived ``random.Random`` around a call into
+# upstream code that only knows the global RNG, then restores the process's
+# own state in a ``finally``. Every other module-level ``random.<name>()``
+# call reads or mutates state resume can't see, so it stays forbidden.
+_ALLOWED_GLOBAL_RANDOM_CALLS = {"getstate", "setstate"}
 
 
 def _module_level_import_nodes(path: Path) -> list[tuple[ast.stmt, str]]:
@@ -96,7 +101,90 @@ def test_search_has_no_module_level_io_or_clock_imports() -> None:
                 continue
             top = module_name.split(".", 1)[0]
             if top in _FORBIDDEN_CLOCK_OR_IO_MODULES:
-                if top in _ALLOWED_IO_OR_RNG_IMPORTS.get(rel, set()):
-                    continue
                 violations.append(f"{rel}:{node.lineno} imports {module_name}")
-    assert not violations, "search/ has an I/O, RNG, or clock import: " + "; ".join(violations)
+    assert not violations, "search/ has an I/O or clock import: " + "; ".join(violations)
+
+
+def _enclosing_statement_list(tree: ast.AST, target: ast.stmt) -> list[ast.stmt] | None:
+    """Return the statement list that directly contains ``target``, if any."""
+    for node in ast.walk(tree):
+        for field in ("body", "orelse", "finalbody"):
+            body = getattr(node, field, None)
+            if isinstance(body, list) and target in body:
+                return body
+    return None
+
+
+def _is_bare_random_dot(call: ast.Call, attr: str) -> bool:
+    return (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr == attr
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "random"
+    )
+
+
+def _restores_from_state(stmt: ast.stmt, target: str) -> bool:
+    """Whether ``stmt`` is ``<target>.setstate(<expr containing "state">)``."""
+    if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)):
+        return False
+    call = stmt.value
+    if not (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr == "setstate"
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == target
+        and call.args
+    ):
+        return False
+    return "state" in ast.unparse(call.args[0]).lower()
+
+
+def test_search_uses_no_global_rng_and_seeds_every_random_instance() -> None:
+    violations: list[str] = []
+    for path in _SEARCH.rglob("*.py"):
+        rel = str(path.relative_to(_SRC))
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if _is_bare_random_dot(node, "Random"):
+                if node.args or node.keywords:
+                    continue  # seeded directly, e.g. random.Random(config.seed)
+                assign = next(
+                    (
+                        candidate
+                        for candidate in ast.walk(tree)
+                        if isinstance(candidate, ast.Assign)
+                        and candidate.value is node
+                        and len(candidate.targets) == 1
+                        and isinstance(candidate.targets[0], ast.Name)
+                    ),
+                    None,
+                )
+                restored = False
+                if assign is not None:
+                    body = _enclosing_statement_list(tree, assign)
+                    target_node = assign.targets[0]
+                    if body is not None and isinstance(target_node, ast.Name):
+                        tail = body[body.index(assign) + 1 :]
+                        restored = any(
+                            _restores_from_state(later, target_node.id) for later in tail
+                        )
+                if not restored:
+                    violations.append(
+                        f"{rel}:{node.lineno} random.Random() is never seeded and its "
+                        "state is not immediately restored from a state value"
+                    )
+                continue
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "random"
+                and node.func.attr not in _ALLOWED_GLOBAL_RANDOM_CALLS
+                and node.func.attr != "Random"
+            ):
+                violations.append(
+                    f"{rel}:{node.lineno} calls the module-global random.{node.func.attr}(...)"
+                )
+    assert not violations, "search/ RNG use is not state-derived: " + "; ".join(violations)
