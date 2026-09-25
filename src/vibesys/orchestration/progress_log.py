@@ -44,7 +44,7 @@ _HEADING_ROUND = re.compile(r"^## Round (\d+) — ")
 _PROGRESS_HEADER = "# Progress\n\n"
 
 
-def render_framework_accuracy_gate(  # noqa: D103  # tracked: #288
+def render_framework_accuracy_gate(
     round_number: int,
     retry: int,
     *,
@@ -52,6 +52,7 @@ def render_framework_accuracy_gate(  # noqa: D103  # tracked: #288
     passed: bool,
     output: str,
 ) -> str:
+    """Render the framework accuracy-gate result."""
     verdict = "pass" if passed else "fail"
     return (
         f"## Round {round_number} — Framework accuracy gate (attempt {retry})\n"
@@ -61,7 +62,7 @@ def render_framework_accuracy_gate(  # noqa: D103  # tracked: #288
     )
 
 
-def render_framework_benchmark(  # noqa: D103, PLR0913  # tracked: #288
+def render_framework_benchmark(  # noqa: PLR0913  # LW-040106 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     round_number: int,
     retry: int,
     *,
@@ -71,6 +72,7 @@ def render_framework_benchmark(  # noqa: D103, PLR0913  # tracked: #288
     metric_value: float | None,
     output: str,
 ) -> str:
+    """Render framework benchmark metrics and diagnostics."""
     verdict = "pass" if passed else "fail"
     metric_line = (
         f"- **{metric_name}**: {metric_value}\n"
@@ -90,7 +92,8 @@ def _round_number(block: str) -> int:
     heading = block.splitlines()[0]
     match = _HEADING_ROUND.match(heading)
     if match is None:
-        raise ValueError(f"framework log block missing a round heading: {heading!r}")  # noqa: TRY003
+        message = f"framework log block missing a round heading: {heading!r}"
+        raise ValueError(message)
     return int(match.group(1))
 
 

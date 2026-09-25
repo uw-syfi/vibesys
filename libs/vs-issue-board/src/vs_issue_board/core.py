@@ -7,30 +7,39 @@ derived views such as markdown mirrors.
 
 from __future__ import annotations
 
-import builtins  # noqa: TC003  # tracked: #288
 import json
-import os
 import sys
 import traceback
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from threading import RLock
-from typing import Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+if TYPE_CHECKING:
+    import builtins
+    from collections.abc import Callable
 _STORE_VERSION = 1
 
 
-class IssueType(StrEnum):  # noqa: D101  # tracked: #288
+def _issue_not_found(issue_id: int) -> KeyError:
+    """Build the stable lookup error used by issue update paths."""
+    return KeyError(f"issue #{issue_id} not found")
+
+
+class IssueType(StrEnum):
+    """Kinds of work items managed by an issue board."""
+
     BUG = "bug"
     FEATURE = "feature"
     PERF = "perf"
 
 
-class IssueStatus(StrEnum):  # noqa: D101  # tracked: #288
+class IssueStatus(StrEnum):
+    """Lifecycle states for issue-board items."""
+
     OPEN = "open"
     IN_PROGRESS = "in_progress"
     CLOSED = "closed"
@@ -75,6 +84,11 @@ class Issue(BaseModel):
 class IssueBoardLoadError(ValueError):
     """Raised when persisted issue-board state cannot be loaded safely."""
 
+    @classmethod
+    def at_path(cls, path: Path, details: str) -> Self:
+        """Describe why the persisted issue-board file could not be loaded."""
+        return cls(f"cannot load issue board {path}: {details}")
+
 
 class _IssueBoardData(BaseModel):
     """Versioned persistence contract for an issue board."""
@@ -89,21 +103,24 @@ class _IssueBoardData(BaseModel):
     def _valid_issue_identity(self) -> Self:
         issue_ids = [issue.id for issue in self.issues]
         if len(issue_ids) != len(set(issue_ids)):
-            raise ValueError("issue IDs must be unique")  # noqa: TRY003  # tracked: #288
+            message = "issue IDs must be unique"
+            raise ValueError(message)
         if issue_ids and self.next_id <= max(issue_ids):
-            raise ValueError("next_id must be greater than every persisted issue ID")  # noqa: TRY003  # tracked: #288
+            message = "next_id must be greater than every persisted issue ID"
+            raise ValueError(message)
         return self
 
 
 class IssueBoard:
     """Atomic JSON-backed issue tracker."""
 
-    def __init__(  # noqa: D107  # tracked: #288
+    def __init__(
         self,
         path: Path,
         *,
         on_change: Callable[[], None] | None = None,
     ) -> None:
+        """Open the JSON issue board with an optional change callback."""
         self.path = Path(path)
         self._lock = RLock()
         self._on_change: Callable[[], None] | None = None
@@ -123,47 +140,39 @@ class IssueBoard:
         try:
             loaded = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise IssueBoardLoadError(  # noqa: TRY003  # tracked: #288
-                f"cannot load issue board {self.path}: invalid JSON: {exc}"
-            ) from exc
+            raise IssueBoardLoadError.at_path(self.path, f"invalid JSON: {exc}") from exc
         except OSError as exc:
-            raise IssueBoardLoadError(  # noqa: TRY003  # tracked: #288
-                f"cannot load issue board {self.path}: cannot read store: {exc}"
-            ) from exc
+            raise IssueBoardLoadError.at_path(self.path, f"cannot read store: {exc}") from exc
         if not isinstance(loaded, dict):
-            raise IssueBoardLoadError(  # noqa: TRY003  # tracked: #288
-                f"cannot load issue board {self.path}: expected a JSON object"
-            )
+            raise IssueBoardLoadError.at_path(self.path, "expected a JSON object")
         if "version" not in loaded:
-            raise IssueBoardLoadError(  # noqa: TRY003  # tracked: #288
-                f"cannot load issue board {self.path}: unsupported version "
-                f"None; expected {_STORE_VERSION}"
+            raise IssueBoardLoadError.at_path(
+                self.path,
+                f"unsupported version None; expected {_STORE_VERSION}",
             )
         if loaded["version"] != _STORE_VERSION:
-            raise IssueBoardLoadError(  # noqa: TRY003  # tracked: #288
-                f"cannot load issue board {self.path}: unsupported version "
-                f"{loaded['version']!r}; expected {_STORE_VERSION}"
+            raise IssueBoardLoadError.at_path(
+                self.path,
+                f"unsupported version {loaded['version']!r}; expected {_STORE_VERSION}",
             )
         try:
             data = _IssueBoardData.model_validate(loaded)
         except ValidationError as exc:
-            raise IssueBoardLoadError(  # noqa: TRY003  # tracked: #288
-                f"cannot load issue board {self.path}: invalid store structure: {exc}"
+            raise IssueBoardLoadError.at_path(
+                self.path,
+                f"invalid store structure: {exc}",
             ) from exc
         return data
 
     def _save_locked(self) -> None:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(self._data.model_dump_json(indent=2), encoding="utf-8")
-        os.replace(tmp, self.path)  # noqa: PTH105  # tracked: #288
+        tmp.replace(self.path)
         if self._on_change is not None:
             try:
                 self._on_change()
-            except Exception:  # noqa: BLE001
-                print(  # noqa: T201  # tracked: #288
-                    "[IssueBoard] on_change callback raised; ignoring:",
-                    file=sys.stderr,
-                )
+            except Exception:  # noqa: BLE001  # lint-waiver: LW-010100 [BLE001]; callbacks are caller code, and persistence must survive any callback failure.
+                sys.stderr.write("[IssueBoard] on_change callback raised; ignoring:\n")
                 traceback.print_exc(file=sys.stderr)
 
     def reload(self) -> None:
@@ -176,24 +185,24 @@ class IssueBoard:
             if stored.id == issue.id:
                 self._data.issues[idx] = issue.model_copy(deep=True)
                 return
-        raise KeyError(f"issue #{issue.id} not found")  # noqa: TRY003  # tracked: #288
+        raise _issue_not_found(issue.id)
 
-    def create(  # noqa: D102  # tracked: #288
+    def create(
         self,
         *,
-        type: IssueType | str,  # noqa: A002  # tracked: #288
+        type: IssueType | str,  # noqa: A002  # lint-waiver: LW-010101 [A002]; `type` is the established public create keyword and serialized issue field name.
         title: str,
         description: str,
         created_by: str,
         iteration: int,
     ) -> Issue:
-        if not isinstance(type, IssueType):
-            type = IssueType(type)  # noqa: A001  # tracked: #288
+        """Create and persist a new open issue with its initial history event."""
+        issue_type = IssueType(type) if not isinstance(type, IssueType) else type
         with self._lock:
-            now = datetime.now().isoformat()  # noqa: DTZ005  # tracked: #288
+            now = datetime.now(UTC).isoformat()
             issue = Issue(
                 id=self._data.next_id,
-                type=type,
+                type=issue_type,
                 title=title.strip(),
                 description=description.strip(),
                 status=IssueStatus.OPEN,
@@ -216,14 +225,15 @@ class IssueBoard:
             self._save_locked()
             return issue
 
-    def get(self, issue_id: int) -> Issue | None:  # noqa: D102  # tracked: #288
+    def get(self, issue_id: int) -> Issue | None:
+        """Return a detached copy of an issue, or ``None`` when absent."""
         with self._lock:
             for issue in self._data.issues:
                 if issue.id == issue_id:
                     return issue.model_copy(deep=True)
         return None
 
-    def update_status(  # noqa: D102, PLR0913  # tracked: #288
+    def update_status(  # noqa: PLR0913  # lint-waiver: LW-010193 [PLR0913]; Preserve IssueBoard.update_status's named-argument contract because callers pass these independent settings directly.
         self,
         issue_id: int,
         status: IssueStatus | str,
@@ -233,13 +243,14 @@ class IssueBoard:
         note: str = "",
         payload: dict[str, Any] | None = None,
     ) -> Issue:
+        """Change issue status and append the corresponding history event."""
         if not isinstance(status, IssueStatus):
             status = IssueStatus(status)
         with self._lock:
             issue = self.get(issue_id)
             if issue is None:
-                raise KeyError(f"issue #{issue_id} not found")  # noqa: TRY003  # tracked: #288
-            now = datetime.now().isoformat()  # noqa: DTZ005  # tracked: #288
+                raise _issue_not_found(issue_id)
+            now = datetime.now(UTC).isoformat()
             old_status = issue.status
             issue.status = status
             issue.updated_at = now
@@ -272,7 +283,7 @@ class IssueBoard:
             for issue in self._data.issues:
                 if issue.status is not IssueStatus.BLOCKED:
                     continue
-                now = datetime.now().isoformat()  # noqa: DTZ005  # tracked: #288
+                now = datetime.now(UTC).isoformat()
                 issue.status = IssueStatus.OPEN
                 issue.attempts = 0
                 issue.closed_iter = None
@@ -291,7 +302,7 @@ class IssueBoard:
                 self._save_locked()
         return reopened
 
-    def increment_attempts(  # noqa: D102  # tracked: #288
+    def increment_attempts(
         self,
         issue_id: int,
         *,
@@ -300,11 +311,12 @@ class IssueBoard:
         note: str = "",
         payload: dict[str, Any] | None = None,
     ) -> Issue:
+        """Increment an issue's attempt count and append an attempt event."""
         with self._lock:
             issue = self.get(issue_id)
             if issue is None:
-                raise KeyError(f"issue #{issue_id} not found")  # noqa: TRY003  # tracked: #288
-            now = datetime.now().isoformat()  # noqa: DTZ005  # tracked: #288
+                raise _issue_not_found(issue_id)
+            now = datetime.now(UTC).isoformat()
             issue.attempts += 1
             issue.updated_at = now
             issue.history.append(
@@ -324,22 +336,24 @@ class IssueBoard:
     # This method shadows the builtin ``list`` inside the class body, which is
     # the scope where method annotations are resolved.  Return annotations that
     # need the builtin sequence type must therefore spell it ``builtins.list``.
-    def list(  # noqa: D102  # tracked: #288
+    def list(
         self,
         *,
         status: IssueStatus | str | None = None,
-        type: IssueType | str | None = None,  # noqa: A002  # tracked: #288
+        type: IssueType | str | None = None,  # noqa: A002  # lint-waiver: LW-010102 [A002]; preserve the public issue-type filter keyword used by callers.
     ) -> builtins.list[Issue]:
+        """Return detached issue copies filtered by optional status and type."""
         if status is not None and not isinstance(status, IssueStatus):
             status = IssueStatus(status)
-        if type is not None and not isinstance(type, IssueType):
-            type = IssueType(type)  # noqa: A001  # tracked: #288
+        issue_type = (
+            type if isinstance(type, IssueType) else IssueType(type) if type is not None else None
+        )
         with self._lock:
             out: list[Issue] = []
             for issue in self._data.issues:
                 if status is not None and issue.status != status:
                     continue
-                if type is not None and issue.type != type:
+                if issue_type is not None and issue.type != issue_type:
                     continue
                 out.append(issue.model_copy(deep=True))
         return out

@@ -1,4 +1,6 @@
-from enum import StrEnum  # noqa: D100  # tracked: #288
+"""Shared VibeSys paths and constant values."""
+
+from enum import StrEnum
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -15,7 +17,9 @@ GREEN = "\033[32m"
 RESET = "\033[0m"
 
 
-class DomainName(StrEnum):  # noqa: D101  # tracked: #288
+class DomainName(StrEnum):
+    """Known optimization domains with framework-owned integrations."""
+
     LLM_SERVING = "llm-serving"
     GENERIC = "generic"
     MICROSERVICES = "microservices"

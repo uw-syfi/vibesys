@@ -1,6 +1,7 @@
 """Filesystem contract tests for the plain-loop state adapter."""
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from tests.support.run_execution import run_execution_record
@@ -15,7 +16,7 @@ from vs_project.api import (
 )
 
 
-def _store(tmp_path) -> IssueQueueStateStore:  # noqa: ANN001
+def _store(tmp_path: Path) -> IssueQueueStateStore:
     project = Project.open(tmp_path)
     project.state.create_project("test")
     run = project.state.new_run_manifest(
@@ -39,7 +40,7 @@ def _store(tmp_path) -> IssueQueueStateStore:  # noqa: ANN001
     return IssueQueueStateStore(namespace)
 
 
-def test_plain_state_store_round_trips_typed_state(tmp_path) -> None:  # noqa: ANN001
+def test_plain_state_store_round_trips_typed_state(tmp_path: Path) -> None:
     store = _store(tmp_path)
     cursor = PlainLoopCursor(
         round_idx=2,
@@ -63,7 +64,7 @@ def test_plain_state_store_round_trips_typed_state(tmp_path) -> None:  # noqa: A
     assert store.load_performance().records == (performance,)
 
 
-def test_plain_state_store_distinguishes_missing_from_corrupt(tmp_path) -> None:  # noqa: ANN001
+def test_plain_state_store_distinguishes_missing_from_corrupt(tmp_path: Path) -> None:
     store = _store(tmp_path)
     assert store.load_cursor() is None
 

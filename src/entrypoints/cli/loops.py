@@ -138,23 +138,21 @@ def _load_metric_space_toml(input_path: Path) -> MetricSpace:
         name = entry.get("name")
         direction = entry.get("direction")
         if not name or direction not in ("max", "min"):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"Malformed entry in {path}: {entry!r}. Each [[objective]] "
-                f"must set name and direction (max|min)."
-            )
+            _exception_message_2 = f"Malformed entry in {path}: {entry!r}. Each [[objective]] must set name and direction (max|min)."
+            raise ValueError(_exception_message_2)
         objectives.append(Objective(name=name, direction=direction))
     raw_value = (data.get("pareto") or {}).get("relative_noise", 0.0)
     if isinstance(raw_value, bool):
-        raise ValueError(f"Malformed pareto.relative_noise in {path}: {raw_value!r}")  # noqa: TRY003, TRY004  # tracked: #288
+        message = f"Malformed pareto.relative_noise in {path}: {raw_value!r}"
+        raise ValueError(message)  # noqa: TRY004  # lint-waiver: LW-010200 [TRY004]; malformed objective files use the CLI's established ValueError diagnostic contract.
     try:
         value = float(raw_value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"Malformed pareto.relative_noise in {path}: {raw_value!r}") from exc  # noqa: TRY003  # tracked: #288
+        _exception_message_3 = f"Malformed pareto.relative_noise in {path}: {raw_value!r}"
+        raise ValueError(_exception_message_3) from exc
     if not math.isfinite(value) or not 0 <= value < 1:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"Malformed pareto.relative_noise in {path}: expected a finite value "
-            f"in [0, 1), got {raw_value!r}"
-        )
+        _exception_message = f"Malformed pareto.relative_noise in {path}: expected a finite value in [0, 1), got {raw_value!r}"
+        raise ValueError(_exception_message)
     return MetricSpace(objectives=tuple(objectives), relative_noise=value)
 
 
@@ -173,15 +171,8 @@ def _resolve_metric_space(args: argparse.Namespace) -> MetricSpace:
     return space
 
 
-def _validate_evolve(args: argparse.Namespace) -> None:  # noqa: C901  # tracked: #288
-    _validate_target_inputs(args)
-    _validate_run_environment_profiler(args)
-    if args.children_per_generation < 1:
-        _configuration_error("--children-per-generation must be >= 1.")
-    if args.max_generations < 1:
-        _configuration_error("--max-generations must be >= 1.")
-    if args.selection_temperature <= 0:
-        _configuration_error("--selection-temperature must be > 0.")
+def _validate_openevolve_options(args: argparse.Namespace) -> None:
+    """Validate options specific to the OpenEvolve search policy."""
     if args.search_policy == "vibesys" and any(
         value is not None
         for value in (
@@ -205,6 +196,18 @@ def _validate_evolve(args: argparse.Namespace) -> None:  # noqa: C901  # tracked
         0.0 <= args.openevolve_migration_rate <= 1.0
     ):
         _configuration_error("--openevolve-migration-rate must be in [0, 1].")
+
+
+def _validate_evolve(args: argparse.Namespace) -> None:
+    _validate_target_inputs(args)
+    _validate_run_environment_profiler(args)
+    if args.children_per_generation < 1:
+        _configuration_error("--children-per-generation must be >= 1.")
+    if args.max_generations < 1:
+        _configuration_error("--max-generations must be >= 1.")
+    if args.selection_temperature <= 0:
+        _configuration_error("--selection-temperature must be > 0.")
+    _validate_openevolve_options(args)
     if not (0.0 <= args.frontier_bias <= 1.0):
         _configuration_error("--frontier-bias must be in [0, 1].")
     if args.bootstrap_max_attempts < 1:
@@ -320,7 +323,7 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
         _prepare_experiment_repository(args, config)
         run_environment = run_environment_spec_from_args(args, build_task_docker_image=True)
         if args.resume is not None:
-            print(f"Resuming VibeSys run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
+            sys.stdout.write(f"Resuming VibeSys run {args.resume} in {bundle.root}/\n")
         return RunRequest(
             project_root=bundle.root,
             orchestration=descriptor,
@@ -346,9 +349,9 @@ def _run_request(args: argparse.Namespace) -> None:
     request = _build_run_request(args)
     result = _execute_run_request(request)
     if result.succeeded:
-        print(f"\n{request.orchestration_id} run completed.")  # noqa: T201  # tracked: #288
+        sys.stdout.write(f"\n{request.orchestration_id} run completed.\n")
     else:
-        print(f"\n{request.orchestration_id} run stopped early.")  # noqa: T201  # tracked: #288
+        sys.stdout.write(f"\n{request.orchestration_id} run stopped early.\n")
         sys.exit(1)
 
 

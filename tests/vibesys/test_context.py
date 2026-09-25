@@ -1,10 +1,11 @@
-import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TypedDict, Unpack
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.support import run_test_command
 
 from vibesys import boot_trace
 from vibesys.agent_run.options import (
@@ -23,7 +24,12 @@ from vibesys.context import (
     create_workspace_resources,
     open_run_resources,
 )
-from vibesys.domains.environment import EnvironmentPatch, NoopEnvironmentHooks
+from vibesys.domains.environment import (
+    EnvironmentContext,
+    EnvironmentHooks,
+    EnvironmentPatch,
+    NoopEnvironmentHooks,
+)
 from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
 from vibesys.errors import ConfigurationError
 from vibesys.evaluators import (
@@ -37,19 +43,18 @@ from vibesys.evaluators.input_manifest import (
     load_input_bundle,
     load_project_task,
 )
+from vibesys.evaluators.tools import CargoGitToolSpec
 from vibesys.events import CoreEventType
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.run import (
     LocalRunIntegration,
-    RunLogger,
-    RunPaths,
     RunStateNamespace,
 )
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
 from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationRunManifest, Project
-from vs_sandbox.api import HostResourceAccess, SandboxLifecycle
+from vs_sandbox.api import HostResourceAccess, SandboxLifecycle, SandboxLifecycleHooks
 
 
 class _FakeBackend:
@@ -60,11 +65,16 @@ class _FakeBackend:
         self.sandbox = MagicMock()
         self.sandbox.execute.return_value = MagicMock(exit_code=0, output="", truncated=False)
 
-    def make_sandbox(self, *_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202
-        SandboxLifecycle(_kwargs.get("lifecycle_hooks")).before_ready(self.sandbox)
+    def make_sandbox(
+        self,
+        *_args: object,
+        lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
+        **_kwargs: object,
+    ) -> object:
+        SandboxLifecycle(lifecycle_hooks).before_ready(self.sandbox)
         return self.sandbox
 
-    def make_monitor(self, _log_dir):  # noqa: ANN001, ANN202
+    def make_monitor(self, _log_dir: object) -> None:
         return None
 
 
@@ -73,12 +83,33 @@ class _RecordingHooks:
         self.prepared = 0
         self.torn_down = 0
 
-    def prepare(self, _ctx):  # noqa: ANN001, ANN202
+    def prepare(self, ctx: EnvironmentContext) -> EnvironmentPatch:
+        del ctx
         self.prepared += 1
         return EnvironmentPatch()
 
-    def teardown(self, _ctx):  # noqa: ANN001, ANN202
+    def teardown(self, ctx: EnvironmentContext) -> None:
+        del ctx
         self.torn_down += 1
+
+
+class _CreateContextOptions(TypedDict, total=False):
+    runs_dir: Path | None
+    evaluator: Path | None
+    evaluator_package_root: Path | None
+    exp_name: str
+    existing: bool
+    configuration: AgentOrchestrationOptions | None
+    config: Config | None
+    profiler_kind: ProfilerKind
+    workspace_sources: tuple[WorkspaceSource, ...]
+    agent_backend: str | None
+    objective: str
+    task_name: str | None
+    task_root: Path | None
+    remote_repo: str | None
+    hooks: EnvironmentHooks | None
+    integration: LocalRunIntegration | None
 
 
 @pytest.fixture(autouse=True)
@@ -86,7 +117,7 @@ def context_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("vibesys.context.backends.get", lambda *_args, **_kwargs: _FakeBackend())
     monkeypatch.setattr(
         "vibesys.context.preflight_profiler_kind",
-        lambda kind: ProfilerPreflightResult(kind, True),  # noqa: FBT003
+        lambda kind: ProfilerPreflightResult(kind, usable=True),
     )
 
 
@@ -155,29 +186,19 @@ def _options(max_rounds: int = 1) -> AgentOrchestrationOptions:
     )
 
 
-def _create_context(  # noqa: PLR0913
+def _create_context(
     project: Path,
-    *,
-    runs_dir: Path | None = None,
-    evaluator: Path | None = None,
-    evaluator_package_root: Path | None = None,
-    exp_name: str = "queue",
-    existing: bool = False,
-    configuration: AgentOrchestrationOptions | None = None,
-    objective: str = "Make the queue faster.\n",
-    task_name: str | None = None,
-    task_root: Path | None = None,
-    remote_repo: str | None = None,
-    hooks=None,  # noqa: ANN001
-    integration: LocalRunIntegration | None = None,
-    config: Config | None = None,
-    profiler_kind: ProfilerKind = ProfilerKind.NONE,
-    workspace_sources: tuple[WorkspaceSource, ...] = (),
-    agent_backend: str | None = "stub",
+    **options: Unpack[_CreateContextOptions],
 ) -> _RunResources:
+    task_root = options.get("task_root")
+    evaluator = options.get("evaluator")
+    evaluator_package_root = options.get("evaluator_package_root")
+    workspace_sources = options.get("workspace_sources", ())
     if task_root is not None:
         selected_project = Project.open(project)
-        bundle = load_project_task(selected_project, selected_project.select_task(task_name))
+        bundle = load_project_task(
+            selected_project, selected_project.select_task(options.get("task_name"))
+        )
     else:
         bundle = load_input_bundle(project)
     updates: dict[str, object] = {}
@@ -190,21 +211,22 @@ def _create_context(  # noqa: PLR0913
             update={"workspace": WorkspaceInput(sources=workspace_sources)}
         )
     bundle = bundle.model_copy(update=updates)
+    exp_name = options.get("exp_name", "queue")
     request = RunRequest(
         project_root=project,
         orchestration=descriptor_from_options(
-            configuration or _options(), orchestration_id="multi-agent"
+            options.get("configuration") or _options(), orchestration_id="multi-agent"
         ),
-        config=config or Config.model_validate({"model": {"name": "gpt-test"}}),
+        config=options.get("config") or Config.model_validate({"model": {"name": "gpt-test"}}),
         input_bundle=bundle,
-        objective=objective,
+        objective=options.get("objective", "Make the queue faster.\n"),
         exp_name=exp_name,
-        resume=ResumeRef(run_id=exp_name) if existing else None,
-        runs_dir=runs_dir,
-        profiler_kind=profiler_kind,
+        resume=ResumeRef(run_id=exp_name) if options.get("existing", False) else None,
+        runs_dir=options.get("runs_dir"),
+        profiler_kind=options.get("profiler_kind", ProfilerKind.NONE),
         run_environment=RunEnvironmentSpec("local"),
-        agent_backend=agent_backend,
-        remote_repo=remote_repo,
+        agent_backend=options.get("agent_backend", "stub"),
+        remote_repo=options.get("remote_repo"),
     )
     setup = RunSetup(
         state_namespace="multi",
@@ -213,14 +235,18 @@ def _create_context(  # noqa: PLR0913
     )
     with patch(
         "vibesys.context.resolve_domain",
-        return_value=SimpleNamespace(environment_hooks=hooks or NoopEnvironmentHooks()),
+        return_value=SimpleNamespace(
+            environment_hooks=options.get("hooks") or NoopEnvironmentHooks()
+        ),
     ):
-        return open_run_resources(request, setup, integration or LocalRunIntegration())
+        return open_run_resources(
+            request, setup, options.get("integration") or LocalRunIntegration()
+        )
 
 
 def _git(project: Path, *args: str) -> str:
-    return subprocess.run(  # noqa: S603
-        [  # noqa: S607
+    return run_test_command(
+        [
             "git",
             "-c",
             "user.name=VibeSys Test",
@@ -235,7 +261,7 @@ def _git(project: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path):  # noqa: ANN001, ANN201
+def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as ctx:
@@ -279,7 +305,7 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         )
     )
 
-    def install_command(tools, root):  # noqa: ANN001, ANN202
+    def install_command(tools: dict[str, CargoGitToolSpec], root: Path) -> str:
         root.mkdir(parents=True, exist_ok=True)
         for name, spec in tools.items():
             tool_install_root(root, name, spec).mkdir(parents=True)
@@ -308,7 +334,7 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         assert all(resources[root] is HostResourceAccess.READ_ONLY for root in expected_tool_roots)
 
 
-def test_run_context_announces_canonical_experiment_state(tmp_path):  # noqa: ANN001, ANN201
+def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     integration = LocalRunIntegration()
@@ -330,7 +356,7 @@ def test_run_context_announces_canonical_experiment_state(tmp_path):  # noqa: AN
         integration.close()
 
 
-def test_context_assembly_logs_stage_timings(tmp_path):  # noqa: ANN001, ANN201
+def test_context_assembly_logs_stage_timings(tmp_path: Path) -> None:
     """Every assembly span up to and past the experiments gate reaches the run log.
 
     This is a regression guard for the diagnostic used to find where
@@ -363,7 +389,7 @@ def test_context_assembly_logs_stage_timings(tmp_path):  # noqa: ANN001, ANN201
     assert "experiments gate open after " in log_text
 
 
-def test_dispatch_preamble_spans_reach_run_log(tmp_path):  # noqa: ANN001, ANN201
+def test_dispatch_preamble_spans_reach_run_log(tmp_path: Path) -> None:
     """Spans closed before ``open_run_resources`` land in the run log, first.
 
     ``_dispatch`` and ``_run_agent`` (main.py) do substantial work before a
@@ -388,7 +414,7 @@ def test_dispatch_preamble_spans_reach_run_log(tmp_path):  # noqa: ANN001, ANN20
     assert preamble_index < context_index
 
 
-def test_context_assembly_without_recorded_preamble_omits_preamble_lines(tmp_path):  # noqa: ANN001, ANN201
+def test_context_assembly_without_recorded_preamble_omits_preamble_lines(tmp_path: Path) -> None:
     """No preamble spans (e.g. a test-built context) means no stray lines."""
     project = tmp_path / "queue"
     evaluator = _write_project(project)
@@ -400,7 +426,9 @@ def test_context_assembly_without_recorded_preamble_omits_preamble_lines(tmp_pat
     assert "boot span dispatch" not in log_text
 
 
-def test_context_assembly_spans_stay_off_stderr_by_default(tmp_path, capfd):  # noqa: ANN001, ANN201
+def test_context_assembly_spans_stay_off_stderr_by_default(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
     """Boot spans are forensics in the run log, not narration at the operator."""
     project = tmp_path / "queue"
     evaluator = _write_project(project)
@@ -412,7 +440,9 @@ def test_context_assembly_spans_stay_off_stderr_by_default(tmp_path, capfd):  # 
     assert "boot span" not in captured_err
 
 
-def test_boot_trace_env_puts_assembly_spans_on_stderr(tmp_path, capfd, monkeypatch):  # noqa: ANN001, ANN201
+def test_boot_trace_env_puts_assembly_spans_on_stderr(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     monkeypatch.setenv(boot_trace.BOOT_TRACE_ENV, "1")
@@ -511,7 +541,7 @@ def test_direct_repository_task_materializes_model_in_local_state(tmp_path: Path
         assert _git(project, "status", "--porcelain") == ""
 
 
-def test_copied_run_provisions_self_contained_project_in_collection(tmp_path):  # noqa: ANN001, ANN201
+def test_copied_run_provisions_self_contained_project_in_collection(tmp_path: Path) -> None:
     source = tmp_path / "input"
     evaluator = _write_project(source)
     runs_dir = tmp_path / "runs"
@@ -532,7 +562,7 @@ def test_copied_run_provisions_self_contained_project_in_collection(tmp_path):  
     assert _git(project, "status", "--porcelain") == ""
 
 
-def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path):  # noqa: ANN001, ANN201
+def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
@@ -560,7 +590,7 @@ def test_agent_v4_run_resumes_with_larger_round_budget(tmp_path):  # noqa: ANN00
     assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
 
 
-def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path):  # noqa: ANN001, ANN201
+def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path: Path) -> None:
     source = tmp_path / "input"
     evaluator = _write_project(source)
     runs_dir = tmp_path / "runs"
@@ -569,12 +599,12 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path):  # noqa
         run_id = first.run_id
 
     remote = tmp_path / "remote.git"
-    subprocess.run(  # noqa: S603
-        ["git", "init", "--bare", "-q", str(remote)],  # noqa: S607
+    run_test_command(
+        ["git", "init", "--bare", "-q", str(remote)],
         check=True,
     )
-    subprocess.run(  # noqa: S603
-        ["git", "remote", "add", "origin", str(remote)],  # noqa: S607
+    run_test_command(
+        ["git", "remote", "add", "origin", str(remote)],
         cwd=project,
         check=True,
     )
@@ -588,8 +618,8 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path):  # noqa
     ):
         pass
 
-    branch = subprocess.run(  # noqa: S603
-        ["git", "--git-dir", str(remote), "branch", "--list", f"vibesys-runs/{run_id}"],  # noqa: S607
+    branch = run_test_command(
+        ["git", "--git-dir", str(remote), "branch", "--list", f"vibesys-runs/{run_id}"],
         check=True,
         capture_output=True,
         text=True,
@@ -597,24 +627,24 @@ def test_collection_resume_pushes_existing_origin_on_teardown(tmp_path):  # noqa
     assert f"vibesys-runs/{run_id}" in branch
 
 
-def test_direct_resume_republishes_an_already_published_run(tmp_path):  # noqa: ANN001, ANN201
+def test_direct_resume_republishes_an_already_published_run(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
         run_id = first.run_id
 
     remote = tmp_path / "remote.git"
-    subprocess.run(  # noqa: S603
-        ["git", "init", "--bare", "-q", str(remote)],  # noqa: S607
+    run_test_command(
+        ["git", "init", "--bare", "-q", str(remote)],
         check=True,
     )
-    subprocess.run(  # noqa: S603
-        ["git", "remote", "add", "origin", str(remote)],  # noqa: S607
+    run_test_command(
+        ["git", "remote", "add", "origin", str(remote)],
         cwd=project,
         check=True,
     )
-    subprocess.run(  # noqa: S603
-        ["git", "push", "-q", "-u", "origin", f"vibesys-runs/{run_id}"],  # noqa: S607
+    run_test_command(
+        ["git", "push", "-q", "-u", "origin", f"vibesys-runs/{run_id}"],
         cwd=project,
         check=True,
     )
@@ -633,15 +663,15 @@ def test_direct_resume_republishes_an_already_published_run(tmp_path):  # noqa: 
     push.assert_called_once_with()
 
 
-def test_direct_resume_does_not_publish_an_untracked_source_origin(tmp_path):  # noqa: ANN001, ANN201
+def test_direct_resume_does_not_publish_an_untracked_source_origin(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     with _create_context(project, evaluator=evaluator) as first:
         run_id = first.run_id
 
     remote = tmp_path / "remote.git"
-    subprocess.run(  # noqa: S603
-        ["git", "init", "--bare", "-q", str(remote)],  # noqa: S607
+    run_test_command(
+        ["git", "init", "--bare", "-q", str(remote)],
         check=True,
     )
     _git(project, "remote", "add", "origin", str(remote))
@@ -660,7 +690,7 @@ def test_direct_resume_does_not_publish_an_untracked_source_origin(tmp_path):  #
     push.assert_not_called()
 
 
-def test_explicit_repository_rejects_a_different_existing_origin(tmp_path):  # noqa: ANN001, ANN201
+def test_explicit_repository_rejects_a_different_existing_origin(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     _git(project, "init", "-q", "-b", "main")
@@ -689,7 +719,7 @@ def test_explicit_repository_rejects_a_different_existing_origin(tmp_path):  # n
     assert "does not match" in caught.value.diagnostic.message
 
 
-def test_direct_run_rejects_unmaterialized_workspace_source(tmp_path):  # noqa: ANN001, ANN201
+def test_direct_run_rejects_unmaterialized_workspace_source(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     source = WorkspaceSource(
@@ -703,7 +733,7 @@ def test_direct_run_rejects_unmaterialized_workspace_source(tmp_path):  # noqa: 
         _create_context(project, evaluator=evaluator, workspace_sources=(source,))
 
 
-def test_omnigent_accepts_active_profiler_configuration(tmp_path):  # noqa: ANN001, ANN201
+def test_omnigent_accepts_active_profiler_configuration(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     configuration = _options().model_copy(
@@ -731,7 +761,7 @@ def test_omnigent_accepts_active_profiler_configuration(tmp_path):  # noqa: ANN0
         assert context.profiler_kind is ProfilerKind.MACOS_CPU
 
 
-def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path):  # noqa: ANN001, ANN201
+def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
 
@@ -750,7 +780,7 @@ def test_portable_state_snapshot_replaces_namespace_exactly(tmp_path):  # noqa: 
     assert portable.agent_visible_path("old.json") not in tree
 
 
-def test_candidate_resources_use_project_worktree_directory(tmp_path):  # noqa: ANN001, ANN201
+def test_candidate_resources_use_project_worktree_directory(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
 
@@ -783,7 +813,7 @@ def test_candidate_resources_use_project_worktree_directory(tmp_path):  # noqa: 
         assert not candidate_root.exists()
 
 
-def test_construction_failure_removes_new_copy_and_tears_down_hooks(tmp_path):  # noqa: ANN001, ANN201
+def test_construction_failure_removes_new_copy_and_tears_down_hooks(tmp_path: Path) -> None:
     source = tmp_path / "input"
     evaluator = _write_project(source)
     runs_dir = tmp_path / "runs"
@@ -800,7 +830,7 @@ def test_construction_failure_removes_new_copy_and_tears_down_hooks(tmp_path):  
     assert not runs_dir.exists() or not list(runs_dir.iterdir())
 
 
-def test_hook_teardown_runs_when_provisioning_fails(tmp_path):  # noqa: ANN001, ANN201
+def test_hook_teardown_runs_when_provisioning_fails(tmp_path: Path) -> None:
     source = tmp_path / "input"
     evaluator = _write_project(source)
     hooks = _RecordingHooks()
@@ -815,21 +845,18 @@ def test_hook_teardown_runs_when_provisioning_fails(tmp_path):  # noqa: ANN001, 
     assert hooks.torn_down == 1
 
 
-def test_log_switch_retargets_stderr_tee(tmp_path):  # noqa: ANN001, ANN201
-    ctx = object.__new__(_RunResources)
+def test_log_switch_retargets_stderr_tee(tmp_path: Path) -> None:
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
     original_stderr = sys.stderr
-    ctx.logger = RunLogger(tmp_path)
-    ctx._paths = RunPaths(  # noqa: SLF001
-        project_root=tmp_path,
-        log_dir=tmp_path,
-        run_log_path=ctx.logger.path,
-    )
-    original_file = ctx.logger.file
-    ctx.switch_log_file("round001")
+    with _create_context(project, evaluator=evaluator) as ctx:
+        original_file = ctx.logger.file
+        ctx.switch_log_file("round001")
 
-    assert original_file.closed
-    print("\033[31mcolored diagnostic\033[0m", file=sys.stderr)  # noqa: T201
-    ctx.logger.close()
+        assert original_file.closed
+        sys.stderr.write("\033[31mcolored diagnostic\033[0m\n")
+        run_log_path = ctx.run_log_path
+
     assert sys.stderr is original_stderr
-    assert "colored diagnostic" in ctx.run_log_path.read_text()
-    assert "\033[31m" not in ctx.run_log_path.read_text()
+    assert "colored diagnostic" in run_log_path.read_text()
+    assert "\033[31m" not in run_log_path.read_text()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shlex
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from vibesys.agent_run import issue_board
@@ -48,8 +48,10 @@ from vibesys.events import (
     CoreEventType,
     EventStatus,
     ExperimentsChangedData,
+    GateFinishedData,
     GateKind,
     RoundFinishedData,
+    RunConfiguredData,
 )
 from vibesys.loops.profile_multi.attribution import run_attribution
 from vibesys.loops.profile_multi.decisions import (
@@ -205,9 +207,8 @@ class ProfileMultiSession:
         self.terminal_policy = _TerminalPolicy()
         config = options.profile_guided
         if config is None:
-            raise ProfileMultiSessionError.missing_profile_config(  # noqa: TRY003  # tracked: #288
-                "profile_multi requires profile_guided settings"
-            )
+            message = "profile_multi requires profile_guided settings"
+            raise ProfileMultiSessionError.missing_profile_config(message)
         self.profile = _ProfilePolicy(config)
         self.framework_benchmark_configured = (
             ctx.request.input_bundle.benchmark_result is not None
@@ -230,9 +231,11 @@ class ProfileMultiSession:
         ctx = self.ctx
         turns = self.turns
         output_sink().run_configured(
-            run_log_path=str(ctx.environment.run_log_path),
-            project_root=str(ctx.request.project_root),
-            objective=turns.objective,
+            RunConfiguredData(
+                run_log_path=str(ctx.environment.run_log_path),
+                project_root=str(ctx.request.project_root),
+                objective=turns.objective,
+            )
         )
         issue_board.ensure_progress_file(turns.progress_path)
         issue_board.ensure_roadmap_file(turns.roadmap_path)
@@ -573,7 +576,7 @@ class ProfileMultiSession:
         )
         await self._checkpoint_active(selected)
 
-    async def _validate_local(  # noqa: C901  # bounded framework recipe gate
+    async def _validate_local(  # noqa: C901  # lint-waiver: LW-020023 [C901]; one sequential loop over recipes shares its reuse, execution, and early-stop state, which helper boundaries would scatter.
         self, selected: ProfileMultiRound, recipe_artifact: str | None
     ) -> str | None:
         """Run judge approved local recipes against an immutable candidate revision."""
@@ -613,10 +616,8 @@ class ProfileMultiSession:
             if reused is not None:
                 results.append(reused)
                 emit_gate_finished(
-                    GateKind.VALIDATION,
+                    GateFinishedData(gate=GateKind.VALIDATION, recipe=recipe.name, reused=True),
                     passed=True,
-                    recipe=recipe.name,
-                    reused=True,
                     round_label=f"round-{number}",
                 )
                 continue
@@ -633,7 +634,7 @@ class ProfileMultiSession:
                     output=output[-GATE_RECORD_TAIL_CHARS:],
                     error=None if execution.exit_code == 0 else "command exited nonzero",
                 )
-            except Exception as error:  # noqa: BLE001  # report execution failure as gate feedback
+            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-020024 [BLE001]; backend execution failures become gate feedback instead of aborting the run.
                 result = FrameworkValidationResult(
                     recipe=recipe,
                     input_digest=digest,
@@ -654,10 +655,12 @@ class ProfileMultiSession:
                 None if result.passed else (result.error or result.output or "unknown failure")
             )
             emit_gate_finished(
-                GateKind.VALIDATION,
+                GateFinishedData(
+                    gate=GateKind.VALIDATION,
+                    recipe=recipe.name,
+                    output_tail=None if failure is None else failure[-GATE_LOG_TAIL_CHARS:],
+                ),
                 passed=result.passed,
-                recipe=recipe.name,
-                output_tail=None if failure is None else failure[-GATE_LOG_TAIL_CHARS:],
                 round_label=f"round-{number}",
             )
             if not result.passed:
@@ -787,11 +790,15 @@ class ProfileMultiSession:
                 self.turns.progress_path,
                 number,
                 retry,
-                command=command or "(not configured)",
-                passed=True,
-                output=(
-                    "Reused the prior framework-owned PASS for this exact candidate commit; "
-                    "a later gate, not accuracy, caused the retry."
+                result=AccuracyGateResult(
+                    command=command,
+                    passed=True,
+                    output=(
+                        "Reused the prior framework-owned PASS for this exact candidate commit; "
+                        "a later gate, not accuracy, caused the retry."
+                    ),
+                    feedback=None,
+                    executed=False,
                 ),
             )
             return await self.ctx.evaluator.reuse_accuracy(label=f"round-{number}")
@@ -815,9 +822,7 @@ class ProfileMultiSession:
             self.turns.progress_path,
             number,
             retry,
-            command=result.command or "(not configured)",
-            passed=result.passed,
-            output=result.output[-GATE_RECORD_TAIL_CHARS:],
+            result=replace(result, output=result.output[-GATE_RECORD_TAIL_CHARS:]),
         )
         await self.workspace.snapshot(f"round-{number}-retry-{retry}-framework-accuracy")
         return result
@@ -843,11 +848,8 @@ class ProfileMultiSession:
             self.turns.progress_path,
             number,
             retry,
-            command=result.command or "(not configured)",
-            passed=result.passed,
+            result=replace(result, output=result.output[-GATE_RECORD_TAIL_CHARS:]),
             metric_name=result.outcome.metric_name or (spec.metric if spec else None),
-            metric_value=result.outcome.metric_value,
-            output=result.output[-GATE_RECORD_TAIL_CHARS:],
         )
         await self.workspace.snapshot(f"round-{number}-retry-{retry}-framework-benchmark")
         return result

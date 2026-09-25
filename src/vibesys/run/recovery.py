@@ -24,7 +24,8 @@ class RecoveryWorkspace:
     def _git_path(self, relative_path: str) -> str:
         relative = PurePosixPath(relative_path)
         if not relative.parts or relative.is_absolute():
-            raise ValueError(f"invalid recovery path {relative_path!r}")  # noqa: TRY003
+            message = f"invalid recovery path {relative_path!r}"
+            raise ValueError(message)
         file = self._namespace.equivalent_external_file(self._project.root, relative)
         return file.relative_to(self._project.root).as_posix()
 

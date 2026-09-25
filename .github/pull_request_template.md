@@ -14,6 +14,18 @@ Describe the high-level design. Call out important implementation choices,
 tradeoffs, boundaries, and any behavior that reviewers should inspect closely.
 -->
 
+### Design
+
+<!--
+Answer the software-design checkpoint (.agents/skills/software-design/):
+- Owner: which module or package owns this change, and why there.
+- Interface: the public interface added or changed, and who depends on it.
+- Direction: which way data and dependencies flow, and any new coupling or
+  `tach.toml` edges (name each one and why it is needed).
+- Drift: known violations you left untouched, extended, or filed as an issue.
+Write "n/a: <reason>" for a question that does not apply.
+-->
+
 ### Architecture
 
 <!--

@@ -30,7 +30,8 @@ class SubscriptionTracker:
     whether any client has ever subscribed, and never resets.
     """
 
-    def __init__(self) -> None:  # noqa: D107  # tracked: #288
+    def __init__(self) -> None:
+        """Initialize subscription lifetime tracking and its condition lock."""
         self._ever_subscribed = threading.Event()
         self._condition = threading.Condition()
         self._active = 0

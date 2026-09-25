@@ -57,7 +57,8 @@ def _resolve_template_path(template: str) -> tuple[Path, tuple[Path, ...]]:
         candidate = root / name
         if candidate.is_file():
             return candidate, roots
-    raise AssertionError(f"no template file found for {template!r}")  # noqa: TRY003
+    message = f"no template file found for {template!r}"
+    raise AssertionError(message)
 
 
 def _free_variables(template: str) -> frozenset[str]:
@@ -87,7 +88,7 @@ def test_every_role_declares_a_context_model() -> None:
         assert role.context is not None, f"{role.id}: {role.template} has no context model"
 
 
-# TODO(stack PR 07/08): remove. At this commit, `loops/multi/profilers/*.j2`  # noqa: FIX002  # tracked: #288
+# TODO(stack PR 07/08): remove. At this commit, `loops/multi/profilers/*.j2`  # noqa: FIX002, TD003  # LW-040125 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
 # and `loops/evolve/profilers/*.j2` do not exist yet as their own files (they
 # land with the multi and evolve strategy migrations); a `ProfilerContext`/
 # `CandidateProfilerContext` role's template resolves through the shared/

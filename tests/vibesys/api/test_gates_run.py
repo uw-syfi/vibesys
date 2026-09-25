@@ -23,7 +23,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock  # test-isolation: stubbed evaluator below
 
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
@@ -62,11 +62,13 @@ def _fake_host(*, progress_path: Path | None = None) -> SimpleNamespace:
                 paths=SimpleNamespace(accuracy_command="check", benchmark_command="bench"),
                 deployment_release_env_var="RELEASE",
             ),
+            # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
             reconcile_model_requests=AsyncMock(return_value=None),
         ),
         request=SimpleNamespace(
             input_bundle=SimpleNamespace(benchmark_result=None, benchmark_result_protocol=None)
         ),
+        # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
         workspaces=SimpleNamespace(root=SimpleNamespace(snapshot=AsyncMock(return_value="rev"))),
     )
     host.progress = _Progress(cast("RunContext", host))
@@ -84,7 +86,9 @@ def _evaluator(*, progress_path: Path | None = None) -> tuple[_Evaluator, Simple
 def test_stub_backend_skips_both_gates_without_recording_or_calling_out(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
     evaluator, _host = _evaluator(progress_path=progress)
+    # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
     evaluator.check = AsyncMock()
+    # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
     evaluator.measure = AsyncMock()
 
     result = asyncio.run(
@@ -109,7 +113,9 @@ def test_resource_reconciliation_failure_stops_before_any_gate(tmp_path: Path) -
     progress = tmp_path / "progress.md"
     evaluator, host = _evaluator(progress_path=progress)
     host.environment.reconcile_model_requests.return_value = "model unavailable"
+    # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
     evaluator.check = AsyncMock()
+    # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
     evaluator.measure = AsyncMock()
 
     result = asyncio.run(
@@ -132,11 +138,13 @@ def test_resource_reconciliation_failure_stops_before_any_gate(tmp_path: Path) -
 def test_accuracy_failure_records_once_and_skips_benchmark(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
     evaluator, _host = _evaluator(progress_path=progress)
+    # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
     evaluator.check = AsyncMock(
         return_value=AccuracyGateResult(
             command="check", passed=False, output="bad", feedback="accuracy rejected", executed=True
         )
     )
+    # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
     evaluator.measure = AsyncMock()
 
     result = asyncio.run(
@@ -161,12 +169,14 @@ def test_accuracy_failure_records_once_and_skips_benchmark(tmp_path: Path) -> No
 def test_accuracy_pass_runs_benchmark_and_records_each_once(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
     evaluator, _host = _evaluator(progress_path=progress)
+    # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
     evaluator.check = AsyncMock(
         return_value=AccuracyGateResult(
             command="check", passed=True, output="ok", feedback=None, executed=True
         )
     )
     outcome = FrameworkBenchmarkOutcome(metric_name="throughput", metric_value=12.0)
+    # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
     evaluator.measure = AsyncMock(
         return_value=BenchmarkGateResult(
             command="bench", output="ok", executed=True, outcome=outcome
@@ -195,12 +205,15 @@ def test_accuracy_pass_runs_benchmark_and_records_each_once(tmp_path: Path) -> N
 def test_reuse_accuracy_records_reuse_and_skips_check(tmp_path: Path) -> None:
     progress = tmp_path / "progress.md"
     evaluator, _host = _evaluator(progress_path=progress)
+    # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
     evaluator.check = AsyncMock()
+    # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
     evaluator.reuse_accuracy = AsyncMock(
         return_value=AccuracyGateResult(
             command="check", passed=True, output="reused", feedback=None, executed=False
         )
     )
+    # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
     evaluator.measure = AsyncMock(
         return_value=BenchmarkGateResult(
             command="bench",
@@ -255,6 +268,7 @@ def test_gates_run_property_records_correspond_1to1_with_outcomes(
             host.environment.reconcile_model_requests.return_value = (
                 None if resource_ok else "resource unavailable"
             )
+            # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
             evaluator.check = AsyncMock(
                 return_value=AccuracyGateResult(
                     command="check",
@@ -264,6 +278,7 @@ def test_gates_run_property_records_correspond_1to1_with_outcomes(
                     executed=True,
                 )
             )
+            # test-isolation: the gate runner is exercised against a stubbed evaluator on a namespace host, with no fake host yet
             evaluator.measure = AsyncMock(
                 return_value=BenchmarkGateResult(
                     command="bench",

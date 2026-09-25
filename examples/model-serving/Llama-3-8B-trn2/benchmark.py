@@ -63,7 +63,7 @@ def _load_tokenizer(model_path):
             if pool:
                 print(f"[prompt] tokenizer from {path}; pool={len(pool)}")
                 return tok, pool
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[prompt] tokenizer load from {path} failed ({exc})")
     print("[prompt] no tokenizer — approximating input length with filler words")
     return None, None
@@ -115,7 +115,7 @@ async def send_request(client, url, prompt, output_len, temperature):
                     out_tokens += 1
                     if t_first is None:
                         t_first = time.perf_counter()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         error = str(exc)
     t_done = time.perf_counter()
     gen = usage_tokens if usage_tokens is not None else out_tokens

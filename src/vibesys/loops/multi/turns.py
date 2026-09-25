@@ -300,7 +300,7 @@ class MultiAgentTurns:
             raise UnsupportedProfilerError
         return definition
 
-    async def _read_only(  # noqa: PLR0913
+    async def _read_only(  # noqa: PLR0913  # lint-waiver: LW-020020 [PLR0913]; the read-only agent turn forwards independent prompt, response, and session options.
         self,
         agent: AgentHandle,
         *,
@@ -430,7 +430,7 @@ Write bounded durable profile evidence only below
                 allowed=(artifact,),
                 mcp_servers=[spec] if spec is not None else None,
             )
-        except Exception as error:  # noqa: BLE001  # profile evidence is optional
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-020021 [BLE001]; profile evidence is optional, so a profiler failure is reported and the round proceeds without it.
             output_sink().framework_warning(
                 "profiler failed",
                 detail=str(error),
@@ -590,7 +590,7 @@ Write bounded durable profile evidence only below
         """Ask the independent judge to audit the parsed implementation."""
         if state.implementation is None:
             raise MissingImplementationError
-        # TODO(stack PR 07): drop this cast once vibesys.roles.implementer owns  # noqa: FIX002  # tracked: #288
+        # TODO(stack PR 07): drop this cast once vibesys.roles.implementer owns  # noqa: FIX002, TD003  # LW-040036 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
         # ImplementerResponse and AttemptState.implementation is typed against
         # it directly; at BASE it is vibesys.schemas.ImplementerResponse, which
         # structurally (but not nominally) satisfies search's ImplementerReply.

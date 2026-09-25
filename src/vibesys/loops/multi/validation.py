@@ -12,6 +12,9 @@ from vibesys.evaluators.validation_recipe import (
     ValidationRecipeArtifact,
 )
 
+_MAX_INPUT_FILES = 4096
+_MAX_INPUT_BYTES = 256 * 1024 * 1024
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -27,12 +30,15 @@ def _validation_input_digest(workspace: Path, recipe: ValidationRecipe) -> str:
     for relative in sorted(recipe.input_paths):
         unresolved = workspace / relative
         if unresolved.is_symlink():
-            raise ValueError(f"validation input must not be a symlink: {relative}")  # noqa: TRY003  # tracked: #288
+            message = f"validation input must not be a symlink: {relative}"
+            raise ValueError(message)
         path = unresolved.resolve()
         if not path.is_relative_to(workspace_root):
-            raise ValueError(f"validation input escapes workspace: {relative}")  # noqa: TRY003  # tracked: #288
+            message = f"validation input escapes workspace: {relative}"
+            raise ValueError(message)
         if not path.exists():
-            raise ValueError(f"validation input does not exist: {relative}")  # noqa: TRY003  # tracked: #288
+            message = f"validation input does not exist: {relative}"
+            raise ValueError(message)
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0dir\0" if path.is_dir() else b"\0file\0")
         entries = [path]
@@ -40,11 +46,13 @@ def _validation_input_digest(workspace: Path, recipe: ValidationRecipe) -> str:
             entries = sorted(candidate for candidate in path.rglob("*") if candidate.is_file())
         for entry in entries:
             if entry.is_symlink():
-                raise ValueError(f"validation input must not be a symlink: {relative}")  # noqa: TRY003  # tracked: #288
+                message = f"validation input must not be a symlink: {relative}"
+                raise ValueError(message)
             total_files += 1
             total_bytes += entry.stat().st_size
-            if total_files > 4096 or total_bytes > 256 * 1024 * 1024:  # noqa: PLR2004  # tracked: #288
-                raise ValueError("validation inputs exceed the 4096-file/256-MiB reuse-hash limit")  # noqa: TRY003  # tracked: #288
+            if total_files > _MAX_INPUT_FILES or total_bytes > _MAX_INPUT_BYTES:
+                message = "validation inputs exceed the 4096-file/256-MiB reuse-hash limit"
+                raise ValueError(message)
             entry_relative = entry.relative_to(workspace_root).as_posix()
             digest.update(entry_relative.encode("utf-8"))
             digest.update(b"\0")
@@ -83,14 +91,18 @@ def _load_validation_recipes(workspace: Path, artifact: str) -> list[ValidationR
     workspace_root = workspace.resolve()
     path = (workspace / artifact).resolve()
     if not path.is_relative_to(workspace_root):
-        raise ValueError("validation recipe artifact escapes the workspace")  # noqa: TRY003  # tracked: #288
+        message = "validation recipe artifact escapes the workspace"
+        raise ValueError(message)
     if not path.is_file():
-        raise ValueError(f"validation recipe artifact does not exist: {artifact}")  # noqa: TRY003  # tracked: #288
+        message = f"validation recipe artifact does not exist: {artifact}"
+        raise ValueError(message)
     try:
         payload = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"validation recipe artifact is not valid JSON: {exc}") from exc  # noqa: TRY003  # tracked: #288
+        message = f"validation recipe artifact is not valid JSON: {exc}"
+        raise ValueError(message) from exc
     try:
         return ValidationRecipeArtifact.model_validate(payload).recipes
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"validation recipe artifact does not match version 1: {exc}") from exc  # noqa: TRY003  # tracked: #288
+        message = f"validation recipe artifact does not match version 1: {exc}"
+        raise ValueError(message) from exc

@@ -2,6 +2,7 @@
 
 # ``_Environment`` shares one private owner for resource lifetime with the rest of
 # the host capabilities split out of runtime.py.
+# lint-waiver: LW-040099 [SLF001]; capabilities in this module share one private owner for resource lifetime.
 # ruff: noqa: SLF001
 
 from __future__ import annotations

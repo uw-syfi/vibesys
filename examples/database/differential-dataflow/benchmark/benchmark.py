@@ -42,6 +42,7 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _WORKSPACE = os.path.normpath(os.path.join(_HERE, ".."))
 sys.path.insert(0, os.path.join(_WORKSPACE, "reference"))
+# lint-waiver: LW-008005 [E402]; This standalone evaluator adds its sibling reference directory to sys.path before importing workload.
 import workload  # noqa: E402
 
 BASELINE_JSON = os.path.join(_HERE, "baseline.json")

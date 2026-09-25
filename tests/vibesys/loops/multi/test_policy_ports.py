@@ -1,6 +1,6 @@
 """Direct built-in strategy decisions with fake async roles and effects."""
 
-# ruff: noqa: SLF001  # Direct policy seams are intentionally exercised.
+# ruff: noqa: SLF001  # LW-030009; Direct policy seams are intentionally exercised.
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
+
+from tests.support import make_orchestrator_plan
 
 from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState
@@ -19,6 +21,7 @@ from vibesys.evaluators.gates import (
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
 )
+from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.evaluators.validation_recipe import (
     ValidationRecipe,
@@ -28,7 +31,7 @@ from vibesys.loops.multi.decisions import AttemptRequest, HypothesisEngine, Plan
 from vibesys.loops.multi.session import MultiSession
 from vibesys.loops.multi.turns import MultiAgentTurns
 from vibesys.loops.profile_multi.controller import HypothesisEngine as ProfileHypothesisEngine
-from vibesys.loops.profile_multi.session import ProfileMultiSession
+from vibesys.loops.profile_multi.session import ProfileMultiSession, _ProfilePolicy
 from vibesys.loops.single.session import SingleSession
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
@@ -41,6 +44,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import pytest
+
+    from vibesys.search.hypothesis import OrchestratorPlan
 
 
 @dataclass
@@ -78,11 +83,11 @@ class _FakeTurns:
 
 
 def _attempt() -> tuple[AttemptRequest, AttemptState]:
-    plan = OrchestratorPlan(
+    plan = make_orchestrator_plan(
         hypothesis_id="h1",
         hypothesis="cache decode",
         task="implement cache",
-        pass_criteria="tests pass",  # noqa: S106
+        criteria="tests pass",
         reasoning="measure decode",
     )
     engine = HypothesisEngine.create(AgentRunState()).start(plan, started_round=1)
@@ -129,13 +134,9 @@ def test_multi_prepass_profiles_only_when_requested_and_enabled() -> None:
 def test_profile_guidance_prepares_cursor_before_designer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from vibesys.evaluators.input_manifest import ProfileGuidedInput  # noqa: PLC0415
-
     calls: list[str] = []
     config = ProfileGuidedInput(command=("fake-profiler",))
     session = cast("Any", ProfileMultiSession.__new__(ProfileMultiSession))
-    from vibesys.loops.profile_multi.session import _ProfilePolicy  # noqa: PLC0415
-
     session.profile = _ProfilePolicy(config)
     session.ctx = SimpleNamespace(events=SimpleNamespace(emit=lambda *_args, **_kwargs: None))
     session.state = AgentRunState()
@@ -155,10 +156,10 @@ def test_profile_guidance_prepares_cursor_before_designer(
 
     async def fake_plan(_request: object) -> OrchestratorPlan:
         calls.append("designer")
-        return OrchestratorPlan(
+        return make_orchestrator_plan(
             hypothesis_id="h1",
             task="implement cache",
-            pass_criteria="tests pass",  # noqa: S106
+            criteria="tests pass",
             reasoning="plan",
         )
 
@@ -271,10 +272,10 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
     state = (
         HypothesisEngine.create(AgentRunState())
         .start(
-            OrchestratorPlan(
+            make_orchestrator_plan(
                 hypothesis_id="used",
                 task="first task",
-                pass_criteria="tests pass",  # noqa: S106
+                criteria="tests pass",
                 reasoning="first plan",
             ),
             started_round=1,
@@ -300,16 +301,16 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
     turns._skills = lambda selections: (selections, [])
     plans = iter(
         [
-            OrchestratorPlan(
+            make_orchestrator_plan(
                 hypothesis_id="used",
                 task="duplicate task",
-                pass_criteria="tests pass",  # noqa: S106
+                criteria="tests pass",
                 reasoning="retry",
             ),
-            OrchestratorPlan(
+            make_orchestrator_plan(
                 hypothesis_id="fresh",
                 task="new task",
-                pass_criteria="tests pass",  # noqa: S106
+                criteria="tests pass",
                 reasoning="corrected",
             ),
         ]

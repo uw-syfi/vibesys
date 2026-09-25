@@ -58,7 +58,7 @@ class DomainSectionContext(BaseModel):
     workspace_sources: tuple[WorkspaceSource, ...]
 
 
-def domain_context(  # noqa: PLR0913  # one field per domain-section variable
+def domain_context(  # noqa: PLR0913  # LW-040124 [PLR0913]; one field per domain-section variable.
     *,
     modality: str | None,
     interface: str,

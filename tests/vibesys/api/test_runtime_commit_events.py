@@ -167,7 +167,7 @@ def test_resume_does_not_replay_already_committed_rounds(tmp_path: Path) -> None
                     },
                     candidate=False,
                 )
-                return ctx._resources.run_id  # noqa: SLF001
+                return ctx._resources.run_id  # noqa: SLF001  # LW-040114 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
         finally:
             integration.close()
 

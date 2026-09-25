@@ -5,13 +5,15 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vibesys.repository import REPOSITORY_SLUG, RepositoryVisibility
 from vs_github.api import GitHubCLI
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 _RUN_BRANCH_PREFIXES = ("vibesys-runs/", "vibesys/")
 _GITHUB_ORIGIN = re.compile(
     r"^(?:https://github\.com/|ssh://git@github\.com/|git@github\.com:)"
@@ -35,9 +37,11 @@ class ExperimentRepository:
         """Create a GitHub repository and attach it as ``origin``."""
         self._require_project_root()
         if not REPOSITORY_SLUG.fullmatch(slug):
-            raise ValueError(f"--repo must be a GitHub OWNER/NAME pair, got {slug!r}")  # noqa: TRY003  # tracked: #288
+            message = f"--repo must be a GitHub OWNER/NAME pair, got {slug!r}"
+            raise ValueError(message)
         if self.has_origin():
-            raise ValueError(f"project repository already has an origin remote: {self.root}")  # noqa: TRY003  # tracked: #288
+            _exception_message = f"project repository already has an origin remote: {self.root}"
+            raise ValueError(_exception_message)
 
         self.github.create_repository(
             slug,
@@ -50,9 +54,11 @@ class ExperimentRepository:
         """Attach an existing remote repository as ``origin``."""
         self._require_project_root()
         if not url.strip():
-            raise ValueError("origin URL must not be empty")  # noqa: TRY003  # tracked: #288
+            message = "origin URL must not be empty"
+            raise ValueError(message)
         if self.has_origin():
-            raise ValueError(f"project repository already has an origin remote: {self.root}")  # noqa: TRY003  # tracked: #288
+            _exception_message = f"project repository already has an origin remote: {self.root}"
+            raise ValueError(_exception_message)
         self._run(["git", "remote", "add", "origin", url], tool="git")
         self.log("[repo] attached origin remote")
 
@@ -128,9 +134,8 @@ class ExperimentRepository:
             branch.startswith(prefix) and branch.removeprefix(prefix)
             for prefix in _RUN_BRANCH_PREFIXES
         ):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "remote publication requires the current VibeSys run branch"
-            )
+            message = "remote publication requires the current VibeSys run branch"
+            raise ValueError(message)
         return branch
 
     def _require_project_root(self) -> None:
@@ -140,12 +145,12 @@ class ExperimentRepository:
             tool="git",
         )
         if result.returncode != 0:
-            raise ValueError(f"project directory is not a Git repository: {self.root}")  # noqa: TRY003  # tracked: #288
+            message = f"project directory is not a Git repository: {self.root}"
+            raise ValueError(message)
         repository_root = Path(result.stdout.strip()).resolve()
         if repository_root != self.root.resolve():
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"project directory must be the Git repository root: {self.root}"
-            )
+            _exception_message = f"project directory must be the Git repository root: {self.root}"
+            raise ValueError(_exception_message)
 
     def _run(
         self,
@@ -165,16 +170,19 @@ class ExperimentRepository:
             }
         )
         try:
-            result = subprocess.run(  # noqa: PLW1510, S603  # tracked: #288
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010235 [S603]; repository operations use framework-built argv with no shell.
                 command,
                 cwd=self.root,
                 capture_output=True,
                 text=True,
                 env=env,
+                check=False,
             )
         except FileNotFoundError as exc:
-            raise RuntimeError(f"{tool} is required for project repository publication") from exc  # noqa: TRY003  # tracked: #288
+            _exception_message = f"{tool} is required for project repository publication"
+            raise RuntimeError(_exception_message) from exc
         if check and result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            raise RuntimeError(f"{tool} command failed ({' '.join(command)}): {detail}")  # noqa: TRY003  # tracked: #288
+            message = f"{tool} command failed ({' '.join(command)}): {detail}"
+            raise RuntimeError(message)
         return result

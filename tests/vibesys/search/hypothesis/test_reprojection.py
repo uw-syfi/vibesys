@@ -41,12 +41,12 @@ def _plan(identifier: str) -> OrchestratorPlan:
         hypothesis_id=identifier,
         hypothesis=f"claim {identifier}",
         task=f"implement {identifier}",
-        pass_criteria="tests pass",  # noqa: S106
+        pass_criteria="tests pass",  # noqa: S106  # LW-040064 [S106]; the argument is a fixture literal, not a credential.
         reasoning="test the claim",
     )
 
 
-def _round(  # noqa: PLR0913
+def _round(  # noqa: PLR0913  # LW-040065 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     number: int,
     metric: float,
     *,

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 from vibesys.evaluators.gates import (
     AccuracyGateResult,
+    BenchmarkContract,
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
 )
@@ -98,26 +99,24 @@ class FakeGateExecutor:
             return self.accuracy_results.pop(0)
         return self.default_accuracy_result
 
-    def run_benchmark(  # noqa: PLR0913  # mirrors GateExecutor.run_benchmark's own field count
+    def run_benchmark(  # noqa: PLR0913  # LW-040100 [PLR0913]; mirrors GateExecutor.run_benchmark's own field count.
         self,
         ctx: object,
         *,
-        result_spec: object | None = None,
-        result_protocol: int | None = None,
-        objectives: object = (),
+        contract: BenchmarkContract,
+        space: object,
         process_id: str,
         output_slug: str,
-        timeout_seconds: int | None = None,
         execution_base: str | None = None,
         round_label: str | None = None,
     ) -> BenchmarkGateResult:
         """Return the next queued benchmark outcome, or the default."""
-        del ctx, result_spec, result_protocol, objectives
+        del ctx, space
         self.benchmark_calls.append(
             FakeBenchmarkCall(
                 process_id=process_id,
                 output_slug=output_slug,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=contract.timeout_seconds,
                 execution_base=execution_base,
                 round_label=round_label,
             )

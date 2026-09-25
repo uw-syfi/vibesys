@@ -16,7 +16,7 @@ class Checkpoint:
         self._handles: dict[Path, object] = {}
         self._owner: dict[str, Path] = {}
         for f in self.files:
-            for name in self._handle(f).keys():  # noqa: SIM118 (safe_open handle, not a dict)
+            for name in self._handle(f).keys():
                 self._owner[name] = f
 
     def _handle(self, f: Path) -> object:

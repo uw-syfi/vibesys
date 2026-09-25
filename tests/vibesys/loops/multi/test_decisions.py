@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from tests.support import make_orchestrator_plan
 
 from vibesys.agent_run.attempts import AttemptState
 from vibesys.agent_run.evidence import CarryOver
@@ -11,12 +12,13 @@ from vibesys.loops.multi.decisions import HypothesisEngine, TerminalRequest, tra
 from vibesys.loops.multi.session import _TerminalPolicy
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import HypothesisOutcome
-from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
+
+_RoundCase = tuple[HypothesisOutcome, bool, bool, str, bool | None, int, bool]
 
 
 @pytest.mark.parametrize(
-    ("outcome", "passed", "reviewed", "next_step", "retained", "continuations", "active"),
+    "case",
     [
         (HypothesisOutcome.CONTINUE, True, True, "Finish cache", None, 0, True),
         (HypothesisOutcome.IMPLEMENTATION_FAILED, False, True, "Repair cache", None, 0, True),
@@ -27,20 +29,13 @@ from vs_loop_state.api import RoundRecord
         (HypothesisOutcome.SUPPORTED, False, False, "", None, 0, False),
     ],
 )
-def test_completed_round_controls_lease_and_designer_handoff(  # noqa: PLR0913
-    outcome: HypothesisOutcome,
-    passed: bool,  # noqa: FBT001
-    reviewed: bool,  # noqa: FBT001
-    next_step: str,
-    retained: bool | None,  # noqa: FBT001
-    continuations: int,
-    active: bool,  # noqa: FBT001
-) -> None:
-    plan = OrchestratorPlan(
+def test_completed_round_controls_lease_and_designer_handoff(case: _RoundCase) -> None:
+    outcome, passed, reviewed, next_step, retained, continuations, active = case
+    plan = make_orchestrator_plan(
         hypothesis_id="h1",
         hypothesis="Cache decode",
         task="Implement cache",
-        pass_criteria="Candidate responds",  # noqa: S106
+        criteria="Candidate responds",
         reasoning="Decode is expensive",
     )
     engine = HypothesisEngine.create(AgentRunState()).start(
@@ -97,3 +92,47 @@ def test_completed_round_controls_lease_and_designer_handoff(  # noqa: PLR0913
         assert transition.carry.regression_info != "stale"
     elif active and not reviewed:
         assert transition.carry.regression_info is None
+
+
+def test_completed_review_keeps_hypothesis_with_bounded_feedback() -> None:
+    plan = make_orchestrator_plan(
+        hypothesis_id="repair-after-review",
+        hypothesis="Cache decode",
+        task="Implement cache",
+        criteria="Candidate responds",
+        reasoning="Decode is expensive",
+    )
+    engine = HypothesisEngine.create(AgentRunState()).start(plan, started_round=1)
+    state = engine.state
+    hypothesis = state.active_hypothesis
+    assert hypothesis is not None
+    hypothesis.continuation_rounds = 1
+    attempt = AttemptState(agent_run_state=state, feedback="address the missing check")
+    record = RoundRecord(
+        round_number=2,
+        commit="2" * 40,
+        perf_metric=None,
+        perf_unit=None,
+        passed=False,
+        reviewed=True,
+        judge_verdict="fail",
+        hypothesis_id="repair-after-review",
+    )
+    transition = transition_round(
+        _TerminalPolicy(),
+        TerminalRequest(
+            engine=engine,
+            state=state,
+            hypothesis=hypothesis,
+            attempt=attempt,
+            record=record,
+            records=[],
+            carry=CarryOver(),
+            reviewed=True,
+            max_retries_per_round=2,
+        ),
+    )
+    active = transition.state.active_hypothesis
+    assert active is not None
+    assert active.feedback == "address the missing check"
+    assert active.continuation_rounds == 2

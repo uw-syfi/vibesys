@@ -14,13 +14,17 @@ from enum import StrEnum
 from pathlib import Path
 
 
-class MacOSProfilerTool(StrEnum):  # noqa: D101  # tracked: #288
+class MacOSProfilerTool(StrEnum):
+    """Native profiler selected for macOS CPU samples."""
+
     XCTRACE = "instruments"
     SAMPLE = "sample"
     NONE = "none"
 
 
-class DiagnosticCode(StrEnum):  # noqa: D101  # tracked: #288
+class DiagnosticCode(StrEnum):
+    """Capability or collection condition reported by the macOS profiler."""
+
     NOT_MACOS = "not_macos"
     COMMAND_LINE_TOOLS_ONLY = "command_line_tools_only"
     TIME_PROFILER_UNAVAILABLE = "time_profiler_unavailable"
@@ -32,7 +36,9 @@ class DiagnosticCode(StrEnum):  # noqa: D101  # tracked: #288
 
 
 @dataclass(frozen=True)
-class Capability:  # noqa: D101  # tracked: #288
+class Capability:
+    """Detected macOS profiling tool and host restrictions."""
+
     tool: MacOSProfilerTool
     xcode_path: str | None
     xctrace_path: str | None
@@ -42,7 +48,9 @@ class Capability:  # noqa: D101  # tracked: #288
 
 
 @dataclass(frozen=True)
-class CollectionResult:  # noqa: D101  # tracked: #288
+class CollectionResult:
+    """Artifacts and status from a macOS profile collection."""
+
     status: str
     tool: MacOSProfilerTool
     artifact: str | None
@@ -173,9 +181,11 @@ def collect(
                 "--",
                 *command,
             ]
-            result = subprocess.run(executed, capture_output=True, text=True, timeout=duration + 30)  # noqa: PLW1510, S603  # tracked: #288
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-009002 [S603]; Instruments must launch the caller-selected workload argv to profile it.
+                executed, capture_output=True, text=True, timeout=duration + 30, check=False
+            )
         elif capability.tool is MacOSProfilerTool.SAMPLE:
-            process = subprocess.Popen(  # noqa: S603  # tracked: #288
+            process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-009003 [S603]; sample mode must launch the caller-selected workload argv before attaching.
                 command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
             time.sleep(warmup)
@@ -190,7 +200,9 @@ def collect(
                 "-file",
                 str(artifact),
             ]
-            result = subprocess.run(executed, capture_output=True, text=True, timeout=duration + 15)  # noqa: PLW1510, S603  # tracked: #288
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-009004 [S603]; the executable is a detected sample profiler and argv contains generated pid/output options.
+                executed, capture_output=True, text=True, timeout=duration + 15, check=False
+            )
             process.terminate()
             try:
                 process.wait(timeout=5)

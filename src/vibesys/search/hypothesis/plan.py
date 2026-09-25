@@ -34,7 +34,8 @@ class HypothesisStrategyUpdate(BaseModel):
     @classmethod
     def _strip_non_empty(cls, value: str) -> str:
         if not (stripped := value.strip()):
-            raise ValueError("must not be blank")  # noqa: TRY003  # tracked: #288
+            message = "must not be blank"
+            raise ValueError(message)
         return stripped
 
 

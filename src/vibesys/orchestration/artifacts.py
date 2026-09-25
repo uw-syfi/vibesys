@@ -30,7 +30,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from vibesys.evaluators.validation_recipe import (
-    FrameworkValidationResult,  # tracked: #288
+    FrameworkValidationResult,
     ValidationRecipeArtifact,
 )
 from vibesys.orchestration.memory import structured_artifact_root

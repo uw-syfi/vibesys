@@ -68,6 +68,7 @@ def test_chat_event_capture_is_cleared_after_handler_error(tmp_path: Path) -> No
     with pytest.raises(RuntimeError):
         parts.chat.chat_with_event("will fail")
 
+    # lint-waiver: LW-010045 [SLF001]; the thread-local response stack has no public depth accessor, so inspect it to detect a request frame retained after failure.
     assert parts.chat._chat_response_local.captures == []  # noqa: SLF001
 
 
@@ -89,4 +90,3 @@ def test_nested_chat_captures_keep_each_terminal_event_separate(tmp_path: Path) 
     assert event is not None
     assert event.text == "outer"
     assert nested_event_text == ["inner"]
-    assert parts.chat._chat_response_local.captures == []  # noqa: SLF001

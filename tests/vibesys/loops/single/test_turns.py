@@ -1,4 +1,5 @@
 """Single strategy plan correction and combined role handoff."""
+# ruff: noqa: SLF001  # LW-030016; These tests pin the strategy turns' private prompt and validation seams.
 
 from __future__ import annotations
 
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from tests.support import make_orchestrator_plan
 
 from vibesys.agent_run.attempts import AttemptState
 from vibesys.agent_run.evidence import CarryOver
@@ -25,15 +27,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.search.hypothesis import OrchestratorPlan
 
 
 def _plan(hypothesis_id: str) -> OrchestratorPlan:
-    return OrchestratorPlan(
+    return make_orchestrator_plan(
         hypothesis_id=hypothesis_id,
         title="Decode batching.",
         hypothesis="Batching reduces decode overhead",
         task="Batch decode requests",
-        pass_criteria="Accuracy passes",  # noqa: S106
+        criteria="Accuracy passes",
         reasoning="Decode is the bottleneck",
     )
 
@@ -96,8 +99,8 @@ def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path
     assert hypothesis is not None
     plan_request = PlanRequest(1, engine.state, [], CarryOver(), None, None, 1, engine.guidance)
 
-    designer_prompt = turns._plan_prompt(plan_request)  # noqa: SLF001
-    combined_prompt = turns._combined_prompt(  # noqa: SLF001
+    designer_prompt = turns._plan_prompt(plan_request)
+    combined_prompt = turns._combined_prompt(
         AttemptRequest(1, plan, "cadence", [], hypothesis, "decode"),
         AttemptState(agent_run_state=engine.state, feedback=None, retry=1),
         [],
@@ -173,4 +176,4 @@ def test_validation_rejects_reused_id() -> None:
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
 
     with pytest.raises(InvalidPlanError, match="already used"):
-        turns._validate_plan(_plan("used"), state)  # noqa: SLF001
+        turns._validate_plan(_plan("used"), state)

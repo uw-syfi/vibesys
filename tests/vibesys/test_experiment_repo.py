@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from dataclasses import dataclass, field
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 import pytest
+from tests.support import run_test_command
 
 from vibesys.repository import RepositoryVisibility
 from vibesys.run.experiment_repo import ExperimentRepository
@@ -15,6 +15,8 @@ from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vs_github.api import GitHubCLI
 
+if TYPE_CHECKING:
+    from pathlib import Path
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "test",
     "GIT_AUTHOR_EMAIL": "test@example.com",
@@ -24,8 +26,8 @@ _IDENTITY = {
 
 
 def _git(root: Path, *args: str) -> str:
-    return subprocess.run(  # noqa: S603  # tracked: #288
-        ["git", *args],  # noqa: S607  # tracked: #288
+    return run_test_command(
+        ["git", *args],
         cwd=root,
         check=True,
         capture_output=True,
@@ -202,8 +204,9 @@ class _RecordingGitHub(GitHubCLI):
         *,
         visibility: str,
         source: Path,
-        remote_name: str = "origin",  # noqa: ARG002  # tracked: #288
+        remote_name: str = "origin",
     ) -> None:
+        del remote_name
         self.calls.append((repository, visibility, source))
 
 

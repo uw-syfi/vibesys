@@ -197,7 +197,7 @@ attributable. Cross the high-value axes below; capture the frame at each cell.
 - **`agent.toml` config.** `[tui].theme`, model/provider blocks, and any
   `[tui]` keys. Feed an **invalid** value (bad theme name, unknown key) and
   confirm it fails with a named error, not a silent fallback or a crash
-  (coding-best-practices rejects unknown keys).
+  (AGENTS.md: reject unknown keys).
 - **Providers / models.** Default claude provider is the baseline. If asked to go
   broader, `--cli-provider codex` with a `gpt-*` model exercises a different
   turn/stream shape; `/model` in chat switches harness+model mid-run.
@@ -329,7 +329,7 @@ Produce one report per independently closable finding. Use the repo forms (see
 When, and only when, the user has approved a fix for a filed ticket, implement it
 the way the repo expects: small, root-caused, in the owning layer, with a
 regression test and the relevant checks green. Read
-`docs/contributing/coding-best-practices.md` and
+`AGENTS.md`, the `software-design` and `testing` skills, and
 `docs/contributing/tui-architecture.md` first; the points below are the parts
 that bite TUI fixes most.
 
@@ -357,7 +357,7 @@ Ownership (put the fix where the state lives, per `tui-architecture.md`):
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress; widgets, rendering, key/mouse | `tui` | `clients/tui/src/**`, `ui/**` |
 | Event/query payloads, run state, projection into experiments/design/rounds, the optimization loop | Python backend | `src/vibesys/server/**`, `src/vibesys/loops/**` |
 
-Rules that follow from this and from coding-best-practices:
+Rules that follow from this and from AGENTS.md and the `software-design` skill:
 - **Backend events are the frontend contract.** Emit semantic fields from the
   backend; do formatting, truncation, color, and layout in the consumer. Do not
   move presentation into `server/**`, and do not teach `core-state` about themes,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from tests.support import make_orchestrator_plan
 
 from vibesys.agent_run.attempts import AttemptState
 from vibesys.agent_run.evidence import CarryOver
@@ -13,12 +14,13 @@ from vibesys.loops.profile_multi.decisions import TerminalRequest, transition_ro
 from vibesys.loops.profile_multi.session import _TerminalPolicy
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import HypothesisOutcome
-from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
+
+_RoundCase = tuple[HypothesisOutcome, bool, bool, str, bool | None, int, bool]
 
 
 @pytest.mark.parametrize(
-    ("outcome", "passed", "reviewed", "next_step", "retained", "continuations", "active"),
+    "case",
     [
         (HypothesisOutcome.CONTINUE, True, True, "Finish cache", None, 0, True),
         (HypothesisOutcome.IMPLEMENTATION_FAILED, False, True, "Repair cache", None, 0, True),
@@ -29,20 +31,13 @@ from vs_loop_state.api import RoundRecord
         (HypothesisOutcome.SUPPORTED, False, False, "", None, 0, False),
     ],
 )
-def test_completed_round_advances_profile_cursor_and_handoff(  # noqa: PLR0913
-    outcome: HypothesisOutcome,
-    passed: bool,  # noqa: FBT001
-    reviewed: bool,  # noqa: FBT001
-    next_step: str,
-    retained: bool | None,  # noqa: FBT001
-    continuations: int,
-    active: bool,  # noqa: FBT001
-) -> None:
-    plan = OrchestratorPlan(
+def test_completed_round_advances_profile_cursor_and_handoff(case: _RoundCase) -> None:
+    outcome, passed, reviewed, next_step, retained, continuations, active = case
+    plan = make_orchestrator_plan(
         hypothesis_id="h1",
         hypothesis="Cache decode",
         task="Implement cache",
-        pass_criteria="Candidate responds",  # noqa: S106
+        criteria="Candidate responds",
         reasoning="Decode is expensive",
     )
     engine = HypothesisEngine.create(

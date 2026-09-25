@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from tests.support import make_orchestrator_plan
+
 from vibesys.agent_run.attempts import (
     AttemptState,
     JudgeReviewed,
@@ -19,15 +21,14 @@ from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
 )
-from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 
 
 def _record_input() -> RecordInput:
-    plan = OrchestratorPlan(
+    plan = make_orchestrator_plan(
         hypothesis_id="cache",
         task="cache responses",
-        pass_criteria="behavior remains correct",  # noqa: S106
+        criteria="behavior remains correct",
         reasoning="reduce repeated work",
     )
     hypothesis = Hypothesis(

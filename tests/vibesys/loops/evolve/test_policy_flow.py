@@ -14,7 +14,7 @@ from vibesys.loops.evolve.policy_flow import (
     SelectionSettings,
 )
 from vibesys.loops.evolve.population import Individual, Population
-from vibesys.loops.evolve.search_policy import SearchSelection
+from vibesys.loops.evolve.search_policy import SearchSelection, SearchSelectionParameters
 
 
 @dataclass
@@ -23,7 +23,10 @@ class FakeSearchPolicy:
     events: list[str] = field(default_factory=list)
     requires_code: bool = True
 
-    def select(self, population: Population, **_kwargs: object) -> SearchSelection | None:
+    def select(
+        self, population: Population, parameters: SearchSelectionParameters
+    ) -> SearchSelection | None:
+        del parameters
         self.events.append(f"select:{len(population.all)}")
         return self.selection
 
@@ -67,7 +70,7 @@ async def test_search_policy_selects_records_and_checkpoints_without_run_environ
     search = EvolveSearch(population, policy, MetricSpace())
 
     assert not search.needs_bootstrap()
-    rng = random.Random(7)  # noqa: S311  # Deterministic selection fixture.
+    rng = random.Random(7)  # noqa: S311  # LW-030004; Deterministic selection fixture.
     selection = await search.plan(
         effects,
         rng=rng,
@@ -106,7 +109,7 @@ async def test_search_policy_handles_no_parent_and_no_fitness_resume() -> None:
     empty = EvolveSearch(Population(), policy, MetricSpace())
     assert empty.needs_bootstrap()
     assert empty.final_choice() is None
-    rng = random.Random(1)  # noqa: S311  # Deterministic selection fixture.
+    rng = random.Random(1)  # noqa: S311  # LW-030005; Deterministic selection fixture.
     assert await empty.plan(effects, rng=rng, settings=SelectionSettings(0, 0, 0.0, 0.0)) is None
     assert effects.events == [
         "checkpoint:evolve: record search selection",
