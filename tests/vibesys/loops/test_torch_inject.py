@@ -301,22 +301,66 @@ def test_sigusr2_toggles_stop_early_without_killing_process(tmp_path: Path) -> N
     assert events.count("profile.export_chrome_trace") == 1
 
 
-def _wait_for_event_count(call_log: Path, event: str, count: int, *, timeout: float) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        seen = sum(1 for _ts, name in parse_call_log(call_log) if name == event)
-        if seen >= count:
-            return
-        time.sleep(0.02)
-    events = parse_call_log(call_log)
-    raise AssertionError(  # noqa: TRY003  # LW-910310; this is a boundary error that deliberately embeds the offending value for the operator to act on
-        f"{event!r} never reached count {count} within {timeout}s; events={events}"
+# A failure bound only: every wait below ends as soon as the handshake file
+# it waits for appears (see sitecustomize.py's "Handshake" section).
+_HANDSHAKE_TIMEOUT_S = 30.0
+
+
+def _wait_for_file(path: Path, *, proc: subprocess.Popen[str]) -> str:
+    """Return *path*'s content once it exists; fail if *proc* exits first."""
+    deadline = time.monotonic() + _HANDSHAKE_TIMEOUT_S
+    while not path.is_file():
+        if proc.poll() is not None:
+            pytest.fail(f"process exited (rc={proc.returncode}) before {path.name}")
+        if time.monotonic() >= deadline:
+            pytest.fail(f"{path} never appeared")
+        time.sleep(0.01)
+    return path.read_text()
+
+
+def _run_window(proc: subprocess.Popen[str], control_dir: Path, window_dir: Path) -> None:
+    """Drive one window the way capture_ops does: name its dir, start, stop, await acks."""
+    (control_dir / "next_window").write_text(f"{window_dir}\n")
+    os.kill(proc.pid, signal.SIGUSR1)
+    _wait_for_file(window_dir / "window.started", proc=proc)
+    os.kill(proc.pid, signal.SIGUSR2)
+    _wait_for_file(window_dir / "window.exported", proc=proc)
+
+
+def _signal_mode_target(
+    tmp_path: Path, **overrides: str
+) -> tuple[subprocess.Popen[str], Path, Path]:
+    """Start a signal-trigger target that imports torch, then blocks on stdin."""
+    fake_torch = write_fake_torch(tmp_path / "fake_torch")
+    control_dir = tmp_path / "control"
+    call_log = tmp_path / "calls.log"
+    env = base_env(
+        out_dir=tmp_path / "default_out",
+        fake_torch_root=fake_torch,
+        call_log=call_log,
+        VIBESYS_TORCH_PROFILE="1",
+        VIBESYS_TORCH_PROFILE_TRIGGER="signal",
+        VIBESYS_TORCH_PROFILE_CONTROL_DIR=str(control_dir),
     )
+    env.update(overrides)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import sys\nimport torch\nsys.stdin.readline()\nprint('done')"],
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return proc, control_dir, call_log
 
 
-# Generous: only reached on failure, and parallel test runs can stall a
-# subprocess for seconds.
-_WINDOW_TIMEOUT_S = 30.0
+def _finish(proc: subprocess.Popen[str]) -> tuple[str, str]:
+    try:
+        return proc.communicate(input="\n", timeout=_HANDSHAKE_TIMEOUT_S)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
 
 
 def test_signal_mode_repeated_windows_produce_two_traces(tmp_path: Path) -> None:
@@ -326,72 +370,86 @@ def test_signal_mode_repeated_windows_produce_two_traces(tmp_path: Path) -> None
     unconditionally and ``start`` only acted ``if self._phase == "idle"``:
     there was no idle -> running cycle after the first stop, so a second
     SIGUSR1 was silently ignored (verified against a real MI210/ROCm 7.2.3
-    warm vLLM server). This drives the state
-    machine through two full SIGUSR1/SIGUSR2 cycles in signal-trigger mode
-    (the mode a warm target uses) and requires two distinct, non-empty
-    traces.
+    warm vLLM server). Drives two full windows through the handshake and
+    requires one non-empty trace per window, each in its own directory.
     """
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    out_dir = tmp_path / "out"
-    call_log = tmp_path / "calls.log"
-    env = base_env(
-        out_dir=out_dir,
-        fake_torch_root=fake_torch,
-        call_log=call_log,
-        VIBESYS_TORCH_PROFILE="1",
-        VIBESYS_TORCH_PROFILE_TRIGGER="signal",
-    )
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            # Block on stdin, not a fixed sleep, so a loaded machine can't
-            # end the process before both windows have run.
-            "import sys\nimport torch\nprint('imported', flush=True)\n"
-            "sys.stdin.readline()\nprint('done')",
-        ],
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    proc, control_dir, _ = _signal_mode_target(tmp_path)
     try:
-        # Wait for `import torch` to *finish*, not the fake's "torch.imported"
-        # event (logged at the top of its import): a SIGUSR1 delivered
-        # mid-import makes start()'s `from torch.profiler import ...` see a
-        # partially initialized module, so that window never starts.
-        assert proc.stdout is not None
-        assert proc.stdout.readline().strip() == "imported"
-
-        # Window 1.
-        os.kill(proc.pid, signal.SIGUSR1)
-        _wait_for_event_count(call_log, "profile.start", 1, timeout=_WINDOW_TIMEOUT_S)
-        os.kill(proc.pid, signal.SIGUSR2)
-        _wait_for_event_count(call_log, "profile.export_chrome_trace", 1, timeout=_WINDOW_TIMEOUT_S)
-
-        # Window 2: this second SIGUSR1 is exactly what the pre-fix state
-        # machine silently dropped.
-        os.kill(proc.pid, signal.SIGUSR1)
-        _wait_for_event_count(call_log, "profile.start", 2, timeout=_WINDOW_TIMEOUT_S)
-        os.kill(proc.pid, signal.SIGUSR2)
-        _wait_for_event_count(call_log, "profile.export_chrome_trace", 2, timeout=_WINDOW_TIMEOUT_S)
-
-        stdout, stderr = proc.communicate(input="\n", timeout=_WINDOW_TIMEOUT_S)
+        _wait_for_file(control_dir / "ready", proc=proc)
+        _run_window(proc, control_dir, tmp_path / "w1")
+        _run_window(proc, control_dir, tmp_path / "w2")
     finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.communicate()
+        stdout, stderr = _finish(proc)
 
     assert proc.returncode == 0, stderr
     assert "done" in stdout
+    for window, window_dir in enumerate((tmp_path / "w1", tmp_path / "w2"), start=1):
+        traces = _trace_files(window_dir)
+        assert len(traces) == 1, f"window {window}: {[p.name for p in traces]}"
+        assert _read_trace(traces[0])["traceEvents"]
+        assert (window_dir / "window.started").read_text() == str(window)
 
-    traces = _trace_files(out_dir)
-    assert len(traces) == 2, f"expected one trace per window, got {[p.name for p in traces]}"
-    for trace in traces:
-        assert _read_trace(trace)["traceEvents"]
-    windows = sorted(int(p.name.split("-")[1].split(".")[0]) for p in traces)
-    assert windows == [1, 2], f"trace filenames must carry a distinct window index: {windows}"
+
+def test_start_signal_during_torch_import_is_queued_not_dropped(tmp_path: Path) -> None:
+    """Regression test: a SIGUSR1 delivered mid-``import torch`` starts the window later.
+
+    Pre-fix, the handler ran on the importing thread, saw a half-initialized
+    torch, failed to start, and dropped the request: the window never
+    happened (a flaky test exposed it; a warm target signaled during its
+    startup would hit the same). The fake torch is held mid-import by a
+    gate file so the signal lands there deterministically.
+    """
+    gate = tmp_path / "import_gate"
+    proc, control_dir, call_log = _signal_mode_target(tmp_path, FAKE_TORCH_IMPORT_GATE=str(gate))
+    window_dir = tmp_path / "w1"
+    try:
+        _wait_for_file(control_dir / "armed", proc=proc)
+        _wait_for_event(call_log, "torch.imported", timeout=_HANDSHAKE_TIMEOUT_S)
+        (control_dir / "next_window").write_text(f"{window_dir}\n")
+        os.kill(proc.pid, signal.SIGUSR1)  # main thread is inside `import torch`
+        gate.write_text("")
+        _wait_for_file(control_dir / "ready", proc=proc)
+        _wait_for_file(window_dir / "window.started", proc=proc)
+        os.kill(proc.pid, signal.SIGUSR2)
+        _wait_for_file(window_dir / "window.exported", proc=proc)
+    finally:
+        _stdout, stderr = _finish(proc)
+
+    assert proc.returncode == 0, stderr
+    assert len(_trace_files(window_dir)) == 1
+    events = [name for _ts, name in parse_call_log(call_log)]
+    assert events.index("torch.import_done") < events.index("profile.start")
+
+
+def test_stop_before_ready_cancels_the_queued_start(tmp_path: Path) -> None:
+    """A SIGUSR2 while a start is still queued cancels it: no window opens later."""
+    gate = tmp_path / "import_gate"
+    proc, control_dir, call_log = _signal_mode_target(tmp_path, FAKE_TORCH_IMPORT_GATE=str(gate))
+    try:
+        _wait_for_file(control_dir / "armed", proc=proc)
+        _wait_for_event(call_log, "torch.imported", timeout=_HANDSHAKE_TIMEOUT_S)
+        os.kill(proc.pid, signal.SIGUSR1)
+        os.kill(proc.pid, signal.SIGUSR2)
+        gate.write_text("")
+        _wait_for_file(control_dir / "ready", proc=proc)
+        # A later, explicit window still works: the queue was cleared, not wedged.
+        _run_window(proc, control_dir, tmp_path / "w1")
+    finally:
+        _stdout, stderr = _finish(proc)
+
+    assert proc.returncode == 0, stderr
+    events = [name for _ts, name in parse_call_log(call_log)]
+    assert events.count("profile.start") == 1
+
+
+def test_gpu_less_target_reports_unavailable_instead_of_ready(tmp_path: Path) -> None:
+    proc, control_dir, _ = _signal_mode_target(tmp_path, FAKE_TORCH_GPU="0")
+    try:
+        reason = _wait_for_file(control_dir / "unavailable", proc=proc)
+    finally:
+        _finish(proc)
+    assert "no GPU" in reason
+    assert not (control_dir / "ready").exists()
 
 
 def test_sigint_exports_then_still_terminates_the_process(tmp_path: Path) -> None:

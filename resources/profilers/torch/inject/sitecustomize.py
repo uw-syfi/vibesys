@@ -74,6 +74,29 @@ directory. ``VIBESYS_TORCH_PROFILE_CONTROL_DIR`` is optional; omitting it
 (the default) just means every window falls back to the configured
 ``VIBESYS_TORCH_PROFILE_OUT_DIR``.
 
+## Handshake: state files, never timing
+
+A controller never has to guess how long anything takes. Every step it
+waits on is announced by a file, written only once the step has happened:
+
+- ``<control_dir>/armed``: signal handlers are installed. A ``SIGUSR1`` sent
+  before this hits the inherited disposition (default: terminate).
+- ``<control_dir>/ready``: ``import torch`` has *completed* and a GPU is
+  visible, so a window can start. The watcher thread decides this: its own
+  ``import torch`` blocks on the module's import lock until the host
+  program's import finishes. ``<control_dir>/unavailable`` (with the reason)
+  is written instead when no window can ever start (no GPU).
+- ``<window_dir>/window.started``, ``window.exported`` or ``window.failed``
+  (with the reason): per-window acknowledgements, written into the output
+  directory the controller named in ``next_window``, so each window's
+  acknowledgements are its own.
+
+A ``SIGUSR1`` that arrives after ``armed`` but before ``ready`` (including
+mid-``import torch``, where a handler running on the importing thread would
+see a half-initialized module) is queued, not dropped: the watcher delivers
+it once ``ready`` holds. A ``SIGUSR2`` before the queued start fires cancels
+it.
+
 ## Threading and signals
 
 ``torch.profiler.profile.start()``/``.stop()`` are not documented as safe to
@@ -189,6 +212,13 @@ _TRIGGER_AUTO = "auto"
 _TRIGGER_SIGNAL = "signal"
 _VALID_TRIGGERS = (_TRIGGER_AUTO, _TRIGGER_SIGNAL)
 _CONTROL_NEXT_WINDOW_NAME = "next_window"
+# Handshake files (see "Handshake: state files, never timing" above).
+_CONTROL_ARMED_NAME = "armed"
+_CONTROL_READY_NAME = "ready"
+_CONTROL_UNAVAILABLE_NAME = "unavailable"
+_ACK_STARTED_NAME = "window.started"
+_ACK_EXPORTED_NAME = "window.exported"
+_ACK_FAILED_NAME = "window.failed"
 # Not part of the documented capture_ops.py contract: an internal knob so
 # tests can exercise the "bounded wait, never block exit" path in well under
 # a second instead of the real-world default below.
@@ -196,8 +226,6 @@ _ENV_SYNC_TIMEOUT_S = "VIBESYS_TORCH_PROFILE_SYNC_TIMEOUT_S"
 
 _DEFAULT_OUT_DIR = "./torch_profile_traces"
 _POLL_INTERVAL_S = 0.1
-_TORCH_INIT_GRACE_RETRIES = 20
-_TORCH_INIT_GRACE_INTERVAL_S = 0.05
 _DEFAULT_SYNCHRONIZE_TIMEOUT_S = 5.0
 
 _LOG_PREFIX = "[vibesys-torch-inject]"
@@ -247,6 +275,23 @@ def _chain_sitecustomize() -> None:
         _log(f"chained sitecustomize import failed (continuing): {exc!r}")
 
 
+def _write_marker(directory: Path | None, name: str, text: str) -> None:
+    """Atomically publish one handshake file (write a temp file, then rename).
+
+    A reader that sees the file therefore sees its whole content. No-op when
+    *directory* is None (no controller is listening); never raises.
+    """
+    if directory is None:
+        return
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        tmp = directory / f".{name}.{os.getpid()}.tmp"
+        tmp.write_text(text)
+        tmp.replace(directory / name)
+    except OSError as exc:
+        _log(f"could not write handshake file {directory / name}: {exc!r}")
+
+
 # ---------------------------------------------------------------------------
 # Capture state machine, driven entirely from signal handlers (main thread)
 # ---------------------------------------------------------------------------
@@ -272,32 +317,62 @@ class _Capture:
         self._prof = None
         self._window_index = 0
         self._active_out_dir: Path | None = None
+        # Where this window's acknowledgements go: only a directory the
+        # controller named via next_window, so windows never share ack files.
+        self._active_ack_dir: Path | None = None
+        # Set by the watcher thread once torch is fully imported and a GPU is
+        # visible; a SIGUSR1 before then is queued in _pending_start.
+        self._ready = threading.Event()
+        self._pending_start = False
 
-    def _resolve_window_out_dir(self) -> Path:
+    def _resolve_window_out_dir(self) -> tuple[Path, Path | None]:
         """Consume the control file naming this window's output dir, if any.
 
-        See the module docstring's "Repeated windows and warm targets"
-        section for the full protocol. Falls back to the module's
-        configured default out_dir when there is no control dir, no control
-        file, an empty file, or the file can't be read -- never raises.
+        Returns ``(out_dir, ack_dir)``: ``ack_dir`` is ``out_dir`` when the
+        controller named it, else ``None`` (the shared default out_dir gets
+        no acknowledgements). See the module docstring's "Repeated windows
+        and warm targets" section. Falls back to the configured default
+        out_dir when there is no control dir, no control file, an empty
+        file, or the file can't be read -- never raises.
         """
         if self._control_dir is None:
-            return self._out_dir
+            return self._out_dir, None
         control_file = self._control_dir / _CONTROL_NEXT_WINDOW_NAME
         try:
             text = control_file.read_text().strip()
         except OSError:
-            return self._out_dir
+            return self._out_dir, None
         with contextlib.suppress(OSError):
             control_file.unlink()
-        return Path(text) if text else self._out_dir
+        if not text:
+            return self._out_dir, None
+        return Path(text), Path(text)
+
+    def mark_ready(self) -> bool:
+        """Record that a window can start now; return whether a start was queued.
+
+        Called from the watcher thread. It does not start the window itself
+        (``torch.profiler`` calls stay on the main thread, see "Threading and
+        signals"): the caller re-delivers ``SIGUSR1`` when this returns True.
+        """
+        with self._lock:
+            self._ready.set()
+            pending, self._pending_start = self._pending_start, False
+        _write_marker(self._control_dir, _CONTROL_READY_NAME, "1")
+        return pending
 
     def start(self) -> None:
         _log("SIGUSR1 handler entered (start requested)")
         with self._lock:
+            if not self._ready.is_set():
+                # torch not fully imported yet (possibly mid-import on this
+                # very thread): queue the request instead of dropping it.
+                self._pending_start = True
+                _log("start queued until torch is imported and a GPU is visible")
+                return
             if self._phase != "idle":
                 return
-            out_dir = self._resolve_window_out_dir()
+            out_dir, ack_dir = self._resolve_window_out_dir()
             try:
                 import torch  # noqa: PLC0415  # LW-920184; this import is deferred to avoid a hard dependency on an optional/heavy library at module load time
                 from torch.profiler import (  # noqa: PLC0415  # LW-920185; this import is deferred to avoid a hard dependency on an optional/heavy library at module load time
@@ -314,46 +389,53 @@ class _Capture:
                 prof.start()
             except Exception as exc:  # noqa: BLE001  # LW-910121; this boundary code deliberately catches any exception from an external tool or subprocess call
                 # self._phase was never touched above, so it is still "idle":
-                # a later SIGUSR1 can retry (e.g. a warm target signaled
-                # before the host program has imported torch yet).
+                # a later SIGUSR1 can retry.
                 _log(
                     f"failed to start torch.profiler (idle again, next SIGUSR1 may retry): {exc!r}"
                 )
+                _write_marker(ack_dir, _ACK_FAILED_NAME, f"start: {exc!r}")
                 return
             self._prof = prof
             self._active_out_dir = out_dir
+            self._active_ack_dir = ack_dir
             self._window_index += 1
             self._phase = "running"
             _log(
                 f"profiling started (record_shapes={self._record_shapes}, "
                 f"window={self._window_index}, out_dir={out_dir})"
             )
+            _write_marker(ack_dir, _ACK_STARTED_NAME, str(self._window_index))
             _ = torch  # keep the import alive via closure; no further use here
 
     def stop_and_export(self) -> None:
         _log("SIGUSR2/SIGINT/atexit handler entered (stop requested)")
         with self._lock:
+            self._pending_start = False  # a stop cancels a start still queued
             if self._phase != "running" or self._prof is None:
                 self._phase = "idle"
                 return
             prof = self._prof
             out_dir = self._active_out_dir or self._out_dir
+            ack_dir = self._active_ack_dir
             window = self._window_index
             self._prof = None
             self._active_out_dir = None
+            self._active_ack_dir = None
             self._phase = "idle"  # ready for the next SIGUSR1 window
             try:
                 prof.stop()
             except Exception as exc:  # noqa: BLE001  # LW-910122; this boundary code deliberately catches any exception from an external tool or subprocess call
                 _log(f"torch.profiler stop() raised (continuing): {exc!r}")
+                _write_marker(ack_dir, _ACK_FAILED_NAME, f"stop: {exc!r}")
                 return
-            self._export(prof, out_dir=out_dir, window=window)
+            self._export(prof, out_dir=out_dir, window=window, ack_dir=ack_dir)
 
-    def _export(self, prof, *, out_dir: Path, window: int) -> None:  # noqa: ANN001  # LW-910123; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
+    def _export(self, prof, *, out_dir: Path, window: int, ack_dir: Path | None) -> None:  # noqa: ANN001  # LW-910123; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             _log(f"could not create output dir {out_dir}: {exc!r}")
+            _write_marker(ack_dir, _ACK_FAILED_NAME, f"export: {exc!r}")
             return
         pid = os.getpid()
         raw_path = out_dir / f"{pid}-{window}.pt.trace.json"
@@ -366,11 +448,13 @@ class _Capture:
                 shutil.copyfileobj(src, dst)
         except Exception as exc:  # noqa: BLE001  # LW-910124; this boundary code deliberately catches any exception from an external tool or subprocess call
             _log(f"failed to export chrome trace: {exc!r}")
+            _write_marker(ack_dir, _ACK_FAILED_NAME, f"export: {exc!r}")
             return
         finally:
             with contextlib.suppress(OSError):
                 raw_path.unlink(missing_ok=True)
         _log(f"exported trace to {gz_path} ({gz_path.stat().st_size} bytes)")
+        _write_marker(ack_dir, _ACK_EXPORTED_NAME, gz_path.name)
         self._bounded_synchronize()
 
     def _bounded_synchronize(self) -> None:
@@ -429,68 +513,70 @@ def _install_chained_handler(sig: signal.Signals, handler) -> None:  # noqa: ANN
 
 
 def _arm(capture: _Capture, *, delay_s: float, duration_s: float | None, trigger: str) -> None:
-    """Install signal handlers; self-trigger the first window only in 'auto' mode.
+    """Install signal handlers and start the readiness watcher.
 
-    In ``trigger="signal"`` mode, the same SIGUSR1/SIGUSR2/SIGINT handlers
-    are installed but nothing here ever sends a self-triggered signal -- an
-    external controller (typically ``capture_runtime.start_target`` plus
-    repeated ``capture_ops.profile_ops(target=...)`` calls) drives every
-    window's start/stop explicitly. This is what makes a process armed this
-    way a reusable "warm target" instead of a one-shot delay/duration
-    capture (see the module docstring).
+    In both trigger modes the watcher waits until torch is fully imported and
+    a GPU is visible, then marks the capture ready (re-delivering a queued
+    ``SIGUSR1``). Only ``trigger="auto"`` goes on to self-trigger a window
+    after ``delay_s`` (and stop it after ``duration_s``); in
+    ``trigger="signal"`` mode an external controller (typically
+    ``capture_runtime.start_target`` plus repeated
+    ``capture_ops.profile_ops(target=...)`` calls) drives every window,
+    which is what makes the process a reusable warm target.
     """
     stop_event = threading.Event()
+    control_dir = capture._control_dir  # noqa: SLF001  # LW-910128; this test exercises the standalone script's underscore-prefixed helpers directly; there is no other entry point
 
-    if trigger == _TRIGGER_AUTO:
-
-        def _watch() -> None:
-            torch_module = _wait_for_torch(stop_event)
-            if torch_module is None:
-                return  # process exiting, or torch never imported
-            if not _gpu_available(torch_module):
-                _log(
-                    "torch imported but no GPU visible (torch.cuda.is_available() is false); "
-                    "skipping capture for this process"
-                )
-                return
-            if delay_s > 0 and stop_event.wait(delay_s):
-                return
-            _log("sending SIGUSR1 (start)")
+    def _watch() -> None:
+        torch_module = _wait_for_torch(stop_event)
+        if torch_module is None:
+            return  # process exiting, or torch never imported
+        if not _gpu_available(torch_module):
+            reason = "torch imported but no GPU visible (torch.cuda.is_available() is false)"
+            _log(f"{reason}; skipping capture for this process")
+            _write_marker(control_dir, _CONTROL_UNAVAILABLE_NAME, reason)
+            return
+        if capture.mark_ready():
+            _log("re-sending queued SIGUSR1 (start)")
             with contextlib.suppress(ProcessLookupError):
                 os.kill(os.getpid(), signal.SIGUSR1)
-            if duration_s is not None and not stop_event.wait(duration_s):
-                _log("sending SIGUSR2 (stop, duration_s elapsed)")
-                with contextlib.suppress(ProcessLookupError):
-                    os.kill(os.getpid(), signal.SIGUSR2)
+        if trigger != _TRIGGER_AUTO:
+            return
+        if delay_s > 0 and stop_event.wait(delay_s):
+            return
+        _log("sending SIGUSR1 (start)")
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(os.getpid(), signal.SIGUSR1)
+        if duration_s is not None and not stop_event.wait(duration_s):
+            _log("sending SIGUSR2 (stop, duration_s elapsed)")
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(os.getpid(), signal.SIGUSR2)
 
-        thread = threading.Thread(target=_watch, name="vibesys-torch-inject-watch", daemon=True)
-        thread.start()
-
+    # Handlers first, so the watcher's own SIGUSR1 can never hit the
+    # inherited default disposition.
     _install_chained_handler(signal.SIGUSR1, lambda *_a: capture.start())
     _install_chained_handler(signal.SIGUSR2, lambda *_a: capture.stop_and_export())
     _install_chained_handler(signal.SIGINT, lambda *_a: capture.stop_and_export())
     atexit.register(capture.stop_and_export)
+    # A SIGUSR1 sent before this point hits whatever disposition the process
+    # inherited across exec, so a controller must wait for this marker
+    # before signaling (see the module docstring's handshake section).
+    _write_marker(control_dir, _CONTROL_ARMED_NAME, "1")
 
-    if trigger == _TRIGGER_SIGNAL and capture._control_dir is not None:  # noqa: SLF001  # LW-910128; this test exercises the standalone script's underscore-prefixed helpers directly; there is no other entry point
-        # Signals sent before this point (interpreter/site startup, this
-        # function running) hit whatever disposition the process inherited
-        # across exec, not these handlers -- a signal delivered that early
-        # is dropped, not queued, so an external controller (start_target's
-        # caller) needs a reliable way to know handlers are live before
-        # sending the first SIGUSR1. This marker file is that readiness
-        # signal; see capture_ops.start_target's default ready_command.
-        with contextlib.suppress(OSError):
-            capture._control_dir.mkdir(parents=True, exist_ok=True)  # noqa: SLF001  # LW-910129; this test exercises the standalone script's underscore-prefixed helpers directly; there is no other entry point
-            (capture._control_dir / "armed").write_text("1")  # noqa: SLF001  # LW-910130; this test exercises the standalone script's underscore-prefixed helpers directly; there is no other entry point
+    thread = threading.Thread(target=_watch, name="vibesys-torch-inject-watch", daemon=True)
+    thread.start()
 
 
 def _wait_for_torch(stop_event: threading.Event):  # noqa: ANN202  # LW-910131; this private helper's return type is intentionally left loose; annotating it now is separate cleanup work
-    """Poll ``sys.modules`` until the host program imports torch, or forever.
+    """Wait until the host program has *finished* importing torch, or forever.
 
-    Cheap (a dict lookup + sleep) and opt-in only (this whole module is a
-    no-op unless ``VIBESYS_TORCH_PROFILE=1``), so an unbounded wait for a
-    process that never imports torch is an accepted cost, not a bug: such a
-    process was never going to produce a GPU trace regardless.
+    Polls ``sys.modules`` (cheap: a dict lookup + sleep). ``torch`` appears
+    there at the start of its import, but the ``import torch`` below, run on
+    this non-importing thread, blocks on the module's import lock until the
+    host thread's import completes, so the module returned is fully
+    initialized. An unbounded wait for a process that never imports torch is
+    an accepted cost (the module is opt-in only): such a process was never
+    going to produce a GPU trace.
     """
     while not stop_event.is_set():
         if "torch" in sys.modules:
@@ -505,23 +591,12 @@ def _wait_for_torch(stop_event: threading.Event):  # noqa: ANN202  # LW-910131; 
 
 
 def _gpu_available(torch_module) -> bool:  # noqa: ANN001  # LW-910133; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    """``torch.cuda.is_available()``, tolerant of torch still mid-import.
-
-    ``sys.modules["torch"]`` is populated at the *start* of ``import torch``
-    (before its body finishes), so seeing it there does not guarantee
-    ``torch.cuda`` is already attached. Retry briefly rather than concluding
-    "no GPU" from a partial-init race.
-    """
-    for _attempt in range(_TORCH_INIT_GRACE_RETRIES):
-        try:
-            return bool(torch_module.cuda.is_available())
-        except AttributeError:
-            time.sleep(_TORCH_INIT_GRACE_INTERVAL_S)
-        except Exception as exc:  # noqa: BLE001  # LW-910134; this boundary code deliberately catches any exception from an external tool or subprocess call
-            _log(f"torch.cuda.is_available() raised (treating as no GPU): {exc!r}")
-            return False
-    _log("torch.cuda never became available after import; treating as no GPU")
-    return False
+    """``torch.cuda.is_available()`` on a fully imported torch (see ``_wait_for_torch``)."""
+    try:
+        return bool(torch_module.cuda.is_available())
+    except Exception as exc:  # noqa: BLE001  # LW-910134; this boundary code deliberately catches any exception from an external tool or subprocess call
+        _log(f"torch.cuda.is_available() raised (treating as no GPU): {exc!r}")
+        return False
 
 
 # ---------------------------------------------------------------------------

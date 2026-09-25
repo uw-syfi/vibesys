@@ -17,8 +17,13 @@ shape its behavior without editing the package:
   (default ``"1"``).
 - ``FAKE_TORCH_SYNC_DELAY_S``: seconds ``cuda.synchronize()`` sleeps before
   returning (default ``0``); used to simulate the ROCm post-export hang.
+- ``FAKE_TORCH_START_DELAY_S``: seconds ``profile.start()`` takes (default
+  ``0``); models ROCm's multi-second profiler backend initialization.
+- ``FAKE_TORCH_IMPORT_GATE``: if set, ``import torch`` blocks after logging
+  ``torch.imported`` until this path exists (a signal can then be delivered
+  deterministically mid-import).
 - ``FAKE_TORCH_CALL_LOG``: path to append one ``"<monotonic>\\t<event>"``
-  line per call the fake module makes (``torch.imported``,
+  line per call the fake module makes (``torch.imported``, ``torch.import_done``,
   ``cuda.is_available``, ``profile.start``, ``profile.stop``,
   ``profile.export_chrome_trace``), used to assert ordering and timing.
 """
@@ -45,6 +50,12 @@ _FAKE_TORCH_INIT_SOURCE = textwrap.dedent(
 
     _log_event("torch.imported")
 
+    # Hold the import open (mid-``import torch``) until the gate file exists,
+    # so a test can deliver a signal at exactly this point.
+    _gate = os.environ.get("FAKE_TORCH_IMPORT_GATE")
+    while _gate and not os.path.exists(_gate):
+        time.sleep(0.01)
+
 
     class cuda:
         @staticmethod
@@ -62,6 +73,8 @@ _FAKE_TORCH_INIT_SOURCE = textwrap.dedent(
 
 
     from . import profiler  # noqa: E402  (torch.profiler must resolve as a submodule)
+
+    _log_event("torch.import_done")
     '''
 )
 
@@ -112,6 +125,7 @@ _FAKE_TORCH_PROFILER_SOURCE = textwrap.dedent(
         def start(self):
             if os.environ.get("FAKE_TORCH_START_FAIL") == "1":
                 raise RuntimeError("fake torch: start() failure")
+            time.sleep(float(os.environ.get("FAKE_TORCH_START_DELAY_S", "0")))
             _log_event("profile.start")
 
         def stop(self):
