@@ -16,7 +16,7 @@ import server.event_index as event_index_module
 import server.events as events_module
 from server.event_index import event_index_path, load_event_index
 from server.events import EventStore, EventType, RunEvent, make_event
-from server.journal import EventJournal
+from server.journal import WireJournal
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -262,8 +262,8 @@ def test_journal_attach_reuses_the_index_despite_server_started(
     log_dir = tmp_path / "run" / "logs"
     events_path = log_dir / "run-events.jsonl"
 
-    def attach() -> EventJournal:
-        journal = EventJournal(threading.Condition(threading.RLock()))
+    def attach() -> WireJournal:
+        journal = WireJournal(threading.Condition(threading.RLock()))
         journal.attach(log_dir)
         return journal
 

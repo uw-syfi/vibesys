@@ -29,6 +29,7 @@ from vibesys.agent_run.evidence import (
 from vibesys.agent_run.hypotheses import adopt_metric_space, update_active_hypothesis
 from vibesys.agent_run.record import RecordInput, build_round_record
 from vibesys.agent_run.state import AgentRunState
+from vibesys.errors import StrategySessionError
 from vibesys.evaluators.gates import (
     GATE_RECORD_TAIL_CHARS,
     AccuracyGateResult,
@@ -60,6 +61,9 @@ if TYPE_CHECKING:
     from vibesys.orchestration.runtime import RunContext
     from vibesys.schemas import OrchestratorPlan
     from vs_loop_state.api import RoundRecord
+
+
+SingleSessionError = StrategySessionError
 
 
 class PlanGuidance(Protocol):
@@ -104,47 +108,6 @@ class AttemptRequest:
     records: list[RoundRecord]
     active_hypothesis: Hypothesis
     last_profile_focus: str
-
-
-class SingleSessionError(RuntimeError):
-    """A durable single strategy invariant failed."""
-
-    def __init__(self, detail: str) -> None:
-        """Preserve the precise failed invariant."""
-        super().__init__(detail)
-
-    @classmethod
-    def missing_active(cls) -> SingleSessionError:
-        """Report that the accepted plan produced no active state."""
-        return cls("designer plan did not create an active hypothesis")
-
-    @classmethod
-    def missing_rollback(cls) -> SingleSessionError:
-        """Report an incomplete rollback decision."""
-        return cls("rollback resolution omitted a commit")
-
-    @classmethod
-    def exhausted_attempts(cls, round_number: int, first: int, limit: int) -> SingleSessionError:
-        """Report a resume cursor beyond the paid attempt limit."""
-        return cls(
-            f"Round {round_number} already persisted {first - 1} attempts, "
-            f"exhausting max_retries_per_round={limit}"
-        )
-
-    @classmethod
-    def missing_gate_reason(cls) -> SingleSessionError:
-        """Report an invalid official gate transition."""
-        return cls("official gate requested without a reason")
-
-    @classmethod
-    def missing_baseline(cls) -> SingleSessionError:
-        """Report that no trusted revision can be restored."""
-        return cls("no trusted retained candidate or input baseline is available")
-
-    @classmethod
-    def missing_winner_commit(cls) -> SingleSessionError:
-        """Report a selected record without a candidate revision."""
-        return cls("selected candidate has no commit")
 
 
 @dataclass(frozen=True)

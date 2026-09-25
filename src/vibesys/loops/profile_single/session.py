@@ -29,6 +29,7 @@ from vibesys.agent_run.evidence import (
 from vibesys.agent_run.hypotheses import adopt_metric_space, update_active_hypothesis
 from vibesys.agent_run.record import RecordInput, build_round_record
 from vibesys.agent_run.state import AgentRunState
+from vibesys.errors import StrategySessionError
 from vibesys.evaluators.gates import (
     GATE_RECORD_TAIL_CHARS,
     AccuracyGateResult,
@@ -62,6 +63,9 @@ if TYPE_CHECKING:
     from vibesys.orchestration.runtime import RunContext
     from vibesys.schemas import OrchestratorPlan
     from vs_loop_state.api import RoundRecord
+
+
+ProfileSingleSessionError = StrategySessionError
 
 
 class PlanGuidance(Protocol):
@@ -106,54 +110,6 @@ class AttemptRequest:
     records: list[RoundRecord]
     active_hypothesis: Hypothesis
     last_profile_focus: str
-
-
-class ProfileSingleSessionError(RuntimeError):
-    """A durable profile guided single strategy invariant failed."""
-
-    def __init__(self, detail: str) -> None:
-        """Preserve the precise failed invariant."""
-        super().__init__(detail)
-
-    @classmethod
-    def missing_active(cls) -> ProfileSingleSessionError:
-        """Report that the accepted plan produced no active state."""
-        return cls("designer plan did not create an active hypothesis")
-
-    @classmethod
-    def missing_rollback(cls) -> ProfileSingleSessionError:
-        """Report an incomplete rollback decision."""
-        return cls("rollback resolution omitted a commit")
-
-    @classmethod
-    def exhausted_attempts(
-        cls, round_number: int, first: int, limit: int
-    ) -> ProfileSingleSessionError:
-        """Report a resume cursor beyond the paid attempt limit."""
-        return cls(
-            f"Round {round_number} already persisted {first - 1} attempts, "
-            f"exhausting max_retries_per_round={limit}"
-        )
-
-    @classmethod
-    def missing_gate_reason(cls) -> ProfileSingleSessionError:
-        """Report an invalid official gate transition."""
-        return cls("official gate requested without a reason")
-
-    @classmethod
-    def missing_baseline(cls) -> ProfileSingleSessionError:
-        """Report that no trusted revision can be restored."""
-        return cls("no trusted retained candidate or input baseline is available")
-
-    @classmethod
-    def missing_winner_commit(cls) -> ProfileSingleSessionError:
-        """Report a selected record without a candidate revision."""
-        return cls("selected candidate has no commit")
-
-    @classmethod
-    def missing_profile_config(cls) -> ProfileSingleSessionError:
-        """Report a descriptor without profile guidance settings."""
-        return cls("profile_guided options are required")
 
 
 @dataclass(frozen=True)
@@ -218,7 +174,9 @@ class ProfileSingleSession:
         self.terminal_policy = _TerminalPolicy()
         config = options.profile_guided
         if config is None:
-            raise ProfileSingleSessionError.missing_profile_config()
+            raise ProfileSingleSessionError.missing_profile_config(  # noqa: TRY003  # tracked: #288
+                "profile_guided options are required"
+            )
         self.profile = _ProfilePolicy(config)
         self.framework_benchmark_configured = (
             ctx.request.input_bundle.benchmark_result is not None

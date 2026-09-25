@@ -49,13 +49,14 @@ def test_store_round_trips_and_prepares_exact_state_transition(tmp_path) -> None
     project = _project(tmp_path)
     namespace = project.state.portable_namespace("run-1", "agent")
     store = AgentRunStateStore(namespace)
+    slot = namespace.slot("state.json", AgentRunState)
     state = AgentRunState(
         active_hypothesis_id="H-1",
         hypotheses=[Hypothesis(hypothesis_id="H-1", plan=_plan("H-1"), started_round=1)],
     )
 
     assert store.load_optional() is None
-    transition = store.transition(state)
+    transition = slot.transition(state)
     assert isinstance(transition, StateTransition)
     assert store.load_optional() is None
 

@@ -13,6 +13,13 @@ from vibesys.agent_run.hypotheses import apply_strategy_updates
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
+from vibesys.errors import (
+    InvalidPlanError,
+    MissingImplementationError,
+    PlanCorrectionExhaustedError,
+    RoleIsolationError,
+    UnsupportedProfilerError,
+)
 from vibesys.events import CoreEventType, EventStatus, FrameworkSource, JudgeResultData
 from vibesys.profilers import (
     ProfilerDefinition,
@@ -53,64 +60,6 @@ if TYPE_CHECKING:
     from vs_agent.api import MCPServerSpec
 
 T = TypeVar("T", bound=BaseModel)
-
-
-class InvalidPlanError(ValueError):
-    """The designer returned an invalid hypothesis state transition."""
-
-    def __init__(self, detail: str) -> None:
-        """Name the violated plan invariant."""
-        super().__init__(detail)
-
-    @classmethod
-    def duplicate_updates(cls) -> InvalidPlanError:
-        """Report repeated prior hypothesis IDs."""
-        return cls("hypothesis_updates names one hypothesis more than once")
-
-    @classmethod
-    def self_reference(cls) -> InvalidPlanError:
-        """Report a plan that updates its own new hypothesis."""
-        return cls("hypothesis_updates includes the new hypothesis")
-
-    @classmethod
-    def reused_id(cls, hypothesis_id: str) -> InvalidPlanError:
-        """Report a new hypothesis ID already used in this run."""
-        return cls(f"hypothesis ID {hypothesis_id!r} was already used")
-
-
-class PlanCorrectionExhaustedError(RuntimeError):
-    """The plan correction loop ended without a validated plan."""
-
-    def __init__(self) -> None:
-        """Name the impossible correction state."""
-        super().__init__("plan correction loop exited without a result")
-
-
-class UnsupportedProfilerError(ValueError):
-    """The selected domain cannot use the configured profiler."""
-
-    def __init__(self) -> None:
-        """Report missing Torch profiler support."""
-        super().__init__("selected domain does not provide Torch profiler support")
-
-
-class MissingImplementationError(ValueError):
-    """A judge turn was requested without a parsed implementation."""
-
-    def __init__(self) -> None:
-        """Name the missing review input."""
-        super().__init__("judge requires a parsed implementer response")
-
-
-class RoleIsolationError(RuntimeError):
-    """A read-only role left unauthorized workspace changes after restoration."""
-
-    def __init__(self, role: str, remaining: list[str]) -> None:
-        """Name the role and paths that could not be isolated."""
-        super().__init__(
-            f"Cannot isolate {role}: workspace is still modified after restore: "
-            + ", ".join(remaining[:8])
-        )
 
 
 def _unauthorized_paths(changes: list[str], allowed: tuple[str, ...]) -> list[str]:
@@ -255,7 +204,7 @@ class MultiAgentTurns:
                 await self.workspace.restore(revision, clean=True, preserve_paths=(allowed,))
                 remaining = _unauthorized_paths(await self.workspace.pending_changes(), (allowed,))
                 if remaining:
-                    raise RoleIsolationError("orchestrator", remaining)
+                    raise RoleIsolationError(remaining, role="orchestrator")
                 self.ctx.log(
                     f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
                     f"attempted by orchestrator: {', '.join(unauthorized[:8])}"
@@ -380,7 +329,7 @@ class MultiAgentTurns:
                 await self.workspace.restore(revision, clean=True, preserve_paths=allowed)
                 remaining = _unauthorized_paths(await self.workspace.pending_changes(), allowed)
                 if remaining:
-                    raise RoleIsolationError(label, remaining)
+                    raise RoleIsolationError(remaining, role=label)
                 self.ctx.log(
                     f"[role-isolation] reverted {len(unauthorized)} workspace change(s): {', '.join(unauthorized[:8])}"
                 )

@@ -11,6 +11,12 @@ from vibesys.agent_run.hypotheses import apply_strategy_updates
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
+from vibesys.errors import (
+    InvalidPlanError,
+    PlanCorrectionExhaustedError,
+    RoleIsolationError,
+    UnsupportedProfilerError,
+)
 from vibesys.events import FrameworkSource
 from vibesys.profilers import (
     ProfilerDefinition,
@@ -37,56 +43,6 @@ if TYPE_CHECKING:
     from vibesys.loops.single.session import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
     from vibesys.skills import ResolvedSkillSelection
-
-
-class InvalidPlanError(ValueError):
-    """The designer returned an invalid hypothesis state transition."""
-
-    def __init__(self, detail: str) -> None:
-        """Name the violated plan invariant."""
-        super().__init__(detail)
-
-    @classmethod
-    def duplicate_updates(cls) -> InvalidPlanError:
-        """Report repeated prior hypothesis IDs."""
-        return cls("hypothesis_updates names one hypothesis more than once")
-
-    @classmethod
-    def self_reference(cls) -> InvalidPlanError:
-        """Report a plan that updates its own new hypothesis."""
-        return cls("hypothesis_updates includes the new hypothesis")
-
-    @classmethod
-    def reused_id(cls, hypothesis_id: str) -> InvalidPlanError:
-        """Report a new hypothesis ID already used in this run."""
-        return cls(f"hypothesis ID {hypothesis_id!r} was already used")
-
-
-class PlanCorrectionExhaustedError(RuntimeError):
-    """The plan correction loop ended without a validated plan."""
-
-    def __init__(self) -> None:
-        """Name the impossible correction state."""
-        super().__init__("plan correction loop exited without a result")
-
-
-class UnsupportedProfilerError(ValueError):
-    """The selected domain cannot use the configured profiler."""
-
-    def __init__(self) -> None:
-        """Report missing Torch profiler support."""
-        super().__init__("selected domain does not provide Torch profiler support")
-
-
-class RoleIsolationError(RuntimeError):
-    """A designer turn left unauthorized workspace changes."""
-
-    def __init__(self, remaining: list[str]) -> None:
-        """Identify changes that survived workspace restoration."""
-        super().__init__(
-            "Cannot isolate orchestrator: workspace is still modified after restore: "
-            + ", ".join(remaining[:8])
-        )
 
 
 def _fallback_plan() -> OrchestratorPlan:

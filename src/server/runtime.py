@@ -27,7 +27,7 @@ from server.events import (
 )
 from server.execution import ExecutionTracker
 from server.integration import RunIntegrationAdapter
-from server.journal import EventJournal
+from server.journal import WireJournal
 from server.read_model import RunInspector
 from server.transport.unix_jsonl import UnixJsonlServer
 from vibesys.api import ConfigurationError, RunStopped, create_session
@@ -57,7 +57,7 @@ class ServerRuntime:
         """Compose all server components around one shared condition."""
         self.socket_path = socket_path
         self.condition = threading.Condition(threading.RLock())
-        self.journal = EventJournal(self.condition)
+        self.journal = WireJournal(self.condition)
         self.executions = ExecutionTracker(self.condition, self.journal)
         self.controller = RunController(self.condition, self.journal, self.executions)
         self.chat = ChatManager(
