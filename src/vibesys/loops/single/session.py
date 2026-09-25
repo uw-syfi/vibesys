@@ -32,7 +32,8 @@ from vibesys.agent_run.state import AgentRunState
 from vibesys.loops.single.hypothesis import HypothesisEngine
 from vibesys.loops.single.turns import SingleAgentTurns
 from vibesys.orchestration.runtime import WorkspaceRestoreError
-from vibesys.schemas import ProfilerSummary, Verdict
+from vibesys.roles.common import Verdict
+from vibesys.roles.profiler import ProfilerSummary
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 

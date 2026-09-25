@@ -12,7 +12,9 @@ from vibesys.loops.issue_queue.render import render_all
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
 from vibesys.orchestration.tools import mcp_spec_from_descriptor
 from vibesys.prompts import PROMPTS_DIR, Prompt
-from vibesys.roles.issue_queue import ISSUE_IMPLEMENTER, ISSUE_JUDGE, ISSUE_PERF_EVAL
+from vibesys.roles.implementer import ISSUE_IMPLEMENTER
+from vibesys.roles.judge import ISSUE_JUDGE
+from vibesys.roles.perf_eval import ISSUE_PERF_EVAL
 from vs_agent.api import MCPServerSpec, RoundProgress, expose_as_tools
 from vs_issue_board.api import (
     Issue,
@@ -27,10 +29,12 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from vibesys.config import LoadLevelCfg
+    from vibesys.evaluators.perf_reply import IssuePerfEvalResponse
     from vibesys.loops.issue_queue.orchestration import IssueQueueOptions
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.roles.implementer import IssueImplementerResponse
+    from vibesys.roles.judge import IssueJudgeResponse
     from vibesys.runtime import AgentHandle
-    from vibesys.schemas import IssueImplementerResponse, IssueJudgeResponse, IssuePerfEvalResponse
 
 
 def build_issue_mcp_spec(

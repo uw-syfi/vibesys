@@ -73,6 +73,7 @@ graph TD
     vibesys.agent_run --> vibesys.evaluators
     vibesys.agent_run --> vibesys.orchestration
     vibesys.agent_run --> vibesys.orchestration.view
+    vibesys.agent_run --> vibesys.roles
     vibesys.api --> vibesys
     vibesys.api --> vibesys.agent_run
     vibesys.api --> vibesys.api.contracts
@@ -115,6 +116,7 @@ graph TD
     vibesys.loops.evolve --> vibesys.orchestration
     vibesys.loops.evolve --> vibesys.orchestration.runtime
     vibesys.loops.evolve --> vibesys.prompts
+    vibesys.loops.evolve --> vibesys.roles
     vibesys.loops.evolve --> vibesys.runtime
     vibesys.loops.evolve --> vibesys.search.population
     vibesys.loops.evolve.entrypoint --> vibesys.context
@@ -125,12 +127,12 @@ graph TD
     vibesys.loops.evolve.entrypoint --> vibesys.search.population
     vibesys.loops.issue_queue --> vibesys
     vibesys.loops.issue_queue --> vibesys.context
+    vibesys.loops.issue_queue --> vibesys.evaluators
     vibesys.loops.issue_queue --> vibesys.orchestration
     vibesys.loops.issue_queue --> vibesys.orchestration.runtime
     vibesys.loops.issue_queue --> vibesys.orchestration.tools
     vibesys.loops.issue_queue --> vibesys.orchestration.view
     vibesys.loops.issue_queue --> vibesys.prompts
-    vibesys.loops.issue_queue --> vibesys.render
     vibesys.loops.issue_queue --> vibesys.roles
     vibesys.loops.issue_queue --> vibesys.runtime
     vibesys.loops.multi --> vibesys
@@ -140,8 +142,6 @@ graph TD
     vibesys.loops.multi --> vibesys.evaluators
     vibesys.loops.multi --> vibesys.orchestration.runtime
     vibesys.loops.multi --> vibesys.orchestration.view
-    vibesys.loops.multi --> vibesys.prompts
-    vibesys.loops.multi --> vibesys.render
     vibesys.loops.multi --> vibesys.roles
     vibesys.loops.multi --> vibesys.runtime
     vibesys.loops.profile_multi --> vibesys
@@ -151,8 +151,6 @@ graph TD
     vibesys.loops.profile_multi --> vibesys.evaluators
     vibesys.loops.profile_multi --> vibesys.orchestration.runtime
     vibesys.loops.profile_multi --> vibesys.orchestration.view
-    vibesys.loops.profile_multi --> vibesys.prompts
-    vibesys.loops.profile_multi --> vibesys.render
     vibesys.loops.profile_multi --> vibesys.roles
     vibesys.loops.profile_multi --> vibesys.runtime
     vibesys.loops.profile_single --> vibesys
@@ -163,7 +161,6 @@ graph TD
     vibesys.loops.profile_single --> vibesys.orchestration.runtime
     vibesys.loops.profile_single --> vibesys.orchestration.view
     vibesys.loops.profile_single --> vibesys.prompts
-    vibesys.loops.profile_single --> vibesys.render
     vibesys.loops.profile_single --> vibesys.roles
     vibesys.loops.profile_single --> vibesys.runtime
     vibesys.loops.registry --> vibesys.loops.evolve.entrypoint
@@ -177,11 +174,9 @@ graph TD
     vibesys.loops.single --> vibesys.agent_run
     vibesys.loops.single --> vibesys.context
     vibesys.loops.single --> vibesys.domains
-    vibesys.loops.single --> vibesys.evaluators
     vibesys.loops.single --> vibesys.orchestration.runtime
     vibesys.loops.single --> vibesys.orchestration.view
     vibesys.loops.single --> vibesys.prompts
-    vibesys.loops.single --> vibesys.render
     vibesys.loops.single --> vibesys.roles
     vibesys.loops.single --> vibesys.runtime
     vibesys.orchestration --> vibesys.orchestration.resume
@@ -229,20 +224,16 @@ graph TD
     vibesys.orchestration.runner --> vibesys.run
     vibesys.orchestration.runtime --> vibesys
     vibesys.orchestration.runtime --> vibesys.context
-    vibesys.orchestration.runtime --> vibesys.evaluators
     vibesys.orchestration.runtime --> vibesys.orchestration.agents
     vibesys.orchestration.runtime --> vibesys.orchestration.control
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
     vibesys.orchestration.runtime --> vibesys.orchestration.gates
     vibesys.orchestration.runtime --> vibesys.orchestration.request
     vibesys.orchestration.runtime --> vibesys.orchestration.state
-    vibesys.orchestration.runtime --> vibesys.orchestration.view
     vibesys.orchestration.runtime --> vibesys.orchestration.workspaces
-    vibesys.orchestration.runtime --> vibesys.prompts
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
-    vibesys.orchestration.runtime --> vibesys.sandbox
     vibesys.orchestration.state --> vibesys
     vibesys.orchestration.state --> vibesys.orchestration._host
     vibesys.orchestration.state --> vibesys.orchestration.view
@@ -252,6 +243,7 @@ graph TD
     vibesys.prompts --> vibesys
     vibesys.render --> vibesys
     vibesys.roles --> vibesys
+    vibesys.roles --> vibesys.evaluators
     vibesys.roles --> vibesys.runtime
     vibesys.run --> vibesys
     vibesys.run --> vibesys.backends
@@ -267,7 +259,6 @@ graph TD
     vibesys.search.hypothesis --> vibesys
     vibesys.search.hypothesis --> vibesys.agent_run
     vibesys.search.hypothesis --> vibesys.evaluators
-    vibesys.search.population --> vibesys
     vibesys.search.population --> vibesys.evaluators
     vibesys.search.profile_focus --> vibesys.agent_run
 ```
@@ -364,6 +355,7 @@ graph TD
     vibesys.agent_run --> vibesys.evaluators
     vibesys.agent_run --> vibesys.orchestration
     vibesys.agent_run --> vibesys.orchestration.view
+    vibesys.agent_run --> vibesys.roles
     vibesys.agent_run --> vs_loop_state
     vibesys.agent_run --> vs_project
     vibesys.api --> vibesys
@@ -422,6 +414,7 @@ graph TD
     vibesys.loops.evolve --> vibesys.orchestration
     vibesys.loops.evolve --> vibesys.orchestration.runtime
     vibesys.loops.evolve --> vibesys.prompts
+    vibesys.loops.evolve --> vibesys.roles
     vibesys.loops.evolve --> vibesys.runtime
     vibesys.loops.evolve --> vibesys.search.population
     vibesys.loops.evolve --> vs_agent
@@ -435,12 +428,12 @@ graph TD
     vibesys.loops.evolve.entrypoint --> vs_project
     vibesys.loops.issue_queue --> vibesys
     vibesys.loops.issue_queue --> vibesys.context
+    vibesys.loops.issue_queue --> vibesys.evaluators
     vibesys.loops.issue_queue --> vibesys.orchestration
     vibesys.loops.issue_queue --> vibesys.orchestration.runtime
     vibesys.loops.issue_queue --> vibesys.orchestration.tools
     vibesys.loops.issue_queue --> vibesys.orchestration.view
     vibesys.loops.issue_queue --> vibesys.prompts
-    vibesys.loops.issue_queue --> vibesys.render
     vibesys.loops.issue_queue --> vibesys.roles
     vibesys.loops.issue_queue --> vibesys.runtime
     vibesys.loops.issue_queue --> vs_agent
@@ -454,8 +447,6 @@ graph TD
     vibesys.loops.multi --> vibesys.evaluators
     vibesys.loops.multi --> vibesys.orchestration.runtime
     vibesys.loops.multi --> vibesys.orchestration.view
-    vibesys.loops.multi --> vibesys.prompts
-    vibesys.loops.multi --> vibesys.render
     vibesys.loops.multi --> vibesys.roles
     vibesys.loops.multi --> vibesys.runtime
     vibesys.loops.multi --> vs_agent
@@ -468,8 +459,6 @@ graph TD
     vibesys.loops.profile_multi --> vibesys.evaluators
     vibesys.loops.profile_multi --> vibesys.orchestration.runtime
     vibesys.loops.profile_multi --> vibesys.orchestration.view
-    vibesys.loops.profile_multi --> vibesys.prompts
-    vibesys.loops.profile_multi --> vibesys.render
     vibesys.loops.profile_multi --> vibesys.roles
     vibesys.loops.profile_multi --> vibesys.runtime
     vibesys.loops.profile_multi --> vs_agent
@@ -483,7 +472,6 @@ graph TD
     vibesys.loops.profile_single --> vibesys.orchestration.runtime
     vibesys.loops.profile_single --> vibesys.orchestration.view
     vibesys.loops.profile_single --> vibesys.prompts
-    vibesys.loops.profile_single --> vibesys.render
     vibesys.loops.profile_single --> vibesys.roles
     vibesys.loops.profile_single --> vibesys.runtime
     vibesys.loops.profile_single --> vs_agent
@@ -500,11 +488,9 @@ graph TD
     vibesys.loops.single --> vibesys.agent_run
     vibesys.loops.single --> vibesys.context
     vibesys.loops.single --> vibesys.domains
-    vibesys.loops.single --> vibesys.evaluators
     vibesys.loops.single --> vibesys.orchestration.runtime
     vibesys.loops.single --> vibesys.orchestration.view
     vibesys.loops.single --> vibesys.prompts
-    vibesys.loops.single --> vibesys.render
     vibesys.loops.single --> vibesys.roles
     vibesys.loops.single --> vibesys.runtime
     vibesys.loops.single --> vs_agent
@@ -562,23 +548,17 @@ graph TD
     vibesys.orchestration.runner --> vibesys.run
     vibesys.orchestration.runtime --> vibesys
     vibesys.orchestration.runtime --> vibesys.context
-    vibesys.orchestration.runtime --> vibesys.evaluators
     vibesys.orchestration.runtime --> vibesys.orchestration.agents
     vibesys.orchestration.runtime --> vibesys.orchestration.control
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
     vibesys.orchestration.runtime --> vibesys.orchestration.gates
     vibesys.orchestration.runtime --> vibesys.orchestration.request
     vibesys.orchestration.runtime --> vibesys.orchestration.state
-    vibesys.orchestration.runtime --> vibesys.orchestration.view
     vibesys.orchestration.runtime --> vibesys.orchestration.workspaces
-    vibesys.orchestration.runtime --> vibesys.prompts
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
-    vibesys.orchestration.runtime --> vibesys.sandbox
     vibesys.orchestration.runtime --> vs_agent
-    vibesys.orchestration.runtime --> vs_project
-    vibesys.orchestration.runtime --> vs_sandbox
     vibesys.orchestration.state --> vibesys
     vibesys.orchestration.state --> vibesys.orchestration._host
     vibesys.orchestration.state --> vibesys.orchestration.view
@@ -591,8 +571,10 @@ graph TD
     vibesys.prompts --> vs_prompts
     vibesys.render --> vibesys
     vibesys.roles --> vibesys
+    vibesys.roles --> vibesys.evaluators
     vibesys.roles --> vibesys.runtime
     vibesys.roles --> vs_agent
+    vibesys.roles --> vs_loop_state
     vibesys.run --> vibesys
     vibesys.run --> vibesys.backends
     vibesys.run --> vibesys.evaluators
@@ -617,10 +599,8 @@ graph TD
     vibesys.search.hypothesis --> vibesys.agent_run
     vibesys.search.hypothesis --> vibesys.evaluators
     vibesys.search.hypothesis --> vs_loop_state
-    vibesys.search.population --> vibesys
     vibesys.search.population --> vibesys.evaluators
     vibesys.search.profile_focus --> vibesys.agent_run
-    vibesys.search.profile_focus --> vs_loop_state
     vibesys.skypilot --> vs_project
     vs_agent --> vs_loop_state
     vs_agent --> vs_project

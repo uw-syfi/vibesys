@@ -27,10 +27,10 @@ from vibesys.loops.multi.decisions import (
     official_evaluation_reason as old_official_evaluation_reason,
 )
 from vibesys.loops.multi.decisions import review_due as old_review_due
+from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
-    ImplementerResponse,
     OrchestratorPlan,
 )
 from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch

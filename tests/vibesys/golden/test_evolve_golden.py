@@ -70,8 +70,11 @@ from vibesys.loops.evolve.orchestration import EvolveOptions, descriptor_from_op
 from vibesys.orchestration.request import RunRequest
 from vibesys.orchestration.runner import run_orchestration
 from vibesys.profilers import ProfilerKind
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.profiler import ProfilerSummary
 from vibesys.run.integration import LocalRunIntegration
-from vibesys.schemas import ImplementerResponse, JudgeResponse, ProfilerSummary, Verdict
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project
 

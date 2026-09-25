@@ -21,7 +21,9 @@ from unittest.mock import patch
 from tests.vibesys.orchestration.harness import run_with_context
 
 from vibesys import roles
-from vibesys.roles.issue_queue import ISSUE_IMPLEMENTER, ISSUE_JUDGE, ISSUE_PERF_EVAL
+from vibesys.roles.implementer import ISSUE_IMPLEMENTER
+from vibesys.roles.judge import ISSUE_JUDGE
+from vibesys.roles.perf_eval import ISSUE_PERF_EVAL
 from vibesys.runtime import Reuse, Role
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient

@@ -7,12 +7,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from vibesys.evaluators.validation_recipe import (
+    FrameworkValidationResult,
+    ValidationRecipe,
+    ValidationRecipeArtifact,
+)
 from vibesys.loops.profile_multi.validation import (
     _load_validation_recipes,
     _reusable_validation_result,
     _validation_input_digest,
 )
-from vibesys.schemas import FrameworkValidationResult, ValidationRecipe, ValidationRecipeArtifact
 
 if TYPE_CHECKING:
     from pathlib import Path

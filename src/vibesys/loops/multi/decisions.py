@@ -16,7 +16,9 @@ from vibesys.schemas import HypothesisOutcome
 if TYPE_CHECKING:
     from vibesys.agent_run.attempts import AttemptState
     from vibesys.agent_run.state import AgentRunState, Hypothesis
-    from vibesys.schemas import ImplementerResponse, OrchestratorPlan, ProfilerSummary
+    from vibesys.roles.implementer import ImplementerResponse
+    from vibesys.roles.profiler import ProfilerSummary
+    from vibesys.schemas import OrchestratorPlan
     from vs_loop_state.api import RoundRecord
 
 _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW = 2

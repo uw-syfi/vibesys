@@ -20,13 +20,11 @@ from vibesys.domains.rendering import render_domain_section
 from vibesys.evaluators.input_manifest import WorkspaceSource
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import PROMPTS_DIR, render_template
-from vibesys.schemas import (
-    ImplementerResponse,
-    JudgeResponse,
-    OrchestratorPlan,
-    PreRoundDecision,
-    SingleAgentRoundResponse,
-)
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.roles.single_agent import SingleAgentRoundResponse
+from vibesys.schemas import OrchestratorPlan
 from vs_agent.cli_common import build_schema_hint
 
 _ROOT = Path(__file__).resolve().parents[4]

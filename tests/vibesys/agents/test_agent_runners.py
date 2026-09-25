@@ -10,10 +10,8 @@ import pytest
 from vibesys.agent_spec_config import agent_spec_from_config
 from vibesys.config import Config
 from vibesys.render.log import log_json_and_print, log_prompt_markdown_and_print
-from vibesys.schemas import (
-    JudgeResponse,
-    Verdict,
-)
+from vibesys.roles.common import Verdict
+from vibesys.roles.judge import JudgeResponse
 from vs_agent.api import AgentClient, build_agent_client
 from vs_agent.callbacks import AgentLogger
 from vs_agent.drivers.agentshim import AgentShimDriver

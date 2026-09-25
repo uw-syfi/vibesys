@@ -41,6 +41,10 @@ from tests.vibesys.orchestration.harness import run_with_context
 from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace
+from vibesys.evaluators.perf_reply import (
+    IssuePerfEvalResponse,
+    PerfMetrics,
+)
 from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
 from vibesys.loops.issue_queue.orchestration import (
     IssueQueueOptions,
@@ -51,16 +55,14 @@ from vibesys.loops.issue_queue.orchestration import (
 from vibesys.loops.profile_single.orchestration import ProfileGuidedSingleAgentOrchestrator
 from vibesys.loops.single.orchestration import SingleAgentOrchestrator
 from vibesys.orchestration.agents import _Agents
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import IssueImplementerResponse
+from vibesys.roles.judge import IssueJudgeResponse
+from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.schemas import (
     CandidateDisposition,
-    IssueImplementerResponse,
-    IssueJudgeResponse,
-    IssuePerfEvalResponse,
     OrchestratorPlan,
-    PerfMetrics,
     PerfTrend,
-    SingleAgentRoundResponse,
-    Verdict,
 )
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient

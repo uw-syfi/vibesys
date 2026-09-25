@@ -29,8 +29,9 @@ from vibesys.loops.profile_single.hypothesis import HypothesisEngine
 from vibesys.loops.profile_single.session import AttemptRequest, PlanRequest
 from vibesys.loops.profile_single.turns import InvalidPlanError, ProfileSingleTurns
 from vibesys.profilers import ProfilerKind
-from vibesys.roles.profile_single import PROFILE_SINGLE_COMBINED
-from vibesys.schemas import OrchestratorPlan, SingleAgentRoundResponse, Verdict
+from vibesys.roles.common import Verdict
+from vibesys.roles.single_agent import PROFILE_SINGLE_COMBINED, SingleAgentRoundResponse
+from vibesys.schemas import OrchestratorPlan
 
 if TYPE_CHECKING:
     from pathlib import Path

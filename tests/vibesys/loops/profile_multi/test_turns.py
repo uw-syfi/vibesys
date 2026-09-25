@@ -35,17 +35,16 @@ from vibesys.loops.profile_multi.controller import HypothesisEngine, ProfileGuid
 from vibesys.loops.profile_multi.decisions import AttemptRequest, PlanRequest
 from vibesys.loops.profile_multi.turns import ProfileMultiTurns
 from vibesys.profilers import ProfilerKind
-from vibesys.roles.multi import MULTI_IMPLEMENTER_CONTINUATION, MULTI_JUDGE
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import MULTI_IMPLEMENTER_CONTINUATION, ImplementerResponse
+from vibesys.roles.judge import MULTI_JUDGE, JudgeResponse
+from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.roles.profiler import ProfilerSummary
 from vibesys.runtime import ReadOnly
 from vibesys.schemas import (
     HypothesisOutcome,
     HypothesisStrategyUpdate,
-    ImplementerResponse,
-    JudgeResponse,
     OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
-    Verdict,
 )
 
 if TYPE_CHECKING:

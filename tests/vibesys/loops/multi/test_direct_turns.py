@@ -38,17 +38,16 @@ from vibesys.loops.multi.decisions import (
 )
 from vibesys.loops.multi.turns import MultiAgentTurns
 from vibesys.profilers import ProfilerKind
-from vibesys.roles.multi import MULTI_IMPLEMENTER_CONTINUATION, MULTI_JUDGE
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import MULTI_IMPLEMENTER_CONTINUATION, ImplementerResponse
+from vibesys.roles.judge import MULTI_JUDGE, JudgeResponse
+from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.roles.profiler import ProfilerSummary
 from vibesys.runtime import ReadOnly
 from vibesys.schemas import (
     HypothesisOutcome,
     HypothesisStrategyUpdate,
-    ImplementerResponse,
-    JudgeResponse,
     OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
-    Verdict,
 )
 
 if TYPE_CHECKING:

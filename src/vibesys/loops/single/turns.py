@@ -25,13 +25,13 @@ from vibesys.profilers import (
     require_profiler_kind,
 )
 from vibesys.prompts import PROMPTS_DIR
-from vibesys.roles.single import SINGLE_COMBINED, SINGLE_ORCHESTRATOR_PLAN
+from vibesys.roles.common import Verdict
+from vibesys.roles.designer import SINGLE_ORCHESTRATOR_PLAN
+from vibesys.roles.single_agent import SINGLE_COMBINED, SingleAgentRoundResponse
 from vibesys.runtime import ReadOnly, Role
 from vibesys.schemas import (
     OrchestratorPlan,
-    SingleAgentRoundResponse,
     SkillResourceSelection,
-    Verdict,
     normalize_hypothesis_title,
 )
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
@@ -146,7 +146,7 @@ class SingleAgentTurns:
 
         A read-only role's allow-list is per-call (it depends on this run's
         ``memory_layout``), so the role is built fresh here rather than
-        declared static in ``vibesys.roles.single``.
+        declared static in ``vibesys.roles.designer`` and ``vibesys.roles.single_agent``.
         """
         allowed = (
             f"{self.roadmap_location.rstrip('/')}/index.md"

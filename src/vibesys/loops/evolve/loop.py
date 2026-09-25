@@ -47,7 +47,10 @@ from vibesys.events import FrameworkSource
 from vibesys.orchestration.runtime import MeasurementOptions
 from vibesys.profilers import ProfilerKind, mcp_spec, profiler_definition
 from vibesys.prompts import PROMPTS_DIR
-from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
+from vibesys.roles.common import Verdict
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.mutator import MutatorResponse
+from vibesys.roles.profiler import ProfilerSummary
 from vibesys.search.population.models import CandidateOutcome, Individual
 
 if TYPE_CHECKING:

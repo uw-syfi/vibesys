@@ -18,16 +18,16 @@ import os
 import tempfile
 from pathlib import Path
 
-from vibesys.schemas import (
+from vibesys.evaluators.perf_reply import ProfilerSummary  # noqa: TC001  # tracked: #288
+from vibesys.evaluators.validation_recipe import (
     FrameworkValidationResult,
-    ImplementerResponse,
-    JudgeResponse,
-    OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
-    SingleAgentRoundResponse,
     ValidationRecipeArtifact,
 )
+from vibesys.roles.implementer import ImplementerResponse  # noqa: TC001  # tracked: #288
+from vibesys.roles.judge import JudgeResponse  # noqa: TC001  # tracked: #288
+from vibesys.roles.pre_round import PreRoundDecision  # noqa: TC001  # tracked: #288
+from vibesys.roles.single_agent import SingleAgentRoundResponse  # noqa: TC001  # tracked: #288
+from vibesys.schemas import OrchestratorPlan  # noqa: TC001  # tracked: #288
 
 MEMORY_LAYOUTS = ("files", "directories")
 #: Workspace-relative roots of the loop's durable memory, layout aside.

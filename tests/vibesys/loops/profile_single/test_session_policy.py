@@ -28,7 +28,9 @@ from vibesys.loops.profile_single.session import (
     RoundSelection,
 )
 from vibesys.orchestration.runtime import GateRunResult, WorkspaceRestoreError
-from vibesys.schemas import OrchestratorPlan, SingleAgentRoundResponse, Verdict
+from vibesys.roles.common import Verdict
+from vibesys.roles.single_agent import SingleAgentRoundResponse
+from vibesys.schemas import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:

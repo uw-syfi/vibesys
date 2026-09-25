@@ -3,7 +3,7 @@
 Same roles, templates, and turn mechanics as ``vibesys.loops.multi.turns``
 (profile_multi and multi render byte-identical prompts; only their
 hypothesis-scheduling policy in ``decisions.py`` differs), so this module
-reuses multi's role catalog (``vibesys.roles.multi``) directly rather than
+reuses multi's roles (designer, pre_round, profiler, implementer, judge) directly rather than
 declaring a duplicate one.
 """
 
@@ -34,23 +34,20 @@ from vibesys.profilers import (
 from vibesys.profilers import (
     mcp_spec as profiler_mcp_spec,
 )
-from vibesys.roles.multi import (
+from vibesys.roles.common import Verdict
+from vibesys.roles.designer import MULTI_ORCHESTRATOR_PLAN
+from vibesys.roles.implementer import (
     MULTI_IMPLEMENTER,
     MULTI_IMPLEMENTER_CONTINUATION,
-    MULTI_JUDGE,
-    MULTI_ORCHESTRATOR_PLAN,
-    MULTI_PRE_ROUND_DECISION,
-    MULTI_PROFILERS,
+    ImplementerResponse,
 )
+from vibesys.roles.judge import MULTI_JUDGE, JudgeResponse
+from vibesys.roles.pre_round import MULTI_PRE_ROUND_DECISION, PreRoundDecision
+from vibesys.roles.profiler import MULTI_PROFILERS, ProfilerSummary
 from vibesys.runtime import ReadOnly
 from vibesys.schemas import (
-    ImplementerResponse,
-    JudgeResponse,
     OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
     SkillResourceSelection,
-    Verdict,
     normalize_hypothesis_title,
 )
 from vibesys.skills import build_skill_catalog, resolve_skill_selections

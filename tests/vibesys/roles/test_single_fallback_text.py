@@ -15,13 +15,17 @@ from typing import TYPE_CHECKING
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.roles import profile_single, single
-from vibesys.schemas import SingleAgentRoundResponse, Verdict
+from vibesys.roles.common import Verdict
+from vibesys.roles.single_agent import (
+    PROFILE_SINGLE_COMBINED,
+    SINGLE_COMBINED,
+    SingleAgentRoundResponse,
+)
 
 if TYPE_CHECKING:
     from vibesys.runtime import Role
 
-_ROLES = (single.SINGLE_COMBINED, profile_single.PROFILE_SINGLE_COMBINED)
+_ROLES = (SINGLE_COMBINED, PROFILE_SINGLE_COMBINED)
 
 
 @given(st.sampled_from(_ROLES))

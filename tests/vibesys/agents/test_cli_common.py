@@ -15,7 +15,7 @@ from pathlib import Path  # noqa: TC003  # tracked: #288
 import pytest
 
 from vibesys.constants import ComputeBackend
-from vibesys.schemas import JudgeResponse
+from vibesys.roles.judge import JudgeResponse
 from vibesys.skills import platform_skill_selection
 from vs_agent.cli_common import (
     CLI_SKILL_DIRS,

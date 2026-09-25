@@ -13,12 +13,12 @@ from vibesys.agent_run.record import RecordInput, build_round_record
 from vibesys.agent_run.state import AgentRunState, Hypothesis
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
-    ImplementerResponse,
     OrchestratorPlan,
-    Verdict,
 )
 from vs_loop_state.api import RoundRecord
 

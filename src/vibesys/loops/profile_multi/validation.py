@@ -7,12 +7,15 @@ import json
 from typing import TYPE_CHECKING
 
 from vibesys.agent_run import issue_board
-from vibesys.schemas import FrameworkValidationResult, ValidationRecipeArtifact
+from vibesys.evaluators.validation_recipe import (
+    FrameworkValidationResult,
+    ValidationRecipeArtifact,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.schemas import ValidationRecipe
+    from vibesys.evaluators.validation_recipe import ValidationRecipe
 
 
 def _validation_input_digest(workspace: Path, recipe: ValidationRecipe) -> str:

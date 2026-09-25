@@ -39,6 +39,7 @@ from vibesys.evaluators.gates import (
     emit_gate_finished,
     emit_gate_started,
 )
+from vibesys.evaluators.validation_recipe import FrameworkValidationResult
 from vibesys.events import GateKind
 from vibesys.loops.multi.decisions import (
     AttemptRequest,
@@ -60,12 +61,11 @@ from vibesys.loops.multi.validation import (
     _validation_input_digest,
 )
 from vibesys.orchestration.runtime import WorkspaceRestoreError
+from vibesys.roles.common import Verdict
+from vibesys.roles.profiler import ProfilerSummary  # noqa: TC001  # tracked: #288
 from vibesys.schemas import (
     CandidateDisposition,
-    FrameworkValidationResult,
     HypothesisOutcome,
-    ProfilerSummary,
-    Verdict,
 )
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory

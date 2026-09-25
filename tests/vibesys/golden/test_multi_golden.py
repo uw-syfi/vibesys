@@ -45,14 +45,12 @@ from vibesys.evaluators.gates import (
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
 from vibesys.profilers import ProfilerKind
-from vibesys.schemas import (
-    ImplementerResponse,
-    JudgeResponse,
-    OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
-    Verdict,
-)
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.roles.profiler import ProfilerSummary
+from vibesys.schemas import OrchestratorPlan
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:

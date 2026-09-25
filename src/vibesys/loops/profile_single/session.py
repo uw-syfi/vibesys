@@ -33,7 +33,8 @@ from vibesys.loops.profile_single.attribution import run_attribution
 from vibesys.loops.profile_single.hypothesis import HypothesisEngine, ProfileGuidanceOutcome
 from vibesys.loops.profile_single.turns import ProfileSingleTurns
 from vibesys.orchestration.runtime import WorkspaceRestoreError
-from vibesys.schemas import ProfilerSummary, Verdict
+from vibesys.roles.common import Verdict
+from vibesys.roles.profiler import ProfilerSummary
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 

@@ -13,7 +13,7 @@ from vibesys.agent_run.attempts import (
     attempt_was_reviewed,
     recorded_judge_verdict,
 )
-from vibesys.schemas import Verdict
+from vibesys.roles.common import Verdict
 
 
 @pytest.mark.parametrize(

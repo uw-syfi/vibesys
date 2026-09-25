@@ -23,11 +23,11 @@ from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.multi import decisions as old_decisions
 from vibesys.loops.multi.session import _TerminalPolicy as OldTerminalPolicy
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import (
     HypothesisOutcome,
-    ImplementerResponse,
     OrchestratorPlan,
-    Verdict,
 )
 from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
 from vibesys.search.hypothesis.state import HypothesisState

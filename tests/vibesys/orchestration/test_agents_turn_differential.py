@@ -3,7 +3,7 @@ every ``multi`` (and, by role-catalog reuse, ``profile_multi``) role.
 
 ``vibesys.loops.multi.turns`` no longer renders prompts itself (phase 3b):
 every turn goes through ``ctx.agents.turn(role, ...)`` with the roles
-declared in ``vibesys.roles.multi``. So the render call this test observes
+declared across the roles family modules multi uses. So the render call this test observes
 and replays is the one ``vibesys.orchestration.agents`` issues, not one
 ``turns.py`` makes directly.
 
@@ -43,22 +43,17 @@ from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts.renderer import render_template as _real_render_template
-from vibesys.roles.multi import (
+from vibesys.roles.common import Verdict
+from vibesys.roles.designer import MULTI_ORCHESTRATOR_PLAN
+from vibesys.roles.implementer import (
     MULTI_IMPLEMENTER,
     MULTI_IMPLEMENTER_CONTINUATION,
-    MULTI_JUDGE,
-    MULTI_ORCHESTRATOR_PLAN,
-    MULTI_PRE_ROUND_DECISION,
-    MULTI_PROFILERS,
-)
-from vibesys.schemas import (
     ImplementerResponse,
-    JudgeResponse,
-    OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
-    Verdict,
 )
+from vibesys.roles.judge import MULTI_JUDGE, JudgeResponse
+from vibesys.roles.pre_round import MULTI_PRE_ROUND_DECISION, PreRoundDecision
+from vibesys.roles.profiler import MULTI_PROFILERS, ProfilerSummary
+from vibesys.schemas import OrchestratorPlan
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:

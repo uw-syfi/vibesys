@@ -2,7 +2,7 @@
 
 Every role turn (orchestrator pre-round decision and plan, profiler,
 implementer, judge) runs through ``ctx.agents.turn`` with the roles declared
-in ``vibesys.roles.multi``. This module builds each turn's prompt context
+across roles/designer.py, pre_round.py, profiler.py, implementer.py, and judge.py. This module builds each turn's prompt context
 (the ``**kwargs`` a template needs) and the strategy-only logic that cannot
 live in a generic host verb: the designer's plan-ID validation retry (state
 dependent, not a pure reply check) and composing the profiler's per-round
@@ -36,23 +36,20 @@ from vibesys.profilers import (
 from vibesys.profilers import (
     mcp_spec as profiler_mcp_spec,
 )
-from vibesys.roles.multi import (
+from vibesys.roles.common import Verdict
+from vibesys.roles.designer import MULTI_ORCHESTRATOR_PLAN
+from vibesys.roles.implementer import (
     MULTI_IMPLEMENTER,
     MULTI_IMPLEMENTER_CONTINUATION,
-    MULTI_JUDGE,
-    MULTI_ORCHESTRATOR_PLAN,
-    MULTI_PRE_ROUND_DECISION,
-    MULTI_PROFILERS,
+    ImplementerResponse,
 )
+from vibesys.roles.judge import MULTI_JUDGE, JudgeResponse
+from vibesys.roles.pre_round import MULTI_PRE_ROUND_DECISION, PreRoundDecision
+from vibesys.roles.profiler import MULTI_PROFILERS, ProfilerSummary
 from vibesys.runtime import ReadOnly
 from vibesys.schemas import (
-    ImplementerResponse,
-    JudgeResponse,
     OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
     SkillResourceSelection,
-    Verdict,
     normalize_hypothesis_title,
 )
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
