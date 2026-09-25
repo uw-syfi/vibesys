@@ -22,6 +22,8 @@ current rather than growing them unboundedly.
 | `kernel_bench.py` (paired A/B microbenchmarking) | Merged |
 | `analyze_torch_profile.py` extensions (certify/gemm_shapes/roofline) | Merged, validated on real MI210 + vLLM traces |
 | `capture_ops.py`/`inject/sitecustomize.py` (`profile_ops`, generic torch.profiler capture) | Merged, validated on real MI210 + vLLM (offline single-process and `vllm serve` topologies), driven through the real MCP server |
+| Warm targets (`start_target`/`stop_target`/`targets`, `profile_ops(target=...)`) | Merged, tested end to end with the fake torch fixture; rocprofv3-side `target=` gated behind a real attach-capability probe |
+| `profile_ops(inject=False)` | Merged, fixes a real MI210 SIGSEGV (double torch.profiler session) |
 | Regression + property test hardening | Merged, tests fail on pre-fix code |
 | Real vLLM-trace validation of the analyzers | Done for `analyze_torch_profile.py`/`profile_ops`; `analyze_rocprof.py`/`capture.py` (rocprof side) tracked separately |
 | VibeSys remote (SkyPilot/Slurm) execution with `rocprof` | Not started: remote execution only supports `--profiler none` today |
@@ -142,6 +144,8 @@ found bugs that synthetic data did not exercise:
 | `counters.py` | MFMA utilization was reported as a raw issue-rate number, not a fraction of the hardware's peak MFMA throughput | Follow-up from the counter-catalogue fix; a raw rate has no ceiling to compare against | `c8bd1df8`, `ca18e474` |
 | `counters.py` | `--flops` (a per-dispatch FLOP count) was divided by `duration_ns` summed across every merged dispatch, understating achieved TFLOP/s by roughly the dispatch count | Real fixture's 4096^3 bf16 GEMM (2 merged dispatches) read ~33%/~60 TFLOP/s of spec peak; correctly scaled it reads ~65%/~118 TFLOP/s, inside the 115-150 TFLOP/s this shape measures on real MI210 serving load | `87a78ae1` |
 | `analyze_rocprof.py` | `kernels`/`families` computed "%GPU" as a naive sum of per-kernel durations, double-counting when kernels on different HW queues of the same GPU genuinely overlap | Real graph-mode vLLM trace has overlapping Queue 1/2/4 windows; `idle_gaps`/`host_idle` already used a merged-interval union instead | `d7ee5abc` |
+| `inject/sitecustomize.py` | State machine left phase `"stopped"` (not `"idle"`) after exporting a trace, so a second `SIGUSR1` on the same long-lived process was silently ignored -- only the first of any repeated windows ever worked | Manual pre-fix/post-fix reproduction (`git show`), then generalized to a regression test | this session |
+| `capture_ops.py` | `profile_ops` against an offline torch script segfaulted (`target_rc=139`, empty trace) when the script already opened its own, separate `torch.profiler` session (e.g. vLLM's `profiler_config` + `start_profile()`/`stop_profile()`, the doc's own recommended pattern for that build): two independent profiler sessions in one process crash the CUPTI/roctracer/kineto backend outright, not catchably | Real MI210 eval run (`run-20260925T003910Z/grade.md`); root-caused architecturally (two profiler sessions unsupported), cross-referenced against the transcript's exact `profile_ops` call | this session |
 
 ## Open items / next steps
 
@@ -167,11 +171,19 @@ found bugs that synthetic data did not exercise:
 - **gfx942/gfx950 numbers**: everything validated so far is MI210 (gfx90a).
   Numbers referenced for MI300-class (gfx942) or newer hardware are spec-only
   and unverified against real captures.
-- **`--attach`**: rocprofv3's `--attach PID` path to an already-running
-  process did not work against this environment's vLLM container (the
-  process never spins up the helper thread `--attach` needs). Not required
-  by the offline-capture recipe above, but worth another look if a live
-  server capture is ever needed.
+- **`--attach` root cause found; warm targets are the working alternative.**
+  rocprofv3's `--attach PID` needs the target to expose a `rocp-bg-attach`
+  background thread (`ROCP_TOOL_ATTACH=1` + `librocprofiler-sdk-attach.so`),
+  which only exists when the host's `librocprofiler-register` was built with
+  `ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON` -- confirmed off on
+  this environment's MI210/ROCm 7.2.3 image via a direct probe
+  (`rocprof/capture.py::_probe_rocprofv3_attach`), which every `profile_*`
+  tool now calls before returning a `target=` error, so this is reported
+  live rather than assumed. VibeSys does not implement rocprofv3 attach
+  capture regardless of what the probe reports (every rocprofv3 tool always
+  launches its own target). For repeated windows against an already-running
+  process, the torch plugin's `start_target`/`profile_ops(target=...)` is
+  the working alternative (torch-level, not a system-wide rocprofv3 trace).
 
 ## Log
 
@@ -379,6 +391,56 @@ Follow-up round driven by an end-to-end eval transcript
   `profile_ops` (torch) records the same `load_window`/`capture_start`/
   `capture_end` for free via the shared lifecycle; its own op-level
   analyses don't slice by it yet (left as a follow-up).
+
+### 2026-09-25
+
+Added warm-target profiling: a reusable, already-running process a caller
+can take repeated profiling windows against, instead of paying a fresh
+launch (weight load, warmup, KV init) per window. `start_target`/
+`stop_target`/`targets` (shared, `resources/profilers/_common/
+capture_runtime.py`), plus `profile_ops(target=<id>, load_command=...)` on
+the torch plugin. Driven by two verified platform facts from earlier work:
+`rocprofv3 --attach` cannot work on this MI210/ROCm 7.2.3 image (its
+`librocprofiler-register` build lacks default attachment -- now confirmed
+via a direct probe instead of assumed; see the updated `--attach` item
+above), and the torch.profiler signal-window injection worked for exactly
+one window before this session because its state machine never reset after
+`stop_and_export` (fixed; see the Bugs table). Measured armed-but-idle
+overhead as negligible (86.31 vs. 86.22 tok/s on a real serving workload).
+
+Build: `sitecustomize.py` now resets to `"idle"` after every export and
+gained a `VIBESYS_TORCH_PROFILE_TRIGGER=signal` mode (armed, never
+self-starts) plus a control-file protocol
+(`<control_dir>/next_window`) so each window can write to its own output
+directory; `capture_runtime.py` gained the target registry (launch, list,
+stop-with-escalation, stop-all-on-exit); the wrapping shell script traps
+`SIGUSR1`/`SIGUSR2` so `os.killpg`'s process-group broadcast doesn't kill it
+out from under its own child (bash's default disposition for those signals
+is to terminate). A signal sent before the target's handlers are actually
+installed is dropped, not queued, so `start_target` doesn't report ready
+until an "armed" marker file `sitecustomize.py` writes right after
+installing its handlers exists. rocprofv3's own capture tools accept
+`target=` only to return the probe-backed error above; `profile_ops`'s
+`target=`/`start_target`/`stop_target`/`targets` are thin delegates to the
+torch plugin's implementation so an agent on only the rocprof MCP server
+can still drive one.
+
+Separately fixed the real MI210 SIGSEGV reported against `profile_ops`
+(`run-20260925T003910Z/grade.md`): added `inject=False`, which skips
+arming `profile_ops`'s own torch.profiler session entirely (no
+`VIBESYS_TORCH_PROFILE`, no `PYTHONPATH` injection) while still exporting
+`VIBESYS_TORCH_PROFILE_OUT_DIR` so a command managing its own separate
+session (e.g. vLLM's `profiler_config` + `start_profile()`/`stop_profile()`,
+exactly what the eval's failing call used) can write its trace where this
+module's existing discovery/analysis pipeline finds it.
+`vllm-profiling.md` now warns against combining the two.
+
+Regression + property tests added for both fixes (verified failing on
+pre-fix code via `git show` extraction, never a stash); a new
+`test_torch_warm_target.py` covers the target lifecycle end to end
+(repeated windows, stop/stop-all, busy-slot interplay, and a hypothesis
+property test over random start/window/stop sequences asserting no leaked
+processes and window count == trace count).
 
 ## Appendix: detailed format notes and commands
 
