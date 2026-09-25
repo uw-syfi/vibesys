@@ -1,7 +1,7 @@
 """Filesystem contract for the single agent policy state slot."""
 
 from vibesys.agent_run.state import AgentRunState, AgentRunStateStore, Hypothesis
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_project.api import (
     OrchestrationDescriptor,
     Project,

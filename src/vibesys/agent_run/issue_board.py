@@ -17,17 +17,20 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vibesys.schemas import (
     FrameworkValidationResult,
     ImplementerResponse,
     JudgeResponse,
-    OrchestratorPlan,
     PreRoundDecision,
     ProfilerSummary,
     SingleAgentRoundResponse,
     ValidationRecipeArtifact,
 )
+
+if TYPE_CHECKING:
+    from vibesys.search.hypothesis import OrchestratorPlan
 
 MEMORY_LAYOUTS = ("files", "directories")
 #: Workspace-relative roots of the loop's durable memory, layout aside.

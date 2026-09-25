@@ -22,7 +22,7 @@ from vibesys.agent_run.state import AgentRunState, Hypothesis, HypothesisReview
 from vibesys.api import RunStatus, RunView
 from vibesys.api.chat_tools_server import build_parser, build_tools
 from vibesys.api.store import RunStore, open_run_store
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api import register_tool
 from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord, RunExecutionRecord

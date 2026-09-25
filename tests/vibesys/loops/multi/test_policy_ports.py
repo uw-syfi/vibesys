@@ -28,7 +28,6 @@ from vibesys.loops.single.session import SingleSession
 from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,
-    OrchestratorPlan,
     PreRoundDecision,
     ProfilerSummary,
     SingleAgentRoundResponse,
@@ -36,6 +35,7 @@ from vibesys.schemas import (
     ValidationRecipeArtifact,
     Verdict,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 
 if TYPE_CHECKING:
     from pathlib import Path

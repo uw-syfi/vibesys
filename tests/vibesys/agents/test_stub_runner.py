@@ -1,10 +1,10 @@
 from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,
-    OrchestratorPlan,
     PreRoundDecision,
     Verdict,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.stub_runner import StubAgentClient
 

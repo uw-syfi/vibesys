@@ -69,10 +69,10 @@ from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.profile_single.orchestration import ProfileGuidedSingleAgentOrchestrator
 from vibesys.schemas import (
-    OrchestratorPlan,
     SingleAgentRoundResponse,
     Verdict,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:

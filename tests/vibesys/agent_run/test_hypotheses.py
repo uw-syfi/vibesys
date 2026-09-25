@@ -30,10 +30,9 @@ from vibesys.agent_run.state import (
 from vibesys.evaluators.metrics import Measurement, MetricComparison, MetricSpace, Objective
 from vibesys.schemas import (
     HypothesisOutcome,
-    HypothesisStrategyUpdate,
-    OrchestratorPlan,
     PerfDeltaReason,
 )
+from vibesys.search.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
 from vs_loop_state.api import PerfProvenance, RoundRecord
 
 

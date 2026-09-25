@@ -9,7 +9,7 @@ from vibesys.agent_run.hypotheses import append_round, start_hypothesis, update_
 
 if TYPE_CHECKING:
     from vibesys.agent_run.state import AgentRunState, Hypothesis
-    from vibesys.schemas import OrchestratorPlan
+    from vibesys.search.hypothesis import OrchestratorPlan
     from vs_loop_state.api import RoundRecord
 
 

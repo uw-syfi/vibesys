@@ -9,7 +9,8 @@ from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.state import AgentRunState
 from vibesys.loops.multi.decisions import HypothesisEngine, TerminalRequest, transition_round
 from vibesys.loops.multi.session import _TerminalPolicy
-from vibesys.schemas import HypothesisOutcome, ImplementerResponse, OrchestratorPlan
+from vibesys.schemas import HypothesisOutcome, ImplementerResponse
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 
 

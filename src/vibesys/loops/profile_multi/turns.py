@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -35,13 +35,13 @@ from vibesys.render.sink import output_sink
 from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,
-    OrchestratorPlan,
     PreRoundDecision,
     ProfilerSummary,
     SkillResourceSelection,
     Verdict,
     normalize_hypothesis_title,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
 from vs_agent.api import AgentSessionKey, SessionScope
 
@@ -588,9 +588,13 @@ Write bounded durable profile evidence only below
         self, request: AttemptRequest, state: AttemptState, conflict: str | None
     ) -> JudgeResponse:
         """Ask the independent judge to audit the parsed implementation."""
-        implementation = state.implementation
-        if implementation is None:
+        if state.implementation is None:
             raise MissingImplementationError
+        # TODO(stack PR 07): drop this cast once vibesys.roles.implementer owns  # noqa: FIX002  # tracked: #288
+        # ImplementerResponse and AttemptState.implementation is typed against
+        # it directly; at BASE it is vibesys.schemas.ImplementerResponse, which
+        # structurally (but not nominally) satisfies search's ImplementerReply.
+        implementation = cast("ImplementerResponse", state.implementation)
         plan = request.plan
         hypothesis = request.active_hypothesis
         view = self.ctx.environment.view

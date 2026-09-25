@@ -17,9 +17,9 @@ from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
     ImplementerResponse,
-    OrchestratorPlan,
     Verdict,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 
 
@@ -60,7 +60,7 @@ def _record_input() -> RecordInput:
             candidate_metrics={"throughput": 12.0},
             candidate_evaluation_artifact="profile.json",
         ),
-        judge=JudgeReviewed(Verdict.PASS),
+        judge=JudgeReviewed(Verdict.PASS.value),
         passed=True,
         official_reason="final_round",
         framework_benchmark=FrameworkBenchmarkOutcome(
@@ -135,7 +135,7 @@ def test_gate_retry_carries_approved_candidate_when_agent_omits_it() -> None:
 def test_failed_review_does_not_retain_agent_candidate() -> None:
     data = _record_input()
     data.attempt.passed = False
-    data.attempt.judge = JudgeReviewed(Verdict.FAIL)
+    data.attempt.judge = JudgeReviewed(Verdict.FAIL.value)
     record = build_round_record(data)
 
     assert record.judge_verdict == "fail"

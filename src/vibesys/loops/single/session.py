@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from vibesys.agent_run.state import Hypothesis
     from vibesys.events import ExperimentsChangeReason
     from vibesys.orchestration.runtime import RunContext
-    from vibesys.schemas import OrchestratorPlan
+    from vibesys.search.hypothesis import OrchestratorPlan
     from vs_loop_state.api import RoundRecord
 
 
@@ -401,7 +401,7 @@ class SingleSession:
         attempt = selected.attempt
         response = await self.turns.combined(selected.request, attempt)
         attempt.single_agent_response = response
-        attempt.judge = JudgeReviewed(response.verdict)
+        attempt.judge = JudgeReviewed(response.verdict.value)
         if response.verdict is Verdict.FAIL:
             attempt.feedback = response.feedback
             selected.request.active_hypothesis.feedback = response.feedback

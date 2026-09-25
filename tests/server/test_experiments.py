@@ -33,9 +33,9 @@ from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
-    OrchestratorPlan,
     PerfDeltaReason,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import MetricComparison, PerfProvenance, RoundRecord
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 

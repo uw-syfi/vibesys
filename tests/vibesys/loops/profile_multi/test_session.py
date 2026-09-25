@@ -35,10 +35,10 @@ from vibesys.schemas import (
     HypothesisOutcome,
     ImplementerResponse,
     JudgeResponse,
-    OrchestratorPlan,
     ValidationRecipeArtifact,
     Verdict,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:
@@ -403,7 +403,7 @@ def test_completed_reviewed_round_checkpoints_record_before_advancing(tmp_path: 
     selected.attempt.retry = 2
     selected.attempt.passed = True
     selected.attempt.official_reason = "final_round"
-    selected.attempt.judge = JudgeReviewed(Verdict.PASS)
+    selected.attempt.judge = JudgeReviewed(Verdict.PASS.value)
     selected.attempt.implementation = ImplementerResponse(
         summary="cache added",
         expected_behavior="faster",

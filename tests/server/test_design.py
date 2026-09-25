@@ -17,7 +17,7 @@ from vibesys.agent_run.state import AgentRunState, Hypothesis
 from vibesys.api.contracts import RunStatus
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
 

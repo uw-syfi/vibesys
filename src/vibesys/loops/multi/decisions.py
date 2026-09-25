@@ -16,7 +16,14 @@ from vibesys.schemas import HypothesisOutcome
 if TYPE_CHECKING:
     from vibesys.agent_run.attempts import AttemptState
     from vibesys.agent_run.state import AgentRunState, Hypothesis
-    from vibesys.schemas import ImplementerResponse, OrchestratorPlan, ProfilerSummary
+    from vibesys.schemas import ProfilerSummary
+    from vibesys.search.hypothesis import OrchestratorPlan
+
+    # ImplementerReply is the structural protocol AttemptState.implementation
+    # is typed against (vibesys.search.hypothesis.attempts); accepting it here
+    # (rather than the concrete vibesys.schemas.ImplementerResponse) covers
+    # exactly the fields these functions read.
+    from vibesys.search.hypothesis.attempts import ImplementerReply
     from vs_loop_state.api import RoundRecord
 
 _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW = 2
@@ -169,7 +176,7 @@ class TerminalPolicy(Protocol):
         ...
 
 
-def implementation_requests_continuation(implementation: ImplementerResponse | None) -> bool:
+def implementation_requests_continuation(implementation: ImplementerReply | None) -> bool:
     """Require a concrete unfinished same-hypothesis step."""
     return bool(
         implementation is not None
@@ -184,7 +191,7 @@ def implementation_requests_continuation(implementation: ImplementerResponse | N
 
 
 def implementation_keeps_hypothesis_active(
-    implementation: ImplementerResponse | None, *, continuation_rounds: int = 0
+    implementation: ImplementerReply | None, *, continuation_rounds: int = 0
 ) -> bool:
     """Bound the implementer's continuation lease to two rounds."""
     return implementation_requests_continuation(implementation) and (
@@ -210,7 +217,7 @@ def review_due(
 
 
 def candidate_evidence_is_fresh(
-    implementation: ImplementerResponse, records: list[RoundRecord]
+    implementation: ImplementerReply, records: list[RoundRecord]
 ) -> bool:
     """Detect a previously unseen objective row requiring review."""
     if not implementation.candidate_metrics:
