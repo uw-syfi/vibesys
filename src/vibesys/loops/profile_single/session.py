@@ -15,40 +15,40 @@ from vibesys.agent_run.attempts import (
 )
 from vibesys.agent_run.errors import StrategySessionError
 from vibesys.agent_run.evidence import (
-    _FAILED_HYPOTHESIS_OUTCOMES,
-    CarryOver,
-    _detect_plateau,
     _format_metric_row,
     _pareto_archive_summary,
-    _pareto_frontier_records,
-    _provisional_candidates_since_official,
     _record_candidate_metrics,
-    _select_final_candidate,
-    _terminal_workspace_notice,
 )
-from vibesys.agent_run.hypotheses import adopt_metric_space, update_active_hypothesis
 from vibesys.agent_run.record import RecordInput, build_round_record
-from vibesys.agent_run.state import AgentRunState
 from vibesys.loops.profile_single.attribution import run_attribution
-from vibesys.loops.profile_single.hypothesis import HypothesisEngine, ProfileGuidanceOutcome
 from vibesys.loops.profile_single.turns import ProfileSingleTurns
 from vibesys.orchestration.runtime import WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.profiler import ProfilerSummary
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis.results import Continue, Finished, NewHypothesis
+from vibesys.search.hypothesis.state import HypothesisState
+from vibesys.search.hypothesis.transitions import (
+    FAILED_HYPOTHESIS_OUTCOMES,
+    CarryOver,
+    adopt_metric_space,
+    provisional_candidates_since_official,
+    terminal_workspace_notice,
+    update_active_hypothesis,
+)
+from vibesys.search.profile_focus import FocusView, ProfileFocus, ProfileFocusConfig
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
-
-_MAX_CONTINUATION_ROUNDS = 2
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from vibesys.agent_run.options import AgentOrchestrationOptions
-    from vibesys.agent_run.state import Hypothesis
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.orchestration.runtime import RunContext
     from vibesys.schemas import OrchestratorPlan
-    from vs_loop_state.api import RoundRecord
+    from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.search.profile_focus.state import ProfileFocusState
 
 
 ProfileSingleSessionError = StrategySessionError
@@ -67,23 +67,13 @@ class PlanRequest:
     """Evidence supplied to this strategy's designer role."""
 
     round_number: int
-    state: AgentRunState
+    state: HypothesisState
     records: list[RoundRecord]
     carry: CarryOver
     profiler_summary: ProfilerSummary | None
     plateau_warning: str | None
     provisional_candidates: int
     profile_guidance: PlanGuidance
-
-
-@dataclass(frozen=True)
-class RoundSelection:
-    """The hypothesis and plan chosen for one round."""
-
-    state: AgentRunState
-    hypothesis: Hypothesis
-    plan: OrchestratorPlan
-    planned_official_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -98,11 +88,10 @@ class AttemptRequest:
     last_profile_focus: str
 
 
-@dataclass(frozen=True)
+@dataclass
 class ProfileSingleRound:
-    """One selected hypothesis and the mutable attempt state for its round."""
+    """One selected hypothesis's turn facts and the mutable attempt state."""
 
-    selection: RoundSelection
     request: AttemptRequest
     attempt: AttemptState
 
@@ -141,9 +130,9 @@ class _ProfilePolicy:
     def __init__(self, config: ProfileGuidedInput) -> None:
         self.config = config
 
-    def official_reason(self, reason: str | None, engine: HypothesisEngine) -> str | None:
+    def official_reason(self, reason: str | None, *, active_component: str) -> str | None:
         """Measure an active component even when the regular cadence defers."""
-        if engine.controller.guidance.active_component:
+        if active_component:
             return reason or "profile-guided component measurement"
         return reason
 
@@ -158,6 +147,14 @@ class ProfileSingleSession:
         self.workspace = ctx.workspaces.root
         self.turns = ProfileSingleTurns(ctx, options)
         self._gate_recorder = issue_board.GateBoardRecorder(self.turns.progress_path)
+        self.search = HypothesisSearch(
+            HypothesisConfig(
+                max_rounds=options.max_rounds,
+                judge_every=options.judge_every,
+                official_eval_every=options.official_eval_every,
+                max_retries_per_round=options.max_retries_per_round,
+            )
+        )
         self.terminal_policy = _TerminalPolicy()
         config = options.profile_guided
         if config is None:
@@ -165,6 +162,12 @@ class ProfileSingleSession:
                 "profile_guided options are required"
             )
         self.profile = _ProfilePolicy(config)
+        self.profile_focus = ProfileFocus(
+            ProfileFocusConfig(
+                plateau_min_rounds=config.min_measured_rounds,
+                min_relative_improvement=config.min_relative_improvement,
+            )
+        )
         self.framework_benchmark_configured = (
             ctx.request.input_bundle.benchmark_result is not None
             or ctx.request.input_bundle.benchmark_result_protocol is not None
@@ -195,16 +198,13 @@ class ProfileSingleSession:
         issue_board.ensure_progress_file(turns.progress_path)
         issue_board.ensure_roadmap_file(turns.roadmap_path)
         issue_board.write_validation_recipe_schema(turns.progress_path)
-        previous = await ctx.state.load(AgentRunState)
-        state = adopt_metric_space(previous or AgentRunState(), self.options.metric_space)
+        previous = await ctx.state.load(HypothesisState)
+        state = adopt_metric_space(previous or self.search.initial(), self.options.metric_space)
         self.state = state
-        self.records = state.rounds
-        self.history = RoundHistory(records=self.records)
-        self.carry = CarryOver(regression_info=_terminal_workspace_notice(self.records))
+        self.carry = CarryOver(regression_info=terminal_workspace_notice(self.records))
         self.round_number = len(self.records) + 1
         self.last_response = None
         self.last_profile_focus = "general latency hotspots on /v1/completions"
-        self.engine = HypothesisEngine.create(state, config=self.profile.config)
         if previous != state:
             await self.ctx.state.commit(
                 sequence=self.round_number,
@@ -213,6 +213,11 @@ class ProfileSingleSession:
                 label="profile_single: initialize policy state",
                 publish=state,
             )
+
+    @property
+    def records(self) -> list[RoundRecord]:
+        """The active state's completed rounds, in recorded order."""
+        return self.state.rounds
 
     @property
     def has_next_round(self) -> bool:
@@ -232,72 +237,77 @@ class ProfileSingleSession:
         with self.ctx.agents.progress(progress):
             yield
 
+    def _focus_state(self) -> ProfileFocusState:
+        return self.state.profile_guidance or self.profile_focus.initial()
+
+    def _with_focus(self, focus_state: ProfileFocusState) -> HypothesisState:
+        """Embed a new profile-focus state, normalized like the ported controller did."""
+        updated = self.state.model_copy(update={"profile_guidance": focus_state}, deep=True)
+        return HypothesisState.model_validate(updated.model_dump())
+
     async def select_hypothesis(self) -> ProfileSingleRound:
         """Choose a designer plan or continue the active hypothesis."""
-        state = self.state
-        engine = self.engine
-        hypothesis = state.active_hypothesis
         number = self.round_number
-        if hypothesis is None:
+        decision = self.search.next_round(
+            self.state, round_number=number, records=self.records, carry=self.carry
+        )
+        if isinstance(decision, Finished):
+            raise ProfileSingleSessionError.missing_active()
+        if isinstance(decision, NewHypothesis):
+            context = decision.context
             attribution = await run_attribution(self.ctx, self.profile.config, round_number=number)
-            engine = HypothesisEngine(
-                engine.replace_state(state).controller.prepare_round(
-                    round_number=number, attribution=attribution
-                )
+            focus_state = self.profile_focus.observe(
+                self._focus_state(), round_number=number, bottlenecks=attribution
             )
-            state = engine.state
+            self.state = self._with_focus(focus_state)
             await self.ctx.state.commit(
                 sequence=self.round_number,
-                writes={"state.json": state},
+                writes={"state.json": self.state},
                 candidate=False,
                 label=f"profile-guided: prepare round {number}",
-                publish=state,
+                publish=self.state,
             )
-            provisional = _provisional_candidates_since_official(self.records)
+            focused = self.profile_focus.focus(focus_state)
+            # ``ranked_bottlenecks`` renders this round's freshly observed
+            # attribution only (not the reconstructed all-time ranking),
+            # matching the ported controller's prompt byte-for-byte.
+            guidance = FocusView(
+                active_component=focused.active_component,
+                ledger_text=focused.ledger_text,
+                ranked_bottlenecks=attribution,
+            )
             summary = self._previous_profile()
             plan = await self.turns.plan(
                 PlanRequest(
-                    round_number=number,
-                    state=state,
-                    records=self.records,
-                    carry=self.carry,
+                    round_number=context.round_number,
+                    state=self.state,
+                    records=list(context.records),
+                    carry=context.carry,
                     profiler_summary=summary,
-                    plateau_warning=_detect_plateau(self.records),
-                    provisional_candidates=provisional,
-                    profile_guidance=engine.controller.guidance,
+                    plateau_warning=context.plateau_warning,
+                    provisional_candidates=context.provisional_candidates,
+                    profile_guidance=guidance,
                 )
             )
-            parent_round = plan.revert_to_round or (number - 1 if number > 1 else None)
-            parent = next(
-                (
-                    record
-                    for record in reversed(self.records)
-                    if record.round_number == parent_round
-                ),
-                None,
-            )
-            engine = engine.replace_state(state).start(
+            started = self.search.start(
+                self.state,
                 plan,
-                started_round=number,
-                parent_round=parent_round,
-                parent_commit=(
-                    parent.commit
-                    if parent is not None and parent.commit is not None
-                    else self.workspace.revision
-                ),
+                round_number=number,
+                current_commit=self.workspace.revision,
+                records=self.records,
             )
-            state = engine.state
-            hypothesis = state.active_hypothesis
-            if hypothesis is None:
-                raise ProfileSingleSessionError.missing_active()
+            self.state = started.state
+            hypothesis = started.hypothesis
             await self.ctx.state.commit(
                 sequence=self.round_number,
-                writes={"state.json": state},
+                writes={"state.json": self.state},
                 candidate=False,
                 label=f"profile_single: start hypothesis {plan.hypothesis_id}",
-                publish=state,
+                publish=self.state,
             )
         else:
+            assert isinstance(decision, Continue)  # noqa: S101  # only remaining variant
+            hypothesis = decision.hypothesis
             plan = hypothesis.plan
             issue_board.append_hypothesis_continuation(
                 self.turns.progress_path,
@@ -309,19 +319,16 @@ class ProfileSingleSession:
             self.ctx.log(
                 f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
             )
-        self.engine = engine
-        self.state = state
         reason = self.profile.official_reason(
-            self._official_reason(requested=plan.request_official_evaluation),
-            engine,
+            self.search.official_due(
+                records=self.records,
+                round_number=number,
+                requested=plan.request_official_evaluation,
+                candidate_ready=True,
+            ),
+            active_component=self._focus_state().active_component or "",
         )
-        selected = RoundSelection(
-            state=state,
-            hypothesis=hypothesis,
-            plan=plan,
-            planned_official_reason=reason,
-        )
-        await self._apply_rollback(selected)
+        await self._apply_rollback(hypothesis)
         request = AttemptRequest(
             round_number=number,
             plan=plan,
@@ -335,7 +342,7 @@ class ProfileSingleSession:
             feedback=hypothesis.feedback,
             revalidation_required=hypothesis.gate_revalidation_pending,
         )
-        return ProfileSingleRound(selected, request, attempt)
+        return ProfileSingleRound(request=request, attempt=attempt)
 
     def _previous_profile(self) -> ProfilerSummary | None:
         response = self.last_response
@@ -349,22 +356,8 @@ class ProfileSingleSession:
             perf_unit=response.perf_unit,
         )
 
-    def _official_reason(self, *, requested: bool) -> str | None:
-        """Apply this strategy's accepted-candidate evaluation cadence."""
-        if self.round_number == self.options.max_rounds:
-            return "final_round"
-        if requested:
-            return "orchestrator_request"
-        if (
-            _provisional_candidates_since_official(self.records) + 1
-            >= self.options.official_eval_every
-        ):
-            return "cadence"
-        return None
-
-    async def _apply_rollback(self, selection: RoundSelection) -> None:
-        parent_round = selection.plan.revert_to_round
-        hypothesis = selection.hypothesis
+    async def _apply_rollback(self, hypothesis: Hypothesis) -> None:
+        parent_round = hypothesis.plan.revert_to_round
         if parent_round is None or hypothesis.revert_applied:
             return
         target = next(
@@ -373,8 +366,8 @@ class ProfileSingleSession:
         if target is None or not target.commit:
             self.ctx.log(f"cannot revert: no commit recorded for round {parent_round}")
             return
-        rollback, failed_child = self.history.resolve_rollback_commit(
-            target, _FAILED_HYPOTHESIS_OUTCOMES
+        rollback, failed_child = RoundHistory(records=self.records).resolve_rollback_commit(
+            target, FAILED_HYPOTHESIS_OUTCOMES
         )
         if rollback is None:
             raise ProfileSingleSessionError.missing_rollback()
@@ -391,16 +384,14 @@ class ProfileSingleSession:
         hypothesis.revert_applied = True
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback
-        state = update_active_hypothesis(selection.state, hypothesis)
+        self.state = update_active_hypothesis(self.state, hypothesis)
         await self.ctx.state.commit(
             sequence=self.round_number,
-            writes={"state.json": state},
+            writes={"state.json": self.state},
             candidate=False,
             label=f"profile_single: set hypothesis {hypothesis.hypothesis_id} parent",
-            publish=state,
+            publish=self.state,
         )
-        self.state = state
-        self.engine = self.engine.replace_state(state)
         if failed_child is None:
             self.ctx.log(f"Reverted workspace to round {parent_round} ({rollback[:8]}).")
         else:
@@ -449,19 +440,14 @@ class ProfileSingleSession:
         if response.verdict is Verdict.FAIL:
             attempt.feedback = response.feedback
             selected.request.active_hypothesis.feedback = response.feedback
-            state = update_active_hypothesis(
-                selected.attempt.agent_run_state, selected.request.active_hypothesis
-            )
-            selected.attempt.agent_run_state = state
-            await self.ctx.state.commit(
-                sequence=self.round_number,
-                writes={"state.json": state},
-                candidate=False,
-                label=f"profile_single: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
-                publish=state,
-            )
+            await self._checkpoint_hypothesis(selected)
             return AttemptDecision.RETRY
-        reason = self._official_reason(requested=selected.request.plan.request_official_evaluation)
+        reason = self.search.official_due(
+            records=self.records,
+            round_number=selected.request.round_number,
+            requested=selected.request.plan.request_official_evaluation,
+            candidate_ready=True,
+        )
         if reason is None:
             self._record_official_decision(selected, run=False, reason="cadence_not_due")
             self.ctx.log("[official-evaluation] deferred; candidate retained as provisional")
@@ -484,7 +470,7 @@ class ProfileSingleSession:
             run=run,
             reason=reason,
             official_eval_every=self.options.official_eval_every,
-            provisional_candidates=_provisional_candidates_since_official(self.records),
+            provisional_candidates=provisional_candidates_since_official(self.records),
         )
 
     async def _official_gates(self, selected: ProfileSingleRound) -> bool:
@@ -521,6 +507,10 @@ class ProfileSingleSession:
         hypothesis.gate_candidate_commit = commit
         hypothesis.gate_accuracy_passed = result.accuracy_passed
         hypothesis.feedback = result.feedback
+        await self._checkpoint_hypothesis(selected)
+        return False
+
+    async def _checkpoint_hypothesis(self, selected: ProfileSingleRound) -> None:
         state = update_active_hypothesis(
             selected.attempt.agent_run_state, selected.request.active_hypothesis
         )
@@ -532,11 +522,11 @@ class ProfileSingleSession:
             label=f"profile_single: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
             publish=state,
         )
-        return False
 
     async def commit_round(self, selected: ProfileSingleRound) -> None:
         """Commit the completed round and publish its observable record."""
         attempt = selected.attempt
+        hypothesis = selected.request.active_hypothesis
         projection = self.terminal_policy.project_performance(selected.request, attempt)
         self.last_response = projection.next_single_response
         candidate_commit = await self.workspace.snapshot(f"round-{self.round_number}-record-input")
@@ -546,8 +536,8 @@ class ProfileSingleSession:
                 state=attempt.agent_run_state,
                 records=self.records,
                 round_number=self.round_number,
-                hypothesis=selected.selection.hypothesis,
-                plan=selected.selection.plan,
+                hypothesis=hypothesis,
+                plan=selected.request.plan,
                 attempt=attempt,
                 projection=projection,
                 reviewed=True,
@@ -560,68 +550,45 @@ class ProfileSingleSession:
                 model=worker.model,
             )
         )
-        engine, carry, exhaustion_feedback = self._complete_policy_round(selected, record)
-        if exhaustion_feedback is not None:
+        official = record.official_evaluation
+        relative_improvement = (
+            record.perf_delta_pct / 100 if record.perf_delta_pct is not None else None
+        )
+        focus_state = self.profile_focus.record(
+            self._focus_state(),
+            round_number=record.round_number,
+            passed=attempt.passed and official,
+            relative_improvement=relative_improvement,
+        )
+        closed = self.search.close_round(
+            self._with_focus(focus_state),
+            hypothesis=hypothesis,
+            record=record,
+            records=self.records,
+            carry=self.carry,
+            passed=attempt.passed,
+            reviewed=True,
+            feedback=attempt.feedback,
+            keeps_active=False,
+            requests_continuation=False,
+            next_step=None,
+            terminal_needs_parent_choice=False,
+        )
+        if closed.exhaustion_feedback is not None:
             issue_board.append_exhaustion_note(
                 self.turns.progress_path,
                 self.round_number,
                 self.options.max_retries_per_round,
-                exhaustion_feedback,
+                closed.exhaustion_feedback,
             )
         await self.ctx.state.commit(
             sequence=self.round_number,
-            writes={"state.json": engine.state},
-            publish=engine.state,
+            writes={"state.json": closed.state},
+            publish=closed.state,
         )
-        self.engine = engine
-        self.state = engine.state
-        self.records = engine.state.rounds
-        self.history = RoundHistory(records=self.records)
-        self.carry = carry
+        self.state = closed.state
+        self.carry = closed.carry
         self.round_number += 1
-
-    def _complete_policy_round(
-        self, selected: ProfileSingleRound, record: RoundRecord
-    ) -> tuple[HypothesisEngine, CarryOver, str | None]:
-        """Advance a reviewed component hypothesis and the next designer handoff."""
-        attempt = selected.attempt
-        next_active = selected.selection.hypothesis.clone()
-        if attempt.passed:
-            active = None
-        elif next_active.continuation_rounds < _MAX_CONTINUATION_ROUNDS:
-            next_active.feedback = attempt.feedback
-            next_active.next_step = None
-            next_active.continuation_rounds += 1
-            active = next_active
-        else:
-            active = None
-        profile_outcome = ProfileGuidanceOutcome.from_round(
-            round_number=record.round_number,
-            passed=attempt.passed,
-            official=record.official_evaluation,
-            delta_pct=record.perf_delta_pct,
-        )
-        engine = self.engine.replace_state(attempt.agent_run_state).complete_round(
-            record, next_active=active, profile_outcome=profile_outcome
-        )
-        carry = CarryOver()
-        exhaustion_feedback: str | None = None
-        if not attempt.passed:
-            exhaustion_feedback = attempt.feedback or ""
-            carry.exhaustion_info = (
-                f"Round {record.round_number} did not pass after "
-                f"{self.options.max_retries_per_round} attempts. Last judge feedback: "
-                f"{attempt.feedback or '(empty)'}"
-            )
-        elif record.official_evaluation and record.candidate_retained is False:
-            carry.regression_info = (
-                f"Round {record.round_number}'s official candidate was not retained: "
-                f"{record.perf_metric}"
-                f"{(' ' + record.perf_unit) if record.perf_unit else ''}. "
-                "Use its recorded parent and objective directions when choosing "
-                "the next checkpoint."
-            )
-        return engine, carry, exhaustion_feedback
 
     async def finish(self) -> bool:
         """Restore the best trusted candidate or the trusted input baseline."""
@@ -630,7 +597,7 @@ class ProfileSingleSession:
             self.turns.progress_path, _pareto_archive_summary(self.records, self.state.metrics)
         )
         if self.state.metrics.objectives:
-            frontier = _pareto_frontier_records(self.records, self.state.metrics)
+            frontier = self.search.frontier(self.records, space=self.state.metrics)
             self.ctx.log(f"\nFinal Pareto frontier ({len(frontier)} rounds):")
             for record in frontier:
                 self.ctx.log(
@@ -638,7 +605,7 @@ class ProfileSingleSession:
                     f"{_format_metric_row(_record_candidate_metrics(record), self.state.metrics.objectives)} "
                     f"(commit {(record.commit or 'n/a')[:12]})"
                 )
-        winner = _select_final_candidate(self.records, self.state.metrics)
+        winner = self.search.best(self.records, space=self.state.metrics)
         if winner is None:
             baseline = self.workspace.trusted_input_baseline
             if baseline is None:

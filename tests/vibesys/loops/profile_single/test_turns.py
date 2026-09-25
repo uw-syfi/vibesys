@@ -25,13 +25,14 @@ from vibesys.agent_run.options import AgentOrchestrationOptions
 from vibesys.agent_run.state import AgentRunState
 from vibesys.constants import DomainName
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
-from vibesys.loops.profile_single.hypothesis import HypothesisEngine
 from vibesys.loops.profile_single.session import AttemptRequest, PlanRequest
 from vibesys.loops.profile_single.turns import InvalidPlanError, ProfileSingleTurns
 from vibesys.profilers import ProfilerKind
 from vibesys.roles.common import Verdict
 from vibesys.roles.single_agent import PROFILE_SINGLE_COMBINED, SingleAgentRoundResponse
 from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis.transitions import start_hypothesis
+from vibesys.search.profile_focus import FocusView
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,10 +62,6 @@ def _response() -> SingleAgentRoundResponse:
         suggestions="Batch more",
         profile_analysis="Decode dominates",
     )
-
-
-def _engine(state: AgentRunState) -> HypothesisEngine:
-    return HypothesisEngine.create(state, config=ProfileGuidedInput(command=("true",)))
 
 
 def _configured_turns(tmp_path: Path) -> ProfileSingleTurns:
@@ -109,17 +106,15 @@ def _configured_turns(tmp_path: Path) -> ProfileSingleTurns:
 def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path: Path) -> None:
     turns = _configured_turns(tmp_path)
     plan = _plan("h1")
-    engine = _engine(AgentRunState()).start(plan, started_round=1)
-    hypothesis = engine.state.active_hypothesis
+    state = start_hypothesis(AgentRunState(), plan, started_round=1)
+    hypothesis = state.active_hypothesis
     assert hypothesis is not None
-    plan_request = PlanRequest(
-        1, engine.state, [], CarryOver(), None, None, 1, engine.controller.guidance
-    )
+    plan_request = PlanRequest(1, state, [], CarryOver(), None, None, 1, FocusView())
 
     designer_context = turns._plan_context(plan_request)  # noqa: SLF001
     combined_context = turns._combined_context(  # noqa: SLF001
         AttemptRequest(1, plan, "profile-guided component measurement", [], hypothesis, "decode"),
-        AttemptState(agent_run_state=engine.state, feedback=None, retry=1),
+        AttemptState(agent_run_state=state, feedback=None, retry=1),
     )
 
     assert turns.template_dir.name == "profile_single"
@@ -135,8 +130,7 @@ async def test_plan_reprompts_reused_hypothesis_and_records_corrected_plan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    prior = _engine(AgentRunState()).start(_plan("used"), started_round=1)
-    state = prior.state
+    state = start_hypothesis(AgentRunState(), _plan("used"), started_round=1)
     turns = ProfileSingleTurns.__new__(ProfileSingleTurns)
     log: list[str] = []
     agent_turn = AsyncMock(side_effect=[_plan("used"), _plan("new")])
@@ -151,9 +145,7 @@ async def test_plan_reprompts_reused_hypothesis_and_records_corrected_plan(
     monkeypatch.setattr(turns, "roadmap_location", "progress-artifacts/roadmap", raising=False)
     monkeypatch.setattr(turns, "_plan_context", lambda _request: {"plan": "context"})
     monkeypatch.setattr(turns, "_skills", lambda selections: (selections, []))
-    request = PlanRequest(
-        2, state, state.rounds, CarryOver(), None, None, 0, prior.controller.guidance
-    )
+    request = PlanRequest(2, state, state.rounds, CarryOver(), None, None, 0, FocusView())
 
     plan = await turns.plan(request)
 
@@ -170,8 +162,8 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plan = _plan("h1")
-    engine = _engine(AgentRunState()).start(plan, started_round=1)
-    hypothesis = engine.state.active_hypothesis
+    state = start_hypothesis(AgentRunState(), plan, started_round=1)
+    hypothesis = state.active_hypothesis
     assert hypothesis is not None
     turns = ProfileSingleTurns.__new__(ProfileSingleTurns)
     agent_turn = AsyncMock(return_value=_response())
@@ -183,7 +175,7 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     monkeypatch.setattr(turns, "_skills", lambda selections: (selections, []))
     monkeypatch.setattr(turns, "_combined_context", lambda *_args: {"combined": "context"})
     request = AttemptRequest(1, plan, None, [], hypothesis, "decode")
-    attempt = AttemptState(agent_run_state=engine.state, feedback=None, retry=1)
+    attempt = AttemptState(agent_run_state=state, feedback=None, retry=1)
 
     response = await turns.combined(request, attempt)
 
@@ -208,7 +200,7 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
 
 def test_validation_rejects_reused_id() -> None:
     plan = _plan("used")
-    state = _engine(AgentRunState()).start(plan, started_round=1).state
+    state = start_hypothesis(AgentRunState(), plan, started_round=1)
     turns = ProfileSingleTurns.__new__(ProfileSingleTurns)
 
     with pytest.raises(InvalidPlanError, match="already used"):
