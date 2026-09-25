@@ -76,6 +76,7 @@ graph TD
     vibesys.api --> vibesys
     vibesys.api --> vibesys.agent_run
     vibesys.api --> vibesys.api.contracts
+    vibesys.api --> vibesys.backends
     vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
     vibesys.api --> vibesys.loops.registry
@@ -185,12 +186,14 @@ graph TD
     vibesys.orchestration.request --> vibesys
     vibesys.orchestration.request --> vibesys.evaluators
     vibesys.orchestration.request --> vibesys.sandbox
+    vibesys.orchestration.runner --> vibesys.backends
     vibesys.orchestration.runner --> vibesys.orchestration.contracts
     vibesys.orchestration.runner --> vibesys.orchestration.environment
     vibesys.orchestration.runner --> vibesys.orchestration.request
     vibesys.orchestration.runner --> vibesys.orchestration.runtime
     vibesys.orchestration.runner --> vibesys.run
     vibesys.orchestration.runtime --> vibesys
+    vibesys.orchestration.runtime --> vibesys.backends
     vibesys.orchestration.runtime --> vibesys.context
     vibesys.orchestration.runtime --> vibesys.evaluators
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
@@ -311,6 +314,7 @@ graph TD
     vibesys.api --> vibesys
     vibesys.api --> vibesys.agent_run
     vibesys.api --> vibesys.api.contracts
+    vibesys.api --> vibesys.backends
     vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
     vibesys.api --> vibesys.loops.registry
@@ -460,12 +464,15 @@ graph TD
     vibesys.orchestration.request --> vibesys.sandbox
     vibesys.orchestration.request --> vs_project
     vibesys.orchestration.resume --> vs_project
+    vibesys.orchestration.runner --> vibesys.backends
     vibesys.orchestration.runner --> vibesys.orchestration.contracts
     vibesys.orchestration.runner --> vibesys.orchestration.environment
     vibesys.orchestration.runner --> vibesys.orchestration.request
     vibesys.orchestration.runner --> vibesys.orchestration.runtime
     vibesys.orchestration.runner --> vibesys.run
+    vibesys.orchestration.runner --> vs_agent
     vibesys.orchestration.runtime --> vibesys
+    vibesys.orchestration.runtime --> vibesys.backends
     vibesys.orchestration.runtime --> vibesys.context
     vibesys.orchestration.runtime --> vibesys.evaluators
     vibesys.orchestration.runtime --> vibesys.orchestration.environment

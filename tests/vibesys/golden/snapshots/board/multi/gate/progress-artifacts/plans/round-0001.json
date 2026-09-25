@@ -1,0 +1,17 @@
+{
+  "hypothesis_id": "H-01",
+  "hypothesis_updates": [],
+  "hypothesis": "batching the prefill step removes per-request launch overhead",
+  "title": "",
+  "activation_evidence": "",
+  "falsification_criteria": "",
+  "expected_effect": "",
+  "minimum_acceptance_criteria": "",
+  "invariants": "",
+  "recommended_skills": [],
+  "task": "batch the prefill step",
+  "pass_criteria": "throughput improves without regressing accuracy",
+  "request_official_evaluation": false,
+  "revert_to_round": null,
+  "reasoning": "scripted golden fixture"
+}

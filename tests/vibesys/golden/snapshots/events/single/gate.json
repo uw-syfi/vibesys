@@ -1,0 +1,532 @@
+[
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": "<SHA>",
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys: initialize run <RUN_ID>",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "experiments_changed",
+      "reason": "project_attached",
+      "revision": null
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "experiments_changed"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys: record effective objective",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "benchmark_contract": false,
+      "kind": "run_configured",
+      "model": null,
+      "objective": "Maximize tok/s throughput.",
+      "pareto_objectives": null,
+      "project_root": "<WORKSPACE>/<TEST_DIR>/input_model",
+      "run_log_path": "<WORKSPACE>/.vibesys-state-<TEST_DIR>/projects/<RUN_ID>/runs/<RUN_ID>/logs/run-<TIMESTAMP>.log",
+      "search_policy": null,
+      "source": "loop"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "run_configured"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "single: initialize policy state",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-plan-input",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "orchestrator is working",
+        "tool": null
+      },
+      "attempt": null,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "orchestrator",
+      "system_prompt": "<text len=7713 sha256=6d531dc2b807aad8>",
+      "user_prompt": "Produce this round's plan. Return only the JSON object."
+    },
+    "round_label": "round-1-plan",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "orchestrator"
+    },
+    "round_label": "round-1-plan",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "<text len=7713 sha256=6d531dc2b807aad8>",
+      "user_prompt": "Produce this round's plan. Return only the JSON object."
+    },
+    "round_label": "round-1-plan",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "activation_evidence": "",
+        "expected_effect": "",
+        "falsification_criteria": "",
+        "hypothesis": "batching the prefill step removes per-request launch overhead",
+        "hypothesis_id": "H-01",
+        "hypothesis_updates": [],
+        "invariants": "",
+        "minimum_acceptance_criteria": "",
+        "pass_criteria": "throughput improves without regressing accuracy",
+        "reasoning": "scripted golden fixture",
+        "recommended_skills": [],
+        "request_official_evaluation": false,
+        "revert_to_round": null,
+        "task": "batch the prefill step",
+        "title": ""
+      }
+    },
+    "round_label": "round-1-plan",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "activation_evidence": "",
+        "expected_effect": "",
+        "falsification_criteria": "",
+        "hypothesis": "batching the prefill step removes per-request launch overhead",
+        "hypothesis_id": "H-01",
+        "hypothesis_updates": [],
+        "invariants": "",
+        "minimum_acceptance_criteria": "",
+        "pass_criteria": "throughput improves without regressing accuracy",
+        "reasoning": "scripted golden fixture",
+        "recommended_skills": [],
+        "request_official_evaluation": false,
+        "revert_to_round": null,
+        "task": "batch the prefill step",
+        "title": ""
+      }
+    },
+    "round_label": "round-1-plan",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "orchestrator",
+    "data": {
+      "attempt": null,
+      "kind": "phase",
+      "phase": "orchestrator"
+    },
+    "round_label": "round-1-plan",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "single: start hypothesis H-01",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "experiments_changed",
+      "reason": "active_hypothesis_changed",
+      "revision": 1
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "experiments_changed"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "single: start round 1 attempt 1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-retry-1-paid-marker",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "activity": {
+        "kind": "agent_execution_activity_changed",
+        "mode": "thinking",
+        "summary": "implementer is working",
+        "tool": null
+      },
+      "attempt": 1,
+      "driver": "fake",
+      "kind": "agent_execution_started",
+      "model": null,
+      "provider": "fake",
+      "stage": "implementer",
+      "system_prompt": "<text len=6333 sha256=dca937ce7569d116>",
+      "user_prompt": "Carry out the orchestrator's task above end-to-end (implement, self-judge, profile) and return only the JSON object."
+    },
+    "round_label": "round-1-retry-1-single-agent",
+    "status": "active",
+    "text": "",
+    "type": "agent_execution_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "attempt": 1,
+      "kind": "phase",
+      "phase": "implementer"
+    },
+    "round_label": "round-1-retry-1-single-agent",
+    "status": "active",
+    "text": "",
+    "type": "phase_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "kind": "invocation_started",
+      "system_prompt": "<text len=6333 sha256=dca937ce7569d116>",
+      "user_prompt": "Carry out the orchestrator's task above end-to-end (implement, self-judge, profile) and return only the JSON object."
+    },
+    "round_label": "round-1-retry-1-single-agent",
+    "status": "active",
+    "text": "",
+    "type": "invocation_started"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "error": null,
+      "kind": "agent_execution_finished",
+      "result": {
+        "bottlenecks": "prefill launch overhead dominates at low batch sizes",
+        "candidate_disposition": "unassessed",
+        "candidate_evaluation_artifact": null,
+        "candidate_metrics": {},
+        "candidate_operating_point": "",
+        "candidate_retention_reason": "",
+        "expected_behavior": "higher steady-state throughput",
+        "feedback": "",
+        "perf_metric": null,
+        "perf_unit": null,
+        "profile_analysis": "ran the local checks",
+        "self_review": "reviewed the diff and the checks",
+        "skill_context_updates": [],
+        "suggestions": "batch decode requests next",
+        "summary": "batched the prefill step",
+        "verdict": "pass"
+      }
+    },
+    "round_label": "round-1-retry-1-single-agent",
+    "status": "completed",
+    "text": "",
+    "type": "agent_execution_finished"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "error": null,
+      "kind": "invocation_finished",
+      "result": {
+        "bottlenecks": "prefill launch overhead dominates at low batch sizes",
+        "candidate_disposition": "unassessed",
+        "candidate_evaluation_artifact": null,
+        "candidate_metrics": {},
+        "candidate_operating_point": "",
+        "candidate_retention_reason": "",
+        "expected_behavior": "higher steady-state throughput",
+        "feedback": "",
+        "perf_metric": null,
+        "perf_unit": null,
+        "profile_analysis": "ran the local checks",
+        "self_review": "reviewed the diff and the checks",
+        "skill_context_updates": [],
+        "suggestions": "batch decode requests next",
+        "summary": "batched the prefill step",
+        "verdict": "pass"
+      }
+    },
+    "round_label": "round-1-retry-1-single-agent",
+    "status": "completed",
+    "text": "",
+    "type": "invocation_finished"
+  },
+  {
+    "agent_kind": "implementer",
+    "data": {
+      "attempt": 1,
+      "kind": "phase",
+      "phase": "implementer"
+    },
+    "round_label": "round-1-retry-1-single-agent",
+    "status": "completed",
+    "text": "",
+    "type": "phase_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-retry-1-single-agent",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "command": "python -c 'print('\"'\"'ok'\"'\"')'",
+      "gate": "accuracy",
+      "kind": "gate_started",
+      "recipe": null,
+      "source": "gates",
+      "source_label": null
+    },
+    "round_label": "round-1",
+    "status": "active",
+    "text": "",
+    "type": "gate_started"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "gate": "accuracy",
+      "kind": "gate_finished",
+      "metric": null,
+      "output_tail": null,
+      "recipe": null,
+      "reused": false,
+      "source": "gates",
+      "source_label": null,
+      "unit": null,
+      "value": null
+    },
+    "round_label": "round-1",
+    "status": "completed",
+    "text": "",
+    "type": "gate_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-retry-1-framework-accuracy",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-record-input",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "experiments_changed",
+      "reason": "round_persisted",
+      "revision": 2
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "experiments_changed"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "attempts": 1,
+      "judge_verdict": "pass",
+      "kind": "round_finished",
+      "perf_metric": null,
+      "perf_unit": null,
+      "profile_skipped": true
+    },
+    "round_label": "round-1",
+    "status": "completed",
+    "text": "",
+    "type": "round_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": "<SHA>",
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "single: restore trusted input baseline",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  }
+]
