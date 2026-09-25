@@ -21,6 +21,7 @@ Launch (typically spawned by the agent runner via ``MCPServerSpec``):
 from __future__ import annotations
 
 import argparse
+import atexit
 import sys
 import threading
 from pathlib import Path
@@ -93,6 +94,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         kernel_include: str | None = None,
         collection_delay_s: float | None = None,
         collection_duration_s: float | None = None,
+        target: str | None = None,
     ) -> str:
         """Capture a whole-run rocprofv3 system trace: host/device overlap, idle, launch cost.
 
@@ -140,6 +142,9 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
                 given together with collection_duration_s).
             collection_duration_s: Seconds to collect after the delay (must
                 be given together with collection_delay_s).
+            target: Not supported by this tool (rocprofv3 attach is
+                unavailable); passing it returns a clear error naming the
+                fix instead of an obscure rocprofv3 failure.
         """
         lifecycle = capture_runtime.Lifecycle(
             command=command,
@@ -163,6 +168,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
                 kernel_include=kernel_include,
                 collection_delay_s=collection_delay_s,
                 collection_duration_s=collection_duration_s,
+                target=target,
             )
         except ValueError as exc:
             return f"error: {exc}"
@@ -184,6 +190,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         timeout_s: float = 300.0,
         sets: list[str],
         kernel: str | None = None,
+        target: str | None = None,
     ) -> str:
         """Capture PMC hardware counters: which hardware ceiling one hot kernel is against.
 
@@ -205,6 +212,8 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
                 architecture (see profiling_capabilities), e.g.
                 ["mfma", "l2", "hbm"].
             kernel: Optional --kernel-include-regex filter, applied to every pass.
+            target: Not supported by this tool (rocprofv3 attach is
+                unavailable); passing it returns a clear error.
         """
         lifecycle = capture_runtime.Lifecycle(
             command=command,
@@ -226,6 +235,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
                 cancel_event=cancel_event,
                 sets=sets,
                 kernel=kernel,
+                target=target,
             )
         except ValueError as exc:
             return f"error: {exc}"
@@ -247,6 +257,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         timeout_s: float = 300.0,
         kernel: str,
         dispatch: int | None = None,
+        target: str | None = None,
     ) -> str:
         """Capture full Speed-of-Light + roofline for one targeted kernel (rocprof-compute).
 
@@ -264,6 +275,8 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
                 anything containing "gemm"); list real names with
                 profile_timeline + kernels first.
             dispatch: Optional specific dispatch index to target.
+            target: Not supported by this tool (rocprofv3 attach is
+                unavailable); passing it returns a clear error.
         """
         lifecycle = capture_runtime.Lifecycle(
             command=command,
@@ -285,6 +298,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
                 cancel_event=cancel_event,
                 kernel=kernel,
                 dispatch=dispatch,
+                target=target,
             )
         except ValueError as exc:
             return f"error: {exc}"
@@ -307,6 +321,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         kernel: str,
         target_cu: int = att.DEFAULT_TARGET_CU,
         buffer_bytes: int = att.DEFAULT_BUFFER_SIZE,
+        target: str | None = None,
     ) -> str:
         """Capture per-instruction stalls inside one kernel, one compute unit (ATT).
 
@@ -324,6 +339,8 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             target_cu: Which compute unit to trace (keeps output small).
             buffer_bytes: ATT buffer size in bytes; raise if the decoded
                 trace reports truncation.
+            target: Not supported by this tool (rocprofv3 attach is
+                unavailable); passing it returns a clear error.
         """
         lifecycle = capture_runtime.Lifecycle(
             command=command,
@@ -346,6 +363,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
                 kernel=kernel,
                 target_cu=target_cu,
                 buffer_bytes=buffer_bytes,
+                target=target,
             )
         except ValueError as exc:
             return f"error: {exc}"
@@ -354,7 +372,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
 
     @mcp.tool()
     async def profile_ops(  # noqa: PLR0913  # tracked: #288
-        command: str,
+        command: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         ready_command: str | None = None,
@@ -367,24 +385,45 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         delay_s: float = 0.0,
         duration_s: float | None = None,
         record_shapes: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
+        inject: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
+        target: str | None = None,
     ) -> str:
         """Capture an in-process torch.profiler trace of any candidate program.
 
         Delegates to the torch plugin's capture_ops.profile_ops, staged
         alongside rocprof; returns a clear error if that plugin isn't
-        staged. Runs off the main event loop and honors client cancellation
-        the same way profile_timeline does; returns "busy: ..." immediately
-        if another capture is already running in this server process. Args:
+        staged. Pass target (a target_id from start_target) instead of
+        command to window an already-running warm target rather than
+        launching a fresh process -- load_command is then required. Runs
+        off the main event loop and honors client cancellation the same way
+        profile_timeline does; returns "busy: ..." immediately if another
+        capture is already running in this server process. Args:
 
             command, cwd, env, ready_command, ready_timeout_s, load_command, setup_command,
                 stop_signal, grace_s, timeout_s: same as profile_timeline
                 (grace/timeout are more generous here: the in-process trace
-                write can itself take a while).
+                write can itself take a while). command is omitted when
+                target is given.
             delay_s: Seconds after arming before the profiler starts.
             duration_s: Seconds to profile before auto-stopping; omit to
-                profile until process exit / stop_signal.
+                profile until process exit / stop_signal. With target=,
+                bounds the window instead.
             record_shapes: Capture per-op input shapes (needed for
-                gemm_shapes/roofline and for certify to pass).
+                gemm_shapes/roofline and for certify to pass). Not
+                applicable with target= (fixed when the target was started).
+            inject: Set False when command already opens its own separate
+                torch.profiler session internally (e.g. a serving engine's
+                native profiler_config + start_profile()/stop_profile()
+                hooks). Two independent profiler sessions in one process
+                crash the CUPTI/roctracer/kineto backend outright (SIGSEGV,
+                not a catchable error). With inject=False this tool never
+                arms its own signal-based session; it still points the
+                command at VIBESYS_TORCH_PROFILE_OUT_DIR so the command's
+                own profiler writes its trace where this tool's discovery/
+                analysis pipeline will find it.
+            target: A target_id from start_target, to window an
+                already-running warm target instead of launching a fresh
+                process.
         """
         cancel_event = threading.Event()
         try:
@@ -404,9 +443,80 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
                 delay_s=delay_s,
                 duration_s=duration_s,
                 record_shapes=record_shapes,
+                inject=inject,
+                target=target,
             )
         except capture_runtime.CaptureBusyError as exc:
             return capture_runtime.format_busy(exc.active)
+
+    @mcp.tool()
+    def start_target(  # noqa: PLR0913  # tracked: #288
+        command: str,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        setup_command: str | None = None,
+        ready_command: str | None = None,
+        ready_timeout_s: float = 60.0,
+        stop_signal: str = "SIGINT",
+        grace_s: float = 10.0,
+        timeout_s: float = 300.0,
+    ) -> str:
+        """Launch a reusable, warm target process for profile_ops(target=...).
+
+        Delegates to the torch plugin's capture_ops.start_target (the same
+        function torch/server.py's own start_target tool calls -- one
+        shared implementation). rocprof's own rocprofv3-based captures
+        cannot use a warm target (rocprofv3 attach is unavailable; see
+        profiling_capabilities), so this exists only to support the
+        delegated profile_ops(target=...) above without needing a second
+        MCP server. Once started, call profile_ops(target=<id>,
+        load_command=...) for each window, and stop_target(<id>) when done
+        -- every target still running when this server process exits is
+        stopped automatically.
+
+        Args:
+            command: Command to launch, run via bash -lc; must keep running
+                (a server, or a script that loops/sleeps) rather than exit
+                on its own.
+            cwd: Working directory for command/ready_command.
+            env: Extra environment variables for the target process.
+            setup_command: Runs to completion BEFORE command, outside the
+                profiler injection entirely. A nonzero exit here means no
+                target is started.
+            ready_command: Polled until it exits 0 before this call
+                returns. Omit to return as soon as command is launched.
+            ready_timeout_s: Max seconds to wait for ready_command.
+            stop_signal: Signal name stop_target sends (default SIGINT).
+            grace_s: Seconds stop_target waits after stop_signal before
+                escalating to SIGTERM/SIGKILL.
+            timeout_s: Hard wall-clock budget for setup_command plus the
+                ready-wait only (the target itself keeps running afterward).
+        """
+        return capture.start_target(
+            command,
+            cwd=cwd,
+            env=env,
+            setup_command=setup_command,
+            ready_command=ready_command,
+            ready_timeout_s=ready_timeout_s,
+            stop_signal=stop_signal,
+            grace_s=grace_s,
+            timeout_s=timeout_s,
+        )
+
+    @mcp.tool()
+    def stop_target(target: str) -> str:
+        """Stop a warm target started with start_target: stop_signal -> grace -> escalate.
+
+        Args:
+            target: The target_id returned by start_target.
+        """
+        return capture.stop_target(target)
+
+    @mcp.tool()
+    def targets() -> str:
+        """List targets currently running in this server process (from start_target)."""
+        return capture.targets()
 
     # -- capture store: list / summarize / diff --------------------------
 
@@ -785,6 +895,10 @@ def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
         description="Stdio MCP server exposing the rocprof capture + analysis toolkit.",
     )
     parser.parse_args(argv)
+    # Any warm target started via start_target() and still running when this
+    # process exits (normal exit, or an uncaught error unwinding to here)
+    # must not be left running -- see capture_runtime.stop_all_targets.
+    atexit.register(capture_runtime.stop_all_targets)
     mcp = build_server()
     mcp.run(transport="stdio")
 

@@ -45,6 +45,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import time
 import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -265,6 +266,123 @@ def _find_att_decoder_dir() -> str | None:
         if (Path(lib_dir) / _ATT_DECODER_LIB_NAME).is_file():
             return lib_dir
     return None
+
+
+_ATTACH_LIB_NAME = "librocprofiler-sdk-attach.so"
+_ATTACH_BG_THREAD_NAME = "rocp-bg-attach"
+_ATTACH_PROBE_TIMEOUT_S = 5.0
+_ATTACH_PROBE_POLL_S = 0.2
+
+
+def _find_attach_lib() -> str | None:
+    for lib_dir in _standard_rocm_lib_dirs():
+        candidate = Path(lib_dir) / _ATTACH_LIB_NAME
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _probe_rocprofv3_attach() -> tuple[bool, str]:
+    """Best-effort probe: can a process on this host expose the attach thread rocprofv3 needs?
+
+    rocprofv3's ``--attach PID`` path requires the target process to have
+    spun up a background thread named ``rocp-bg-attach`` (via
+    ``ROCP_TOOL_ATTACH=1`` plus ``librocprofiler-sdk-attach.so`` on
+    ``LD_PRELOAD``); that thread only exists when the host's
+    ``librocprofiler-register`` was built with
+    ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. This spawns a
+    short-lived helper process with that env set and polls
+    ``/proc/<pid>/task/*/comm`` for the thread name, mirroring the exact
+    recipe verified against a real MI210/ROCm 7.2.3 image (see
+    ``docs/contributing/amd-profiler-worklog.md`` and the warm-target
+    experiment notes it references): that image's build never produced the
+    thread regardless of env, so the probe correctly reports unavailable
+    there, and would report available on an image built with default
+    attachment enabled.
+    """
+    attach_lib = _find_attach_lib()
+    if attach_lib is None:
+        return False, f"{_ATTACH_LIB_NAME} not found under $ROCM_PATH/lib or /opt/rocm/lib"
+    env = {**os.environ, "ROCP_TOOL_ATTACH": "1", "LD_PRELOAD": attach_lib}
+    try:
+        proc = subprocess.Popen(  # tracked: #288
+            [sys.executable, "-c", "import time; time.sleep(5)"],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        return False, f"could not launch attach probe process: {exc}"
+    try:
+        found = _poll_for_thread_name(proc.pid, _ATTACH_BG_THREAD_NAME, _ATTACH_PROBE_TIMEOUT_S)
+    finally:
+        _kill_probe(proc)
+    if found:
+        return True, f"{_ATTACH_BG_THREAD_NAME} thread observed (attach lib: {attach_lib})"
+    return False, (
+        f"{_ATTACH_BG_THREAD_NAME} thread never appeared: this librocprofiler-register build was "
+        "not compiled with ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON (verified root cause "
+        "on MI210/ROCm 7.2.3; see docs/contributing/amd-profiler-worklog.md)"
+    )
+
+
+def _poll_for_thread_name(pid: int, name: str, timeout_s: float) -> bool:
+    deadline = time.monotonic() + timeout_s
+    task_dir = Path(f"/proc/{pid}/task")
+    while time.monotonic() < deadline:
+        if task_dir.is_dir():
+            for entry in task_dir.iterdir():
+                with contextlib.suppress(OSError):
+                    if (entry / "comm").read_text().strip() == name:
+                        return True
+        time.sleep(_ATTACH_PROBE_POLL_S)
+    return False
+
+
+def _kill_probe(proc: subprocess.Popen) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        proc.terminate()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=2.0)
+    if proc.poll() is None:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=2.0)
+
+
+def _capability_attach_line() -> str:
+    available, detail = _probe_rocprofv3_attach()
+    if available:
+        return (
+            f"rocprofv3 attach: probe succeeded ({detail}) -- VibeSys does not implement "
+            "rocprofv3 --attach capture even where the underlying build supports it; every "
+            "profile_* capture tool still launches its own target. For repeated windows on an "
+            "already-running process, use the torch plugin's start_target + "
+            "profile_ops(target=<id>) instead."
+        )
+    return (
+        f"rocprofv3 attach: unavailable ({detail}) -- every profile_* capture tool must launch "
+        "its own target for the capture's lifetime; passing target= to one returns this message "
+        "instead of an rocprofv3 failure. For repeated windows on an already-running process, use "
+        "the torch plugin's start_target + profile_ops(target=<id>) instead."
+    )
+
+
+def target_arg_unavailable_message() -> str:
+    """The error text a rocprof capture tool returns when called with ``target=``.
+
+    rocprofv3 attach cannot be exercised end to end regardless of what the
+    capability probe reports (see ``_capability_attach_line``): every
+    rocprofv3 ``profile_*`` capture tool always launches its own target.
+    """
+    _available, detail = _probe_rocprofv3_attach()
+    return (
+        f"error: target= is not supported by this capture tool ({detail}). Every rocprofv3 "
+        "capture must launch its own target for the capture's lifetime (omit target=, pass "
+        "command= instead). For repeated windows on an already-running process, use the torch "
+        "plugin's start_target + profile_ops(target=<id>) instead."
+    )
 
 
 def import_torch_sibling(module_name: str) -> types.ModuleType | None:
@@ -500,6 +618,10 @@ def profiling_capabilities() -> str:
         _capability_rocprofv3_line(rocprofv3_bin, version),
         *_capability_gpu_agent_lines(agents),
         _capability_att_line(rocprofv3_bin, version),
+        _capability_attach_line()
+        if rocprofv3_bin
+        else "rocprofv3 attach: unavailable (rocprofv3 itself not found; see the rocprofv3 line "
+        "above).",
         _capability_compute_block(),
         _capability_torch_line(),
         _capability_ops_line(),
@@ -523,6 +645,7 @@ def profile_timeline(  # noqa: PLR0913  # tracked: #288
     kernel_include: str | None = None,
     collection_delay_s: float | None = None,
     collection_duration_s: float | None = None,
+    target: str | None = None,
     cancel_event: threading.Event | None = None,
 ) -> str:
     """Capture a whole-run rocprofv3 system trace: host/device timeline.
@@ -546,7 +669,14 @@ def profile_timeline(  # noqa: PLR0913  # tracked: #288
     already running. ``cancel_event``, when given, is forwarded to
     ``capture_runtime.run_capture`` so a caller can stop this capture from
     another thread (see ``resources/profilers/_common/mcp_async.py``).
+
+    ``target`` is not supported by this tool (rocprofv3 attach cannot be
+    exercised end to end regardless of host); passing it returns a clear
+    error naming the fix instead of an obscure rocprofv3 failure -- see
+    ``target_arg_unavailable_message``.
     """
+    if target is not None:
+        return target_arg_unavailable_message()
     if (collection_delay_s is None) != (collection_duration_s is None):
         raise ValueError(  # noqa: TRY003  # tracked: #288
             "collection_delay_s and collection_duration_s must both be given, or neither "
@@ -767,6 +897,7 @@ def profile_counters(
     *,
     sets: list[str],
     kernel: str | None = None,
+    target: str | None = None,
     cancel_event: threading.Event | None = None,
 ) -> str:
     """Capture PMC hardware counters for one or more named counter sets.
@@ -792,7 +923,13 @@ def profile_counters(
     already running. ``cancel_event``, when given, stops the in-flight pass
     and skips any not-yet-started passes rather than continuing to run the
     plan out (see ``resources/profilers/_common/mcp_async.py``).
+
+    ``target`` is not supported by this tool; see ``profile_timeline``'s
+    docstring for why (rocprofv3 attach unavailable, use the torch plugin's
+    warm-target profile_ops instead).
     """
+    if target is not None:
+        return target_arg_unavailable_message()
     if not sets:
         raise ValueError("sets must name at least one counter set (see profiling_capabilities)")  # noqa: TRY003  # tracked: #288
     arch = _detect_arch()
@@ -931,6 +1068,7 @@ def profile_kernel_deep(
     *,
     kernel: str,
     dispatch: int | None = None,
+    target: str | None = None,
     cancel_event: threading.Event | None = None,
 ) -> str:
     """Capture full Speed-of-Light + roofline for one targeted kernel (rocprof-compute).
@@ -952,7 +1090,12 @@ def profile_kernel_deep(
     already running. ``cancel_event``, when given, is forwarded to
     ``capture_runtime.run_capture`` so a caller can stop this capture from
     another thread (see ``resources/profilers/_common/mcp_async.py``).
+
+    ``target`` is not supported by this tool; see ``profile_timeline``'s
+    docstring for why.
     """
+    if target is not None:
+        return target_arg_unavailable_message()
     if not kernel:
         raise ValueError("kernel is required (a literal substring of the real kernel name)")  # noqa: TRY003  # tracked: #288
     rocprof_bin = compute.find_rocprof_compute_bin()
@@ -1038,12 +1181,13 @@ def _find_att_dispatch_dir(out_dir: Path) -> Path | None:
     return matches[0].parent if matches else None
 
 
-def profile_instructions(
+def profile_instructions(  # noqa: PLR0913  # tracked: #288
     lifecycle: capture_runtime.Lifecycle,
     *,
     kernel: str,
     target_cu: int = att.DEFAULT_TARGET_CU,
     buffer_bytes: int = att.DEFAULT_BUFFER_SIZE,
+    target: str | None = None,
     cancel_event: threading.Event | None = None,
 ) -> str:
     """Capture per-instruction stalls inside one kernel, one compute unit (ATT).
@@ -1061,7 +1205,12 @@ def profile_instructions(
     already running. ``cancel_event``, when given, is forwarded to
     ``capture_runtime.run_capture`` so a caller can stop this capture from
     another thread (see ``resources/profilers/_common/mcp_async.py``).
+
+    ``target`` is not supported by this tool; see ``profile_timeline``'s
+    docstring for why.
     """
+    if target is not None:
+        return target_arg_unavailable_message()
     if not kernel:
         raise ValueError("kernel is required (a --kernel-include-regex value)")  # noqa: TRY003  # tracked: #288
     decoder_dir = _find_att_decoder_dir()
@@ -1144,7 +1293,7 @@ def _format_instructions_result(result: capture_runtime.CaptureResult) -> str:
 
 def profile_ops(  # noqa: PLR0913  # tracked: #288
     *,
-    command: str,
+    command: str | None = None,
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     ready_command: str | None = None,
@@ -1156,19 +1305,35 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
     delay_s: float = 0.0,
     duration_s: float | None = None,
     record_shapes: bool = True,
+    inject: bool = True,
     setup_command: str | None = None,
+    target: str | None = None,
     cancel_event: threading.Event | None = None,
 ) -> str:
-    """Capture a torch.profiler trace of an offline script or microbenchmark.
+    """Capture a torch.profiler trace of an offline script, microbenchmark, or warm target.
 
     Thin delegation to the torch plugin's ``capture_ops.profile_ops``,
     staged alongside rocprof (see the rocprof ``ProfilerDefinition``'s
     ``extra_support_kinds``). Its lifecycle args and defaults match that
     module directly (grace/timeout are generous: the in-process torch trace
-    write can itself take a while). Returns a clear error, rather than
-    raising, if that module isn't importable. Next: ``certify``,
-    ``gemm_shapes``, ``roofline``, or ``summary`` (dispatches to the torch
-    analyzer).
+    write can itself take a while). Pass ``target`` (from ``start_target``)
+    instead of ``command`` to window an already-running warm target; see
+    that module's docstring. Returns a clear error, rather than raising, if
+    that module isn't importable. Next: ``certify``, ``gemm_shapes``,
+    ``roofline``, or ``summary`` (dispatches to the torch analyzer).
+
+    Set ``inject=False`` when ``command`` already opens its own
+    ``torch.profiler.profile()`` session internally (e.g. a serving engine's
+    native ``profiler_config`` + ``start_profile()``/``stop_profile()``
+    hooks): two independent profiler sessions in one process crash the
+    CUPTI/roctracer/kineto backend outright (a SIGSEGV, not a catchable
+    Python error -- this is what produced a real ``target_rc=139`` with an
+    empty trace on MI210). With ``inject=False`` this tool never arms its
+    own signal-based session (no ``VIBESYS_TORCH_PROFILE``, no PYTHONPATH
+    injection of ``sitecustomize.py``); it still sets
+    ``VIBESYS_TORCH_PROFILE_OUT_DIR`` so the command's own profiler can
+    write its trace where this tool's existing discovery/analysis pipeline
+    will find it.
     """
     ops_module = import_torch_sibling("capture_ops")
     if ops_module is None:
@@ -1194,11 +1359,69 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
             delay_s=delay_s,
             duration_s=duration_s,
             record_shapes=record_shapes,
+            inject=inject,
             setup_command=setup_command,
+            target=target,
             cancel_event=cancel_event,
         )
     except TypeError as exc:
         return f"error: torch capture_ops.profile_ops() signature mismatch: {exc}"
+
+
+# ---------------------------------------------------------------------------
+# start_target / stop_target / targets: warm-target lifecycle (shared with
+# the torch plugin -- see capture_ops.start_target). rocprof's own
+# rocprofv3-based captures cannot use a warm target (see
+# target_arg_unavailable_message above); this exists so an agent using only
+# the rocprof MCP server can still start/stop a target for the delegated
+# torch profile_ops(target=...) above, without needing a second MCP server.
+# ---------------------------------------------------------------------------
+
+
+def start_target(  # noqa: PLR0913  # tracked: #288
+    command: str,
+    *,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    setup_command: str | None = None,
+    ready_command: str | None = None,
+    ready_timeout_s: float = 60.0,
+    stop_signal: str = "SIGINT",
+    grace_s: float = 10.0,
+    timeout_s: float = 300.0,
+) -> str:
+    """Launch a reusable, warm target process for the torch plugin's profile_ops(target=...).
+
+    Delegates to the torch plugin's ``capture_ops.start_target`` (the same
+    function ``torch/server.py``'s own ``start_target`` tool calls -- one
+    shared implementation), which arms the process for repeated torch
+    signal-window captures. Returns a clear error, rather than raising, if
+    that module isn't importable.
+    """
+    ops_module = import_torch_sibling("capture_ops")
+    if ops_module is None:
+        return (
+            "error: the torch profiler plugin's capture_ops module is not staged alongside "
+            "rocprof (expected a 'torch' or 'torch_profiler' sibling directory with "
+            "capture_ops.py); start_target is unavailable."
+        )
+    start_target_fn = getattr(ops_module, "start_target", None)
+    if start_target_fn is None:
+        return "error: torch capture_ops module has no start_target() function."
+    try:
+        return start_target_fn(
+            command,
+            cwd=cwd,
+            env=env,
+            setup_command=setup_command,
+            ready_command=ready_command,
+            ready_timeout_s=ready_timeout_s,
+            stop_signal=stop_signal,
+            grace_s=grace_s,
+            timeout_s=timeout_s,
+        )
+    except RuntimeError as exc:
+        return f"error: {exc}"
 
 
 # ---------------------------------------------------------------------------
@@ -1234,6 +1457,20 @@ def captures(limit: int = 10) -> str:
         for entry in summaries
     )
     return "\n".join(lines)
+
+
+def stop_target(target: str) -> str:
+    """Stop a warm target started with start_target: stop_signal -> grace -> escalate."""
+    try:
+        capture_runtime.stop_target(target)
+    except KeyError as exc:
+        return f"error: {exc}"
+    return f"stopped target {target}"
+
+
+def targets() -> str:
+    """List targets currently running in this server process (from start_target)."""
+    return capture_runtime.format_targets(capture_runtime.list_targets())
 
 
 # ---------------------------------------------------------------------------
