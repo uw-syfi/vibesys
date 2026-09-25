@@ -44,10 +44,10 @@ from vibesys.evaluators.gates import (
 from vibesys.events import FrameworkSource
 from vibesys.orchestration.runtime import MeasurementOptions
 from vibesys.profilers import ProfilerKind, mcp_spec, profiler_definition
-from vibesys.roles.candidate_judge import CANDIDATE_JUDGE
 from vibesys.roles.common import Verdict
-from vibesys.roles.evolve_profiler import CANDIDATE_PROFILERS
-from vibesys.roles.mutator import CANDIDATE_MUTATOR
+from vibesys.roles.judge import CANDIDATE_JUDGE, CandidateJudgeContext
+from vibesys.roles.mutator import CANDIDATE_MUTATOR, MutatorContext
+from vibesys.roles.profiler import CANDIDATE_PROFILERS, CandidateProfilerContext
 from vibesys.search.population.models import CandidateOutcome, Individual
 
 if TYPE_CHECKING:
@@ -200,7 +200,6 @@ async def _run_mutator(  # noqa: PLR0913  # tracked: #288
     modality: str | None,
     domain_definition: DomainDefinition,
     is_cold_start: bool,
-    space: MetricSpace,
     failed_lessons: list[str] | None = None,
     num_failed_attempts: int = 0,
     repair_seed: bool = False,
@@ -215,29 +214,27 @@ async def _run_mutator(  # noqa: PLR0913  # tracked: #288
         DomainRole.IMPLEMENTER,
         **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes, scope=scope),
     )
-    context = {
-        "reference_path": ctx.environment.reference_path,
-        "modality": modality,
-        "objective": objective,
-        "parent": parent,
-        "inspirations": inspirations,
-        "is_cold_start": is_cold_start,
-        "space": space,
-        "interface": _INTERFACE,
-        "domain_implementer": domain_implementer,
-        "runtime_notes": prompt_runtime_notes,
-        "profile_execution": ctx.environment.view_for(scope).profile_execution,
-        "accuracy_command": ctx.environment.view_for(scope).paths.accuracy_command,
-        "benchmark_command": ctx.environment.view_for(scope).paths.benchmark_command,
-        "failed_lessons": failed_lessons or [],
-        "num_failed_attempts": num_failed_attempts,
-        "repair_seed": repair_seed,
+    context = MutatorContext(
+        reference_path=ctx.environment.reference_path,
+        modality=modality,
+        objective=objective,
+        parent=parent,
+        inspirations=inspirations,
+        is_cold_start=is_cold_start,
+        interface=_INTERFACE,
+        domain_implementer=domain_implementer,
+        runtime_notes=prompt_runtime_notes,
+        accuracy_command=ctx.environment.view_for(scope).paths.accuracy_command,
+        benchmark_command=ctx.environment.view_for(scope).paths.benchmark_command,
+        failed_lessons=failed_lessons or [],
+        num_failed_attempts=num_failed_attempts,
+        repair_seed=repair_seed,
         # `mutator_prompt.j2` gates an (currently unused) Pareto-frontier
         # section on `objectives`, which no caller ever populated; pass a
         # falsy value explicitly so strict-undefined rendering keeps
         # skipping that section exactly as it does today.
-        "objectives": None,
-    }
+        objectives=None,
+    )
     return cast(
         "MutatorResponse",
         await ctx.agents.turn(
@@ -271,17 +268,16 @@ async def _run_judge(  # noqa: PLR0913  # tracked: #288
         DomainRole.JUDGE,
         **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes, scope=scope),
     )
-    context = {
-        "accuracy_command": ctx.environment.view_for(scope).paths.accuracy_command,
-        "benchmark_command": ctx.environment.view_for(scope).paths.benchmark_command,
-        "pass_criteria": pass_criteria,
-        "modality": modality,
-        "interface": _INTERFACE,
-        "domain_judge": domain_judge,
-        "runtime_notes": prompt_runtime_notes,
-        "profile_execution": ctx.environment.view_for(scope).profile_execution,
-        "objective": objective,
-    }
+    context = CandidateJudgeContext(
+        accuracy_command=ctx.environment.view_for(scope).paths.accuracy_command,
+        benchmark_command=ctx.environment.view_for(scope).paths.benchmark_command,
+        pass_criteria=pass_criteria,
+        modality=modality,
+        interface=_INTERFACE,
+        domain_judge=domain_judge,
+        runtime_notes=prompt_runtime_notes,
+        objective=objective,
+    )
     return cast(
         "JudgeResponse",
         await ctx.agents.turn(
@@ -339,24 +335,24 @@ async def _run_profiler(  # noqa: PLR0913  # tracked: #288
         DomainRole.PROFILER,
         **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes, scope=scope),
     )
-    context = {
-        "benchmark_command": ctx.environment.view_for(scope).paths.benchmark_command,
-        "modality": modality,
-        "interface": _INTERFACE,
-        "domain_profiler": domain_profiler,
-        "runtime_notes": prompt_runtime_notes,
-        "profile_execution": ctx.environment.view_for(scope).profile_execution,
-        "objective": objective,
-        "profile_focus": "Measure the headline metric for this candidate; rank top kernel-level bottlenecks.",
-        "profiler_support_name": definition.support_name,
-        "profiler_mcp_name": definition.mcp_name,
-    }
     addendum = (
         _PARETO_PROFILER_ADDENDUM.format(
             objective_list=_format_objectives_for_profiler(space.objectives),
         )
         if space.objectives
         else ""
+    )
+    context = CandidateProfilerContext(
+        benchmark_command=ctx.environment.view_for(scope).paths.benchmark_command,
+        modality=modality,
+        domain_profiler=domain_profiler,
+        runtime_notes=prompt_runtime_notes,
+        profile_execution=ctx.environment.view_for(scope).profile_execution,
+        objective=objective,
+        profile_focus="Measure the headline metric for this candidate; rank top kernel-level bottlenecks.",
+        profiler_support_name=definition.support_name,
+        profiler_mcp_name=definition.mcp_name,
+        pareto_objectives_addendum=addendum,
     )
     spec = mcp_spec(kind)
     label = f"gen-{generation}-cand-{child_idx}-profiler"
@@ -369,7 +365,6 @@ async def _run_profiler(  # noqa: PLR0913  # tracked: #288
                 context=context,
                 label=label,
                 mcp_servers=[spec] if spec is not None else None,
-                prompt_suffix=addendum,
                 workspace=scope or ctx.workspaces.root,
             ),
         )
@@ -582,7 +577,6 @@ async def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
             modality=modality,
             domain_definition=domain_definition,
             is_cold_start=False,
-            space=space,
             runtime_notes=cand_notes,
             scope=scope,
         )
@@ -820,7 +814,6 @@ class _BootstrapAdapter:
                 modality=self.modality,
                 domain_definition=self.domain_definition,
                 is_cold_start=True,
-                space=self.space,
                 failed_lessons=failed_lessons,
                 num_failed_attempts=num_failed_attempts,
                 repair_seed=wip_seed is not None,

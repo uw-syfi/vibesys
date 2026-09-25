@@ -176,6 +176,7 @@ def _render_prompt(case: _Case, role: str) -> str:
             profile_focus="Measure the headline metric and identify the dominant bottleneck.",
             profiler_support_name=definition.support_name,
             profiler_mcp_name=definition.mcp_name,
+            pareto_objectives_addendum="",
         )
     raise AssertionError(f"unknown prompt role: {role}")  # noqa: TRY003  # tracked: #288
 

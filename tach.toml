@@ -204,7 +204,7 @@ depends_on = ["vibesys.agent_run"]
 # execution, sequencing, or state transitions -- those stay in
 # vibesys.orchestration.runtime (ctx.agents.turn) and loops/.
 path = "vibesys.roles"
-depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state", "vs_issue_board"]
+depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state", "vs_issue_board", "vibesys.search.population"]
 
 [[modules]]
 path = "vibesys.loops"

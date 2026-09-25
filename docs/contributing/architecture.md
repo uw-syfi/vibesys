@@ -248,6 +248,7 @@ graph TD
     vibesys.roles --> vibesys
     vibesys.roles --> vibesys.evaluators
     vibesys.roles --> vibesys.runtime
+    vibesys.roles --> vibesys.search.population
     vibesys.run --> vibesys
     vibesys.run --> vibesys.backends
     vibesys.run --> vibesys.evaluators
@@ -579,6 +580,7 @@ graph TD
     vibesys.roles --> vibesys
     vibesys.roles --> vibesys.evaluators
     vibesys.roles --> vibesys.runtime
+    vibesys.roles --> vibesys.search.population
     vibesys.roles --> vs_agent
     vibesys.roles --> vs_issue_board
     vibesys.roles --> vs_loop_state

@@ -7,9 +7,39 @@ backend/model config lookup as every other strategy's implementer), so
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.evaluators.metrics import Objective
 from vibesys.runtime import Reuse, Role, Writes
+from vibesys.search.population.models import Individual
+
+
+class MutatorContext(BaseModel):
+    """Context for evolve's mutator role (``mutator_prompt.j2``).
+
+    ``objectives`` gates an unused Pareto-frontier section: no caller
+    populates it today (the mutator always mutates one lineage at a time),
+    so it stays ``None`` in practice, but the template already reads it and
+    the field belongs here regardless.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    accuracy_command: str | None
+    benchmark_command: str | None
+    domain_implementer: str
+    failed_lessons: list[str]
+    inspirations: list[Individual]
+    interface: str
+    is_cold_start: bool
+    modality: str | None
+    num_failed_attempts: int
+    objective: str
+    objectives: list[Objective] | None
+    parent: Individual | None
+    reference_path: str
+    repair_seed: bool
+    runtime_notes: str
 
 
 class MutatorResponse(BaseModel):
@@ -44,6 +74,7 @@ CANDIDATE_MUTATOR = Role(
     template="loops/evolve/mutator_prompt.j2",
     reply=MutatorResponse,
     fallback=_fallback_mutator,
+    context=MutatorContext,
     access=Writes(),
     session=Reuse(),
     message=(

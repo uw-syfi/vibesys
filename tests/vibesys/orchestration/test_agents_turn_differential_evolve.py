@@ -3,8 +3,8 @@ every ``evolve`` role (mutator, judge, and the resolved profiler kind).
 
 ``vibesys.loops.evolve.loop`` no longer renders prompts itself (phase 4c):
 every candidate turn goes through ``ctx.agents.turn(role, ...)`` with the
-roles declared in ``roles/mutator.py``, ``roles/candidate_judge.py``, and
-``roles/evolve_profiler.py``. So the render call this test observes and
+roles declared in ``roles/mutator.py`` and evolve's candidate roles in
+``roles/judge.py``/``roles/profiler.py``. So the render call this test observes and
 replays is the one ``vibesys.orchestration.agents`` issues, not one
 ``loop.py`` makes directly.
 
@@ -39,10 +39,10 @@ from tests.vibesys.orchestration.harness import run_with_context
 from vibesys.loops.evolve.orchestration import descriptor_from_options
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts.renderer import render_template as _real_render_template
-from vibesys.roles.candidate_judge import CANDIDATE_JUDGE
 from vibesys.roles.common import Verdict
-from vibesys.roles.evolve_profiler import CANDIDATE_PROFILERS
+from vibesys.roles.judge import CANDIDATE_JUDGE
 from vibesys.roles.mutator import CANDIDATE_MUTATOR
+from vibesys.roles.profiler import CANDIDATE_PROFILERS
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:

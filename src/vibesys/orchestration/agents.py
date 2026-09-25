@@ -449,7 +449,7 @@ class _Agents:
         finally:
             _active_progress.reset(token)
 
-    async def turn(  # noqa: C901, PLR0913
+    async def turn(  # noqa: PLR0913
         self,
         role: Role,
         *,
@@ -463,7 +463,6 @@ class _Agents:
         before_paid: Callable[[], Awaitable[None]] | None = None,
         backend: ComputeBackend | None = None,
         workspace: _WorkspaceHandleLike | None = None,
-        prompt_suffix: str = "",
     ) -> BaseModel:
         """Run one role turn: render, isolate, retry, time out, all in one place.
 
@@ -505,10 +504,7 @@ class _Agents:
         ``workspace`` targets a turn's snapshot/isolation at an isolated
         workspace (e.g. evolve's per-candidate forked worktree) instead of
         the run's root tree; it defaults to ``ctx.workspaces.root``, which
-        every strategy but evolve uses exclusively. ``prompt_suffix`` appends
-        literal text after the rendered ``role.template`` (e.g. evolve's
-        Pareto-frontier objectives addendum, computed from run state rather
-        than expressible as a template kwarg).
+        every strategy but evolve uses exclusively.
         """
         host = self._host
         workspace = workspace if workspace is not None else host.workspaces.root
@@ -519,8 +515,6 @@ class _Agents:
             if backend is not None
             else render_template(template_name, template_dir=template_dir, **context_kwargs)
         )
-        if prompt_suffix:
-            prompt += prompt_suffix
         user_message = role.message if message is None else message
         reuse_session = None if isinstance(role.session, Reuse) else isinstance(role.session, Keyed)
         resolved_session_key = (

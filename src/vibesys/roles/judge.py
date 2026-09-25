@@ -1,8 +1,15 @@
-"""Judge role family: hypothesis judge (multi) and issue judge (issue_queue).
+"""Judge role family: hypothesis, issue, and candidate judge roles.
+
+Covers ``multi``'s hypothesis judge, ``issue_queue``'s issue judge, and
+``evolve``'s candidate judge.
 
 ``issue_id`` is a per-call correlation field on the issue judge's reply, so
 its ``fallback`` uses a placeholder (``issue_id=0``); a caller restores the
 real ID with ``reply.model_copy(update={"issue_id": issue.id})``.
+
+``CANDIDATE_JUDGE`` (evolve's offspring judge) reuses ``JudgeResponse`` but
+renders its own template with its own context model, so it stays a distinct
+``Role`` in this module rather than a variant of ``MULTI_JUDGE``.
 """
 
 from __future__ import annotations
@@ -58,6 +65,21 @@ class IssueJudgeContext(BaseModel):
     accuracy_command: str | None
     benchmark_command: str | None
     issue: Issue
+
+
+class CandidateJudgeContext(BaseModel):
+    """Context for evolve's candidate-judge role (``judge_prompt.j2``)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    accuracy_command: str | None
+    benchmark_command: str | None
+    domain_judge: str
+    interface: str
+    modality: str | None
+    objective: str | None
+    pass_criteria: str
+    runtime_notes: str
 
 
 class JudgeResponse(BaseModel):
@@ -121,6 +143,14 @@ def _fallback_issue_judge() -> IssueJudgeResponse:
     )
 
 
+def _fallback_candidate_judge() -> JudgeResponse:
+    return JudgeResponse(
+        analysis="Judge produced no structured response.",
+        feedback="No structured response received.",
+        verdict=Verdict.FAIL,
+    )
+
+
 MULTI_JUDGE = Role(
     id="judge",
     template="loops/multi/judge_prompt.j2",
@@ -143,4 +173,15 @@ ISSUE_JUDGE = Role(
     session=Reuse(),
 )
 
-ALL_ROLES = (MULTI_JUDGE, ISSUE_JUDGE)
+CANDIDATE_JUDGE = Role(
+    id="judge",
+    template="loops/evolve/judge_prompt.j2",
+    reply=JudgeResponse,
+    fallback=_fallback_candidate_judge,
+    context=CandidateJudgeContext,
+    access=ReadOnly(),
+    session=Reuse(),
+    message="Review the offspring per the criteria above. Return only the JSON verdict.",
+)
+
+ALL_ROLES = (MULTI_JUDGE, ISSUE_JUDGE, CANDIDATE_JUDGE)

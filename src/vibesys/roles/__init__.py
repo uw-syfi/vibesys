@@ -16,14 +16,13 @@ Families:
   - ``designer``:        round-planning roles (multi, single, profile_single)
   - ``pre_round``:       pre-round profiling decision (multi)
   - ``implementer``:     hypothesis/issue implementer roles (multi, issue_queue)
-  - ``judge``:           hypothesis/issue judge roles (multi, issue_queue)
-  - ``profiler``:        per-profiler-kind roles (multi)
+  - ``judge``:           hypothesis/issue/candidate judge roles (multi,
+                         issue_queue, evolve)
+  - ``profiler``:        per-profiler-kind roles (multi, evolve)
   - ``single_agent``:    combined implement+judge+profile roles (single,
                          profile_single)
   - ``perf_eval``:       performance-evaluator role (issue_queue)
   - ``mutator``:         evolve's mutation-operator role (candidate implementer)
-  - ``candidate_judge``: evolve's offspring judge role
-  - ``evolve_profiler``: evolve's per-profiler-kind candidate profiler roles
   - ``common``:          reply-schema pieces shared by more than one family
                          (``Verdict``, ``SkillResourceSelection``)
 
@@ -39,10 +38,8 @@ used by at least one registered strategy.
 from __future__ import annotations
 
 from vibesys.roles import (
-    candidate_judge,
     common,
     designer,
-    evolve_profiler,
     implementer,
     judge,
     mutator,
@@ -61,16 +58,12 @@ ALL_ROLES = (
     *single_agent.ALL_ROLES,
     *perf_eval.ALL_ROLES,
     *mutator.ALL_ROLES,
-    *candidate_judge.ALL_ROLES,
-    *evolve_profiler.ALL_ROLES,
 )
 
 __all__ = [
     "ALL_ROLES",
-    "candidate_judge",
     "common",
     "designer",
-    "evolve_profiler",
     "implementer",
     "judge",
     "mutator",
