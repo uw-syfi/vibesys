@@ -7,19 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.attempts import (
-    AttemptDecision,
-    AttemptState,
-    JudgeReviewed,
-    PerformanceProjection,
-)
-from vibesys.agent_run.errors import StrategySessionError
-from vibesys.agent_run.evidence import (
-    _format_metric_row,
-    _pareto_archive_summary,
-    _record_candidate_metrics,
-)
-from vibesys.agent_run.record import RecordInput, build_round_record
+from vibesys.errors import StrategySessionError
 from vibesys.loops.profile_single.attribution import run_attribution
 from vibesys.loops.profile_single.turns import ProfileSingleTurns
 from vibesys.orchestration import progress_log
@@ -27,27 +15,37 @@ from vibesys.orchestration.runtime import WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.profiler import ProfilerSummary
 from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis.attempts import (
+    AttemptDecision,
+    AttemptState,
+    JudgeReviewed,
+    PerformanceProjection,
+)
+from vibesys.search.hypothesis.record import RecordInput, build_round_record
 from vibesys.search.hypothesis.results import Continue, Finished, NewHypothesis
 from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.hypothesis.transitions import (
     FAILED_HYPOTHESIS_OUTCOMES,
     CarryOver,
+    _format_metric_row,
     adopt_metric_space,
+    pareto_archive_summary,
     provisional_candidates_since_official,
+    record_candidate_metrics,
     terminal_workspace_notice,
     update_active_hypothesis,
 )
-from vibesys.search.profile_focus import FocusView, ProfileFocus, ProfileFocusConfig
+from vibesys.search.profile_focus import ProfileFocus, ProfileFocusConfig
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from vibesys.agent_run.options import AgentOrchestrationOptions
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
+    from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.orchestration.runtime import RunContext
-    from vibesys.schemas import OrchestratorPlan
+    from vibesys.search.hypothesis.plan import OrchestratorPlan
     from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
     from vibesys.search.profile_focus.state import ProfileFocusState
 
@@ -243,7 +241,7 @@ class ProfileSingleSession:
         number = self.round_number
         self.ctx.switch_log(f"round{number:03d}")
         issue_board.write_pareto_archive(
-            self.turns.progress_path, _pareto_archive_summary(self.records, self.state.metrics)
+            self.turns.progress_path, pareto_archive_summary(self.records, self.state.metrics)
         )
         progress = RoundProgress(number, self.options.max_rounds)
         self.ctx.log(f"\n{'=' * 60}\n  {progress.label()}\n{'=' * 60}\n")
@@ -280,15 +278,7 @@ class ProfileSingleSession:
                 label=f"profile-guided: prepare round {number}",
                 publish=self.state,
             )
-            focused = self.profile_focus.focus(focus_state)
-            # ``ranked_bottlenecks`` renders this round's freshly observed
-            # attribution only (not the reconstructed all-time ranking),
-            # matching the ported controller's prompt byte-for-byte.
-            guidance = FocusView(
-                active_component=focused.active_component,
-                ledger_text=focused.ledger_text,
-                ranked_bottlenecks=attribution,
-            )
+            guidance = self.profile_focus.focus(focus_state)
             summary = self._previous_profile()
             plan = await self.turns.plan(
                 PlanRequest(
@@ -450,7 +440,7 @@ class ProfileSingleSession:
         attempt = selected.attempt
         response = await self.turns.combined(selected.request, attempt)
         attempt.single_agent_response = response
-        attempt.judge = JudgeReviewed(response.verdict)
+        attempt.judge = JudgeReviewed(response.verdict.value)
         if response.verdict is Verdict.FAIL:
             attempt.feedback = response.feedback
             selected.request.active_hypothesis.feedback = response.feedback
@@ -610,7 +600,7 @@ class ProfileSingleSession:
         """Restore the best trusted candidate or the trusted input baseline."""
         self.ctx.log(f"Reached max_rounds={self.options.max_rounds}. Stopping.")
         issue_board.write_pareto_archive(
-            self.turns.progress_path, _pareto_archive_summary(self.records, self.state.metrics)
+            self.turns.progress_path, pareto_archive_summary(self.records, self.state.metrics)
         )
         if self.state.metrics.objectives:
             frontier = self.search.frontier(self.records, space=self.state.metrics)
@@ -618,7 +608,7 @@ class ProfileSingleSession:
             for record in frontier:
                 self.ctx.log(
                     f"  round {record.round_number}: "
-                    f"{_format_metric_row(_record_candidate_metrics(record), self.state.metrics.objectives)} "
+                    f"{_format_metric_row(record_candidate_metrics(record), self.state.metrics.objectives)} "
                     f"(commit {(record.commit or 'n/a')[:12]})"
                 )
         winner = self.search.best(self.records, space=self.state.metrics)
@@ -636,7 +626,7 @@ class ProfileSingleSession:
         await self.workspace.restore(winner.commit, clean=True)
         await self.workspace.snapshot(f"profile_single: select round {winner.round_number}")
         metrics = (
-            _format_metric_row(_record_candidate_metrics(winner), self.state.metrics.objectives)
+            _format_metric_row(record_candidate_metrics(winner), self.state.metrics.objectives)
             if self.state.metrics.objectives
             else f"{winner.perf_metric:.6g} {winner.perf_unit or ''}"
         )

@@ -5,8 +5,8 @@ import math
 import pytest
 from pydantic import ValidationError
 
-from vibesys.agent_run.state import AgentRunState, Hypothesis
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
 
 
 def _plan() -> OrchestratorPlan:
@@ -28,8 +28,8 @@ def test_agent_run_state_round_trips_through_its_external_schema() -> None:
         gate_approved_metrics={"throughput": 42.0},
     )
 
-    state = AgentRunState(active_hypothesis_id="h1", hypotheses=[hypothesis])
-    loaded = AgentRunState.model_validate_json(state.model_dump_json(), strict=True)
+    state = HypothesisState(active_hypothesis_id="h1", hypotheses=[hypothesis])
+    loaded = HypothesisState.model_validate_json(state.model_dump_json(), strict=True)
 
     assert loaded == state
     assert loaded.schema_version == 1

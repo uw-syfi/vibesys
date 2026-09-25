@@ -20,9 +20,10 @@ from pathlib import Path
 from typing import Never, cast
 
 from entrypoints.launcher import bundled_tui
-from vibesys.agent_run.state import AgentRunStateStore
 from vibesys.evaluators import EvaluatorPackageRequirement, resolve_evaluator_package
 from vibesys.input_project import materialize_input_project
+from vibesys.loops.multi.orchestration import MultiProjector
+from vibesys.orchestration.view import RunStatus
 from vibesys.profilers import ACTIVE_PROFILER_KINDS
 from vibesys.resource_paths import (
     default_skill_roots,
@@ -442,7 +443,8 @@ def _verify_project_state(project_root: Path) -> None:
     if (project_root / "agent.toml").exists():
         _fail("Configless headless smoke unexpectedly created agent.toml")
     try:
-        store = Project.open(project_root).state
+        project = Project.open(project_root)
+        store = project.state
         store.load_project()
         runs = store.list_runs()
     except ProjectError as exc:
@@ -450,9 +452,10 @@ def _verify_project_state(project_root: Path) -> None:
     if len(runs) != 1 or not runs[0].run_id.endswith("-installed-release-smoke"):
         _fail(f"Project smoke did not create exactly one run: {runs}")
     run = runs[0]
-    agent_state = AgentRunStateStore(store.portable_namespace(run.run_id, "multi")).load()
-    completed_rounds = agent_state.rounds
-    if len(completed_rounds) != 1 or completed_rounds[0].round_number != 1:
+    view = MultiProjector().view(
+        project, run.run_id, status=RunStatus.UNKNOWN, loop="multi-agent"
+    )
+    if len(view.rounds) != 1 or view.rounds[0].number != 1:
         _fail("Project smoke did not persist exactly one completed round")
     if store.current_run_id() != run.run_id:
         _fail("Project smoke did not persist its local current-run pointer")

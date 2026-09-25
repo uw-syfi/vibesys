@@ -1,11 +1,10 @@
 """Pure state transitions for the hypothesis search.
 
-Ported from ``vibesys.agent_run.hypotheses`` and ``vibesys.agent_run.evidence``
-(copied, not imported: those modules are deleted once the strategies are
-rewired onto this package). Semantics are unchanged; only names and module
-boundaries were cleaned up. Every function here is a pure function of its
-arguments: no ``RunContext``, no agents, no prompts, no filesystem, no clock,
-no global RNG.
+Ported from the former ``vibesys.agent_run.hypotheses`` and
+``vibesys.agent_run.evidence`` modules (agent_run has since dissolved).
+Semantics are unchanged; only names and module boundaries were cleaned up.
+Every function here is a pure function of its arguments: no ``RunContext``,
+no agents, no prompts, no filesystem, no clock, no global RNG.
 """
 
 from __future__ import annotations
@@ -13,16 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
-# Re-exported, not copied: ``vibesys.loops.multi.turns`` still type-hints its
-# ``CarryOver`` parameter from ``agent_run.evidence``. Re-exporting keeps both
-# call sites the same class rather than nominally distinct twins.
-from vibesys.agent_run.evidence import CarryOver  # noqa: F401
 from vibesys.evaluators.metrics import Measurement, MetricComparison, MetricSpace
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
-    HypothesisStrategyUpdate,
-    OrchestratorPlan,
     PerfDeltaReason,
 )
 from vibesys.search.hypothesis.state import (
@@ -37,6 +30,7 @@ from vibesys.search.hypothesis.state import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vibesys.search.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
     from vs_loop_state.api import PerfProvenance, RoundRecord
 
 # ``hypothesis_outcome`` values that mark a hypothesis campaign as failed, for
@@ -652,7 +646,15 @@ def _retained(
     return retained
 
 
-# --- Evidence: retention, frontier, and carry-over text (from agent_run.evidence) ---
+# --- Evidence: retention, frontier, and carry-over text ---
+
+
+@dataclass
+class CarryOver:
+    """Record-derived guidance passed to the next planning turn."""
+
+    regression_info: str | None = None
+    exhaustion_info: str | None = None
 
 
 def record_candidate_metrics(record: RoundRecord) -> dict[str, float]:
@@ -737,6 +739,112 @@ def _format_metric_row(metrics: dict[str, float], objectives: Sequence) -> str:
         for objective in objectives
         if objective.name in metrics
     )
+
+
+def pareto_archive_summary(records: Sequence[RoundRecord], space: MetricSpace) -> str:
+    """Render trusted frontier parents and any measured points awaiting review."""
+    objectives = space.objectives
+    latest = max(records, key=lambda record: record.round_number, default=None)
+    latest_metrics = (
+        _format_metric_row(latest.metrics, objectives)
+        if latest is not None
+        and latest.official_evaluation
+        and trusted_perf_provenance(latest.perf_provenance)
+        and objectives
+        and space.complete(latest.metrics)
+        else (
+            f"{latest.perf_metric:.6g} {latest.perf_unit or ''}".strip()
+            if latest is not None
+            and latest.official_evaluation
+            and trusted_perf_provenance(latest.perf_provenance)
+            and latest.perf_metric is not None
+            else "(none)"
+        )
+    )
+    latest_line = (
+        "Latest completed round: none."
+        if latest is None
+        else (
+            f"Latest completed round: round {latest.round_number}, "
+            f"commit {(latest.commit or '(missing)')[:12]}, "
+            f"official metrics: {latest_metrics}; "
+            f"retained: {record_candidate_retained(latest)}."
+        )
+    )
+    if not objectives:
+        return (
+            "No objective axes are configured. Use objectives.toml to enable "
+            "multi-objective checkpoint retention; official scalar tracking remains active.\n"
+            f"{latest_line}"
+        )
+
+    lines = [
+        "Configured axes: "
+        + ", ".join(f"{objective.name}:{objective.direction}" for objective in objectives),
+        (
+            "Dominance is variance-aware: a point removes another only when it is no worse "
+            f"within {space.relative_noise:.0%} on every axis and better by more than "
+            f"{space.relative_noise:.0%} on at least one."
+        ),
+        latest_line,
+    ]
+    frontier = pareto_frontier_records(records, space)
+    if frontier:
+        lines.append("Trusted frontier parents:")
+        for record in frontier:
+            assert record.commit is not None  # noqa: S101  # tracked: #288
+            evidence = "official" if record.official_evaluation else "reviewed provisional"
+            operating_point = record.candidate_operating_point or "canonical workload row"
+            artifact = record.candidate_evaluation_artifact or record.evaluation_artifact
+            lines.append(
+                f"- round {record.round_number}, commit {record.commit[:12]}, {evidence}: "
+                f"{_format_metric_row(record_candidate_metrics(record), objectives)}; "
+                f"operating point: {operating_point}; artifact: {artifact or '(missing)'}"
+            )
+    else:
+        lines.append("Trusted frontier parents: none recorded yet.")
+
+    trusted_rounds = {record.round_number for record in trusted_candidate_records(records, space)}
+    pending = [
+        record
+        for record in records
+        if record.round_number not in trusted_rounds
+        and record.commit
+        and record_candidate_retained(record) is True
+        and all(objective.name in record.candidate_metrics for objective in objectives)
+    ]
+    if pending:
+        pending.sort(key=lambda record: record.round_number)
+        lines.append(
+            "Measured frontier claims not yet usable as trusted parents (retain the commit, "
+            "but do not treat it as a parent). A row lands here because its hard invariants "
+            "have not passed independent review, or because its numbers are the "
+            "implementer's own report rather than a framework measurement:"
+        )
+        omitted = pending[:-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT]
+        if omitted:
+            # This line is read by a model, so it agrees with itself: one
+            # omitted claim says "1 older untrusted claim", and a single
+            # omitted round says "round 4" rather than the degenerate
+            # "rounds 4-4".
+            claims = "claim" if len(omitted) == 1 else "claims"
+            first = omitted[0].round_number
+            last = omitted[-1].round_number
+            rounds = f"round {first}" if first == last else f"rounds {first}-{last}"
+            lines.append(
+                f"- {len(omitted)} older untrusted {claims} omitted from this context "
+                f"({rounds}); do not treat any omitted claim as a trusted parent."
+            )
+        for record in pending[-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT:]:
+            assert record.commit is not None  # noqa: S101  # tracked: #288
+            lines.append(
+                f"- round {record.round_number}, commit {record.commit[:12]}: "
+                f"{_format_metric_row(record.candidate_metrics, objectives)}; "
+                f"operating point: {record.candidate_operating_point or '(unspecified)'}; "
+                f"artifact: {record.candidate_evaluation_artifact or '(missing)'}; "
+                f"reason: {record.candidate_retention_reason or '(unspecified)'}"
+            )
+    return "\n".join(lines)
 
 
 def pareto_archive_conflict(

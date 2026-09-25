@@ -7,12 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vibesys import boot_trace
-from vibesys.agent_run.options import (
-    AgentOrchestrationOptions,
-    compare_resume_descriptors,
-    descriptor_from_options,
-)
-from vibesys.agent_run.state import AgentRunState
 from vibesys.api import open_run_store
 from vibesys.api.agent import is_agent_run_manifest
 from vibesys.config import Config
@@ -38,6 +32,11 @@ from vibesys.evaluators.input_manifest import (
     load_project_task,
 )
 from vibesys.events import CoreEventType
+from vibesys.loops.agent_options import (
+    AgentOrchestrationOptions,
+    compare_resume_descriptors,
+    descriptor_from_options,
+)
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.run import (
@@ -47,6 +46,7 @@ from vibesys.run import (
     RunStateNamespace,
 )
 from vibesys.sandbox.run_environment import RunEnvironmentSpec
+from vibesys.search.hypothesis.state import HypothesisState
 from vs_loop_state.api import PlainLoopCursor
 from vs_project.api import OrchestrationRunManifest, Project
 from vs_sandbox.api import HostResourceAccess, SandboxLifecycle
@@ -208,7 +208,7 @@ def _create_context(  # noqa: PLR0913
     )
     setup = RunSetup(
         state_namespace="multi",
-        state_slots={"state.json": AgentRunState},
+        state_slots={"state.json": HypothesisState},
         resume_policy=compare_resume_descriptors,
     )
     with patch(

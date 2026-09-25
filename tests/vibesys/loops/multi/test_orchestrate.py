@@ -8,23 +8,12 @@ from typing import Literal
 import pytest
 
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.evidence import (
-    _detect_plateau,
-    _pareto_archive_conflict,
-    _pareto_archive_dominators,
-    _pareto_archive_summary,
-    _pareto_frontier_records,
-    _provisional_candidates_since_official,
-    _select_final_candidate,
-    _terminal_workspace_notice,
-    _trusted_candidate_records,
-)
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.evaluators.validation_recipe import (
     ValidationRecipe,
     ValidationRecipeArtifact,
 )
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.orchestration import progress_log
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.roles.common import Verdict
@@ -35,10 +24,20 @@ from vibesys.roles.profiler import ProfilerSummary
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
-    OrchestratorPlan,
 )
-from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
 from vibesys.search.hypothesis import cadence as _cadence
+from vibesys.search.hypothesis.transitions import (
+    detect_plateau,
+    pareto_archive_conflict,
+    pareto_archive_dominators,
+    pareto_archive_summary,
+    pareto_frontier_records,
+    provisional_candidates_since_official,
+    select_final_candidate,
+    terminal_workspace_notice,
+    trusted_candidate_records,
+)
 from vs_loop_state.api import RoundRecord
 
 _THROUGHPUT_LATENCY = MetricSpace(
@@ -186,7 +185,7 @@ def test_official_evaluation_cadence_counts_candidate_checkpoints_not_rounds(): 
         RoundRecord(4, "d", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
     ]
 
-    assert _provisional_candidates_since_official(records) == 2
+    assert provisional_candidates_since_official(records) == 2
     assert (
         _official_evaluation_reason(
             records=records,
@@ -290,7 +289,7 @@ def test_official_evaluation_cadence_counts_reviewed_frontier_tradeoff():  # noq
         )
     ]
 
-    assert _provisional_candidates_since_official(records) == 1
+    assert provisional_candidates_since_official(records) == 1
 
 
 def test_typed_unknown_retention_is_not_trusted_as_pareto_state():  # noqa: ANN201  # tracked: #288
@@ -310,7 +309,7 @@ def test_typed_unknown_retention_is_not_trusted_as_pareto_state():  # noqa: ANN2
         candidate_retained=None,
     )
 
-    assert _pareto_frontier_records([record], _THROUGHPUT_LATENCY) == []
+    assert pareto_frontier_records([record], _THROUGHPUT_LATENCY) == []
 
 
 def test_noise_aware_dominance_preserves_sub_noise_alternatives():  # noqa: ANN201  # tracked: #288
@@ -346,7 +345,7 @@ def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_p
     throughput_parent = candidate(2, 140.0, 100.0)
     dominated = candidate(3, 90.0, 110.0)
 
-    frontier = _pareto_frontier_records(
+    frontier = pareto_frontier_records(
         [latency_parent, throughput_parent, dominated],
         _THROUGHPUT_LATENCY,
     )
@@ -366,7 +365,7 @@ def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate():  #
         candidate_metrics={"throughput": 8795.8, "latency": 7724.0},
     )
 
-    conflict = _pareto_archive_conflict(
+    conflict = pareto_archive_conflict(
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER,
         candidate_metrics={"throughput": 7258.5, "latency": 9601.6},
         records=[trusted],
@@ -391,7 +390,7 @@ def test_live_archive_preserves_real_throughput_latency_tradeoff():  # noqa: ANN
     )
 
     assert (
-        _pareto_archive_conflict(
+        pareto_archive_conflict(
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER,
             candidate_metrics={"throughput": 140.0, "latency": 100.0},
             records=[trusted],
@@ -428,7 +427,7 @@ def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa:
         candidate_retention_reason="higher-throughput tradeoff",
     )
 
-    summary = _pareto_archive_summary([trusted, pending], _THROUGHPUT_LATENCY)
+    summary = pareto_archive_summary([trusted, pending], _THROUGHPUT_LATENCY)
 
     assert "Trusted frontier parents" in summary
     assert "round 49" in summary
@@ -463,8 +462,8 @@ def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice():
         for round_number in range(1, 11)
     ]
 
-    summary = _pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
-    assert summary == _pareto_archive_summary(list(reversed(pending_records)), _THROUGHPUT_LATENCY)
+    summary = pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
+    assert summary == pareto_archive_summary(list(reversed(pending_records)), _THROUGHPUT_LATENCY)
 
     for record in pending_records[-8:]:
         assert record.commit is not None
@@ -503,7 +502,7 @@ def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count():  # 
         for round_number in range(1, 10)
     ]
 
-    summary = _pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
+    summary = pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
     assert "1 older untrusted claim omitted from this context (round 1)" in summary
     assert "claims omitted" not in summary
     assert "rounds 1-1" not in summary
@@ -528,7 +527,7 @@ def test_pareto_archive_summary_lists_all_pending_claims_within_the_limit():  # 
         for round_number in range(1, 9)
     ]
 
-    summary = _pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
+    summary = pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
 
     for record in pending_records:
         assert record.commit is not None
@@ -572,7 +571,7 @@ def test_implementer_report_cannot_seed_archive_or_dominate_candidates():  # noq
 
     A reviewed, accuracy-passing implementer self-report that persisted
     ``candidate_retained=True`` must not be selected by
-    ``_trusted_candidate_records`` and must not count as a dominator in a later
+    ``trusted_candidate_records`` and must not count as a dominator in a later
     Pareto decision. A framework-provenance row of the same shape still does.
     """
     space = MetricSpace(objectives=(Objective(name="accuracy", direction="max"),))
@@ -580,13 +579,13 @@ def test_implementer_report_cannot_seed_archive_or_dominate_candidates():  # noq
     framework = _accuracy_row(2, 0.95, provenance="framework")
 
     # Trusted Pareto-parent selection is gated on framework provenance.
-    assert _trusted_candidate_records([implementer], space) == []
-    assert _trusted_candidate_records([framework], space) == [framework]
+    assert trusted_candidate_records([implementer], space) == []
+    assert trusted_candidate_records([framework], space) == [framework]
     # A weaker later candidate is only dominated by the trusted framework row,
     # never by the untrusted implementer self-report.
     weaker = {"accuracy": 0.80}
-    assert _pareto_archive_dominators(weaker, [implementer], space) == []
-    assert _pareto_archive_dominators(weaker, [framework], space) == [framework]
+    assert pareto_archive_dominators(weaker, [implementer], space) == []
+    assert pareto_archive_dominators(weaker, [framework], space) == [framework]
 
 
 def _official_record(  # noqa: PLR0913  # test record builder
@@ -625,7 +624,7 @@ def test_final_candidate_is_noise_aware_and_rejects_untrusted_records():  # noqa
     failed = _official_record(5, "e" * 40, 700.0, passed=False)
 
     assert (
-        _select_final_candidate([older, newer_within_noise, self_reported, rejected, failed], space)
+        select_final_candidate([older, newer_within_noise, self_reported, rejected, failed], space)
         is newer_within_noise
     )
 
@@ -649,7 +648,7 @@ def test_final_pareto_candidate_requires_canonical_official_metrics():  # noqa: 
         candidate_retained=True,
     )
 
-    assert _select_final_candidate([official, provisional], _THROUGHPUT_LATENCY) is official
+    assert select_final_candidate([official, provisional], _THROUGHPUT_LATENCY) is official
 
 
 def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: ANN201  # tracked: #288
@@ -668,7 +667,7 @@ def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: A
         RoundRecord(2, "b", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
     ]
 
-    assert _provisional_candidates_since_official(records) == 1
+    assert provisional_candidates_since_official(records) == 1
     assert (
         _official_evaluation_reason(
             records=records,
@@ -708,7 +707,7 @@ def test_terminal_workspace_notice_points_designer_to_hypothesis_parent():  # no
         ),
     ]
 
-    notice = _terminal_workspace_notice(records)
+    notice = terminal_workspace_notice(records)
 
     assert notice is not None
     assert "workspace edits are still present" in notice
@@ -730,7 +729,7 @@ def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit():  # noqa: 
         candidate_metrics={"throughput": 6827.7, "latency": 3628.7},
     )
 
-    notice = _terminal_workspace_notice([record])
+    notice = terminal_workspace_notice([record])
 
     assert notice is not None
     assert "Preserve commit" in notice
@@ -776,7 +775,7 @@ def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():
         ),
     ]
 
-    notice = _terminal_workspace_notice(records)
+    notice = terminal_workspace_notice(records)
 
     assert notice is not None
     assert "recorded pre-hypothesis parent is round 28" in notice
@@ -823,7 +822,7 @@ def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposa
         ),
     ]
 
-    notice = _terminal_workspace_notice(records)
+    notice = terminal_workspace_notice(records)
 
     assert notice is not None
     assert "recorded pre-hypothesis parent is round 60" in notice
@@ -1227,14 +1226,14 @@ def test_detect_plateau_returns_none_when_too_few_rounds():  # noqa: ANN201  # t
 
     # Two rounds is below the 3-round minimum streak.
     records = [_record(1, 40.0), _record(2, 41.0)]
-    assert _detect_plateau(records) is None
+    assert detect_plateau(records) is None
 
 
 def test_detect_plateau_fires_on_flat_perf_streak():  # noqa: ANN201  # tracked: #288
 
     # 41.0 vs 41.5 is ~1.2% spread — well under the 5% threshold.
     records = [_record(1, 41.0), _record(2, 41.5), _record(3, 41.2)]
-    warning = _detect_plateau(records)
+    warning = detect_plateau(records)
     assert warning is not None
     assert "rounds 1–3" in warning  # noqa: RUF001  # tracked: #288
     assert "tok/s" in warning
@@ -1244,7 +1243,7 @@ def test_detect_plateau_skips_when_perf_diverges():  # noqa: ANN201  # tracked: 
 
     # 41.0 vs 116.0 is ~64% spread — clearly off-plateau.
     records = [_record(1, 41.0), _record(2, 116.0), _record(3, 114.5)]
-    assert _detect_plateau(records) is None
+    assert detect_plateau(records) is None
 
 
 def test_detect_plateau_ignores_rounds_without_perf():  # noqa: ANN201  # tracked: #288
@@ -1257,7 +1256,7 @@ def test_detect_plateau_ignores_rounds_without_perf():  # noqa: ANN201  # tracke
         _record(3, 41.3),
         _record(4, 41.1),
     ]
-    warning = _detect_plateau(records)
+    warning = detect_plateau(records)
     assert warning is not None
     assert "rounds 1–4" in warning  # noqa: RUF001  # tracked: #288
 
@@ -1274,7 +1273,7 @@ def test_detect_plateau_ignores_failed_official_measurements():  # noqa: ANN201 
         _record(3, 41.3),
         _record(4, 41.1),
     ]
-    warning = _detect_plateau(records)
+    warning = detect_plateau(records)
     assert warning is not None
     assert "rounds 1–4" in warning  # noqa: RUF001  # tracked: #288
 
@@ -1283,7 +1282,7 @@ def test_failed_official_measurement_cannot_complete_plateau_streak():  # noqa: 
 
     failed = _record(3, 41.1)
     failed.passed = False
-    assert _detect_plateau([_record(1, 41.0), _record(2, 41.2), failed]) is None
+    assert detect_plateau([_record(1, 41.0), _record(2, 41.2), failed]) is None
 
 
 def test_detect_plateau_streak_must_be_recent():  # noqa: ANN201  # tracked: #288
@@ -1297,4 +1296,4 @@ def test_detect_plateau_streak_must_be_recent():  # noqa: ANN201  # tracked: #28
         _record(4, 116.0),  # break
     ]
     # By round 4, the recent streak (rounds 2,3,4) spans 41.2-116.0 → no plateau.
-    assert _detect_plateau(records) is None
+    assert detect_plateau(records) is None

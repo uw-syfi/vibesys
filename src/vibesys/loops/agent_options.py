@@ -1,4 +1,4 @@
-"""Validated, versioned options for the four built-in agent orchestrators."""
+"""Validated, versioned options shared by the four built-in agent orchestrators."""
 
 from __future__ import annotations
 

@@ -3,7 +3,7 @@
 `vibesys.api.agent`'s `AgentRunProjection`/`HypothesisView`/`HypothesisRoundView` already
 derive every fact this module publishes -- copying authoritative state,
 never grouping rounds, selecting a baseline, or inferring a resolution (see
-`vibesys.agent_run.readmodel`). This module only reshapes those boundary DTOs into
+`vibesys.loops.hypothesis_readmodel`). This module only reshapes those boundary DTOs into
 the server's own wire types (`HypothesisEntry`/`HypothesisRound`) and caches
 the reshaped result, revisioned so a client can fetch only what changed.
 """
@@ -52,7 +52,7 @@ def _strategy_disposition(value: str) -> _StrategyDisposition:
     `vibesys.api.agent.HypothesisView` widens this to plain `str` at the API
     boundary rather than leaking core's own `HypothesisStrategy` enum (see
     its docstring); the only producer of the value
-    (`vibesys.agent_run.readmodel`, from `Hypothesis.strategy.value`) writes
+    (`vibesys.loops.hypothesis_readmodel`, from `Hypothesis.strategy.value`) writes
     exactly one of these three strings, so an unrecognized value here means
     the boundary DTO's contract was violated upstream.
     """

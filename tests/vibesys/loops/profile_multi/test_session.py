@@ -15,8 +15,13 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed, JudgeSkipped
-from vibesys.agent_run.state import AgentRunState
+from vibesys.agent_run import issue_board
+from vibesys.search.hypothesis.attempts import (
+    AttemptDecision,
+    AttemptState,
+    JudgeReviewed,
+    JudgeSkipped,
+)
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.validation_recipe import ValidationRecipeArtifact
@@ -35,9 +40,15 @@ from vibesys.roles.implementer import ImplementerResponse
 from vibesys.roles.judge import JudgeResponse
 from vibesys.schemas import (
     HypothesisOutcome,
-    OrchestratorPlan,
 )
-from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
+from vibesys.search.hypothesis.attempts import (
+    AttemptDecision,
+    AttemptState,
+    JudgeReviewed,
+    JudgeSkipped,
+)
+from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.hypothesis.transitions import CarryOver
 from vibesys.search.profile_focus import ProfileFocus, ProfileFocusConfig
 from vs_loop_state.api import RoundRecord
@@ -126,7 +137,7 @@ async def _fake_transaction(
 def _session(tmp_path: Path) -> ProfileMultiSession:
     session = cast("Any", ProfileMultiSession.__new__(ProfileMultiSession))
     config = _config()
-    state = AgentRunState()
+    state = HypothesisState()
     session.options = SimpleNamespace(
         max_rounds=3,
         max_retries_per_round=2,
@@ -420,7 +431,7 @@ def test_completed_reviewed_round_checkpoints_record_before_advancing(tmp_path: 
     selected.attempt.retry = 2
     selected.attempt.passed = True
     selected.attempt.official_reason = "final_round"
-    selected.attempt.judge = JudgeReviewed(Verdict.PASS)
+    selected.attempt.judge = JudgeReviewed("pass")
     selected.attempt.implementation = ImplementerResponse(
         summary="cache added",
         expected_behavior="faster",
@@ -444,7 +455,7 @@ def test_completed_reviewed_round_checkpoints_record_before_advancing(tmp_path: 
 
 def _rollback_hypothesis(
     *, parent_round: int, started_round: int
-) -> tuple[AgentRunState, Hypothesis]:
+) -> tuple[HypothesisState, Hypothesis]:
     from vibesys.search.hypothesis.transitions import append_round  # noqa: PLC0415
 
     search = _search()

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from vibesys.agent_run.attempts import AttemptState
 from vibesys.loops.multi.session import _TerminalPolicy
 from vibesys.roles.implementer import ImplementerResponse
-from vibesys.schemas import HypothesisOutcome, OrchestratorPlan
-from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.schemas import HypothesisOutcome
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
+from vibesys.search.hypothesis.attempts import AttemptState
 from vibesys.search.hypothesis.transitions import CarryOver
 from vs_loop_state.api import RoundRecord
 

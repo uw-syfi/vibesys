@@ -21,18 +21,17 @@ from unittest.mock import AsyncMock
 import pytest
 
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.attempts import AttemptState
-from vibesys.agent_run.evidence import CarryOver
-from vibesys.agent_run.options import AgentOrchestrationOptions
-from vibesys.agent_run.state import AgentRunState
 from vibesys.constants import DomainName
+from vibesys.loops.agent_options import AgentOrchestrationOptions
 from vibesys.loops.single.session import STATIC_GUIDANCE, AttemptRequest, PlanRequest
 from vibesys.loops.single.turns import InvalidPlanError, SingleAgentTurns
 from vibesys.profilers import ProfilerKind
 from vibesys.roles.common import Verdict
 from vibesys.roles.single_agent import SINGLE_COMBINED, SingleAgentRoundResponse
-from vibesys.schemas import OrchestratorPlan
-from vibesys.search.hypothesis.transitions import start_hypothesis
+from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.hypothesis.attempts import AttemptState
+from vibesys.search.hypothesis.state import HypothesisState
+from vibesys.search.hypothesis.transitions import CarryOver, start_hypothesis
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -105,7 +104,7 @@ def _configured_turns(tmp_path: Path) -> SingleAgentTurns:
 def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path: Path) -> None:
     turns = _configured_turns(tmp_path)
     plan = _plan("h1")
-    state = start_hypothesis(AgentRunState(), plan, started_round=1)
+    state = start_hypothesis(HypothesisState(), plan, started_round=1)
     hypothesis = state.active_hypothesis
     assert hypothesis is not None
     plan_request = PlanRequest(1, state, [], CarryOver(), None, None, 1, STATIC_GUIDANCE)
@@ -129,7 +128,7 @@ async def test_plan_reprompts_reused_hypothesis_and_records_corrected_plan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = start_hypothesis(AgentRunState(), _plan("used"), started_round=1)
+    state = start_hypothesis(HypothesisState(), _plan("used"), started_round=1)
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
     log: list[str] = []
     agent_turn = AsyncMock(side_effect=[_plan("used"), _plan("new")])
@@ -161,7 +160,7 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plan = _plan("h1")
-    state = start_hypothesis(AgentRunState(), plan, started_round=1)
+    state = start_hypothesis(HypothesisState(), plan, started_round=1)
     hypothesis = state.active_hypothesis
     assert hypothesis is not None
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
@@ -199,7 +198,7 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
 
 def test_validation_rejects_reused_id() -> None:
     plan = _plan("used")
-    state = start_hypothesis(AgentRunState(), plan, started_round=1)
+    state = start_hypothesis(HypothesisState(), plan, started_round=1)
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
 
     with pytest.raises(InvalidPlanError, match="already used"):

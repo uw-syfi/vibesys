@@ -135,11 +135,11 @@ depends_on = ["vs_feature_flags", "vs_loop_state", "vs_agent"]
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.loops.registry", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.agent_run"]
+depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.api.contracts", "vibesys.runtime", "vibesys.orchestration._common", "vibesys.orchestration.runner", "vibesys.loops.registry", "vibesys.orchestration.contracts", "vibesys.orchestration.request", "vibesys.agent_run", "vibesys.loops.hypothesis_readmodel"]
 
 [[modules]]
 path = "vibesys.api.agent"
-depends_on = ["vibesys.loops.registry", "vs_project", "vibesys.agent_run"]
+depends_on = ["vibesys.loops.registry", "vs_project", "vibesys.agent_run", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel"]
 
 [[modules]]
 path = "vibesys.api.evolve"
@@ -183,33 +183,34 @@ path = "vibesys.context"
 depends_on = ["vibesys", "vs_agent", "vibesys.backends", "vibesys.domains", "vibesys.evaluators", "vibesys.render", "vibesys.run", "vibesys.sandbox", "vs_project", "vs_sandbox", "vibesys.orchestration", "vibesys.orchestration.request"]
 
 [[modules]]
+# Dissolved into search/hypothesis, roles/, and loops/ except issue_board.py
+# (the progress-board module, owned by a different lane). Depends on
+# vibesys.roles and vibesys.search.hypothesis for issue_board.py's typed
+# handoff data alone.
 path = "vibesys.agent_run"
-depends_on = ["vs_project", "vibesys", "vs_loop_state", "vibesys.orchestration.view", "vibesys.orchestration", "vibesys.evaluators", "vibesys.roles"]
+depends_on = ["vibesys.evaluators", "vibesys.roles", "vibesys.search.hypothesis"]
 
 [[modules]]
 # Pure, deterministic search policy: never RunContext/agents/prompts/I/O.
-# `vibesys.agent_run` is an explicit, temporary exception: search.hypothesis
-# and search.profile_focus re-export (not copy) its pydantic state models so
-# persisted JSON stays byte-identical while both packages are live; it is
-# removed once agent_run dissolves into search/. Forbidden: vibesys.loops,
-# vibesys.orchestration, vibesys.prompts, vs_agent (agents/runtime).
+# Forbidden: vibesys.loops, vibesys.orchestration, vibesys.roles,
+# vibesys.prompts, vs_agent (agents/runtime).
 path = "vibesys.search"
 depends_on = []
 
 [[modules]]
 path = "vibesys.search.hypothesis"
-depends_on = ["vibesys", "vibesys.evaluators", "vibesys.agent_run", "vs_loop_state"]
+depends_on = ["vibesys", "vibesys.evaluators", "vibesys.search.profile_focus", "vs_loop_state", "vs_project"]
 
 [[modules]]
 path = "vibesys.search.profile_focus"
-depends_on = ["vibesys.agent_run"]
+depends_on = []
 
 [[modules]]
 # Role catalog: data only (Role instances, reply schemas). Never turn
 # execution, sequencing, or state transitions -- those stay in
 # vibesys.orchestration.runtime (ctx.agents.turn) and loops/.
 path = "vibesys.roles"
-depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state", "vs_issue_board", "vibesys.search.population"]
+depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state", "vs_issue_board", "vibesys.search.population", "vibesys.search.hypothesis"]
 
 [[modules]]
 path = "vibesys.loops"
@@ -217,19 +218,19 @@ depends_on = []
 
 [[modules]]
 path = "vibesys.loops.single"
-depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.agent_run", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.orchestration.progress_log"]
+depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.agent_run", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log"]
 
 [[modules]]
 path = "vibesys.loops.multi"
-depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.orchestration.progress_log"]
+depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log"]
 
 [[modules]]
 path = "vibesys.loops.profile_single"
-depends_on = ["vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys", "vibesys.prompts", "vs_project", "vibesys.agent_run", "vibesys.domains", "vs_agent", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.orchestration.progress_log"]
+depends_on = ["vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys", "vibesys.prompts", "vs_project", "vibesys.agent_run", "vibesys.domains", "vs_agent", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log"]
 
 [[modules]]
 path = "vibesys.loops.profile_multi"
-depends_on = [ "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent", "vibesys.roles", "vibesys.prompts", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.orchestration.progress_log"]
+depends_on = [ "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent", "vibesys.roles", "vibesys.prompts", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log"]
 
 [[modules]]
 path = "vibesys.loops.issue_queue"
@@ -410,6 +411,20 @@ depends_on = ["vibesys.orchestration.request"]
 # create a cycle back through) agents/workspaces/gates/state/environment.
 path = "vibesys.orchestration._host"
 depends_on = ["vibesys", "vibesys.context", "vibesys.orchestration.request", "vibesys.orchestration.view", "vibesys.run", "vibesys.runtime", "vibesys.sandbox"]
+
+[[modules]]
+# Shared strategy-option validation for the four hypothesis-driven
+# strategies. Sits directly under vibesys.loops (not inside any one
+# strategy folder) because strategies never import each other.
+path = "vibesys.loops.agent_options"
+depends_on = ["vibesys", "vibesys.errors", "vibesys.evaluators", "vibesys.orchestration", "vs_project"]
+
+[[modules]]
+# Shared hypothesis-search read model for the four hypothesis-driven
+# strategies' registered projectors. Sits directly under vibesys.loops for
+# the same reason as vibesys.loops.agent_options.
+path = "vibesys.loops.hypothesis_readmodel"
+depends_on = ["vibesys", "vibesys.orchestration.view", "vibesys.search.hypothesis", "vs_loop_state"]
 
 [[modules]]
 path = "vibesys.loops.registry"

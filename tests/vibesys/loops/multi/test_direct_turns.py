@@ -20,15 +20,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.attempts import AttemptState
-from vibesys.agent_run.errors import (
+from vibesys.constants import DomainName
+from vibesys.errors import (
     InvalidPlanError,
     MissingImplementationError,
     UnsupportedProfilerError,
 )
-from vibesys.agent_run.options import AgentOrchestrationOptions
-from vibesys.agent_run.state import AgentRunState
-from vibesys.constants import DomainName
+from vibesys.loops.agent_options import AgentOrchestrationOptions
 from vibesys.loops.multi.decisions import (
     STATIC_GUIDANCE,
     AttemptRequest,
@@ -45,10 +43,15 @@ from vibesys.roles.profiler import ProfilerSummary
 from vibesys.runtime import ReadOnly
 from vibesys.schemas import (
     HypothesisOutcome,
+)
+from vibesys.search.hypothesis import (
+    HypothesisConfig,
+    HypothesisSearch,
     HypothesisStrategyUpdate,
     OrchestratorPlan,
 )
-from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.search.hypothesis.attempts import AttemptState
+from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.hypothesis.transitions import CarryOver
 
 if TYPE_CHECKING:
@@ -56,7 +59,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.orchestration.runtime import RunContext
-    from vibesys.search.hypothesis.state import HypothesisState
 
 
 def _options() -> AgentOrchestrationOptions:
@@ -215,7 +217,7 @@ def test_plan_reprompts_reused_id_then_accepts_new_one(tmp_path: Path) -> None:
 
 def test_plan_rejects_duplicate_self_and_existing_hypothesis_updates(tmp_path: Path) -> None:
     turns = _turns(tmp_path)
-    state = AgentRunState()
+    state = HypothesisState()
     update = HypothesisStrategyUpdate(
         hypothesis_id="old", disposition="parked", reason="Not current"
     )

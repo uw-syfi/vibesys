@@ -7,22 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.agent_run import issue_board
-from vibesys.agent_run.attempts import (
-    AttemptDecision,
-    AttemptState,
-    JudgeReviewed,
-    JudgeSkipped,
-    JudgeSkipReason,
-    PerformanceProjection,
-    attempt_was_reviewed,
-)
-from vibesys.agent_run.errors import StrategySessionError
-from vibesys.agent_run.evidence import (
-    _format_metric_row,
-    _pareto_archive_summary,
-    _record_candidate_metrics,
-)
-from vibesys.agent_run.record import RecordInput, build_round_record
+from vibesys.errors import StrategySessionError
 from vibesys.evaluators.gates import (
     GATE_LOG_TAIL_CHARS,
     GATE_RECORD_TAIL_CHARS,
@@ -53,13 +38,26 @@ from vibesys.schemas import (
 )
 from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
 from vibesys.search.hypothesis import cadence as hypothesis_cadence
+from vibesys.search.hypothesis.attempts import (
+    AttemptDecision,
+    AttemptState,
+    JudgeReviewed,
+    JudgeSkipped,
+    JudgeSkipReason,
+    PerformanceProjection,
+    attempt_was_reviewed,
+)
+from vibesys.search.hypothesis.record import RecordInput, build_round_record
 from vibesys.search.hypothesis.results import Continue, Finished, NewHypothesis
 from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.hypothesis.transitions import (
     FAILED_HYPOTHESIS_OUTCOMES,
     CarryOver,
+    _format_metric_row,
     adopt_metric_space,
+    pareto_archive_summary,
     provisional_candidates_since_official,
+    record_candidate_metrics,
     terminal_workspace_notice,
     update_active_hypothesis,
 )
@@ -69,7 +67,7 @@ from vs_loop_state.api import RoundHistory
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from vibesys.agent_run.options import AgentOrchestrationOptions
+    from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.orchestration.runtime import RunContext
     from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
 
@@ -259,7 +257,7 @@ class MultiSession:
         number = self.round_number
         self.ctx.switch_log(f"round{number:03d}")
         issue_board.write_pareto_archive(
-            self.turns.progress_path, _pareto_archive_summary(self.records, self.state.metrics)
+            self.turns.progress_path, pareto_archive_summary(self.records, self.state.metrics)
         )
         progress = RoundProgress(number, self.options.max_rounds)
         self.ctx.log(f"\n{'=' * 60}\n  {progress.label()}\n{'=' * 60}\n")
@@ -483,7 +481,7 @@ class MultiSession:
             space=state.agent_run_state.metrics,
         )
         verdict = await self.turns.review(selected.request, selected.attempt, conflict)
-        state.judge = JudgeReviewed(verdict.verdict)
+        state.judge = JudgeReviewed(verdict.verdict.value)
         if verdict.verdict is not Verdict.PASS:
             state.feedback = verdict.feedback
             selected.request.active_hypothesis.feedback = verdict.feedback
@@ -799,7 +797,7 @@ class MultiSession:
         """Restore the best trusted candidate or the trusted input baseline."""
         self.ctx.log(f"Reached max_rounds={self.options.max_rounds}. Stopping.")
         issue_board.write_pareto_archive(
-            self.turns.progress_path, _pareto_archive_summary(self.records, self.state.metrics)
+            self.turns.progress_path, pareto_archive_summary(self.records, self.state.metrics)
         )
         if self.state.metrics.objectives:
             frontier = self.search.frontier(self.records, space=self.state.metrics)
@@ -807,7 +805,7 @@ class MultiSession:
             for record in frontier:
                 self.ctx.log(
                     f"  round {record.round_number}: "
-                    f"{_format_metric_row(_record_candidate_metrics(record), self.state.metrics.objectives)} "
+                    f"{_format_metric_row(record_candidate_metrics(record), self.state.metrics.objectives)} "
                     f"(commit {(record.commit or 'n/a')[:12]})"
                 )
         winner = self.search.best(self.records, space=self.state.metrics)
@@ -825,7 +823,7 @@ class MultiSession:
         await self.workspace.restore(winner.commit, clean=True)
         await self.workspace.snapshot(f"multi: select round {winner.round_number}")
         metrics = (
-            _format_metric_row(_record_candidate_metrics(winner), self.state.metrics.objectives)
+            _format_metric_row(record_candidate_metrics(winner), self.state.metrics.objectives)
             if self.state.metrics.objectives
             else f"{winner.perf_metric:.6g} {winner.perf_unit or ''}"
         )

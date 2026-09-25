@@ -3,24 +3,26 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Literal
 
 import pytest
 
-from vibesys.agent_run.attempts import (
+from vibesys.search.hypothesis.attempts import (
     JudgeReviewed,
     JudgeSkipped,
     JudgeSkipReason,
     attempt_was_reviewed,
     recorded_judge_verdict,
 )
-from vibesys.roles.common import Verdict
 
 
 @pytest.mark.parametrize(
     ("verdict", "expected"),
-    [(Verdict.PASS, "pass"), (Verdict.FAIL, "fail")],
+    [("pass", "pass"), ("fail", "fail")],
 )
-def test_reviewed_attempt_records_its_verdict(verdict: Verdict, expected: str) -> None:
+def test_reviewed_attempt_records_its_verdict(
+    verdict: Literal["pass", "fail"], expected: str
+) -> None:
     outcome = JudgeReviewed(verdict)
 
     assert attempt_was_reviewed(outcome) is True
@@ -39,12 +41,12 @@ def test_skipped_attempt_records_deferred_whatever_the_reason(reason: JudgeSkipR
 def test_a_skipped_attempt_cannot_carry_a_verdict() -> None:
     """The two variants are disjoint, so 'verdict without review' has no value."""
     assert not hasattr(JudgeSkipped(JudgeSkipReason.NOT_REACHED), "verdict")
-    assert not hasattr(JudgeReviewed(Verdict.PASS), "reason")
+    assert not hasattr(JudgeReviewed("pass"), "reason")
 
 
 def test_an_attempt_outcome_is_immutable() -> None:
     """An attempt's result is replaced by the next attempt, never updated."""
-    outcome = JudgeReviewed(Verdict.PASS)
+    outcome = JudgeReviewed("pass")
 
     with pytest.raises(dataclasses.FrozenInstanceError):
-        setattr(outcome, "verdict", Verdict.FAIL)  # noqa: B010  # tracked: #288
+        setattr(outcome, "verdict", "fail")  # noqa: B010  # tracked: #288

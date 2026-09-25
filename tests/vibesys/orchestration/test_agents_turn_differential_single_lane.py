@@ -38,13 +38,13 @@ from unittest.mock import patch
 from tests.vibesys.golden.harness import run_scripted
 from tests.vibesys.orchestration.harness import run_with_context
 
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.evaluators.perf_reply import (
     IssuePerfEvalResponse,
     PerfMetrics,
 )
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
 from vibesys.loops.issue_queue.orchestration import (
     IssueQueueOptions,
@@ -61,9 +61,9 @@ from vibesys.roles.judge import IssueJudgeResponse
 from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.schemas import (
     CandidateDisposition,
-    OrchestratorPlan,
     PerfTrend,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 

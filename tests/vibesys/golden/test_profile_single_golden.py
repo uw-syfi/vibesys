@@ -57,8 +57,6 @@ from tests.vibesys.golden.helpers import (
     read_events,
 )
 
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
-from vibesys.agent_run.state import ProfileBottleneck
 from vibesys.evaluators.gates import (
     AccuracyGateResult,
     GateKind,
@@ -67,13 +65,15 @@ from vibesys.evaluators.gates import (
 )
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.profile_single.orchestration import ProfileGuidedSingleAgentOrchestrator
 from vibesys.roles.common import Verdict
 from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.schemas import (
     CandidateDisposition,
-    OrchestratorPlan,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.profile_focus.state import ProfileBottleneck
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:

@@ -14,10 +14,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from vibesys.agent_run.evidence import CarryOver
-    from vibesys.agent_run.state import AgentRunState, Hypothesis
     from vibesys.roles.profiler import ProfilerSummary
-    from vibesys.schemas import OrchestratorPlan
+    from vibesys.search.hypothesis.plan import OrchestratorPlan
+    from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
+    from vibesys.search.hypothesis.transitions import CarryOver
     from vibesys.search.profile_focus import FocusView
     from vs_loop_state.api import RoundRecord
 
@@ -27,7 +27,7 @@ class PlanRequest:
     """Evidence supplied to the profile guided multi designer."""
 
     round_number: int
-    state: AgentRunState
+    state: HypothesisState
     records: list[RoundRecord]
     carry: CarryOver
     profiler_summary: ProfilerSummary | None
