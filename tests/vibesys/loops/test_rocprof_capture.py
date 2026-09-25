@@ -685,26 +685,8 @@ def _install_fake_rocprofv3_flushes_on_sigint_then_hangs(bin_dir: Path) -> Path:
         path,
         textwrap.dedent(
             f"""
-            import signal
-
-            # Register the handler before any other import (mirrors
-            # test_capture_runtime.py's _FAKE_PROFILER_SOURCE): a
-            # ready_command/load_command pair that both succeed instantly
-            # can have capture_runtime send stop_signal while this process
-            # is still mid-startup, and an unhandled SIGINT during import
-            # raises KeyboardInterrupt instead of running the intended
-            # flush-and-keep-running handler below.
-            def _on_sigint(signum, frame):
-                if out_dir:
-                    out_path = Path(out_dir)
-                    out_path.mkdir(parents=True, exist_ok=True)
-                    src = FIXTURES / "kernel_trace" / "out_kernel_trace.csv"
-                    if src.is_file():
-                        shutil.copy(src, out_path / "out_kernel_trace.csv")
-
-            signal.signal(signal.SIGINT, _on_sigint)
-
             import shutil
+            import signal
             import subprocess
             import sys
             import time
@@ -717,6 +699,19 @@ def _install_fake_rocprofv3_flushes_on_sigint_then_hangs(bin_dir: Path) -> Path:
                 if tok == "-d" and i + 1 < len(argv):
                     out_dir = argv[i + 1]
                     break
+
+            def _on_sigint(signum, frame):
+                if out_dir:
+                    out_path = Path(out_dir)
+                    out_path.mkdir(parents=True, exist_ok=True)
+                    src = FIXTURES / "kernel_trace" / "out_kernel_trace.csv"
+                    if src.is_file():
+                        shutil.copy(src, out_path / "out_kernel_trace.csv")
+
+            signal.signal(signal.SIGINT, _on_sigint)
+            # Handler live and out_dir known: announce readiness so the test's
+            # ready_command gates stop_signal on this, not on a sleep.
+            Path(__file__).with_name("rocprofv3.ready").write_text("1")
 
             wrapped = argv[argv.index("--") + 1:] if "--" in argv else []
             if wrapped:
@@ -744,13 +739,11 @@ def test_profile_timeline_killed_after_grace_still_analyzes_a_real_flushed_trace
     # ever trying a graceful stop first.
     lifecycle = cr.Lifecycle(
         command="sleep 60",
-        ready_command="true",
-        # A short sleep, not "true": gives the fake profiler's own process
-        # startup (its handful of imports before its SIGINT handler is
-        # fully live) a comfortable cushion before stop_signal is sent, so
-        # the test exercises the intended race-free flush path rather than
-        # racing the fake process's own startup.
-        load_command="sleep 0.3",
+        # The fake writes this once its SIGINT handler is live, so
+        # stop_signal can never race its startup.
+        ready_command=f"test -f '{bin_dir / 'rocprofv3.ready'}'",
+        ready_interval_s=0.05,
+        load_command="true",
         stop_signal="SIGINT",
         grace_s=0.2,
         timeout_s=10.0,
