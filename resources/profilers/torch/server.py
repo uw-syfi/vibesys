@@ -19,6 +19,7 @@ import argparse
 import contextlib
 import io
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -35,6 +36,7 @@ for _name in ("_common", "profilers_common"):
         sys.path.insert(0, str(_candidate))
         break
 import capture_runtime  # noqa: E402
+import mcp_async  # noqa: E402
 
 sys.path.insert(0, str(_HERE))
 import analyze_torch_profile  # noqa: E402
@@ -82,13 +84,14 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
     mcp = FastMCP("vibesys-torch-profiler")
 
     @mcp.tool()
-    def profile_ops(  # noqa: PLR0913  # tracked: #288
+    async def profile_ops(  # noqa: PLR0913  # tracked: #288
         command: str,
         cwd: str | None = None,
         env: dict | None = None,
         ready_command: str | None = None,
         ready_timeout_s: float = 600.0,
         load_command: str | None = None,
+        setup_command: str | None = None,
         stop_signal: str = "SIGINT",
         grace_s: float = 120.0,
         timeout_s: float = 1800.0,
@@ -118,6 +121,12 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
         it); prefer `delay_s=0` so recording starts before the target
         spawns its own worker threads.
 
+        Runs off the main event loop, so other tool calls stay responsive
+        while this is in flight; a client that cancels the call stops the
+        capture rather than leaving it running unsupervised. If another
+        GPU-using capture is already running in this server process,
+        returns "busy: ..." immediately instead of queuing.
+
         Args:
             command: Target command, run via bash -lc.
             cwd: Working directory for command/load_command.
@@ -128,31 +137,48 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
             ready_timeout_s: Max seconds to wait for ready_command.
             load_command: Run once ready_command succeeds; command is
                 stopped via stop_signal once this returns.
+            setup_command: Runs to completion BEFORE command, outside the
+                profiler injection entirely. Use it for anything (e.g.
+                picking a free port) whose own output or child processes
+                must not run under the profiled env: write the value to a
+                file here, then have command read it back with `read -r
+                VAR < file`, never `$(...)`. A nonzero exit here stops the
+                capture immediately (status setup_failed) with no target
+                ever started.
             stop_signal: Signal name to stop command with (default SIGINT).
             grace_s: Seconds to wait after stop_signal before escalating to
                 SIGTERM/SIGKILL (ROCm's post-export hang can take minutes;
                 size generously).
-            timeout_s: Hard wall-clock budget for the whole capture.
+            timeout_s: Hard wall-clock budget for the whole capture. Set
+                your MCP client's own tool-call timeout above this value:
+                a capture commonly runs 10-25 minutes.
             delay_s: Seconds after arming before the profiler starts.
             duration_s: Seconds to profile before auto-stopping; omit to
                 profile until process exit / SIGINT.
             record_shapes: Capture per-op input shapes. Required for
                 gemm_shapes/roofline and for certify to pass.
         """
-        return capture_ops.profile_ops(
-            command=command,
-            cwd=cwd,
-            env=env,
-            ready_command=ready_command,
-            ready_timeout_s=ready_timeout_s,
-            load_command=load_command,
-            stop_signal=stop_signal,
-            grace_s=grace_s,
-            timeout_s=timeout_s,
-            delay_s=delay_s,
-            duration_s=duration_s,
-            record_shapes=record_shapes,
-        )
+        cancel_event = threading.Event()
+        try:
+            return await mcp_async.run_cancellable(
+                capture_ops.profile_ops,
+                cancel_event=cancel_event,
+                command=command,
+                cwd=cwd,
+                env=env,
+                ready_command=ready_command,
+                ready_timeout_s=ready_timeout_s,
+                load_command=load_command,
+                setup_command=setup_command,
+                stop_signal=stop_signal,
+                grace_s=grace_s,
+                timeout_s=timeout_s,
+                delay_s=delay_s,
+                duration_s=duration_s,
+                record_shapes=record_shapes,
+            )
+        except capture_runtime.CaptureBusyError as exc:
+            return capture_runtime.format_busy(exc.active)
 
     @mcp.tool()
     def tables(report: str) -> str:
