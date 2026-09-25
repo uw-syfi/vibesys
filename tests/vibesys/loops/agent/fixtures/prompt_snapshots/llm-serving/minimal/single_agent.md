@@ -111,6 +111,11 @@ Use it only when `VibeServeModel.from_pretrained(...)` and `.generate(...)`
 exercise the reviewed production mechanism. It captures device kernels, not
 HTTP, admission, scheduling, queueing, or service batching; do not extrapolate
 without end-to-end evidence or recreate the production hot path just for it.
+
+Capture-tool argument contracts are engine-specific: see
+`serving-systems/references/tooling/profiling-serving-engines.md` and
+`serving-systems/references/engines/`. ROCm:
+`serving-systems/references/platforms/rocm/profiler.md`.
 ## Execution boundary
 
 The accuracy checker and benchmark communicate with a running candidate service
