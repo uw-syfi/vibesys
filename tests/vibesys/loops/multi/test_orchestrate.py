@@ -880,8 +880,10 @@ def test_progress_writes_typed_role_handoffs_atomically(tmp_path, progress_name,
         evidence="Untrusted implementer claim.",
     )
 
-    plan_path = artifacts.write_plan_artifact(progress, 12, plan)
-    evidence_path = artifacts.write_implementer_artifact(progress, 12, 2, implementation)
+    plan_path = artifacts.write_model(artifacts.plan_artifact_path(progress, 12), plan)
+    evidence_path = artifacts.write_model(
+        artifacts.implementer_artifact_path(progress, 12, 2), implementation
+    )
 
     assert plan_path == tmp_path / artifact_root / "plans" / "round-0012.json"
     assert evidence_path == (
@@ -898,8 +900,12 @@ def test_persisted_implementer_attempts_define_resume_boundary(tmp_path):  # noq
         summary="Retained the first target run.",
         expected_behavior="A resumed round must not overwrite it.",
     )
-    first = artifacts.write_implementer_artifact(progress, 8, 1, implementation)
-    second = artifacts.write_implementer_artifact(progress, 8, 2, implementation)
+    first = artifacts.write_model(
+        artifacts.implementer_artifact_path(progress, 8, 1), implementation
+    )
+    second = artifacts.write_model(
+        artifacts.implementer_artifact_path(progress, 8, 2), implementation
+    )
 
     assert artifacts.implementer_artifact_paths(progress, 8) == [first, second]
     assert artifacts.next_implementer_attempt(progress, 8) == 3
@@ -922,7 +928,9 @@ def test_implementer_start_marker_advances_the_resume_boundary(tmp_path):  # noq
     assert artifacts.implementer_artifact_paths(progress, 8) == []
     assert artifacts.next_implementer_attempt(progress, 8) == 2
 
-    completed = artifacts.write_implementer_artifact(progress, 8, 1, implementation)
+    completed = artifacts.write_model(
+        artifacts.implementer_artifact_path(progress, 8, 1), implementation
+    )
 
     # The marker and its own completed artifact name one attempt, not two.
     assert artifacts.implementer_artifact_paths(progress, 8) == [completed]
