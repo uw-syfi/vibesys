@@ -15,7 +15,7 @@ host-computed: ``select_hypothesis`` runs ``run_attribution`` directly (a
 shelled-out profiler command parsed into ``ProfileBottleneck`` rows), not an
 agent turn, so there is nothing to script through ``FakeAgentClient`` for it.
 That attribution command is scripted out here (patching
-``vibesys.loops.profile_single.session.run_attribution``, the same
+``vibesys.loops.single.session.run_attribution``, the same
 production call site production code uses) the same way multi's ``gate``
 scenario scripts out the accuracy gate's trusted command execution, so the
 snapshot stays hermetic and deterministic.
@@ -57,8 +57,6 @@ from tests.vibesys.golden.helpers import (
     read_events,
 )
 
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
-from vibesys.agent_run.state import ProfileBottleneck
 from vibesys.evaluators.gates import (
     AccuracyGateResult,
     GateKind,
@@ -67,10 +65,15 @@ from vibesys.evaluators.gates import (
 )
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.loops.profile_single.orchestration import ProfileGuidedSingleAgentOrchestrator
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
+from vibesys.loops.single.orchestration import ProfileGuidedSingleAgentOrchestrator
 from vibesys.roles.common import Verdict
 from vibesys.roles.single_agent import SingleAgentRoundResponse
+from vibesys.schemas import (
+    CandidateDisposition,
+)
 from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.profile_focus.state import ProfileBottleneck
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:
@@ -117,6 +120,7 @@ def _combined(
         bottlenecks="prefill dominates end-to-end latency",
         suggestions="fuse the prefill launches further",
         profile_analysis="prefill accounts for the majority of measured cost",
+        candidate_disposition=CandidateDisposition.UNASSESSED,
     )
 
 
@@ -135,13 +139,13 @@ def _patch_attribution():  # noqa: ANN202  # tracked: #288
     """Replace only the host-computed profiler command this strategy runs.
 
     Keeps the real ``select_hypothesis`` call site in
-    ``vibesys.loops.profile_single.session`` (so the round-1 hypothesis
+    ``vibesys.loops.single.session`` (so the round-1 hypothesis
     start, plan prompt, and profile-guidance context still come from
     production code), but removes the dependency on a real shelled-out
     profiler command.
     """
     return patch(
-        "vibesys.loops.profile_single.session.run_attribution",
+        "vibesys.loops.single.session.run_attribution",
         side_effect=lambda *_args, **_kwargs: _attribution(),
     )
 

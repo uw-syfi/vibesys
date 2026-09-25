@@ -35,7 +35,6 @@ from tests.vibesys.golden.helpers import (
     read_events,
 )
 
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.evaluators.gates import (
     AccuracyGateResult,
     GateKind,
@@ -43,13 +42,14 @@ from vibesys.evaluators.gates import (
     emit_gate_started,
 )
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.evaluators.perf_reply import ProfilerSummary
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
 from vibesys.profilers import ProfilerKind
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.roles.judge import JudgeResponse
 from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.roles.profiler import ProfilerSummary
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api.testing import FakeAgentClient
 

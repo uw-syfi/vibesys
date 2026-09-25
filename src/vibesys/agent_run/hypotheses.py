@@ -1,7 +1,9 @@
 """Pure transitions for the authoritative agent-run hypothesis state.
 
-# TODO(stack PR 07): remove. Glue re-export: definitions now live in
-# ``vibesys.search.hypothesis.transitions``.
+# TODO(stack PR 09): remove. Glue re-export: definitions now live in
+# ``vibesys.search.hypothesis.transitions``. Kept only for
+# ``vibesys.agent_run.readmodel``, whose last caller is
+# ``vibesys.api.chat_tools_server`` (migrated in stack PR 09).
 """
 
 from __future__ import annotations

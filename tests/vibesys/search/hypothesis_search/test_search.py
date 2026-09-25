@@ -21,9 +21,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
-
-# TODO(stack PR 07): import from vibesys.loops.multi.session once it takes a  # noqa: FIX002  # tracked: #288
-# HypothesisConfig; at BASE, _TerminalPolicy() still takes no arguments.
 from vibesys.loops.multi.session import _TerminalPolicy
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import (
@@ -492,7 +489,7 @@ def test_close_round_is_deterministic_and_bounds_the_lease(
         judge_verdict=("pass" if passed else "fail") if reviewed else "deferred",
     )
 
-    policy = _TerminalPolicy()
+    policy = _TerminalPolicy(search.config)
     keeps_active = policy.keeps_hypothesis_active(attempt, continuation_rounds)
     requests_continuation = bool(
         outcome

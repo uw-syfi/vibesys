@@ -199,7 +199,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": "<SHA>",
+      "commit": null,
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-profiler-input",
@@ -306,21 +306,6 @@
     "status": "completed",
     "text": "",
     "type": "phase_finished"
-  },
-  {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
-      "commit": "<SHA>",
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
-      "label": "round-1-profiler",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
   },
   {
     "agent_kind": null,
@@ -501,7 +486,7 @@
       "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
-      "label": "round-1-retry-1-paid-marker",
+      "label": "round-1-retry-1-implementer-input",
       "source": "git_tracking"
     },
     "round_label": null,
@@ -630,7 +615,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": "<SHA>",
+      "commit": null,
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-retry-1-implementer",
@@ -645,7 +630,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": null,
+      "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-retry-1-judge-input",
@@ -769,21 +754,6 @@
       "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
-      "label": "round-1-retry-1-judge",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
-  },
-  {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
-      "commit": "<SHA>",
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
       "label": "round-1-record-input",
       "source": "git_tracking"
     },
@@ -810,18 +780,6 @@
   {
     "agent_kind": null,
     "data": {
-      "kind": "experiments_changed",
-      "reason": "round_persisted",
-      "revision": 2
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "experiments_changed"
-  },
-  {
-    "agent_kind": null,
-    "data": {
       "attempts": 1,
       "judge_verdict": "pass",
       "kind": "round_finished",
@@ -833,6 +791,18 @@
     "status": "completed",
     "text": "",
     "type": "round_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "kind": "experiments_changed",
+      "reason": "round_persisted",
+      "revision": 2
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "experiments_changed"
   },
   {
     "agent_kind": null,

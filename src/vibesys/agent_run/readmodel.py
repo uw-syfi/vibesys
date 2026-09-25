@@ -1,6 +1,11 @@
 """Project authoritative agent state into typed run views.
 
 The boundary models copy recorded facts without inferring resolutions.
+
+# TODO(stack PR 09): remove. Superseded by
+# ``vibesys.loops.hypothesis_readmodel``; kept only because
+# ``vibesys.api.chat_tools_server`` still imports ``agent_projection`` from
+# this old path, and stack PR 09 migrates that module (its last caller).
 """
 
 from __future__ import annotations
@@ -114,6 +119,12 @@ class RoundView(BaseModel):
     passed: bool
     profile_skipped: bool = False
     official_evaluation: bool = False
+    # Mirrors `vibesys.loops.hypothesis_readmodel.RoundView`: multi/single now
+    # produce these two fields on every round, so this compat shim's model
+    # must accept them (it is `extra="forbid"`) even though nothing here
+    # reads them.
+    attempts: int = 1
+    judge_verdict: Literal["pass", "fail", "skipped"] | None = None
 
 
 class AgentRunProjection(BaseModel):

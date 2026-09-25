@@ -24,7 +24,7 @@ golden suite:
 
 Unlike plain multi, profile_multi requires an ``options.profile_guided``
 config and always runs its component-attribution step once per round
-(``vibesys.loops.profile_multi.session.run_attribution``), independent of
+(``vibesys.loops.multi.session.run_attribution``), independent of
 the pre-round profiler decision and of backend. That step shells out to the
 configured attribution command via ``ctx.environment.execute``, so every
 scenario here replaces it with a scripted empty-attribution result, the same
@@ -53,8 +53,6 @@ from tests.vibesys.golden.helpers import (
     read_events,
 )
 
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
-from vibesys.agent_run.state import ProfileBottleneck
 from vibesys.evaluators.gates import (
     AccuracyGateResult,
     GateKind,
@@ -63,14 +61,16 @@ from vibesys.evaluators.gates import (
 )
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.evaluators.perf_reply import ProfilerSummary
-from vibesys.loops.profile_multi.orchestration import ProfileGuidedMultiAgentOrchestrator
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
+from vibesys.loops.multi.orchestration import ProfileGuidedMultiAgentOrchestrator
 from vibesys.profilers import ProfilerKind
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.roles.judge import JudgeResponse
 from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.roles.profiler import ProfilerSummary
 from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.profile_focus.state import ProfileBottleneck
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:
@@ -123,7 +123,7 @@ def _no_attribution() -> AsyncMock:
     """Replace the per-round component-attribution shell-out with an empty result.
 
     Keeps ``run_attribution``'s call site in
-    ``vibesys.loops.profile_multi.session`` (production round control), but
+    ``vibesys.loops.multi.session`` (production round control), but
     removes the dependency on a real profiler command running in the
     sandbox, the same seam
     ``tests/vibesys/loops/multi/test_policy_ports.py`` uses.
@@ -144,7 +144,7 @@ def test_pass_scenario_golden(tmp_path: Path) -> None:
     runner.enqueue("judge", _judge(Verdict.PASS))
 
     descriptor = descriptor_from_options(_options(), orchestration_id=_ORCHESTRATION_ID)
-    with patch("vibesys.loops.profile_multi.session.run_attribution", new=_no_attribution()):
+    with patch("vibesys.loops.multi.session.run_attribution", new=_no_attribution()):
         run = run_scripted(
             tmp_path,
             orchestration_id=_ORCHESTRATION_ID,
@@ -182,7 +182,7 @@ def test_retry_then_pass_scenario_golden(tmp_path: Path) -> None:
     )
 
     descriptor = descriptor_from_options(_options(), orchestration_id=_ORCHESTRATION_ID)
-    with patch("vibesys.loops.profile_multi.session.run_attribution", new=_no_attribution()):
+    with patch("vibesys.loops.multi.session.run_attribution", new=_no_attribution()):
         run = run_scripted(
             tmp_path,
             orchestration_id=_ORCHESTRATION_ID,
@@ -237,7 +237,7 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
 
     descriptor = descriptor_from_options(_options(), orchestration_id=_ORCHESTRATION_ID)
     with (
-        patch("vibesys.loops.profile_multi.session.run_attribution", new=_no_attribution()),
+        patch("vibesys.loops.multi.session.run_attribution", new=_no_attribution()),
         patch(
             "vibesys.orchestration.gates.run_accuracy_gate",
             side_effect=_scripted_accuracy_gate(passed=True),
@@ -289,7 +289,7 @@ def test_profile_scenario_golden(tmp_path: Path) -> None:
     )
 
     descriptor = descriptor_from_options(_options(), orchestration_id=_ORCHESTRATION_ID)
-    with patch("vibesys.loops.profile_multi.session.run_attribution", new=attribution):
+    with patch("vibesys.loops.multi.session.run_attribution", new=attribution):
         run = run_scripted(
             tmp_path,
             orchestration_id=_ORCHESTRATION_ID,

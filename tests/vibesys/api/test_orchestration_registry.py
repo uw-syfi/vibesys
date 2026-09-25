@@ -24,11 +24,15 @@ from vibesys.context import RunSetup
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
 from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
-from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
-from vibesys.loops.profile_multi.orchestration import ProfileGuidedMultiAgentOrchestrator
-from vibesys.loops.profile_single.orchestration import ProfileGuidedSingleAgentOrchestrator
+from vibesys.loops.multi.orchestration import (
+    MultiAgentOrchestrator,
+    ProfileGuidedMultiAgentOrchestrator,
+)
 from vibesys.loops.registry import built_in_orchestrations
-from vibesys.loops.single.orchestration import SingleAgentOrchestrator
+from vibesys.loops.single.orchestration import (
+    ProfileGuidedSingleAgentOrchestrator,
+    SingleAgentOrchestrator,
+)
 from vs_project.api import OrchestrationDescriptor, Project
 
 if TYPE_CHECKING:

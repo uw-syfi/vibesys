@@ -1,4 +1,10 @@
-"""Validated, versioned options for the four built-in agent orchestrators."""
+"""Validated, versioned options for the four built-in agent orchestrators.
+
+# TODO(stack PR 09): remove. Superseded by ``vibesys.loops.agent_options``;
+# kept only because ``tests/vibesys/api/test_chat_tools_server.py`` still
+# imports this old path, and stack PR 09 migrates
+# ``vibesys.api.chat_tools_server`` (that test's last caller).
+"""
 
 from __future__ import annotations
 

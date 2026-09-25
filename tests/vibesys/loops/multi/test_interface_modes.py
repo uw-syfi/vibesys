@@ -8,20 +8,23 @@ artifact requirements.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.constants import DomainName
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.errors import ConfigurationError
+from vibesys.errors import ConfigurationError, UnsupportedProfilerError
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
-from vibesys.loops.multi.turns import MultiAgentTurns
-from vibesys.profilers import ProfilerDefinition, ProfilerKind
+from vibesys.profilers import (
+    ProfilerDefinition,
+    ProfilerKind,
+    profiler_definition,
+    require_profiler_kind,
+)
 from vibesys.prompts import PROMPTS_DIR, render_template
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "multi"
@@ -31,11 +34,18 @@ _SINGLE_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "single"
 def _effective_profiler_definition(
     kind: ProfilerKind, *, supports_torch_profiler: bool = False
 ) -> ProfilerDefinition | None:
-    """Exercise the strategy's resolved-profiler guard without opening agents."""
-    turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
-    turns.ctx = SimpleNamespace(environment=SimpleNamespace(profiler_kind=kind))
-    turns.domain = SimpleNamespace(supports_torch_profiler=supports_torch_profiler)
-    return turns._profiler()  # noqa: SLF001  # validate the strategy's profiler guard
+    """Exercise the same resolved-profiler guard ``MultiAgentTurns._profiler``
+    applies (``require_profiler_kind`` + domain torch-support check), through
+    the public ``vibesys.profilers`` functions it composes, rather than
+    reaching into the strategy's private method.
+    """
+    resolved = require_profiler_kind(kind)
+    if resolved is ProfilerKind.NONE:
+        return None
+    definition = profiler_definition(resolved)
+    if definition.requires_domain_torch_support and not supports_torch_profiler:
+        raise UnsupportedProfilerError
+    return definition
 
 
 def _profiler_prompt_template(

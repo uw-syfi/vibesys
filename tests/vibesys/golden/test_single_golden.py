@@ -41,7 +41,6 @@ from tests.vibesys.golden.helpers import (
     read_events,
 )
 
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.evaluators.gates import (
     AccuracyGateResult,
     GateKind,
@@ -49,9 +48,13 @@ from vibesys.evaluators.gates import (
     emit_gate_started,
 )
 from vibesys.evaluators.metrics import MetricSpace
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.single.orchestration import SingleAgentOrchestrator
 from vibesys.roles.common import Verdict
 from vibesys.roles.single_agent import SingleAgentRoundResponse
+from vibesys.schemas import (
+    CandidateDisposition,
+)
 from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api.testing import FakeAgentClient
 
@@ -101,6 +104,7 @@ def _combined(
         bottlenecks="prefill launch overhead dominates at low batch sizes",
         suggestions="batch decode requests next",
         profile_analysis="ran the local checks",
+        candidate_disposition=CandidateDisposition.UNASSESSED,
     )
 
 
@@ -206,9 +210,9 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
 
 
 def test_timeout_scenario_golden(tmp_path: Path) -> None:
-    """The combined turn times out: single/turns.py catches
-    ``subprocess.TimeoutExpired`` and synthesizes a FAIL
-    ``SingleAgentRoundResponse`` instead of propagating the exception.
+    """The combined turn times out: post-fix behavior at HEAD synthesizes a
+    FAIL ``SingleAgentRoundResponse`` (``single/turns.py`` catches
+    ``subprocess.TimeoutExpired``) instead of propagating the exception.
     """
     runner = FakeAgentClient(backend_name="stub")
     runner.enqueue("orchestrator", _plan())

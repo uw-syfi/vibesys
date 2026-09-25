@@ -438,6 +438,7 @@ def test_torch_profiler_remote_capture_is_provider_neutral():  # noqa: ANN201  #
         "domain_profiler": "",
         "profiler_support_name": "torch_profiler",
         "profiler_mcp_name": "vibesys-torch-profiler",
+        "profiler_campaign_context": "",
     }
 
     local = render_template(

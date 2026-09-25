@@ -7,40 +7,37 @@ from typing import Literal
 
 import pytest
 
-from vibesys.agent_run import issue_board
-from vibesys.agent_run.evidence import (
-    _detect_plateau,
-    _pareto_archive_conflict,
-    _pareto_archive_dominators,
-    _pareto_archive_summary,
-    _pareto_frontier_records,
-    _provisional_candidates_since_official,
-    _select_final_candidate,
-    _terminal_workspace_notice,
-    _trusted_candidate_records,
-)
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.evaluators.validation_recipe import (
     ValidationRecipe,
     ValidationRecipeArtifact,
 )
-from vibesys.loops.multi.decisions import (
-    candidate_evidence_is_fresh as _candidate_evidence_is_fresh,
-)
-from vibesys.loops.multi.decisions import official_evaluation_reason as _official_evaluation_reason
-from vibesys.loops.multi.decisions import review_due as _review_due
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
+from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.prompts import PROMPTS_DIR
+from vibesys.prompts.contexts import display_path
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.roles.judge import JudgeResponse
 from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.roles.profiler import ProfilerSummary
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
 )
-from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
+from vibesys.search.hypothesis import cadence as _cadence
+from vibesys.search.hypothesis.transitions import (
+    detect_plateau,
+    pareto_archive_conflict,
+    pareto_archive_dominators,
+    pareto_archive_summary,
+    pareto_frontier_records,
+    provisional_candidates_since_official,
+    select_final_candidate,
+    terminal_workspace_notice,
+    trusted_candidate_records,
+)
 from vs_loop_state.api import RoundRecord
 
 _THROUGHPUT_LATENCY = MetricSpace(
@@ -49,6 +46,52 @@ _THROUGHPUT_LATENCY = MetricSpace(
         Objective(name="latency", direction="min"),
     )
 )
+
+
+def _official_evaluation_reason(  # noqa: PLR0913
+    *,
+    records: list[RoundRecord],
+    round_number: int,
+    max_rounds: int,
+    official_eval_every: int,
+    requested: bool,
+    candidate_ready: bool,
+) -> str | None:
+    search = HypothesisSearch(
+        HypothesisConfig(max_rounds=max_rounds, official_eval_every=official_eval_every)
+    )
+    return search.official_due(
+        records=records,
+        round_number=round_number,
+        requested=requested,
+        candidate_ready=candidate_ready,
+    )
+
+
+def _review_due(
+    *,
+    round_number: int,
+    max_rounds: int,
+    judge_every: int,
+    outcome: HypothesisOutcome,
+    candidate_evidence_fresh: bool = False,
+) -> bool:
+    search = HypothesisSearch(HypothesisConfig(max_rounds=max_rounds, judge_every=judge_every))
+    return search.review_due(
+        round_number=round_number,
+        outcome=outcome,
+        candidate_evidence_is_fresh=candidate_evidence_fresh,
+    )
+
+
+def _candidate_evidence_is_fresh(
+    implementation: ImplementerResponse, records: list[RoundRecord]
+) -> bool:
+    return _cadence.candidate_evidence_fresh(
+        candidate_metrics=implementation.candidate_metrics,
+        candidate_evaluation_artifact=implementation.candidate_evaluation_artifact,
+        records=records,
+    )
 
 
 def test_orchestration_descriptor_contains_only_policy_settings() -> None:
@@ -108,7 +151,7 @@ def test_validation_recipe_artifact_rejects_invented_top_level_shape():  # noqa:
 def test_issue_board_publishes_authoritative_validation_recipe_schema(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress"
 
-    path = issue_board.write_validation_recipe_schema(progress)
+    path = artifacts.write_validation_recipe_schema(progress)
     schema = json.loads(path.read_text())
 
     assert path == progress / "validation" / "recipe-schema.json"
@@ -142,7 +185,7 @@ def test_official_evaluation_cadence_counts_candidate_checkpoints_not_rounds(): 
         RoundRecord(4, "d", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
     ]
 
-    assert _provisional_candidates_since_official(records) == 2
+    assert provisional_candidates_since_official(records) == 2
     assert (
         _official_evaluation_reason(
             records=records,
@@ -246,7 +289,7 @@ def test_official_evaluation_cadence_counts_reviewed_frontier_tradeoff():  # noq
         )
     ]
 
-    assert _provisional_candidates_since_official(records) == 1
+    assert provisional_candidates_since_official(records) == 1
 
 
 def test_typed_unknown_retention_is_not_trusted_as_pareto_state():  # noqa: ANN201  # tracked: #288
@@ -266,7 +309,7 @@ def test_typed_unknown_retention_is_not_trusted_as_pareto_state():  # noqa: ANN2
         candidate_retained=None,
     )
 
-    assert _pareto_frontier_records([record], _THROUGHPUT_LATENCY) == []
+    assert pareto_frontier_records([record], _THROUGHPUT_LATENCY) == []
 
 
 def test_noise_aware_dominance_preserves_sub_noise_alternatives():  # noqa: ANN201  # tracked: #288
@@ -302,7 +345,7 @@ def test_pareto_frontier_keeps_throughput_latency_tradeoff_and_drops_dominated_p
     throughput_parent = candidate(2, 140.0, 100.0)
     dominated = candidate(3, 90.0, 110.0)
 
-    frontier = _pareto_frontier_records(
+    frontier = pareto_frontier_records(
         [latency_parent, throughput_parent, dominated],
         _THROUGHPUT_LATENCY,
     )
@@ -322,7 +365,7 @@ def test_live_archive_rejects_stale_frontier_claim_for_dominated_candidate():  #
         candidate_metrics={"throughput": 8795.8, "latency": 7724.0},
     )
 
-    conflict = _pareto_archive_conflict(
+    conflict = pareto_archive_conflict(
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER,
         candidate_metrics={"throughput": 7258.5, "latency": 9601.6},
         records=[trusted],
@@ -347,7 +390,7 @@ def test_live_archive_preserves_real_throughput_latency_tradeoff():  # noqa: ANN
     )
 
     assert (
-        _pareto_archive_conflict(
+        pareto_archive_conflict(
             candidate_disposition=CandidateDisposition.PARETO_FRONTIER,
             candidate_metrics={"throughput": 140.0, "latency": 100.0},
             records=[trusted],
@@ -384,7 +427,7 @@ def test_pareto_archive_distinguishes_trusted_and_pending_candidates():  # noqa:
         candidate_retention_reason="higher-throughput tradeoff",
     )
 
-    summary = _pareto_archive_summary([trusted, pending], _THROUGHPUT_LATENCY)
+    summary = pareto_archive_summary([trusted, pending], _THROUGHPUT_LATENCY)
 
     assert "Trusted frontier parents" in summary
     assert "round 49" in summary
@@ -419,8 +462,8 @@ def test_pareto_archive_summary_bounds_pending_claims_with_an_omission_notice():
         for round_number in range(1, 11)
     ]
 
-    summary = _pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
-    assert summary == _pareto_archive_summary(list(reversed(pending_records)), _THROUGHPUT_LATENCY)
+    summary = pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
+    assert summary == pareto_archive_summary(list(reversed(pending_records)), _THROUGHPUT_LATENCY)
 
     for record in pending_records[-8:]:
         assert record.commit is not None
@@ -459,7 +502,7 @@ def test_pareto_archive_summary_omission_notice_agrees_with_its_own_count():  # 
         for round_number in range(1, 10)
     ]
 
-    summary = _pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
+    summary = pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
     assert "1 older untrusted claim omitted from this context (round 1)" in summary
     assert "claims omitted" not in summary
     assert "rounds 1-1" not in summary
@@ -484,7 +527,7 @@ def test_pareto_archive_summary_lists_all_pending_claims_within_the_limit():  # 
         for round_number in range(1, 9)
     ]
 
-    summary = _pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
+    summary = pareto_archive_summary(pending_records, _THROUGHPUT_LATENCY)
 
     for record in pending_records:
         assert record.commit is not None
@@ -528,7 +571,7 @@ def test_implementer_report_cannot_seed_archive_or_dominate_candidates():  # noq
 
     A reviewed, accuracy-passing implementer self-report that persisted
     ``candidate_retained=True`` must not be selected by
-    ``_trusted_candidate_records`` and must not count as a dominator in a later
+    ``trusted_candidate_records`` and must not count as a dominator in a later
     Pareto decision. A framework-provenance row of the same shape still does.
     """
     space = MetricSpace(objectives=(Objective(name="accuracy", direction="max"),))
@@ -536,13 +579,13 @@ def test_implementer_report_cannot_seed_archive_or_dominate_candidates():  # noq
     framework = _accuracy_row(2, 0.95, provenance="framework")
 
     # Trusted Pareto-parent selection is gated on framework provenance.
-    assert _trusted_candidate_records([implementer], space) == []
-    assert _trusted_candidate_records([framework], space) == [framework]
+    assert trusted_candidate_records([implementer], space) == []
+    assert trusted_candidate_records([framework], space) == [framework]
     # A weaker later candidate is only dominated by the trusted framework row,
     # never by the untrusted implementer self-report.
     weaker = {"accuracy": 0.80}
-    assert _pareto_archive_dominators(weaker, [implementer], space) == []
-    assert _pareto_archive_dominators(weaker, [framework], space) == [framework]
+    assert pareto_archive_dominators(weaker, [implementer], space) == []
+    assert pareto_archive_dominators(weaker, [framework], space) == [framework]
 
 
 def _official_record(  # noqa: PLR0913  # test record builder
@@ -581,7 +624,7 @@ def test_final_candidate_is_noise_aware_and_rejects_untrusted_records():  # noqa
     failed = _official_record(5, "e" * 40, 700.0, passed=False)
 
     assert (
-        _select_final_candidate([older, newer_within_noise, self_reported, rejected, failed], space)
+        select_final_candidate([older, newer_within_noise, self_reported, rejected, failed], space)
         is newer_within_noise
     )
 
@@ -605,7 +648,7 @@ def test_final_pareto_candidate_requires_canonical_official_metrics():  # noqa: 
         candidate_retained=True,
     )
 
-    assert _select_final_candidate([official, provisional], _THROUGHPUT_LATENCY) is official
+    assert select_final_candidate([official, provisional], _THROUGHPUT_LATENCY) is official
 
 
 def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: ANN201  # tracked: #288
@@ -624,7 +667,7 @@ def test_official_evaluation_cadence_resets_at_verified_checkpoint():  # noqa: A
         RoundRecord(2, "b", None, None, True, reviewed=True, hypothesis_outcome="proven"),  # noqa: FBT003  # tracked: #288
     ]
 
-    assert _provisional_candidates_since_official(records) == 1
+    assert provisional_candidates_since_official(records) == 1
     assert (
         _official_evaluation_reason(
             records=records,
@@ -664,7 +707,7 @@ def test_terminal_workspace_notice_points_designer_to_hypothesis_parent():  # no
         ),
     ]
 
-    notice = _terminal_workspace_notice(records)
+    notice = terminal_workspace_notice(records)
 
     assert notice is not None
     assert "workspace edits are still present" in notice
@@ -686,7 +729,7 @@ def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit():  # noqa: 
         candidate_metrics={"throughput": 6827.7, "latency": 3628.7},
     )
 
-    notice = _terminal_workspace_notice([record])
+    notice = terminal_workspace_notice([record])
 
     assert notice is not None
     assert "Preserve commit" in notice
@@ -732,7 +775,7 @@ def test_terminal_workspace_notice_preserves_credible_continuation_checkpoint():
         ),
     ]
 
-    notice = _terminal_workspace_notice(records)
+    notice = terminal_workspace_notice(records)
 
     assert notice is not None
     assert "recorded pre-hypothesis parent is round 28" in notice
@@ -779,7 +822,7 @@ def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposa
         ),
     ]
 
-    notice = _terminal_workspace_notice(records)
+    notice = terminal_workspace_notice(records)
 
     assert notice is not None
     assert "recorded pre-hypothesis parent is round 60" in notice
@@ -810,7 +853,7 @@ def test_progress_writes_orchestrator_plan(tmp_path):  # noqa: ANN001, ANN201  #
         expected_effect="Forecast 1.3x to 1.6x throughput",
         minimum_acceptance_criteria="Retain at >=1.15x with no latency regression",
     )
-    issue_board.append_orchestrator_plan(progress, 1, plan)
+    progress_log.write(progress, progress_log.render_orchestrator_plan(1, plan))
     text = progress.read_text()
     assert "Round 1 — Orchestrator (plan)" in text
     assert "Build FastAPI server" in text
@@ -837,8 +880,10 @@ def test_progress_writes_typed_role_handoffs_atomically(tmp_path, progress_name,
         evidence="Untrusted implementer claim.",
     )
 
-    plan_path = issue_board.write_plan_artifact(progress, 12, plan)
-    evidence_path = issue_board.write_implementer_artifact(progress, 12, 2, implementation)
+    plan_path = artifacts.write_model(artifacts.plan_artifact_path(progress, 12), plan)
+    evidence_path = artifacts.write_model(
+        artifacts.implementer_artifact_path(progress, 12, 2), implementation
+    )
 
     assert plan_path == tmp_path / artifact_root / "plans" / "round-0012.json"
     assert evidence_path == (
@@ -855,12 +900,16 @@ def test_persisted_implementer_attempts_define_resume_boundary(tmp_path):  # noq
         summary="Retained the first target run.",
         expected_behavior="A resumed round must not overwrite it.",
     )
-    first = issue_board.write_implementer_artifact(progress, 8, 1, implementation)
-    second = issue_board.write_implementer_artifact(progress, 8, 2, implementation)
+    first = artifacts.write_model(
+        artifacts.implementer_artifact_path(progress, 8, 1), implementation
+    )
+    second = artifacts.write_model(
+        artifacts.implementer_artifact_path(progress, 8, 2), implementation
+    )
 
-    assert issue_board.implementer_artifact_paths(progress, 8) == [first, second]
-    assert issue_board.next_implementer_attempt(progress, 8) == 3
-    assert issue_board.next_implementer_attempt(progress, 9) == 1
+    assert artifacts.implementer_artifact_paths(progress, 8) == [first, second]
+    assert artifacts.next_implementer_attempt(progress, 8) == 3
+    assert artifacts.next_implementer_attempt(progress, 9) == 1
 
 
 def test_implementer_start_marker_advances_the_resume_boundary(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -869,26 +918,28 @@ def test_implementer_start_marker_advances_the_resume_boundary(tmp_path):  # noq
         summary="Recorded after the marker.",
         expected_behavior="A killed attempt must not be replayed under its label.",
     )
-    marker = issue_board.write_implementer_start_marker(progress, 8, 1)
+    marker = artifacts.write_implementer_start_marker(progress, 8, 1)
 
     assert marker == (
         tmp_path / "progress" / "evidence" / "round-0008-attempt-01-implementer.started.json"
     )
     # An attempt killed mid-invoke leaves the marker and no completed artifact,
     # yet the round must resume on attempt 2.
-    assert issue_board.implementer_artifact_paths(progress, 8) == []
-    assert issue_board.next_implementer_attempt(progress, 8) == 2
+    assert artifacts.implementer_artifact_paths(progress, 8) == []
+    assert artifacts.next_implementer_attempt(progress, 8) == 2
 
-    completed = issue_board.write_implementer_artifact(progress, 8, 1, implementation)
+    completed = artifacts.write_model(
+        artifacts.implementer_artifact_path(progress, 8, 1), implementation
+    )
 
     # The marker and its own completed artifact name one attempt, not two.
-    assert issue_board.implementer_artifact_paths(progress, 8) == [completed]
-    assert issue_board.next_implementer_attempt(progress, 8) == 2
+    assert artifacts.implementer_artifact_paths(progress, 8) == [completed]
+    assert artifacts.next_implementer_attempt(progress, 8) == 2
 
-    issue_board.write_implementer_start_marker(progress, 9, 1)
+    artifacts.write_implementer_start_marker(progress, 9, 1)
 
-    assert issue_board.next_implementer_attempt(progress, 8) == 2
-    assert issue_board.next_implementer_attempt(progress, 9) == 2
+    assert artifacts.next_implementer_attempt(progress, 8) == 2
+    assert artifacts.next_implementer_attempt(progress, 9) == 2
 
 
 def test_agent_memory_paths_distinguish_files_from_directories(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -898,38 +949,44 @@ def test_agent_memory_paths_distinguish_files_from_directories(tmp_path):  # noq
     artifact.parent.mkdir(parents=True)
     artifact.write_text("{}\n")
 
-    assert issue_board.display_path(directory, workspace) == "progress/"
-    assert issue_board.display_path(artifact, workspace) == "progress/plans/round-0012.json"
+    assert display_path(directory, workspace) == "progress/"
+    assert display_path(artifact, workspace) == "progress/plans/round-0012.json"
 
 
 def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress"
-    issue_board.append_pre_round_decision(
+    progress_log.write(
         progress,
-        7,
-        PreRoundDecision(
-            need_profile=True,
-            profile_focus="stale focus",
-            reasoning="stale decision",
+        progress_log.render_pre_round_decision(
+            7,
+            PreRoundDecision(
+                need_profile=True,
+                profile_focus="stale focus",
+                reasoning="stale decision",
+            ),
         ),
     )
-    issue_board.append_orchestrator_plan(
+    progress_log.write(
         progress,
-        7,
-        OrchestratorPlan(
-            task="Keep this plan",
-            pass_criteria="plan remains",  # noqa: S106  # tracked: #288
-            reasoning="retained plan",
+        progress_log.render_orchestrator_plan(
+            7,
+            OrchestratorPlan(
+                task="Keep this plan",
+                pass_criteria="plan remains",  # noqa: S106  # tracked: #288
+                reasoning="retained plan",
+            ),
         ),
     )
 
-    issue_board.append_pre_round_decision(
+    progress_log.write(
         progress,
-        7,
-        PreRoundDecision(
-            need_profile=False,
-            profile_focus="",
-            reasoning="resumed decision",
+        progress_log.render_pre_round_decision(
+            7,
+            PreRoundDecision(
+                need_profile=False,
+                profile_focus="",
+                reasoning="resumed decision",
+            ),
         ),
     )
 
@@ -943,18 +1000,20 @@ def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path)
 
 def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress"
-    issue_board.append_hypothesis_continuation(
+    progress_log.write(
         progress,
-        7,
-        plan=OrchestratorPlan(
-            hypothesis_id="transport",
-            hypothesis="remove queue fanout",
-            task="stale initial implementation task",
-            pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
-            reasoning="continue interrupted work",
+        progress_log.render_hypothesis_continuation(
+            7,
+            plan=OrchestratorPlan(
+                hypothesis_id="transport",
+                hypothesis="remove queue fanout",
+                task="stale initial implementation task",
+                pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
+                reasoning="continue interrupted work",
+            ),
+            started_round=6,
+            continuation_step="recover exact source",
         ),
-        started_round=6,
-        continuation_step="recover exact source",
     )
     round_file = progress / "round-0007.md"
     with round_file.open("a") as document:
@@ -963,18 +1022,20 @@ def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # 
             "Exact measured bytes are retained at `recovery/source.py`.\n\n"
         )
 
-    issue_board.append_hypothesis_continuation(
+    progress_log.write(
         progress,
-        7,
-        plan=OrchestratorPlan(
-            hypothesis_id="transport",
-            hypothesis="remove queue fanout",
-            task="stale initial implementation task",
-            pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
-            reasoning="resume interrupted work",
+        progress_log.render_hypothesis_continuation(
+            7,
+            plan=OrchestratorPlan(
+                hypothesis_id="transport",
+                hypothesis="remove queue fanout",
+                task="stale initial implementation task",
+                pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
+                reasoning="resume interrupted work",
+            ),
+            started_round=6,
+            continuation_step="verify recovered source",
         ),
-        started_round=6,
-        continuation_step="verify recovered source",
     )
 
     text = round_file.read_text()
@@ -989,23 +1050,23 @@ def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # 
 
 def test_progress_preserves_distinct_attempts_but_replaces_same_attempt(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress.md"
-    issue_board.append_implementer(
+    progress_log.write(
         progress,
-        3,
-        1,
-        ImplementerResponse(summary="interrupted", expected_behavior="old"),
+        progress_log.render_implementer(
+            3, 1, ImplementerResponse(summary="interrupted", expected_behavior="old")
+        ),
     )
-    issue_board.append_implementer(
+    progress_log.write(
         progress,
-        3,
-        1,
-        ImplementerResponse(summary="resumed", expected_behavior="new"),
+        progress_log.render_implementer(
+            3, 1, ImplementerResponse(summary="resumed", expected_behavior="new")
+        ),
     )
-    issue_board.append_implementer(
+    progress_log.write(
         progress,
-        3,
-        2,
-        ImplementerResponse(summary="retry", expected_behavior="newer"),
+        progress_log.render_implementer(
+            3, 2, ImplementerResponse(summary="retry", expected_behavior="newer")
+        ),
     )
 
     text = progress.read_text()
@@ -1025,7 +1086,7 @@ def test_progress_writes_profiler_summary_with_perf(tmp_path):  # noqa: ANN001, 
         perf_metric=8.2,
         perf_unit="req/s",
     )
-    issue_board.append_profiler_summary(progress, 2, summary)
+    progress_log.write(progress, progress_log.render_profiler_summary(2, summary))
     text = progress.read_text()
     assert "Round 2 — Profiler" in text
     assert "perf_metric**: 8.2 req/s" in text
@@ -1034,17 +1095,17 @@ def test_progress_writes_profiler_summary_with_perf(tmp_path):  # noqa: ANN001, 
 
 def test_progress_append_implementer_and_judge(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress.md"
-    issue_board.append_implementer(
+    progress_log.write(
         progress,
-        3,
-        1,
-        ImplementerResponse(summary="added cuda graph", expected_behavior="replay works"),
+        progress_log.render_implementer(
+            3, 1, ImplementerResponse(summary="added cuda graph", expected_behavior="replay works")
+        ),
     )
-    issue_board.append_judge(
+    progress_log.write(
         progress,
-        3,
-        1,
-        JudgeResponse(analysis="good", feedback="", verdict=Verdict.PASS),
+        progress_log.render_judge(
+            3, 1, JudgeResponse(analysis="good", feedback="", verdict=Verdict.PASS)
+        ),
     )
     text = progress.read_text()
     assert "Round 3 — Implementer (attempt 1)" in text
@@ -1053,34 +1114,36 @@ def test_progress_append_implementer_and_judge(tmp_path):  # noqa: ANN001, ANN20
 
 
 def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    roadmap, progress = issue_board.resolve_paths(tmp_path, "directories")
-    issue_board.ensure_roadmap_file(roadmap)
+    roadmap, progress = memory.resolve_paths(tmp_path, "directories")
+    memory.ensure_roadmap_file(roadmap)
     for round_number in range(1, 16):
-        issue_board.append_pre_round_decision(
+        progress_log.write(
             progress,
-            round_number,
-            PreRoundDecision(
-                need_profile=False,
-                profile_focus="",
-                reasoning=f"decision-{round_number}",
+            progress_log.render_pre_round_decision(
+                round_number,
+                PreRoundDecision(
+                    need_profile=False,
+                    profile_focus="",
+                    reasoning=f"decision-{round_number}",
+                ),
             ),
         )
 
     assert (roadmap / "index.md").exists()
     assert (progress / "round-0001.md").exists()
     assert (progress / "round-0015.md").exists()
-    recent = issue_board.read_progress(progress)
+    recent = memory.read_progress(progress)
     assert "## Round 11 —" not in recent
     assert "## Round 12 —" in recent
     assert "## Round 15 —" in recent
 
 
 def test_ensure_roadmap_seeds_header_when_missing(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.agent_run import issue_board  # noqa: PLC0415  # tracked: #288
+    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
 
     p = tmp_path / "roadmap.md"
     assert not p.exists()
-    issue_board.ensure_roadmap_file(p)
+    memory.ensure_roadmap_file(p)
     assert p.exists()
     text = p.read_text()
     # The seed must scaffold the four sections so the orchestrator's first
@@ -1092,27 +1155,27 @@ def test_ensure_roadmap_seeds_header_when_missing(tmp_path):  # noqa: ANN001, AN
 
 
 def test_ensure_roadmap_does_not_overwrite_existing(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.agent_run import issue_board  # noqa: PLC0415  # tracked: #288
+    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
 
     p = tmp_path / "roadmap.md"
     p.write_text("# my custom plan\n")
-    issue_board.ensure_roadmap_file(p)
+    memory.ensure_roadmap_file(p)
     assert p.read_text() == "# my custom plan\n"
 
 
 def test_read_roadmap_returns_text(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.agent_run import issue_board  # noqa: PLC0415  # tracked: #288
+    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
 
     p = tmp_path / "roadmap.md"
     p.write_text("hello\n")
-    assert issue_board.read_roadmap(p) == "hello\n"
+    assert memory.read_roadmap(p) == "hello\n"
 
 
 def test_read_roadmap_missing_returns_empty(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.agent_run import issue_board  # noqa: PLC0415  # tracked: #288
+    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
 
     p = tmp_path / "nope.md"
-    assert issue_board.read_roadmap(p) == ""
+    assert memory.read_roadmap(p) == ""
 
 
 def test_outer_prompts_reference_memory_paths_without_embedding_contents():  # noqa: ANN201  # tracked: #288
@@ -1148,7 +1211,7 @@ def test_outer_prompts_reference_memory_paths_without_embedding_contents():  # n
 def test_pareto_archive_is_materialized_beside_progress(tmp_path, progress_name, expected):  # noqa: ANN001, ANN201  # tracked: #288
     progress_path = tmp_path / progress_name
 
-    document = issue_board.write_pareto_archive(progress_path, "Trusted frontier: round 4")
+    document = memory.write_pareto_archive(progress_path, "Trusted frontier: round 4")
 
     assert document == tmp_path / expected
     assert document.read_text() == "# Pareto frontier\n\nTrusted frontier: round 4\n"
@@ -1171,14 +1234,14 @@ def test_detect_plateau_returns_none_when_too_few_rounds():  # noqa: ANN201  # t
 
     # Two rounds is below the 3-round minimum streak.
     records = [_record(1, 40.0), _record(2, 41.0)]
-    assert _detect_plateau(records) is None
+    assert detect_plateau(records) is None
 
 
 def test_detect_plateau_fires_on_flat_perf_streak():  # noqa: ANN201  # tracked: #288
 
     # 41.0 vs 41.5 is ~1.2% spread — well under the 5% threshold.
     records = [_record(1, 41.0), _record(2, 41.5), _record(3, 41.2)]
-    warning = _detect_plateau(records)
+    warning = detect_plateau(records)
     assert warning is not None
     assert "rounds 1–3" in warning  # noqa: RUF001  # tracked: #288
     assert "tok/s" in warning
@@ -1188,7 +1251,7 @@ def test_detect_plateau_skips_when_perf_diverges():  # noqa: ANN201  # tracked: 
 
     # 41.0 vs 116.0 is ~64% spread — clearly off-plateau.
     records = [_record(1, 41.0), _record(2, 116.0), _record(3, 114.5)]
-    assert _detect_plateau(records) is None
+    assert detect_plateau(records) is None
 
 
 def test_detect_plateau_ignores_rounds_without_perf():  # noqa: ANN201  # tracked: #288
@@ -1201,7 +1264,7 @@ def test_detect_plateau_ignores_rounds_without_perf():  # noqa: ANN201  # tracke
         _record(3, 41.3),
         _record(4, 41.1),
     ]
-    warning = _detect_plateau(records)
+    warning = detect_plateau(records)
     assert warning is not None
     assert "rounds 1–4" in warning  # noqa: RUF001  # tracked: #288
 
@@ -1218,7 +1281,7 @@ def test_detect_plateau_ignores_failed_official_measurements():  # noqa: ANN201 
         _record(3, 41.3),
         _record(4, 41.1),
     ]
-    warning = _detect_plateau(records)
+    warning = detect_plateau(records)
     assert warning is not None
     assert "rounds 1–4" in warning  # noqa: RUF001  # tracked: #288
 
@@ -1227,7 +1290,7 @@ def test_failed_official_measurement_cannot_complete_plateau_streak():  # noqa: 
 
     failed = _record(3, 41.1)
     failed.passed = False
-    assert _detect_plateau([_record(1, 41.0), _record(2, 41.2), failed]) is None
+    assert detect_plateau([_record(1, 41.0), _record(2, 41.2), failed]) is None
 
 
 def test_detect_plateau_streak_must_be_recent():  # noqa: ANN201  # tracked: #288
@@ -1241,4 +1304,4 @@ def test_detect_plateau_streak_must_be_recent():  # noqa: ANN201  # tracked: #28
         _record(4, 116.0),  # break
     ]
     # By round 4, the recent streak (rounds 2,3,4) spans 41.2-116.0 → no plateau.
-    assert _detect_plateau(records) is None
+    assert detect_plateau(records) is None
