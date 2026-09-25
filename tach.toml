@@ -146,6 +146,11 @@ path = "vibesys.api.evolve"
 depends_on = ["vibesys.loops.evolve"]
 
 [[modules]]
+# The owned fake/test-double surface for core; see the module docstring.
+path = "vibesys.api.testing"
+depends_on = ["vibesys.backends"]
+
+[[modules]]
 path = "vibesys.api.contracts"
 depends_on = ["vs_agent", "vibesys", "vs_project", "vibesys.orchestration.environment", "vibesys.orchestration.request", "vibesys.orchestration.view", "vibesys.evaluators"]
 
@@ -359,11 +364,11 @@ depends_on = [ "vs_project", "vibesys.orchestration.view", "vibesys.orchestratio
 
 [[modules]]
 path = "vibesys.orchestration.runner"
-depends_on = ["vibesys.orchestration.contracts", "vibesys.run", "vibesys.orchestration.runtime", "vibesys.orchestration.request", "vibesys.orchestration.environment"]
+depends_on = ["vibesys.orchestration.contracts", "vibesys.run", "vibesys.orchestration.runtime", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.backends", "vs_agent"]
 
 [[modules]]
 path = "vibesys.orchestration.runtime"
-depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.runtime", "vibesys.run", "vibesys.render", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.orchestration.agents", "vibesys.orchestration.control", "vibesys.orchestration.gates", "vibesys.orchestration.state", "vibesys.orchestration.workspaces"]
+depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.runtime", "vibesys.run", "vibesys.render", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.orchestration.agents", "vibesys.orchestration.control", "vibesys.orchestration.gates", "vibesys.orchestration.state", "vibesys.orchestration.workspaces", "vibesys.backends"]
 
 [[modules]]
 path = "vibesys.orchestration.agents"

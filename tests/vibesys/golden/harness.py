@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 
+from vibesys.api.testing import FakeComputeBackend
 from vibesys.config import Config, as_config
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.loops.registry import built_in_orchestrations
@@ -24,9 +25,13 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import Project
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
+    from vibesys.backends.base import ComputeBackendImpl
+    from vibesys.constants import ComputeBackend
     from vibesys.orchestration.contracts import Orchestrator
+    from vs_agent.api import AgentClientProtocol
     from vs_agent.api.testing import FakeAgentClient
     from vs_project.api import OrchestrationDescriptor
 
@@ -47,6 +52,12 @@ class _SharedFakeClient:
 
     def close(self) -> None:
         """Leave the shared script open for the other roles."""
+
+
+def _fake_backend_factory(backend: ComputeBackend, **_kwargs: object) -> ComputeBackendImpl:
+    """Adapt ``FakeComputeBackend`` to the ``backends.get`` seam's call shape."""
+    del backend
+    return FakeComputeBackend()
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,13 +111,14 @@ def run_scripted(  # noqa: PLR0913  # tracked: #288
 ) -> ScriptedRun:
     """Run one registered strategy end-to-end with a scripted agent client.
 
-    Patches only the two seams every strategy already needs mocked for a
-    hermetic test: the CUDA local shell sandbox factory (trusted gate commands
-    run through it, so gate scenarios also script ``run_accuracy_gate``) and
-    ``build_agent_client`` (the one true seam between the host and a real
-    agent CLI). Everything else -- git tracking, workspace snapshots,
-    progress-board writes, event recording -- runs for real against
-    ``tmp_path``.
+    Injects fakes through the run's two construction seams instead of
+    patching module attributes: ``backend_factory`` (in place of the CUDA
+    backend and its local shell sandbox; trusted gate commands run through
+    it, so gate scenarios also script ``run_accuracy_gate``) and
+    ``agent_client_factory`` (in place of ``build_agent_client``, the one
+    true seam between the host and a real agent CLI). Everything else --
+    git tracking, workspace snapshots, progress-board writes, event
+    recording -- runs for real against ``tmp_path``.
 
     ``profiler_kind`` defaults to ``NONE``; pass an active kind to reach a
     strategy's profiler role (the profiler agent is never invoked otherwise).
@@ -135,18 +147,16 @@ def run_scripted(  # noqa: PLR0913  # tracked: #288
                 integration,
                 orchestrator_factory(descriptor),
                 projector=projector,
+                agent_client_factory=cast(
+                    "Callable[..., AgentClientProtocol]",
+                    lambda **_kwargs: _SharedFakeClient(runner),
+                ),
+                backend_factory=_fake_backend_factory,
             )
         finally:
             integration.close()
 
-    with (
-        patch("vibesys.backends.cuda.make_local_shell_sandbox"),
-        patch(
-            "vibesys.orchestration.runtime.build_agent_client",
-            side_effect=lambda **_kwargs: _SharedFakeClient(runner),
-        ),
-        patch("vibesys.context.PROJECT_ROOT", tmp_path),
-    ):
+    with patch("vibesys.context.PROJECT_ROOT", tmp_path):
         result = asyncio.run(execute())
 
     projects = [path for path in (tmp_path / "exp_env").iterdir() if path.is_dir()]
