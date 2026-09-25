@@ -36,8 +36,44 @@ When armed, it:
 4. Stops it after ``VIBESYS_TORCH_PROFILE_DURATION_S`` (if set), or when the
    process receives ``SIGUSR2``, or at process exit (``atexit``/``SIGINT``),
    whichever comes first. Stopping **exports the Chrome trace to
-   ``<out_dir>/<pid>.pt.trace.json.gz`` first**, before attempting anything
-   else that could hang (see "Threading and signals" below).
+   ``<out_dir>/<pid>-<window#>.pt.trace.json.gz`` first**, before attempting
+   anything else that could hang (see "Threading and signals" below).
+
+## Repeated windows and warm targets
+
+After exporting, the capture state machine returns to ``idle`` instead of
+staying ``stopped`` permanently: a later ``SIGUSR1`` starts a new window
+(``window#`` increments each time) rather than being silently ignored. This
+is what lets a caller take more than one profiling window against the same
+already-running process (a "warm target"), instead of every capture needing
+its own process lifetime.
+
+``VIBESYS_TORCH_PROFILE_TRIGGER`` selects how windows are driven:
+
+- ``auto`` (default): unchanged from before -- self-arms after
+  ``VIBESYS_TORCH_PROFILE_DELAY_S``, self-stops after
+  ``VIBESYS_TORCH_PROFILE_DURATION_S`` if set. Still only takes the one
+  window an external caller doesn't otherwise control, since nothing but
+  this module ever sends it a second ``SIGUSR1``.
+- ``signal``: installs the same ``SIGUSR1``/``SIGUSR2``/``SIGINT`` handlers
+  but never self-triggers. An external controller (typically
+  ``capture_runtime.start_target`` + repeated
+  ``capture_ops.profile_ops(target=...)`` calls) drives every window's
+  start/stop explicitly by signaling this process directly. This is the
+  mode a warm target is armed with.
+
+Each window's output directory can be pointed at a fresh location via a
+small control-file protocol: before sending ``SIGUSR1``, the controller may
+write the desired output directory (plain UTF-8 text, an optional trailing
+newline) to ``<VIBESYS_TORCH_PROFILE_CONTROL_DIR>/next_window``. The
+``SIGUSR1`` handler consumes (reads, then deletes) that file and uses its
+content for that one window only, falling back to
+``VIBESYS_TORCH_PROFILE_OUT_DIR`` when no control file exists, is empty, or
+can't be read. This lets a warm-target caller route each window's trace to
+its own capture directory instead of piling every window into one shared
+directory. ``VIBESYS_TORCH_PROFILE_CONTROL_DIR`` is optional; omitting it
+(the default) just means every window falls back to the configured
+``VIBESYS_TORCH_PROFILE_OUT_DIR``.
 
 ## Threading and signals
 
@@ -121,7 +157,7 @@ process).
 Each Python process that imports this file (typically inherited via
 ``PYTHONPATH``/environment across a ``subprocess``/``spawn`` boundary — a
 fresh interpreter re-runs site initialization and this module) writes its
-own ``<pid>.pt.trace.json.gz``. A ``fork()``-based worker (no new
+own ``<pid>-<window#>.pt.trace.json.gz`` per window. A ``fork()``-based worker (no new
 interpreter) does not re-run this module at all; that matches CUDA/HIP's own
 fork restrictions and is why serving engines spawn worker processes rather
 than forking them after GPU init.
@@ -147,6 +183,13 @@ _ENV_OUT_DIR = "VIBESYS_TORCH_PROFILE_OUT_DIR"
 _ENV_DELAY_S = "VIBESYS_TORCH_PROFILE_DELAY_S"
 _ENV_DURATION_S = "VIBESYS_TORCH_PROFILE_DURATION_S"
 _ENV_RECORD_SHAPES = "VIBESYS_TORCH_PROFILE_RECORD_SHAPES"
+# See "Repeated windows and warm targets" above.
+_ENV_TRIGGER = "VIBESYS_TORCH_PROFILE_TRIGGER"
+_ENV_CONTROL_DIR = "VIBESYS_TORCH_PROFILE_CONTROL_DIR"
+_TRIGGER_AUTO = "auto"
+_TRIGGER_SIGNAL = "signal"
+_VALID_TRIGGERS = (_TRIGGER_AUTO, _TRIGGER_SIGNAL)
+_CONTROL_NEXT_WINDOW_NAME = "next_window"
 # Not part of the documented capture_ops.py contract: an internal knob so
 # tests can exercise the "bounded wait, never block exit" path in well under
 # a second instead of the real-world default below.
@@ -219,24 +262,48 @@ class _Capture:
         out_dir: Path,
         record_shapes: bool,
         sync_timeout_s: float = _DEFAULT_SYNCHRONIZE_TIMEOUT_S,
+        control_dir: Path | None = None,
     ) -> None:
         self._out_dir = out_dir
         self._record_shapes = record_shapes
         self._sync_timeout_s = sync_timeout_s
+        self._control_dir = control_dir
         self._lock = threading.Lock()
-        self._phase = "idle"  # idle -> running -> stopped
+        self._phase = "idle"  # idle -> running -> idle (see module docstring: repeated windows)
         self._prof = None
+        self._window_index = 0
+        self._active_out_dir: Path | None = None
+
+    def _resolve_window_out_dir(self) -> Path:
+        """Consume the control file naming this window's output dir, if any.
+
+        See the module docstring's "Repeated windows and warm targets"
+        section for the full protocol. Falls back to the module's
+        configured default out_dir when there is no control dir, no control
+        file, an empty file, or the file can't be read -- never raises.
+        """
+        if self._control_dir is None:
+            return self._out_dir
+        control_file = self._control_dir / _CONTROL_NEXT_WINDOW_NAME
+        try:
+            text = control_file.read_text().strip()
+        except OSError:
+            return self._out_dir
+        with contextlib.suppress(OSError):
+            control_file.unlink()
+        return Path(text) if text else self._out_dir
 
     def start(self) -> None:
         _log("SIGUSR1 handler entered (start requested)")
         with self._lock:
             if self._phase != "idle":
                 return
+            out_dir = self._resolve_window_out_dir()
             try:
                 import torch  # noqa: PLC0415
                 from torch.profiler import ProfilerActivity, profile  # noqa: PLC0415
 
-                self._out_dir.mkdir(parents=True, exist_ok=True)
+                out_dir.mkdir(parents=True, exist_ok=True)
                 prof = profile(
                     activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                     record_shapes=self._record_shapes,
@@ -244,39 +311,51 @@ class _Capture:
                 )
                 prof.start()
             except Exception as exc:  # noqa: BLE001  # tracked: #288
-                _log(f"failed to start torch.profiler (continuing without a capture): {exc!r}")
-                self._phase = "stopped"  # never retry after a failed start
+                # self._phase was never touched above, so it is still "idle":
+                # a later SIGUSR1 can retry (e.g. a warm target signaled
+                # before the host program has imported torch yet).
+                _log(
+                    f"failed to start torch.profiler (idle again, next SIGUSR1 may retry): {exc!r}"
+                )
                 return
             self._prof = prof
+            self._active_out_dir = out_dir
+            self._window_index += 1
             self._phase = "running"
-            _log(f"profiling started (record_shapes={self._record_shapes})")
+            _log(
+                f"profiling started (record_shapes={self._record_shapes}, "
+                f"window={self._window_index}, out_dir={out_dir})"
+            )
             _ = torch  # keep the import alive via closure; no further use here
 
     def stop_and_export(self) -> None:
         _log("SIGUSR2/SIGINT/atexit handler entered (stop requested)")
         with self._lock:
             if self._phase != "running" or self._prof is None:
-                self._phase = "stopped"
+                self._phase = "idle"
                 return
             prof = self._prof
+            out_dir = self._active_out_dir or self._out_dir
+            window = self._window_index
             self._prof = None
-            self._phase = "stopped"
+            self._active_out_dir = None
+            self._phase = "idle"  # ready for the next SIGUSR1 window
             try:
                 prof.stop()
             except Exception as exc:  # noqa: BLE001  # tracked: #288
                 _log(f"torch.profiler stop() raised (continuing): {exc!r}")
                 return
-            self._export(prof)
+            self._export(prof, out_dir=out_dir, window=window)
 
-    def _export(self, prof) -> None:  # noqa: ANN001  # tracked: #288
+    def _export(self, prof, *, out_dir: Path, window: int) -> None:  # noqa: ANN001  # tracked: #288
         try:
-            self._out_dir.mkdir(parents=True, exist_ok=True)
+            out_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            _log(f"could not create output dir {self._out_dir}: {exc!r}")
+            _log(f"could not create output dir {out_dir}: {exc!r}")
             return
         pid = os.getpid()
-        raw_path = self._out_dir / f"{pid}.pt.trace.json"
-        gz_path = self._out_dir / f"{pid}.pt.trace.json.gz"
+        raw_path = out_dir / f"{pid}-{window}.pt.trace.json"
+        gz_path = out_dir / f"{pid}-{window}.pt.trace.json.gz"
         try:
             # Export BEFORE anything that could hang (see module docstring):
             # this is the point where the trace becomes durable.
@@ -347,37 +426,60 @@ def _install_chained_handler(sig: signal.Signals, handler) -> None:  # noqa: ANN
     signal.signal(sig, _wrapped)
 
 
-def _arm(capture: _Capture, *, delay_s: float, duration_s: float | None) -> None:
-    """Wait for torch + a visible GPU, then drive start/stop via self-signals."""
+def _arm(capture: _Capture, *, delay_s: float, duration_s: float | None, trigger: str) -> None:
+    """Install signal handlers; self-trigger the first window only in 'auto' mode.
+
+    In ``trigger="signal"`` mode, the same SIGUSR1/SIGUSR2/SIGINT handlers
+    are installed but nothing here ever sends a self-triggered signal -- an
+    external controller (typically ``capture_runtime.start_target`` plus
+    repeated ``capture_ops.profile_ops(target=...)`` calls) drives every
+    window's start/stop explicitly. This is what makes a process armed this
+    way a reusable "warm target" instead of a one-shot delay/duration
+    capture (see the module docstring).
+    """
     stop_event = threading.Event()
 
-    def _watch() -> None:
-        torch_module = _wait_for_torch(stop_event)
-        if torch_module is None:
-            return  # process exiting, or torch never imported
-        if not _gpu_available(torch_module):
-            _log(
-                "torch imported but no GPU visible (torch.cuda.is_available() is false); "
-                "skipping capture for this process"
-            )
-            return
-        if delay_s > 0 and stop_event.wait(delay_s):
-            return
-        _log("sending SIGUSR1 (start)")
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(os.getpid(), signal.SIGUSR1)
-        if duration_s is not None and not stop_event.wait(duration_s):
-            _log("sending SIGUSR2 (stop, duration_s elapsed)")
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(os.getpid(), signal.SIGUSR2)
+    if trigger == _TRIGGER_AUTO:
 
-    thread = threading.Thread(target=_watch, name="vibesys-torch-inject-watch", daemon=True)
-    thread.start()
+        def _watch() -> None:
+            torch_module = _wait_for_torch(stop_event)
+            if torch_module is None:
+                return  # process exiting, or torch never imported
+            if not _gpu_available(torch_module):
+                _log(
+                    "torch imported but no GPU visible (torch.cuda.is_available() is false); "
+                    "skipping capture for this process"
+                )
+                return
+            if delay_s > 0 and stop_event.wait(delay_s):
+                return
+            _log("sending SIGUSR1 (start)")
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(os.getpid(), signal.SIGUSR1)
+            if duration_s is not None and not stop_event.wait(duration_s):
+                _log("sending SIGUSR2 (stop, duration_s elapsed)")
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(os.getpid(), signal.SIGUSR2)
+
+        thread = threading.Thread(target=_watch, name="vibesys-torch-inject-watch", daemon=True)
+        thread.start()
 
     _install_chained_handler(signal.SIGUSR1, lambda *_a: capture.start())
     _install_chained_handler(signal.SIGUSR2, lambda *_a: capture.stop_and_export())
     _install_chained_handler(signal.SIGINT, lambda *_a: capture.stop_and_export())
     atexit.register(capture.stop_and_export)
+
+    if trigger == _TRIGGER_SIGNAL and capture._control_dir is not None:  # noqa: SLF001  # tracked: #288
+        # Signals sent before this point (interpreter/site startup, this
+        # function running) hit whatever disposition the process inherited
+        # across exec, not these handlers -- a signal delivered that early
+        # is dropped, not queued, so an external controller (start_target's
+        # caller) needs a reliable way to know handlers are live before
+        # sending the first SIGUSR1. This marker file is that readiness
+        # signal; see capture_ops.start_target's default ready_command.
+        with contextlib.suppress(OSError):
+            capture._control_dir.mkdir(parents=True, exist_ok=True)  # noqa: SLF001  # tracked: #288
+            (capture._control_dir / "armed").write_text("1")  # noqa: SLF001  # tracked: #288
 
 
 def _wait_for_torch(stop_event: threading.Event):  # noqa: ANN202  # tracked: #288
@@ -448,11 +550,20 @@ def _main() -> None:
         duration_s = _parse_float_env(_ENV_DURATION_S, None)
         record_shapes = os.environ.get(_ENV_RECORD_SHAPES, "1") == "1"
         sync_timeout_s = _parse_float_env(_ENV_SYNC_TIMEOUT_S, _DEFAULT_SYNCHRONIZE_TIMEOUT_S)
+        trigger = os.environ.get(_ENV_TRIGGER, _TRIGGER_AUTO)
+        if trigger not in _VALID_TRIGGERS:
+            _log(f"ignoring unknown {_ENV_TRIGGER}={trigger!r}; using {_TRIGGER_AUTO!r}")
+            trigger = _TRIGGER_AUTO
+        control_dir_raw = os.environ.get(_ENV_CONTROL_DIR)
+        control_dir = Path(control_dir_raw).expanduser() if control_dir_raw else None
 
         capture = _Capture(
-            out_dir=out_dir, record_shapes=record_shapes, sync_timeout_s=sync_timeout_s
+            out_dir=out_dir,
+            record_shapes=record_shapes,
+            sync_timeout_s=sync_timeout_s,
+            control_dir=control_dir,
         )
-        _arm(capture, delay_s=delay_s, duration_s=duration_s)
+        _arm(capture, delay_s=delay_s, duration_s=duration_s, trigger=trigger)
     except Exception as exc:  # noqa: BLE001  # tracked: #288
         _log(f"failed to arm torch.profiler injection (host program unaffected): {exc!r}")
 
