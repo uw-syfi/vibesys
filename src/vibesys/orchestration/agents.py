@@ -46,6 +46,7 @@ from vibesys.runtime import (
     Role,
     RoleIsolationError,
     WorkspaceScope,
+    Writes,
 )
 from vibesys.schemas import SkillResourceSelection
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
@@ -59,7 +60,7 @@ if TYPE_CHECKING:
 
     from vibesys.constants import ComputeBackend
     from vibesys.context import _RunResources
-    from vibesys.orchestration._host import HostResources
+    from vibesys.orchestration._host import HostResources, _WorkspaceHandleLike
     from vibesys.orchestration.workspaces import WorkspaceHandle
     from vs_agent.api import (
         AgentCapabilities,
@@ -80,6 +81,21 @@ def _unauthorized_paths(changes: list[str], allowed: tuple[str, ...]) -> list[st
             path == item.rstrip("/") or path.startswith(f"{item.rstrip('/')}/") for item in allowed
         )
     ]
+
+
+async def _maybe_snapshot_post_turn(
+    workspace: _WorkspaceHandleLike, role: Role, label: str
+) -> None:
+    """Snapshot after a turn only when it can record something.
+
+    A :class:`~vibesys.runtime.Writes` role always snapshots (a writing
+    role's edits may be needed later even if this particular turn made
+    none). Any other role only snapshots when the workspace actually has
+    pending changes, so a turn that changed nothing does not add a
+    workspace-snapshot event.
+    """
+    if isinstance(role.access, Writes) or await workspace.pending_changes():
+        await workspace.snapshot(label)
 
 
 def _split_template(template: str) -> tuple[Path, str]:
@@ -467,6 +483,16 @@ class _Agents:
         snapshot so a crash after the hook still resumes from a committed
         tree, matching today's paid-marker snapshot.
 
+        The pre-turn snapshot always runs (every role needs it for isolation
+        and for the paid marker's crash safety). The post-turn snapshot only
+        runs when it can actually record something: the workspace has
+        pending changes, or the role has :class:`~vibesys.runtime.Writes`
+        access (which always snapshots, since a writing role's whole point
+        is candidate edits a later round or gate may need to check out even
+        when this particular turn made none). A ``ReadOnly`` role with no
+        pending changes (including no ``access.allow`` residue) skips it, so
+        a turn that changed nothing does not add a snapshot event.
+
         ``backend``, when given, renders ``role.template`` through
         :class:`~vibesys.prompts.Prompt` instead of plain ``render_template``,
         auto-injecting that backend's compute fragments (``device_dtype``,
@@ -553,5 +579,5 @@ class _Agents:
 
         if role.filter_skills:
             reply = _filter_reply_skills(host, reply)
-        await workspace.snapshot(label)
+        await _maybe_snapshot_post_turn(workspace, role, label)
         return reply

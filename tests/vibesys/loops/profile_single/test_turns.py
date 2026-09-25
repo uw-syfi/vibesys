@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptState
 from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.options import AgentOrchestrationOptions
@@ -195,6 +196,15 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     assert call.kwargs["session_key"] == "h1"
     assert call.kwargs["label"] == "round-1-retry-1-single-agent"
     assert "Implemented batching" in (tmp_path / "progress.md").read_text()
+
+    # `before_paid` (run by `ctx.agents.turn` right before its pre-turn
+    # snapshot, so it is git-committed before the paid call starts) writes
+    # the same implementer-start marker `begin_attempt` used to write
+    # directly; see the shared design brief, item 3.
+    before_paid = call.kwargs["before_paid"]
+    assert issue_board.next_implementer_attempt(tmp_path / "progress.md", 1) == 1
+    await before_paid()
+    assert issue_board.next_implementer_attempt(tmp_path / "progress.md", 1) == 2
 
 
 def test_validation_rejects_reused_id() -> None:

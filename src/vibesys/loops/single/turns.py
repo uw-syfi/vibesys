@@ -321,6 +321,12 @@ class SingleAgentTurns:
         plan = request.plan
         plan.recommended_skills, resolved = self._skills(plan.recommended_skills)
         context = self._combined_context(request, state, resolved)
+
+        async def mark_paid() -> None:
+            issue_board.write_implementer_start_marker(
+                self.progress_path, request.round_number, state.retry
+            )
+
         response = cast(
             "SingleAgentRoundResponse",
             await self.ctx.agents.turn(
@@ -329,6 +335,7 @@ class SingleAgentTurns:
                 context=context,
                 session_key=plan.hypothesis_id,
                 label=f"round-{request.round_number}-retry-{state.retry}-single-agent",
+                before_paid=mark_paid,
             ),
         )
         response.skill_context_updates, _ = self._skills(response.skill_context_updates)

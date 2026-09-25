@@ -421,7 +421,7 @@ class ProfileSingleSession:
         return range(first, limit + 1)
 
     async def begin_attempt(self, selected: ProfileSingleRound, retry: int) -> None:
-        """Persist a paid turn marker before invoking the combined agent."""
+        """Persist attempt state before the combined agent's paid turn."""
         self.ctx.log(f"\n--- attempt {retry}/{self.options.max_retries_per_round} ---\n")
         attempt = selected.attempt
         attempt.retry = retry
@@ -433,10 +433,10 @@ class ProfileSingleSession:
             label=f"profile_single: start round {self.round_number} attempt {retry}",
             publish=attempt.agent_run_state,
         )
-        issue_board.write_implementer_start_marker(
-            self.turns.progress_path, self.round_number, retry
-        )
-        await self.workspace.snapshot(f"round-{self.round_number}-retry-{retry}-paid-marker")
+        # The paid-work marker is written by `turns.combined`'s `before_paid`
+        # hook and committed by `ctx.agents.turn`'s pre-turn snapshot
+        # (label "...-single-agent-input"), so it lands in git durably
+        # before the paid call starts. See the shared design brief, item 3.
         await self.ctx.environment.reselect_device()
 
     async def combined_turn(self, selected: ProfileSingleRound) -> AttemptDecision:

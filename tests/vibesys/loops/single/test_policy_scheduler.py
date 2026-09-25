@@ -12,7 +12,6 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed
 from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.options import AgentOrchestrationOptions
@@ -254,10 +253,17 @@ async def test_paid_attempt_is_marked_before_turn_and_failed_review_checkpoints(
     decision = await session.combined_turn(selected)
 
     assert decision is AttemptDecision.RETRY
-    assert order[:3] == ["commit", "snapshot", "reselect"]
+    # The paid-work marker snapshot moved into `turns.combined`'s
+    # `before_paid` hook (run by `ctx.agents.turn`); `turns.combined` is
+    # mocked here, so `begin_attempt` itself only commits state and
+    # reselects the device.
+    assert order[:2] == ["commit", "reselect"]
+    assert "snapshot" not in order
     assert commit.await_count == 2
     assert selected.request.active_hypothesis.feedback == "repair accuracy"
-    assert issue_board.next_implementer_attempt(session.turns.progress_path, 1) == 2
+    # `turns.combined` (which now writes the marker itself, via its
+    # `before_paid` hook) is mocked here, so this test does not exercise the
+    # marker write; see tests/vibesys/loops/single/test_turns.py for that.
 
 
 @pytest.mark.asyncio

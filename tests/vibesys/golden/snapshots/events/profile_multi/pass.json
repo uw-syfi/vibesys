@@ -214,21 +214,6 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": null,
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
-      "label": "round-1-pre",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
-  },
-  {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
       "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
@@ -354,21 +339,6 @@
     "status": "completed",
     "text": "",
     "type": "phase_finished"
-  },
-  {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
-      "commit": null,
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
-      "label": "round-1-plan",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
   },
   {
     "agent_kind": null,
@@ -666,21 +636,6 @@
     "status": "completed",
     "text": "",
     "type": "phase_finished"
-  },
-  {
-    "agent_kind": null,
-    "data": {
-      "baseline": null,
-      "commit": null,
-      "excluded_paths": [],
-      "kind": "workspace_snapshot",
-      "label": "round-1-retry-1-judge",
-      "source": "git_tracking"
-    },
-    "round_label": null,
-    "status": null,
-    "text": "",
-    "type": "workspace_snapshot"
   },
   {
     "agent_kind": "judge",

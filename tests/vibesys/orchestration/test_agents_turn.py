@@ -360,6 +360,43 @@ def test_paid_hook_runs_before_turn(tmp_path: Path) -> None:
     assert order == ["hook", "turn-done"]
 
 
+def test_paid_marker_is_committed_before_a_mid_turn_crash(tmp_path: Path) -> None:
+    """The paid marker is durable in git even if the agent raises mid-turn.
+
+    ``before_paid`` runs, then the pre-turn snapshot commits its edit,
+    *then* the (real or fake) agent call happens. A crash inside that call
+    must not lose the marker: the workspace has no pending changes for it
+    to lose, because it is already committed.
+    """
+    runner = FakeAgentClient(backend_name="stub")
+    runner.fail("testrole", RuntimeError("agent crashed mid-turn"))
+
+    async def body(ctx: RunContext) -> None:
+        workspace_path = ctx.workspaces.root.path
+
+        async def before_paid() -> None:
+            (workspace_path / "paid-marker.txt").write_text("attempt 1\n")
+
+        agent = await _spawn(ctx)
+        try:
+            with pytest.raises(RuntimeError, match="agent crashed mid-turn"):
+                await ctx.agents.turn(
+                    _role(paid=True),
+                    agent=agent,
+                    context={"subject": "x"},
+                    label="paid-crash",
+                    before_paid=before_paid,
+                )
+            # The marker write already landed in a committed snapshot: no
+            # pending changes remain to lose if the process dies here.
+            assert await ctx.workspaces.root.pending_changes() == []
+            assert (workspace_path / "paid-marker.txt").read_text() == "attempt 1\n"
+        finally:
+            await agent.close()
+
+    _with_fixture_prompts_dir(tmp_path, lambda: run_with_context(tmp_path, runner, body))
+
+
 def test_filter_skills_drops_unknown_selections(tmp_path: Path) -> None:
     runner = FakeAgentClient(backend_name="stub")
     runner.enqueue(
