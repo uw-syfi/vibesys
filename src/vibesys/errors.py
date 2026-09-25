@@ -19,6 +19,7 @@ class ConfigurationDiagnostic:
 class ConfigurationError(Exception):
     """Raised when user input cannot be resolved into a runnable session."""
 
-    def __init__(self, diagnostic: ConfigurationDiagnostic):  # noqa: ANN204, D107  # tracked: #288
+    def __init__(self, diagnostic: ConfigurationDiagnostic) -> None:
+        """Wrap the configuration diagnostic in an exception."""
         super().__init__(diagnostic.message)
         self.diagnostic = diagnostic

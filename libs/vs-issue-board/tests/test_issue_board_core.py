@@ -1,8 +1,11 @@
 """Tests for the reusable JSON-backed issue board."""
 
+from __future__ import annotations
+
 import json
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 from unittest.mock import Mock
 
 import pytest
@@ -15,26 +18,29 @@ from vs_issue_board.api import (
     IssueType,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-def _make_store(tmp_path) -> IssueBoard:  # noqa: ANN001  # tracked: #288
+
+class _CreateOptions(TypedDict, total=False):
+    type: IssueType | str
+    title: str
+    description: str
+    created_by: str
+    iteration: int
+
+
+def _make_store(tmp_path: Path) -> IssueBoard:
     return IssueBoard(tmp_path / "issues.json")
 
 
-def _create(  # noqa: PLR0913  # tracked: #288
-    store,  # noqa: ANN001  # tracked: #288
-    *,
-    type=IssueType.BUG,  # noqa: A002, ANN001  # tracked: #288
-    title="t",  # noqa: ANN001  # tracked: #288
-    description="d",  # noqa: ANN001  # tracked: #288
-    created_by="perf_eval",  # noqa: ANN001  # tracked: #288
-    iteration=1,  # noqa: A002, ANN001, RUF100  # tracked: #288
-) -> Issue:
+def _create(store: IssueBoard, **options: Unpack[_CreateOptions]) -> Issue:
     return store.create(
-        type=type,
-        title=title,
-        description=description,
-        created_by=created_by,
-        iteration=iteration,
+        type=options.get("type", IssueType.BUG),
+        title=options.get("title", "t"),
+        description=options.get("description", "d"),
+        created_by=options.get("created_by", "perf_eval"),
+        iteration=options.get("iteration", 1),
     )
 
 
@@ -44,14 +50,14 @@ def _create(  # noqa: PLR0913  # tracked: #288
 
 
 class TestCreate:
-    def test_create_assigns_sequential_ids(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_create_assigns_sequential_ids(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         a = _create(store, title="a")
         b = _create(store, title="b")
         c = _create(store, title="c")
         assert (a.id, b.id, c.id) == (1, 2, 3)
 
-    def test_create_persists_atomically_to_disk(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_create_persists_atomically_to_disk(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         _create(store, title="persist me")
         # Reload from disk via a fresh store
@@ -62,7 +68,7 @@ class TestCreate:
         # No tmp file left behind
         assert not (tmp_path / "issues.json.tmp").exists()
 
-    def test_create_preserves_versioned_json_contract(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_create_preserves_versioned_json_contract(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         issue = _create(store, title="persist me")
 
@@ -72,7 +78,7 @@ class TestCreate:
             "issues": [issue.model_dump(mode="json")],
         }
 
-    def test_create_records_create_event_in_history(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_create_records_create_event_in_history(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         issue = _create(store, created_by="perf_eval", iteration=2)
         assert len(issue.history) == 1
@@ -81,7 +87,7 @@ class TestCreate:
         assert evt.action == "create"
         assert evt.iteration == 2
 
-    def test_create_accepts_string_type(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_create_accepts_string_type(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         issue = store.create(
             type="perf",
@@ -94,7 +100,7 @@ class TestCreate:
 
 
 class TestLoadCorrupt:
-    def test_load_corrupt_json_raises_without_replacing_file(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_load_corrupt_json_raises_without_replacing_file(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
         path.write_text("not json", encoding="utf-8")
         original = path.read_bytes()
@@ -104,7 +110,7 @@ class TestLoadCorrupt:
 
         assert path.read_bytes() == original
 
-    def test_load_wrong_version_raises_without_replacing_file(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_load_wrong_version_raises_without_replacing_file(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
         path.write_text(json.dumps({"version": 999, "next_id": 1, "issues": []}), encoding="utf-8")
         original = path.read_bytes()
@@ -114,7 +120,9 @@ class TestLoadCorrupt:
 
         assert path.read_bytes() == original
 
-    def test_load_invalid_store_structure_raises_without_replacing_file(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_load_invalid_store_structure_raises_without_replacing_file(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "issues.json"
         path.write_text(
             json.dumps({"version": 1, "next_id": 1, "issues": "not-a-list"}),
@@ -135,7 +143,9 @@ class TestLoadCorrupt:
             (2, [0], "greater than or equal to 1"),
         ],
     )
-    def test_load_rejects_invalid_issue_identity(self, tmp_path, next_id, issue_ids, message):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_load_rejects_invalid_issue_identity(
+        self, tmp_path: Path, next_id: int, issue_ids: list[int], message: str
+    ) -> None:
         path = tmp_path / "issues.json"
         issues = [
             {
@@ -167,7 +177,9 @@ class TestLoadCorrupt:
             lambda payload: payload["issues"][0]["history"][0].update({"trace_id": "unknown"}),
         ],
     )
-    def test_load_rejects_unknown_nested_fields(self, tmp_path, mutate):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_load_rejects_unknown_nested_fields(
+        self, tmp_path: Path, mutate: Callable[[dict[str, Any]], None]
+    ) -> None:
         path = tmp_path / "issues.json"
         board = IssueBoard(path)
         _create(board, title="existing")
@@ -181,16 +193,20 @@ class TestLoadCorrupt:
 
         assert path.read_bytes() == original
 
-    def test_open_existing_does_not_overwrite_concurrent_write(self, tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_open_existing_does_not_overwrite_concurrent_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         path = tmp_path / "issues.json"
         writer = IssueBoard(path)
         _create(writer, title="existing")
         original_read_text = Path.read_text
         wrote_concurrently = False
 
-        def read_then_write(target, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202  # tracked: #288
+        def read_then_write(
+            target: Path, encoding: str | None = None, errors: str | None = None
+        ) -> str:
             nonlocal wrote_concurrently
-            content = original_read_text(target, *args, **kwargs)
+            content = original_read_text(target, encoding=encoding, errors=errors)
             if target == path and not wrote_concurrently:
                 wrote_concurrently = True
                 _create(writer, title="concurrent")
@@ -204,7 +220,7 @@ class TestLoadCorrupt:
 
 
 class TestReload:
-    def test_reload_picks_up_external_writes(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_reload_picks_up_external_writes(self, tmp_path: Path) -> None:
         store_a = _make_store(tmp_path)
         store_b = _make_store(tmp_path)
         _create(store_a, title="written by a")
@@ -214,7 +230,9 @@ class TestReload:
         assert len(store_b.list()) == 1
         assert store_b.list()[0].title == "written by a"
 
-    def test_reload_corrupt_json_raises_and_preserves_last_valid_snapshot(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_reload_corrupt_json_raises_and_preserves_last_valid_snapshot(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "issues.json"
         store = IssueBoard(path)
         _create(store, title="last valid")
@@ -227,7 +245,9 @@ class TestReload:
         assert [issue.title for issue in store.list()] == ["last valid"]
         assert path.read_bytes() == corrupt
 
-    def test_reload_wrong_version_raises_and_preserves_last_valid_snapshot(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_reload_wrong_version_raises_and_preserves_last_valid_snapshot(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "issues.json"
         store = IssueBoard(path)
         _create(store, title="last valid")
@@ -243,7 +263,9 @@ class TestReload:
         assert [issue.title for issue in store.list()] == ["last valid"]
         assert path.read_bytes() == incompatible
 
-    def test_reload_missing_file_raises_and_preserves_last_valid_snapshot(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_reload_missing_file_raises_and_preserves_last_valid_snapshot(
+        self, tmp_path: Path
+    ) -> None:
         path = tmp_path / "issues.json"
         store = IssueBoard(path)
         _create(store, title="last valid")
@@ -261,7 +283,7 @@ class TestReload:
 
 
 class TestList:
-    def test_list_filters_by_status(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_list_filters_by_status(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         a = _create(store, title="a")
         b = _create(store, title="b")
@@ -271,22 +293,24 @@ class TestList:
         assert {i.id for i in opens} == {b.id}
         assert {i.id for i in closeds} == {a.id}
 
-    def test_list_filters_by_type(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_list_filters_by_type(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         _create(store, type=IssueType.BUG, title="bug")
         _create(store, type=IssueType.PERF, title="perf")
         bugs = store.list(type=IssueType.BUG)
         perfs = store.list(type=IssueType.PERF)
-        assert len(bugs) == 1 and bugs[0].title == "bug"  # noqa: PT018  # tracked: #288
-        assert len(perfs) == 1 and perfs[0].title == "perf"  # noqa: PT018  # tracked: #288
+        assert len(bugs) == 1
+        assert bugs[0].title == "bug"
+        assert len(perfs) == 1
+        assert perfs[0].title == "perf"
 
-    def test_list_accepts_string_filters(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_list_accepts_string_filters(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         _create(store, type=IssueType.BUG)
         bugs = store.list(status="open", type="bug")
         assert len(bugs) == 1
 
-    def test_public_issue_models_do_not_mutate_board_state(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_public_issue_models_do_not_mutate_board_state(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         created = _create(store, title="original")
         fetched = store.get(created.id)
@@ -311,7 +335,7 @@ class TestList:
 
 
 class TestSearch:
-    def test_search_substring_case_insensitive(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_search_substring_case_insensitive(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         _create(store, title="Add Paged KV cache", description="Reduce frag")
         _create(store, title="Other thing", description="unrelated")
@@ -319,7 +343,7 @@ class TestSearch:
         assert len(hits) == 1
         assert hits[0].title == "Add Paged KV cache"
 
-    def test_search_keyword_and_match(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_search_keyword_and_match(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         _create(store, title="Paged KV cache", description="memory frag")
         _create(store, title="Continuous batching", description="paged scheduler")
@@ -328,14 +352,14 @@ class TestSearch:
         assert len(hits) == 1
         assert hits[0].title == "Paged KV cache"
 
-    def test_search_empty_query_returns_empty(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_search_empty_query_returns_empty(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         _create(store)
         assert store.search("") == []
         assert store.search("   ") == []
         assert store.search(",,") == []
 
-    def test_search_no_match(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_search_no_match(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         _create(store, title="hello", description="world")
         assert store.search("xyzzy") == []
@@ -347,7 +371,7 @@ class TestSearch:
 
 
 class TestStateTransitions:
-    def test_update_status_records_history_event(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_update_status_records_history_event(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         issue = _create(store)
         store.update_status(
@@ -360,7 +384,7 @@ class TestStateTransitions:
         assert reloaded.history[-1].action == "open->in_progress"
         assert reloaded.history[-1].note == "claimed"
 
-    def test_update_status_to_closed_records_closed_iter(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_update_status_to_closed_records_closed_iter(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         issue = _create(store, iteration=1)
         store.update_status(issue.id, IssueStatus.IN_PROGRESS, actor="loop", iteration=2)
@@ -370,7 +394,7 @@ class TestStateTransitions:
         assert reloaded.status == IssueStatus.CLOSED
         assert reloaded.closed_iter == 2
 
-    def test_update_status_blocked_records_closed_iter(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_update_status_blocked_records_closed_iter(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         issue = _create(store, iteration=1)
         store.update_status(
@@ -381,7 +405,7 @@ class TestStateTransitions:
         assert reloaded.status == IssueStatus.BLOCKED
         assert reloaded.closed_iter == 3
 
-    def test_increment_attempts_appends_event(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_increment_attempts_appends_event(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         issue = _create(store)
         assert issue.attempts == 0
@@ -392,7 +416,7 @@ class TestStateTransitions:
         assert reloaded.attempts == 2
         assert sum(1 for e in reloaded.history if e.action == "attempt") == 2
 
-    def test_update_unknown_id_raises(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_update_unknown_id_raises(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         with pytest.raises(KeyError):
             store.update_status(999, IssueStatus.CLOSED, actor="x", iteration=1)
@@ -406,7 +430,9 @@ class TestStateTransitions:
 
 
 class TestCapHelper:
-    def test_open_count_by_creator_in_iter_counts_only_creator_and_iter(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_open_count_by_creator_in_iter_counts_only_creator_and_iter(
+        self, tmp_path: Path
+    ) -> None:
         store = _make_store(tmp_path)
         _create(store, created_by="perf_eval", iteration=1)
         _create(store, created_by="perf_eval", iteration=1)
@@ -417,7 +443,7 @@ class TestCapHelper:
         assert store.open_count_by_creator_in_iter("judge", 1) == 1
         assert store.open_count_by_creator_in_iter("nobody", 1) == 0
 
-    def test_cap_helper_counts_closed_issues_too(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_cap_helper_counts_closed_issues_too(self, tmp_path: Path) -> None:
         # Closing an issue mid-iteration must NOT free up cap budget.
         store = _make_store(tmp_path)
         a = _create(store, created_by="perf_eval", iteration=1)
@@ -431,17 +457,17 @@ class TestCapHelper:
 
 
 class TestNextOpen:
-    def test_next_open_returns_none_when_empty(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_next_open_returns_none_when_empty(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         assert store.next_open() is None
 
-    def test_next_open_returns_none_when_all_closed(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_next_open_returns_none_when_all_closed(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         a = _create(store)
         store.update_status(a.id, IssueStatus.CLOSED, actor="judge", iteration=1)
         assert store.next_open() is None
 
-    def test_next_open_orders_bug_before_feature_before_perf(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_next_open_orders_bug_before_feature_before_perf(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         # Insert in reverse priority order
         perf = _create(store, type=IssueType.PERF, title="perf")
@@ -459,7 +485,7 @@ class TestNextOpen:
         assert third is not None
         assert third.id == perf.id
 
-    def test_next_open_fifo_within_type(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_next_open_fifo_within_type(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         a = _create(store, type=IssueType.BUG, title="first bug")
         # Ensure a strict timestamp gap so created_at sort is stable
@@ -479,7 +505,7 @@ class TestNextOpen:
         assert third is not None
         assert third.id == c.id
 
-    def test_next_open_skips_in_progress(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_next_open_skips_in_progress(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         a = _create(store, type=IssueType.BUG, title="claimed")
         b = _create(store, type=IssueType.BUG, title="open")
@@ -495,7 +521,7 @@ class TestNextOpen:
 
 
 class TestEventPayload:
-    def test_payload_round_trip_through_disk(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_payload_round_trip_through_disk(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         issue = _create(store, title="payload test")
         payload = {
@@ -518,7 +544,7 @@ class TestEventPayload:
         assert last.action == "attempt"
         assert last.payload == payload
 
-    def test_payload_default_none_for_existing_call_sites(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_payload_default_none_for_existing_call_sites(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         issue = _create(store)
         store.update_status(
@@ -541,7 +567,7 @@ class TestEventPayload:
         for evt in reloaded.history:
             assert evt.payload is None
 
-    def test_load_old_json_without_payload_key(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_load_old_json_without_payload_key(self, tmp_path: Path) -> None:
         """A pre-feature issues.json whose history events lack the payload
         key must still load cleanly with payload=None defaults."""
         path = tmp_path / "issues.json"
@@ -587,7 +613,7 @@ class TestEventPayload:
 
 
 class TestReopenBlocked:
-    def test_reopens_blocked_issue_resets_attempts_and_status(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_reopens_blocked_issue_resets_attempts_and_status(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         a = _create(store, title="will block", iteration=1)
         store.increment_attempts(a.id, actor="implementer", iteration=1)
@@ -623,7 +649,7 @@ class TestReopenBlocked:
         assert last.iteration == 2
         assert last.note == "retried on resume"
 
-    def test_reopen_blocked_only_touches_blocked_issues(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_reopen_blocked_only_touches_blocked_issues(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         blocked = _create(store, title="blocked")
         open_issue = _create(store, title="open")
@@ -653,19 +679,15 @@ class TestReopenBlocked:
         assert open_after.status == IssueStatus.OPEN
         assert closed_after.status == IssueStatus.CLOSED
 
-    def test_reopen_blocked_no_blocked_is_noop(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-        store = _make_store(tmp_path)
-        _create(store)
+    def test_reopen_blocked_no_blocked_is_noop(self, tmp_path: Path) -> None:
         cb = Mock()
-        store._on_change = (  # noqa: SLF001  # tracked: #288
-            cb  # bypass constructor wiring for this assertion  # noqa: RUF100, SLF001  # tracked: #288
-        )
+        store = IssueBoard(tmp_path / "issues.json", on_change=cb)
         reopened = store.reopen_blocked(actor="loop:resume", iteration=1)
         assert reopened == []
         # No mutation -> no callback fired (and importantly no save).
         assert cb.call_count == 0
 
-    def test_reopen_blocked_persists_to_disk(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_reopen_blocked_persists_to_disk(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         a = _create(store)
         store.update_status(a.id, IssueStatus.BLOCKED, actor="loop", iteration=1)
@@ -679,7 +701,7 @@ class TestReopenBlocked:
         assert reloaded.closed_iter is None
         assert reloaded.history[-1].action == "blocked->open"
 
-    def test_reopen_blocked_picked_by_next_open(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_reopen_blocked_picked_by_next_open(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         a = _create(store, type=IssueType.BUG)
         store.update_status(a.id, IssueStatus.BLOCKED, actor="loop", iteration=1)
@@ -691,7 +713,7 @@ class TestReopenBlocked:
 
 
 class TestOnChangeCallback:
-    def test_callback_fires_on_each_mutation(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_callback_fires_on_each_mutation(self, tmp_path: Path) -> None:
         cb = Mock()
         store = IssueBoard(tmp_path / "issues.json", on_change=cb)
         # Bootstrap save in __init__ must NOT fire the callback.
@@ -715,7 +737,7 @@ class TestOnChangeCallback:
         )
         assert cb.call_count == 3
 
-    def test_callback_failure_does_not_corrupt_store(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_callback_failure_does_not_corrupt_store(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
         cb = Mock(side_effect=RuntimeError("renderer exploded"))
         store = IssueBoard(path, on_change=cb)

@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import csv
+import importlib
 import importlib.util
+import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import httpx
 import pytest
 
 from vibesys.evaluators.input_manifest import load_input_bundle
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from types import ModuleType
 
 _REPO_ROOT = Path(__file__).parents[2]
@@ -210,3 +215,191 @@ def test_measured_metrics_read_the_session_runner_summary(run: ModuleType) -> No
     assert metrics["ttft_ms"]["p50"] == 10.0
     assert metrics["prefix_cache_hit_rate_server"] == 0.5
     assert metrics["failed_steps"] == 0
+
+
+# ----------------------------------------------------------------------------- accuracy gate
+
+
+@pytest.fixture
+def checker(monkeypatch: pytest.MonkeyPatch) -> Iterator[ModuleType]:
+    """Import this bundle's accuracy_checker.checker (other bundles ship one too)."""
+
+    def ours() -> list[str]:
+        return [m for m in sys.modules if m.split(".")[0] == "accuracy_checker"]
+
+    for name in ours():
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.syspath_prepend(str(_BUNDLE))
+    yield importlib.import_module("accuracy_checker.checker")
+    for name in ours():
+        del sys.modules[name]
+
+
+def _golden(near_tie_at: int | None = None) -> dict[str, Any]:
+    """Two synthetic cases of 8 golden tokens (4 rounds of 2); decisive unless near_tie_at."""
+
+    def case(name: str, prompt: list[int], gold: list[int]) -> dict[str, Any]:
+        return {
+            "name": name,
+            "prompt_ids": prompt,
+            "greedy_ids": gold,
+            "tf_logprob": [-0.1] * len(gold),
+            "tf_top1": gold,
+            "tf_margin": [2.0] * len(gold),
+        }
+
+    golden = {
+        "cases": [
+            case("short", [1, 2, 3], list(range(10, 18))),
+            case("long", [4, 5, 6, 7, 8, 9], list(range(20, 28))),
+        ]
+    }
+    if near_tie_at is not None:
+        golden["cases"][0]["tf_margin"][near_tie_at] = 0.1
+    return golden
+
+
+@dataclass(frozen=True)
+class Behavior:
+    prefix_cache: bool = True
+    report_cached: bool = True
+    # Resume bug: on a cache hit, generation starts one position late.
+    off_by_one_on_hit: bool = False
+    # Continuation offsets (in the "short" case) where the server emits another token.
+    flip_at: frozenset[int] = frozenset()
+
+
+def _common_prefix(a: list[int], b: list[int]) -> int:
+    return next(
+        (i for i, (x, y) in enumerate(zip(a, b, strict=False)) if x != y), min(len(a), len(b))
+    )
+
+
+class StubServer:
+    """In-memory OpenAI-compatible completions server that decodes the golden sequence."""
+
+    def __init__(self, golden: dict[str, Any], behavior: Behavior) -> None:
+        self.cases = golden["cases"]
+        self.behavior = behavior
+        self.computed: list[list[int]] = []  # sequences whose state the server holds
+
+    def _case(self, tokens: list[int]) -> dict[str, Any]:
+        for case in self.cases:
+            full = case["prompt_ids"] + case["greedy_ids"]
+            if len(tokens) >= len(case["prompt_ids"]) and full[: len(tokens)] == tokens:
+                return case
+        pytest.fail(f"unknown prompt {tokens}")
+
+    def _cached(self, prompt: list[int]) -> int:
+        if not self.behavior.prefix_cache:
+            return 0
+        hits = [min(_common_prefix(seq, prompt), len(prompt) - 1) for seq in self.computed]
+        return max([0, *hits])
+
+    def _generate(self, prompt: list[int], n: int) -> tuple[list[int], int]:
+        case = self._case(prompt)
+        cached = self._cached(prompt)
+        start = len(prompt) - len(case["prompt_ids"])
+        if self.behavior.off_by_one_on_hit and cached:
+            start += 1
+        gold = case["greedy_ids"] + [0] * (n + 1)
+        flips = self.behavior.flip_at if case["name"] == "short" else frozenset()
+        out = [gold[i] + 1000 if i in flips else gold[i] for i in range(start, start + n)]
+        self.computed.append(prompt + out[:-1])
+        return out, cached
+
+    def _usage(self, prompt: list[int], n: int, cached: int) -> dict[str, Any]:
+        usage: dict[str, Any] = {"prompt_tokens": len(prompt), "completion_tokens": n}
+        if self.behavior.report_cached:
+            usage["prompt_tokens_details"] = {"cached_tokens": cached}
+        return usage
+
+    def _echo(self, tokens: list[int]) -> dict[str, Any]:
+        case = self._case(tokens)
+        prompt_len = len(case["prompt_ids"])
+        given: list[float | None] = [None] + [0.0] * (prompt_len - 1)
+        top: list[dict[str, float] | None] = [None] + [{"token_id:0": 0.0}] * (prompt_len - 1)
+        for lp, top1 in zip(case["tf_logprob"], case["tf_top1"], strict=True):
+            given.append(lp)
+            top.append({f"token_id:{top1}": lp})
+        return {"choices": [{"logprobs": {"token_logprobs": given, "top_logprobs": top}}]}
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        prompt, n = body["prompt"], body["max_tokens"]
+        if body.get("echo"):
+            return httpx.Response(200, json=self._echo(prompt))
+        out, cached = self._generate(prompt, n)
+        usage = self._usage(prompt, n, cached)
+        if not body.get("stream"):
+            return httpx.Response(200, json={"choices": [{"token_ids": out}], "usage": usage})
+        chunks: list[dict[str, Any]] = [{"choices": [{"token_ids": [t]}]} for t in out]
+        chunks.append({"choices": [], "usage": usage})
+        sse = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+        return httpx.Response(200, text=sse)
+
+
+def _run_gate(
+    checker: ModuleType, behavior: Behavior, golden: dict[str, Any] | None = None
+) -> tuple[bool, dict[str, Any]]:
+    golden = golden or _golden()
+    target = checker.HttpTarget("http://stub", "Qwen/Qwen3.5-9B")
+    server = StubServer(golden, behavior)
+    target.client = httpx.Client(transport=httpx.MockTransport(server.handle))
+    return checker.run_gate(target, golden, checker.Thresholds(), log=lambda _line: None)
+
+
+@pytest.mark.usefixtures("checker")
+def test_resume_rounds_split_the_golden_continuation() -> None:
+    resume = importlib.import_module("accuracy_checker.resume")
+
+    assert resume.plan_rounds(64, 4) == [(0, 16), (16, 16), (32, 16), (48, 16)]
+    assert resume.plan_rounds(10, 4) == [(0, 3), (3, 3), (6, 3), (9, 1)]
+
+
+def test_gate_passes_a_correct_server_that_resumes_from_its_cache(checker: ModuleType) -> None:
+    passed, summary = _run_gate(checker, Behavior())
+
+    resume = summary["resume_check"]
+    assert passed
+    # Rounds 2-4 of both cases resume from the previous round's computed context.
+    assert resume["cache_hit_rounds"] == 6
+    assert resume["cached_tokens"] == resume["resumable_tokens"] > 0
+
+
+def test_gate_passes_a_correct_server_without_prefix_caching(checker: ModuleType) -> None:
+    passed, summary = _run_gate(checker, Behavior(prefix_cache=False))
+
+    assert passed
+    assert summary["resume_check"]["cache_hit_rounds"] == 0
+
+
+def test_gate_fails_a_server_whose_cache_hits_resume_at_the_wrong_position(
+    checker: ModuleType,
+) -> None:
+    passed, summary = _run_gate(checker, Behavior(off_by_one_on_hit=True))
+
+    resume = summary["resume_check"]
+    assert not passed
+    assert not resume["checks"]["resume: chained-round divergences only at near-ties"]
+    assert "short#2@2 (cached 4)" in resume["cache_hit_non_tie_divergences"]
+
+
+def test_gate_fails_a_server_that_omits_cached_tokens(checker: ModuleType) -> None:
+    passed, summary = _run_gate(checker, Behavior(report_cached=False))
+
+    checks = summary["resume_check"]["checks"]
+    assert not passed
+    assert not checks["resume: cached_tokens reported, 0 <= cached <= prompt tokens"]
+
+
+def test_gate_tolerates_a_chained_divergence_only_at_a_near_tie(checker: ModuleType) -> None:
+    flip = Behavior(flip_at=frozenset({5}))
+
+    decisive_passed, decisive = _run_gate(checker, flip)
+    tie_passed, tie = _run_gate(checker, flip, _golden(near_tie_at=5))
+
+    assert not decisive_passed
+    assert decisive["resume_check"]["non_tie_divergences"] == ["short#3@5 (cached 6)"]
+    assert tie_passed
+    assert tie["resume_check"]["non_tie_divergences"] == []

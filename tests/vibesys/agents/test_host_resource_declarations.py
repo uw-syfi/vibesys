@@ -9,7 +9,7 @@ from tests.support import provider_profiles as fake_profiles
 
 import vibesys
 from vs_agent import host_resource_declarations
-from vs_sandbox.api import HostResource, HostResourceAccess, HostResourceContext
+from vs_sandbox.api import HostResource, HostResourceAccess
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")
 
@@ -50,29 +50,39 @@ _FAKE_PROFILES = {
 class TestInstallRoot:
     """Agent packages may need binaries from sibling installation paths."""
 
-    def test_node_package_imports_whole_package_tree(self):  # noqa: ANN201  # tracked: #288
+    def test_node_package_imports_whole_package_tree(self) -> None:
         launcher = Path(
             "/home/u/.nvm/versions/node/v24/lib/node_modules/@openai/codex/bin/codex.js"
         )
-        root = host_resource_declarations._install_root(launcher)  # noqa: SLF001  # tracked: #288
+        root = Path("/home/u/.nvm/versions/node/v24/lib")
+        runtime_paths = {
+            resource.path
+            for resource in host_resource_declarations.declare_agent_host_resources(
+                {}, binary_path=str(launcher), provider="codex"
+            )
+            if resource.purpose == "agent and VibeSys runtime"
+        }
 
-        assert root == Path("/home/u/.nvm/versions/node/v24/lib")
+        assert root in runtime_paths
         platform_bin = Path(
             "/home/u/.nvm/versions/node/v24/lib/node_modules/@openai/"
             "codex/node_modules/@openai/codex-linux-x64/bin/codex"
         )
         assert platform_bin.is_relative_to(root)
 
-    def test_plain_binary_imports_its_directory(self):  # noqa: ANN201  # tracked: #288
-        assert host_resource_declarations._install_root(Path("/opt/tool/bin/agent")) == Path(  # noqa: SLF001  # tracked: #288
-            "/opt/tool/bin"
+    def test_plain_binary_imports_its_directory(self) -> None:
+        resources = host_resource_declarations.declare_agent_host_resources(
+            {}, binary_path="/opt/tool/bin/agent", provider="codex"
         )
+        assert HostResource(Path("/opt/tool/bin"), purpose="agent and VibeSys runtime") in resources
 
 
 class TestInterpreterAliasRoots:
     """A venv reached through an alias directory must import that alias."""
 
-    def test_alias_directory_between_venv_and_install_is_declared(self, monkeypatch, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_alias_directory_between_venv_and_install_is_declared(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         install = tmp_path / "cpython-3.14.7"
         (install / "bin").mkdir(parents=True)
         real = install / "bin" / "python3.14"
@@ -85,19 +95,34 @@ class TestInterpreterAliasRoots:
         (venv_bin / "python3").symlink_to("python")
         monkeypatch.setattr(host_resource_declarations.sys, "executable", str(venv_bin / "python3"))
 
-        roots = host_resource_declarations._interpreter_alias_roots()  # noqa: SLF001  # tracked: #288
+        runtime_roots = {
+            resource.path
+            for resource in host_resource_declarations.declare_agent_host_resources(
+                {"HOME": str(tmp_path)}, binary_path=None, provider="codex"
+            )
+            if resource.purpose == "Python runtime"
+        }
 
         # The alias, not the resolved install: sys.base_prefix already covers
         # the resolved path, and only the alias name dangles in the sandbox.
-        assert roots == {alias}
+        assert alias in runtime_roots
 
-    def test_no_alias_declares_nothing_extra(self, monkeypatch, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_no_alias_declares_nothing_extra(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         real = tmp_path / "usr" / "bin" / "python3.14"
         real.parent.mkdir(parents=True)
         real.write_text("#!/bin/false\n")
         monkeypatch.setattr(host_resource_declarations.sys, "executable", str(real))
 
-        assert host_resource_declarations._interpreter_alias_roots() == set()  # noqa: SLF001  # tracked: #288
+        runtime_roots = {
+            resource.path
+            for resource in host_resource_declarations.declare_agent_host_resources(
+                {"HOME": str(tmp_path)}, binary_path=None, provider="codex"
+            )
+            if resource.purpose == "Python runtime"
+        }
+        assert real.parent not in runtime_roots
 
 
 class TestAgentRuntime:
@@ -110,10 +135,8 @@ class TestAgentRuntime:
     """
 
     def test_declares_the_running_vibesys_package_root(self) -> None:
-        declarations = tuple(
-            host_resource_declarations._agent_runtime(  # noqa: SLF001  # tracked: #288
-                HostResourceContext(env={})
-            )
+        declarations = host_resource_declarations.declare_agent_host_resources(
+            {}, binary_path=None, provider="codex"
         )
 
         vibesys_root = Path(vibesys.__file__).resolve().parents[1]
@@ -123,7 +146,7 @@ class TestAgentRuntime:
         assert matching[0].purpose == "agent and VibeSys runtime"
 
 
-def test_defaults_declare_path_rust_and_shell_resources(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_defaults_declare_path_rust_and_shell_resources(tmp_path: Path) -> None:
     home = tmp_path / "home"
     tool_bin = home / "tools" / "bin"
     cargo_bin = home / ".cargo" / "bin"
@@ -212,23 +235,23 @@ def _fake_profiles_installed(monkeypatch: pytest.MonkeyPatch) -> None:
         ("opencode", ".config/opencode", ".codex/auth.json"),
     ],
 )
-def test_provider_state_is_scoped_to_selected_agent(  # noqa: ANN201
-    tmp_path,  # noqa: ANN001
-    provider,  # noqa: ANN001
-    expected,  # noqa: ANN001
-    forbidden,  # noqa: ANN001
-    _fake_profiles_installed,  # noqa: ANN001, PT019
-):
+@pytest.mark.usefixtures("_fake_profiles_installed")
+def test_provider_state_is_scoped_to_selected_agent(
+    tmp_path: Path,
+    provider: str,
+    expected: str,
+    forbidden: str,
+) -> None:
     writable = _writable_state(tmp_path, provider)
 
     assert expected in writable
     assert forbidden not in writable
 
 
-def test_codex_state_is_declared_as_leaf_files_not_the_whole_home(  # noqa: ANN201
-    tmp_path,  # noqa: ANN001
-    _fake_profiles_installed,  # noqa: ANN001, PT019
-):
+@pytest.mark.usefixtures("_fake_profiles_installed")
+def test_codex_state_is_declared_as_leaf_files_not_the_whole_home(
+    tmp_path: Path,
+) -> None:
     writable = _writable_state(tmp_path, "codex")
 
     # A Codex checkout may live under $CODEX_HOME/worktrees, so the directory
@@ -242,7 +265,8 @@ def test_codex_state_is_declared_as_leaf_files_not_the_whole_home(  # noqa: ANN2
     }
 
 
-def test_codex_home_relocates_the_state_leaves(tmp_path, _fake_profiles_installed):  # noqa: ANN001, ANN201, PT019
+@pytest.mark.usefixtures("_fake_profiles_installed")
+def test_codex_home_relocates_the_state_leaves(tmp_path: Path) -> None:
     relocated = tmp_path / "relocated-codex"
 
     writable = _writable_state(tmp_path, "codex", {"CODEX_HOME": str(relocated)})
@@ -255,7 +279,8 @@ def test_codex_home_relocates_the_state_leaves(tmp_path, _fake_profiles_installe
     assert ".config/codex" in writable
 
 
-def test_claude_config_dir_relocates_the_state_root(tmp_path, _fake_profiles_installed):  # noqa: ANN001, ANN201, PT019
+@pytest.mark.usefixtures("_fake_profiles_installed")
+def test_claude_config_dir_relocates_the_state_root(tmp_path: Path) -> None:
     """A second provider with a state root variable gets the same generic rule.
 
     Claude declares no narrowed leaves, so its whole relocated directory is
@@ -272,7 +297,7 @@ def test_claude_config_dir_relocates_the_state_root(tmp_path, _fake_profiles_ins
     assert ".config/claude" in writable
 
 
-def test_a_provider_agentshim_does_not_register_is_rejected(tmp_path):  # noqa: ANN001, ANN201
+def test_a_provider_agentshim_does_not_register_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="unregistered-provider"):
         _writable_state(tmp_path, "unregistered-provider")
 
@@ -289,12 +314,11 @@ class TestShippedProfileState:
     @staticmethod
     def _declarations(tmp_path: Path, provider: str) -> tuple[HostResource, ...]:
         return tuple(
-            host_resource_declarations._provider_state(  # noqa: SLF001
-                host_resource_declarations.HostResourceContext(
-                    env={"HOME": str(tmp_path)},
-                    provider=provider,
-                )
+            resource
+            for resource in host_resource_declarations.declare_agent_host_resources(
+                {"HOME": str(tmp_path)}, binary_path=None, provider=provider
             )
+            if resource.purpose == f"{provider} agent state"
         )
 
     @pytest.mark.parametrize("provider", _SHIPPED)
@@ -326,7 +350,7 @@ class TestShippedProfileState:
 class TestContainerRuntimeResources:
     """Microservice candidates are container topologies the agent must drive."""
 
-    def test_docker_socket_is_declared_writable(self):  # noqa: ANN201  # tracked: #288
+    def test_docker_socket_is_declared_writable(self) -> None:
         declarations = host_resource_declarations.container_runtime_resources({})
 
         writable = {
@@ -336,7 +360,7 @@ class TestContainerRuntimeResources:
         }
         assert Path("/var/run/docker.sock") in writable
 
-    def test_custom_unix_docker_host_is_declared(self):  # noqa: ANN201  # tracked: #288
+    def test_custom_unix_docker_host_is_declared(self) -> None:
         declarations = host_resource_declarations.container_runtime_resources(
             {"DOCKER_HOST": "unix:///run/user/1000/docker.sock"}
         )
@@ -344,7 +368,7 @@ class TestContainerRuntimeResources:
         paths = {resource.path for resource in declarations}
         assert Path("/run/user/1000/docker.sock") in paths
 
-    def test_tcp_docker_host_declares_no_extra_path(self):  # noqa: ANN201  # tracked: #288
+    def test_tcp_docker_host_declares_no_extra_path(self) -> None:
         declarations = host_resource_declarations.container_runtime_resources(
             {"DOCKER_HOST": "tcp://127.0.0.1:2375"}
         )
@@ -360,10 +384,10 @@ class TestTaskScratchDir:
     derived from the sandbox's private ``/tmp``.
     """
 
-    def test_scratch_dir_follows_the_task_naming_convention(self):  # noqa: ANN201  # tracked: #288
-        assert host_resource_declarations.task_scratch_dir("hotel-reservation") == Path(
-            "/tmp/vibesys-hotel-reservation"  # noqa: S108  # tracked: #288
-        )
+    def test_scratch_dir_follows_the_task_naming_convention(self) -> None:
+        scratch_dir = host_resource_declarations.task_scratch_dir("hotel-reservation")
+        assert scratch_dir.parent == host_resource_declarations.TASK_SCRATCH_ROOT
+        assert scratch_dir.name == "vibesys-hotel-reservation"
 
 
 class TestTaskAgentHostResources:

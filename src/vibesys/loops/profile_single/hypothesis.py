@@ -125,9 +125,11 @@ class ProfileGuidedHypothesisController:
     def __post_init__(self) -> None:
         """Validate policy configuration independently of input manifests."""
         if self.plateau_min_rounds < 1:
-            raise ValueError("plateau_min_rounds must be positive")  # noqa: TRY003
+            message = "plateau_min_rounds must be positive"
+            raise ValueError(message)
         if self.min_relative_improvement < 0:
-            raise ValueError("min_relative_improvement must be non-negative")  # noqa: TRY003
+            message = "min_relative_improvement must be non-negative"
+            raise ValueError(message)
 
     @classmethod
     def create(

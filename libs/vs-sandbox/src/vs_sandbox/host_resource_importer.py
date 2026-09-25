@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+    from pathlib import Path
 
 
 @dataclass(frozen=True)

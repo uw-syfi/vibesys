@@ -45,9 +45,11 @@ class ArtifactRecord(BaseModel):
         try:
             payload = base64.b64decode(self.data_base64, validate=True)
         except (binascii.Error, ValueError) as exc:
-            raise ValueError("artifact payload is not valid base64") from exc  # noqa: TRY003
+            _exception_message = "artifact payload is not valid base64"
+            raise ValueError(_exception_message) from exc
         if len(payload) != self.size or hashlib.sha256(payload).hexdigest() != self.sha256:
-            raise ValueError("artifact payload does not match its digest")  # noqa: TRY003
+            message = "artifact payload does not match its digest"
+            raise ValueError(message)
         return self
 
     @classmethod
@@ -128,17 +130,22 @@ class InvocationRecord(BaseModel):
     @model_validator(mode="after")
     def _consistent_phase(self) -> InvocationRecord:
         if self.client_delivered_offset > self.remote_read_offset:
-            raise ValueError("client offset exceeds remote-read offset")  # noqa: TRY003
+            message = "client offset exceeds remote-read offset"
+            raise ValueError(message)
         if self.phase in {InvocationPhase.COMPLETED, InvocationPhase.ACKNOWLEDGED}:
             if self.result is None:
-                raise ValueError("terminal invocation is missing its result")  # noqa: TRY003
+                _exception_message = "terminal invocation is missing its result"
+                raise ValueError(_exception_message)
         elif self.result is not None:
-            raise ValueError("nonterminal invocation must not contain a result")  # noqa: TRY003
+            _exception_message_2 = "nonterminal invocation must not contain a result"
+            raise ValueError(_exception_message_2)
         if self.phase is InvocationPhase.PREPARED:
             if self.active_cluster_name is not None or self.attempt_resources is not None:
-                raise ValueError("prepared invocation must not be bound to an attempt")  # noqa: TRY003
+                _exception_message_3 = "prepared invocation must not be bound to an attempt"
+                raise ValueError(_exception_message_3)
         elif self.attempt_resources is None:
-            raise ValueError("remote invocation is missing attempt resources")  # noqa: TRY003
+            _exception_message_4 = "remote invocation is missing attempt resources"
+            raise ValueError(_exception_message_4)
         return self
 
 
@@ -177,7 +184,8 @@ class InvocationJournal:
                 existing.request_sha256 != request_sha256
                 or existing.snapshot_sha256 != snapshot_sha256
             ):
-                raise ValueError("invocation ID was reused for another request")  # noqa: TRY003
+                message = "invocation ID was reused for another request"
+                raise ValueError(message)
             return existing
         return self._save(
             InvocationRecord(
@@ -197,7 +205,8 @@ class InvocationJournal:
     ) -> InvocationRecord:
         """Persist submission intent before invoking the non-idempotent CLI call."""
         if record.phase is not InvocationPhase.PREPARED:
-            raise ValueError("only a prepared invocation can begin submission")  # noqa: TRY003
+            message = "only a prepared invocation can begin submission"
+            raise ValueError(message)
         return self._save(
             record.model_copy(
                 update={
@@ -220,7 +229,8 @@ class InvocationJournal:
         ):
             return record
         if record.active_cluster_name not in {None, cluster_name}:
-            raise ValueError("submitted cluster differs from submission intent")  # noqa: TRY003
+            message = "submitted cluster differs from submission intent"
+            raise ValueError(message)
         return self._save(
             record.model_copy(
                 update={
@@ -239,7 +249,8 @@ class InvocationJournal:
             remote_read < record.remote_read_offset
             or client_delivered < record.client_delivered_offset
         ):
-            raise ValueError("invocation offsets must be monotonic")  # noqa: TRY003
+            message = "invocation offsets must be monotonic"
+            raise ValueError(message)
         return self._save(
             record.model_copy(
                 update={
@@ -265,7 +276,8 @@ class InvocationJournal:
             InvocationPhase.SUBMITTED,
             InvocationPhase.RUNNING,
         }:
-            raise ValueError("only an attached invocation can be retried")  # noqa: TRY003
+            message = "only an attached invocation can be retried"
+            raise ValueError(message)
         next_attempt = record.attempt + 1
         return self._save(
             record.model_copy(
@@ -284,7 +296,8 @@ class InvocationJournal:
     def acknowledge(self, record: InvocationRecord) -> InvocationRecord:
         """Mark a terminal payload delivered without deleting replay provenance."""
         if record.phase is not InvocationPhase.COMPLETED:
-            raise ValueError("only completed invocations can be acknowledged")  # noqa: TRY003
+            message = "only completed invocations can be acknowledged"
+            raise ValueError(message)
         return self._save(record.model_copy(update={"phase": InvocationPhase.ACKNOWLEDGED}))
 
     def _save(self, record: InvocationRecord) -> InvocationRecord:

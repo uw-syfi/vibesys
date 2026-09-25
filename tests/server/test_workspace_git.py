@@ -6,6 +6,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support import run_test_command
 
 from server.api.workspace_git import WorkspacePatchReader
 
@@ -25,7 +26,7 @@ class _Warnings:
 
 def _git(workspace: Path, *args: str) -> str:
     command = ["git", "-C", str(workspace), *args]
-    result = subprocess.run(command, capture_output=True, check=True, text=True)  # noqa: S603
+    result = run_test_command(command, capture_output=True, check=True, text=True)
     return result.stdout.strip()
 
 

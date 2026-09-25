@@ -6,7 +6,7 @@ from vs_sandbox import host_resource_importer
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
 
 
-def test_importer_partitions_access_and_write_wins(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_importer_partitions_access_and_write_wins(tmp_path: Path) -> None:
     workspace = tmp_path / "runs" / "current" / "workspace"
     readonly = tmp_path / "readonly"
     writable = tmp_path / "writable"
@@ -27,7 +27,7 @@ def test_importer_partitions_access_and_write_wins(tmp_path):  # noqa: ANN001, A
     assert imports.write_paths == (writable,)
 
 
-def test_importer_rejects_relative_and_symlinked_workspace_ancestors(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_importer_rejects_relative_and_symlinked_workspace_ancestors(tmp_path: Path) -> None:
     run_root = tmp_path / "runs"
     workspace = run_root / "current" / "workspace"
     workspace.mkdir(parents=True)

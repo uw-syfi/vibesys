@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 import pytest
 from tests.server.support import agent_descriptor, build_server_parts
+from tests.support import run_test_command
 from tests.support.run_execution import run_execution_record
 
+import server.api.service as service_module
 from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
 from server.api.workspace_git import WorkspacePatchReader
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.api import RunView
+    from vs_project.api import GitTrackerEvents
 
 
 class _RoundFields(TypedDict, total=False):
@@ -105,7 +108,7 @@ def _view(state: AgentRunState, *, run_id: str = "run-1") -> RunView:
 
 def _git(workspace: Path, *args: str) -> str:
     command = ["git", "-C", str(workspace), *args]
-    result = subprocess.run(command, capture_output=True, check=True, text=True)  # noqa: S603
+    result = run_test_command(command, capture_output=True, check=True, text=True)
     return result.stdout.strip()
 
 
@@ -689,8 +692,10 @@ def test_service_reports_no_design_patch_before_attach(tmp_path: Path) -> None:
     assert response.design_patch is None
 
 
-def test_service_reuses_one_design_projection_per_run(tmp_path: Path) -> None:
-    """The diff cache lives on the service, so refreshes cost no subprocess."""
+def test_service_reuses_one_design_projection_per_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Repeated public queries reuse the same immutable commit-range diff."""
     workspace = _repo(tmp_path / "project")
     (workspace / "OBJECTIVE.md").write_text("Make the queue fast.\n", encoding="utf-8")
     baseline = _commit_all(workspace, "baseline")
@@ -705,14 +710,29 @@ def test_service_reuses_one_design_projection_per_run(tmp_path: Path) -> None:
             ],
         )
     )
+    constructions = 0
+    diff_calls = 0
+
+    class _CountingGitTracker(GitTracker):
+        def __init__(self, root: Path, *, run_id: str, events: GitTrackerEvents) -> None:
+            nonlocal constructions
+            constructions += 1
+            super().__init__(root, run_id=run_id, events=events)
+
+        def diff_name_status(self, base: str, head: str) -> str | None:
+            nonlocal diff_calls
+            diff_calls += 1
+            return super().diff_name_status(base, head)
+
+    monkeypatch.setattr(service_module, "GitTracker", _CountingGitTracker)
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
 
-    parts.api.execute(DesignQuery())
-    design = parts.api._design  # noqa: SLF001
-    parts.api.execute(DesignQuery())
+    first = parts.api.execute(DesignQuery())
+    second = parts.api.execute(DesignQuery())
 
-    assert design is not None
-    assert parts.api._design is design  # noqa: SLF001
+    assert first.design == second.design
+    assert constructions == 1
+    assert diff_calls == 1
 
 
 def test_service_reports_design_not_ready_before_attach(tmp_path: Path) -> None:

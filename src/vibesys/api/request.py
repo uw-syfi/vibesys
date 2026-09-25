@@ -84,6 +84,7 @@ __all__ = [
 
 def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
     """Validate a selected policy before the CLI creates run resources."""
+    # lint-waiver: LW-020003 [PLC0415]; the built-in orchestration registry imports every loop implementation, so it loads only when a caller needs it.
     from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
 
     built_in_orchestrations().resolve(descriptor.id).orchestrator(descriptor)

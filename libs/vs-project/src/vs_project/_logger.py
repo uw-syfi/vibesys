@@ -4,7 +4,7 @@ import re
 import sys
 import threading
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO, cast
 
@@ -37,11 +37,11 @@ class _TeeWriter:
         self._secondary.write(strip_ansi(text))
         return len(text)
 
-    def flush(self):  # noqa: ANN202  # tracked: #288
+    def flush(self) -> None:
         self._primary.flush()
         self._secondary.flush()
 
-    def isatty(self):  # noqa: ANN202  # tracked: #288
+    def isatty(self) -> bool:
         return False
 
     def fileno(self) -> int:
@@ -109,12 +109,12 @@ class RunLogger:
         *,
         tee_stderr: bool = True,
         emit: Callable[[str, TextIO], None] | None = None,
-    ) -> None:  # tracked: #288
+    ) -> None:
         self.log_dir = log_dir
         self._tee_stderr = tee_stderr
         self._emit = emit if emit is not None else _default_emit
         self._lock = threading.RLock()
-        run_started = datetime.now().strftime("%Y%m%d-%H%M%S")  # noqa: DTZ005  # tracked: #288
+        run_started = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         self.path = log_dir / f"run-{run_started}.log"
         self.file = self.path.open("a", encoding="utf-8")
         self.writer = cast(
@@ -139,10 +139,10 @@ class RunLogger:
         with self._lock:
             return self.file.closed
 
-    def lprint(self, text: str) -> None:  # tracked: #288
+    def lprint(self, text: str) -> None:
         self._emit(text, self.writer)
 
-    def switch(self, label: int | str) -> TextIO:  # tracked: #288
+    def switch(self, label: int | str) -> TextIO:
         """Switch to a per-phase log file (``run-<datetime>-<label>.log``).
 
         *label* is stringified into the file name.  Integer labels get a
@@ -158,7 +158,7 @@ class RunLogger:
         with self._lock:
             previous_file = self.file
             previous_file.flush()
-            ts = datetime.now().strftime("%Y%m%d-%H%M%S")  # noqa: DTZ005  # tracked: #288
+            ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
             suffix = f"step{label}" if isinstance(label, int) else label
             new_path = self.log_dir / f"run-{ts}-{suffix}.log"
             new_file = new_path.open("a", encoding="utf-8")
@@ -167,7 +167,7 @@ class RunLogger:
             previous_file.close()
             return new_file
 
-    def close(self) -> None:  # tracked: #288
+    def close(self) -> None:
         with self._lock:
             if self._stderr_tee is not None and sys.stderr is self._stderr_tee:
                 sys.stderr = self._original_stderr

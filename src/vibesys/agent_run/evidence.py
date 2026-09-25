@@ -26,6 +26,7 @@ _FAILED_HYPOTHESIS_OUTCOMES = (
 _PARETO_ARCHIVE_PENDING_CLAIM_LIMIT = 8
 _PLATEAU_THRESHOLD_PCT = 5.0
 _PLATEAU_MIN_STREAK = 3
+_EN_DASH = "\N{EN DASH}"
 
 
 def _record_candidate_metrics(record: RoundRecord) -> dict[str, float]:
@@ -181,7 +182,8 @@ def _pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> s
     if frontier:
         lines.append("Trusted frontier parents:")
         for record in frontier:
-            assert record.commit is not None  # noqa: S101  # tracked: #288
+            if record.commit is None:
+                continue
             evidence = "official" if record.official_evaluation else "reviewed provisional"
             operating_point = record.candidate_operating_point or "canonical workload row"
             artifact = record.candidate_evaluation_artifact or record.evaluation_artifact
@@ -225,7 +227,8 @@ def _pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> s
                 f"({rounds}); do not treat any omitted claim as a trusted parent."
             )
         for record in pending[-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT:]:
-            assert record.commit is not None  # noqa: S101  # tracked: #288
+            if record.commit is None:
+                continue
             lines.append(
                 f"- round {record.round_number}, commit {record.commit[:12]}: "
                 f"{_format_metric_row(record.candidate_metrics, objectives)}; "
@@ -324,7 +327,9 @@ def _detect_plateau(
     threshold_pct: float = _PLATEAU_THRESHOLD_PCT,
     min_streak: int = _PLATEAU_MIN_STREAK,
 ) -> str | None:
-    """Return a warning string if the most recent ``min_streak`` rounds
+    """Return a warning string if recent same-unit rounds stayed steady.
+
+    Check whether the most recent ``min_streak`` rounds
     with **fresh, same-unit** perf metrics stayed within ``threshold_pct``
     of each other; else None.
 
@@ -342,7 +347,7 @@ def _detect_plateau(
 
     The orchestrator gets this verbatim in its prompt; phrasing is
     user-facing.
-    """  # noqa: D205  # tracked: #288
+    """
     fresh = [
         r
         for r in records
@@ -371,7 +376,7 @@ def _detect_plateau(
     rounds = [r.round_number for r in tail]
     return (
         f"The last {min_streak} rounds with a fresh perf measurement (rounds "
-        f"{rounds[0]}–{rounds[-1]}) all landed in {lo:.2f}–{hi:.2f}{unit_suffix} "  # noqa: RUF001  # tracked: #288
+        f"{rounds[0]}{_EN_DASH}{rounds[-1]}) all landed in {lo:.2f}{_EN_DASH}{hi:.2f}{unit_suffix} "
         f"— a {spread_pct:.2f}% spread, well within bench noise. Whatever you've "
         f"been working on for those rounds is not actually moving the headline "
         f"metric."

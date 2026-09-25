@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING
 
 import pytest
 from tui_packaging import (
@@ -12,6 +12,9 @@ from tui_packaging import (
     stage_prebuilt_tui,
     validate_tui_payload,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _write_payload(
@@ -56,7 +59,7 @@ def _write_payload(
     return root
 
 
-def test_stage_prebuilt_tui_validates_and_copies_the_payload(tmp_path):  # noqa: ANN001, ANN201
+def test_stage_prebuilt_tui_validates_and_copies_the_payload(tmp_path: Path) -> None:
     source = _write_payload(tmp_path / "source")
     destination = tmp_path / "destination"
 
@@ -110,14 +113,14 @@ def test_tui_payload_rejects_checkout_specific_dependencies(tmp_path: Path) -> N
         validate_tui_payload(source, expected_target="linux-x86_64")
 
 
-def test_optional_staging_without_a_payload_is_a_noop(tmp_path):  # noqa: ANN001, ANN201
+def test_optional_staging_without_a_payload_is_a_noop(tmp_path: Path) -> None:
     destination = tmp_path / "destination"
 
     assert not stage_prebuilt_tui(None, destination, required=False)
     assert not destination.exists()
 
 
-def test_required_staging_rejects_a_missing_payload(tmp_path):  # noqa: ANN001, ANN201
+def test_required_staging_rejects_a_missing_payload(tmp_path: Path) -> None:
     with pytest.raises(TuiPackagingError, match="TUI payload"):
         stage_prebuilt_tui(tmp_path / "missing", tmp_path / "dest", required=True)
 
@@ -133,7 +136,9 @@ def test_required_staging_rejects_a_missing_payload(tmp_path):  # noqa: ANN001, 
         ("licenses/opentui-core.txt", "opentui-core"),
     ],
 )
-def test_required_staging_rejects_missing_files(tmp_path, relative_path, message):  # noqa: ANN001, ANN201
+def test_required_staging_rejects_missing_files(
+    tmp_path: Path, relative_path: str, message: str
+) -> None:
     source = _write_payload(tmp_path / "source")
     (source / relative_path).unlink()
 
@@ -141,7 +146,7 @@ def test_required_staging_rejects_missing_files(tmp_path, relative_path, message
         stage_prebuilt_tui(source, tmp_path / "dest", required=True)
 
 
-def test_staging_rejects_a_non_executable_bun(tmp_path):  # noqa: ANN001, ANN201
+def test_staging_rejects_a_non_executable_bun(tmp_path: Path) -> None:
     source = _write_payload(tmp_path / "source")
     (source / "bin" / "bun").chmod(0o644)
 
@@ -149,7 +154,7 @@ def test_staging_rejects_a_non_executable_bun(tmp_path):  # noqa: ANN001, ANN201
         stage_prebuilt_tui(source, tmp_path / "dest", required=True)
 
 
-def test_staging_rejects_a_wrong_bun_version_or_target(tmp_path):  # noqa: ANN001, ANN201
+def test_staging_rejects_a_wrong_bun_version_or_target(tmp_path: Path) -> None:
     source = _write_payload(tmp_path / "source")
     manifest_path = source / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
@@ -169,7 +174,7 @@ def test_staging_rejects_a_wrong_bun_version_or_target(tmp_path):  # noqa: ANN00
         )
 
 
-def test_staging_rejects_an_unexpected_native_package(tmp_path):  # noqa: ANN001, ANN201
+def test_staging_rejects_an_unexpected_native_package(tmp_path: Path) -> None:
     source = _write_payload(tmp_path / "source")
     extra = source / "app" / "node_modules" / "@opentui" / "core-darwin-arm64"
     extra.mkdir(parents=True)
@@ -179,7 +184,7 @@ def test_staging_rejects_an_unexpected_native_package(tmp_path):  # noqa: ANN001
         stage_prebuilt_tui(source, tmp_path / "dest", required=True)
 
 
-def test_staging_rejects_source_maps_and_hash_mismatches(tmp_path):  # noqa: ANN001, ANN201
+def test_staging_rejects_source_maps_and_hash_mismatches(tmp_path: Path) -> None:
     source = _write_payload(tmp_path / "source")
     (source / "app" / "dist" / "launcher.js.map").write_text("{}\n")
 

@@ -1,4 +1,5 @@
 """Profile single policy decisions over completed round evidence."""
+# ruff: noqa: SLF001  # LW-030013; These tests pin the session policy's private round and command seams.
 
 from __future__ import annotations
 
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from tests.support import make_orchestrator_plan
 
 from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed
@@ -32,11 +34,11 @@ if TYPE_CHECKING:
 
 
 def _plan() -> OrchestratorPlan:
-    return OrchestratorPlan(
+    return make_orchestrator_plan(
         hypothesis_id="h1",
         hypothesis="cache decode",
         task="implement cache",
-        pass_criteria="tests pass",  # noqa: S106
+        criteria="tests pass",
         reasoning="measure decode",
     )
 
@@ -79,7 +81,7 @@ def test_review_failure_retains_bounded_claim_and_sets_exhaustion_carry() -> Non
         hypothesis_outcome="rejected",
     )
 
-    engine, carry, exhaustion = session._complete_policy_round(selected, record)  # noqa: SLF001
+    engine, carry, exhaustion = session._complete_policy_round(selected, record)
 
     active = engine.state.active_hypothesis
     assert active is not None
@@ -104,7 +106,7 @@ def test_terminal_success_releases_claim_and_reports_discarded_official_candidat
         perf_unit="ops",
     )
 
-    engine, carry, exhaustion = session._complete_policy_round(selected, record)  # noqa: SLF001
+    engine, carry, exhaustion = session._complete_policy_round(selected, record)
 
     assert engine.state.active_hypothesis is None
     assert exhaustion is None
@@ -139,7 +141,7 @@ async def test_profile_attribution_is_checkpointed_before_plan_and_continuation_
     session.carry = CarryOver()
     session.last_response = None
     session.last_profile_focus = "decode"
-    monkeypatch.setattr(session, "profile", profile_session._ProfilePolicy(config), raising=False)  # noqa: SLF001
+    monkeypatch.setattr(session, "profile", profile_session._ProfilePolicy(config), raising=False)
     plan = AsyncMock(return_value=_plan())
     monkeypatch.setattr(
         session,
@@ -315,7 +317,7 @@ async def test_passed_profile_round_commits_record_and_publishes_finished_event(
     session.records = []
     session.state = session.engine.state
     session.framework_benchmark_configured = False
-    session.terminal_policy = profile_session._TerminalPolicy()  # noqa: SLF001
+    session.terminal_policy = profile_session._TerminalPolicy()
     selected.attempt.passed = True
     selected.attempt.retry = 1
     selected.attempt.single_agent_response = _response(Verdict.PASS)
@@ -373,14 +375,14 @@ def test_retry_cursor_and_official_command_keep_policy_boundaries(
         session, "turns", SimpleNamespace(progress_path=tmp_path / "progress.md"), raising=False
     )
     assert list(session.remaining_attempts(selected)) == [1, 2, 3]
-    assert session._official_reason(requested=False) is None  # noqa: SLF001
-    assert session._official_reason(requested=True) == "orchestrator_request"  # noqa: SLF001
+    assert session._official_reason(requested=False) is None
+    assert session._official_reason(requested=True) == "orchestrator_request"
     session.round_number = 3
-    assert session._official_reason(requested=False) == "final_round"  # noqa: SLF001
-    assert ProfileSingleSession._command("run benchmark", "a b", "RELEASE") == (  # noqa: SLF001
+    assert session._official_reason(requested=False) == "final_round"
+    assert ProfileSingleSession._command("run benchmark", "a b", "RELEASE") == (
         "env VIBESYS_CANDIDATE_REVISION='a b' RELEASE=1 run benchmark"
     )
-    assert ProfileSingleSession._command(None, "revision", "RELEASE") is None  # noqa: SLF001
+    assert ProfileSingleSession._command(None, "revision", "RELEASE") is None
     session.options = session.options.model_copy(update={"max_retries_per_round": 0})
     with pytest.raises(ProfileSingleSessionError, match="exhausting"):
         session.remaining_attempts(selected)

@@ -1,6 +1,6 @@
 """Local host for the public custom-orchestration agent capabilities."""
 
-# Capabilities in this module share one private owner for resource lifetime.
+# lint-waiver: LW-020038 [SLF001]; capabilities in this module share one private owner for resource lifetime.
 # ruff: noqa: SLF001
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from vibesys.context import (
 )
 from vibesys.evaluators.gates import (
     AccuracyGateResult,
+    BenchmarkContract,
     BenchmarkGateResult,
     emit_gate_finished,
     emit_gate_started,
@@ -38,12 +39,14 @@ from vibesys.evaluators.gates import (
     run_accuracy_gate,
     run_benchmark_gate,
 )
+from vibesys.evaluators.metrics import MetricSpace
 from vibesys.events import (
     AgentExecutionActivityData,
     AgentExecutionFinishedData,
     AgentExecutionStartedData,
     CoreEventType,
     EventStatus,
+    GateFinishedData,
     GateKind,
     InvocationFinishedData,
     InvocationStartedData,
@@ -139,7 +142,7 @@ async def _wait_until_done(task: asyncio.Task) -> None:
             await asyncio.shield(task)
         except asyncio.CancelledError:
             continue
-        except BaseException:  # noqa: BLE001
+        except BaseException:  # noqa: BLE001  # lint-waiver: LW-020027 [BLE001]; the caller inspects the worker's outcome after the wait, so this loop only needs to stop on any failure.
             break
 
 
@@ -152,7 +155,7 @@ async def _close_runtime(host: RunContext, error: BaseException | None) -> None:
             await asyncio.shield(cleanup)
         except asyncio.CancelledError:
             cancelled = True
-        except BaseException:  # noqa: BLE001  # inspect the completed task below
+        except BaseException:  # noqa: BLE001  # lint-waiver: LW-020028 [BLE001]; the completed cleanup task's exception is inspected right after the loop.
             break
     try:
         cleanup.result()
@@ -170,7 +173,7 @@ async def _close_runtime(host: RunContext, error: BaseException | None) -> None:
 
 
 class _LocalAgentHandle:
-    def __init__(  # noqa: PLR0913  # independently owned agent resources
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-020029 [PLR0913]; independently owned agent resources are injected by the host, and bundling them would hide ownership.
         self,
         definition: AgentDefinition,
         context: _RunResources,
@@ -243,7 +246,7 @@ class _LocalAgentHandle:
             ),
         )
 
-    async def turn_structured(  # noqa: PLR0913
+    async def turn_structured(  # noqa: PLR0913  # lint-waiver: LW-020030 [PLR0913]; this method mirrors AgentHandle.turn_structured, whose independent keyword options are its public contract.
         self,
         message: str,
         *,
@@ -473,7 +476,8 @@ class _RunState:
         """Return the policy's portable namespace for existing paid-work journals."""
         setup = self._host._setup
         if setup.state_namespace is None:
-            raise TypeError("policy did not declare a portable state namespace")  # noqa: TRY003
+            message = "policy did not declare a portable state namespace"
+            raise TypeError(message)
         context = self._host._resources
         return context.state.portable(setup.state_namespace)
 
@@ -482,7 +486,8 @@ class _RunState:
         """Return machine-local state for uncommitted paid-work cursors."""
         setup = self._host._setup
         if setup.state_namespace is None:
-            raise TypeError("policy did not declare a state namespace")  # noqa: TRY003
+            message = "policy did not declare a state namespace"
+            raise TypeError(message)
         return self._host._resources.state.local(setup.state_namespace)
 
     def local_path(self, name: str) -> Path:
@@ -493,7 +498,8 @@ class _RunState:
             None if parent == PurePosixPath(".") else parent
         )
         if relative.name in {"", ".", ".."} or relative.is_absolute():
-            raise ValueError(f"invalid local state path {name!r}")  # noqa: TRY003
+            message = f"invalid local state path {name!r}"
+            raise ValueError(message)
         return directory / relative.name
 
     def artifact_path(self, name: str) -> Path:
@@ -505,7 +511,8 @@ class _RunState:
         setup = self._host._setup
         declared = setup.state_slots or {}
         if declared.get(name) is not model:
-            raise TypeError(f"policy state slot {name!r} is not declared with {model.__name__}")  # noqa: TRY003
+            message = f"policy state slot {name!r} is not declared with {model.__name__}"
+            raise TypeError(message)
         return _TypedRunStateSlot(self._host, self.namespace.slot(name, model))
 
     async def load(self, model: type[T]) -> T | None:
@@ -542,17 +549,20 @@ class _RunState:
         context = self._host._resources
         namespace = self._host._setup.state_namespace
         if namespace is None:
-            raise TypeError("policy did not declare a durable state slot")  # noqa: TRY003
+            message = "policy did not declare a durable state slot"
+            raise TypeError(message)
         coordinator = context._round_transaction_coordinator
         if coordinator is None:
-            raise TypeError("policy did not declare checkpoint slots")  # noqa: TRY003
+            message = "policy did not declare checkpoint slots"
+            raise TypeError(message)
         coordinator.begin(sequence, writes=writes, candidate=candidate, label=label).complete()
         committed = publish or writes.get("state.json")
         if committed is not None:
             context.publish_committed_state(namespace, committed)
         revision = context.git.current_sha()
         if revision is None:
-            raise RuntimeError("checkpoint completed without a Git revision")  # noqa: TRY003
+            message = "checkpoint completed without a Git revision"
+            raise RuntimeError(message)
         return revision
 
 
@@ -655,7 +665,11 @@ class _Evaluator:
     def _reuse_accuracy(self, label: str | None) -> AccuracyGateResult:
         command = self._host.environment.view.paths.accuracy_command
         emit_gate_started(GateKind.ACCURACY, command=command, round_label=label)
-        emit_gate_finished(GateKind.ACCURACY, passed=True, reused=True, round_label=label)
+        emit_gate_finished(
+            GateFinishedData(gate=GateKind.ACCURACY, reused=True),
+            passed=True,
+            round_label=label,
+        )
         return AccuracyGateResult(
             command=command,
             passed=True,
@@ -679,12 +693,14 @@ class _Evaluator:
             return await self._host._run_blocking(
                 run_benchmark_gate,
                 context,
-                result_spec=bundle.benchmark_result,
-                result_protocol=bundle.benchmark_result_protocol,
-                objectives=options.objectives,
+                contract=BenchmarkContract(
+                    result_spec=bundle.benchmark_result,
+                    result_protocol=bundle.benchmark_result_protocol,
+                    timeout_seconds=timeout,
+                ),
+                space=MetricSpace(objectives=tuple(options.objectives)),
                 process_id=output_slug,
                 output_slug=output_slug,
-                timeout_seconds=timeout,
                 execution_base=options.execution_base,
                 round_label=options.label,
             )
@@ -757,7 +773,8 @@ class WorkspaceHandle:
     async def discard(self) -> None:
         """Close an isolated workspace and all of its agent handles."""
         if self._scope is None:
-            raise ValueError("the run root cannot be discarded")  # noqa: TRY003
+            message = "the run root cannot be discarded"
+            raise ValueError(message)
         await self._owner._discard_scope(self._scope)
 
 
@@ -775,7 +792,8 @@ class _Workspaces:
         """Resolve a public handle to its internal scope identity."""
         if isinstance(scope, WorkspaceHandle):
             if scope._owner is not self:
-                raise ValueError("workspace handle belongs to another run")  # noqa: TRY003
+                message = "workspace handle belongs to another run"
+                raise ValueError(message)
             return scope._scope
         return scope
 
@@ -789,9 +807,11 @@ class _Workspaces:
         parent = self._host._resources
         base = revision or parent.git.current_sha()
         if base is None:
-            raise RuntimeError("cannot fork a workspace without a committed revision")  # noqa: TRY003
+            message = "cannot fork a workspace without a committed revision"
+            raise RuntimeError(message)
         if not parent.run_environment_view.supports_parallel_candidate_evaluation:
-            raise RuntimeError("run environment cannot open isolated candidate sandboxes")  # noqa: TRY003
+            message = "run environment cannot open isolated candidate sandboxes"
+            raise RuntimeError(message)
         scope_id = f"s{uuid.uuid4().hex}"
         context = create_workspace_resources(
             parent,
@@ -827,7 +847,8 @@ class _Workspaces:
         parent.git.snapshot(label)
         revision = parent.git.current_sha()
         if revision is None:
-            raise RuntimeError("workspace snapshot completed without a Git revision")  # noqa: TRY003
+            message = "workspace snapshot completed without a Git revision"
+            raise RuntimeError(message)
         return revision
 
     def _snapshot_scoped(self, label: str, scope: WorkspaceScope) -> str:
@@ -836,7 +857,8 @@ class _Workspaces:
         git.snapshot(label)
         revision = git.current_sha()
         if revision is None:
-            raise RuntimeError("workspace snapshot completed without a Git revision")  # noqa: TRY003
+            message = "workspace snapshot completed without a Git revision"
+            raise RuntimeError(message)
         return revision
 
     def _retain_scoped(self, scope: WorkspaceScope, revision: str) -> str:
@@ -861,7 +883,8 @@ class _Workspaces:
                 preserve_paths=preserve_paths,
             )
         if not adopted:
-            raise RuntimeError(f"could not adopt candidate revision {revision!r}")  # noqa: TRY003
+            message = f"could not adopt candidate revision {revision!r}"
+            raise RuntimeError(message)
 
     async def _restore(
         self,
@@ -885,7 +908,8 @@ class _Workspaces:
                 preserve_paths=preserve_paths,
             )
             if not restored:
-                raise RuntimeError(f"could not restore candidate revision {revision!r}")  # noqa: TRY003
+                message = f"could not restore candidate revision {revision!r}"
+                raise RuntimeError(message)
             scope.revision = revision
 
     async def _retain(self, name: str, revision: str) -> str:
@@ -926,7 +950,7 @@ class _Workspaces:
                     continue
                 try:
                     await agent.close()
-                except BaseException as exc:  # noqa: BLE001  # finish scope cleanup
+                except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020031 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                     errors.append(exc)
             async with (
                 self._host.evaluator._lock_for(scope),
@@ -935,13 +959,14 @@ class _Workspaces:
             ):
                 try:
                     await self._host._run_blocking(self._discard, scope)
-                except BaseException as exc:  # noqa: BLE001  # report all cleanup errors
+                except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020032 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                     errors.append(exc)
                 finally:
                     if scope.id not in self._scopes:
                         self._host.evaluator._forget(scope)
             if errors:
-                raise BaseExceptionGroup("scoped agent cleanup failed", errors)  # noqa: TRY003
+                message = "scoped agent cleanup failed"
+                raise BaseExceptionGroup(message, errors)
 
     def _discard(self, scope: WorkspaceScope) -> None:
         current = self._require_scope(scope)
@@ -957,10 +982,12 @@ class _Workspaces:
     def _require_scope(self, scope: WorkspaceScope | WorkspaceHandle) -> WorkspaceScope:
         resolved = self._scope_of(scope)
         if resolved is None:
-            raise ValueError("expected an isolated workspace scope")  # noqa: TRY003
+            message = "expected an isolated workspace scope"
+            raise ValueError(message)
         current = self._scopes.get(resolved.id)
         if current is not resolved:
-            raise ValueError("workspace scope is closed or belongs to another run")  # noqa: TRY003
+            message = "workspace scope is closed or belongs to another run"
+            raise ValueError(message)
         return current
 
     def _resources_for(self, scope: WorkspaceScope | WorkspaceHandle | None) -> _RunResources:
@@ -982,10 +1009,11 @@ class _Workspaces:
                     self._host._parent_mutation_lock,
                 ):
                     await asyncio.to_thread(self._discard, scope)
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020033 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                 errors.append(exc)
         if errors:
-            raise BaseExceptionGroup("workspace cleanup failed", errors)  # noqa: TRY003
+            message = "workspace cleanup failed"
+            raise BaseExceptionGroup(message, errors)
 
 
 class _Environment:
@@ -1104,7 +1132,7 @@ class _Environment:
 class RunContext:
     """One run's resources and focused host capabilities."""
 
-    def __init__(  # noqa: PLR0913  # tracked: #288
+    def __init__(  # noqa: PLR0913  # LW-040004 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         self,
         request: RunRequest,
         integration: LocalRunIntegration,
@@ -1182,7 +1210,7 @@ class RunContext:
 
     @classmethod
     @asynccontextmanager
-    async def open(  # noqa: PLR0913  # tracked: #288
+    async def open(  # noqa: PLR0913  # LW-040005 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
         cls,
         request: RunRequest,
         integration: LocalRunIntegration,
@@ -1368,16 +1396,17 @@ class RunContext:
             for agent in reversed(tuple(self._agents.values())):
                 try:
                     await agent.close()
-                except BaseException as exc:  # noqa: BLE001
+                except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020034 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                     errors.append(exc)
             try:
                 await self.workspaces.close()
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020035 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                 errors.append(exc)
         if self._resource_owner is not None:
             try:
                 await asyncio.to_thread(self._resource_owner.close)
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020036 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                 errors.append(exc)
         if errors:
-            raise BaseExceptionGroup("run cleanup failed", errors)  # noqa: TRY003
+            message = "run cleanup failed"
+            raise BaseExceptionGroup(message, errors)

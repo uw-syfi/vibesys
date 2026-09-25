@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import engine_scan  # noqa: E402
+import engine_scan
 
 
 def _scan(files: dict[str, str]) -> list[str]:

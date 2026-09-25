@@ -1,6 +1,6 @@
 """Candidate-authored local validation stays bounded to its declared inputs."""
 
-# ruff: noqa: SLF001  # Exercise the policy's focused validation helpers directly.
+# ruff: noqa: SLF001  # LW-030010; Exercise the policy's focused validation helpers directly.
 
 from __future__ import annotations
 

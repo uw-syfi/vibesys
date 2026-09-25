@@ -13,22 +13,27 @@ import json
 import random
 import shutil
 import uuid
-from collections.abc import Generator  # noqa: TC003  # tracked: #288
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from openevolve.config import DatabaseConfig
 from openevolve.database import Program, ProgramDatabase
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.loops.evolve.population import Individual, Population  # noqa: TC001  # tracked: #288
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Iterator
+    from pathlib import Path
+
+    from vibesys.loops.evolve.population import Individual, Population
 
 
-class SearchPolicyName(StrEnum):  # noqa: D101  # tracked: #288
+class SearchPolicyName(StrEnum):
+    """Registered search algorithms for evolutionary loops."""
+
     VIBESYS = "vibesys"
     OPENEVOLVE = "openevolve"
 
@@ -44,6 +49,18 @@ class SearchSelection:
 
 
 @dataclass(frozen=True)
+class SearchSelectionParameters:
+    """Independent controls shared by the registered search policies."""
+
+    rng: random.Random
+    k_top_inspirations: int
+    k_random_inspirations: int
+    selection_temperature: float
+    space: MetricSpace
+    frontier_bias: float
+
+
+@dataclass(frozen=True)
 class OpenEvolveSearchConfig:
     """Supported OpenEvolve database knobs, pinned to v0.3.1 semantics."""
 
@@ -53,17 +70,23 @@ class OpenEvolveSearchConfig:
     migration_interval: int = 50
     migration_rate: float = 0.1
 
-    def __post_init__(self) -> None:  # noqa: D105  # tracked: #288
+    def __post_init__(self) -> None:
+        """Validate OpenEvolve configuration bounds at construction."""
         if self.population_size < 1:
-            raise ValueError("OpenEvolve population_size must be >= 1")  # noqa: TRY003  # tracked: #288
+            message = "OpenEvolve population_size must be >= 1"
+            raise ValueError(message)
         if self.archive_size < 1:
-            raise ValueError("OpenEvolve archive_size must be >= 1")  # noqa: TRY003  # tracked: #288
+            message = "OpenEvolve archive_size must be >= 1"
+            raise ValueError(message)
         if self.num_islands < 1:
-            raise ValueError("OpenEvolve num_islands must be >= 1")  # noqa: TRY003  # tracked: #288
+            message = "OpenEvolve num_islands must be >= 1"
+            raise ValueError(message)
         if self.migration_interval < 1:
-            raise ValueError("OpenEvolve migration_interval must be >= 1")  # noqa: TRY003  # tracked: #288
+            message = "OpenEvolve migration_interval must be >= 1"
+            raise ValueError(message)
         if not 0.0 <= self.migration_rate <= 1.0:
-            raise ValueError("OpenEvolve migration_rate must be in [0, 1]")  # noqa: TRY003  # tracked: #288
+            message = "OpenEvolve migration_rate must be in [0, 1]"
+            raise ValueError(message)
 
 
 class _PersistedOpenEvolveConfig(BaseModel):
@@ -128,21 +151,19 @@ class SearchPolicy(Protocol):
     """Selection/persistence surface consumed by the VibeSys evolve loop."""
 
     @property
-    def requires_code(self) -> bool: ...  # noqa: D102  # tracked: #288
+    def requires_code(self) -> bool:
+        """Whether selections require candidate source code."""
+        ...
 
-    def select(  # noqa: D102, PLR0913  # tracked: #288
+    def select(
         self,
         population: Population,
-        *,
-        rng: random.Random,
-        k_top_inspirations: int,
-        k_random_inspirations: int,
-        selection_temperature: float,
-        space: MetricSpace,
-        frontier_bias: float,
-    ) -> SearchSelection | None: ...
+        parameters: SearchSelectionParameters,
+    ) -> SearchSelection | None:
+        """Select a parent and optional inspirations for the next candidate."""
+        ...
 
-    def record(  # noqa: D102  # tracked: #288
+    def record(
         self,
         individual: Individual,
         *,
@@ -150,41 +171,41 @@ class SearchPolicy(Protocol):
         policy_parent_id: str | None,
         target_island: int | None,
         space: MetricSpace,
-    ) -> None: ...
+    ) -> None:
+        """Record a candidate admitted by the evolve loop."""
+        ...
 
-    def finish_generation(self, generation: int) -> None: ...  # noqa: D102  # tracked: #288
+    def finish_generation(self, generation: int) -> None:
+        """Persist any state accumulated during the completed generation."""
+        ...
 
 
 class VibeSysSearchPolicy:
     """Existing scalar/Pareto population selection."""
 
     @property
-    def requires_code(self) -> bool:  # noqa: D102  # tracked: #288
+    def requires_code(self) -> bool:
+        """Scalar/Pareto selection uses persisted individuals, not source."""
         return False
 
-    def select(  # noqa: D102, PLR0913  # tracked: #288
+    def select(
         self,
         population: Population,
-        *,
-        rng: random.Random,
-        k_top_inspirations: int,
-        k_random_inspirations: int,
-        selection_temperature: float,
-        space: MetricSpace,
-        frontier_bias: float,
+        parameters: SearchSelectionParameters,
     ) -> SearchSelection | None:
+        """Select a parent and inspiration set from the current population."""
         parent = population.select_parent(
-            rng=rng,
-            temperature=selection_temperature,
-            space=space,
-            frontier_bias=frontier_bias,
+            rng=parameters.rng,
+            temperature=parameters.selection_temperature,
+            space=parameters.space,
+            frontier_bias=parameters.frontier_bias,
         )
         inspirations = population.select_inspirations(
             parent_id=parent.id if parent else None,
-            k_top=k_top_inspirations,
-            k_random=k_random_inspirations,
-            rng=rng,
-            space=space,
+            k_top=parameters.k_top_inspirations,
+            k_random=parameters.k_random_inspirations,
+            rng=parameters.rng,
+            space=parameters.space,
         )
         if parent is None:
             passers = population.passed
@@ -193,25 +214,27 @@ class VibeSysSearchPolicy:
             parent = passers[-1]
         return SearchSelection(parent=parent, inspirations=inspirations)
 
-    def record(  # noqa: D102  # tracked: #288
+    def record(
         self,
-        individual: Individual,  # noqa: ARG002  # tracked: #288
+        individual: Individual,
         *,
-        code: str,  # noqa: ARG002  # tracked: #288
-        policy_parent_id: str | None,  # noqa: ARG002  # tracked: #288
-        target_island: int | None,  # noqa: ARG002  # tracked: #288
-        space: MetricSpace,  # noqa: ARG002  # tracked: #288
+        code: str,
+        policy_parent_id: str | None,
+        target_island: int | None,
+        space: MetricSpace,
     ) -> None:
-        return None
+        """Accept an individual without maintaining policy-specific state."""
+        del individual, code, policy_parent_id, target_island, space
 
-    def finish_generation(self, generation: int) -> None:  # noqa: ARG002, D102  # tracked: #288
-        return None
+    def finish_generation(self, generation: int) -> None:
+        """Finish a generation without additional persistence."""
+        del generation
 
 
 class _SortedIterationSet(set[str]):
     """Set semantics with deterministic iteration for replaying OpenEvolve."""
 
-    def __iter__(self):  # noqa: ANN204  # tracked: #288
+    def __iter__(self) -> Iterator[str]:
         return iter(sorted(super().__iter__()))
 
 
@@ -231,10 +254,11 @@ class OpenEvolveSearchPolicy:
     _STATE_SCHEMA_VERSION: Literal[1] = 1
 
     @property
-    def requires_code(self) -> bool:  # noqa: D102  # tracked: #288
+    def requires_code(self) -> bool:
+        """OpenEvolve selection stores candidate source patches."""
         return True
 
-    def __init__(  # noqa: D107  # tracked: #288
+    def __init__(
         self,
         *,
         state_dir: Path,
@@ -242,27 +266,30 @@ class OpenEvolveSearchPolicy:
         config: OpenEvolveSearchConfig | None,
         space: MetricSpace,
     ) -> None:
+        """Restore or initialize the OpenEvolve adapter in its state directory."""
         self.state_dir = state_dir
         self._snapshot_dir = self._resolve_snapshot_dir(state_dir)
         saved_state = self._load_adapter_state()
         saved_config = saved_state.config.to_domain() if saved_state is not None else None
         if config is not None and saved_config is not None and config != saved_config:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            message = (
                 "OpenEvolve search configuration does not match the resumed run: "
                 f"saved={saved_config}, requested={config}"
             )
+            raise ValueError(message)
         self.config = config or saved_config or OpenEvolveSearchConfig()
         self._objective_signature = self._objectives_signature(space)
         saved_objectives = saved_state.objective_signature if saved_state else None
         if saved_objectives is not None and saved_objectives != self._objective_signature:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            message = (
                 "OpenEvolve fitness objective does not match the resumed run: "
                 f"saved={saved_objectives}, requested={self._objective_signature}"
             )
+            raise ValueError(message)
         self._admitted_individual_ids = set(
             saved_state.admitted_individual_ids if saved_state else ()
         )
-        self._rng = random.Random(seed)  # noqa: S311  # tracked: #288
+        self._rng = random.Random(seed)  # noqa: S311  # lint-waiver: LW-009042 [S311]; seeded pseudorandom state makes policy selection replayable, with no security token use.
         if saved_state is not None:
             self._rng.setstate(saved_state.rng_state)
 
@@ -299,18 +326,21 @@ class OpenEvolveSearchPolicy:
             self._save_full_state()
 
     @classmethod
-    def has_state(cls, state_dir: Path) -> bool:  # noqa: D102  # tracked: #288
+    def has_state(cls, state_dir: Path) -> bool:
+        """Return whether an OpenEvolve snapshot exists in the state directory."""
         return cls._resolve_snapshot_dir(state_dir) is not None
 
     @classmethod
-    def persisted_config(cls, state_dir: Path) -> OpenEvolveSearchConfig | None:  # noqa: D102  # tracked: #288
+    def persisted_config(cls, state_dir: Path) -> OpenEvolveSearchConfig | None:
+        """Load the persisted OpenEvolve configuration, if present."""
         snapshot_dir = cls._resolve_snapshot_dir(state_dir)
         if snapshot_dir is None:
             return None
         return cls._read_adapter_state(snapshot_dir).config.to_domain()
 
     @classmethod
-    def persisted_objectives(cls, state_dir: Path) -> list[Objective] | None:  # noqa: D102  # tracked: #288
+    def persisted_objectives(cls, state_dir: Path) -> list[Objective] | None:
+        """Load the persisted objective signature, if present."""
         snapshot_dir = cls._resolve_snapshot_dir(state_dir)
         if snapshot_dir is None:
             return None
@@ -335,7 +365,8 @@ class OpenEvolveSearchPolicy:
         snapshot_name = current_path.read_text().strip()
         snapshot_dir = state_dir / "snapshots" / snapshot_name
         if not snapshot_name or not snapshot_dir.is_dir():
-            raise ValueError(f"invalid OpenEvolve snapshot pointer in {current_path}")  # noqa: TRY003  # tracked: #288
+            message = f"invalid OpenEvolve snapshot pointer in {current_path}"
+            raise ValueError(message)
         return snapshot_dir
 
     @staticmethod
@@ -368,7 +399,7 @@ class OpenEvolveSearchPolicy:
         if not isinstance(self._database.archive, _SortedIterationSet):
             self._database.archive = _SortedIterationSet(self._database.archive)
 
-    def _canonicalize_new_upstream_programs(self, program_ids_before: set[str]) -> None:  # noqa: C901, PLR0912  # tracked: #288
+    def _canonicalize_new_upstream_programs(self, program_ids_before: set[str]) -> None:
         """Replace upstream random IDs and timestamps with state-derived values."""
         new_programs = [
             program
@@ -392,7 +423,8 @@ class OpenEvolveSearchPolicy:
             )
             canonical_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"vibesys-openevolve:{identity}"))
             if canonical_id in self._database.programs or canonical_id in replacements.values():
-                raise RuntimeError(f"duplicate deterministic OpenEvolve program ID: {canonical_id}")  # noqa: TRY003  # tracked: #288
+                message = f"duplicate deterministic OpenEvolve program ID: {canonical_id}"
+                raise RuntimeError(message)
             replacements[program.id] = canonical_id
             program.id = canonical_id
             program.timestamp = float(program.iteration_found or self._database.last_iteration)
@@ -400,12 +432,24 @@ class OpenEvolveSearchPolicy:
         if not replacements:
             return
 
+        self._replace_program_ids(replacements)
+
+    def _replace_program_ids(self, replacements: dict[str, str]) -> None:
+        """Update every upstream index when canonicalizing program identities."""
+        self._rekey_programs(replacements)
+        self._rekey_islands(replacements)
+        self._rekey_history(replacements)
+        self._rekey_prompts(replacements)
+
+    def _rekey_programs(self, replacements: dict[str, str]) -> None:
         for old_id, canonical_id in replacements.items():
             program = self._database.programs.pop(old_id)
             self._database.programs[canonical_id] = program
         for program in self._database.programs.values():
             if program.parent_id in replacements:
                 program.parent_id = replacements[program.parent_id]
+
+    def _rekey_islands(self, replacements: dict[str, str]) -> None:
         for island in self._database.islands:
             for old_id, canonical_id in replacements.items():
                 if old_id in island:
@@ -414,6 +458,8 @@ class OpenEvolveSearchPolicy:
         for feature_map in self._database.island_feature_maps:
             for feature, program_id in list(feature_map.items()):
                 feature_map[feature] = replacements.get(program_id, program_id)
+
+    def _rekey_history(self, replacements: dict[str, str]) -> None:
         self._database.archive = _SortedIterationSet(
             replacements.get(program_id, program_id) for program_id in self._database.archive
         )
@@ -423,30 +469,26 @@ class OpenEvolveSearchPolicy:
             replacements.get(program_id, program_id) if program_id is not None else None
             for program_id in self._database.island_best_programs
         ]
+
+    def _rekey_prompts(self, replacements: dict[str, str]) -> None:
         if self._database.prompts_by_program:
             for old_id, canonical_id in replacements.items():
                 prompts = self._database.prompts_by_program.pop(old_id, None)
                 if prompts is not None:
                     self._database.prompts_by_program[canonical_id] = prompts
 
-    def select(  # noqa: D102, PLR0913  # tracked: #288
+    def select(
         self,
         population: Population,
-        *,
-        rng: random.Random,
-        k_top_inspirations: int,
-        k_random_inspirations: int,
-        selection_temperature: float,
-        space: MetricSpace,
-        frontier_bias: float,
+        parameters: SearchSelectionParameters,
     ) -> SearchSelection | None:
-        del rng, selection_temperature, space, frontier_bias
+        """Select a parent program and inspirations from the active island."""
         if not self._database.programs:
             return None
 
         island = self._database.current_island
         program_ids_before = set(self._database.programs)
-        inspiration_count = k_top_inspirations + k_random_inspirations
+        inspiration_count = parameters.k_top_inspirations + parameters.k_random_inspirations
         with self._upstream_random():
             self._normalize_upstream_collections()
             parent_program, inspiration_programs = self._database.sample_from_island(
@@ -479,7 +521,7 @@ class OpenEvolveSearchPolicy:
             target_island=island,
         )
 
-    def record(  # noqa: D102  # tracked: #288
+    def record(
         self,
         individual: Individual,
         *,
@@ -488,10 +530,12 @@ class OpenEvolveSearchPolicy:
         target_island: int | None,
         space: MetricSpace,
     ) -> None:
+        """Add an accepted individual to the OpenEvolve database."""
         if not individual.passed or not individual.commit:
             return
         if self._objectives_signature(space) != self._objective_signature:
-            raise ValueError("OpenEvolve fitness objective changed during the run")  # noqa: TRY003  # tracked: #288
+            message = "OpenEvolve fitness objective changed during the run"
+            raise ValueError(message)
         if individual.id in self._admitted_individual_ids:
             return
         program_id = f"vibesys-{individual.id}"
@@ -539,7 +583,8 @@ class OpenEvolveSearchPolicy:
         self._save_full_state(admitted_individual_ids=prospective_ids)
         self._admitted_individual_ids = prospective_ids
 
-    def finish_generation(self, generation: int) -> None:  # noqa: D102  # tracked: #288
+    def finish_generation(self, generation: int) -> None:
+        """Persist selection state after completing a generation."""
         del generation
         self._save_selection_state()
 

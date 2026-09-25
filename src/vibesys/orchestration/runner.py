@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentClientProtocol
 
 
-async def run_orchestration(  # noqa: PLR0913  # tracked: #288
+async def run_orchestration(  # noqa: PLR0913  # LW-040002 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     request: RunRequest,
     integration: LocalRunIntegration,
     orchestrator: Orchestrator,

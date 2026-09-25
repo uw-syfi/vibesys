@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import TextIO, overload
+from typing import TextIO, cast, overload
 
 from pydantic import BaseModel
 
@@ -124,11 +124,14 @@ class RunSetup:
     def __post_init__(self) -> None:
         """Reject incomplete policy-owned state slot declarations."""
         if self.state_namespace is None and self.state_slots:
-            raise ValueError("RunSetup state slots require state_namespace")  # noqa: TRY003
+            message = "RunSetup state slots require state_namespace"
+            raise ValueError(message)
         if self.state_namespace is not None and not self.state_slots:
-            raise ValueError("RunSetup requires at least one state slot")  # noqa: TRY003
+            message = "RunSetup requires at least one state slot"
+            raise ValueError(message)
         if self.state_namespace == "":
-            raise ValueError("RunSetup.state_namespace must be nonempty")  # noqa: TRY003
+            message = "RunSetup.state_namespace must be nonempty"
+            raise ValueError(message)
 
 
 def _execution_status(error: BaseException | None) -> EventStatus:
@@ -146,9 +149,11 @@ def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
         return None
     p = Path(raw).expanduser().resolve()
     if not p.exists():
-        raise ValueError(f"{label} path does not exist: {raw}")  # noqa: TRY003  # tracked: #288
+        message = f"{label} path does not exist: {raw}"
+        raise ValueError(message)
     if not p.is_dir():
-        raise ValueError(f"{label} path is not a directory: {raw}")  # noqa: TRY003  # tracked: #288
+        message = f"{label} path is not a directory: {raw}"
+        raise ValueError(message)
     return p
 
 
@@ -232,9 +237,11 @@ def _coerce_skills_dirs(raw_dirs: list[str] | None) -> list[Path]:
             p = PROJECT_ROOT / p
         p = p.resolve()
         if not p.exists():
-            raise ValueError(f"--skills-dir path does not exist: {raw}")  # noqa: TRY003  # tracked: #288
+            message = f"--skills-dir path does not exist: {raw}"
+            raise ValueError(message)
         if not p.is_dir():
-            raise ValueError(f"--skills-dir path is not a directory: {raw}")  # noqa: TRY003  # tracked: #288
+            message = f"--skills-dir path is not a directory: {raw}"
+            raise ValueError(message)
         result.append(p)
     return result
 
@@ -261,7 +268,8 @@ def _round_transaction_for_setup(
     if namespace is None:
         return None
     if models is None:
-        raise TypeError("RunSetup requires declared state slots")  # noqa: TRY003
+        message = "RunSetup requires declared state slots"
+        raise TypeError(message)
 
     def open_coordinator(
         project: Project, git: GitTracker, run_id: str
@@ -307,14 +315,14 @@ def _close_after_construction_failure(
     """Unwind partial resource construction without replacing its root cause."""
     try:
         teardown_stack.close()
-    except BaseException as cleanup_error:  # noqa: BLE001  # tracked: #288
+    except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-008203 [BLE001]; cleanup must annotate the original construction failure even if teardown raises a BaseException.
         construction_error.add_note(
             "Additional error while cleaning up partial resource construction: "
             f"{type(cleanup_error).__name__}: {cleanup_error}"
         )
 
 
-def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
+def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0915]; ordered resource setup and ExitStack rollback share mutable lifecycle state, which helper boundaries would obscure.
     *,
     teardown_stack: ExitStack,
     request: RunRequest,
@@ -325,7 +333,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
     bundle = request.input_bundle
     exp_name = request.resume.run_id if request.resume is not None else request.exp_name
     if exp_name is None:
-        raise ValueError("RunRequest.exp_name is required for a fresh run")  # noqa: TRY003
+        message = "RunRequest.exp_name is required for a fresh run"
+        raise ValueError(message)
     config = request.config
     input_path = str(bundle.root)
     accuracy_command = bundle.accuracy_command_display
@@ -385,11 +394,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
             run_id = exp_name if existing else generate_run_id(exp_name)
             collection_root = runs_dir.expanduser().resolve() if runs_dir is not None else None
             copied_project = not existing and collection_root is not None
-            if copied_project:
-                assert collection_root is not None  # noqa: S101  # tracked: #288
-                project_root = collection_root / run_id
-            else:
-                project_root = input_dir
+            project_root = collection_root / run_id if copied_project else input_dir
             evaluator_source = _coerce_dir(evaluator_path, "evaluator.source")
 
             if not copied_project and workspace_sources:
@@ -515,10 +520,10 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
             environment_patch: EnvironmentPatch | None = None
 
             def _teardown_environment_hooks() -> None:
-                assert environment_context is not None  # noqa: S101  # tracked: #288
+                context = cast("EnvironmentContext", environment_context)
                 try:
-                    hooks.teardown(environment_context)
-                except Exception as exc:  # noqa: BLE001  # tracked: #288
+                    hooks.teardown(context)
+                except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-008205 [BLE001]; hook teardown is best effort and logs arbitrary hook failures without masking run cleanup.
                     hook_log[0](f"[warn] environment hook teardown failed: {exc}")
 
             workspace_files = Workspace(
@@ -531,7 +536,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
             )
             construction_complete = False
             if copied_project:
-                assert collection_root is not None  # noqa: S101  # tracked: #288
 
                 def _remove_incomplete_project() -> None:
                     if not construction_complete and project_root.exists():
@@ -620,7 +624,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
                     evaluator_source=evaluator_source,
                 ),
             )
-            git.init(existing, trusted_input_baseline=trusted_input_baseline)
+            git.init(existing=existing, trusted_input_baseline=trusted_input_baseline)
         with boot_trace.span("project_state_resume"):
             effective_orchestration = orchestration_descriptor
             round_transaction_coordinator: MultiSlotRoundTransactionCoordinator | None = None
@@ -677,7 +681,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
                         logger.lprint(f"[project] recovered round transaction: {recovery.value}")
                 if setup.resume_recovery is not None:
                     if setup.state_namespace is None:
-                        raise TypeError("resume recovery requires a state namespace")  # noqa: TRY003
+                        message = "resume recovery requires a state namespace"
+                        raise TypeError(message)
                     setup.resume_recovery(
                         RecoveryWorkspace(
                             project,
@@ -780,7 +785,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
                 )
                 environment_patch = hooks.prepare(environment_context)
                 teardown_stack.callback(_teardown_environment_hooks)
-            assert environment_patch is not None  # noqa: S101  # tracked: #288
+            environment_patch = cast("EnvironmentPatch", environment_patch)
 
             plan = workspace_files.plan_setup(
                 existing=True,
@@ -1256,7 +1261,7 @@ class _RunResources:
     together so setup failure and run closure unwind them in construction order.
     """
 
-    def __init__(  # noqa: ANN204, PLR0913  # tracked: #288
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-008208 [PLR0913]; `_RunResources` receives already-owned runtime resources explicitly, without a second mutable parameter container.
         self,
         *,
         backend: ComputeBackend,
@@ -1296,7 +1301,7 @@ class _RunResources:
         run_id: str,
         round_transaction_coordinator: (MultiSlotRoundTransactionCoordinator | None) = None,
         agent_host_resources: tuple[HostResource, ...] = (),
-    ):
+    ) -> None:
         self.backend = backend
         # Retained so a candidate sub-context can hand its own agent runner the
         # same declarations the parent computed, rather than recomputing them
