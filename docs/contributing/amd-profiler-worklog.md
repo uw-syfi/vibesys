@@ -14,18 +14,20 @@ current rather than growing them unboundedly.
 | --- | --- |
 | ROCm knowledge docs (measurement protocol, counter triage, roofline, AITER engagement proof, profiler tool map) | Merged |
 | `rocprof` `ProfilerKind`: MCP server, `rocprof.j2` prompt, ROCm backend default | Merged |
-| `capture.py` (shared capture-lifecycle-driven `profile_*` tools; curated MCP surface) | Merged, tested against fake `rocprofv3`/`rocprof-compute` executables (no GPU) |
-| `analyze_rocprof.py` (rocprofv3 system trace) | Merged, validated on real MI210 + vLLM traces |
-| `counters.py` (PMC, <=4 counters/pass) | Merged, validated on real MI210 data |
+| Prompt domain neutrality (`rocprof.j2`/`torch.j2` render generically outside `llm_serving`; engine-specific pointers live in `llm_serving/profiler.md`) | Merged, regression-tested (`test_prompt_domain_leakage.py`) |
+| `capture.py` (shared capture-lifecycle-driven `profile_*` tools; curated MCP surface) | Merged; `profile_timeline`/`profile_counters`/`profile_instructions` driven live on real MI210 + vLLM through the real MCP server; `profile_kernel_deep` unit-tested only |
+| Async/cancellable/busy-guarded MCP tools, `setup_command` (`capture_runtime.py`; rocprof + torch MCP servers) | Merged, unit/property-tested; responsiveness confirmed live in agent eval iteration 3 (`captures()` returned in 0.17s during an active capture, busy-guard rejection in 0.07s) |
+| `analyze_rocprof.py` (rocprofv3 system trace) | Merged; `kernels`/`families`/`idle_gaps`/`summary`/`compare` validated live on real MI210 + vLLM traces via `profile_timeline`; `cpu_overhead`/`memory`/`graphs`/`host_idle` unit-tested against real MI210 fixtures, not yet driven live |
+| `counters.py` (PMC, <=4 counters/pass, packed into as few passes as possible) | Merged, validated on real MI210 data; fixed a real packed-pass double-counting bug (achieved HBM bandwidth read ~2x high) |
 | `att.py` (thread trace) | Merged, validated on real MI210 data (ROCm >=7.1 only) |
 | `compute.py` (rocprof-compute doctor/profile/analyze) | Merged, validated on real MI210 data |
-| `kernel_bench.py` (paired A/B microbenchmarking) | Merged |
-| `analyze_torch_profile.py` extensions (certify/gemm_shapes/roofline) | Merged, validated on real MI210 + vLLM traces |
+| `kernel_bench.py` (paired A/B microbenchmarking) | Merged, unit-tested only; not yet run on real hardware |
+| `analyze_torch_profile.py` extensions (certify/gemm_shapes/roofline) | Merged; `certify`/`gemm_shapes` validated live on real MI210 + vLLM traces via `profile_ops`; `roofline` unit-tested only |
 | `capture_ops.py`/`inject/sitecustomize.py` (`profile_ops`, generic torch.profiler capture) | Merged, validated on real MI210 + vLLM (offline single-process and `vllm serve` topologies), driven through the real MCP server |
-| Warm targets (`start_target`/`stop_target`/`targets`, `profile_ops(target=...)`) | Merged, tested end to end with the fake torch fixture; rocprofv3-side `target=` gated behind a real attach-capability probe |
-| `profile_ops(inject=False)` | Merged, fixes a real MI210 SIGSEGV (double torch.profiler session) |
+| Warm targets (`start_target`/`stop_target`/`targets`, `profile_ops(target=...)`) | Merged, tested end to end with the fake torch fixture; armed-but-idle overhead measured negligible on a real MI210 serving workload (86.31 vs. 86.22 tok/s); rocprofv3-side `target=` gated behind a real attach-capability probe |
+| `profile_ops(inject=False)` | Merged, fixes a real MI210 SIGSEGV (double torch.profiler session) found by agent eval iteration 2 |
 | Regression + property test hardening | Merged, tests fail on pre-fix code |
-| Real vLLM-trace validation of the analyzers | Done for `analyze_torch_profile.py`/`profile_ops`; `analyze_rocprof.py`/`capture.py` (rocprof side) tracked separately |
+| Agent end-to-end eval (Sonnet via the Claude CLI, skills-only workspace, real MI210) | Iteration 1 partial, iteration 2 partial (found the `profile_ops` SIGSEGV), iteration 3 passing 6/6 |
 | VibeSys remote (SkyPilot/Slurm) execution with `rocprof` | Not started: remote execution only supports `--profiler none` today |
 
 ## What was built
@@ -146,23 +148,26 @@ found bugs that synthetic data did not exercise:
 | `analyze_rocprof.py` | `kernels`/`families` computed "%GPU" as a naive sum of per-kernel durations, double-counting when kernels on different HW queues of the same GPU genuinely overlap | Real graph-mode vLLM trace has overlapping Queue 1/2/4 windows; `idle_gaps`/`host_idle` already used a merged-interval union instead | `d7ee5abc` |
 | `inject/sitecustomize.py` | State machine left phase `"stopped"` (not `"idle"`) after exporting a trace, so a second `SIGUSR1` on the same long-lived process was silently ignored -- only the first of any repeated windows ever worked | Manual pre-fix/post-fix reproduction (`git show`), then generalized to a regression test | this session |
 | `capture_ops.py` | `profile_ops` against an offline torch script segfaulted (`target_rc=139`, empty trace) when the script already opened its own, separate `torch.profiler` session (e.g. vLLM's `profiler_config` + `start_profile()`/`stop_profile()`, the doc's own recommended pattern for that build): two independent profiler sessions in one process crash the CUPTI/roctracer/kineto backend outright, not catchably | Real MI210 eval run (`run-20260925T003910Z/grade.md`); root-caused architecturally (two profiler sessions unsupported), cross-referenced against the transcript's exact `profile_ops` call | this session |
+| `counters.py` | A packed rocprofv3 pass shares one output directory across every counter set it bundled; `_discover` read the same `*_counter_collection.csv` once per repeated `set_dirs` entry, summing every counter N times while duration stayed correctly single-counted -- inflating every duration-normalized rate by roughly N | Real MI210 packed `hbm`+`mfma` capture read achieved HBM bandwidth as 1749 GB/s, above the 1600 GB/s gfx90a spec peak; raw counters actually account for ~875 GB/s (~55% of spec) | `d68ccca4` |
+| `rocprof.j2`/`torch.j2` prompts | Templates hard-coded `serving-systems/references/...` skill paths for engine-specific profiling guidance, leaking llm-serving-specific wording and paths into the GENERIC-domain rendering | Snapshot audit of the rendered GENERIC-domain prompt | `30bf623c` |
 
 ## Open items / next steps
 
-- **Real-trace validation of the analyzers**: `analyze_rocprof.py` and the
-  torch analyzer still need validation against the real vLLM traces captured
-  during this work (100-230 MB rocprofv3 CSVs; gzipped Kineto traces),
-  including performance on files that size and any capture-guidance updates
-  that fall out of it. One finding from this pass: the real graph-mode
-  trace's Composable Kernel `FmhaFwdKernel` (grouped/varlen-mode causal
-  attention) averages ~338ms/call over 27 calls, a >1000x outlier against
-  every neighboring kernel on the identical capture (rocprofv3's own
+- **`FmhaFwdKernel` outlier root cause**: the real graph-mode trace's
+  Composable Kernel `FmhaFwdKernel` (grouped/varlen-mode causal attention)
+  averages ~338ms/call over 27 calls, a >1000x outlier against every
+  neighboring kernel on the identical capture (rocprofv3's own
   `kernel_stats.csv` corroborates the raw per-dispatch rows -- not a VibeSys
-  aggregation bug). `families` now flags this class of outlier
-  (`_outlier_family_note`) instead of reporting it as a plain %GPU line; the
-  underlying question -- badly undersized launch grid vs. a rocprofv3
+  aggregation bug). `families` flags this class of outlier
+  (`_outlier_family_note`) instead of reporting it as a plain %GPU line, but
+  the underlying question -- badly undersized launch grid vs. a rocprofv3
   dispatch-timing quirk for this kernel's launch shape -- is still open and
   needs a targeted `compute.py profile`/`att.py` capture on that kernel.
+- **Remaining unit-tested-only surfaces**: `analyze_rocprof.py`'s
+  `cpu_overhead`/`memory`/`graphs`/`host_idle` subcommands,
+  `analyze_torch_profile.py`'s `roofline` subcommand, and `kernel_bench.py`
+  have real MI210 fixtures in their test suites but have not been driven
+  live against a real capture yet.
 - **VibeSys remote execution gap**: SkyPilot/Slurm remote execution only
   supports `--profiler none` today, so `rocprof` cannot yet be selected from
   a remote VibeSys run on the cluster, even though every tool in this work
@@ -394,6 +399,32 @@ Follow-up round driven by an end-to-end eval transcript
 
 ### 2026-09-25
 
+Ran agent end-to-end eval iteration 3 (Sonnet via the Claude CLI, skills-only
+workspace: no source, only `resources/skills/`), following iterations 1 and
+2, which were partial passes (iteration 2 found the `profile_ops` SIGSEGV
+below). Iteration 3 passed 6/6. The agent read `counter-triage.md`,
+`measurement-protocol.md`, and `aiter-engagement.md` from its skills-only
+workspace, packed the `hbm`+`mfma` counter sets into a single rocprofv3
+pass, and used `setup_command` for launch-time setup instead of `$(...)`
+substitution. The MCP server stayed responsive throughout: `captures()`
+returned in 0.17s while a capture was in flight, and the busy guard
+rejected a concurrent capture attempt in 0.07s.
+
+Found and fixed a real double-counting bug in `counters.py`: a packed
+rocprofv3 pass shares one output directory across every counter set it
+bundled, and `_discover` read the same `*_counter_collection.csv` once per
+repeated directory entry, summing every counter N times while duration
+stayed correctly single-counted. A real MI210 packed `hbm`+`mfma` capture
+reported achieved HBM bandwidth as 1749 GB/s, above the 1600 GB/s gfx90a
+spec peak; the raw counters actually account for ~875 GB/s (~55% of spec),
+consistent with this module's existing note that clean streaming reads land
+~50-60% of peak. The MFMA-busy-fraction reading was unaffected (duration
+stayed single-counted, so that ratio didn't move). `_discover` now dedupes
+by each file's resolved path; `counters.py` also now flags any
+achieved-bandwidth reading above the architecture's spec peak instead of
+printing a bare, easily-misread number. Regression and hypothesis property
+tests added (`test_rocprof_counters.py`), verified failing on pre-fix code.
+
 Added warm-target profiling: a reusable, already-running process a caller
 can take repeated profiling windows against, instead of paying a fresh
 launch (weight load, warmup, KV init) per window. `start_target`/
@@ -441,6 +472,19 @@ pre-fix code via `git show` extraction, never a stash); a new
 (repeated windows, stop/stop-all, busy-slot interplay, and a hypothesis
 property test over random start/window/stop sequences asserting no leaked
 processes and window count == trace count).
+
+Fixed a prompt domain leak: `rocprof.j2`/`torch.j2` hard-coded
+`serving-systems/references/...` skill paths for engine-specific profiling
+guidance, so the GENERIC-domain rendering (no `llm_serving` domain active)
+leaked llm-serving-specific wording and paths. Replaced with generic
+"check the engine-specific profiling notes in your skills, if any" wording
+in the templates, and moved the concrete pointers
+(`profiling-serving-engines.md`, `references/engines/`,
+`references/platforms/rocm/profiler.md`) into the `llm_serving` domain's
+own `profiler.md`, mirroring how `implementer.md`/`orchestrator.md`/
+`single_agent.md` already scope this knowledge. Added a regression test
+(`test_prompt_domain_leakage.py`) asserting the pointers survive in the
+`llm_serving` domain snapshot and never appear in the GENERIC rendering.
 
 ## Appendix: detailed format notes and commands
 
