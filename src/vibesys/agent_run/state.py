@@ -111,6 +111,13 @@ class ProfileGuidanceState(BaseModel):
 
     active_component: str | None = None
     components: list[ProfileGuidedComponent] = Field(default_factory=list)
+    # Which round's attribution ``ranked_bottlenecks`` should render, mirroring
+    # the ported controller's ephemeral, non-persisted ranking field: set by
+    # the most recent ``observe()`` call, cleared once ``record()`` applies a
+    # measured round to the active component. None outside that window, so a
+    # component observed in an earlier round but not this one does not
+    # resurface in the ranking.
+    ranking_round: Annotated[int, Field(gt=0)] | None = None
 
     @model_validator(mode="after")
     def _valid_cursor(self) -> Self:

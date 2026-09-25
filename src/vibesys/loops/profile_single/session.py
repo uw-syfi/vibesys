@@ -36,7 +36,7 @@ from vibesys.search.hypothesis.transitions import (
     terminal_workspace_notice,
     update_active_hypothesis,
 )
-from vibesys.search.profile_focus import FocusView, ProfileFocus, ProfileFocusConfig
+from vibesys.search.profile_focus import ProfileFocus, ProfileFocusConfig
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 
@@ -267,15 +267,7 @@ class ProfileSingleSession:
                 label=f"profile-guided: prepare round {number}",
                 publish=self.state,
             )
-            focused = self.profile_focus.focus(focus_state)
-            # ``ranked_bottlenecks`` renders this round's freshly observed
-            # attribution only (not the reconstructed all-time ranking),
-            # matching the ported controller's prompt byte-for-byte.
-            guidance = FocusView(
-                active_component=focused.active_component,
-                ledger_text=focused.ledger_text,
-                ranked_bottlenecks=attribution,
-            )
+            guidance = self.profile_focus.focus(focus_state)
             summary = self._previous_profile()
             plan = await self.turns.plan(
                 PlanRequest(
