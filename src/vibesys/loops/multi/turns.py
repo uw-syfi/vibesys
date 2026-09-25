@@ -58,12 +58,14 @@ from vibesys.schemas import normalize_hypothesis_title
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
     from vibesys.schemas import SkillResourceSelection
     from vibesys.search.hypothesis import CarryOver, HypothesisSearch
-    from vibesys.search.hypothesis.attempts import AttemptState
+    from vibesys.search.hypothesis.attempts import AttemptState, ImplementerReply
     from vibesys.search.hypothesis.plan import OrchestratorPlan
     from vibesys.search.hypothesis.state import HypothesisState
     from vibesys.skills import ResolvedSkillSelection
@@ -110,6 +112,28 @@ class MultiAgentTurns:
         self.pareto_location = display_path(
             memory.pareto_archive_path(self.progress_path), self.workspace.path
         )
+
+    def _write_plan_artifact(self, round_number: int, plan: OrchestratorPlan) -> Path:
+        """Persist the exact typed plan used by the framework for one round.
+
+        The host (`vibesys.orchestration.artifacts`) only knows how to write
+        an arbitrary `BaseModel`; this strategy owns the plan's type.
+        """
+        path = artifacts.plan_artifact_path(self.progress_path, round_number)
+        return artifacts.write_model(path, plan)
+
+    def _write_implementer_artifact(
+        self, round_number: int, retry: int, response: ImplementerReply
+    ) -> Path:
+        """Persist parsed implementer claims as untrusted data for Judge audit.
+
+        `response` is `ImplementerReply`, a structural protocol (not a
+        `BaseModel` subclass -- `vibesys.search.hypothesis` must not import
+        `vibesys.roles`), so this writes its dump through `write_json`
+        rather than the host's `BaseModel`-typed `write_model`.
+        """
+        path = artifacts.implementer_artifact_path(self.progress_path, round_number, retry)
+        return artifacts.write_json(path, response.model_dump(mode="json"))
 
     async def open(self) -> None:
         """Start each role this strategy can invoke."""
@@ -233,7 +257,7 @@ class MultiAgentTurns:
                     "Produce a corrected plan for this round. Return only the JSON object."
                 )
                 continue
-            artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
+            self._write_plan_artifact(request.round_number, plan)
             self.ctx.progress.note(
                 progress_log.render_orchestrator_plan(request.round_number, plan)
             )
@@ -386,7 +410,7 @@ Write bounded durable profile evidence only below
         plan = request.plan
         hypothesis = request.active_hypothesis
         view = self.ctx.environment.view
-        artifact = artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
+        artifact = self._write_plan_artifact(request.round_number, plan)
         prior = tuple(
             display_path(path, self.workspace.path)
             for path in artifacts.implementer_artifact_paths(
@@ -435,7 +459,7 @@ Write bounded durable profile evidence only below
         plan = request.plan
         hypothesis = request.active_hypothesis
         view = self.ctx.environment.view
-        artifact = artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
+        artifact = self._write_plan_artifact(request.round_number, plan)
         prior = tuple(
             display_path(path, self.workspace.path)
             for path in artifacts.implementer_artifact_paths(
@@ -500,10 +524,8 @@ Write bounded durable profile evidence only below
         synthesized = response.summary in _SYNTHESIZED_IMPLEMENTER_SUMMARIES
         if response.skill_context_updates:
             plan.recommended_skills = [*plan.recommended_skills, *response.skill_context_updates]
-            artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
-        artifacts.write_implementer_artifact(
-            self.progress_path, request.round_number, state.retry, response
-        )
+            self._write_plan_artifact(request.round_number, plan)
+        self._write_implementer_artifact(request.round_number, state.retry, response)
         self.ctx.progress.note(
             progress_log.render_implementer(request.round_number, state.retry, response)
         )
@@ -520,11 +542,9 @@ Write bounded durable profile evidence only below
         hypothesis = request.active_hypothesis
         view = self.ctx.environment.view
 
-        plan_artifact = artifacts.write_plan_artifact(
-            self.progress_path, request.round_number, plan
-        )
-        evidence = artifacts.write_implementer_artifact(
-            self.progress_path, request.round_number, state.retry, implementation
+        plan_artifact = self._write_plan_artifact(request.round_number, plan)
+        evidence = self._write_implementer_artifact(
+            request.round_number, state.retry, implementation
         )
         domain_ctx = self._domain_context()
         domain_ctx["accuracy_command"] = None

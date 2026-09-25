@@ -1,4 +1,4 @@
-"""Host-owned turn artifacts: typed role-handoff data written to disk.
+"""Host-owned turn artifacts: role-handoff data written to disk generically.
 
 A strategy's designer, implementer, and judge roles hand off large evidence
 (a plan, an implementer's parsed claims, framework-executed validation
@@ -10,9 +10,14 @@ a directory beside -- or, for legacy ``progress.md`` runs, a sibling of --
 the progress log), one category subdirectory per artifact kind (``plans``,
 ``evidence``, ``validation``, ``profiles/round-NNNN``).
 
-``write_json`` is the one atomic-write primitive every typed writer in this
-module (and :func:`write_validation_recipe_schema`, whose payload is a JSON
-schema rather than a model instance) goes through.
+``write_json`` is the one atomic-write primitive every writer in this module
+(and :func:`write_validation_recipe_schema`, whose payload is a JSON schema
+rather than a model instance) goes through. This module knows nothing about
+*which* pydantic model a plan or an implementer reply is -- those types live
+one layer above the host (``vibesys.search.hypothesis``, ``vibesys.roles``)
+-- so it writes any :class:`~pydantic.BaseModel` via :func:`write_model` and
+only computes the destination path; the caller in ``loops/`` supplies the
+typed value.
 """
 
 from __future__ import annotations
@@ -21,7 +26,6 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
@@ -30,10 +34,6 @@ from vibesys.evaluators.validation_recipe import (
     ValidationRecipeArtifact,
 )
 from vibesys.orchestration.memory import structured_artifact_root
-
-if TYPE_CHECKING:
-    from vibesys.search.hypothesis import OrchestratorPlan  # tracked: #288
-    from vibesys.search.hypothesis.attempts import ImplementerReply  # tracked: #288
 
 
 def write_json(path: Path, payload: object) -> Path:
@@ -57,10 +57,13 @@ def write_model(path: Path, model: BaseModel) -> Path:
     return write_json(path, model.model_dump(mode="json"))
 
 
-def write_plan_artifact(progress_path: Path, round_number: int, plan: OrchestratorPlan) -> Path:
-    """Persist the exact typed plan used by the framework for one round."""
-    path = structured_artifact_root(progress_path) / "plans" / f"round-{round_number:04d}.json"
-    return write_model(path, plan)
+def plan_artifact_path(progress_path: Path, round_number: int) -> Path:
+    """Return the destination for one round's typed plan artifact.
+
+    The caller (``loops/``) owns the plan's type (``OrchestratorPlan``) and
+    writes it with :func:`write_model`; this module only knows the path.
+    """
+    return structured_artifact_root(progress_path) / "plans" / f"round-{round_number:04d}.json"
 
 
 #: Name tail of a completed implementer attempt artifact.
@@ -76,17 +79,15 @@ def _implementer_evidence_root(progress_path: Path) -> Path:
     return structured_artifact_root(progress_path) / "evidence"
 
 
-def write_implementer_artifact(
-    progress_path: Path,
-    round_number: int,
-    retry: int,
-    response: ImplementerReply,
-) -> Path:
-    """Persist parsed implementer claims as untrusted data for Judge audit."""
-    path = _implementer_evidence_root(progress_path) / (
+def implementer_artifact_path(progress_path: Path, round_number: int, retry: int) -> Path:
+    """Return the destination for one attempt's implementer evidence artifact.
+
+    The caller (``loops/``) owns the reply's type (``ImplementerReply``) and
+    writes it with :func:`write_model`; this module only knows the path.
+    """
+    return _implementer_evidence_root(progress_path) / (
         f"round-{round_number:04d}-attempt-{retry:02d}{_IMPLEMENTER_ARTIFACT_SUFFIX}"
     )
-    return write_json(path, response.model_dump(mode="json"))
 
 
 class ImplementerStartMarker(BaseModel):
