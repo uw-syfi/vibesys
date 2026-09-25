@@ -53,6 +53,7 @@ class _FakeTurns:
     needs_profile: bool = True
     profiler_enabled: bool = True
     worker: SimpleNamespace = field(default_factory=lambda: SimpleNamespace(backend_name="cli"))
+    progress_path: Path | None = None
 
     async def pre_round_decision(
         self, _round_number: int, _carry: CarryOver, *, has_history: bool
@@ -116,6 +117,7 @@ def test_multi_prepass_profiles_only_when_requested_and_enabled() -> None:
     calls: list[str] = []
     turns = _FakeTurns(calls)
     session = cast("Any", MultiSession.__new__(MultiSession))
+    session._board_log = []
     session.turns = turns
     session.round_number = 1
     session.state = HypothesisState()
@@ -144,6 +146,7 @@ def test_profile_guidance_prepares_cursor_before_designer(
     calls: list[str] = []
     config = ProfileGuidedInput(command=("fake-profiler",))
     session = cast("Any", ProfileMultiSession.__new__(ProfileMultiSession))
+    session._board_log = []
     from vibesys.loops.profile_multi.session import _ProfilePolicy  # noqa: PLC0415
 
     session.profile = _ProfilePolicy(config)
@@ -189,7 +192,7 @@ def test_profile_guidance_prepares_cursor_before_designer(
         )
 
     monkeypatch.setattr("vibesys.loops.profile_multi.session.run_attribution", fake_attribution)
-    session.turns = SimpleNamespace(plan=fake_plan)
+    session.turns = SimpleNamespace(plan=fake_plan, progress_path=None)
     session._pre_round_profile = AsyncMock(return_value=None)
     session._apply_rollback = AsyncMock()
 
@@ -212,7 +215,7 @@ def test_multi_validation_failure_checkpoints_before_retry_and_official_gate() -
     session.options = SimpleNamespace(max_rounds=1, judge_every=1, official_eval_every=1)
     session.workspace = SimpleNamespace(revision="a" * 40)
     session.state = state.agent_run_state
-    session._gate_recorder = None
+    session._board_log = []
     validation_feedback = ["bad recipe", None]
 
     async def validate(_selected: object, _recipe: str | None) -> str | None:
@@ -270,6 +273,7 @@ def test_single_uses_only_combined_turn_and_its_own_verdict() -> None:
     state.retry = 1
     selected = SimpleNamespace(request=request, attempt=state)
     session = cast("Any", SingleSession.__new__(SingleSession))
+    session._board_log = []
     session.options = SimpleNamespace(max_rounds=1, official_eval_every=1)
     session.state = state.agent_run_state
     session.search = _search()
@@ -321,6 +325,7 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
         profile_guidance=PlainGuidance(),
     )
     turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
+    turns._board = []
     turns.progress_path = tmp_path / "progress.md"
     turns.roadmap_location = "roadmap.md"
     turns._plan_context = lambda _request: {}
@@ -354,7 +359,7 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
     result = asyncio.run(turns.plan(request))
     assert result.hypothesis_id == "fresh"
     assert "previous plan was rejected" in calls[-1]
-    assert "fresh" in turns.progress_path.read_text()
+    assert any("fresh" in block for block in turns._board)
 
 
 # Role-isolation restoration (unauthorized-edit revert) is now host code:
@@ -385,6 +390,7 @@ def test_multi_implementer_marks_paid_turn_before_invocation(tmp_path: Path) -> 
         return ImplementerResponse(summary="cache added", expected_behavior="faster")
 
     turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
+    turns._board = []
     turns.progress_path = tmp_path / "progress.md"
     issue_board.ensure_progress_file(turns.progress_path)
     turns.ctx = SimpleNamespace(agents=SimpleNamespace(turn=agents_turn))
@@ -464,6 +470,7 @@ def test_multi_local_validation_restores_mutated_candidate(tmp_path: Path) -> No
         source.write_text("VALUE = 1\n")
 
     session = cast("Any", MultiSession.__new__(MultiSession))
+    session._board_log = []
     session.round_number = 1
     session.turns = SimpleNamespace(progress_path=progress_path)
     session.workspace = SimpleNamespace(
@@ -496,9 +503,9 @@ def test_multi_official_gate_failure_persists_revalidation_for_exact_commit() ->
     selected = SimpleNamespace(request=request, attempt=attempt)
     session = cast("Any", MultiSession.__new__(MultiSession))
     session.workspace = SimpleNamespace(revision="a" * 40)
-    session.turns = SimpleNamespace(worker=SimpleNamespace(backend_name="cli"))
+    session.turns = SimpleNamespace(worker=SimpleNamespace(backend_name="cli"), progress_path=None)
     session.state = attempt.agent_run_state
-    session._gate_recorder = None
+    session._board_log = []
     session.round_number = 1
     decisions: list[tuple[bool, str]] = []
     session._record_official_decision = lambda _selected, *, run, reason: decisions.append(

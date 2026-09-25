@@ -122,7 +122,7 @@ def _turns(tmp_path: Path) -> ProfileMultiTurns:
             warning=MagicMock(),
         ),
     )
-    turns = ProfileMultiTurns(ctx, _options())
+    turns = ProfileMultiTurns(ctx, _options(), [])
     issue_board.ensure_progress_file(turns.progress_path)
     issue_board.ensure_roadmap_file(turns.roadmap_path)
     return turns

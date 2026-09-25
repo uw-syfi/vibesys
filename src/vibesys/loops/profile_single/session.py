@@ -10,6 +10,7 @@ from vibesys.agent_run import issue_board
 from vibesys.errors import StrategySessionError
 from vibesys.loops.profile_single.attribution import run_attribution
 from vibesys.loops.profile_single.turns import ProfileSingleTurns
+from vibesys.orchestration import progress_log
 from vibesys.orchestration.runtime import WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.profiler import ProfilerSummary
@@ -39,7 +40,9 @@ from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
+
+    from pydantic import BaseModel
 
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent_options import AgentOrchestrationOptions
@@ -143,8 +146,8 @@ class ProfileSingleSession:
         self.ctx = ctx
         self.options = options
         self.workspace = ctx.workspaces.root
-        self.turns = ProfileSingleTurns(ctx, options)
-        self._gate_recorder = issue_board.GateBoardRecorder(self.turns.progress_path)
+        self._board_log: list[str] = []
+        self.turns = ProfileSingleTurns(ctx, options, self._board_log)
         self.search = HypothesisSearch(
             HypothesisConfig(
                 max_rounds=options.max_rounds,
@@ -185,6 +188,44 @@ class ProfileSingleSession:
             raise
         return session
 
+    def _drain_board(self) -> list[str]:
+        """Take and clear the pending framework-log buffer.
+
+        Used both by `_commit` (flushed with the next checkpoint) and by
+        the official-gates call site (flushed ahead of that gate's own
+        synchronous write, so the file's section order matches when every
+        write happened synchronously).
+        """
+        board = list(self._board_log)
+        self._board_log.clear()
+        return board
+
+    async def _commit(
+        self,
+        *,
+        sequence: int,
+        writes: Mapping[str, BaseModel],
+        publish: BaseModel | None = None,
+        candidate: bool = True,
+        label: str | None = None,
+    ) -> str:
+        """Delegate to `ctx.state.commit`, draining any buffered board entries.
+
+        The host writes them to `progress.md` as part of this checkpoint,
+        which is always before the next turn; see
+        `vibesys.orchestration.state._RunState.commit`.
+        """
+        board = self._drain_board()
+        return await self.ctx.state.commit(
+            sequence=sequence,
+            writes=writes,
+            board=board,
+            progress_path=self.turns.progress_path,
+            publish=publish,
+            candidate=candidate,
+            label=label,
+        )
+
     async def _initialize(self) -> None:
         ctx = self.ctx
         turns = self.turns
@@ -204,7 +245,7 @@ class ProfileSingleSession:
         self.last_response = None
         self.last_profile_focus = "general latency hotspots on /v1/completions"
         if previous != state:
-            await self.ctx.state.commit(
+            await self._commit(
                 sequence=self.round_number,
                 writes={"state.json": state},
                 candidate=False,
@@ -258,7 +299,7 @@ class ProfileSingleSession:
                 self._focus_state(), round_number=number, bottlenecks=attribution
             )
             self.state = self._with_focus(focus_state)
-            await self.ctx.state.commit(
+            await self._commit(
                 sequence=self.round_number,
                 writes={"state.json": self.state},
                 candidate=False,
@@ -288,7 +329,7 @@ class ProfileSingleSession:
             )
             self.state = started.state
             hypothesis = started.hypothesis
-            await self.ctx.state.commit(
+            await self._commit(
                 sequence=self.round_number,
                 writes={"state.json": self.state},
                 candidate=False,
@@ -299,12 +340,13 @@ class ProfileSingleSession:
             assert isinstance(decision, Continue)  # noqa: S101  # only remaining variant
             hypothesis = decision.hypothesis
             plan = hypothesis.plan
-            issue_board.append_hypothesis_continuation(
-                self.turns.progress_path,
-                number,
-                plan=plan,
-                started_round=hypothesis.started_round,
-                continuation_step=hypothesis.next_step or plan.task,
+            self._board_log.append(
+                progress_log.render_hypothesis_continuation(
+                    number,
+                    plan=plan,
+                    started_round=hypothesis.started_round,
+                    continuation_step=hypothesis.next_step or plan.task,
+                )
             )
             self.ctx.log(
                 f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
@@ -375,7 +417,7 @@ class ProfileSingleSession:
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback
         self.state = update_active_hypothesis(self.state, hypothesis)
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": self.state},
             candidate=False,
@@ -408,7 +450,7 @@ class ProfileSingleSession:
         attempt = selected.attempt
         attempt.retry = retry
         attempt.official_reason = None
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": attempt.agent_run_state},
             candidate=False,
@@ -453,14 +495,15 @@ class ProfileSingleSession:
     def _record_official_decision(
         self, selected: ProfileSingleRound, *, run: bool, reason: str
     ) -> None:
-        issue_board.append_official_evaluation_decision(
-            self.turns.progress_path,
-            self.round_number,
-            selected.attempt.retry,
-            run=run,
-            reason=reason,
-            official_eval_every=self.options.official_eval_every,
-            provisional_candidates=provisional_candidates_since_official(self.records),
+        self._board_log.append(
+            progress_log.render_official_evaluation_decision(
+                self.round_number,
+                selected.attempt.retry,
+                run=run,
+                reason=reason,
+                official_eval_every=self.options.official_eval_every,
+                provisional_candidates=provisional_candidates_since_official(self.records),
+            )
         )
 
     async def _official_gates(self, selected: ProfileSingleRound) -> bool:
@@ -479,10 +522,11 @@ class ProfileSingleSession:
         )
         result = await self.ctx.gates.run(
             round_number=self.round_number,
+            board=self._drain_board(),
             retry=attempt.retry,
             commit=commit,
             objectives=self.state.metrics.objectives,
-            record=self._gate_recorder,
+            progress_path=self.turns.progress_path,
             reuse_accuracy=reuse_accuracy,
             agent_backend_name=self.turns.worker.backend_name,
         )
@@ -505,7 +549,7 @@ class ProfileSingleSession:
             selected.attempt.agent_run_state, selected.request.active_hypothesis
         )
         selected.attempt.agent_run_state = state
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": state},
             candidate=False,
@@ -565,13 +609,14 @@ class ProfileSingleSession:
             terminal_needs_parent_choice=False,
         )
         if closed.exhaustion_feedback is not None:
-            issue_board.append_exhaustion_note(
-                self.turns.progress_path,
-                self.round_number,
-                self.options.max_retries_per_round,
-                closed.exhaustion_feedback,
+            self._board_log.append(
+                progress_log.render_exhaustion_note(
+                    self.round_number,
+                    self.options.max_retries_per_round,
+                    closed.exhaustion_feedback,
+                )
             )
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": closed.state},
             publish=closed.state,

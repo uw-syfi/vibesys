@@ -41,7 +41,6 @@ from vibesys.orchestration.agents import _Agents, _LocalAgentHandle
 from vibesys.orchestration.control import _RunControl
 from vibesys.orchestration.environment import _Environment
 from vibesys.orchestration.gates import (
-    GateRecorder,
     GateRunResult,
     MeasurementOptions,
     _Evaluator,
@@ -74,7 +73,6 @@ if TYPE_CHECKING:
 # Re-exported for callers that import these public names from this module
 # rather than from the capability module that now owns them.
 __all__ = [
-    "GateRecorder",
     "GateRunResult",
     "MeasurementOptions",
     "RunContext",

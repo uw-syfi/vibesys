@@ -24,6 +24,7 @@ from vibesys.loops.profile_multi.validation import (
     _reusable_validation_result,
     _validation_input_digest,
 )
+from vibesys.orchestration import progress_log
 from vibesys.orchestration.runtime import WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.profiler import ProfilerSummary  # noqa: TC001  # tracked: #288
@@ -61,7 +62,9 @@ from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
+
+    from pydantic import BaseModel
 
     from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent_options import AgentOrchestrationOptions
@@ -187,8 +190,8 @@ class ProfileMultiSession:
         self.ctx = ctx
         self.options = options
         self.workspace = ctx.workspaces.root
-        self.turns = ProfileMultiTurns(ctx, options)
-        self._gate_recorder = issue_board.GateBoardRecorder(self.turns.progress_path)
+        self._board_log: list[str] = []
+        self.turns = ProfileMultiTurns(ctx, options, self._board_log)
         self.search = HypothesisSearch(
             HypothesisConfig(
                 max_rounds=options.max_rounds,
@@ -227,6 +230,44 @@ class ProfileMultiSession:
             raise
         return session
 
+    def _drain_board(self) -> list[str]:
+        """Take and clear the pending framework-log buffer.
+
+        Used both by `_commit` (flushed with the next checkpoint) and by
+        the official-gates call site (flushed ahead of that gate's own
+        synchronous write, so the file's section order matches when every
+        write happened synchronously).
+        """
+        board = list(self._board_log)
+        self._board_log.clear()
+        return board
+
+    async def _commit(
+        self,
+        *,
+        sequence: int,
+        writes: Mapping[str, BaseModel],
+        publish: BaseModel | None = None,
+        candidate: bool = True,
+        label: str | None = None,
+    ) -> str:
+        """Delegate to `ctx.state.commit`, draining any buffered board entries.
+
+        The host writes them to `progress.md` as part of this checkpoint,
+        which is always before the next turn; see
+        `vibesys.orchestration.state._RunState.commit`.
+        """
+        board = self._drain_board()
+        return await self.ctx.state.commit(
+            sequence=sequence,
+            writes=writes,
+            board=board,
+            progress_path=self.turns.progress_path,
+            publish=publish,
+            candidate=candidate,
+            label=label,
+        )
+
     async def _initialize(self) -> None:
         ctx = self.ctx
         turns = self.turns
@@ -245,7 +286,7 @@ class ProfileMultiSession:
         self.round_number = len(self.records) + 1
         self.last_profile_focus = "general latency hotspots on /v1/completions"
         if previous != state:
-            await self.ctx.state.commit(
+            await self._commit(
                 sequence=self.round_number,
                 writes={"state.json": state},
                 candidate=False,
@@ -294,7 +335,7 @@ class ProfileMultiSession:
                 self._focus_state(), round_number=number, bottlenecks=bottlenecks
             )
             self.state = self.state.model_copy(update={"profile_guidance": focus_state})
-            await self.ctx.state.commit(
+            await self._commit(
                 sequence=self.round_number,
                 writes={"state.json": self.state},
                 candidate=False,
@@ -323,7 +364,7 @@ class ProfileMultiSession:
             )
             self.state = started.state
             hypothesis = started.hypothesis
-            await self.ctx.state.commit(
+            await self._commit(
                 sequence=self.round_number,
                 writes={"state.json": self.state},
                 candidate=False,
@@ -334,12 +375,13 @@ class ProfileMultiSession:
             assert isinstance(decision, Continue)  # noqa: S101  # only remaining variant
             hypothesis = decision.hypothesis
             plan = hypothesis.plan
-            issue_board.append_hypothesis_continuation(
-                self.turns.progress_path,
-                number,
-                plan=plan,
-                started_round=hypothesis.started_round,
-                continuation_step=hypothesis.next_step or plan.task,
+            self._board_log.append(
+                progress_log.render_hypothesis_continuation(
+                    number,
+                    plan=plan,
+                    started_round=hypothesis.started_round,
+                    continuation_step=hypothesis.next_step or plan.task,
+                )
             )
             self.ctx.log(
                 f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
@@ -410,7 +452,7 @@ class ProfileMultiSession:
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback
         self.state = update_active_hypothesis(self.state, hypothesis)
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": self.state},
             candidate=False,
@@ -444,7 +486,7 @@ class ProfileMultiSession:
         attempt.retry = retry
         attempt.official_reason = None
         attempt.judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": attempt.agent_run_state},
             candidate=False,
@@ -490,11 +532,12 @@ class ProfileMultiSession:
         )
         if not due:
             state.judge = JudgeSkipped(JudgeSkipReason.SPARSE_REVIEW_POLICY)
-            issue_board.append_judge_skipped(
-                self.turns.progress_path,
-                selected.request.round_number,
-                outcome=implementation.hypothesis_outcome.value,
-                judge_every=self.options.judge_every,
+            self._board_log.append(
+                progress_log.render_judge_skipped(
+                    selected.request.round_number,
+                    outcome=implementation.hypothesis_outcome.value,
+                    judge_every=self.options.judge_every,
+                )
             )
             self.ctx.log("[judge] deferred by sparse-review policy; official gates were not run")
             return AttemptDecision.FINISH
@@ -548,7 +591,7 @@ class ProfileMultiSession:
             selected.attempt.agent_run_state, selected.request.active_hypothesis
         )
         selected.attempt.agent_run_state = state
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": state},
             candidate=False,
@@ -672,12 +715,10 @@ class ProfileMultiSession:
             self.turns.progress_path, number, retry, results
         )
         location = issue_board.display_path(artifact, self.workspace.path)
-        issue_board.append_framework_validation_gate(
-            self.turns.progress_path,
-            number,
-            retry,
-            artifact=location,
-            results=results,
+        self._board_log.append(
+            progress_log.render_framework_validation_gate(
+                number, retry, artifact=location, results=results
+            )
         )
         await self.workspace.snapshot(f"round-{number}-retry-{retry}-framework-validation")
         failed = next((result for result in results if not result.passed), None)
@@ -704,14 +745,15 @@ class ProfileMultiSession:
     def _record_official_decision(
         self, selected: ProfileMultiRound, *, run: bool, reason: str
     ) -> None:
-        issue_board.append_official_evaluation_decision(
-            self.turns.progress_path,
-            self.round_number,
-            selected.attempt.retry,
-            run=run,
-            reason=reason,
-            official_eval_every=self.options.official_eval_every,
-            provisional_candidates=provisional_candidates_since_official(self.records),
+        self._board_log.append(
+            progress_log.render_official_evaluation_decision(
+                self.round_number,
+                selected.attempt.retry,
+                run=run,
+                reason=reason,
+                official_eval_every=self.options.official_eval_every,
+                provisional_candidates=provisional_candidates_since_official(self.records),
+            )
         )
 
     async def _official_gates(self, selected: ProfileMultiRound) -> bool:
@@ -730,10 +772,11 @@ class ProfileMultiSession:
         )
         result = await self.ctx.gates.run(
             round_number=self.round_number,
+            board=self._drain_board(),
             retry=attempt.retry,
             commit=commit,
             objectives=self.state.metrics.objectives,
-            record=self._gate_recorder,
+            progress_path=self.turns.progress_path,
             reuse_accuracy=reuse_accuracy,
             agent_backend_name=self.turns.worker.backend_name,
         )
@@ -815,13 +858,14 @@ class ProfileMultiSession:
         )
         state = closed.state.model_copy(update={"profile_guidance": focus_state})
         if closed.exhaustion_feedback is not None:
-            issue_board.append_exhaustion_note(
-                self.turns.progress_path,
-                self.round_number,
-                self.options.max_retries_per_round,
-                closed.exhaustion_feedback,
+            self._board_log.append(
+                progress_log.render_exhaustion_note(
+                    self.round_number,
+                    self.options.max_retries_per_round,
+                    closed.exhaustion_feedback,
+                )
             )
-        await self.ctx.state.commit(
+        await self._commit(
             sequence=self.round_number,
             writes={"state.json": state},
             publish=state,

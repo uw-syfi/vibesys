@@ -16,6 +16,7 @@ from vibesys.errors import (
     UnsupportedProfilerError,
 )
 from vibesys.events import FrameworkSource
+from vibesys.orchestration import progress_log
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
@@ -49,10 +50,20 @@ if TYPE_CHECKING:
 class SingleAgentTurns:
     """One designer and one combined implementer, reviewer, and profiler."""
 
-    def __init__(self, ctx: RunContext, options: AgentOrchestrationOptions) -> None:
-        """Bind the run's public capabilities and strategy options."""
+    def __init__(
+        self, ctx: RunContext, options: AgentOrchestrationOptions, board: list[str]
+    ) -> None:
+        """Bind the run's public capabilities, strategy options, and board buffer.
+
+        *board* is the owning session's pending framework-log buffer: turns
+        append pure, unwritten Markdown blocks to it (see
+        ``vibesys.orchestration.progress_log``'s ``render_*`` functions); the
+        session hands the buffer to ``ctx.state.commit`` -- the host -- which
+        is the only place that writes it to disk.
+        """
         self.ctx = ctx
         self.options = options
+        self._board = board
         self.workspace = ctx.workspaces.root
         self.domain = resolve_domain(ctx.request.input_bundle.domain)
         self.modality = options.modality
@@ -205,7 +216,7 @@ class SingleAgentTurns:
                 continue
             plan.recommended_skills, _ = self._skills(plan.recommended_skills)
             issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-            issue_board.append_orchestrator_plan(self.progress_path, request.round_number, plan)
+            self._board.append(progress_log.render_orchestrator_plan(request.round_number, plan))
             return plan
         raise PlanCorrectionExhaustedError
 
@@ -333,7 +344,7 @@ class SingleAgentTurns:
                     "verdict": Verdict.FAIL,
                 }
             )
-        issue_board.append_single_agent_round(
-            self.progress_path, request.round_number, state.retry, response
+        self._board.append(
+            progress_log.render_single_agent_round(request.round_number, state.retry, response)
         )
         return response

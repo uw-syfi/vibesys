@@ -12,6 +12,8 @@ renders from, the state-dependent plan-ID retry that wraps
 writes around each turn.
 """
 
+# ruff: noqa: SLF001  # Fixtures construct turns via __new__ and poke the board buffer.
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -98,7 +100,7 @@ def _configured_turns(tmp_path: Path) -> SingleAgentTurns:
         official_eval_every=2,
         memory_layout="files",
     )
-    return SingleAgentTurns(cast("RunContext", context), options)
+    return SingleAgentTurns(cast("RunContext", context), options, [])
 
 
 def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path: Path) -> None:
@@ -109,8 +111,8 @@ def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path
     assert hypothesis is not None
     plan_request = PlanRequest(1, state, [], CarryOver(), None, None, 1, STATIC_GUIDANCE)
 
-    designer_context = turns._plan_context(plan_request)  # noqa: SLF001
-    combined_context = turns._combined_context(  # noqa: SLF001
+    designer_context = turns._plan_context(plan_request)
+    combined_context = turns._combined_context(
         AttemptRequest(1, plan, "cadence", [], hypothesis, "decode"),
         AttemptState(agent_run_state=state, feedback=None, retry=1),
     )
@@ -130,6 +132,7 @@ async def test_plan_reprompts_reused_hypothesis_and_records_corrected_plan(
 ) -> None:
     state = start_hypothesis(HypothesisState(), _plan("used"), started_round=1)
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
+    turns._board = []
     log: list[str] = []
     agent_turn = AsyncMock(side_effect=[_plan("used"), _plan("new")])
     monkeypatch.setattr(
@@ -164,6 +167,7 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     hypothesis = state.active_hypothesis
     assert hypothesis is not None
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
+    turns._board = []
     agent_turn = AsyncMock(return_value=_response())
     monkeypatch.setattr(
         turns, "ctx", SimpleNamespace(agents=SimpleNamespace(turn=agent_turn)), raising=False
@@ -184,7 +188,7 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     assert call.kwargs["context"] == {"combined": "context"}
     assert call.kwargs["session_key"] == "h1"
     assert call.kwargs["label"] == "round-1-retry-1-single-agent"
-    assert "Implemented batching" in (tmp_path / "progress.md").read_text()
+    assert any("Implemented batching" in block for block in turns._board)
 
     # `before_paid` (run by `ctx.agents.turn` right before its pre-turn
     # snapshot, so it is git-committed before the paid call starts) writes
@@ -200,6 +204,7 @@ def test_validation_rejects_reused_id() -> None:
     plan = _plan("used")
     state = start_hypothesis(HypothesisState(), plan, started_round=1)
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
+    turns._board = []
 
     with pytest.raises(InvalidPlanError, match="already used"):
-        turns._validate_plan(_plan("used"), state)  # noqa: SLF001
+        turns._validate_plan(_plan("used"), state)

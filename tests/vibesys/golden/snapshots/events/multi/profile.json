@@ -199,7 +199,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": "<SHA>",
+      "commit": null,
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-profiler-input",
@@ -311,7 +311,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": "<SHA>",
+      "commit": null,
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-plan-input",

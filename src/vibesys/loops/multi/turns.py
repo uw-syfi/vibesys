@@ -26,6 +26,7 @@ from vibesys.errors import (
     UnsupportedProfilerError,
 )
 from vibesys.events import CoreEventType, EventStatus, FrameworkSource, JudgeResultData
+from vibesys.orchestration import progress_log
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
@@ -77,10 +78,20 @@ _SYNTHESIZED_IMPLEMENTER_SUMMARIES = frozenset(
 class MultiAgentTurns:
     """Independent designer, profiler, implementer, and judge roles."""
 
-    def __init__(self, ctx: RunContext, options: AgentOrchestrationOptions) -> None:
-        """Bind the run's public capabilities and strategy options."""
+    def __init__(
+        self, ctx: RunContext, options: AgentOrchestrationOptions, board: list[str]
+    ) -> None:
+        """Bind the run's public capabilities, strategy options, and board buffer.
+
+        *board* is the owning session's pending framework-log buffer: turns
+        append pure, unwritten Markdown blocks to it (see
+        ``vibesys.orchestration.progress_log``'s ``render_*`` functions); the
+        session hands the buffer to ``ctx.state.commit`` -- the host -- which
+        is the only place that writes it to disk.
+        """
         self.ctx = ctx
         self.options = options
+        self._board = board
         self.workspace = ctx.workspaces.root
         self.domain = resolve_domain(ctx.request.input_bundle.domain)
         self.modality = options.modality
@@ -219,7 +230,7 @@ class MultiAgentTurns:
                 )
                 continue
             issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-            issue_board.append_orchestrator_plan(self.progress_path, request.round_number, plan)
+            self._board.append(progress_log.render_orchestrator_plan(request.round_number, plan))
             return plan
         raise PlanCorrectionExhaustedError
 
@@ -255,7 +266,7 @@ class MultiAgentTurns:
                 label=f"round-{round_number}-pre",
             ),
         )
-        issue_board.append_pre_round_decision(self.progress_path, round_number, decision)
+        self._board.append(progress_log.render_pre_round_decision(round_number, decision))
         return decision
 
     def _profiler_campaign_context(self, artifact: str) -> str:
@@ -336,7 +347,7 @@ Write bounded durable profile evidence only below
                 round_label=f"round-{round_number}",
             )
             return None
-        issue_board.append_profiler_summary(self.progress_path, round_number, summary)
+        self._board.append(progress_log.render_profiler_summary(round_number, summary))
         return summary
 
     def _framework_benchmark_configured(self) -> bool:
@@ -487,8 +498,8 @@ Write bounded durable profile evidence only below
         issue_board.write_implementer_artifact(
             self.progress_path, request.round_number, state.retry, response
         )
-        issue_board.append_implementer(
-            self.progress_path, request.round_number, state.retry, response
+        self._board.append(
+            progress_log.render_implementer(request.round_number, state.retry, response)
         )
         return response, synthesized
 
@@ -569,5 +580,5 @@ Write bounded durable profile evidence only below
                 verdict=response.verdict.value, feedback=response.feedback, attempt=state.retry
             ),
         )
-        issue_board.append_judge(self.progress_path, request.round_number, state.retry, response)
+        self._board.append(progress_log.render_judge(request.round_number, state.retry, response))
         return response
