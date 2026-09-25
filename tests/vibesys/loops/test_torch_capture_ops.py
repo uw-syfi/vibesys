@@ -15,6 +15,7 @@ from __future__ import annotations
 import gzip
 import importlib.util
 import json
+import os
 import socket
 import sys
 import textwrap
@@ -308,6 +309,103 @@ def test_build_capture_env_user_env_wins_on_conflict(
 
 
 # ---------------------------------------------------------------------------
+# _build_capture_env(inject=False): regression test for a real MI210 SIGSEGV
+# (target_rc=139, empty trace) hit when a command that already opens its own
+# torch.profiler.profile() session (e.g. vLLM's profiler_config +
+# start_profile()/stop_profile()) was also profiled by this module's own
+# signal-based injection -- two independent profiler sessions in one process
+# crash the CUPTI/roctracer/kineto backend outright, not catchably. Fixed by
+# threading an inject=False path all the way through profile_ops that skips
+# arming sitecustomize.py entirely while still exporting
+# VIBESYS_TORCH_PROFILE_OUT_DIR for the command's own profiler to use.
+#
+# This fails against pre-fix code (git show HEAD~N -- the ``inject`` keyword
+# did not exist there at all): calling _build_capture_env(inject=False, ...)
+# raises TypeError('_build_capture_env() got an unexpected keyword argument
+# \'inject\''), not the assertions below.
+# ---------------------------------------------------------------------------
+
+
+def test_build_capture_env_inject_false_skips_injection_but_keeps_out_dir(
+    capture_ops: ModuleType, tmp_path: Path
+) -> None:
+    env = capture_ops._build_capture_env(  # noqa: SLF001
+        user_env=None,
+        out_dir=tmp_path,
+        delay_s=5.0,
+        duration_s=30.0,
+        record_shapes=True,
+        inject=False,
+    )
+    assert env["VIBESYS_TORCH_PROFILE_OUT_DIR"] == str(tmp_path)
+    assert "VIBESYS_TORCH_PROFILE" not in env
+    assert "VIBESYS_TORCH_PROFILE_DELAY_S" not in env
+    assert "VIBESYS_TORCH_PROFILE_DURATION_S" not in env
+    assert "VIBESYS_TORCH_PROFILE_RECORD_SHAPES" not in env
+    assert "PYTHONPATH" not in env
+
+
+def test_build_capture_env_inject_false_preserves_user_pythonpath(
+    capture_ops: ModuleType, tmp_path: Path
+) -> None:
+    env = capture_ops._build_capture_env(  # noqa: SLF001
+        user_env={"PYTHONPATH": "/existing/path"},
+        out_dir=tmp_path,
+        delay_s=0.0,
+        duration_s=None,
+        record_shapes=True,
+        inject=False,
+    )
+    # inject=False never prepends _INJECT_DIR: the caller's PYTHONPATH must
+    # pass through completely untouched, since sitecustomize.py must never
+    # load into this process at all.
+    assert env["PYTHONPATH"] == "/existing/path"
+
+
+@given(
+    delay_s=st.floats(min_value=0.0, max_value=60.0, allow_nan=False),
+    duration_s=st.one_of(st.none(), st.floats(min_value=0.0, max_value=60.0, allow_nan=False)),
+    record_shapes=st.booleans(),
+    inject=st.booleans(),
+)
+@FAST
+def test_build_capture_env_injection_keys_gated_exactly_by_inject(  # noqa: PLR0913  # tracked: #288
+    capture_ops: ModuleType,
+    tmp_path: Path,
+    delay_s: float,
+    duration_s: float | None,
+    record_shapes: bool,  # noqa: FBT001
+    inject: bool,  # noqa: FBT001
+) -> None:
+    """Property: every VIBESYS_TORCH_PROFILE* injection key, and the
+    PYTHONPATH prepend, appear if and only if inject=True -- regardless of
+    delay_s/duration_s/record_shapes -- while VIBESYS_TORCH_PROFILE_OUT_DIR
+    is set unconditionally either way."""
+    env = capture_ops._build_capture_env(  # noqa: SLF001
+        user_env=None,
+        out_dir=tmp_path,
+        delay_s=delay_s,
+        duration_s=duration_s,
+        record_shapes=record_shapes,
+        inject=inject,
+    )
+    assert env["VIBESYS_TORCH_PROFILE_OUT_DIR"] == str(tmp_path)
+    injection_keys = {
+        "VIBESYS_TORCH_PROFILE",
+        "VIBESYS_TORCH_PROFILE_DELAY_S",
+        "VIBESYS_TORCH_PROFILE_RECORD_SHAPES",
+        "PYTHONPATH",
+    }
+    present = injection_keys & env.keys()
+    if inject:
+        assert present == injection_keys
+        assert env["PYTHONPATH"].split(os.pathsep)[0] == str(capture_ops._INJECT_DIR)  # noqa: SLF001
+    else:
+        assert present == set()
+        assert ("VIBESYS_TORCH_PROFILE_DURATION_S" in env) is False
+
+
+# ---------------------------------------------------------------------------
 # profile_ops end to end (bounded script)
 # ---------------------------------------------------------------------------
 
@@ -345,6 +443,80 @@ def test_profile_ops_bounded_script_produces_certified_summary(
     assert manifest["primary_trace"] is not None
     assert manifest["trace_files"] == [manifest["primary_trace"]]
     assert (captures[0] / manifest["primary_trace"]).is_file()
+
+
+def test_profile_ops_inject_false_finds_a_trace_the_command_writes_itself(
+    capture_ops: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for the real MI210 SIGSEGV: with inject=False,
+    sitecustomize.py must never be armed (no VIBESYS_TORCH_PROFILE=1, no
+    PYTHONPATH prepend of the inject dir) even though profile_ops still
+    finds and certifies a trace -- one the command wrote itself, simulating
+    a serving engine's own profiler_config + start_profile()/stop_profile()
+    path (see resources/skills/serving-systems/references/engines/
+    vllm-profiling.md). Uses the fake torch package directly from within
+    the workload script (not via sitecustomize's injection) to write a
+    real, readable *.pt.trace.json.gz that this module's own discovery
+    then picks up."""
+    fake_torch = write_fake_torch(tmp_path / "fake_torch")
+    profiles_dir = tmp_path / "profiles"
+    monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(profiles_dir))
+    call_log = tmp_path / "calls.log"
+
+    script = tmp_path / "native_profile_workload.py"
+    script.write_text(
+        textwrap.dedent(
+            """
+            import gzip
+            import os
+            import shutil
+
+            import torch
+
+            out_dir = os.environ["VIBESYS_TORCH_PROFILE_OUT_DIR"]
+            os.makedirs(out_dir, exist_ok=True)
+
+            prof = torch.profiler.profile(
+                activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+                record_shapes=True,
+            )
+            prof.start()
+            prof.stop()
+            raw_path = os.path.join(out_dir, f"{os.getpid()}-native.pt.trace.json")
+            gz_path = raw_path + ".gz"
+            prof.export_chrome_trace(raw_path)
+            with open(raw_path, "rb") as src, gzip.open(gz_path, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            """
+        )
+    )
+
+    output = capture_ops.profile_ops(
+        command=f"{sys.executable} {script}",
+        env={"PYTHONPATH": str(fake_torch), "FAKE_TORCH_CALL_LOG": str(call_log)},
+        inject=False,
+        timeout_s=20,
+        grace_s=5,
+    )
+
+    assert ": ok" in output
+    assert "primary trace:" in output
+    assert "--- certify ---" in output
+
+    # sitecustomize.py was never armed: exactly one profile.start (the
+    # script's own explicit call), not two -- proving inject=False did not
+    # layer a second, competing torch.profiler session on top of the
+    # command's own.
+    events = call_log.read_text().splitlines() if call_log.exists() else []
+    starts = [line for line in events if line.endswith("\tprofile.start")]
+    assert len(starts) == 1
+
+    captures2 = list(profiles_dir.iterdir())
+    assert len(captures2) == 1
+    manifest2 = json.loads((captures2[0] / "manifest.json").read_text())
+    assert manifest2["meta"]["inject"] is False
+    assert manifest2["primary_trace"] is not None
+    assert (captures2[0] / manifest2["primary_trace"]).is_file()
 
 
 def test_profile_ops_reports_no_traces_when_no_gpu(
