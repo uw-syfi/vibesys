@@ -140,3 +140,91 @@ def test_failed_review_does_not_retain_agent_candidate() -> None:
     assert record.judge_verdict == "fail"
     assert not record.official_evaluation
     assert record.candidate_retained is False
+
+
+# --- causal baseline selection (build_round_record -> metric_baseline) -----
+#
+# These drive the same fallback/fail-closed/renamed-unit/untrusted-provenance
+# paths that ``metric_baseline`` implements, entirely through the record
+# builder's public ``RecordInput``/``build_round_record`` surface: no
+# ``vibesys.search.hypothesis.transitions`` import needed.
+
+
+def _official(number: int, metric: float, *, unit: str = "throughput", provenance="framework"):  # noqa: ANN001, ANN202
+    return RoundRecord(
+        round_number=number,
+        commit=f"parent-commit-{number}",
+        perf_metric=metric,
+        perf_unit=unit,
+        passed=True,
+        metrics={unit: metric},
+        official_evaluation=True,
+        perf_provenance=provenance,
+    )
+
+
+def test_baseline_falls_back_to_the_newest_official_reading_bounded_by_parent_round() -> None:
+    data = _record_input()
+    parent = _official(1, 10.0)
+    later = _official(2, 20.0)
+    data = replace(data, records=[parent, later])
+    data.hypothesis.parent_round = 2
+    data.hypothesis.parent_commit = "unmatched-commit"
+
+    record = build_round_record(data)
+
+    assert record.perf_baseline_round == 2
+    assert record.perf_baseline_commit == later.commit
+    assert record.perf_baseline_metric == 20.0
+
+
+def test_baseline_fails_closed_with_an_unplaced_parent_commit_and_no_round_bound() -> None:
+    data = _record_input()
+    data = replace(data, records=[_official(1, 10.0)])
+    data.hypothesis.parent_round = None
+    data.hypothesis.parent_commit = "a commit no official round carries"
+
+    record = build_round_record(data)
+
+    assert record.perf_baseline_round is None
+    assert record.perf_baseline_commit is None
+    assert record.perf_baseline_metric is None
+    assert record.perf_delta_pct is None
+
+
+def test_baseline_matches_a_renamed_headline_unit_through_its_metrics_row() -> None:
+    """A prior round whose *displayed* unit was renamed still matches, via its
+    metrics row keyed by the current objective name ("throughput" here).
+    """
+    data = _record_input()
+    renamed = RoundRecord(
+        round_number=1,
+        commit="renamed-commit",
+        perf_metric=10.0,
+        perf_unit="old_headline_name",
+        passed=True,
+        metrics={"throughput": 10.0},
+        official_evaluation=True,
+        perf_provenance="framework",
+    )
+    data = replace(data, records=[renamed])
+    data.hypothesis.parent_round = 1
+    data.hypothesis.parent_commit = renamed.commit
+
+    record = build_round_record(data)
+
+    assert record.perf_baseline_round == 1
+    assert record.perf_baseline_metric == 10.0
+
+
+def test_baseline_skips_an_agent_self_reported_prior_round() -> None:
+    data = _record_input()
+    self_reported = _official(1, 999.0, provenance="implementer")
+    data = replace(data, records=[self_reported])
+    data.hypothesis.parent_round = 1
+    data.hypothesis.parent_commit = self_reported.commit
+
+    record = build_round_record(data)
+
+    assert record.perf_baseline_round is None
+    assert record.perf_baseline_metric is None

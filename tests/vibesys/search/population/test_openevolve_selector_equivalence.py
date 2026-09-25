@@ -153,9 +153,9 @@ def test_in_memory_backend_matches_old_file_backend(
     )
 
     new_load_files, new_dump_files = (
-        openevolve_selector._load_files,
-        openevolve_selector._dump_files,
-    )  # noqa: SLF001
+        openevolve_selector._load_files,  # noqa: SLF001
+        openevolve_selector._dump_files,  # noqa: SLF001
+    )
 
     with _backend(new_load_files, new_dump_files):
         new_trace = _drive(config, perf_metrics)
