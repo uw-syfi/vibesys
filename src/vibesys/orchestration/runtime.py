@@ -611,11 +611,20 @@ class _Evaluator:
 
     def __init__(self, host: RunContext) -> None:
         self._host = host
-        self._locks: dict[str | None, asyncio.Lock] = {None: asyncio.Lock()}
+        self._locks: dict[str, asyncio.Lock] = {}
 
     def _lock_for(self, scope: WorkspaceScope | WorkspaceHandle | None) -> asyncio.Lock:
-        """Serialize gates only within the workspace they inspect."""
+        """Serialize gates with the workspace they inspect.
+
+        The parent tree (``scope is None``, or an isolation-free
+        ``WorkspaceHandle``) shares ``_parent_mutation_lock`` with
+        ``adopt``/``checkpoint`` so a gate on the parent tree and an
+        adopt/checkpoint can never interleave (R6). Isolated scopes keep
+        their own lock, independent of the parent lock and of each other.
+        """
         key = scope.id if scope is not None else None
+        if key is None:
+            return self._host._parent_mutation_lock
         lock = self._locks.get(key)
         if lock is None:
             lock = asyncio.Lock()
@@ -941,7 +950,7 @@ class _Workspaces:
                     continue
                 try:
                     await agent.close()
-                except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-020031 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
+                except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020031 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                     errors.append(exc)
             async with (
                 self._host.evaluator._lock_for(scope),
@@ -950,7 +959,7 @@ class _Workspaces:
             ):
                 try:
                     await self._host._run_blocking(self._discard, scope)
-                except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-020032 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
+                except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-020032 [BLE001]; cleanup must continue through every resource, so each failure is collected and raised together afterwards.
                     errors.append(exc)
                 finally:
                     if scope.id not in self._scopes:

@@ -9,6 +9,8 @@ from typing import cast
 from uuid import UUID
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, ValidationError
 from tests.support.run_execution import run_execution_record
 
@@ -746,6 +748,80 @@ def test_resolve_run_without_runs_is_actionable(tmp_path: Path) -> None:
 
     with pytest.raises(ProjectStateError, match=r"No VibeSys runs.*\.vibesys/state"):
         store.state.resolve_run()
+
+
+def _corrupt_schema_version(store: Project, run_id: str, *, version: int) -> None:
+    path = store.state._run_manifest_path(run_id)  # noqa: SLF001  # LW-040035 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["schema_version"] = version
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_list_runs_skips_an_incompatible_run_and_surfaces_it(tmp_path: Path) -> None:
+    """Regression: one run this VibeSys can't load (e.g. an old schema
+    version) used to fail list_runs() -- and therefore latest_run() and
+    resolve_run() -- for the whole directory. It must instead skip that run,
+    report it via incompatible_runs(), and keep resolving from what's left.
+    """
+    store = _store(tmp_path)
+    first = _run(store, minute=1)
+    second = _run(store, minute=2)
+    _corrupt_schema_version(store, first.run_id, version=3)
+
+    assert store.state.list_runs() == [second]
+
+    [(run_id, error)] = store.state.incompatible_runs()
+    assert run_id == first.run_id
+    assert isinstance(error, ProjectStateError)
+    assert "unsupported run schema version" in str(error)
+
+    # latest_run()/resolve_run() still work against the mixed directory.
+    assert store.state.latest_run() == second
+    assert store.state.resolve_run() == second
+
+
+@given(validity=st.lists(st.booleans(), min_size=1, max_size=6))
+@settings(
+    max_examples=20, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+def test_list_runs_property_any_mix_of_valid_and_incompatible_runs(
+    validity: list[bool], tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Property generalizing the regression: for any mix of valid and
+    incompatible run directories, list_runs() returns exactly the valid
+    ones (never raising for the incompatible ones), incompatible_runs()
+    reports exactly the rest, and latest_run()/resolve_run() still resolve
+    correctly (or raise the actionable "no runs" error when none are valid).
+
+    The machine-local "current run" pointer is cleared first: an explicit
+    ask (by run_id, or via that pointer) for a specific incompatible run is
+    a different, already-handled case (the CLI resume path surfaces it
+    directly) -- this property covers resolution with no explicit target.
+    """
+    root = tmp_path_factory.mktemp("mixed_runs")
+    store = _store(root)
+    runs = [_run(store, minute=index) for index in range(len(validity))]
+    store.state.set_current_run(None)
+    valid_ids = set()
+    invalid_ids = set()
+    for run, is_valid in zip(runs, validity, strict=True):
+        if is_valid:
+            valid_ids.add(run.run_id)
+        else:
+            invalid_ids.add(run.run_id)
+            _corrupt_schema_version(store, run.run_id, version=1)
+
+    assert {run.run_id for run in store.state.list_runs()} == valid_ids
+    assert {reported_id for reported_id, _ in store.state.incompatible_runs()} == invalid_ids
+
+    if valid_ids:
+        latest = store.state.latest_run()
+        assert latest is not None
+        assert latest.run_id in valid_ids
+        assert store.state.resolve_run().run_id in valid_ids
+    else:
+        with pytest.raises(ProjectStateError, match="No VibeSys runs"):
+            store.state.resolve_run()
 
 
 @pytest.mark.parametrize("run_id", ["../escape", "/absolute", "Uppercase", "", "a/b"])

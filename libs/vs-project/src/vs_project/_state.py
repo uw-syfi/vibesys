@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -58,6 +59,8 @@ from vs_project.errors import (
 
 if TYPE_CHECKING:
     from uuid import UUID
+
+_logger = logging.getLogger(__name__)
 
 PROJECT_SCHEMA_VERSION: Literal[1] = 1
 RUN_SCHEMA_VERSION: Literal[4] = 4
@@ -1077,18 +1080,43 @@ class ProjectState:
             )
 
     def list_runs(self) -> list[OrchestrationRunManifest]:
-        """Return all runs ordered by creation time, then run ID."""
+        """Return all compatible runs ordered by creation time, then run ID.
+
+        A run this VibeSys cannot load (e.g. an older schema version) is
+        skipped rather than failing the whole listing; see
+        :meth:`incompatible_runs` to discover what was skipped and why.
+        """
+        manifests, _skipped = self._load_all_runs()
+        return sorted(manifests, key=lambda manifest: (manifest.created_at, manifest.run_id))
+
+    def incompatible_runs(self) -> list[tuple[str, ProjectStateError]]:
+        """Return ``(run_id, error)`` for every run :meth:`list_runs` skipped."""
+        _loaded, skipped = self._load_all_runs()
+        return skipped
+
+    def _load_all_runs(
+        self,
+    ) -> tuple[list[OrchestrationRunManifest], list[tuple[str, ProjectStateError]]]:
+        """Load every run directory, separating what loaded from what didn't."""
         self._validate_storage_roots()
         runs_dir = self._metadata_dir / "runs"
         if not runs_dir.exists():
-            return []
+            return [], []
         manifests: list[OrchestrationRunManifest] = []
+        skipped: list[tuple[str, ProjectStateError]] = []
         for child in sorted(runs_dir.iterdir()):
             if not child.is_dir():
                 message = f"Unexpected file in VibeSys runs directory: {child}"
                 raise ProjectStateError(message)
-            manifests.append(self.load_run(child.name))
-        return sorted(manifests, key=lambda manifest: (manifest.created_at, manifest.run_id))
+            try:
+                manifests.append(self.load_run(child.name))
+            except ProjectStateError as exc:
+                _logger.warning("Skipping incompatible VibeSys run %r: %s", child.name, exc)
+                skipped.append((child.name, exc))
+        return (
+            sorted(manifests, key=lambda manifest: (manifest.created_at, manifest.run_id)),
+            skipped,
+        )
 
     def latest_run(self) -> OrchestrationRunManifest | None:
         """Return the most recently created run, if one exists."""
