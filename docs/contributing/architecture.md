@@ -131,6 +131,7 @@ graph TD
     vibesys.loops.issue_queue --> vibesys.orchestration.view
     vibesys.loops.issue_queue --> vibesys.prompts
     vibesys.loops.issue_queue --> vibesys.render
+    vibesys.loops.issue_queue --> vibesys.roles
     vibesys.loops.issue_queue --> vibesys.runtime
     vibesys.loops.multi --> vibesys
     vibesys.loops.multi --> vibesys.agent_run
@@ -163,6 +164,8 @@ graph TD
     vibesys.loops.profile_single --> vibesys.orchestration.view
     vibesys.loops.profile_single --> vibesys.prompts
     vibesys.loops.profile_single --> vibesys.render
+    vibesys.loops.profile_single --> vibesys.roles
+    vibesys.loops.profile_single --> vibesys.runtime
     vibesys.loops.registry --> vibesys.loops.evolve.entrypoint
     vibesys.loops.registry --> vibesys.loops.issue_queue
     vibesys.loops.registry --> vibesys.loops.multi
@@ -179,6 +182,8 @@ graph TD
     vibesys.loops.single --> vibesys.orchestration.view
     vibesys.loops.single --> vibesys.prompts
     vibesys.loops.single --> vibesys.render
+    vibesys.loops.single --> vibesys.roles
+    vibesys.loops.single --> vibesys.runtime
     vibesys.orchestration --> vibesys.orchestration.resume
     vibesys.orchestration._common --> vibesys.orchestration.request
     vibesys.orchestration.agents --> vibesys
@@ -424,6 +429,7 @@ graph TD
     vibesys.loops.issue_queue --> vibesys.orchestration.view
     vibesys.loops.issue_queue --> vibesys.prompts
     vibesys.loops.issue_queue --> vibesys.render
+    vibesys.loops.issue_queue --> vibesys.roles
     vibesys.loops.issue_queue --> vibesys.runtime
     vibesys.loops.issue_queue --> vs_agent
     vibesys.loops.issue_queue --> vs_issue_board
@@ -466,6 +472,8 @@ graph TD
     vibesys.loops.profile_single --> vibesys.orchestration.view
     vibesys.loops.profile_single --> vibesys.prompts
     vibesys.loops.profile_single --> vibesys.render
+    vibesys.loops.profile_single --> vibesys.roles
+    vibesys.loops.profile_single --> vibesys.runtime
     vibesys.loops.profile_single --> vs_agent
     vibesys.loops.profile_single --> vs_loop_state
     vibesys.loops.profile_single --> vs_project
@@ -485,6 +493,8 @@ graph TD
     vibesys.loops.single --> vibesys.orchestration.view
     vibesys.loops.single --> vibesys.prompts
     vibesys.loops.single --> vibesys.render
+    vibesys.loops.single --> vibesys.roles
+    vibesys.loops.single --> vibesys.runtime
     vibesys.loops.single --> vs_agent
     vibesys.loops.single --> vs_loop_state
     vibesys.loops.single --> vs_project

@@ -12,15 +12,19 @@ strategies name the "same" conceptual step (e.g. ``multi`` and ``single``
 each have their own ``*_ORCHESTRATOR_PLAN``): never a role branching on
 which strategy called it.
 
-profile_multi and profile_single are not yet catalogued here (deferred to
-the phase that migrates them onto ``ctx.agents.turn``; see the phase-3a
-report).
+profile_multi is not yet catalogued here (deferred to the phase that
+migrates it onto ``ctx.agents.turn``; see the phase-3a report).
 """
 
 from __future__ import annotations
 
-from vibesys.roles import issue_queue, multi, single
+from vibesys.roles import issue_queue, multi, profile_single, single
 
-ALL_ROLES = (*multi.ALL_ROLES, *single.ALL_ROLES, *issue_queue.ALL_ROLES)
+ALL_ROLES = (
+    *multi.ALL_ROLES,
+    *single.ALL_ROLES,
+    *profile_single.ALL_ROLES,
+    *issue_queue.ALL_ROLES,
+)
 
-__all__ = ["ALL_ROLES", "issue_queue", "multi", "single"]
+__all__ = ["ALL_ROLES", "issue_queue", "multi", "profile_single", "single"]
