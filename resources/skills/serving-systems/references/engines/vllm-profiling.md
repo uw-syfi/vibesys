@@ -160,6 +160,20 @@ This writes a gzipped Kineto trace (`*.pt.trace.json.gz`). Graph mode
 produces far fewer CPU-side events than eager mode, since graph replay
 collapses many per-kernel dispatch events into one graph-launch event.
 
+**Do not combine this pattern with `profile_ops`'s default injection.**
+`profile_ops` normally arms its own, separate `torch.profiler` session via
+signal-based injection. Running that injection *and* `profiler_config` +
+`start_profile()`/`stop_profile()` in the same process opens two independent
+`torch.profiler.profile()` sessions at once, which crashes the
+CUPTI/roctracer/kineto backend outright (confirmed on real MI210 hardware:
+`target_rc=139` SIGSEGV, empty trace) rather than raising a catchable
+Python error. When the script already manages `profiler_config` itself,
+call `profile_ops(..., inject=False)`: this skips arming the tool's own
+session while still exporting `VIBESYS_TORCH_PROFILE_OUT_DIR` (set either
+way) into the process's env, so the script can read it and pass it as
+`torch_profiler_dir` itself, landing the trace where the capture's own
+discovery/analysis pipeline will read from.
+
 ## Post-capture hang (confirmed on ROCm)
 
 Measured on both ROCm 6.4/torch 2.9.1 and ROCm 7.2.3/torch 2.12.
