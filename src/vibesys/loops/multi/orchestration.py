@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.agent_run import issue_board
 from vibesys.context import RunSetup, RunStartHints
 from vibesys.errors import InvalidStrategyOptionsError
 from vibesys.loops.agent_options import (
@@ -23,6 +22,7 @@ from vibesys.loops.agent_options import (
 )
 from vibesys.loops.hypothesis_readmodel import project_run_view
 from vibesys.loops.multi.session import MultiSession
+from vibesys.orchestration import memory
 from vibesys.orchestration.view import RunStatus, RunView
 from vibesys.search.hypothesis.attempts import AttemptDecision
 from vibesys.search.hypothesis.state import HypothesisState, load_hypothesis_state
@@ -53,7 +53,7 @@ def _load_options(
         )
     if options.interface not in {"inprocess", "service"}:
         raise InvalidStrategyOptionsError(orchestration_id, "interface", options.interface)
-    if options.memory_layout not in issue_board.MEMORY_LAYOUTS:
+    if options.memory_layout not in memory.MEMORY_LAYOUTS:
         raise InvalidStrategyOptionsError(orchestration_id, "memory_layout", options.memory_layout)
     return options
 
@@ -131,7 +131,7 @@ class MultiAgentOrchestrator:
                 max_rounds=self.options.max_rounds,
                 expected_roles=("orchestrator", "implementer", "judge"),
             ),
-            memory_paths=issue_board.declared_memory_paths(),
+            memory_paths=memory.declared_memory_paths(),
         )
 
     async def run(self, ctx: RunContext) -> bool:

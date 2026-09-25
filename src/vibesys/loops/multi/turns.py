@@ -26,7 +26,7 @@ from vibesys.errors import (
     UnsupportedProfilerError,
 )
 from vibesys.events import CoreEventType, EventStatus, FrameworkSource, JudgeResultData
-from vibesys.orchestration import progress_log
+from vibesys.orchestration import memory, progress_log
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
@@ -36,7 +36,12 @@ from vibesys.profilers import (
 from vibesys.profilers import (
     mcp_spec as profiler_mcp_spec,
 )
-from vibesys.prompts.contexts import domain_context, implementer_focus_kwargs, plan_focus_kwargs
+from vibesys.prompts.contexts import (
+    display_path,
+    domain_context,
+    implementer_focus_kwargs,
+    plan_focus_kwargs,
+)
 from vibesys.roles.common import Verdict
 from vibesys.roles.designer import MULTI_ORCHESTRATOR_PLAN, PlanContext
 from vibesys.roles.implementer import (
@@ -95,14 +100,14 @@ class MultiAgentTurns:
         if self.modality is None and self.domain.name is constants.DomainName.LLM_SERVING:
             self.modality = "text_generation"
         self.objective = ctx.request.objective or ctx.request.input_bundle.objective
-        self.roadmap_path, self.progress_path = issue_board.resolve_paths(
+        self.roadmap_path, self.progress_path = memory.resolve_paths(
             self.workspace.path, options.memory_layout
         )
         ctx.progress.declare(self.progress_path)
-        self.progress_location = issue_board.display_path(self.progress_path, self.workspace.path)
-        self.roadmap_location = issue_board.display_path(self.roadmap_path, self.workspace.path)
-        self.pareto_location = issue_board.display_path(
-            issue_board.pareto_archive_path(self.progress_path), self.workspace.path
+        self.progress_location = display_path(self.progress_path, self.workspace.path)
+        self.roadmap_location = display_path(self.roadmap_path, self.workspace.path)
+        self.pareto_location = display_path(
+            memory.pareto_archive_path(self.progress_path), self.workspace.path
         )
 
     async def open(self) -> None:
@@ -308,7 +313,7 @@ Write bounded durable profile evidence only below
             return None
         kind = require_profiler_kind(self.ctx.environment.profiler_kind)
         view = self.ctx.environment.view
-        artifact = issue_board.display_path(
+        artifact = display_path(
             issue_board.profiler_artifact_root(self.progress_path, round_number),
             self.workspace.path,
         ).rstrip("/")
@@ -382,7 +387,7 @@ Write bounded durable profile evidence only below
         view = self.ctx.environment.view
         artifact = issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
         prior = tuple(
-            issue_board.display_path(path, self.workspace.path)
+            display_path(path, self.workspace.path)
             for path in issue_board.implementer_artifact_paths(
                 self.progress_path, request.round_number
             )
@@ -396,13 +401,13 @@ Write bounded durable profile evidence only below
                 self.domain, DomainRole.IMPLEMENTER, **self._domain_context()
             ),
             objective_location=view.paths.objective,
-            plan_artifact_location=issue_board.display_path(artifact, self.workspace.path),
+            plan_artifact_location=display_path(artifact, self.workspace.path),
             progress_location=self.progress_location,
             pareto_archive_location=self.pareto_location,
-            validation_location=issue_board.display_path(
+            validation_location=display_path(
                 issue_board.validation_artifact_root(self.progress_path), self.workspace.path
             ),
-            validation_recipe_contract_location=issue_board.display_path(
+            validation_recipe_contract_location=display_path(
                 issue_board.validation_recipe_schema_path(self.progress_path), self.workspace.path
             ),
             retry=state.retry,
@@ -431,7 +436,7 @@ Write bounded durable profile evidence only below
         view = self.ctx.environment.view
         artifact = issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
         prior = tuple(
-            issue_board.display_path(path, self.workspace.path)
+            display_path(path, self.workspace.path)
             for path in issue_board.implementer_artifact_paths(
                 self.progress_path, request.round_number
             )
@@ -439,13 +444,13 @@ Write bounded durable profile evidence only below
         return ImplementerContinuationContext(
             hypothesis_id=plan.hypothesis_id,
             objective_location=view.paths.objective,
-            plan_artifact_location=issue_board.display_path(artifact, self.workspace.path),
+            plan_artifact_location=display_path(artifact, self.workspace.path),
             progress_location=self.progress_location,
             pareto_archive_location=self.pareto_location,
-            validation_location=issue_board.display_path(
+            validation_location=display_path(
                 issue_board.validation_artifact_root(self.progress_path), self.workspace.path
             ),
-            validation_recipe_contract_location=issue_board.display_path(
+            validation_recipe_contract_location=display_path(
                 issue_board.validation_recipe_schema_path(self.progress_path), self.workspace.path
             ),
             runtime_notes=view.prompt_notes,
@@ -533,7 +538,7 @@ Write bounded durable profile evidence only below
             gate_approved_perf_metric=hypothesis.gate_approved_perf_metric,
             gate_approved_perf_unit=hypothesis.gate_approved_perf_unit,
             gate_revalidation_pending=hypothesis.gate_revalidation_pending,
-            implementer_artifact_location=issue_board.display_path(evidence, self.workspace.path),
+            implementer_artifact_location=display_path(evidence, self.workspace.path),
             interface=self.options.interface,
             modality=self.modality,
             objective_location=view.paths.objective,
@@ -541,14 +546,14 @@ Write bounded durable profile evidence only below
             official_evaluation_reason=request.planned_official_reason,
             pareto_archive_conflict=conflict,
             pareto_archive_location=self.pareto_location,
-            plan_artifact_location=issue_board.display_path(plan_artifact, self.workspace.path),
+            plan_artifact_location=display_path(plan_artifact, self.workspace.path),
             progress_location=self.progress_location,
             retry=state.retry,
             runtime_notes=view.prompt_notes,
-            validation_location=issue_board.display_path(
+            validation_location=display_path(
                 issue_board.validation_artifact_root(self.progress_path), self.workspace.path
             ),
-            validation_recipe_contract_location=issue_board.display_path(
+            validation_recipe_contract_location=display_path(
                 issue_board.validation_recipe_schema_path(self.progress_path), self.workspace.path
             ),
         )

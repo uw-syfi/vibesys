@@ -24,8 +24,9 @@ from vibesys.loops.multi.validation import (
     _reusable_validation_result,
     _validation_input_digest,
 )
-from vibesys.orchestration import progress_log
+from vibesys.orchestration import memory, progress_log
 from vibesys.orchestration.runtime import WorkspaceRestoreError
+from vibesys.prompts.contexts import display_path
 from vibesys.roles.common import Verdict
 from vibesys.roles.profiler import ProfilerSummary  # noqa: TC001  # tracked: #288
 from vibesys.schemas import (
@@ -272,8 +273,8 @@ class MultiSession:
             project_root=str(ctx.request.project_root),
             objective=turns.objective,
         )
-        issue_board.ensure_progress_file(turns.progress_path)
-        issue_board.ensure_roadmap_file(turns.roadmap_path)
+        memory.ensure_progress_file(turns.progress_path)
+        memory.ensure_roadmap_file(turns.roadmap_path)
         issue_board.write_validation_recipe_schema(turns.progress_path)
         previous = await ctx.state.load(HypothesisState)
         state = adopt_metric_space(previous or self.search.initial(), self.options.metric_space)
@@ -315,7 +316,7 @@ class MultiSession:
         """Attribute one round's turns and release progress on all exits."""
         number = self.round_number
         self.ctx.switch_log(f"round{number:03d}")
-        issue_board.write_pareto_archive(
+        memory.write_pareto_archive(
             self.turns.progress_path, pareto_archive_summary(self.records, self.state.metrics)
         )
         progress = RoundProgress(number, self.options.max_rounds)
@@ -722,7 +723,7 @@ class MultiSession:
         artifact = issue_board.write_validation_result_artifact(
             self.turns.progress_path, number, retry, results
         )
-        location = issue_board.display_path(artifact, self.workspace.path)
+        location = display_path(artifact, self.workspace.path)
         self.ctx.progress.note(
             progress_log.render_framework_validation_gate(
                 number, retry, artifact=location, results=results
@@ -883,7 +884,7 @@ class MultiSession:
     async def finish(self) -> bool:
         """Restore the best trusted candidate or the trusted input baseline."""
         self.ctx.log(f"Reached max_rounds={self.options.max_rounds}. Stopping.")
-        issue_board.write_pareto_archive(
+        memory.write_pareto_archive(
             self.turns.progress_path, pareto_archive_summary(self.records, self.state.metrics)
         )
         if self.state.metrics.objectives:

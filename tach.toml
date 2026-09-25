@@ -158,7 +158,7 @@ depends_on = ["vibesys", "vs_agent", "vibesys.domains", "vibesys.evaluators", "v
 
 [[modules]]
 path = "vibesys.api.agent"
-depends_on = ["vibesys.loops.registry", "vs_project", "vibesys.agent_run", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel"]
+depends_on = ["vibesys.loops.registry", "vs_project", "vibesys.orchestration.memory", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel"]
 
 [[modules]]
 path = "vibesys.api.evolve"
@@ -197,6 +197,14 @@ depends_on = ["vibesys", "vs_agent", "vs_sandbox", "vibesys.context", "vibesys.e
 path = "vibesys.orchestration.tools"
 layer = "orchestration_host"
 depends_on = ["vs_agent"]
+
+[[modules]]
+# Host-owned agent memory (roadmap, progress log, Pareto archive): pure path
+# resolution plus the file writes strategies used to hand-roll via the
+# dissolved vibesys.agent_run.issue_board.
+path = "vibesys.orchestration.memory"
+layer = "orchestration_host"
+depends_on = []
 
 [[modules]]
 path = "vibesys.runtime"
@@ -250,12 +258,12 @@ depends_on = []
 [[modules]]
 path = "vibesys.loops.single"
 layer = "loops"
-depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.agent_run", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.evaluators", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log"]
+depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.agent_run", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.evaluators", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log", "vibesys.orchestration.memory"]
 
 [[modules]]
 path = "vibesys.loops.multi"
 layer = "loops"
-depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log"]
+depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vibesys.prompts", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.search.hypothesis", "vibesys.search.profile_focus", "vibesys.loops.agent_options", "vibesys.loops.hypothesis_readmodel", "vibesys.errors", "vibesys.orchestration.progress_log", "vibesys.orchestration.memory"]
 
 [[modules]]
 path = "vibesys.loops.issue_queue"

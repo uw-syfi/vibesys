@@ -16,7 +16,7 @@ from vibesys.errors import (
     UnsupportedProfilerError,
 )
 from vibesys.events import FrameworkSource
-from vibesys.orchestration import progress_log
+from vibesys.orchestration import memory, progress_log
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
@@ -24,7 +24,7 @@ from vibesys.profilers import (
     require_profiler_kind,
 )
 from vibesys.prompts import PROMPTS_DIR
-from vibesys.prompts.contexts import domain_context, plan_focus_kwargs
+from vibesys.prompts.contexts import display_path, domain_context, plan_focus_kwargs
 from vibesys.roles.common import Verdict
 from vibesys.roles.designer import SINGLE_ORCHESTRATOR_PLAN, PlanContext
 from vibesys.roles.single_agent import (
@@ -67,14 +67,14 @@ class SingleAgentTurns:
         if self.modality is None and self.domain.name is constants.DomainName.LLM_SERVING:
             self.modality = "text_generation"
         self.objective = ctx.request.objective or ctx.request.input_bundle.objective
-        self.roadmap_path, self.progress_path = issue_board.resolve_paths(
+        self.roadmap_path, self.progress_path = memory.resolve_paths(
             self.workspace.path, options.memory_layout
         )
         ctx.progress.declare(self.progress_path)
-        self.progress_location = issue_board.display_path(self.progress_path, self.workspace.path)
-        self.roadmap_location = issue_board.display_path(self.roadmap_path, self.workspace.path)
-        self.pareto_location = issue_board.display_path(
-            issue_board.pareto_archive_path(self.progress_path), self.workspace.path
+        self.progress_location = display_path(self.progress_path, self.workspace.path)
+        self.roadmap_location = display_path(self.roadmap_path, self.workspace.path)
+        self.pareto_location = display_path(
+            memory.pareto_archive_path(self.progress_path), self.workspace.path
         )
         self.template_dir = PROMPTS_DIR / "loops" / "single"
 
@@ -284,10 +284,10 @@ class SingleAgentTurns:
             domain_profiler=render_domain_section(self.domain, DomainRole.PROFILER, **domain_ctx),
             interface=self.options.interface,
             objective_location=view.paths.objective,
-            plan_artifact_location=issue_board.display_path(plan_artifact, self.workspace.path),
+            plan_artifact_location=display_path(plan_artifact, self.workspace.path),
             progress_location=self.progress_location,
             pareto_archive_location=self.pareto_location,
-            validation_location=issue_board.display_path(
+            validation_location=display_path(
                 issue_board.validation_artifact_root(self.progress_path), self.workspace.path
             ),
             feedback=state.feedback,
