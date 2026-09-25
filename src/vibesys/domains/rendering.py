@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path  # noqa: TC003  # tracked: #288
 
 from vibesys.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
-from vibesys.prompts import render_string
+from vibesys.prompts import render_string  # tach-ignore(pre-existing edge)
 
 
 def _coerce_role(role: DomainRole | str) -> DomainRole:

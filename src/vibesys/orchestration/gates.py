@@ -1,4 +1,4 @@
-"""``ctx.gates``/``ctx.evaluator``: trusted accuracy/benchmark checks in the run workspace.
+"""``ctx.gates``: trusted accuracy/benchmark checks in the run workspace.
 
 Split from ``runtime.py`` by capability; see that module's docstring.
 """

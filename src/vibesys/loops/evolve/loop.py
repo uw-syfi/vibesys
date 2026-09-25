@@ -392,7 +392,7 @@ async def _run_framework_accuracy_gate(
         and timeout_seconds != ctx.request.input_bundle.manifest.accuracy.timeout_seconds
     ):
         raise _AccuracyTimeoutMismatchError
-    result = await ctx.evaluator.check(
+    result = await ctx.gates.check(
         process_id=f"evolve-accuracy-{generation}-{child_idx}",
         label=f"gen-{generation}-cand-{child_idx}",
         scope=scope,
@@ -415,7 +415,7 @@ async def _run_framework_benchmark_gate(
     the framework's measurement of a candidate rather than only the agent
     transcripts around it.
     """
-    return await ctx.evaluator.measure(
+    return await ctx.gates.measure(
         output_slug=f"gen{generation}-cand{child_idx}",
         scope=scope,
         options=MeasurementOptions(

@@ -34,7 +34,7 @@ from vibesys.events import (
     PhaseData,
     json_value,
 )
-from vibesys.prompts import PROMPTS_DIR, Prompt, render_template
+from vibesys.prompts import PROMPTS_DIR, Prompt, render_template  # tach-ignore(pre-existing edge)
 from vibesys.run.run_control import splice_steering
 from vibesys.runtime import (
     AgentDefinition,
