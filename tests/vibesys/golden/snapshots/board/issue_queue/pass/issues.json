@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "next_id": 2,
+  "issues": [
+    {
+      "id": 1,
+      "type": "feature",
+      "title": "Build FastAPI inference server for the reference model",
+      "description": "## Background\n\nBuild a production-ready FastAPI inference server that serves **the specific model defined in the reference implementation** at `.`. Read the reference code and any config files carefully — your server must implement this exact model architecture and its weights loading. Do NOT build a generic wrapper around the `transformers` library (e.g. `AutoModelForCausalLM`). Instead, write self-contained model code that directly implements the layers, attention, MLP, etc. using PyTorch, based on the reference.\n\n**Own layer implementations**: Implement every layer of the model architecture explicitly in your code (attention, MLP, normalization, positional embeddings, etc.). You may use `transformers` as a utility (e.g. `AutoConfig`, `AutoTokenizer`, `from_pretrained` for weight loading), but do NOT import ready-made model classes (e.g. `LlamaModel`, `LlamaAttention`). Each layer must be defined in your own code so it can be optimized in later steps.\n\n**Model weights**: The model weights directory is at the fixed path `/model` inside the workspace. Do NOT download or fetch models from the internet.\n\n**GPU and dtype**: Load the model on GPU (`device=\"cuda\"`) with an efficient dtype (`torch.bfloat16` or `torch.float16`). Do NOT use `float32` or CPU — inference will be far too slow.\n\n**Environment**: Initialize the project with `uv init --no-vcs` and add dependencies via `uv add`. Always use `uv run` to execute scripts and tests.\n\n**VibeServeModel interface**: Inspect the accuracy checker and preserve the entry\nmodule it imports. That module must export a class named `VibeServeModel`; the\nproduction server may use a different language or runtime behind this adapter.\nThe class must implement:\n\n1. `model = VibeServeModel.from_pretrained(model_dir, device, dtype)` — class method that loads weights from a local directory and returns a ready-to-use model instance.\n2. `output_ids = model.generate(input_ids, max_new_tokens=N)` — greedy generation that returns a tensor of shape `(1, prompt_len + generated_len)` (same convention as HuggingFace `model.generate()`).\n\nKeep this interface working across all issues, even as internals change.\n\n**Streaming token visibility (CRITICAL)**: The `/v1/completions` SSE streaming endpoint MUST emit a **non-empty `text` delta for every generated token**. The benchmark measures token throughput, TTFT (time to first token), and TPOT (time per output token) by counting non-empty SSE chunks. If chunks have empty text, the benchmark will report `token_throughput = 0` and `ttft_ms`/`tpot_ms = null`, which means the server's performance cannot be measured or improved.\n\nCommon causes of empty token deltas:\n\n- Calling `tokenizer.decode(token_id, skip_special_tokens=True)` on a single token that produces an empty string (e.g. byte-level BPE fragments, SentencePiece leading spaces). **You must handle this** — fall back to the raw token string, a placeholder character, or incremental detokenization.\n- Materializing all tokens first and then emitting SSE chunks (defeats streaming — emit each token as it is generated).\n- Accidentally hitting a fallback/synthetic completion path instead of real model inference.\n\nThis is the foundation issue. Subsequent perf, feature, and bug issues filed by the perf evaluator and judge will refine this implementation over time.\n\n## Acceptance criteria\n\n- The entry module imported by the accuracy checker exports a `VibeServeModel` class with the `from_pretrained` / `generate` interface described above.\n- A FastAPI server exposes both `/v1/completions` (SSE streaming) and `/health` endpoints.\n- The model loads on GPU with `bfloat16`/`float16` from `/model` — no `float32`, no CPU, no internet fetches.\n- Every layer of the model architecture is implemented in the workspace code (no `LlamaModel` / `LlamaAttention` imports).\n- The project is initialized with `uv init --no-vcs`, dependencies added via `uv add`, and scripts run through `uv run`.\n- The `/v1/completions` SSE stream emits a non-empty `text` delta per generated token, and the benchmark reports `token_throughput > 0` with non-null `ttft_ms` / `tpot_ms`.\n- The accuracy checker command `python -c 'print('\"'\"'ok'\"'\"')'` passes when run against `VibeServeModel`.\n- The benchmark command `python -c 'print('\"'\"'ok'\"'\"')'` completes at least one request and reports `token_throughput > 0`.\n- A pytest test suite covers `/health`, `/v1/completions`, the accuracy checker, and a benchmark sanity run.\n- All tests pass via `uv run pytest -v`.\n\n## Notes\n\nThis is the initial bootstrap issue auto-created by the issue-loop on the first iteration. Resolving it brings the workspace to \"minimum viable serving\"; performance optimizations and bug fixes will follow as separate issues filed by the perf evaluator and judge.",
+      "status": "closed",
+      "created_by": "loop:bootstrap",
+      "created_iter": 1,
+      "created_at": "<TIMESTAMP>",
+      "updated_at": "<TIMESTAMP>",
+      "attempts": 1,
+      "history": [
+        {
+          "timestamp": "<TIMESTAMP>",
+          "actor": "loop:bootstrap",
+          "action": "create",
+          "iteration": 1,
+          "note": "",
+          "payload": null
+        },
+        {
+          "timestamp": "<TIMESTAMP>",
+          "actor": "loop",
+          "action": "open->in_progress",
+          "iteration": 1,
+          "note": "claimed for processing",
+          "payload": null
+        },
+        {
+          "timestamp": "<TIMESTAMP>",
+          "actor": "implementer",
+          "action": "attempt",
+          "iteration": 1,
+          "note": "Built the inference server.",
+          "payload": {
+            "issue_id": 1,
+            "summary": "Built the inference server.",
+            "files_touched": [
+              "server.py"
+            ],
+            "self_check": "ran the accuracy checker locally"
+          }
+        },
+        {
+          "timestamp": "<TIMESTAMP>",
+          "actor": "judge",
+          "action": "in_progress->closed",
+          "iteration": 1,
+          "note": "closed by judge after attempt 1",
+          "payload": {
+            "issue_id": 1,
+            "analysis": "reviewed the diff and the accuracy checks",
+            "feedback": "",
+            "verdict": "pass",
+            "new_issues_filed": []
+          }
+        }
+      ],
+      "closed_iter": 1
+    }
+  ]
+}

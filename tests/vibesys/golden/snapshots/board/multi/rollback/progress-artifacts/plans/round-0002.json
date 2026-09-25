@@ -1,0 +1,17 @@
+{
+  "hypothesis_id": "H-02",
+  "hypothesis_updates": [],
+  "hypothesis": "reverting to the round-1 baseline before decode batching",
+  "title": "",
+  "activation_evidence": "",
+  "falsification_criteria": "",
+  "expected_effect": "",
+  "minimum_acceptance_criteria": "",
+  "invariants": "",
+  "recommended_skills": [],
+  "task": "batch the decode step from the round-1 baseline",
+  "pass_criteria": "throughput improves without regressing accuracy",
+  "request_official_evaluation": false,
+  "revert_to_round": 1,
+  "reasoning": "scripted golden fixture: roll back then retry"
+}

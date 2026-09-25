@@ -274,9 +274,19 @@ def _round_transaction_for_setup(
 
 
 def open_run_resources(
-    request: RunRequest, setup: RunSetup, integration: LocalRunIntegration
+    request: RunRequest,
+    setup: RunSetup,
+    integration: LocalRunIntegration,
+    *,
+    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
 ) -> "_RunResources":
-    """Open the one project context from a canonical request and policy setup."""
+    """Open the one project context from a canonical request and policy setup.
+
+    ``backend_factory`` overrides how the compute backend is constructed
+    (default: the registered ``vibesys.backends.get``); a test injects
+    ``vibesys.api.testing.FakeComputeBackend`` here instead of monkeypatching
+    the registry or a backend's internal sandbox constructor.
+    """
     teardown_stack = ExitStack()
     try:
         return _assemble_run_resources(
@@ -284,6 +294,7 @@ def open_run_resources(
             request=request,
             setup=setup,
             integration=integration,
+            backend_factory=backend_factory,
         )
     except BaseException as construction_error:
         _close_after_construction_failure(teardown_stack, construction_error)
@@ -309,6 +320,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
     request: RunRequest,
     setup: RunSetup,
     integration: LocalRunIntegration,
+    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
 ) -> "_RunResources":
     bundle = request.input_bundle
     exp_name = request.resume.run_id if request.resume is not None else request.exp_name
@@ -407,7 +419,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
                     ) from exc
 
         with boot_trace.span("backend_and_model"):
-            backend_impl = backends.get(
+            backend_get = backend_factory or backends.get
+            backend_impl = backend_get(
                 backend,
                 log_dir=Project.log_directory_for(project_root, run_id),
                 log=buffered_logs.append,
