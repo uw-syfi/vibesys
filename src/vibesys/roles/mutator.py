@@ -7,7 +7,9 @@ backend/model config lookup as every other strategy's implementer), so
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vibesys.evaluators.metrics import Objective
 from vibesys.runtime import Reuse, Role, Writes
@@ -40,6 +42,12 @@ class MutatorContext(BaseModel):
     reference_path: str
     repair_seed: bool
     runtime_notes: str
+
+    @model_validator(mode="after")
+    def _require_parent_unless_cold_start(self) -> Self:
+        if not self.is_cold_start and self.parent is None:
+            raise ValueError("parent is required unless is_cold_start is True")  # noqa: TRY003
+        return self
 
 
 class MutatorResponse(BaseModel):
