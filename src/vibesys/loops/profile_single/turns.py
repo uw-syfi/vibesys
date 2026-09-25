@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from vibesys import constants
-from vibesys.agent_run import issue_board
+from vibesys.agent_run import board_log, issue_board
 from vibesys.agent_run.errors import (
     InvalidPlanError,
     PlanCorrectionExhaustedError,
@@ -209,7 +209,9 @@ class ProfileSingleTurns:
                 continue
             plan.recommended_skills, _ = self._skills(plan.recommended_skills)
             issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-            issue_board.append_orchestrator_plan(self.progress_path, request.round_number, plan)
+            board_log.write(
+                self.progress_path, board_log.render_orchestrator_plan(request.round_number, plan)
+            )
             return plan
         raise PlanCorrectionExhaustedError
 
@@ -337,7 +339,8 @@ class ProfileSingleTurns:
                     "verdict": Verdict.FAIL,
                 }
             )
-        issue_board.append_single_agent_round(
-            self.progress_path, request.round_number, state.retry, response
+        board_log.write(
+            self.progress_path,
+            board_log.render_single_agent_round(request.round_number, state.retry, response),
         )
         return response

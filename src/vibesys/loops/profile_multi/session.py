@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.agent_run import issue_board
+from vibesys.agent_run import board_log, issue_board
 from vibesys.agent_run.attempts import (
     AttemptDecision,
     AttemptState,
@@ -190,7 +190,7 @@ class ProfileMultiSession:
         self.options = options
         self.workspace = ctx.workspaces.root
         self.turns = ProfileMultiTurns(ctx, options)
-        self._gate_recorder = issue_board.GateBoardRecorder(self.turns.progress_path)
+        self._gate_recorder = board_log.GateBoardRecorder(self.turns.progress_path)
         self.search = HypothesisSearch(
             HypothesisConfig(
                 max_rounds=options.max_rounds,
@@ -336,12 +336,14 @@ class ProfileMultiSession:
             assert isinstance(decision, Continue)  # noqa: S101  # only remaining variant
             hypothesis = decision.hypothesis
             plan = hypothesis.plan
-            issue_board.append_hypothesis_continuation(
+            board_log.write(
                 self.turns.progress_path,
-                number,
-                plan=plan,
-                started_round=hypothesis.started_round,
-                continuation_step=hypothesis.next_step or plan.task,
+                board_log.render_hypothesis_continuation(
+                    number,
+                    plan=plan,
+                    started_round=hypothesis.started_round,
+                    continuation_step=hypothesis.next_step or plan.task,
+                ),
             )
             self.ctx.log(
                 f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
@@ -492,11 +494,13 @@ class ProfileMultiSession:
         )
         if not due:
             state.judge = JudgeSkipped(JudgeSkipReason.SPARSE_REVIEW_POLICY)
-            issue_board.append_judge_skipped(
+            board_log.write(
                 self.turns.progress_path,
-                selected.request.round_number,
-                outcome=implementation.hypothesis_outcome.value,
-                judge_every=self.options.judge_every,
+                board_log.render_judge_skipped(
+                    selected.request.round_number,
+                    outcome=implementation.hypothesis_outcome.value,
+                    judge_every=self.options.judge_every,
+                ),
             )
             self.ctx.log("[judge] deferred by sparse-review policy; official gates were not run")
             return AttemptDecision.FINISH
@@ -674,12 +678,11 @@ class ProfileMultiSession:
             self.turns.progress_path, number, retry, results
         )
         location = issue_board.display_path(artifact, self.workspace.path)
-        issue_board.append_framework_validation_gate(
+        board_log.write(
             self.turns.progress_path,
-            number,
-            retry,
-            artifact=location,
-            results=results,
+            board_log.render_framework_validation_gate(
+                number, retry, artifact=location, results=results
+            ),
         )
         await self.workspace.snapshot(f"round-{number}-retry-{retry}-framework-validation")
         failed = next((result for result in results if not result.passed), None)
@@ -706,14 +709,16 @@ class ProfileMultiSession:
     def _record_official_decision(
         self, selected: ProfileMultiRound, *, run: bool, reason: str
     ) -> None:
-        issue_board.append_official_evaluation_decision(
+        board_log.write(
             self.turns.progress_path,
-            self.round_number,
-            selected.attempt.retry,
-            run=run,
-            reason=reason,
-            official_eval_every=self.options.official_eval_every,
-            provisional_candidates=provisional_candidates_since_official(self.records),
+            board_log.render_official_evaluation_decision(
+                self.round_number,
+                selected.attempt.retry,
+                run=run,
+                reason=reason,
+                official_eval_every=self.options.official_eval_every,
+                provisional_candidates=provisional_candidates_since_official(self.records),
+            ),
         )
 
     async def _official_gates(self, selected: ProfileMultiRound) -> bool:
@@ -817,11 +822,13 @@ class ProfileMultiSession:
         )
         state = closed.state.model_copy(update={"profile_guidance": focus_state})
         if closed.exhaustion_feedback is not None:
-            issue_board.append_exhaustion_note(
+            board_log.write(
                 self.turns.progress_path,
-                self.round_number,
-                self.options.max_retries_per_round,
-                closed.exhaustion_feedback,
+                board_log.render_exhaustion_note(
+                    self.round_number,
+                    self.options.max_retries_per_round,
+                    closed.exhaustion_feedback,
+                ),
             )
         await self.ctx.state.commit(
             sequence=self.round_number,

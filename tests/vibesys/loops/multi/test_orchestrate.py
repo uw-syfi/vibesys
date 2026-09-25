@@ -7,7 +7,7 @@ from typing import Literal
 
 import pytest
 
-from vibesys.agent_run import issue_board
+from vibesys.agent_run import board_log, issue_board
 from vibesys.agent_run.evidence import (
     _detect_plateau,
     _pareto_archive_conflict,
@@ -853,7 +853,7 @@ def test_progress_writes_orchestrator_plan(tmp_path):  # noqa: ANN001, ANN201  #
         expected_effect="Forecast 1.3x to 1.6x throughput",
         minimum_acceptance_criteria="Retain at >=1.15x with no latency regression",
     )
-    issue_board.append_orchestrator_plan(progress, 1, plan)
+    board_log.write(progress, board_log.render_orchestrator_plan(1, plan))
     text = progress.read_text()
     assert "Round 1 — Orchestrator (plan)" in text
     assert "Build FastAPI server" in text
@@ -947,32 +947,38 @@ def test_agent_memory_paths_distinguish_files_from_directories(tmp_path):  # noq
 
 def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress"
-    issue_board.append_pre_round_decision(
+    board_log.write(
         progress,
-        7,
-        PreRoundDecision(
-            need_profile=True,
-            profile_focus="stale focus",
-            reasoning="stale decision",
+        board_log.render_pre_round_decision(
+            7,
+            PreRoundDecision(
+                need_profile=True,
+                profile_focus="stale focus",
+                reasoning="stale decision",
+            ),
         ),
     )
-    issue_board.append_orchestrator_plan(
+    board_log.write(
         progress,
-        7,
-        OrchestratorPlan(
-            task="Keep this plan",
-            pass_criteria="plan remains",  # noqa: S106  # tracked: #288
-            reasoning="retained plan",
+        board_log.render_orchestrator_plan(
+            7,
+            OrchestratorPlan(
+                task="Keep this plan",
+                pass_criteria="plan remains",  # noqa: S106  # tracked: #288
+                reasoning="retained plan",
+            ),
         ),
     )
 
-    issue_board.append_pre_round_decision(
+    board_log.write(
         progress,
-        7,
-        PreRoundDecision(
-            need_profile=False,
-            profile_focus="",
-            reasoning="resumed decision",
+        board_log.render_pre_round_decision(
+            7,
+            PreRoundDecision(
+                need_profile=False,
+                profile_focus="",
+                reasoning="resumed decision",
+            ),
         ),
     )
 
@@ -986,18 +992,20 @@ def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path)
 
 def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress"
-    issue_board.append_hypothesis_continuation(
+    board_log.write(
         progress,
-        7,
-        plan=OrchestratorPlan(
-            hypothesis_id="transport",
-            hypothesis="remove queue fanout",
-            task="stale initial implementation task",
-            pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
-            reasoning="continue interrupted work",
+        board_log.render_hypothesis_continuation(
+            7,
+            plan=OrchestratorPlan(
+                hypothesis_id="transport",
+                hypothesis="remove queue fanout",
+                task="stale initial implementation task",
+                pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
+                reasoning="continue interrupted work",
+            ),
+            started_round=6,
+            continuation_step="recover exact source",
         ),
-        started_round=6,
-        continuation_step="recover exact source",
     )
     round_file = progress / "round-0007.md"
     with round_file.open("a") as document:
@@ -1006,18 +1014,20 @@ def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # 
             "Exact measured bytes are retained at `recovery/source.py`.\n\n"
         )
 
-    issue_board.append_hypothesis_continuation(
+    board_log.write(
         progress,
-        7,
-        plan=OrchestratorPlan(
-            hypothesis_id="transport",
-            hypothesis="remove queue fanout",
-            task="stale initial implementation task",
-            pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
-            reasoning="resume interrupted work",
+        board_log.render_hypothesis_continuation(
+            7,
+            plan=OrchestratorPlan(
+                hypothesis_id="transport",
+                hypothesis="remove queue fanout",
+                task="stale initial implementation task",
+                pass_criteria="source is recoverable",  # noqa: S106  # tracked: #288
+                reasoning="resume interrupted work",
+            ),
+            started_round=6,
+            continuation_step="verify recovered source",
         ),
-        started_round=6,
-        continuation_step="verify recovered source",
     )
 
     text = round_file.read_text()
@@ -1032,23 +1042,23 @@ def test_progress_replacement_preserves_operator_recovery_section(tmp_path):  # 
 
 def test_progress_preserves_distinct_attempts_but_replaces_same_attempt(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress.md"
-    issue_board.append_implementer(
+    board_log.write(
         progress,
-        3,
-        1,
-        ImplementerResponse(summary="interrupted", expected_behavior="old"),
+        board_log.render_implementer(
+            3, 1, ImplementerResponse(summary="interrupted", expected_behavior="old")
+        ),
     )
-    issue_board.append_implementer(
+    board_log.write(
         progress,
-        3,
-        1,
-        ImplementerResponse(summary="resumed", expected_behavior="new"),
+        board_log.render_implementer(
+            3, 1, ImplementerResponse(summary="resumed", expected_behavior="new")
+        ),
     )
-    issue_board.append_implementer(
+    board_log.write(
         progress,
-        3,
-        2,
-        ImplementerResponse(summary="retry", expected_behavior="newer"),
+        board_log.render_implementer(
+            3, 2, ImplementerResponse(summary="retry", expected_behavior="newer")
+        ),
     )
 
     text = progress.read_text()
@@ -1068,7 +1078,7 @@ def test_progress_writes_profiler_summary_with_perf(tmp_path):  # noqa: ANN001, 
         perf_metric=8.2,
         perf_unit="req/s",
     )
-    issue_board.append_profiler_summary(progress, 2, summary)
+    board_log.write(progress, board_log.render_profiler_summary(2, summary))
     text = progress.read_text()
     assert "Round 2 — Profiler" in text
     assert "perf_metric**: 8.2 req/s" in text
@@ -1077,17 +1087,17 @@ def test_progress_writes_profiler_summary_with_perf(tmp_path):  # noqa: ANN001, 
 
 def test_progress_append_implementer_and_judge(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress.md"
-    issue_board.append_implementer(
+    board_log.write(
         progress,
-        3,
-        1,
-        ImplementerResponse(summary="added cuda graph", expected_behavior="replay works"),
+        board_log.render_implementer(
+            3, 1, ImplementerResponse(summary="added cuda graph", expected_behavior="replay works")
+        ),
     )
-    issue_board.append_judge(
+    board_log.write(
         progress,
-        3,
-        1,
-        JudgeResponse(analysis="good", feedback="", verdict=Verdict.PASS),
+        board_log.render_judge(
+            3, 1, JudgeResponse(analysis="good", feedback="", verdict=Verdict.PASS)
+        ),
     )
     text = progress.read_text()
     assert "Round 3 — Implementer (attempt 1)" in text
@@ -1099,13 +1109,15 @@ def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path):  # no
     roadmap, progress = issue_board.resolve_paths(tmp_path, "directories")
     issue_board.ensure_roadmap_file(roadmap)
     for round_number in range(1, 16):
-        issue_board.append_pre_round_decision(
+        board_log.write(
             progress,
-            round_number,
-            PreRoundDecision(
-                need_profile=False,
-                profile_focus="",
-                reasoning=f"decision-{round_number}",
+            board_log.render_pre_round_decision(
+                round_number,
+                PreRoundDecision(
+                    need_profile=False,
+                    profile_focus="",
+                    reasoning=f"decision-{round_number}",
+                ),
             ),
         )
 

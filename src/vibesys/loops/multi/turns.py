@@ -15,7 +15,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from vibesys import constants
-from vibesys.agent_run import issue_board
+from vibesys.agent_run import board_log, issue_board
 from vibesys.agent_run.errors import (
     InvalidPlanError,
     MissingImplementationError,
@@ -221,7 +221,9 @@ class MultiAgentTurns:
                 )
                 continue
             issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-            issue_board.append_orchestrator_plan(self.progress_path, request.round_number, plan)
+            board_log.write(
+                self.progress_path, board_log.render_orchestrator_plan(request.round_number, plan)
+            )
             return plan
         raise PlanCorrectionExhaustedError
 
@@ -257,7 +259,9 @@ class MultiAgentTurns:
                 label=f"round-{round_number}-pre",
             ),
         )
-        issue_board.append_pre_round_decision(self.progress_path, round_number, decision)
+        board_log.write(
+            self.progress_path, board_log.render_pre_round_decision(round_number, decision)
+        )
         return decision
 
     def _profiler_campaign_context(self, artifact: str) -> str:
@@ -338,7 +342,9 @@ Write bounded durable profile evidence only below
                 round_label=f"round-{round_number}",
             )
             return None
-        issue_board.append_profiler_summary(self.progress_path, round_number, summary)
+        board_log.write(
+            self.progress_path, board_log.render_profiler_summary(round_number, summary)
+        )
         return summary
 
     def _framework_benchmark_configured(self) -> bool:
@@ -489,8 +495,9 @@ Write bounded durable profile evidence only below
         issue_board.write_implementer_artifact(
             self.progress_path, request.round_number, state.retry, response
         )
-        issue_board.append_implementer(
-            self.progress_path, request.round_number, state.retry, response
+        board_log.write(
+            self.progress_path,
+            board_log.render_implementer(request.round_number, state.retry, response),
         )
         return response, synthesized
 
@@ -571,5 +578,7 @@ Write bounded durable profile evidence only below
                 verdict=response.verdict.value, feedback=response.feedback, attempt=state.retry
             ),
         )
-        issue_board.append_judge(self.progress_path, request.round_number, state.retry, response)
+        board_log.write(
+            self.progress_path, board_log.render_judge(request.round_number, state.retry, response)
+        )
         return response
