@@ -191,7 +191,7 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
 
     descriptor = descriptor_from_options(_options(), orchestration_id=_ORCHESTRATION_ID)
     with patch(
-        "vibesys.orchestration.runtime.run_accuracy_gate",
+        "vibesys.orchestration.gates.run_accuracy_gate",
         side_effect=_scripted_accuracy_gate(passed=True),
     ):
         run = run_scripted(

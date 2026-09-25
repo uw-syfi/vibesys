@@ -163,7 +163,7 @@ depends_on = []
 
 [[modules]]
 path = "vibesys.orchestration.environment"
-depends_on = ["vibesys", "vs_agent", "vs_sandbox"]
+depends_on = ["vibesys", "vs_agent", "vs_sandbox", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.sandbox", "vibesys.orchestration.workspaces"]
 
 [[modules]]
 path = "vibesys.orchestration.tools"
@@ -363,7 +363,27 @@ depends_on = ["vibesys.orchestration.contracts", "vibesys.run", "vibesys.orchest
 
 [[modules]]
 path = "vibesys.orchestration.runtime"
-depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.render", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.orchestration.view", "vs_project", "vibesys.sandbox", "vs_sandbox", "vibesys.prompts"]
+depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.render", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.orchestration.view", "vs_project", "vibesys.sandbox", "vs_sandbox", "vibesys.prompts", "vibesys.orchestration.agents", "vibesys.orchestration.control", "vibesys.orchestration.gates", "vibesys.orchestration.state", "vibesys.orchestration.workspaces"]
+
+[[modules]]
+path = "vibesys.orchestration.agents"
+depends_on = ["vibesys", "vibesys.context", "vibesys.prompts", "vibesys.run", "vibesys.runtime", "vs_agent", "vibesys.orchestration.workspaces"]
+
+[[modules]]
+path = "vibesys.orchestration.workspaces"
+depends_on = ["vibesys.context", "vibesys.runtime"]
+
+[[modules]]
+path = "vibesys.orchestration.state"
+depends_on = ["vibesys", "vibesys.orchestration.view", "vs_project"]
+
+[[modules]]
+path = "vibesys.orchestration.gates"
+depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_sandbox", "vibesys.orchestration.workspaces"]
+
+[[modules]]
+path = "vibesys.orchestration.control"
+depends_on = ["vibesys.run"]
 
 [[modules]]
 path = "vibesys.orchestration._common"

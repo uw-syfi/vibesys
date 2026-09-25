@@ -9,7 +9,7 @@ from io import StringIO
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
-from vibesys.orchestration.runtime import _active_progress, _Agents, _LocalAgentHandle
+from vibesys.orchestration.agents import _active_progress, _Agents, _LocalAgentHandle
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.runtime import AgentDefinition
 from vibesys.schemas import JudgeResponse, Verdict

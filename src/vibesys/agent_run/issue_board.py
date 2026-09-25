@@ -720,7 +720,7 @@ def append_framework_benchmark(  # noqa: D103, PLR0913  # tracked: #288
 
 
 class GateBoardRecorder:
-    """The one `orchestration.runtime.GateRecorder` for every agent strategy.
+    """The one `orchestration.gates.GateRecorder` for every agent strategy.
 
     `ctx.gates.run` calls this back with the same typed gate result it
     computed; the strategy declares one instance (bound to its own progress

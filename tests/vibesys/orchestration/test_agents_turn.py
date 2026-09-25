@@ -95,7 +95,7 @@ def _with_fixture_prompts_dir(tmp_path: Path, fn):  # noqa: ANN001, ANN202  # tr
     """Patch ``PROMPTS_DIR`` to an isolated fixture tree for one call."""
     prompts_root = tmp_path / "prompts_fixture"
     _write_fixture_templates(prompts_root)
-    with patch("vibesys.orchestration.runtime.PROMPTS_DIR", prompts_root):
+    with patch("vibesys.orchestration.agents.PROMPTS_DIR", prompts_root):
         return fn()
 
 

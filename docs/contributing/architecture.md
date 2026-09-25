@@ -179,10 +179,29 @@ graph TD
     vibesys.loops.single --> vibesys.render
     vibesys.orchestration --> vibesys.orchestration.resume
     vibesys.orchestration._common --> vibesys.orchestration.request
+    vibesys.orchestration.agents --> vibesys
+    vibesys.orchestration.agents --> vibesys.context
+    vibesys.orchestration.agents --> vibesys.orchestration.workspaces
+    vibesys.orchestration.agents --> vibesys.prompts
+    vibesys.orchestration.agents --> vibesys.run
+    vibesys.orchestration.agents --> vibesys.runtime
     vibesys.orchestration.contracts --> vibesys.context
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
+    vibesys.orchestration.control --> vibesys.run
     vibesys.orchestration.environment --> vibesys
+    vibesys.orchestration.environment --> vibesys.context
+    vibesys.orchestration.environment --> vibesys.evaluators
+    vibesys.orchestration.environment --> vibesys.orchestration.workspaces
+    vibesys.orchestration.environment --> vibesys.runtime
+    vibesys.orchestration.environment --> vibesys.sandbox
+    vibesys.orchestration.gates --> vibesys
+    vibesys.orchestration.gates --> vibesys.context
+    vibesys.orchestration.gates --> vibesys.evaluators
+    vibesys.orchestration.gates --> vibesys.orchestration.workspaces
+    vibesys.orchestration.gates --> vibesys.run
+    vibesys.orchestration.gates --> vibesys.runtime
+    vibesys.orchestration.gates --> vibesys.sandbox
     vibesys.orchestration.request --> vibesys
     vibesys.orchestration.request --> vibesys.evaluators
     vibesys.orchestration.request --> vibesys.sandbox
@@ -194,14 +213,23 @@ graph TD
     vibesys.orchestration.runtime --> vibesys
     vibesys.orchestration.runtime --> vibesys.context
     vibesys.orchestration.runtime --> vibesys.evaluators
+    vibesys.orchestration.runtime --> vibesys.orchestration.agents
+    vibesys.orchestration.runtime --> vibesys.orchestration.control
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
+    vibesys.orchestration.runtime --> vibesys.orchestration.gates
     vibesys.orchestration.runtime --> vibesys.orchestration.request
+    vibesys.orchestration.runtime --> vibesys.orchestration.state
     vibesys.orchestration.runtime --> vibesys.orchestration.view
+    vibesys.orchestration.runtime --> vibesys.orchestration.workspaces
     vibesys.orchestration.runtime --> vibesys.prompts
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
     vibesys.orchestration.runtime --> vibesys.sandbox
+    vibesys.orchestration.state --> vibesys
+    vibesys.orchestration.state --> vibesys.orchestration.view
+    vibesys.orchestration.workspaces --> vibesys.context
+    vibesys.orchestration.workspaces --> vibesys.runtime
     vibesys.prompts --> vibesys
     vibesys.render --> vibesys
     vibesys.roles --> vibesys
@@ -458,13 +486,34 @@ graph TD
     vibesys.loops.single --> vs_project
     vibesys.orchestration --> vibesys.orchestration.resume
     vibesys.orchestration._common --> vibesys.orchestration.request
+    vibesys.orchestration.agents --> vibesys
+    vibesys.orchestration.agents --> vibesys.context
+    vibesys.orchestration.agents --> vibesys.orchestration.workspaces
+    vibesys.orchestration.agents --> vibesys.prompts
+    vibesys.orchestration.agents --> vibesys.run
+    vibesys.orchestration.agents --> vibesys.runtime
+    vibesys.orchestration.agents --> vs_agent
     vibesys.orchestration.contracts --> vibesys.context
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
     vibesys.orchestration.contracts --> vs_project
+    vibesys.orchestration.control --> vibesys.run
     vibesys.orchestration.environment --> vibesys
+    vibesys.orchestration.environment --> vibesys.context
+    vibesys.orchestration.environment --> vibesys.evaluators
+    vibesys.orchestration.environment --> vibesys.orchestration.workspaces
+    vibesys.orchestration.environment --> vibesys.runtime
+    vibesys.orchestration.environment --> vibesys.sandbox
     vibesys.orchestration.environment --> vs_agent
     vibesys.orchestration.environment --> vs_sandbox
+    vibesys.orchestration.gates --> vibesys
+    vibesys.orchestration.gates --> vibesys.context
+    vibesys.orchestration.gates --> vibesys.evaluators
+    vibesys.orchestration.gates --> vibesys.orchestration.workspaces
+    vibesys.orchestration.gates --> vibesys.run
+    vibesys.orchestration.gates --> vibesys.runtime
+    vibesys.orchestration.gates --> vibesys.sandbox
+    vibesys.orchestration.gates --> vs_sandbox
     vibesys.orchestration.request --> vibesys
     vibesys.orchestration.request --> vibesys.evaluators
     vibesys.orchestration.request --> vibesys.sandbox
@@ -478,9 +527,14 @@ graph TD
     vibesys.orchestration.runtime --> vibesys
     vibesys.orchestration.runtime --> vibesys.context
     vibesys.orchestration.runtime --> vibesys.evaluators
+    vibesys.orchestration.runtime --> vibesys.orchestration.agents
+    vibesys.orchestration.runtime --> vibesys.orchestration.control
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
+    vibesys.orchestration.runtime --> vibesys.orchestration.gates
     vibesys.orchestration.runtime --> vibesys.orchestration.request
+    vibesys.orchestration.runtime --> vibesys.orchestration.state
     vibesys.orchestration.runtime --> vibesys.orchestration.view
+    vibesys.orchestration.runtime --> vibesys.orchestration.workspaces
     vibesys.orchestration.runtime --> vibesys.prompts
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
@@ -489,7 +543,12 @@ graph TD
     vibesys.orchestration.runtime --> vs_agent
     vibesys.orchestration.runtime --> vs_project
     vibesys.orchestration.runtime --> vs_sandbox
+    vibesys.orchestration.state --> vibesys
+    vibesys.orchestration.state --> vibesys.orchestration.view
+    vibesys.orchestration.state --> vs_project
     vibesys.orchestration.tools --> vs_agent
+    vibesys.orchestration.workspaces --> vibesys.context
+    vibesys.orchestration.workspaces --> vibesys.runtime
     vibesys.prompts --> vibesys
     vibesys.prompts --> vs_prompts
     vibesys.render --> vibesys

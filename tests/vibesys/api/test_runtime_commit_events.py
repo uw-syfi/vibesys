@@ -1,6 +1,6 @@
 """``ctx.state.commit`` derives round/experiment events strategy-agnostically.
 
-Covers the host mechanism in ``vibesys.orchestration.runtime``: after a
+Covers the host mechanism in ``vibesys.orchestration.state``: after a
 checkpoint, the host diffs the previous published `RunView` against the new
 one and emits `ROUND_FINISHED` for newly observed rounds and
 `EXPERIMENTS_CHANGED` when the experiment revision moved. These tests never
@@ -24,7 +24,8 @@ from vibesys.context import RunSetup
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.events import CoreEventType, ExperimentsChangedData
 from vibesys.orchestration.request import ResumeRef, RunRequest
-from vibesys.orchestration.runtime import RunContext, _emit_commit_events
+from vibesys.orchestration.runtime import RunContext
+from vibesys.orchestration.state import _emit_commit_events
 from vibesys.orchestration.view import RoundSummary, RunStatus, RunView
 from vibesys.profilers import ProfilerKind
 from vibesys.run.integration import LocalRunIntegration
