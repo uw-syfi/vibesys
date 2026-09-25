@@ -684,15 +684,13 @@ def _install_fake_rocprofv3_flushes_on_sigint_then_hangs(bin_dir: Path) -> Path:
     _write_script(
         path,
         textwrap.dedent(
-            f"""
-            import shutil
+            """
             import signal
             import subprocess
             import sys
             import time
             from pathlib import Path
 
-            FIXTURES = Path({str(_ROCPROF_FIXTURES)!r})
             argv = sys.argv[1:]
             out_dir = None
             for i, tok in enumerate(argv):
@@ -701,12 +699,21 @@ def _install_fake_rocprofv3_flushes_on_sigint_then_hangs(bin_dir: Path) -> Path:
                     break
 
             def _on_sigint(signum, frame):
+                # Stamp the flushed kernels at the time the load command
+                # recorded (CLOCK_MONOTONIC, rocprofv3's clock), i.e. inside
+                # this capture's load window, as a real trace would be. A
+                # static fixture's timestamps only look aligned on a host
+                # booted under _ALIGNMENT_SLACK_S ago, which made the default
+                # load-window slice keep zero kernels on fresh CI runners.
                 if out_dir:
                     out_path = Path(out_dir)
                     out_path.mkdir(parents=True, exist_ok=True)
-                    src = FIXTURES / "kernel_trace" / "out_kernel_trace.csv"
-                    if src.is_file():
-                        shutil.copy(src, out_path / "out_kernel_trace.csv")
+                    t = int(Path(__file__).with_name("load.ts").read_text())
+                    (out_path / "out_kernel_trace.csv").write_text(
+                        "Kernel_Name,Dispatch_Id,Start_Timestamp,End_Timestamp\\n"
+                        f"flash_attn_decode_kernel,1,{t},{t + 1}\\n"
+                        f"flash_attn_decode_kernel,2,{t + 2},{t + 3}\\n"
+                    )
 
             signal.signal(signal.SIGINT, _on_sigint)
             # Handler live and out_dir known: announce readiness so the test's
@@ -743,7 +750,12 @@ def test_profile_timeline_killed_after_grace_still_analyzes_a_real_flushed_trace
         # stop_signal can never race its startup.
         ready_command=f"test -f '{bin_dir / 'rocprofv3.ready'}'",
         ready_interval_s=0.05,
-        load_command="true",
+        # Records a CLOCK_MONOTONIC instant inside the load window; the fake
+        # stamps its flushed kernels with it.
+        load_command=(
+            f"{sys.executable} -c \"import time; open('{bin_dir / 'load.ts'}', 'w')"
+            f'.write(str(time.clock_gettime_ns(time.CLOCK_MONOTONIC)))"'
+        ),
         stop_signal="SIGINT",
         grace_s=0.2,
         timeout_s=10.0,
@@ -758,6 +770,9 @@ def test_profile_timeline_killed_after_grace_still_analyzes_a_real_flushed_trace
     # instead of unconditionally withholding analysis of a non-OK capture.
     assert "no kernel data found" not in out
     assert "Top Kernels" in out
+    # Sliced by the real load window, on any host (no uptime-dependent
+    # fallback to the whole run).
+    assert "window: load phase, 2 of 2 dispatches" in out
 
 
 @given(status=st.sampled_from(list(cr.CaptureStatus)))
