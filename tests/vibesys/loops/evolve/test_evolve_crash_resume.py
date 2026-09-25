@@ -31,7 +31,7 @@ from unittest.mock import patch
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.loops.evolve.test_evolutionary_loop import (
+from tests.vibesys.loops.evolve._support import (
     _default_profiler_responses,
     _invoke_loop,
     _judge_response,
