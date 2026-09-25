@@ -22,7 +22,7 @@ from vibesys.events import (
 from vibesys.orchestration import progress_log
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
     from pathlib import Path
 
     from vibesys.events import CoreEventData
@@ -168,8 +168,6 @@ class _RunState:
         *,
         sequence: int,
         writes: Mapping[str, BaseModel],
-        board: Sequence[str] = (),
-        progress_path: Path | None = None,
         **options: Unpack[_CheckpointOptions],
     ) -> str:
         """Checkpoint typed writes, publish, then emit the events that follow.
@@ -186,11 +184,10 @@ class _RunState:
         before the next turn, which is the only ordering the board needs.
         Resume never depends on this file: it is a derived, regenerable
         narration of state that is already durable by the time this writes
-        it. A strategy notes pending blocks via `ctx.progress.note` (see
-        `vibesys.orchestration.progress`) after declaring its path once with
-        `ctx.progress.declare`; `board`/`progress_path` are a deprecated
-        explicit alternative, kept only for strategies not yet converted.
-        # TODO(remove after multi conversion): drop `board`/`progress_path`.
+        it. A strategy declares its progress path once with
+        `ctx.progress.declare` and notes pending blocks with
+        `ctx.progress.note` (see `vibesys.orchestration.progress`); this
+        drains and writes that buffer.
         """
         async with self._host._parent_mutation_lock:
             before = await self._previous_view()
@@ -206,21 +203,11 @@ class _RunState:
         self._last_view = after
         self._last_view_loaded = True
         _emit_commit_events(self._host.events, before, after)
-        self._flush_progress(board, progress_path)
+        self._flush_progress()
         return revision
 
-    def _flush_progress(self, board: Sequence[str], progress_path: Path | None) -> None:
-        """Write pending framework-log blocks in order.
-
-        `progress_path` given explicitly selects the deprecated path: write
-        exactly `board` there (matching the old strategy-owned-buffer
-        behavior). Otherwise drain the host-owned `ctx.progress` buffer.
-        # TODO(remove after multi conversion): drop the explicit-path branch.
-        """
-        if progress_path is not None:
-            for block in board:
-                progress_log.write(progress_path, block)
-            return
+    def _flush_progress(self) -> None:
+        """Write the host-owned buffer's pending framework-log blocks, in order."""
         progress = self._host.progress
         path = progress.path
         if path is None:

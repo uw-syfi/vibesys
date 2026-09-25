@@ -167,8 +167,7 @@ class SingleSession:
         self.ctx = ctx
         self.options = options
         self.workspace = ctx.workspaces.root
-        self._board_log: list[str] = []
-        self.turns = SingleAgentTurns(ctx, options, self._board_log)
+        self.turns = SingleAgentTurns(ctx, options)
         self.search = HypothesisSearch(
             HypothesisConfig(
                 max_rounds=options.max_rounds,
@@ -212,18 +211,6 @@ class SingleSession:
             raise
         return session
 
-    def _drain_board(self) -> list[str]:
-        """Take and clear the pending framework-log buffer.
-
-        Used both by `_commit` (flushed with the next checkpoint) and by
-        the official-gates call site (flushed ahead of that gate's own
-        synchronous write, so the file's section order matches when every
-        write happened synchronously).
-        """
-        board = list(self._board_log)
-        self._board_log.clear()
-        return board
-
     async def _commit(
         self,
         *,
@@ -233,18 +220,15 @@ class SingleSession:
         candidate: bool = True,
         label: str | None = None,
     ) -> str:
-        """Delegate to `ctx.state.commit`, draining any buffered board entries.
+        """Delegate to `ctx.state.commit`.
 
-        The host writes them to `progress.md` as part of this checkpoint,
-        which is always before the next turn; see
-        `vibesys.orchestration.state._RunState.commit`.
+        The host flushes any pending framework-log entries noted via
+        `ctx.progress.note` as part of this checkpoint, which is always
+        before the next turn; see `vibesys.orchestration.state._RunState.commit`.
         """
-        board = self._drain_board()
         return await self.ctx.state.commit(
             sequence=sequence,
             writes=writes,
-            board=board,
-            progress_path=self.turns.progress_path,
             publish=publish,
             candidate=candidate,
             label=label,
@@ -369,7 +353,7 @@ class SingleSession:
             assert isinstance(decision, Continue)  # noqa: S101  # only remaining variant
             hypothesis = decision.hypothesis
             plan = hypothesis.plan
-            self._board_log.append(
+            self.ctx.progress.note(
                 progress_log.render_hypothesis_continuation(
                     number,
                     plan=plan,
@@ -523,7 +507,7 @@ class SingleSession:
         return await self._official_gates(selected)
 
     def _record_official_decision(self, selected: SingleRound, *, run: bool, reason: str) -> None:
-        self._board_log.append(
+        self.ctx.progress.note(
             progress_log.render_official_evaluation_decision(
                 self.round_number,
                 selected.attempt.retry,
@@ -550,11 +534,9 @@ class SingleSession:
         )
         result = await self.ctx.gates.run(
             round_number=self.round_number,
-            board=self._drain_board(),
             retry=attempt.retry,
             commit=commit,
             objectives=self.state.metrics.objectives,
-            progress_path=self.turns.progress_path,
             reuse_accuracy=reuse_accuracy,
             agent_backend_name=self.turns.worker.backend_name,
         )
@@ -640,7 +622,7 @@ class SingleSession:
             terminal_needs_parent_choice=False,
         )
         if closed.exhaustion_feedback is not None:
-            self._board_log.append(
+            self.ctx.progress.note(
                 progress_log.render_exhaustion_note(
                     self.round_number,
                     self.options.max_retries_per_round,

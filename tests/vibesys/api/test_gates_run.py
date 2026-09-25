@@ -33,6 +33,7 @@ from vibesys.evaluators.gates import (
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
 )
+from vibesys.orchestration.progress import _Progress
 from vibesys.orchestration.runtime import GateRunResult, _Evaluator
 
 if TYPE_CHECKING:
@@ -54,8 +55,8 @@ def _benchmark_verdicts(text: str) -> list[tuple[int, int, str]]:
     return [(int(n), int(r), verdict) for n, r, verdict in _BENCHMARK_HEADING.findall(text)]
 
 
-def _fake_host() -> SimpleNamespace:
-    return SimpleNamespace(
+def _fake_host(*, progress_path: Path | None = None) -> SimpleNamespace:
+    host = SimpleNamespace(
         environment=SimpleNamespace(
             view=SimpleNamespace(
                 paths=SimpleNamespace(accuracy_command="check", benchmark_command="bench"),
@@ -68,17 +69,21 @@ def _fake_host() -> SimpleNamespace:
         ),
         workspaces=SimpleNamespace(root=SimpleNamespace(snapshot=AsyncMock(return_value="rev"))),
     )
+    host.progress = _Progress(cast("RunContext", host))
+    if progress_path is not None:
+        host.progress.declare(progress_path)
+    return host
 
 
-def _evaluator() -> tuple[_Evaluator, SimpleNamespace]:
-    host = _fake_host()
+def _evaluator(*, progress_path: Path | None = None) -> tuple[_Evaluator, SimpleNamespace]:
+    host = _fake_host(progress_path=progress_path)
     evaluator = _Evaluator(cast("RunContext", host))
     return evaluator, host
 
 
 def test_stub_backend_skips_both_gates_without_recording_or_calling_out(tmp_path: Path) -> None:
-    evaluator, _host = _evaluator()
     progress = tmp_path / "progress.md"
+    evaluator, _host = _evaluator(progress_path=progress)
     evaluator.check = AsyncMock()
     evaluator.measure = AsyncMock()
 
@@ -88,7 +93,6 @@ def test_stub_backend_skips_both_gates_without_recording_or_calling_out(tmp_path
             retry=1,
             commit="a" * 40,
             objectives=(),
-            progress_path=progress,
             agent_backend_name="stub",
         )
     )
@@ -102,9 +106,9 @@ def test_stub_backend_skips_both_gates_without_recording_or_calling_out(tmp_path
 
 
 def test_resource_reconciliation_failure_stops_before_any_gate(tmp_path: Path) -> None:
-    evaluator, host = _evaluator()
-    host.environment.reconcile_model_requests.return_value = "model unavailable"
     progress = tmp_path / "progress.md"
+    evaluator, host = _evaluator(progress_path=progress)
+    host.environment.reconcile_model_requests.return_value = "model unavailable"
     evaluator.check = AsyncMock()
     evaluator.measure = AsyncMock()
 
@@ -114,7 +118,6 @@ def test_resource_reconciliation_failure_stops_before_any_gate(tmp_path: Path) -
             retry=1,
             commit="a" * 40,
             objectives=(),
-            progress_path=progress,
             agent_backend_name="cli",
         )
     )
@@ -127,8 +130,8 @@ def test_resource_reconciliation_failure_stops_before_any_gate(tmp_path: Path) -
 
 
 def test_accuracy_failure_records_once_and_skips_benchmark(tmp_path: Path) -> None:
-    evaluator, _host = _evaluator()
     progress = tmp_path / "progress.md"
+    evaluator, _host = _evaluator(progress_path=progress)
     evaluator.check = AsyncMock(
         return_value=AccuracyGateResult(
             command="check", passed=False, output="bad", feedback="accuracy rejected", executed=True
@@ -142,7 +145,6 @@ def test_accuracy_failure_records_once_and_skips_benchmark(tmp_path: Path) -> No
             retry=1,
             commit="a" * 40,
             objectives=(),
-            progress_path=progress,
             agent_backend_name="cli",
         )
     )
@@ -157,8 +159,8 @@ def test_accuracy_failure_records_once_and_skips_benchmark(tmp_path: Path) -> No
 
 
 def test_accuracy_pass_runs_benchmark_and_records_each_once(tmp_path: Path) -> None:
-    evaluator, _host = _evaluator()
     progress = tmp_path / "progress.md"
+    evaluator, _host = _evaluator(progress_path=progress)
     evaluator.check = AsyncMock(
         return_value=AccuracyGateResult(
             command="check", passed=True, output="ok", feedback=None, executed=True
@@ -177,7 +179,6 @@ def test_accuracy_pass_runs_benchmark_and_records_each_once(tmp_path: Path) -> N
             retry=1,
             commit="a" * 40,
             objectives=(),
-            progress_path=progress,
             agent_backend_name="cli",
         )
     )
@@ -192,8 +193,8 @@ def test_accuracy_pass_runs_benchmark_and_records_each_once(tmp_path: Path) -> N
 
 
 def test_reuse_accuracy_records_reuse_and_skips_check(tmp_path: Path) -> None:
-    evaluator, _host = _evaluator()
     progress = tmp_path / "progress.md"
+    evaluator, _host = _evaluator(progress_path=progress)
     evaluator.check = AsyncMock()
     evaluator.reuse_accuracy = AsyncMock(
         return_value=AccuracyGateResult(
@@ -215,7 +216,6 @@ def test_reuse_accuracy_records_reuse_and_skips_check(tmp_path: Path) -> None:
             retry=2,
             commit="a" * 40,
             objectives=(),
-            progress_path=progress,
             reuse_accuracy=True,
             agent_backend_name="cli",
         )
@@ -250,7 +250,7 @@ def test_gates_run_property_records_correspond_1to1_with_outcomes(
 
     async def exercise() -> None:
         progress = Path(tempfile.mkdtemp()) / "progress.md"
-        evaluator, host = _evaluator()
+        evaluator, host = _evaluator(progress_path=progress)
         for index, (backend, resource_ok, accuracy_pass, benchmark_pass) in enumerate(outcomes):
             host.environment.reconcile_model_requests.return_value = (
                 None if resource_ok else "resource unavailable"
@@ -287,7 +287,6 @@ def test_gates_run_property_records_correspond_1to1_with_outcomes(
                 retry=1,
                 commit="a" * 40,
                 objectives=(),
-                progress_path=progress,
                 agent_backend_name=backend,
             )
 

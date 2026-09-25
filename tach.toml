@@ -419,7 +419,7 @@ depends_on = ["vibesys.orchestration.contracts", "vibesys.run", "vibesys.orchest
 [[modules]]
 path = "vibesys.orchestration.runtime"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.runtime", "vibesys.run", "vibesys.render", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.orchestration.agents", "vibesys.orchestration.control", "vibesys.orchestration.gates", "vibesys.orchestration.state", "vibesys.orchestration.workspaces", "vibesys.backends"]
+depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.runtime", "vibesys.run", "vibesys.render", "vibesys.orchestration.request", "vibesys.orchestration.environment", "vibesys.orchestration.agents", "vibesys.orchestration.control", "vibesys.orchestration.gates", "vibesys.orchestration.progress", "vibesys.orchestration.state", "vibesys.orchestration.workspaces", "vibesys.backends"]
 
 [[modules]]
 path = "vibesys.orchestration.agents"
@@ -449,6 +449,14 @@ depends_on = ["vibesys", "vibesys.roles", "vibesys.evaluators", "vibesys.search.
 path = "vibesys.orchestration.gates"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_sandbox", "vibesys.orchestration.workspaces", "vibesys.orchestration._host", "vibesys.orchestration.progress_log"]
+
+[[modules]]
+# ``ctx.progress``: the host-owned pending framework-log buffer (see that
+# module's docstring). Depends only on ``_host`` (the structural `HostResources`
+# Protocol) so `state.py`/`gates.py` can type `host.progress` without a cycle.
+path = "vibesys.orchestration.progress"
+layer = "orchestration_host"
+depends_on = ["vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.control"

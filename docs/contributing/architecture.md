@@ -218,6 +218,7 @@ graph TD
     vibesys.orchestration.gates --> vibesys.run
     vibesys.orchestration.gates --> vibesys.runtime
     vibesys.orchestration.gates --> vibesys.sandbox
+    vibesys.orchestration.progress --> vibesys.orchestration._host
     vibesys.orchestration.progress_log --> vibesys
     vibesys.orchestration.progress_log --> vibesys.evaluators
     vibesys.orchestration.progress_log --> vibesys.roles
@@ -238,6 +239,7 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.orchestration.control
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
     vibesys.orchestration.runtime --> vibesys.orchestration.gates
+    vibesys.orchestration.runtime --> vibesys.orchestration.progress
     vibesys.orchestration.runtime --> vibesys.orchestration.request
     vibesys.orchestration.runtime --> vibesys.orchestration.state
     vibesys.orchestration.runtime --> vibesys.orchestration.workspaces
@@ -547,6 +549,7 @@ graph TD
     vibesys.orchestration.gates --> vibesys.runtime
     vibesys.orchestration.gates --> vibesys.sandbox
     vibesys.orchestration.gates --> vs_sandbox
+    vibesys.orchestration.progress --> vibesys.orchestration._host
     vibesys.orchestration.progress_log --> vibesys
     vibesys.orchestration.progress_log --> vibesys.evaluators
     vibesys.orchestration.progress_log --> vibesys.roles
@@ -570,6 +573,7 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.orchestration.control
     vibesys.orchestration.runtime --> vibesys.orchestration.environment
     vibesys.orchestration.runtime --> vibesys.orchestration.gates
+    vibesys.orchestration.runtime --> vibesys.orchestration.progress
     vibesys.orchestration.runtime --> vibesys.orchestration.request
     vibesys.orchestration.runtime --> vibesys.orchestration.state
     vibesys.orchestration.runtime --> vibesys.orchestration.workspaces

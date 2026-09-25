@@ -50,20 +50,17 @@ if TYPE_CHECKING:
 class SingleAgentTurns:
     """One designer and one combined implementer, reviewer, and profiler."""
 
-    def __init__(
-        self, ctx: RunContext, options: AgentOrchestrationOptions, board: list[str]
-    ) -> None:
-        """Bind the run's public capabilities, strategy options, and board buffer.
+    def __init__(self, ctx: RunContext, options: AgentOrchestrationOptions) -> None:
+        """Bind the run's public capabilities and strategy options.
 
-        *board* is the owning session's pending framework-log buffer: turns
-        append pure, unwritten Markdown blocks to it (see
-        ``vibesys.orchestration.progress_log``'s ``render_*`` functions); the
-        session hands the buffer to ``ctx.state.commit`` -- the host -- which
-        is the only place that writes it to disk.
+        Declares this run's progress-board path once with `ctx.progress`
+        (see `vibesys.orchestration.progress`): turns note pure, unwritten
+        Markdown blocks (see `vibesys.orchestration.progress_log`'s
+        `render_*` functions) via `ctx.progress.note`; only
+        `ctx.state.commit`/`ctx.gates.run` -- the host -- write them to disk.
         """
         self.ctx = ctx
         self.options = options
-        self._board = board
         self.workspace = ctx.workspaces.root
         self.domain = resolve_domain(ctx.request.input_bundle.domain)
         self.modality = options.modality
@@ -73,6 +70,7 @@ class SingleAgentTurns:
         self.roadmap_path, self.progress_path = issue_board.resolve_paths(
             self.workspace.path, options.memory_layout
         )
+        ctx.progress.declare(self.progress_path)
         self.progress_location = issue_board.display_path(self.progress_path, self.workspace.path)
         self.roadmap_location = issue_board.display_path(self.roadmap_path, self.workspace.path)
         self.pareto_location = issue_board.display_path(
@@ -216,7 +214,9 @@ class SingleAgentTurns:
                 continue
             plan.recommended_skills, _ = self._skills(plan.recommended_skills)
             issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-            self._board.append(progress_log.render_orchestrator_plan(request.round_number, plan))
+            self.ctx.progress.note(
+                progress_log.render_orchestrator_plan(request.round_number, plan)
+            )
             return plan
         raise PlanCorrectionExhaustedError
 
@@ -344,7 +344,7 @@ class SingleAgentTurns:
                     "verdict": Verdict.FAIL,
                 }
             )
-        self._board.append(
+        self.ctx.progress.note(
             progress_log.render_single_agent_round(request.round_number, state.retry, response)
         )
         return response

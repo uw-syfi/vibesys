@@ -46,6 +46,12 @@ if TYPE_CHECKING:
     from vibesys.orchestration.runtime import RunContext
 
 
+def _fake_progress() -> SimpleNamespace:
+    """A minimal ``ctx.progress``-shaped fake: collect noted blocks, in order."""
+    notes: list[str] = []
+    return SimpleNamespace(notes=notes, note=notes.append, declare=lambda _path: None)
+
+
 def _plan(hypothesis_id: str) -> OrchestratorPlan:
     return OrchestratorPlan(
         hypothesis_id=hypothesis_id,
@@ -96,6 +102,7 @@ def _configured_turns(tmp_path: Path) -> SingleAgentTurns:
             workspace_sources=(),
             profiler_kind=ProfilerKind.NONE,
         ),
+        progress=_fake_progress(),
     )
     options = AgentOrchestrationOptions(
         interface="inprocess",
@@ -105,7 +112,7 @@ def _configured_turns(tmp_path: Path) -> SingleAgentTurns:
         official_eval_every=2,
         memory_layout="files",
     )
-    return SingleAgentTurns(cast("RunContext", context), options, [])
+    return SingleAgentTurns(cast("RunContext", context), options)
 
 
 def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path: Path) -> None:
@@ -159,13 +166,14 @@ async def test_plan_reprompts_reused_hypothesis_and_records_corrected_plan(
 ) -> None:
     state = start_hypothesis(HypothesisState(), _plan("used"), started_round=1)
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
-    turns._board = []
     log: list[str] = []
     agent_turn = AsyncMock(side_effect=[_plan("used"), _plan("new")])
     monkeypatch.setattr(
         turns,
         "ctx",
-        SimpleNamespace(log=log.append, agents=SimpleNamespace(turn=agent_turn)),
+        SimpleNamespace(
+            log=log.append, agents=SimpleNamespace(turn=agent_turn), progress=_fake_progress()
+        ),
         raising=False,
     )
     monkeypatch.setattr(turns, "designer", SimpleNamespace(), raising=False)
@@ -194,10 +202,13 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     hypothesis = state.active_hypothesis
     assert hypothesis is not None
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
-    turns._board = []
+    progress = _fake_progress()
     agent_turn = AsyncMock(return_value=_response())
     monkeypatch.setattr(
-        turns, "ctx", SimpleNamespace(agents=SimpleNamespace(turn=agent_turn)), raising=False
+        turns,
+        "ctx",
+        SimpleNamespace(agents=SimpleNamespace(turn=agent_turn), progress=progress),
+        raising=False,
     )
     monkeypatch.setattr(turns, "worker", SimpleNamespace(), raising=False)
     monkeypatch.setattr(turns, "progress_path", tmp_path / "progress.md", raising=False)
@@ -215,7 +226,7 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     assert call.kwargs["context"] == {"combined": "context"}
     assert call.kwargs["session_key"] == "h1"
     assert call.kwargs["label"] == "round-1-retry-1-single-agent"
-    assert any("Implemented batching" in block for block in turns._board)
+    assert any("Implemented batching" in block for block in progress.notes)
 
     # `before_paid` (run by `ctx.agents.turn` right before its pre-turn
     # snapshot, so it is git-committed before the paid call starts) writes
@@ -231,7 +242,6 @@ def test_validation_rejects_reused_id() -> None:
     plan = _plan("used")
     state = start_hypothesis(HypothesisState(), plan, started_round=1)
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
-    turns._board = []
 
     with pytest.raises(InvalidPlanError, match="already used"):
         turns._validate_plan(_plan("used"), state)
