@@ -29,14 +29,11 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-# TODO(stack PR 06): import from vibesys.evaluators.validation_recipe once that  # noqa: TD003, FIX002
-# module lands (evaluators/{perf_reply,validation_recipe}.py, PR 06); today these
-# still live in the not-yet-dissolved vibesys.schemas.
-from vibesys.orchestration.memory import structured_artifact_root
-from vibesys.schemas import (
+from vibesys.evaluators.validation_recipe import (
     FrameworkValidationResult,  # tracked: #288
     ValidationRecipeArtifact,
 )
+from vibesys.orchestration.memory import structured_artifact_root
 
 
 def write_json(path: Path, payload: object) -> Path:

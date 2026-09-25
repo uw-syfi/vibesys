@@ -26,10 +26,10 @@ from vibesys.profilers import (
 )
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.render.sink import output_sink
+from vibesys.roles.common import Verdict
+from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.schemas import (
-    SingleAgentRoundResponse,
     SkillResourceSelection,
-    Verdict,
     normalize_hypothesis_title,
 )
 from vibesys.search.hypothesis import OrchestratorPlan

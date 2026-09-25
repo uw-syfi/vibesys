@@ -43,6 +43,7 @@ from vibesys.evaluators.gates import (
     emit_gate_finished,
     emit_gate_started,
 )
+from vibesys.evaluators.validation_recipe import FrameworkValidationResult
 from vibesys.events import (
     CoreEventType,
     EventStatus,
@@ -71,12 +72,10 @@ from vibesys.loops.multi.validation import (
 )
 from vibesys.orchestration.runtime import MeasurementOptions, WorkspaceRestoreError
 from vibesys.render.sink import output_sink
+from vibesys.roles.common import Verdict
 from vibesys.schemas import (
     CandidateDisposition,
-    FrameworkValidationResult,
     HypothesisOutcome,
-    ProfilerSummary,
-    Verdict,
 )
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
@@ -85,6 +84,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from vibesys.agent_run.options import AgentOrchestrationOptions
+    from vibesys.evaluators.perf_reply import ProfilerSummary
     from vibesys.events import ExperimentsChangeReason
     from vibesys.orchestration.runtime import RunContext
 

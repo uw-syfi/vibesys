@@ -19,22 +19,22 @@ from vibesys.evaluators.gates import (
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
 )
+from vibesys.evaluators.perf_reply import ProfilerSummary
+from vibesys.evaluators.validation_recipe import (
+    ValidationRecipe,
+    ValidationRecipeArtifact,
+)
 from vibesys.loops.multi.decisions import AttemptRequest, HypothesisEngine, PlanRequest
 from vibesys.loops.multi.session import MultiSession
 from vibesys.loops.multi.turns import MultiAgentTurns
 from vibesys.loops.profile_multi.controller import HypothesisEngine as ProfileHypothesisEngine
 from vibesys.loops.profile_multi.session import ProfileMultiSession
 from vibesys.loops.single.session import SingleSession
-from vibesys.schemas import (
-    ImplementerResponse,
-    JudgeResponse,
-    PreRoundDecision,
-    ProfilerSummary,
-    SingleAgentRoundResponse,
-    ValidationRecipe,
-    ValidationRecipeArtifact,
-    Verdict,
-)
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.search.hypothesis import OrchestratorPlan
 
 if TYPE_CHECKING:

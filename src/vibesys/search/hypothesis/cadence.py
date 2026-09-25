@@ -12,7 +12,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome
+from vibesys.schemas import (
+    CandidateDisposition,
+    HypothesisOutcome,
+)
 from vibesys.search.hypothesis.transitions import provisional_candidates_since_official
 
 if TYPE_CHECKING:

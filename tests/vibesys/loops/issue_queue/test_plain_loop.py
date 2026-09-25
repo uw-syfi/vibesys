@@ -23,21 +23,21 @@ from vibesys.config import as_config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND
 from vibesys.errors import ConfigurationError
 from vibesys.evaluators.input_manifest import load_input_bundle
+from vibesys.evaluators.perf_reply import (
+    IssuePerfEvalResponse,
+    PerfMetrics,
+)
 from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
 from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
 from vibesys.orchestration.request import ResumeRef, RunRequest
 from vibesys.orchestration.runner import run_orchestration
 from vibesys.profilers import ProfilerKind
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import IssueImplementerResponse
+from vibesys.roles.judge import IssueJudgeResponse
 from vibesys.run.integration import LocalRunIntegration
-from vibesys.schemas import (
-    IssueImplementerResponse,
-    IssueJudgeResponse,
-    IssuePerfEvalResponse,
-    PerfMetrics,
-    PerfTrend,
-    Verdict,
-)
+from vibesys.schemas import PerfTrend
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_issue_board.api import IssueBoard, IssueStatus

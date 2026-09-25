@@ -6,12 +6,10 @@ from dataclasses import replace
 
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.metrics import MetricSpace, Objective
-
-# TODO(stack PR 06): import ImplementerResponse from vibesys.roles.implementer once it exists.  # noqa: FIX002  # tracked: #288
+from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
-    ImplementerResponse,
 )
 from vibesys.search.hypothesis import OrchestratorPlan
 from vibesys.search.hypothesis.attempts import (

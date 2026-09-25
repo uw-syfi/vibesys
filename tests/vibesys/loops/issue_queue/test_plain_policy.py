@@ -7,16 +7,16 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Literal, cast
 from unittest.mock import AsyncMock, patch
 
-from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
-from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
-from vibesys.schemas import (
-    IssueImplementerResponse,
-    IssueJudgeResponse,
+from vibesys.evaluators.perf_reply import (
     IssuePerfEvalResponse,
     PerfMetrics,
-    PerfTrend,
-    Verdict,
 )
+from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
+from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import IssueImplementerResponse
+from vibesys.roles.judge import IssueJudgeResponse
+from vibesys.schemas import PerfTrend
 from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
 from vs_loop_state.api import PlainLoopCursor
 

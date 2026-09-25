@@ -17,6 +17,7 @@ from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.options import AgentOrchestrationOptions
 from vibesys.agent_run.state import AgentRunState
 from vibesys.constants import DomainName
+from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.loops.multi.decisions import (
     AttemptRequest,
     HypothesisEngine,
@@ -31,14 +32,13 @@ from vibesys.loops.multi.turns import (
     _unauthorized_paths,
 )
 from vibesys.profilers import ProfilerKind
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.pre_round import PreRoundDecision
 from vibesys.schemas import (
     HypothesisOutcome,
-    ImplementerResponse,
-    JudgeResponse,
-    PreRoundDecision,
-    ProfilerSummary,
     SkillResourceSelection,
-    Verdict,
 )
 from vibesys.search.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
 

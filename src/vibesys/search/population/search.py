@@ -27,11 +27,7 @@ from vibesys.search.population.models import (
 
 if TYPE_CHECKING:
     from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
-
-    # TODO(stack PR 06): import from vibesys.evaluators.perf_reply once  # noqa: FIX002  # tracked: #288
-    # schemas.py dissolves; at BASE, ProfilerSummary still lives in
-    # vibesys.schemas.
-    from vibesys.schemas import ProfilerSummary
+    from vibesys.evaluators.perf_reply import ProfilerSummary
 
 __all__ = ["PopulationSearch", "candidate_fitness"]
 

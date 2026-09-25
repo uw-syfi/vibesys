@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING, Annotated, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
+from vibesys.schemas import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    PerfDeltaReason,
+)
 from vibesys.search.hypothesis.plan import OrchestratorPlan
 from vibesys.search.profile_focus.state import ProfileFocusState
 from vs_loop_state.api import HypothesisResolution, PerfProvenance, RoundRecord
