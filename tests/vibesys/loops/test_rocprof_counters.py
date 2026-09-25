@@ -47,6 +47,7 @@ from resources.profilers.rocprof.counters import (
     MfmaPeakContext,
     _aggregate_by_kernel,
     _block_counts,
+    _bw_exceeds_spec_note,
     _classify_mfma_compute_bound,
     _discover,
     _duration_from_counter_rows,
@@ -799,6 +800,19 @@ def test_real_mi210_packed_pass_kernel_metrics_by_name_matches_manual_arithmetic
     assert kernel_metrics.hbm_bytes == pytest.approx(_REAL_PACKED_HBM_BYTES)
     assert kernel_metrics.duration_ns == pytest.approx(_REAL_PACKED_DURATION_NS)
     assert kernel_metrics.achieved_bw_gb_s == pytest.approx(_REAL_PACKED_BW_GB_S)
+
+
+def test_bw_exceeds_spec_note_is_none_at_or_under_peak_and_present_above_it():  # noqa: ANN201  # tracked: #288
+    spec = PEAK_SPECS["gfx90a"]  # 1.6 TB/s -> 1600 GB/s
+    assert _bw_exceeds_spec_note(1600.0, spec) is None
+    assert _bw_exceeds_spec_note(1599.9, spec) is None
+    assert _bw_exceeds_spec_note(None, spec) is None
+    assert _bw_exceeds_spec_note(1749.0, None) is None
+    note = _bw_exceeds_spec_note(1749.0, spec)
+    assert note is not None
+    assert "exceeds spec" in note
+    assert "1749" in note
+    assert "1600" in note
 
 
 # ---------------------------------------------------------------------------

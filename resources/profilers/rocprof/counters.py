@@ -1212,12 +1212,35 @@ def _fmt(value: float | None, suffix: str = "", precision: int = 2) -> str:
     return f"{value:.{precision}f}{suffix}" if value is not None else "n/a"
 
 
-def _print_derived(metrics: DerivedMetrics) -> None:
+def _bw_exceeds_spec_note(bw_gb_s: float | None, spec: PeakSpec | None) -> str | None:
+    """Flag text for an achieved HBM bandwidth reading above the arch's spec peak.
+
+    Real hardware cannot sustain more bytes/s on the TCC-EA interface than
+    the memory system's rated peak, so a reading above it means the
+    counter arithmetic -- not the GPU -- is wrong: traffic that isn't
+    actually HBM-bound got counted (e.g. a packed-pass output directory
+    read twice, see ``_discover``), or counters from different capture
+    windows got stitched together. Report this instead of a bare number so
+    a caller doesn't mistake it for a real >peak measurement.
+    """
+    if bw_gb_s is None or spec is None:
+        return None
+    peak_gb_s = spec.hbm_tb_s * 1000
+    if bw_gb_s <= peak_gb_s:
+        return None
+    return (
+        f"exceeds spec: {bw_gb_s:.0f} GB/s > {peak_gb_s:.0f} GB/s peak -- counter likely "
+        "includes non-HBM traffic"
+    )
+
+
+def _print_derived(metrics: DerivedMetrics, spec: PeakSpec | None = None) -> None:
     print(  # noqa: T201  # tracked: #288
         f"  L2 hit rate: {_fmt(metrics.l2_hit_rate_pct, '%', 1)}   "
         f"GPU busy: {_fmt(metrics.gpu_busy_pct, '%', 1)}   "
         f"MFMA issue rate: {_fmt(metrics.mfma_issue_rate, ' insts/cycle', 4)}"
     )
+    bw_note = _bw_exceeds_spec_note(metrics.achieved_bw_gb_s, spec)
     print(  # noqa: T201  # tracked: #288
         f"  HBM bytes: {_fmt(metrics.hbm_bytes, ' B', 0)}   "
         f"achieved BW: {_fmt(metrics.achieved_bw_gb_s, ' GB/s', 1)}"
@@ -1226,6 +1249,7 @@ def _print_derived(metrics: DerivedMetrics) -> None:
             if metrics.hbm_bytes is not None and metrics.duration_ns is None
             else ""
         )
+        + (f"  [{bw_note}]" if bw_note else "")
     )
     print(f"  LDS bank-conflict rate: {_fmt(metrics.lds_bank_conflict_rate_pct, '%', 1)}")  # noqa: T201  # tracked: #288
 
@@ -1252,6 +1276,7 @@ def cmd_report(ns: argparse.Namespace) -> None:
     aggs = _aggregate_by_kernel(rows)
     kernels = _filter_kernels(aggs, ns.kernel)
     arch = _report_arch_for(ns)
+    spec = PEAK_SPECS.get(arch) if arch else None
 
     print(f"Merged {len(counter_files)} counter file(s), {len(kernels)} kernel(s) matched.")  # noqa: T201  # tracked: #288
     if durations:
@@ -1266,10 +1291,10 @@ def cmd_report(ns: argparse.Namespace) -> None:
             workgroup_size=agg.workgroup_size,
             arch=arch or "gfx942",
         )
-        metrics = derive_metrics(agg, duration)
+        metrics = derive_metrics(agg, duration, spec=spec)
         print(f"\n{_short_kernel_name(agg.name)}  ({agg.dispatch_count} dispatch(es))")  # noqa: T201  # tracked: #288
         _print_kernel_resources(agg, occ)
-        _print_derived(metrics)
+        _print_derived(metrics, spec)
 
     remainder = kernels[ns.top :]
     if remainder:
@@ -1354,10 +1379,16 @@ def _classify(
     if metrics.achieved_bw_gb_s is not None:
         bw_fraction = metrics.achieved_bw_gb_s / (spec.hbm_tb_s * 1000)
         if bw_fraction >= BANDWIDTH_BOUND_FRACTION_OF_PEAK:
+            bw_note = _bw_exceeds_spec_note(metrics.achieved_bw_gb_s, spec)
+            evidence = (
+                f"achieved {metrics.achieved_bw_gb_s:.0f} GB/s "
+                f"({bw_fraction * 100:.0f}% of {spec.hbm_tb_s * 1000:.0f} GB/s spec peak)"
+            )
+            if bw_note:
+                evidence += f" -- {bw_note}"
             return Verdict(
                 "BANDWIDTH-BOUND",
-                f"achieved {metrics.achieved_bw_gb_s:.0f} GB/s "
-                f"({bw_fraction * 100:.0f}% of {spec.hbm_tb_s * 1000:.0f} GB/s spec peak)",
+                evidence,
                 "raise arithmetic intensity: fuse epilogues, tile for L2/Infinity-Cache reuse, check XCD locality",
             )
     mfma_verdict = _classify_mfma_compute_bound(metrics)
