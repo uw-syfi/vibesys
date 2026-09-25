@@ -15,7 +15,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from vibesys import constants
-from vibesys.agent_run import issue_board
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
@@ -26,7 +25,7 @@ from vibesys.errors import (
     UnsupportedProfilerError,
 )
 from vibesys.events import CoreEventType, EventStatus, FrameworkSource, JudgeResultData
-from vibesys.orchestration import memory, progress_log
+from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
@@ -232,7 +231,7 @@ class MultiAgentTurns:
                     "Produce a corrected plan for this round. Return only the JSON object."
                 )
                 continue
-            issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
+            artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
             self.ctx.progress.note(
                 progress_log.render_orchestrator_plan(request.round_number, plan)
             )
@@ -314,7 +313,7 @@ Write bounded durable profile evidence only below
         kind = require_profiler_kind(self.ctx.environment.profiler_kind)
         view = self.ctx.environment.view
         artifact = display_path(
-            issue_board.profiler_artifact_root(self.progress_path, round_number),
+            artifacts.profiler_artifact_root(self.progress_path, round_number),
             self.workspace.path,
         ).rstrip("/")
         context = ProfilerContext(
@@ -385,10 +384,10 @@ Write bounded durable profile evidence only below
         plan = request.plan
         hypothesis = request.active_hypothesis
         view = self.ctx.environment.view
-        artifact = issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
+        artifact = artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
         prior = tuple(
             display_path(path, self.workspace.path)
-            for path in issue_board.implementer_artifact_paths(
+            for path in artifacts.implementer_artifact_paths(
                 self.progress_path, request.round_number
             )
         )
@@ -405,10 +404,10 @@ Write bounded durable profile evidence only below
             progress_location=self.progress_location,
             pareto_archive_location=self.pareto_location,
             validation_location=display_path(
-                issue_board.validation_artifact_root(self.progress_path), self.workspace.path
+                artifacts.validation_artifact_root(self.progress_path), self.workspace.path
             ),
             validation_recipe_contract_location=display_path(
-                issue_board.validation_recipe_schema_path(self.progress_path), self.workspace.path
+                artifacts.validation_recipe_schema_path(self.progress_path), self.workspace.path
             ),
             retry=state.retry,
             feedback=state.feedback,
@@ -434,10 +433,10 @@ Write bounded durable profile evidence only below
         plan = request.plan
         hypothesis = request.active_hypothesis
         view = self.ctx.environment.view
-        artifact = issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
+        artifact = artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
         prior = tuple(
             display_path(path, self.workspace.path)
-            for path in issue_board.implementer_artifact_paths(
+            for path in artifacts.implementer_artifact_paths(
                 self.progress_path, request.round_number
             )
         )
@@ -448,10 +447,10 @@ Write bounded durable profile evidence only below
             progress_location=self.progress_location,
             pareto_archive_location=self.pareto_location,
             validation_location=display_path(
-                issue_board.validation_artifact_root(self.progress_path), self.workspace.path
+                artifacts.validation_artifact_root(self.progress_path), self.workspace.path
             ),
             validation_recipe_contract_location=display_path(
-                issue_board.validation_recipe_schema_path(self.progress_path), self.workspace.path
+                artifacts.validation_recipe_schema_path(self.progress_path), self.workspace.path
             ),
             runtime_notes=view.prompt_notes,
             prior_attempt_artifact_locations=prior,
@@ -481,7 +480,7 @@ Write bounded durable profile evidence only below
         label = f"round-{request.round_number}-retry-{state.retry}-implementer"
 
         async def mark_paid() -> None:
-            issue_board.write_implementer_start_marker(
+            artifacts.write_implementer_start_marker(
                 self.progress_path, request.round_number, state.retry
             )
 
@@ -499,8 +498,8 @@ Write bounded durable profile evidence only below
         synthesized = response.summary in _SYNTHESIZED_IMPLEMENTER_SUMMARIES
         if response.skill_context_updates:
             plan.recommended_skills = [*plan.recommended_skills, *response.skill_context_updates]
-            issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-        issue_board.write_implementer_artifact(
+            artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
+        artifacts.write_implementer_artifact(
             self.progress_path, request.round_number, state.retry, response
         )
         self.ctx.progress.note(
@@ -519,10 +518,10 @@ Write bounded durable profile evidence only below
         hypothesis = request.active_hypothesis
         view = self.ctx.environment.view
 
-        plan_artifact = issue_board.write_plan_artifact(
+        plan_artifact = artifacts.write_plan_artifact(
             self.progress_path, request.round_number, plan
         )
-        evidence = issue_board.write_implementer_artifact(
+        evidence = artifacts.write_implementer_artifact(
             self.progress_path, request.round_number, state.retry, implementation
         )
         domain_ctx = self._domain_context()
@@ -551,10 +550,10 @@ Write bounded durable profile evidence only below
             retry=state.retry,
             runtime_notes=view.prompt_notes,
             validation_location=display_path(
-                issue_board.validation_artifact_root(self.progress_path), self.workspace.path
+                artifacts.validation_artifact_root(self.progress_path), self.workspace.path
             ),
             validation_recipe_contract_location=display_path(
-                issue_board.validation_recipe_schema_path(self.progress_path), self.workspace.path
+                artifacts.validation_recipe_schema_path(self.progress_path), self.workspace.path
             ),
         )
         response = cast(

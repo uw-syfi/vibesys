@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.agent_run import issue_board
 from vibesys.errors import StrategySessionError
 from vibesys.evaluators.gates import (
     GATE_LOG_TAIL_CHARS,
@@ -24,7 +23,7 @@ from vibesys.loops.multi.validation import (
     _reusable_validation_result,
     _validation_input_digest,
 )
-from vibesys.orchestration import memory, progress_log
+from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.orchestration.runtime import WorkspaceRestoreError
 from vibesys.prompts.contexts import display_path
 from vibesys.roles.common import Verdict
@@ -275,7 +274,7 @@ class MultiSession:
         )
         memory.ensure_progress_file(turns.progress_path)
         memory.ensure_roadmap_file(turns.roadmap_path)
-        issue_board.write_validation_recipe_schema(turns.progress_path)
+        artifacts.write_validation_recipe_schema(turns.progress_path)
         previous = await ctx.state.load(HypothesisState)
         state = adopt_metric_space(previous or self.search.initial(), self.options.metric_space)
         self.state = state
@@ -478,7 +477,7 @@ class MultiSession:
 
     def remaining_attempts(self, selected: MultiRound) -> range:
         """Resume after the last durable paid attempt marker."""
-        first = issue_board.next_implementer_attempt(
+        first = artifacts.next_implementer_attempt(
             self.turns.progress_path, selected.request.round_number
         )
         limit = self.options.max_retries_per_round
@@ -720,7 +719,7 @@ class MultiSession:
                     break
             if not restore_required:
                 tx.commit()
-        artifact = issue_board.write_validation_result_artifact(
+        artifact = artifacts.write_validation_result_artifact(
             self.turns.progress_path, number, retry, results
         )
         location = display_path(artifact, self.workspace.path)

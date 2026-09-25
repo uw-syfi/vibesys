@@ -7,15 +7,15 @@ from typing import Literal
 
 import pytest
 
-from vibesys.agent_run import issue_board
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.evaluators.validation_recipe import (
     ValidationRecipe,
     ValidationRecipeArtifact,
 )
 from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
-from vibesys.orchestration import progress_log
+from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.prompts import PROMPTS_DIR
+from vibesys.prompts.contexts import display_path
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.roles.judge import JudgeResponse
@@ -151,7 +151,7 @@ def test_validation_recipe_artifact_rejects_invented_top_level_shape():  # noqa:
 def test_issue_board_publishes_authoritative_validation_recipe_schema(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
     progress = tmp_path / "progress"
 
-    path = issue_board.write_validation_recipe_schema(progress)
+    path = artifacts.write_validation_recipe_schema(progress)
     schema = json.loads(path.read_text())
 
     assert path == progress / "validation" / "recipe-schema.json"
@@ -880,8 +880,8 @@ def test_progress_writes_typed_role_handoffs_atomically(tmp_path, progress_name,
         evidence="Untrusted implementer claim.",
     )
 
-    plan_path = issue_board.write_plan_artifact(progress, 12, plan)
-    evidence_path = issue_board.write_implementer_artifact(progress, 12, 2, implementation)
+    plan_path = artifacts.write_plan_artifact(progress, 12, plan)
+    evidence_path = artifacts.write_implementer_artifact(progress, 12, 2, implementation)
 
     assert plan_path == tmp_path / artifact_root / "plans" / "round-0012.json"
     assert evidence_path == (
@@ -898,12 +898,12 @@ def test_persisted_implementer_attempts_define_resume_boundary(tmp_path):  # noq
         summary="Retained the first target run.",
         expected_behavior="A resumed round must not overwrite it.",
     )
-    first = issue_board.write_implementer_artifact(progress, 8, 1, implementation)
-    second = issue_board.write_implementer_artifact(progress, 8, 2, implementation)
+    first = artifacts.write_implementer_artifact(progress, 8, 1, implementation)
+    second = artifacts.write_implementer_artifact(progress, 8, 2, implementation)
 
-    assert issue_board.implementer_artifact_paths(progress, 8) == [first, second]
-    assert issue_board.next_implementer_attempt(progress, 8) == 3
-    assert issue_board.next_implementer_attempt(progress, 9) == 1
+    assert artifacts.implementer_artifact_paths(progress, 8) == [first, second]
+    assert artifacts.next_implementer_attempt(progress, 8) == 3
+    assert artifacts.next_implementer_attempt(progress, 9) == 1
 
 
 def test_implementer_start_marker_advances_the_resume_boundary(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -912,26 +912,26 @@ def test_implementer_start_marker_advances_the_resume_boundary(tmp_path):  # noq
         summary="Recorded after the marker.",
         expected_behavior="A killed attempt must not be replayed under its label.",
     )
-    marker = issue_board.write_implementer_start_marker(progress, 8, 1)
+    marker = artifacts.write_implementer_start_marker(progress, 8, 1)
 
     assert marker == (
         tmp_path / "progress" / "evidence" / "round-0008-attempt-01-implementer.started.json"
     )
     # An attempt killed mid-invoke leaves the marker and no completed artifact,
     # yet the round must resume on attempt 2.
-    assert issue_board.implementer_artifact_paths(progress, 8) == []
-    assert issue_board.next_implementer_attempt(progress, 8) == 2
+    assert artifacts.implementer_artifact_paths(progress, 8) == []
+    assert artifacts.next_implementer_attempt(progress, 8) == 2
 
-    completed = issue_board.write_implementer_artifact(progress, 8, 1, implementation)
+    completed = artifacts.write_implementer_artifact(progress, 8, 1, implementation)
 
     # The marker and its own completed artifact name one attempt, not two.
-    assert issue_board.implementer_artifact_paths(progress, 8) == [completed]
-    assert issue_board.next_implementer_attempt(progress, 8) == 2
+    assert artifacts.implementer_artifact_paths(progress, 8) == [completed]
+    assert artifacts.next_implementer_attempt(progress, 8) == 2
 
-    issue_board.write_implementer_start_marker(progress, 9, 1)
+    artifacts.write_implementer_start_marker(progress, 9, 1)
 
-    assert issue_board.next_implementer_attempt(progress, 8) == 2
-    assert issue_board.next_implementer_attempt(progress, 9) == 2
+    assert artifacts.next_implementer_attempt(progress, 8) == 2
+    assert artifacts.next_implementer_attempt(progress, 9) == 2
 
 
 def test_agent_memory_paths_distinguish_files_from_directories(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -941,8 +941,8 @@ def test_agent_memory_paths_distinguish_files_from_directories(tmp_path):  # noq
     artifact.parent.mkdir(parents=True)
     artifact.write_text("{}\n")
 
-    assert issue_board.display_path(directory, workspace) == "progress/"
-    assert issue_board.display_path(artifact, workspace) == "progress/plans/round-0012.json"
+    assert display_path(directory, workspace) == "progress/"
+    assert display_path(artifact, workspace) == "progress/plans/round-0012.json"
 
 
 def test_progress_replaces_interrupted_stage_instead_of_duplicating_it(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
@@ -1106,8 +1106,8 @@ def test_progress_append_implementer_and_judge(tmp_path):  # noqa: ANN001, ANN20
 
 
 def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    roadmap, progress = issue_board.resolve_paths(tmp_path, "directories")
-    issue_board.ensure_roadmap_file(roadmap)
+    roadmap, progress = memory.resolve_paths(tmp_path, "directories")
+    memory.ensure_roadmap_file(roadmap)
     for round_number in range(1, 16):
         progress_log.write(
             progress,
@@ -1124,18 +1124,18 @@ def test_directory_memory_layout_splits_rounds_and_bounds_reads(tmp_path):  # no
     assert (roadmap / "index.md").exists()
     assert (progress / "round-0001.md").exists()
     assert (progress / "round-0015.md").exists()
-    recent = issue_board.read_progress(progress)
+    recent = memory.read_progress(progress)
     assert "## Round 11 —" not in recent
     assert "## Round 12 —" in recent
     assert "## Round 15 —" in recent
 
 
 def test_ensure_roadmap_seeds_header_when_missing(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.agent_run import issue_board  # noqa: PLC0415  # tracked: #288
+    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
 
     p = tmp_path / "roadmap.md"
     assert not p.exists()
-    issue_board.ensure_roadmap_file(p)
+    memory.ensure_roadmap_file(p)
     assert p.exists()
     text = p.read_text()
     # The seed must scaffold the four sections so the orchestrator's first
@@ -1147,27 +1147,27 @@ def test_ensure_roadmap_seeds_header_when_missing(tmp_path):  # noqa: ANN001, AN
 
 
 def test_ensure_roadmap_does_not_overwrite_existing(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.agent_run import issue_board  # noqa: PLC0415  # tracked: #288
+    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
 
     p = tmp_path / "roadmap.md"
     p.write_text("# my custom plan\n")
-    issue_board.ensure_roadmap_file(p)
+    memory.ensure_roadmap_file(p)
     assert p.read_text() == "# my custom plan\n"
 
 
 def test_read_roadmap_returns_text(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.agent_run import issue_board  # noqa: PLC0415  # tracked: #288
+    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
 
     p = tmp_path / "roadmap.md"
     p.write_text("hello\n")
-    assert issue_board.read_roadmap(p) == "hello\n"
+    assert memory.read_roadmap(p) == "hello\n"
 
 
 def test_read_roadmap_missing_returns_empty(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.agent_run import issue_board  # noqa: PLC0415  # tracked: #288
+    from vibesys.orchestration import memory  # noqa: PLC0415  # tracked: #288
 
     p = tmp_path / "nope.md"
-    assert issue_board.read_roadmap(p) == ""
+    assert memory.read_roadmap(p) == ""
 
 
 def test_outer_prompts_reference_memory_paths_without_embedding_contents():  # noqa: ANN201  # tracked: #288
@@ -1203,7 +1203,7 @@ def test_outer_prompts_reference_memory_paths_without_embedding_contents():  # n
 def test_pareto_archive_is_materialized_beside_progress(tmp_path, progress_name, expected):  # noqa: ANN001, ANN201  # tracked: #288
     progress_path = tmp_path / progress_name
 
-    document = issue_board.write_pareto_archive(progress_path, "Trusted frontier: round 4")
+    document = memory.write_pareto_archive(progress_path, "Trusted frontier: round 4")
 
     assert document == tmp_path / expected
     assert document.read_text() == "# Pareto frontier\n\nTrusted frontier: round 4\n"

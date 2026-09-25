@@ -19,7 +19,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from vibesys.agent_run import issue_board
 from vibesys.constants import DomainName
 from vibesys.errors import (
     InvalidPlanError,
@@ -29,6 +28,7 @@ from vibesys.errors import (
 from vibesys.loops.agent_options import AgentOrchestrationOptions
 from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
 from vibesys.loops.multi.turns import MultiAgentTurns
+from vibesys.orchestration import artifacts, memory
 from vibesys.profilers import ProfilerKind
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import MULTI_IMPLEMENTER_CONTINUATION, ImplementerResponse
@@ -122,8 +122,8 @@ def _turns(tmp_path: Path) -> MultiAgentTurns:
         ),
     )
     turns = MultiAgentTurns(ctx, _options())
-    issue_board.ensure_progress_file(turns.progress_path)
-    issue_board.ensure_roadmap_file(turns.roadmap_path)
+    memory.ensure_progress_file(turns.progress_path)
+    memory.ensure_roadmap_file(turns.roadmap_path)
     return turns
 
 
@@ -278,7 +278,7 @@ def test_implementer_marks_paid_turn_before_snapshot_and_judge_applies_pareto_gu
     )
     turns.worker = _handle()
     events: list[str] = []
-    original_marker = issue_board.write_implementer_start_marker
+    original_marker = artifacts.write_implementer_start_marker
 
     def marker(path: Path, round_number: int, retry: int) -> Path:
         events.append("marker")
@@ -298,7 +298,7 @@ def test_implementer_marks_paid_turn_before_snapshot_and_judge_applies_pareto_gu
 
     turns.ctx.agents.turn = agents_turn
 
-    with mock.patch("vibesys.loops.multi.turns.issue_board.write_implementer_start_marker", marker):
+    with mock.patch("vibesys.loops.multi.turns.artifacts.write_implementer_start_marker", marker):
         returned, synthesized = asyncio.run(turns.implement(request, attempt))
     assert returned == response
     assert not synthesized

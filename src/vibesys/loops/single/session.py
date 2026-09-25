@@ -15,11 +15,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.agent_run import issue_board
 from vibesys.errors import StrategySessionError
 from vibesys.loops.single.attribution import run_attribution
 from vibesys.loops.single.turns import SingleAgentTurns
-from vibesys.orchestration import memory, progress_log
+from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.orchestration.runtime import WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.profiler import ProfilerSummary
@@ -244,7 +243,7 @@ class SingleSession:
         )
         memory.ensure_progress_file(turns.progress_path)
         memory.ensure_roadmap_file(turns.roadmap_path)
-        issue_board.write_validation_recipe_schema(turns.progress_path)
+        artifacts.write_validation_recipe_schema(turns.progress_path)
         previous = await ctx.state.load(HypothesisState)
         state = adopt_metric_space(previous or self.search.initial(), self.options.metric_space)
         self.state = state
@@ -448,7 +447,7 @@ class SingleSession:
 
     def remaining_attempts(self, selected: SingleRound) -> range:
         """Resume after the last durable paid attempt marker."""
-        first = issue_board.next_implementer_attempt(
+        first = artifacts.next_implementer_attempt(
             self.turns.progress_path, selected.request.round_number
         )
         limit = self.options.max_retries_per_round

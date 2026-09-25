@@ -99,7 +99,7 @@ def test_reuse_selects_newest_matching_pass_only(
         )
     )
     monkeypatch.setattr(
-        validation.issue_board, "validation_result_artifact_paths", lambda _path: [old, newest]
+        validation.artifacts, "validation_result_artifact_paths", lambda _path: [old, newest]
     )
     reused = validation._reusable_validation_result(tmp_path / "progress.md", recipe, digest)
     assert reused is not None

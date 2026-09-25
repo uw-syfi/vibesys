@@ -69,11 +69,7 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 
 ```mermaid
 graph TD
-    vibesys.agent_run --> vibesys.evaluators
-    vibesys.agent_run --> vibesys.roles
-    vibesys.agent_run --> vibesys.search.hypothesis
     vibesys.api --> vibesys
-    vibesys.api --> vibesys.agent_run
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
@@ -145,13 +141,13 @@ graph TD
     vibesys.loops.issue_queue --> vibesys.roles
     vibesys.loops.issue_queue --> vibesys.runtime
     vibesys.loops.multi --> vibesys
-    vibesys.loops.multi --> vibesys.agent_run
     vibesys.loops.multi --> vibesys.context
     vibesys.loops.multi --> vibesys.domains
     vibesys.loops.multi --> vibesys.errors
     vibesys.loops.multi --> vibesys.evaluators
     vibesys.loops.multi --> vibesys.loops.agent_options
     vibesys.loops.multi --> vibesys.loops.hypothesis_readmodel
+    vibesys.loops.multi --> vibesys.orchestration.artifacts
     vibesys.loops.multi --> vibesys.orchestration.memory
     vibesys.loops.multi --> vibesys.orchestration.progress_log
     vibesys.loops.multi --> vibesys.orchestration.runtime
@@ -168,13 +164,13 @@ graph TD
     vibesys.loops.registry --> vibesys.loops.single
     vibesys.loops.registry --> vibesys.orchestration.contracts
     vibesys.loops.single --> vibesys
-    vibesys.loops.single --> vibesys.agent_run
     vibesys.loops.single --> vibesys.context
     vibesys.loops.single --> vibesys.domains
     vibesys.loops.single --> vibesys.errors
     vibesys.loops.single --> vibesys.evaluators
     vibesys.loops.single --> vibesys.loops.agent_options
     vibesys.loops.single --> vibesys.loops.hypothesis_readmodel
+    vibesys.loops.single --> vibesys.orchestration.artifacts
     vibesys.loops.single --> vibesys.orchestration.memory
     vibesys.loops.single --> vibesys.orchestration.progress_log
     vibesys.loops.single --> vibesys.orchestration.runtime
@@ -200,6 +196,9 @@ graph TD
     vibesys.orchestration.agents --> vibesys.prompts
     vibesys.orchestration.agents --> vibesys.run
     vibesys.orchestration.agents --> vibesys.runtime
+    vibesys.orchestration.artifacts --> vibesys.evaluators
+    vibesys.orchestration.artifacts --> vibesys.orchestration.memory
+    vibesys.orchestration.artifacts --> vibesys.search.hypothesis
     vibesys.orchestration.contracts --> vibesys.context
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view
@@ -368,11 +367,7 @@ graph TD
     vibesys --> vs_agent
     vibesys --> vs_feature_flags
     vibesys --> vs_loop_state
-    vibesys.agent_run --> vibesys.evaluators
-    vibesys.agent_run --> vibesys.roles
-    vibesys.agent_run --> vibesys.search.hypothesis
     vibesys.api --> vibesys
-    vibesys.api --> vibesys.agent_run
     vibesys.api --> vibesys.api.contracts
     vibesys.api --> vibesys.domains
     vibesys.api --> vibesys.evaluators
@@ -467,13 +462,13 @@ graph TD
     vibesys.loops.issue_queue --> vs_loop_state
     vibesys.loops.issue_queue --> vs_project
     vibesys.loops.multi --> vibesys
-    vibesys.loops.multi --> vibesys.agent_run
     vibesys.loops.multi --> vibesys.context
     vibesys.loops.multi --> vibesys.domains
     vibesys.loops.multi --> vibesys.errors
     vibesys.loops.multi --> vibesys.evaluators
     vibesys.loops.multi --> vibesys.loops.agent_options
     vibesys.loops.multi --> vibesys.loops.hypothesis_readmodel
+    vibesys.loops.multi --> vibesys.orchestration.artifacts
     vibesys.loops.multi --> vibesys.orchestration.memory
     vibesys.loops.multi --> vibesys.orchestration.progress_log
     vibesys.loops.multi --> vibesys.orchestration.runtime
@@ -493,13 +488,13 @@ graph TD
     vibesys.loops.registry --> vibesys.loops.single
     vibesys.loops.registry --> vibesys.orchestration.contracts
     vibesys.loops.single --> vibesys
-    vibesys.loops.single --> vibesys.agent_run
     vibesys.loops.single --> vibesys.context
     vibesys.loops.single --> vibesys.domains
     vibesys.loops.single --> vibesys.errors
     vibesys.loops.single --> vibesys.evaluators
     vibesys.loops.single --> vibesys.loops.agent_options
     vibesys.loops.single --> vibesys.loops.hypothesis_readmodel
+    vibesys.loops.single --> vibesys.orchestration.artifacts
     vibesys.loops.single --> vibesys.orchestration.memory
     vibesys.loops.single --> vibesys.orchestration.progress_log
     vibesys.loops.single --> vibesys.orchestration.runtime
@@ -529,6 +524,9 @@ graph TD
     vibesys.orchestration.agents --> vibesys.run
     vibesys.orchestration.agents --> vibesys.runtime
     vibesys.orchestration.agents --> vs_agent
+    vibesys.orchestration.artifacts --> vibesys.evaluators
+    vibesys.orchestration.artifacts --> vibesys.orchestration.memory
+    vibesys.orchestration.artifacts --> vibesys.search.hypothesis
     vibesys.orchestration.contracts --> vibesys.context
     vibesys.orchestration.contracts --> vibesys.orchestration.runtime
     vibesys.orchestration.contracts --> vibesys.orchestration.view

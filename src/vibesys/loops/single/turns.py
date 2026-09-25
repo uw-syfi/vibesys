@@ -6,7 +6,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from vibesys import constants
-from vibesys.agent_run import issue_board
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
@@ -16,7 +15,7 @@ from vibesys.errors import (
     UnsupportedProfilerError,
 )
 from vibesys.events import FrameworkSource
-from vibesys.orchestration import memory, progress_log
+from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
@@ -213,7 +212,7 @@ class SingleAgentTurns:
                 )
                 continue
             plan.recommended_skills, _ = self._skills(plan.recommended_skills)
-            issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
+            artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
             self.ctx.progress.note(
                 progress_log.render_orchestrator_plan(request.round_number, plan)
             )
@@ -273,7 +272,7 @@ class SingleAgentTurns:
         view = self.ctx.environment.view
         plan = request.plan
         profiler = self._profiler()
-        plan_artifact = issue_board.write_plan_artifact(
+        plan_artifact = artifacts.write_plan_artifact(
             self.progress_path, request.round_number, plan
         )
         domain_ctx = self._domain_context()
@@ -288,7 +287,7 @@ class SingleAgentTurns:
             progress_location=self.progress_location,
             pareto_archive_location=self.pareto_location,
             validation_location=display_path(
-                issue_board.validation_artifact_root(self.progress_path), self.workspace.path
+                artifacts.validation_artifact_root(self.progress_path), self.workspace.path
             ),
             feedback=state.feedback,
             profiler_kind=self.ctx.environment.profiler_kind.value,
@@ -309,7 +308,7 @@ class SingleAgentTurns:
         context = self._combined_context(request, state)
 
         async def mark_paid() -> None:
-            issue_board.write_implementer_start_marker(
+            artifacts.write_implementer_start_marker(
                 self.progress_path, request.round_number, state.retry
             )
 
@@ -329,7 +328,7 @@ class SingleAgentTurns:
             plan.recommended_skills, _ = self._skills(
                 [*plan.recommended_skills, *response.skill_context_updates]
             )
-            issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
+            artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
         conflict = pareto_archive_conflict(
             candidate_disposition=response.candidate_disposition,
             candidate_metrics=dict(response.candidate_metrics),

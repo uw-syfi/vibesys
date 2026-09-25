@@ -12,10 +12,10 @@ from pathlib import Path  # noqa: TC003  # tracked: #288
 
 import pytest
 
-from vibesys.agent_run import issue_board
 from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
+from vibesys.orchestration import memory
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import PROMPTS_DIR, render_template
 
@@ -100,7 +100,7 @@ def _domain_context(context: dict[str, object]) -> dict[str, object]:
 
 def test_fresh_roadmap_scaffold_does_not_seed_solution_ideas(tmp_path: Path) -> None:
     roadmap = tmp_path / "roadmap"
-    issue_board.ensure_roadmap_file(roadmap)
+    memory.ensure_roadmap_file(roadmap)
 
     text = (roadmap / "index.md").read_text()
     for term in _PRIOR_SOLUTION_TERMS:
