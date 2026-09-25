@@ -24,6 +24,7 @@ from vibesys.loops.profile_single.session import (
     ProfileSingleSessionError,
     RoundSelection,
 )
+from vibesys.orchestration.runtime import GateRunResult
 from vibesys.schemas import OrchestratorPlan, SingleAgentRoundResponse, Verdict
 from vs_loop_state.api import RoundRecord
 
@@ -288,28 +289,44 @@ async def test_passing_review_defers_official_gate_until_cadence(
 async def test_official_gate_failure_keeps_accuracy_evidence_for_same_revision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """`official_gates` policy: ``ctx.gates.run`` mechanics are host-level (see
+    ``tests/vibesys/api/test_gates_run.py``)."""
     session, selected = _session()
     session.round_number = 3
     session.records = []
+    session.state = session.engine.state
+    monkeypatch.setattr(session, "_gate_recorder", None, raising=False)
     commit = AsyncMock()
     monkeypatch.setattr(
         session,
         "ctx",
-        SimpleNamespace(log=lambda _message: None, state=SimpleNamespace(commit=commit)),
+        SimpleNamespace(
+            log=lambda _message: None,
+            state=SimpleNamespace(commit=commit),
+            gates=SimpleNamespace(
+                run=AsyncMock(
+                    return_value=GateRunResult(
+                        feedback="benchmark failed",
+                        benchmark=FrameworkBenchmarkOutcome(),
+                        accuracy_passed=True,
+                    )
+                )
+            ),
+        ),
         raising=False,
     )
     monkeypatch.setattr(
         session, "workspace", SimpleNamespace(revision="candidate-revision"), raising=False
     )
-    monkeypatch.setattr(session, "turns", SimpleNamespace(progress_path=None), raising=False)
+    monkeypatch.setattr(
+        session,
+        "turns",
+        SimpleNamespace(progress_path=None, worker=SimpleNamespace(backend_name="cli")),
+        raising=False,
+    )
     selected.attempt.official_reason = "final_round"
     selected.attempt.retry = 2
     monkeypatch.setattr(session, "_record_official_decision", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        session,
-        "_run_gates",
-        AsyncMock(return_value=("benchmark failed", FrameworkBenchmarkOutcome(), True)),
-    )
 
     assert not await session.official_gates(selected)
     assert selected.request.active_hypothesis.gate_revalidation_pending
@@ -396,10 +413,6 @@ def test_retry_cursor_and_official_command_keep_policy_boundaries(
     assert session._official_reason(requested=True) == "orchestrator_request"  # noqa: SLF001
     session.round_number = 3
     assert session._official_reason(requested=False) == "final_round"  # noqa: SLF001
-    assert ProfileSingleSession._command("run benchmark", "a b", "RELEASE") == (  # noqa: SLF001
-        "env VIBESYS_CANDIDATE_REVISION='a b' RELEASE=1 run benchmark"
-    )
-    assert ProfileSingleSession._command(None, "revision", "RELEASE") is None  # noqa: SLF001
     session.options = session.options.model_copy(update={"max_retries_per_round": 0})
     with pytest.raises(ProfileSingleSessionError, match="exhausting"):
         session.remaining_attempts(selected)

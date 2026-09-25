@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shlex
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -30,15 +29,8 @@ from vibesys.agent_run.evidence import (
 from vibesys.agent_run.hypotheses import adopt_metric_space, update_active_hypothesis
 from vibesys.agent_run.record import RecordInput, build_round_record
 from vibesys.agent_run.state import AgentRunState
-from vibesys.evaluators.gates import (
-    GATE_RECORD_TAIL_CHARS,
-    AccuracyGateResult,
-    BenchmarkGateResult,
-    FrameworkBenchmarkOutcome,
-)
 from vibesys.loops.single.hypothesis import HypothesisEngine
 from vibesys.loops.single.turns import SingleAgentTurns
-from vibesys.orchestration.runtime import MeasurementOptions
 from vibesys.schemas import ProfilerSummary, Verdict
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
@@ -148,6 +140,7 @@ class SingleSession:
         self.options = options
         self.workspace = ctx.workspaces.root
         self.turns = SingleAgentTurns(ctx, options)
+        self._gate_recorder = issue_board.GateBoardRecorder(self.turns.progress_path)
         self.terminal_policy = _TerminalPolicy()
         self.framework_benchmark_configured = (
             ctx.request.input_bundle.benchmark_result is not None
@@ -442,17 +435,6 @@ class SingleSession:
             provisional_candidates=_provisional_candidates_since_official(self.records),
         )
 
-    @staticmethod
-    def _command(command: str | None, revision: str | None, release_env: str | None) -> str | None:
-        if command is None:
-            return None
-        variables = []
-        if revision:
-            variables.append(f"VIBESYS_CANDIDATE_REVISION={shlex.quote(revision)}")
-        if release_env:
-            variables.append(f"{release_env}=1")
-        return f"env {' '.join(variables)} {command}" if variables else command
-
     async def _official_gates(self, selected: SingleRound) -> bool:
         attempt = selected.attempt
         reason = attempt.official_reason
@@ -467,20 +449,26 @@ class SingleSession:
             and hypothesis.gate_candidate_commit == commit
             and hypothesis.gate_accuracy_passed
         )
-        feedback, benchmark, accuracy_passed = await self._run_gates(
-            attempt.retry, commit, reuse_accuracy=reuse_accuracy
+        result = await self.ctx.gates.run(
+            round_number=self.round_number,
+            retry=attempt.retry,
+            commit=commit,
+            objectives=self.state.metrics.objectives,
+            record=self._gate_recorder,
+            reuse_accuracy=reuse_accuracy,
+            agent_backend_name=self.turns.worker.backend_name,
         )
-        attempt.framework_benchmark = benchmark
-        attempt.framework_perf_metric = benchmark.metric_value
-        if feedback is None:
+        attempt.framework_benchmark = result.benchmark
+        attempt.framework_perf_metric = result.benchmark.metric_value
+        if result.feedback is None:
             attempt.passed = True
             return True
-        attempt.feedback = feedback
+        attempt.feedback = result.feedback
         attempt.revalidation_required = True
         hypothesis.gate_revalidation_pending = True
         hypothesis.gate_candidate_commit = commit
-        hypothesis.gate_accuracy_passed = accuracy_passed
-        hypothesis.feedback = feedback
+        hypothesis.gate_accuracy_passed = result.accuracy_passed
+        hypothesis.feedback = result.feedback
         state = update_active_hypothesis(
             selected.attempt.agent_run_state, selected.request.active_hypothesis
         )
@@ -493,96 +481,6 @@ class SingleSession:
             publish=state,
         )
         return False
-
-    async def _run_gates(
-        self, retry: int, commit: str | None, *, reuse_accuracy: bool
-    ) -> tuple[str | None, FrameworkBenchmarkOutcome, bool]:
-        if self.turns.worker.backend_name == "stub":
-            return None, FrameworkBenchmarkOutcome(), False
-        resource_feedback = await self.ctx.environment.reconcile_model_requests()
-        if resource_feedback is not None:
-            return resource_feedback, FrameworkBenchmarkOutcome(), False
-        accuracy = await self._accuracy_gate(retry, commit, reuse=reuse_accuracy)
-        if accuracy.feedback is not None:
-            return accuracy.feedback, FrameworkBenchmarkOutcome(), False
-        benchmark = await self._benchmark_gate(retry, commit)
-        return benchmark.outcome.feedback, benchmark.outcome, True
-
-    async def _accuracy_gate(
-        self, retry: int, commit: str | None, *, reuse: bool
-    ) -> AccuracyGateResult:
-        number = self.round_number
-        view = self.ctx.environment.view
-        command = view.paths.accuracy_command
-        if reuse:
-            issue_board.append_framework_accuracy_gate(
-                self.turns.progress_path,
-                number,
-                retry,
-                command=command or "(not configured)",
-                passed=True,
-                output=(
-                    "Reused the prior framework-owned PASS for this exact candidate commit; "
-                    "a later gate, not accuracy, caused the retry."
-                ),
-            )
-            return await self.ctx.evaluator.reuse_accuracy(label=f"round-{number}")
-        release = (
-            self.ctx.request.input_bundle.benchmark_result is None
-            and self.ctx.request.input_bundle.benchmark_result_protocol is None
-        ) or not view.paths.benchmark_command
-        execution = self._command(
-            command,
-            commit,
-            view.deployment_release_env_var if release else None,
-        )
-        result = await self.ctx.evaluator.check(
-            f"accuracy-{number}-{retry}",
-            label=f"round-{number}",
-            execution_command=execution,
-        )
-        if result.passed and not result.executed:
-            return result
-        issue_board.append_framework_accuracy_gate(
-            self.turns.progress_path,
-            number,
-            retry,
-            command=result.command or "(not configured)",
-            passed=result.passed,
-            output=result.output[-GATE_RECORD_TAIL_CHARS:],
-        )
-        await self.workspace.snapshot(f"round-{number}-retry-{retry}-framework-accuracy")
-        return result
-
-    async def _benchmark_gate(self, retry: int, commit: str | None) -> BenchmarkGateResult:
-        number = self.round_number
-        view = self.ctx.environment.view
-        execution = self._command(
-            view.paths.benchmark_command, commit, view.deployment_release_env_var
-        )
-        result = await self.ctx.evaluator.measure(
-            f"{number}-{retry}",
-            options=MeasurementOptions(
-                objectives=tuple(self.state.metrics.objectives),
-                label=f"round-{number}",
-                execution_base=execution,
-            ),
-        )
-        if not result.executed:
-            return result
-        spec = self.ctx.request.input_bundle.benchmark_result
-        issue_board.append_framework_benchmark(
-            self.turns.progress_path,
-            number,
-            retry,
-            command=result.command or "(not configured)",
-            passed=result.passed,
-            metric_name=result.outcome.metric_name or (spec.metric if spec else None),
-            metric_value=result.outcome.metric_value,
-            output=result.output[-GATE_RECORD_TAIL_CHARS:],
-        )
-        await self.workspace.snapshot(f"round-{number}-retry-{retry}-framework-benchmark")
-        return result
 
     async def commit_round(self, selected: SingleRound) -> None:
         """Commit the completed round and publish its observable record."""

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
@@ -14,17 +14,14 @@ from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState
 from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.state import AgentRunState
-from vibesys.evaluators.gates import (
-    AccuracyGateResult,
-    BenchmarkGateResult,
-    FrameworkBenchmarkOutcome,
-)
+from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.loops.multi.decisions import AttemptRequest, HypothesisEngine, PlanRequest
 from vibesys.loops.multi.session import MultiSession
 from vibesys.loops.multi.turns import MultiAgentTurns
 from vibesys.loops.profile_multi.controller import HypothesisEngine as ProfileHypothesisEngine
 from vibesys.loops.profile_multi.session import ProfileMultiSession
 from vibesys.loops.single.session import SingleSession
+from vibesys.orchestration.runtime import GateRunResult
 from vibesys.schemas import (
     ImplementerResponse,
     JudgeResponse,
@@ -48,6 +45,7 @@ class _FakeTurns:
     calls: list[str]
     needs_profile: bool = True
     profiler_enabled: bool = True
+    worker: SimpleNamespace = field(default_factory=lambda: SimpleNamespace(backend_name="cli"))
 
     async def pre_round_decision(
         self, _round_number: int, _carry: CarryOver, *, has_history: bool
@@ -193,6 +191,8 @@ def test_multi_validation_failure_checkpoints_before_retry_and_official_gate() -
     session.round_number = 1
     session.options = SimpleNamespace(max_rounds=1, judge_every=1, official_eval_every=1)
     session.workspace = SimpleNamespace(revision="a" * 40)
+    session.state = state.agent_run_state
+    session._gate_recorder = None
     validation_feedback = ["bad recipe", None]
 
     async def validate(_selected: object, _recipe: str | None) -> str | None:
@@ -208,15 +208,15 @@ def test_multi_validation_failure_checkpoints_before_retry_and_official_gate() -
         state=SimpleNamespace(commit=commit),
     )
 
-    async def gates(
-        _retry: int, _commit: str | None, *, reuse_accuracy: bool
-    ) -> tuple[str | None, FrameworkBenchmarkOutcome, bool]:
+    async def gates(*, reuse_accuracy: bool, **_kwargs: object) -> GateRunResult:
         assert not reuse_accuracy
         calls.append(f"official-gate:{state.retry}")
-        return None, FrameworkBenchmarkOutcome(), True
+        return GateRunResult(
+            feedback=None, benchmark=FrameworkBenchmarkOutcome(), accuracy_passed=True
+        )
 
+    session.ctx.gates = SimpleNamespace(run=gates)
     session._validate_local = validate
-    session._run_gates = gates
     session._record_official_decision = lambda _selected, *, run, reason: calls.append(
         f"official-decision:{state.retry}:{run}:{reason}"
     )
@@ -458,23 +458,40 @@ def test_multi_local_validation_restores_mutated_candidate(tmp_path: Path) -> No
 
 
 def test_multi_official_gate_failure_persists_revalidation_for_exact_commit() -> None:
+    """`_official_gates` policy: revalidation bookkeeping and gate reuse on retry.
+
+    `ctx.gates.run`'s own mechanics (resource reconciliation, accuracy-then-
+    benchmark ordering) are host mechanics, covered at the host level in
+    `tests/vibesys/api/test_gates_run.py`.
+    """
     request, attempt = _attempt()
     attempt.retry = 1
     attempt.official_reason = "final_round"
     selected = SimpleNamespace(request=request, attempt=attempt)
     session = cast("Any", MultiSession.__new__(MultiSession))
     session.workspace = SimpleNamespace(revision="a" * 40)
-    session.ctx = SimpleNamespace(state=SimpleNamespace(commit=AsyncMock()))
+    session.turns = SimpleNamespace(worker=SimpleNamespace(backend_name="cli"))
+    session.state = attempt.agent_run_state
+    session._gate_recorder = None
     session.round_number = 1
     decisions: list[tuple[bool, str]] = []
     session._record_official_decision = lambda _selected, *, run, reason: decisions.append(
         (run, reason)
     )
-    session._run_gates = AsyncMock(
+    gates_run = AsyncMock(
         side_effect=[
-            ("benchmark failed", FrameworkBenchmarkOutcome(), True),
-            (None, FrameworkBenchmarkOutcome(), True),
+            GateRunResult(
+                feedback="benchmark failed",
+                benchmark=FrameworkBenchmarkOutcome(),
+                accuracy_passed=True,
+            ),
+            GateRunResult(
+                feedback=None, benchmark=FrameworkBenchmarkOutcome(), accuracy_passed=True
+            ),
         ]
+    )
+    session.ctx = SimpleNamespace(
+        state=SimpleNamespace(commit=AsyncMock()), gates=SimpleNamespace(run=gates_run)
     )
 
     assert not asyncio.run(session._official_gates(selected))
@@ -487,62 +504,5 @@ def test_multi_official_gate_failure_persists_revalidation_for_exact_commit() ->
 
     assert asyncio.run(session._official_gates(selected))
     assert attempt.passed
-    assert session._run_gates.await_args_list[1].kwargs["reuse_accuracy"]
+    assert gates_run.await_args_list[1].kwargs["reuse_accuracy"]
     assert decisions == [(True, "final_round"), (True, "final_round")]
-
-
-def test_multi_run_gates_stops_after_resource_reconciliation_failure() -> None:
-    session = cast("Any", MultiSession.__new__(MultiSession))
-    reconcile = AsyncMock(return_value="model request rejected")
-    session.ctx = SimpleNamespace(environment=SimpleNamespace(reconcile_model_requests=reconcile))
-    session.turns = SimpleNamespace(worker=SimpleNamespace(backend_name="cli"))
-    session._accuracy_gate = AsyncMock()
-    session._benchmark_gate = AsyncMock()
-
-    feedback, benchmark, accuracy_passed = asyncio.run(
-        session._run_gates(1, "a" * 40, reuse_accuracy=False)
-    )
-    assert feedback == "model request rejected"
-    assert benchmark.metric_value is None
-    assert not accuracy_passed
-    session._accuracy_gate.assert_not_awaited()
-    session._benchmark_gate.assert_not_awaited()
-
-
-def test_multi_run_gates_orders_accuracy_before_benchmark() -> None:
-    session = cast("Any", MultiSession.__new__(MultiSession))
-    session.ctx = SimpleNamespace(
-        environment=SimpleNamespace(reconcile_model_requests=AsyncMock(return_value=None))
-    )
-    session.turns = SimpleNamespace(worker=SimpleNamespace(backend_name="cli"))
-    session._accuracy_gate = AsyncMock(
-        side_effect=[
-            AccuracyGateResult(
-                command="check",
-                passed=False,
-                output="failed",
-                feedback="accuracy rejected",
-                executed=True,
-            ),
-            AccuracyGateResult(
-                command="check", passed=True, output="passed", feedback=None, executed=True
-            ),
-        ]
-    )
-    outcome = FrameworkBenchmarkOutcome(metric_value=12.0)
-    session._benchmark_gate = AsyncMock(
-        return_value=BenchmarkGateResult(
-            command="measure", output="passed", executed=True, outcome=outcome
-        )
-    )
-
-    feedback, _, passed = asyncio.run(session._run_gates(1, "a" * 40, reuse_accuracy=False))
-    assert feedback == "accuracy rejected"
-    assert not passed
-    session._benchmark_gate.assert_not_awaited()
-
-    feedback, benchmark, passed = asyncio.run(session._run_gates(2, "b" * 40, reuse_accuracy=True))
-    assert feedback is None
-    assert benchmark is outcome
-    assert passed
-    assert session._accuracy_gate.await_args_list[1].kwargs["reuse"]

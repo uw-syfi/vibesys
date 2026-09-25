@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shlex
 import sys
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -30,8 +31,10 @@ from vibesys.context import (
     open_scoped_agent_environment,
 )
 from vibesys.evaluators.gates import (
+    GATE_RECORD_TAIL_CHARS,
     AccuracyGateResult,
     BenchmarkGateResult,
+    FrameworkBenchmarkOutcome,
     emit_gate_finished,
     emit_gate_started,
     framework_command_timeout,
@@ -751,6 +754,50 @@ class _GateInputs:
         return self.git.trusted_input_changes()
 
 
+class GateRecorder(Protocol):
+    """Progress-board sink a strategy declares once for `_Evaluator.run`.
+
+    Each method receives the same typed gate result `run` computed, so a
+    strategy's board rendering never re-derives verdict/output/metric facts
+    from anything but that one result.
+    """
+
+    def accuracy(
+        self, round_number: int, retry: int, *, command: str, passed: bool, output: str
+    ) -> None:
+        """Record one accuracy-gate outcome."""
+        ...
+
+    def benchmark(  # noqa: PLR0913  # mirrors the typed gate result's own field count
+        self,
+        round_number: int,
+        retry: int,
+        *,
+        command: str,
+        passed: bool,
+        metric_name: str | None,
+        metric_value: float | None,
+        output: str,
+    ) -> None:
+        """Record one benchmark-gate outcome."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class GateRunResult:
+    """Combined accuracy+benchmark outcome from one `_Evaluator.run` call.
+
+    `feedback` is the first gate's rejection message, or `None` if both
+    passed (or gates were skipped, e.g. a stub backend). `accuracy_passed`
+    tells the caller whether it may reuse this outcome for a later retry of
+    the exact same candidate commit (see `reuse_accuracy`).
+    """
+
+    feedback: str | None
+    benchmark: FrameworkBenchmarkOutcome
+    accuracy_passed: bool
+
+
 class _Evaluator:
     """Trusted checks and measurements in the parent run workspace."""
 
@@ -843,6 +890,151 @@ class _Evaluator:
                 execution_base=options.execution_base,
                 round_label=options.label,
             )
+
+    async def run(  # noqa: PLR0913  # one call replaces four strategies' hand-rolled sequencing
+        self,
+        *,
+        round_number: int,
+        retry: int,
+        commit: str | None,
+        objectives: Sequence[Objective],
+        record: GateRecorder,
+        reuse_accuracy: bool = False,
+        agent_backend_name: str | None = None,
+    ) -> GateRunResult:
+        """Run the accuracy then benchmark gate, recording each outcome once.
+
+        This is the one place the "official gates are due" mechanics live
+        (reuse-accuracy, command composition with the candidate revision and
+        release env var, accuracy-then-benchmark sequencing, the stub-backend
+        skip). *When* to call it (retry/review policy) stays with the
+        strategy. A stub `agent_backend_name` (tests, fast local runs) skips
+        both gates and reports a pass with no feedback and an empty outcome,
+        matching every strategy's prior hand-rolled check.
+        """
+        if agent_backend_name == "stub":
+            return GateRunResult(
+                feedback=None, benchmark=FrameworkBenchmarkOutcome(), accuracy_passed=False
+            )
+        resource_feedback = await self._host.environment.reconcile_model_requests()
+        if resource_feedback is not None:
+            return GateRunResult(
+                feedback=resource_feedback,
+                benchmark=FrameworkBenchmarkOutcome(),
+                accuracy_passed=False,
+            )
+        accuracy = await self._run_accuracy_gate(
+            round_number, retry, commit, reuse=reuse_accuracy, record=record
+        )
+        if accuracy.feedback is not None:
+            return GateRunResult(
+                feedback=accuracy.feedback,
+                benchmark=FrameworkBenchmarkOutcome(),
+                accuracy_passed=False,
+            )
+        benchmark = await self._run_benchmark_gate(
+            round_number, retry, commit, objectives, record=record
+        )
+        return GateRunResult(feedback=benchmark.feedback, benchmark=benchmark, accuracy_passed=True)
+
+    async def _run_accuracy_gate(
+        self,
+        round_number: int,
+        retry: int,
+        commit: str | None,
+        *,
+        reuse: bool,
+        record: GateRecorder,
+    ) -> AccuracyGateResult:
+        view = self._host.environment.view
+        command = view.paths.accuracy_command
+        if reuse:
+            record.accuracy(
+                round_number,
+                retry,
+                command=command or "(not configured)",
+                passed=True,
+                output=(
+                    "Reused the prior framework-owned PASS for this exact candidate commit; "
+                    "a later gate, not accuracy, caused the retry."
+                ),
+            )
+            return await self.reuse_accuracy(label=f"round-{round_number}")
+        bundle = self._host.request.input_bundle
+        release = (
+            bundle.benchmark_result is None and bundle.benchmark_result_protocol is None
+        ) or not view.paths.benchmark_command
+        execution = self._command(
+            command, commit, view.deployment_release_env_var if release else None
+        )
+        result = await self.check(
+            f"accuracy-{round_number}-{retry}",
+            label=f"round-{round_number}",
+            execution_command=execution,
+        )
+        if result.passed and not result.executed:
+            return result
+        record.accuracy(
+            round_number,
+            retry,
+            command=result.command or "(not configured)",
+            passed=result.passed,
+            output=result.output[-GATE_RECORD_TAIL_CHARS:],
+        )
+        await self._host.workspaces.root.snapshot(
+            f"round-{round_number}-retry-{retry}-framework-accuracy"
+        )
+        return result
+
+    async def _run_benchmark_gate(
+        self,
+        round_number: int,
+        retry: int,
+        commit: str | None,
+        objectives: Sequence[Objective],
+        *,
+        record: GateRecorder,
+    ) -> FrameworkBenchmarkOutcome:
+        view = self._host.environment.view
+        execution = self._command(
+            view.paths.benchmark_command, commit, view.deployment_release_env_var
+        )
+        result = await self.measure(
+            f"{round_number}-{retry}",
+            options=MeasurementOptions(
+                objectives=tuple(objectives),
+                label=f"round-{round_number}",
+                execution_base=execution,
+            ),
+        )
+        if not result.executed:
+            return result.outcome
+        spec = self._host.request.input_bundle.benchmark_result
+        record.benchmark(
+            round_number,
+            retry,
+            command=result.command or "(not configured)",
+            passed=result.passed,
+            metric_name=result.outcome.metric_name or (spec.metric if spec else None),
+            metric_value=result.outcome.metric_value,
+            output=result.output[-GATE_RECORD_TAIL_CHARS:],
+        )
+        await self._host.workspaces.root.snapshot(
+            f"round-{round_number}-retry-{retry}-framework-benchmark"
+        )
+        return result.outcome
+
+    @staticmethod
+    def _command(command: str | None, revision: str | None, release_env: str | None) -> str | None:
+        """Compose a trusted gate command with the candidate revision/release env."""
+        if command is None:
+            return None
+        variables = []
+        if revision:
+            variables.append(f"VIBESYS_CANDIDATE_REVISION={shlex.quote(revision)}")
+        if release_env:
+            variables.append(f"{release_env}=1")
+        return f"env {' '.join(variables)} {command}" if variables else command
 
 
 class WorkspaceHandle:
@@ -1285,6 +1477,10 @@ class RunContext:
         self.control = _RunControl(integration, debug=request.debug)
         self.state = _RunState(self)
         self.evaluator = _Evaluator(self)
+        # `gates` is the same instance as `evaluator`, under the name the
+        # `run` gate API is meant to be reached by; `evaluator` stays for
+        # `check`/`measure`/`reuse_accuracy` callers until they migrate too.
+        self.gates = self.evaluator
         self.workspaces = _Workspaces(self)
         self.agents = _Agents(self)
         self.environment = _Environment(self)

@@ -706,6 +706,53 @@ def append_framework_benchmark(  # noqa: D103, PLR0913  # tracked: #288
     _append(progress_path, block, round_number)
 
 
+class GateBoardRecorder:
+    """The one `orchestration.runtime.GateRecorder` for every agent strategy.
+
+    `ctx.gates.run` calls this back with the same typed gate result it
+    computed; the strategy declares one instance (bound to its own progress
+    file) instead of writing `append_framework_*` calls next to each gate
+    call site.
+    """
+
+    __slots__ = ("progress_path",)
+
+    def __init__(self, progress_path: Path) -> None:
+        """Bind this recorder to one strategy's progress file."""
+        self.progress_path = progress_path
+
+    def accuracy(
+        self, round_number: int, retry: int, *, command: str, passed: bool, output: str
+    ) -> None:
+        """Record one accuracy-gate outcome."""
+        append_framework_accuracy_gate(
+            self.progress_path, round_number, retry, command=command, passed=passed, output=output
+        )
+
+    def benchmark(  # noqa: PLR0913  # mirrors GateRecorder.benchmark's own field count
+        self,
+        round_number: int,
+        retry: int,
+        *,
+        command: str,
+        passed: bool,
+        metric_name: str | None,
+        metric_value: float | None,
+        output: str,
+    ) -> None:
+        """Record one benchmark-gate outcome."""
+        append_framework_benchmark(
+            self.progress_path,
+            round_number,
+            retry,
+            command=command,
+            passed=passed,
+            metric_name=metric_name,
+            metric_value=metric_value,
+            output=output,
+        )
+
+
 def append_exhaustion_note(  # noqa: D103  # tracked: #288
     progress_path: Path, round_number: int, attempts: int, last_feedback: str
 ) -> None:

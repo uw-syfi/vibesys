@@ -13,14 +13,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed, JudgeSkipped
 from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.state import AgentRunState
-from vibesys.evaluators.gates import (
-    AccuracyGateResult,
-    BenchmarkGateResult,
-    FrameworkBenchmarkOutcome,
-)
+from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.loops.multi.decisions import AttemptRequest, HypothesisEngine, RoundSelection
 from vibesys.loops.multi.session import (
     MultiRound,
@@ -28,6 +25,7 @@ from vibesys.loops.multi.session import (
     MultiSessionError,
     _TerminalPolicy,
 )
+from vibesys.orchestration.runtime import GateRunResult
 from vibesys.schemas import (
     HypothesisOutcome,
     ImplementerResponse,
@@ -94,6 +92,7 @@ def _session(tmp_path: Path) -> MultiSession:
     )
     progress = tmp_path / "progress.md"
     progress.write_text("# Progress\n")
+    session._gate_recorder = issue_board.GateBoardRecorder(progress)
     session.turns = SimpleNamespace(
         progress_path=progress,
         roadmap_path=tmp_path / "roadmap.md",
@@ -133,9 +132,7 @@ def _session(tmp_path: Path) -> MultiSession:
         agents=SimpleNamespace(progress=lambda _progress: nullcontext()),
         state=SimpleNamespace(load=AsyncMock(return_value=None), commit=AsyncMock()),
         environment=environment,
-        evaluator=SimpleNamespace(
-            check=AsyncMock(), measure=AsyncMock(), reuse_accuracy=AsyncMock()
-        ),
+        gates=SimpleNamespace(run=AsyncMock()),
         request=SimpleNamespace(
             project_root=tmp_path,
             input_bundle=SimpleNamespace(benchmark_result=None, benchmark_result_protocol=None),
@@ -280,13 +277,21 @@ def test_sparse_review_defers_gates_and_records_provisional_decision(tmp_path: P
 
 
 def test_official_gate_feedback_is_checkpointed_and_success_passes(tmp_path: Path) -> None:
+    """`official_gates` handles `ctx.gates.run`'s result: the policy the strategy owns.
+
+    `ctx.gates.run`'s own mechanics (stub skip, resource reconciliation,
+    accuracy-then-benchmark ordering) are host mechanics, covered at the host
+    level in `tests/vibesys/api/test_gates_run.py`.
+    """
     session = cast("Any", _session(tmp_path))
     selected = _selected()
     selected.attempt.official_reason = "final_round"
     selected.attempt.retry = 1
     session._record_official_decision = MagicMock()
     benchmark = FrameworkBenchmarkOutcome(metric_name="throughput", metric_value=42.0)
-    session._run_gates = AsyncMock(return_value=("benchmark failed", benchmark, True))
+    session.ctx.gates.run.return_value = GateRunResult(
+        feedback="benchmark failed", benchmark=benchmark, accuracy_passed=True
+    )
 
     assert not asyncio.run(session.official_gates(selected))
     assert selected.request.active_hypothesis.gate_revalidation_pending
@@ -294,48 +299,11 @@ def test_official_gate_feedback_is_checkpointed_and_success_passes(tmp_path: Pat
     assert selected.attempt.framework_perf_metric == 42.0
     session.ctx.state.commit.assert_awaited_once()
 
-    session._run_gates.return_value = (None, benchmark, True)
+    session.ctx.gates.run.return_value = GateRunResult(
+        feedback=None, benchmark=benchmark, accuracy_passed=True
+    )
     assert asyncio.run(session.official_gates(selected))
     assert selected.attempt.passed
-
-
-def test_gate_pipeline_handles_resource_accuracy_and_benchmark_outcomes(tmp_path: Path) -> None:
-    session = cast("Any", _session(tmp_path))
-    session.turns.worker.backend_name = "stub"
-    assert asyncio.run(session._run_gates(1, "a" * 40, reuse_accuracy=False))[0] is None
-    session.turns.worker.backend_name = "cli"
-
-    session.ctx.environment.reconcile_model_requests.return_value = "model unavailable"
-    assert (
-        asyncio.run(session._run_gates(1, "a" * 40, reuse_accuracy=False))[0] == "model unavailable"
-    )
-    session.ctx.environment.reconcile_model_requests.return_value = None
-    session._accuracy_gate = AsyncMock(
-        return_value=AccuracyGateResult(
-            command="check", passed=False, output="bad", feedback="accuracy failed", executed=True
-        )
-    )
-    assert (
-        asyncio.run(session._run_gates(1, "a" * 40, reuse_accuracy=False))[0] == "accuracy failed"
-    )
-
-    session._accuracy_gate.return_value = AccuracyGateResult(
-        command="check", passed=True, output="ok", feedback=None, executed=True
-    )
-    session._benchmark_gate = AsyncMock(
-        return_value=BenchmarkGateResult(
-            command="bench",
-            output="ok",
-            executed=True,
-            outcome=FrameworkBenchmarkOutcome(metric_value=5.0),
-        )
-    )
-    feedback, outcome, accuracy_passed = asyncio.run(
-        session._run_gates(1, "a" * 40, reuse_accuracy=True)
-    )
-    assert feedback is None
-    assert outcome.metric_value == 5.0
-    assert accuracy_passed
 
 
 def test_local_validation_rejects_mutating_command_and_restores_snapshot(tmp_path: Path) -> None:
@@ -398,33 +366,3 @@ def test_completed_reviewed_round_checkpoints_record_before_advancing(tmp_path: 
     commit = session.ctx.state.commit.await_args
     assert commit.kwargs["sequence"] == 1
     assert commit.kwargs["writes"]["state.json"].rounds == session.records
-
-
-def test_accuracy_and_benchmark_gates_attach_revision_and_snapshot(tmp_path: Path) -> None:
-    session = cast("Any", _session(tmp_path))
-    session.ctx.evaluator.check.return_value = AccuracyGateResult(
-        command="check", passed=True, output="healthy", feedback=None, executed=True
-    )
-    accuracy = asyncio.run(session._accuracy_gate(1, "c" * 40, reuse=False))
-    assert accuracy.passed
-    check_command = session.ctx.evaluator.check.await_args.kwargs["execution_command"]
-    assert "VIBESYS_CANDIDATE_REVISION=" in check_command
-    assert "RELEASE_DEPLOYMENT=1" in check_command
-    assert session.workspace.snapshot.await_count == 1
-
-    session.ctx.evaluator.reuse_accuracy.return_value = accuracy
-    assert asyncio.run(session._accuracy_gate(2, "c" * 40, reuse=True)) is accuracy
-    session.ctx.evaluator.reuse_accuracy.assert_awaited_once_with(label="round-1")
-    assert session.workspace.snapshot.await_count == 1
-
-    benchmark = BenchmarkGateResult(
-        command="bench",
-        output="42",
-        executed=True,
-        outcome=FrameworkBenchmarkOutcome(metric_name="throughput", metric_value=42.0),
-    )
-    session.ctx.evaluator.measure.return_value = benchmark
-    assert asyncio.run(session._benchmark_gate(1, "c" * 40)) is benchmark
-    options = session.ctx.evaluator.measure.await_args.kwargs["options"]
-    assert "VIBESYS_CANDIDATE_REVISION=" in options.execution_base
-    assert session.workspace.snapshot.await_count == 2
