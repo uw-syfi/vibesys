@@ -62,6 +62,27 @@ def _load_module(name: str, path: Path) -> ModuleType:
     return module
 
 
+# Registered under the bare names "capture_runtime"/"capture" (not a
+# file-scoped name) *deliberately*: capture.py's own top-level `import
+# capture_runtime` statement does a plain sys.modules lookup by that exact
+# name, so pre-registering `cr` under it here (before loading capture.py)
+# makes capture.py's internal `capture_runtime` reference resolve to this
+# same `cr` object rather than triggering an independent fresh import. Any
+# other test file that also wants a private, standalone
+# capture_runtime.py load (e.g. test_capture_runtime.py) must use a
+# file-scoped name instead of "capture_runtime"/"capture": sys.modules is
+# process-global, and clobbering this pre-registration mid-session (e.g.
+# from a later-collected test file's own module-level `_load_module` call)
+# silently splits module identity for capture.py and anything loaded after
+# the clobber (a real bug this exact setup surfaced: server.py's `import
+# capture_runtime`, resolved lazily when test_profiler_mcp.py's
+# `rocprof_server_mod` fixture first execs server.py, picked up whichever
+# module last won the "capture_runtime" slot, while capture.py -- already
+# cached under "capture" and never re-executed -- kept its own, different
+# `capture_runtime` reference bound at its own load time here; server.py's
+# `except capture_runtime.CaptureBusyError` then silently failed to catch
+# capture.py's own `CaptureBusyError`, a different class object with the
+# same name, and the exception propagated as an uncaught `ToolError`).
 cr = _load_module("capture_runtime", _COMMON_DIR / "capture_runtime.py")
 capture = _load_module("capture", _ROCPROF_DIR / "capture.py")
 
@@ -199,6 +220,69 @@ def _install_fake_rocprofv3(
             rocm_version=rocm_version,
         ),
     )
+    return path
+
+
+def _fake_rocprofv3_pmc_limit_source(*, limit: int) -> str:
+    """A fake rocprofv3 that rejects any ``--pmc`` pass over *limit* counters.
+
+    Models the real (unconfirmed without a live rocprofv3) rejection
+    ``profile_counters``' packing fallback is built to recover from: a
+    packed pass with too many counters for one hardware collection fails
+    with recognizable text (see ``counters.PACKED_PASS_REJECTION_RE``)
+    instead of succeeding. Writes a minimal, real-shaped
+    ``*_counter_collection.csv`` (one row per requested counter, on the
+    fixed ``flash_attn_decode_kernel`` name) for any pass at or under the
+    limit, so a downstream ``counter_triage`` call has something to read.
+    """
+    return textwrap.dedent(
+        f"""
+        import sys
+        from pathlib import Path
+
+        LIMIT = {limit!r}
+        argv = sys.argv[1:]
+
+        out_dir = None
+        for i, tok in enumerate(argv):
+            if tok == "-d" and i + 1 < len(argv):
+                out_dir = argv[i + 1]
+                break
+
+        pmc_counters = []
+        if "--pmc" in argv:
+            j = argv.index("--pmc") + 1
+            while j < len(argv) and not argv[j].startswith("--"):
+                pmc_counters.append(argv[j])
+                j += 1
+
+        if len(pmc_counters) > LIMIT:
+            sys.stderr.write(
+                "rocprofv3: error: requested counters do not fit in a single pass; "
+                "this collection requires multiple passes\\n"
+            )
+            sys.exit(1)
+
+        if out_dir:
+            out_path = Path(out_dir)
+            out_path.mkdir(parents=True, exist_ok=True)
+            header = (
+                "Kernel_Name,Dispatch_Id,Counter_Name,Counter_Value,"
+                "Start_Timestamp,End_Timestamp"
+            )
+            rows = [header]
+            for i, name in enumerate(pmc_counters):
+                rows.append(f"flash_attn_decode_kernel,1,{{name}},{{100 + i}},1000,2000")
+            (out_path / "fake_counter_collection.csv").write_text("\\n".join(rows) + "\\n")
+
+        sys.exit(0)
+        """
+    )
+
+
+def _install_fake_rocprofv3_pmc_limit(bin_dir: Path, *, limit: int) -> Path:
+    path = bin_dir / "rocprofv3"
+    _write_script(path, _fake_rocprofv3_pmc_limit_source(limit=limit))
     return path
 
 
@@ -477,23 +561,19 @@ def test_profile_timeline_records_hip_api_and_kernel_include_in_manifest(
     assert manifest["meta"]["kernel_include"] == "foo.*"
 
 
-def _install_fake_diag_helper(bin_dir: Path) -> Path:
-    """A helper mimicking real rocprofv3's own SPM diagnostic banner.
+def _install_fake_diag_helper_unsuppressible(bin_dir: Path) -> Path:
+    """A helper mimicking real rocprofv3's own, confirmed-unsuppressible SPM banner.
 
-    Models the real incident this branch fixes: rocprofv3 injects its tool
-    library into every process in the launched tree (inherited env), and
-    that library prints a one-time diagnostic line to stdout the moment it
-    loads into a process -- independent of whether that process does any
-    profiled work. A small helper invoked via ``$(...)`` command
-    substitution to compute a value (e.g. picking a free port) has that
-    banner land in the substitution result together with the real value,
-    because both go to the same stdout. Real rocprofv3 has an actual env
-    knob for this (candidate names are unconfirmed without a live rocprofv3
-    -- see ``capture.py``'s ``_ROCPROFV3_QUIET_ENV``); this fake checks the
-    same candidate names capture.py sets, so the test exercises exactly the
-    mechanism the fix relies on: the value reaching this subprocess via
-    ordinary env inheritance down the whole process tree, not a rocprofv3-
-    specific channel.
+    Models the real, hardware-confirmed mechanism (see
+    ``docs/contributing/amd-profiler-worklog.md``): rocprofv3 injects its
+    tool library into every process in the launched tree via inherited env
+    (a stand-in for its real ``LD_PRELOAD`` injection), and that library
+    prints a diagnostic banner the moment it loads -- with **no** env var or
+    CLI flag that suppresses it (7 candidates plus ``--log-level fatal``
+    were tried live on real MI210 hardware; every one produced the
+    identical banner). This fake has no quiet-env check at all, matching
+    that finding: the only way to get a clean value out of it is to never
+    run it under the injected env in the first place (``setup_command``).
     """
     path = bin_dir / "diag_helper"
     _write_script(
@@ -503,10 +583,7 @@ def _install_fake_diag_helper(bin_dir: Path) -> Path:
             import os
             import sys
 
-            quiet = os.environ.get("ROCPROFILER_LOG_LEVEL") == "fatal" or (
-                os.environ.get("ROCPROF_LOG_LEVEL") == "fatal"
-            )
-            if not quiet:
+            if os.environ.get("FAKE_ROCPROFV3_INJECTED") == "1":
                 sys.stdout.write(
                     "Streaming Performance Monitor (SPM) is not supported on gfx90a devices\\n"
                 )
@@ -517,31 +594,78 @@ def _install_fake_diag_helper(bin_dir: Path) -> Path:
     return path
 
 
-def test_profile_timeline_quiets_rocprofv3_diagnostic_leaking_into_command_substitution(
+def _install_fake_rocprofv3_injecting(bin_dir: Path) -> Path:
+    """A ``rocprofv3`` fake that injects a marker env var into its whole launched tree.
+
+    Stands in for rocprofv3's real ``LD_PRELOAD`` injection: propagated to
+    every descendant of the *wrapped* command via ordinary env inheritance,
+    with no scoping to HSA/ROCm work. ``setup_command`` never runs inside
+    this tree at all (see ``_run_setup`` in ``capture_runtime.py``), so
+    nothing it runs can ever observe this marker.
+    """
+    path = bin_dir / "rocprofv3"
+    _write_script(
+        path,
+        textwrap.dedent(
+            """
+            import os
+            import subprocess
+            import sys
+            from pathlib import Path
+
+            argv = sys.argv[1:]
+            out_dir = None
+            for i, tok in enumerate(argv):
+                if tok == "-d" and i + 1 < len(argv):
+                    out_dir = argv[i + 1]
+                    break
+            wrapped = argv[argv.index("--") + 1 :] if "--" in argv else []
+            env = dict(os.environ)
+            env["FAKE_ROCPROFV3_INJECTED"] = "1"
+            rc = subprocess.Popen(wrapped, env=env).wait() if wrapped else 0
+            if rc == 0 and out_dir:
+                Path(out_dir).mkdir(parents=True, exist_ok=True)
+            sys.exit(rc)
+            """
+        ),
+    )
+    return path
+
+
+def test_profile_timeline_setup_command_avoids_the_unsuppressible_rocprofv3_banner(
     profiles_dir: Path, bin_dir: Path, tmp_path: Path
 ) -> None:
     """Regression test for the real observed incident (see grade.md / transcript).
 
-    A ``command`` that captures a helper's stdout via ``$(...)`` (e.g. a
-    port-picker) must get back a clean value even though it's launched
-    under rocprofv3, which would otherwise leak its own diagnostic banner
-    into that same stdout. ``capture.py`` must default
-    ``ROCPROFILER_LOG_LEVEL``/``ROCPROF_LOG_LEVEL`` into the lifecycle env
-    it hands to ``run_capture`` for exactly this reason.
+    A value a launch needs (e.g. a port, picked via a helper's stdout) must
+    come back clean when picked via ``setup_command``, even though
+    rocprofv3 (faked here to inject an unsuppressible marker into
+    everything it launches) would corrupt that same value if the helper
+    ran inside ``command`` instead. There is no quiet-env mitigation to
+    fall back on (confirmed dead on real hardware -- see
+    ``docs/contributing/amd-profiler-worklog.md``); ``setup_command`` is
+    the only fix, since ``run_capture`` never wraps it in
+    ``profiler_prefix``. Fails on code that runs ``setup_command`` through
+    the profiler (or has no ``setup_command`` at all): verified by
+    temporarily changing ``capture_runtime._run_setup`` to prepend
+    ``profiler_prefix`` and re-running this test -- the banner then leaks
+    into the captured value.
     """
     del profiles_dir
-    _install_fake_rocprofv3(bin_dir)
-    _install_fake_diag_helper(bin_dir)
+    _install_fake_rocprofv3_injecting(bin_dir)
+    _install_fake_diag_helper_unsuppressible(bin_dir)
     marker = tmp_path / "captured_value.txt"
     lifecycle = cr.Lifecycle(
-        command=f'VALUE=$(diag_helper)\nprintf %s "$VALUE" > {shlex.quote(str(marker))}\n',
+        command=f'read -r VALUE < {shlex.quote(str(marker))}\nprintf %s "$VALUE" > {shlex.quote(str(marker))}.echoed\n',
+        setup_command=f"diag_helper > {shlex.quote(str(marker))}\n",
         timeout_s=10.0,
     )
 
     out = capture.profile_timeline(lifecycle)
 
     assert "): ok" in out
-    assert marker.read_text() == "54321"
+    assert marker.read_text() == "54321\n"
+    assert Path(f"{marker}.echoed").read_text() == "54321"
 
 
 def _install_fake_rocprofv3_flushes_on_sigint_then_hangs(bin_dir: Path) -> Path:
@@ -839,6 +963,71 @@ def test_profile_counters_success_runs_two_passes_and_triages(
     assert manifest["kind"] == "counters"
     assert set(manifest["set_dirs"]) == {"l2", "hbm"}
     assert manifest["arch"] == "gfx90a"
+
+
+def test_profile_counters_packs_a_known_good_combo_into_one_pass(
+    profiles_dir: Path, bin_dir: Path
+) -> None:
+    """Regression: mfma+hbm (validated together on real MI210 hardware) costs one pass.
+
+    Fails on the pre-packing code, which always ran one rocprofv3 pass per
+    requested set regardless of hardware-block fit (verified by temporarily
+    reverting capture.py/counters.py to the pre-packing revision and
+    re-running this test, per the repo's regression-test policy: the old
+    code reports 2 passes planned/run here, not 1).
+    """
+    del profiles_dir
+    _install_fake_rocprofv3_pmc_limit(bin_dir, limit=100)  # generous: nothing gets rejected
+    _install_fake_rocminfo(bin_dir)
+    lifecycle = cr.Lifecycle(command="true", timeout_s=10.0)
+
+    out = capture.profile_counters(lifecycle, sets=["mfma", "hbm"])
+
+    assert "): ok" in out
+    assert "1 pass(es) run, 1 planned, 2 set(s) requested" in out
+    assert "pass mfma+hbm: ok" in out
+
+    (summary,) = cr.list_captures(limit=1)
+    manifest = cr.load_manifest(summary.dir)
+    assert manifest["passes_planned"] == 1
+    assert manifest["passes_run"] == 1
+    # Both sets resolve to the same shared pass directory.
+    assert manifest["set_dirs"]["mfma"] == manifest["set_dirs"]["hbm"]
+
+
+def test_profile_counters_falls_back_to_split_passes_when_rocprofv3_rejects_a_packed_pass(
+    profiles_dir: Path, bin_dir: Path
+) -> None:
+    """Regression: a rocprofv3 rejection of a packed pass falls back to one pass per set.
+
+    mfma (4 counters) + hbm (4 counters) = 8 counters combined; the fake
+    rocprofv3 here rejects anything over 6, so the planned single pack
+    must fall back to 2 separate passes and the run count must reflect
+    that (2 run, 1 planned), not silently drop data or report a false "ok"
+    with only mfma's counters. Fails on code that either has no fallback
+    (a packed-pass rejection would surface as an unconditional
+    ``target_failed`` overall status with no retry) or that retries with
+    the exact same oversized command (identical rejection loops forever /
+    never completes).
+    """
+    del profiles_dir
+    _install_fake_rocprofv3_pmc_limit(bin_dir, limit=6)
+    _install_fake_rocminfo(bin_dir)
+    lifecycle = cr.Lifecycle(command="true", timeout_s=10.0)
+
+    out = capture.profile_counters(lifecycle, sets=["mfma", "hbm"])
+
+    assert "): ok" in out
+    assert "2 pass(es) run, 1 planned, 2 set(s) requested" in out
+    assert "(a rejected packed pass fell back to more passes)" in out
+    assert "pass mfma: ok" in out
+    assert "pass hbm: ok" in out
+
+    (summary,) = cr.list_captures(limit=1)
+    manifest = cr.load_manifest(summary.dir)
+    assert manifest["passes_planned"] == 1
+    assert manifest["passes_run"] == 2
+    assert manifest["set_dirs"]["mfma"] != manifest["set_dirs"]["hbm"]
 
 
 # ---------------------------------------------------------------------------
