@@ -118,6 +118,7 @@ graph TD
     vibesys.loops.evolve --> vibesys.render
     vibesys.loops.evolve --> vibesys.run
     vibesys.loops.evolve --> vibesys.runtime
+    vibesys.loops.evolve --> vibesys.search.population
     vibesys.loops.evolve.entrypoint --> vibesys.context
     vibesys.loops.evolve.entrypoint --> vibesys.evaluators
     vibesys.loops.evolve.entrypoint --> vibesys.loops.evolve
@@ -212,6 +213,8 @@ graph TD
     vibesys.sandbox --> vibesys.evaluators
     vibesys.sandbox --> vibesys.prompts
     vibesys.sandbox --> vibesys.skypilot
+    vibesys.search.population --> vibesys
+    vibesys.search.population --> vibesys.evaluators
 ```
 
 ## Full module graph
@@ -367,6 +370,7 @@ graph TD
     vibesys.loops.evolve --> vibesys.render
     vibesys.loops.evolve --> vibesys.run
     vibesys.loops.evolve --> vibesys.runtime
+    vibesys.loops.evolve --> vibesys.search.population
     vibesys.loops.evolve --> vs_agent
     vibesys.loops.evolve --> vs_loop_state
     vibesys.loops.evolve --> vs_project
@@ -500,6 +504,8 @@ graph TD
     vibesys.sandbox --> vs_agent
     vibesys.sandbox --> vs_project
     vibesys.sandbox --> vs_sandbox
+    vibesys.search.population --> vibesys
+    vibesys.search.population --> vibesys.evaluators
     vibesys.skypilot --> vs_project
     vs_agent --> vs_loop_state
     vs_agent --> vs_project

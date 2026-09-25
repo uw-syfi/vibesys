@@ -203,7 +203,7 @@ depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestra
 
 [[modules]]
 path = "vibesys.loops.evolve"
-depends_on = [ "vs_project", "vibesys.prompts", "vibesys", "vibesys.domains", "vibesys.render", "vibesys.run", "vs_agent", "vs_loop_state", "vibesys.orchestration", "vibesys.orchestration.runtime", "vibesys.evaluators", "vibesys.runtime"]
+depends_on = [ "vs_project", "vibesys.prompts", "vibesys", "vibesys.domains", "vibesys.render", "vibesys.run", "vs_agent", "vs_loop_state", "vibesys.orchestration", "vibesys.orchestration.runtime", "vibesys.evaluators", "vibesys.runtime", "vibesys.search.population"]
 
 [[modules]]
 path = "vibesys.run"
@@ -232,6 +232,10 @@ depends_on = ["vibesys"]
 [[modules]]
 path = "vibesys.evaluators"
 depends_on = ["vibesys", "vibesys.render", "vs_evaluator_protocol", "vs_loop_state", "vs_project", "vs_sandbox"]
+
+[[modules]]
+path = "vibesys.search.population"
+depends_on = ["vibesys", "vibesys.evaluators"]
 
 [[modules]]
 path = "vibesys.prompts"
