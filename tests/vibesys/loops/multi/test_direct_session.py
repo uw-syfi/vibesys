@@ -24,6 +24,7 @@ from vibesys.loops.multi.session import (
     MultiSessionError,
     _TerminalPolicy,
 )
+from vibesys.orchestration.progress import _Progress
 from vibesys.orchestration.runtime import GateRunResult, WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
@@ -148,7 +149,6 @@ def _session(tmp_path: Path) -> MultiSession:
     session.workspace.transaction = lambda **kwargs: _fake_transaction(session.workspace, **kwargs)
     progress = tmp_path / "progress.md"
     progress.write_text("# Progress\n")
-    session._board_log = []
     session.turns = SimpleNamespace(
         progress_path=progress,
         roadmap_path=tmp_path / "roadmap.md",
@@ -189,11 +189,13 @@ def _session(tmp_path: Path) -> MultiSession:
         state=SimpleNamespace(load=AsyncMock(return_value=None), commit=AsyncMock()),
         environment=environment,
         gates=SimpleNamespace(run=AsyncMock()),
+        progress=_Progress(cast("Any", None)),
         request=SimpleNamespace(
             project_root=tmp_path,
             input_bundle=SimpleNamespace(benchmark_result=None, benchmark_result_protocol=None),
         ),
     )
+    session.ctx.progress.declare(progress)
     return session
 
 

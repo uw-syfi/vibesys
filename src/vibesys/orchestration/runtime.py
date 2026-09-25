@@ -45,6 +45,7 @@ from vibesys.orchestration.gates import (
     MeasurementOptions,
     _Evaluator,
 )
+from vibesys.orchestration.progress import _Progress
 from vibesys.orchestration.state import _RunState
 from vibesys.orchestration.workspaces import (
     WorkspaceHandle,
@@ -184,6 +185,7 @@ class RunContext:
         self.workspaces = _Workspaces(self)
         self.agents = _Agents(self)
         self.environment = _Environment(self)
+        self.progress = _Progress(self)
 
     @property
     def events(self) -> EventJournal:

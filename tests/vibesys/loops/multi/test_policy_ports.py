@@ -78,6 +78,12 @@ class _FakeTurns:
         return JudgeResponse(analysis="reviewed", feedback="", verdict=Verdict.PASS)
 
 
+def _fake_progress() -> SimpleNamespace:
+    """A minimal ``ctx.progress``-shaped fake: collect noted blocks, in order."""
+    notes: list[str] = []
+    return SimpleNamespace(notes=notes, note=notes.append, declare=lambda _path: None)
+
+
 def _search() -> HypothesisSearch:
     return HypothesisSearch(HypothesisConfig(max_rounds=1))
 
@@ -113,7 +119,6 @@ def test_multi_prepass_profiles_only_when_requested_and_enabled() -> None:
     turns = _FakeTurns(calls)
     session = cast("Any", MultiSession.__new__(MultiSession))
     session._label = "multi"
-    session._board_log = []
     session.turns = turns
     session.round_number = 1
     session.state = HypothesisState()
@@ -154,7 +159,6 @@ def test_profile_guidance_prepares_cursor_before_designer(
     config = ProfileGuidedInput(command=("fake-profiler",))
     session = cast("Any", MultiSession.__new__(MultiSession))
     session._label = "profile_multi"
-    session._board_log = []
     from vibesys.loops.multi.session import _ProfilePolicy  # noqa: PLC0415
 
     session.profile = _ProfilePolicy(config)
@@ -224,7 +228,6 @@ def test_multi_validation_failure_checkpoints_before_retry_and_official_gate() -
     session.options = SimpleNamespace(max_rounds=1, judge_every=1, official_eval_every=1)
     session.workspace = SimpleNamespace(revision="a" * 40)
     session.state = state.agent_run_state
-    session._board_log = []
     validation_feedback = ["bad recipe", None]
 
     async def validate(_selected: object, _recipe: str | None) -> str | None:
@@ -282,7 +285,6 @@ def test_single_uses_only_combined_turn_and_its_own_verdict() -> None:
     state.retry = 1
     selected = SimpleNamespace(request=request, attempt=state)
     session = cast("Any", SingleSession.__new__(SingleSession))
-    session._board_log = []
     session.options = SimpleNamespace(max_rounds=1, official_eval_every=1)
     session.state = state.agent_run_state
     session.search = _search()
@@ -334,7 +336,7 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
         profile_guidance=FocusView(),
     )
     turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
-    turns._board = []
+    progress = _fake_progress()
     turns.progress_path = tmp_path / "progress.md"
     turns.roadmap_location = "roadmap.md"
     turns._plan_context = lambda _request: {}
@@ -363,12 +365,14 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
             calls.append(cast("str", message))
         return next(plans)
 
-    turns.ctx = SimpleNamespace(log=calls.append, agents=SimpleNamespace(turn=agents_turn))
+    turns.ctx = SimpleNamespace(
+        log=calls.append, agents=SimpleNamespace(turn=agents_turn), progress=progress
+    )
     turns.designer = SimpleNamespace()
     result = asyncio.run(turns.plan(request))
     assert result.hypothesis_id == "fresh"
     assert "previous plan was rejected" in calls[-1]
-    assert any("fresh" in block for block in turns._board)
+    assert any("fresh" in block for block in progress.notes)
 
 
 # Role-isolation restoration (unauthorized-edit revert) is now host code:
@@ -399,10 +403,9 @@ def test_multi_implementer_marks_paid_turn_before_invocation(tmp_path: Path) -> 
         return ImplementerResponse(summary="cache added", expected_behavior="faster")
 
     turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
-    turns._board = []
     turns.progress_path = tmp_path / "progress.md"
     issue_board.ensure_progress_file(turns.progress_path)
-    turns.ctx = SimpleNamespace(agents=SimpleNamespace(turn=agents_turn))
+    turns.ctx = SimpleNamespace(agents=SimpleNamespace(turn=agents_turn), progress=_fake_progress())
     turns.worker = SimpleNamespace()
     turns._implementer_context = lambda *_args: {}
     response, synthesized = asyncio.run(turns.implement(request, state))
@@ -480,7 +483,6 @@ def test_multi_local_validation_restores_mutated_candidate(tmp_path: Path) -> No
 
     session = cast("Any", MultiSession.__new__(MultiSession))
     session._label = "multi"
-    session._board_log = []
     session.round_number = 1
     session.turns = SimpleNamespace(progress_path=progress_path)
     session.workspace = SimpleNamespace(
@@ -490,7 +492,9 @@ def test_multi_local_validation_restores_mutated_candidate(tmp_path: Path) -> No
         restore=restore,
         transaction=_fake_transaction_factory(snapshot, restore),
     )
-    session.ctx = SimpleNamespace(environment=SimpleNamespace(execute=execute))
+    session.ctx = SimpleNamespace(
+        environment=SimpleNamespace(execute=execute), progress=_fake_progress()
+    )
     selected = SimpleNamespace(attempt=SimpleNamespace(retry=1))
     feedback = asyncio.run(session._validate_local(selected, "recipes.json"))
     assert feedback is not None
@@ -516,7 +520,6 @@ def test_multi_official_gate_failure_persists_revalidation_for_exact_commit() ->
     session.workspace = SimpleNamespace(revision="a" * 40)
     session.turns = SimpleNamespace(worker=SimpleNamespace(backend_name="cli"), progress_path=None)
     session.state = attempt.agent_run_state
-    session._board_log = []
     session.round_number = 1
     decisions: list[tuple[bool, str]] = []
     session._record_official_decision = lambda _selected, *, run, reason: decisions.append(

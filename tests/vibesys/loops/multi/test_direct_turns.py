@@ -118,9 +118,10 @@ def _turns(tmp_path: Path) -> MultiAgentTurns:
             agents=SimpleNamespace(turn=AsyncMock()),
             log=MagicMock(),
             warning=MagicMock(),
+            progress=SimpleNamespace(note=lambda _block: None, declare=lambda _path: None),
         ),
     )
-    turns = MultiAgentTurns(ctx, _options(), [])
+    turns = MultiAgentTurns(ctx, _options())
     issue_board.ensure_progress_file(turns.progress_path)
     issue_board.ensure_roadmap_file(turns.roadmap_path)
     return turns

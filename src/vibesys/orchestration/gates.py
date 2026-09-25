@@ -200,12 +200,13 @@ class _Evaluator:
         passed: bool,
         output: str,
     ) -> None:
-        """Write one accuracy-gate outcome, if this strategy declared a board.
+        """Write one accuracy-gate outcome, if this run declared a progress path.
 
         ``ctx.gates.run`` writes gate entries itself (synchronously, ahead of
         the snapshot it already takes right after) rather than handing a
-        recorder back to the caller: a strategy just passes its progress
-        path, and never renders or writes anything for gates itself.
+        recorder back to the caller: a strategy declares its progress path
+        via ``ctx.progress.declare`` and never renders or writes anything
+        for gates itself.
         """
         if progress_path is None:
             return
@@ -223,8 +224,6 @@ class _Evaluator:
         retry: int,
         commit: str | None,
         objectives: Sequence[Objective],
-        progress_path: Path | None,
-        board: Sequence[str] = (),
         reuse_accuracy: bool = False,
         agent_backend_name: str | None = None,
     ) -> GateRunResult:
@@ -238,15 +237,16 @@ class _Evaluator:
         both gates and reports a pass with no feedback and an empty outcome,
         matching every strategy's prior hand-rolled check.
 
-        `board` is the strategy's pending framework-log buffer (see
-        `vibesys.orchestration.state._RunState.commit`'s own `board`
-        parameter): this call is often the next write to `progress_path`
-        after those blocks became available, so this flushes them first, in
-        order, before this gate's own outcome -- keeping the file's section
-        order the same as when every write happened synchronously.
+        This is often the next write to `ctx.progress`'s declared path after
+        blocks became available (see `vibesys.orchestration.progress`), so
+        this flushes that pending buffer first, in order, before this gate's
+        own outcome -- keeping the file's section order the same as when
+        every write happened synchronously.
         """
-        if board and progress_path is not None:
-            for block in board:
+        progress_path = self._host.progress.path
+        pending = self._host.progress.drain()
+        if progress_path is not None:
+            for block in pending:
                 progress_log.write(progress_path, block)
         if agent_backend_name == "stub":
             return GateRunResult(
