@@ -19,7 +19,6 @@ from vibesys.errors import StrategySessionError
 from vibesys.loops.single.attribution import run_attribution
 from vibesys.loops.single.turns import SingleAgentTurns
 from vibesys.orchestration import artifacts, memory, progress_log
-from vibesys.orchestration.runtime import WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.profiler import ProfilerSummary
 from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
@@ -416,16 +415,13 @@ class SingleSession:
         )
         if rollback is None:
             raise SingleSessionError.missing_rollback()
-        try:
-            async with self.workspace.transaction() as tx:
-                await self.workspace.restore(rollback, clean=True)
-                tx.commit()
-        except WorkspaceRestoreError:
-            self.ctx.warning(
-                f"could not check out rollback revision {rollback[:8]} for round "
-                f"{parent_round}; will retry the rollback next round"
+        async with self.workspace.transaction() as tx:
+            restored = await self.workspace.restore_or_warn(
+                rollback, clean=True, round_label=f"round-{self.round_number}"
             )
-            return
+            if not restored:
+                return
+            tx.commit()
         hypothesis.revert_applied = True
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback

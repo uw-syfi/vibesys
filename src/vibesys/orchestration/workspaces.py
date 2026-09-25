@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from vibesys.context import WorkspaceResourceSpec, create_workspace_resources
+from vibesys.events import FrameworkSource
 from vibesys.runtime import WorkspaceScope
 
 if TYPE_CHECKING:
@@ -115,6 +116,34 @@ class WorkspaceHandle:
         await self._owner._restore(
             revision, scope=self._scope, clean=clean, preserve_paths=preserve_paths
         )
+
+    async def restore_or_warn(
+        self,
+        revision: str,
+        *,
+        clean: bool = True,
+        preserve_paths: tuple[str, ...] = (),
+        round_label: str | None = None,
+    ) -> bool:
+        """Restore to *revision*, tolerating a transient checkout failure (R1).
+
+        For rollback-style restores that must not abort the run: on success,
+        returns ``True``. On a failed checkout, publishes a framework warning
+        instead of raising and returns ``False``, so the caller can leave its
+        own state unchanged and retry the same restore on a later round.
+        """
+        try:
+            await self.restore(revision, clean=clean, preserve_paths=preserve_paths)
+        except WorkspaceRestoreError:
+            self._owner._host.warning(
+                f"could not restore workspace to revision {revision[:8]}; "
+                "will retry on a later round",
+                source=FrameworkSource.GIT_TRACKING,
+                source_label="rollback",
+                round_label=round_label,
+            )
+            return False
+        return True
 
     async def retain(self, name: str, revision: str) -> str:
         """Keep a revision reachable under a policy-owned name."""

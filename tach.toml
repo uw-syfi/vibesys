@@ -438,7 +438,7 @@ depends_on = ["vibesys", "vibesys.context", "vibesys.prompts", "vibesys.run", "v
 [[modules]]
 path = "vibesys.orchestration.workspaces"
 layer = "orchestration_host"
-depends_on = ["vibesys.context", "vibesys.runtime", "vibesys.orchestration._host"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.runtime", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.state"

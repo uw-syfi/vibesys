@@ -251,6 +251,7 @@ graph TD
     vibesys.orchestration.state --> vibesys.orchestration._host
     vibesys.orchestration.state --> vibesys.orchestration.progress_log
     vibesys.orchestration.state --> vibesys.orchestration.view
+    vibesys.orchestration.workspaces --> vibesys
     vibesys.orchestration.workspaces --> vibesys.context
     vibesys.orchestration.workspaces --> vibesys.orchestration._host
     vibesys.orchestration.workspaces --> vibesys.runtime
@@ -589,6 +590,7 @@ graph TD
     vibesys.orchestration.state --> vibesys.orchestration.view
     vibesys.orchestration.state --> vs_project
     vibesys.orchestration.tools --> vs_agent
+    vibesys.orchestration.workspaces --> vibesys
     vibesys.orchestration.workspaces --> vibesys.context
     vibesys.orchestration.workspaces --> vibesys.orchestration._host
     vibesys.orchestration.workspaces --> vibesys.runtime
