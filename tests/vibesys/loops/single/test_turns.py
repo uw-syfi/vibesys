@@ -30,8 +30,9 @@ from vibesys.loops.single.hypothesis import HypothesisEngine
 from vibesys.loops.single.session import AttemptRequest, PlanRequest
 from vibesys.loops.single.turns import InvalidPlanError, SingleAgentTurns
 from vibesys.profilers import ProfilerKind
-from vibesys.roles.single import SINGLE_COMBINED
-from vibesys.schemas import OrchestratorPlan, SingleAgentRoundResponse, Verdict
+from vibesys.roles.common import Verdict
+from vibesys.roles.single_agent import SINGLE_COMBINED, SingleAgentRoundResponse
+from vibesys.schemas import OrchestratorPlan
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -113,15 +114,13 @@ def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path
     combined_context = turns._combined_context(  # noqa: SLF001
         AttemptRequest(1, plan, "cadence", [], hypothesis, "decode"),
         AttemptState(agent_run_state=engine.state, feedback=None, retry=1),
-        [],
     )
 
     assert turns.template_dir.name == "single"
-    assert designer_context["objective_location"] == "OBJECTIVE.md"
-    assert designer_context["runtime_notes"] == "Run locally"
-    assert combined_context["objective_location"] == "OBJECTIVE.md"
-    assert combined_context["official_evaluation_reason"] == "cadence"
-    assert combined_context["task"] == "Batch decode requests"
+    assert designer_context.objective_location == "OBJECTIVE.md"
+    assert designer_context.runtime_notes == "Run locally"
+    assert combined_context.objective_location == "OBJECTIVE.md"
+    assert combined_context.official_evaluation_reason == "cadence"
     assert (tmp_path / "progress-artifacts" / "plans" / "round-0001.json").exists()
 
 

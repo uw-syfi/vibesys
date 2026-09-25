@@ -9,7 +9,7 @@ from vibesys.context import RunSetup, RunStartHints
 from vibesys.loops.issue_queue.loop import IssueQueueRun
 from vibesys.loops.issue_queue.orchestration import compare_resume, options_from_descriptor
 from vibesys.orchestration.view import RunStatus, RunView
-from vibesys.schemas import Verdict
+from vibesys.roles.common import Verdict
 from vs_issue_board.api import Issue, IssueStatus
 from vs_loop_state.api import PlainLoopCursor, PlainPerformanceSnapshot
 

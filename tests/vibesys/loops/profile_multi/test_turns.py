@@ -35,17 +35,16 @@ from vibesys.loops.profile_multi.controller import HypothesisEngine, ProfileGuid
 from vibesys.loops.profile_multi.decisions import AttemptRequest, PlanRequest
 from vibesys.loops.profile_multi.turns import ProfileMultiTurns
 from vibesys.profilers import ProfilerKind
-from vibesys.roles.multi import MULTI_IMPLEMENTER_CONTINUATION, MULTI_JUDGE
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import MULTI_IMPLEMENTER_CONTINUATION, ImplementerResponse
+from vibesys.roles.judge import MULTI_JUDGE, JudgeResponse
+from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.roles.profiler import ProfilerSummary
 from vibesys.runtime import ReadOnly
 from vibesys.schemas import (
     HypothesisOutcome,
     HypothesisStrategyUpdate,
-    ImplementerResponse,
-    JudgeResponse,
     OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
-    Verdict,
 )
 
 if TYPE_CHECKING:
@@ -156,13 +155,13 @@ def test_roles_open_close_and_plan_context(tmp_path: Path) -> None:
 
     plan_request, _, _ = _request()
     context = turns._plan_context(plan_request)
-    assert context["objective"] == "Improve throughput"
+    assert context.objective_location == "OBJECTIVE.md"
     planned = asyncio.run(turns.plan(plan_request))
     assert planned.hypothesis_id == "h1"
     assert (tmp_path / "progress-artifacts" / "plans" / "round-0001.json").is_file()
     call = turns.ctx.agents.turn.await_args
     assert call.kwargs["label"] == "round-1-plan"
-    assert isinstance(call.kwargs["context"]["objective"], str)
+    assert isinstance(call.kwargs["context"].objective_location, str)
     assert isinstance(call.args[0].access, ReadOnly)
 
     asyncio.run(turns.close())

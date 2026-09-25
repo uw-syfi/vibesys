@@ -11,7 +11,11 @@ from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.loops.profile_multi.controller import HypothesisEngine
 from vibesys.loops.profile_multi.decisions import TerminalRequest, transition_round
 from vibesys.loops.profile_multi.session import _TerminalPolicy
-from vibesys.schemas import HypothesisOutcome, ImplementerResponse, OrchestratorPlan
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.schemas import (
+    HypothesisOutcome,
+    OrchestratorPlan,
+)
 from vs_loop_state.api import RoundRecord
 
 

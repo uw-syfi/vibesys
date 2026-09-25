@@ -32,9 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-from jinja2 import Environment, FileSystemLoader
+from typing import TYPE_CHECKING, cast
 
 from vibesys.domains.base import DomainDefinition, DomainRole
 from vibesys.domains.rendering import render_domain_section
@@ -46,18 +44,22 @@ from vibesys.evaluators.gates import (
 from vibesys.events import FrameworkSource
 from vibesys.orchestration.runtime import MeasurementOptions
 from vibesys.profilers import ProfilerKind, mcp_spec, profiler_definition
-from vibesys.prompts import PROMPTS_DIR
-from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
+from vibesys.roles.common import Verdict
+from vibesys.roles.judge import CANDIDATE_JUDGE, CandidateJudgeContext
+from vibesys.roles.mutator import CANDIDATE_MUTATOR, MutatorContext
+from vibesys.roles.profiler import CANDIDATE_PROFILERS, CandidateProfilerContext
 from vibesys.search.population.models import CandidateOutcome, Individual
 
 if TYPE_CHECKING:
     from vibesys.evaluators.metrics import MetricSpace, Objective
     from vibesys.loops.evolve.state import EvolutionStateStore, EvolveState
     from vibesys.orchestration.runtime import RunContext, WorkspaceHandle
+    from vibesys.roles.judge import JudgeResponse
+    from vibesys.roles.mutator import MutatorResponse
+    from vibesys.roles.profiler import ProfilerSummary
     from vibesys.runtime import AgentHandle
     from vibesys.search.population.search import PopulationSearch
 
-_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "evolve"
 _INTERFACE = "inprocess"
 
 # Shared "no contract declared" default; the dataclass is frozen, so one
@@ -68,21 +70,6 @@ _NO_BENCHMARK_CONTRACT = BenchmarkContract()
 class _AccuracyTimeoutMismatchError(ValueError):
     def __init__(self) -> None:
         super().__init__("evolve accuracy timeout differs from the run manifest")
-
-
-# Evolve owns its role prompts; modality fragments and profiler prompts are
-# shared with the other strategies under prompts/shared/. Domain role files
-# are rendered separately and injected into the templates.
-_jinja_env = Environment(  # noqa: S701  # tracked: #288
-    loader=FileSystemLoader([str(_TEMPLATE_DIR), str(PROMPTS_DIR / "shared")]),
-    keep_trailing_newline=True,
-    trim_blocks=True,
-    lstrip_blocks=True,
-)
-
-
-def _render(name: str, **kwargs: object) -> str:
-    return _jinja_env.get_template(name).render(**kwargs)
 
 
 def _sequence(state: EvolveState) -> int:
@@ -213,7 +200,6 @@ async def _run_mutator(  # noqa: PLR0913  # tracked: #288
     modality: str | None,
     domain_definition: DomainDefinition,
     is_cold_start: bool,
-    space: MetricSpace,
     failed_lessons: list[str] | None = None,
     num_failed_attempts: int = 0,
     repair_seed: bool = False,
@@ -228,38 +214,36 @@ async def _run_mutator(  # noqa: PLR0913  # tracked: #288
         DomainRole.IMPLEMENTER,
         **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes, scope=scope),
     )
-    system_prompt = _render(
-        "mutator_prompt.j2",
+    context = MutatorContext(
         reference_path=ctx.environment.reference_path,
         modality=modality,
         objective=objective,
         parent=parent,
         inspirations=inspirations,
         is_cold_start=is_cold_start,
-        space=space,
         interface=_INTERFACE,
         domain_implementer=domain_implementer,
         runtime_notes=prompt_runtime_notes,
-        profile_execution=ctx.environment.view_for(scope).profile_execution,
         accuracy_command=ctx.environment.view_for(scope).paths.accuracy_command,
         benchmark_command=ctx.environment.view_for(scope).paths.benchmark_command,
         failed_lessons=failed_lessons or [],
         num_failed_attempts=num_failed_attempts,
         repair_seed=repair_seed,
+        # `mutator_prompt.j2` gates an (currently unused) Pareto-frontier
+        # section on `objectives`, which no caller ever populated; pass a
+        # falsy value explicitly so strict-undefined rendering keeps
+        # skipping that section exactly as it does today.
+        objectives=None,
     )
-    return await agents["implementer"].turn_structured(
-        (
-            "Edit the workspace to produce an offspring of the parent. "
-            "Then return one JSON object matching the schema above."
+    return cast(
+        "MutatorResponse",
+        await ctx.agents.turn(
+            CANDIDATE_MUTATOR,
+            agent=agents["implementer"],
+            context=context,
+            label=f"gen-{generation}-cand-{child_idx}-mutator",
+            workspace=scope or ctx.workspaces.root,
         ),
-        system_prompt=system_prompt,
-        response_cls=MutatorResponse,
-        fallback_factory=lambda: MutatorResponse(
-            summary="Mutator produced no structured response.",
-            hypothesis="unknown",
-            expected_behavior="unknown",
-        ),
-        label=f"gen-{generation}-cand-{child_idx}-mutator",
     )
 
 
@@ -284,8 +268,7 @@ async def _run_judge(  # noqa: PLR0913  # tracked: #288
         DomainRole.JUDGE,
         **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes, scope=scope),
     )
-    system_prompt = _render(
-        "judge_prompt.j2",
+    context = CandidateJudgeContext(
         accuracy_command=ctx.environment.view_for(scope).paths.accuracy_command,
         benchmark_command=ctx.environment.view_for(scope).paths.benchmark_command,
         pass_criteria=pass_criteria,
@@ -293,19 +276,17 @@ async def _run_judge(  # noqa: PLR0913  # tracked: #288
         interface=_INTERFACE,
         domain_judge=domain_judge,
         runtime_notes=prompt_runtime_notes,
-        profile_execution=ctx.environment.view_for(scope).profile_execution,
         objective=objective,
     )
-    return await agents["judge"].turn_structured(
-        "Review the offspring per the criteria above. Return only the JSON verdict.",
-        system_prompt=system_prompt,
-        response_cls=JudgeResponse,
-        fallback_factory=lambda: JudgeResponse(
-            analysis="Judge produced no structured response.",
-            feedback="No structured response received.",
-            verdict=Verdict.FAIL,
+    return cast(
+        "JudgeResponse",
+        await ctx.agents.turn(
+            CANDIDATE_JUDGE,
+            agent=agents["judge"],
+            context=context,
+            label=f"gen-{generation}-cand-{child_idx}-judge",
+            workspace=scope or ctx.workspaces.root,
         ),
-        label=f"gen-{generation}-cand-{child_idx}-judge",
     )
 
 
@@ -346,7 +327,6 @@ async def _run_profiler(  # noqa: PLR0913  # tracked: #288
     if kind is ProfilerKind.NONE:
         return None
     definition = profiler_definition(kind)
-    template = definition.prompt_template
     prompt_runtime_notes = (
         runtime_notes if runtime_notes is not None else ctx.environment.view_for(scope).prompt_notes
     )
@@ -355,11 +335,16 @@ async def _run_profiler(  # noqa: PLR0913  # tracked: #288
         DomainRole.PROFILER,
         **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes, scope=scope),
     )
-    base_prompt = _render(
-        template,
+    addendum = (
+        _PARETO_PROFILER_ADDENDUM.format(
+            objective_list=_format_objectives_for_profiler(space.objectives),
+        )
+        if space.objectives
+        else ""
+    )
+    context = CandidateProfilerContext(
         benchmark_command=ctx.environment.view_for(scope).paths.benchmark_command,
         modality=modality,
-        interface=_INTERFACE,
         domain_profiler=domain_profiler,
         runtime_notes=prompt_runtime_notes,
         profile_execution=ctx.environment.view_for(scope).profile_execution,
@@ -367,30 +352,21 @@ async def _run_profiler(  # noqa: PLR0913  # tracked: #288
         profile_focus="Measure the headline metric for this candidate; rank top kernel-level bottlenecks.",
         profiler_support_name=definition.support_name,
         profiler_mcp_name=definition.mcp_name,
+        pareto_objectives_addendum=addendum,
     )
-    if space.objectives:
-        addendum = _PARETO_PROFILER_ADDENDUM.format(
-            objective_list=_format_objectives_for_profiler(space.objectives),
-        )
-        system_prompt = base_prompt + addendum
-    else:
-        system_prompt = base_prompt
     spec = mcp_spec(kind)
     label = f"gen-{generation}-cand-{child_idx}-profiler"
     try:
-        return await agents["profiler"].turn_structured(
-            "Profile the server and return exactly one JSON object matching the schema above.",
-            system_prompt=system_prompt,
-            response_cls=ProfilerSummary,
-            fallback_factory=lambda: ProfilerSummary(
-                analysis="Profiler produced no structured response.",
-                bottlenecks="n/a",
-                suggestions="n/a",
-                perf_metric=None,
-                perf_unit=None,
+        return cast(
+            "ProfilerSummary",
+            await ctx.agents.turn(
+                CANDIDATE_PROFILERS[kind],
+                agent=agents["profiler"],
+                context=context,
+                label=label,
+                mcp_servers=[spec] if spec is not None else None,
+                workspace=scope or ctx.workspaces.root,
             ),
-            label=label,
-            mcp_servers=[spec] if spec is not None else None,
         )
     except Exception as exc:  # noqa: BLE001  # tracked: #288
         ctx.warning(
@@ -601,7 +577,6 @@ async def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
             modality=modality,
             domain_definition=domain_definition,
             is_cold_start=False,
-            space=space,
             runtime_notes=cand_notes,
             scope=scope,
         )
@@ -815,6 +790,7 @@ class _BootstrapAdapter:
         ctx = self.ctx
         ctx.log(f"\n--- bootstrap attempt {number}/{max_attempts} ---\n")
         wip_seed = await self._repair_seed()
+        revision_before_attempt = ctx.workspaces.root.revision
         cand_notes, cand_deployment = _candidate_runtime_notes(ctx, 0, number)
         failed_lessons = self.search.failure_lessons(self.state.population)
         num_failed_attempts = sum(
@@ -838,7 +814,6 @@ class _BootstrapAdapter:
                 modality=self.modality,
                 domain_definition=self.domain_definition,
                 is_cold_start=True,
-                space=self.space,
                 failed_lessons=failed_lessons,
                 num_failed_attempts=num_failed_attempts,
                 repair_seed=wip_seed is not None,
@@ -869,7 +844,9 @@ class _BootstrapAdapter:
             else:
                 failure_feedback = verdict.feedback
             if failure_feedback is not None:
-                return await self._record_failure(number, mutator.summary, failure_feedback)
+                return await self._record_failure(
+                    number, mutator.summary, failure_feedback, revision_before_attempt
+                )
             return await self._record_seed(
                 number,
                 _BootstrapPassingEvidence(mutator.summary, verdict.feedback, benchmark, cand_notes),
@@ -892,20 +869,27 @@ class _BootstrapAdapter:
                 wip_seed = None
         return wip_seed
 
-    async def _snapshot_wip(self, number: int) -> str | None:
-        """Retain a failed tree only when the snapshot created a new commit."""
+    def _wip_commit_since(self, revision_before_attempt: str | None) -> str | None:
+        """Return the tree's current commit if the attempt left a new one.
+
+        ``ctx.agents.turn`` now commits a role's pending edits as part of its
+        own pre/post-turn snapshot (the mutator's own turn, or the following
+        read-only judge turn's pre-turn snapshot, whichever runs first while
+        the tree is still dirty) -- so by the time an attempt's outcome is
+        known, any WIP tree is already committed under whatever turn label
+        captured it. This only has to recognize that a new commit exists,
+        not create one.
+        """
         try:
-            sha_before = self.ctx.workspaces.root.revision
-            sha_after = await self.ctx.workspaces.root.snapshot(f"wip-seed-bootstrap{number}")
+            current = self.ctx.workspaces.root.revision
         except Exception as exc:  # noqa: BLE001  # tracked: #288
             self.ctx.warning(
-                "wip-seed snapshot failed",
+                "reading the workspace revision failed",
                 detail=str(exc),
                 source=FrameworkSource.LOOP,
             )
             return None
-        else:
-            return sha_after if sha_after and sha_after != sha_before else None
+        return current if current and current != revision_before_attempt else None
 
     async def _admit(self, outcome: CandidateOutcome) -> Individual:
         """Admit one attempt's outcome and persist the new search state."""
@@ -914,10 +898,10 @@ class _BootstrapAdapter:
         return individual
 
     async def _record_failure(
-        self, number: int, summary: str, feedback: str
+        self, number: int, summary: str, feedback: str, revision_before_attempt: str | None
     ) -> BootstrapAttemptResult:
         """Record one failed attempt, retaining its optional WIP seed."""
-        commit = await self._snapshot_wip(number)
+        commit = self._wip_commit_since(revision_before_attempt)
         individual = await self._admit(
             CandidateOutcome(
                 passed=False,

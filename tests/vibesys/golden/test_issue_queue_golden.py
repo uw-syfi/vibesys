@@ -56,19 +56,19 @@ from tests.vibesys.golden.helpers import (
     read_events,
 )
 
-from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
-from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
-from vibesys.schemas import (
-    IssueImplementerResponse,
-    IssueJudgeResponse,
+from vibesys.evaluators.perf_reply import (
     IssuePerfEvalResponse,
     LatencyStats,
     LoadLevelMetrics,
     PerfMetrics,
-    PerfTrend,
     ThroughputStats,
-    Verdict,
 )
+from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
+from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import IssueImplementerResponse
+from vibesys.roles.judge import IssueJudgeResponse
+from vibesys.schemas import PerfTrend
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import OrchestrationDescriptor, Project

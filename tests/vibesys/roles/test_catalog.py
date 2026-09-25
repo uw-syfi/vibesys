@@ -1,18 +1,72 @@
-"""Sanity checks for the ``vibesys.roles`` catalog.
-
-Does not (yet) assert every declared role is referenced by a strategy:
-none of ``loops/`` calls ``ctx.agents.turn`` in phase 3a (see the phase-3a
-report), so that "unused role" invariant only becomes meaningful once
-loops/ migrates in a later phase.
-"""
+"""Sanity checks for the ``vibesys.roles`` catalog."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from vibesys import roles
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.runtime import Role
+
+_LOOPS_SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys" / "loops"
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _role_search_names() -> dict[int, str]:
+    """Map each ``Role``'s ``id()`` to the module-level name that finds it.
+
+    A dict-of-``Role`` family (e.g. ``MULTI_PROFILERS``: one per profiler
+    kind, no single named constant per ``Role``) maps every value to the
+    dict's own name, since that's the identifier a strategy imports.
+    """
+    by_id: dict[int, str] = {}
+    for family in (
+        roles.designer,
+        roles.pre_round,
+        roles.implementer,
+        roles.judge,
+        roles.profiler,
+        roles.single_agent,
+        roles.perf_eval,
+        roles.mutator,
+    ):
+        for name, value in vars(family).items():
+            if name.startswith("_") or not _IDENTIFIER.match(name):
+                continue
+            if isinstance(value, Role):
+                by_id[id(value)] = name
+            elif (
+                isinstance(value, dict)
+                and value
+                and all(isinstance(v, Role) for v in value.values())
+            ):
+                for v in value.values():
+                    by_id[id(v)] = name
+    return by_id
+
+
+def test_every_role_in_the_catalog_is_used_by_a_registered_strategy() -> None:
+    """Every ``Role`` any strategy uses lives in ``roles/``; the converse:
+    every ``Role`` declared in ``roles/`` is reachable from a registered
+    strategy's ``loops/`` folder, so the catalog carries no dead roles.
+    """
+    search_names = _role_search_names()
+    assert {id(role) for role in roles.ALL_ROLES} <= search_names.keys(), (
+        "a Role in roles.ALL_ROLES has no discoverable module-level name"
+    )
+
+    loops_source = "\n".join(
+        path.read_text() for path in _LOOPS_SRC.rglob("*.py") if "roles" not in path.parts
+    )
+    unused = sorted(
+        {
+            search_names[id(role)]
+            for role in roles.ALL_ROLES
+            if not re.search(rf"\b{re.escape(search_names[id(role)])}\b", loops_source)
+        }
+    )
+    assert not unused, f"roles declared but never referenced from loops/: {unused}"
 
 
 def test_every_role_has_a_real_template_file() -> None:

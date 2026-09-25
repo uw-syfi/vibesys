@@ -7,11 +7,12 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, assert_never
 
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
-from vibesys.schemas import Verdict
+from vibesys.roles.common import Verdict
 
 if TYPE_CHECKING:
     from vibesys.agent_run.state import AgentRunState
-    from vibesys.schemas import ImplementerResponse, SingleAgentRoundResponse
+    from vibesys.roles.implementer import ImplementerResponse
+    from vibesys.roles.single_agent import SingleAgentRoundResponse
     from vs_loop_state.api import JudgeVerdict, PerfProvenance
 
 

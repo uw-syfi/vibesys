@@ -8,11 +8,15 @@ from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from pydantic import BaseModel, ConfigDict
+
 from vibesys.loops.issue_queue.render import render_all
 from vibesys.loops.issue_queue.state import IssueQueueStateStore
 from vibesys.orchestration.tools import mcp_spec_from_descriptor
 from vibesys.prompts import PROMPTS_DIR, Prompt
-from vibesys.roles.issue_queue import ISSUE_IMPLEMENTER, ISSUE_JUDGE, ISSUE_PERF_EVAL
+from vibesys.roles.implementer import ISSUE_IMPLEMENTER, IssueImplementerContext
+from vibesys.roles.judge import ISSUE_JUDGE, IssueJudgeContext
+from vibesys.roles.perf_eval import ISSUE_PERF_EVAL, IssuePerfEvalContext
 from vs_agent.api import MCPServerSpec, RoundProgress, expose_as_tools
 from vs_issue_board.api import (
     Issue,
@@ -23,14 +27,46 @@ from vs_loop_state.api import PlainLoopCursor, PlainPerformanceRecord
 
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "issue_queue"
 IssueQueuePhase = Literal["implementer", "judge", "perf_eval"]
+
+
+class ImplementerUserContext(BaseModel):
+    """Context for issue_queue's implementer ``user.j2`` (the turn's message text)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    issue: Issue
+    prior_judge_review: dict[str, Any] | None
+
+
+class JudgeUserContext(BaseModel):
+    """Context for issue_queue's judge ``user.j2``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    issue: Issue
+
+
+class BootstrapContext(BaseModel):
+    """Context for issue_queue's ``bootstrap_issue.j2``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    reference_path: str
+    accuracy_command: str | None
+    benchmark_command: str | None
+    runtime_notes: str
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from vibesys.config import LoadLevelCfg
+    from vibesys.evaluators.perf_reply import IssuePerfEvalResponse
     from vibesys.loops.issue_queue.orchestration import IssueQueueOptions
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.roles.implementer import IssueImplementerResponse
+    from vibesys.roles.judge import IssueJudgeResponse
     from vibesys.runtime import AgentHandle
-    from vibesys.schemas import IssueImplementerResponse, IssueJudgeResponse, IssuePerfEvalResponse
 
 
 def build_issue_mcp_spec(
@@ -242,13 +278,13 @@ class IssueQueueRun:
         """Create the first candidate-facing issue and commit the cursor."""
         if self.state.bootstrap_done:
             return
-        description = self.prompt.render(
-            "bootstrap_issue.j2",
+        context = BootstrapContext(
             reference_path=self.host.environment.reference_path,
             accuracy_command=self.host.environment.view.paths.accuracy_command,
             benchmark_command=self.host.environment.view.paths.benchmark_command,
             runtime_notes=self.host.environment.view.prompt_notes,
         )
+        description = self.prompt.render("bootstrap_issue.j2", **context.model_dump())
         issue = self.board.create(
             type=IssueType.FEATURE,
             title="Build FastAPI inference server for the reference model",
@@ -362,11 +398,11 @@ class _IssueQueueTurns:
     async def implement(self, issue: Issue) -> IssueImplementerResponse:
         host = self.host
         await host.environment.reselect_device()
-        user_prompt = self.prompt.render(
-            "implementer/user.j2",
+        user_context = ImplementerUserContext(
             issue=issue,
             prior_judge_review=_latest_judge_review(issue),
         )
+        user_prompt = self.prompt.render("implementer/user.j2", **user_context.model_dump())
         await host.control.debug_step(f"Implementer step on issue #{issue.id}")
         host.log(f">>> Implementer working on issue #{issue.id}...")
         reply = cast(
@@ -374,11 +410,11 @@ class _IssueQueueTurns:
             await host.agents.turn(
                 ISSUE_IMPLEMENTER,
                 agent=self.implementer,
-                context={
-                    "reference_path": host.environment.reference_path,
-                    "runtime_notes": host.environment.view.prompt_notes,
-                    "issue": issue,
-                },
+                context=IssueImplementerContext(
+                    reference_path=host.environment.reference_path,
+                    runtime_notes=host.environment.view.prompt_notes,
+                    issue=issue,
+                ),
                 message=user_prompt,
                 label=f"impl issue #{issue.id} att{issue.attempts + 1}",
                 backend=host.request.backend,
@@ -398,7 +434,9 @@ class _IssueQueueTurns:
     async def judge(self, issue: Issue, iteration: int) -> IssueJudgeResponse:
         host = self.host
         await host.environment.reselect_device()
-        user_prompt = self.prompt.render("judge/user.j2", issue=issue)
+        user_prompt = self.prompt.render(
+            "judge/user.j2", **JudgeUserContext(issue=issue).model_dump()
+        )
         await host.control.debug_step(f"Judge step on issue #{issue.id}")
         host.log(f"\n>>> Judge reviewing issue #{issue.id}...")
         reply = cast(
@@ -406,11 +444,11 @@ class _IssueQueueTurns:
             await host.agents.turn(
                 ISSUE_JUDGE,
                 agent=self.judge_agent,
-                context={
-                    "accuracy_command": host.environment.view.paths.accuracy_command,
-                    "benchmark_command": host.environment.view.paths.benchmark_command,
-                    "issue": issue,
-                },
+                context=IssueJudgeContext(
+                    accuracy_command=host.environment.view.paths.accuracy_command,
+                    benchmark_command=host.environment.view.paths.benchmark_command,
+                    issue=issue,
+                ),
                 message=user_prompt,
                 label=f"judge issue #{issue.id} att{issue.attempts}",
                 mcp_servers=self._issue_mcp_spec(
@@ -445,14 +483,14 @@ class _IssueQueueTurns:
             await host.agents.turn(
                 ISSUE_PERF_EVAL,
                 agent=self.perf_agent,
-                context={
-                    "load_levels": self.load_levels,
-                    "progress_path": None,
-                    "perf_metrics_path": self.perf_metrics_location,
-                    "issue_create_cap": self.max_issues_per_perf_eval,
-                    "benchmark_command": host.environment.view.paths.benchmark_command,
-                    "runtime_notes": host.environment.view.prompt_notes,
-                },
+                context=IssuePerfEvalContext(
+                    load_levels=self.load_levels,
+                    progress_path=None,
+                    perf_metrics_path=self.perf_metrics_location,
+                    issue_create_cap=self.max_issues_per_perf_eval,
+                    benchmark_command=host.environment.view.paths.benchmark_command,
+                    runtime_notes=host.environment.view.prompt_notes,
+                ),
                 message=user_prompt,
                 label=f"perf_eval iter {iteration}",
                 mcp_servers=self._issue_mcp_spec(

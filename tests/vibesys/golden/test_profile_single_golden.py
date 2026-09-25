@@ -68,11 +68,11 @@ from vibesys.evaluators.gates import (
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.profile_single.orchestration import ProfileGuidedSingleAgentOrchestrator
+from vibesys.roles.common import Verdict
+from vibesys.roles.single_agent import SingleAgentRoundResponse
 from vibesys.schemas import (
     CandidateDisposition,
     OrchestratorPlan,
-    SingleAgentRoundResponse,
-    Verdict,
 )
 from vs_agent.api.testing import FakeAgentClient
 

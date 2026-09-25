@@ -1,4 +1,4 @@
-"""Agent turns and prompt decisions for the profile guided single strategy."""
+"""Agent turns and prompt decisions for the single strategy."""
 
 from __future__ import annotations
 
@@ -25,13 +25,18 @@ from vibesys.profilers import (
     require_profiler_kind,
 )
 from vibesys.prompts import PROMPTS_DIR
-from vibesys.roles.profile_single import PROFILE_SINGLE_COMBINED, PROFILE_SINGLE_ORCHESTRATOR_PLAN
+from vibesys.prompts.contexts import domain_context, plan_focus_kwargs
+from vibesys.roles.common import Verdict
+from vibesys.roles.designer import PROFILE_SINGLE_ORCHESTRATOR_PLAN, PlanContext
+from vibesys.roles.single_agent import (
+    PROFILE_SINGLE_COMBINED,
+    SingleAgentRoundContext,
+    SingleAgentRoundResponse,
+)
 from vibesys.runtime import ReadOnly, Role
 from vibesys.schemas import (
     OrchestratorPlan,
-    SingleAgentRoundResponse,
     SkillResourceSelection,
-    Verdict,
     normalize_hypothesis_title,
 )
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
@@ -90,46 +95,44 @@ class ProfileSingleTurns:
 
     def _domain_context(self) -> dict[str, object]:
         view = self.ctx.environment.view
-        return {
-            "modality": self.modality,
-            "interface": self.options.interface,
-            "reference_path": self.ctx.environment.reference_path,
-            "benchmark_command": view.paths.benchmark_command,
-            "accuracy_command": view.paths.accuracy_command,
-            "runtime_notes": view.prompt_notes,
-            "profile_execution": view.profile_execution,
-            "workspace_sources": self.ctx.environment.workspace_sources,
-        }
+        return domain_context(
+            modality=self.modality,
+            interface=self.options.interface,
+            reference_path=self.ctx.environment.reference_path,
+            benchmark_command=view.paths.benchmark_command,
+            accuracy_command=view.paths.accuracy_command,
+            runtime_notes=view.prompt_notes,
+            profile_execution=view.profile_execution,
+            workspace_sources=self.ctx.environment.workspace_sources,
+        ).model_dump()
 
-    def _plan_context(self, request: PlanRequest) -> dict[str, object]:
+    def _plan_context(self, request: PlanRequest) -> PlanContext:
         view = self.ctx.environment.view
         domain_orchestrator = render_domain_section(
             self.domain, DomainRole.ORCHESTRATOR, **self._domain_context()
         )
-        return {
-            "objective": self.objective,
-            "objective_location": view.paths.objective,
-            "profiler_summary": request.profiler_summary,
-            "regression_info": request.carry.regression_info,
-            "exhaustion_info": request.carry.exhaustion_info,
-            "progress_location": self.progress_location,
-            "roadmap_location": self.roadmap_location,
-            "pareto_archive_location": self.pareto_location,
-            "plateau_warning": request.plateau_warning,
-            "domain_orchestrator": domain_orchestrator,
-            "runtime_notes": view.prompt_notes,
-            "profile_execution": view.profile_execution,
-            "framework_benchmark_enabled": (
+        return PlanContext(
+            objective_location=view.paths.objective,
+            profiler_summary=request.profiler_summary,
+            regression_info=request.carry.regression_info,
+            exhaustion_info=request.carry.exhaustion_info,
+            progress_location=self.progress_location,
+            roadmap_location=self.roadmap_location,
+            pareto_archive_location=self.pareto_location,
+            plateau_warning=request.plateau_warning,
+            domain_orchestrator=domain_orchestrator,
+            runtime_notes=view.prompt_notes,
+            framework_benchmark_enabled=(
                 self.ctx.request.input_bundle.benchmark_result is not None
                 or self.ctx.request.input_bundle.benchmark_result_protocol is not None
             ),
-            "official_eval_every": self.options.official_eval_every,
-            "provisional_candidates": request.provisional_candidates,
-            "official_eval_cadence_due": (
+            official_eval_every=self.options.official_eval_every,
+            provisional_candidates=request.provisional_candidates,
+            official_eval_cadence_due=(
                 request.provisional_candidates + 1 >= self.options.official_eval_every
             ),
-            **request.profile_guidance.plan_prompt_context(),
-        }
+            **plan_focus_kwargs(request.profile_guidance.plan_prompt_context()),
+        )
 
     def _validate_plan(self, plan: OrchestratorPlan, state: AgentRunState) -> None:
         updates = [item.hypothesis_id for item in plan.hypothesis_updates]
@@ -146,7 +149,7 @@ class ProfileSingleTurns:
 
         A read-only role's allow-list is per-call (it depends on this run's
         ``memory_layout``), so the role is built fresh here rather than
-        declared static in ``vibesys.roles.profile_single``.
+        declared static in ``vibesys.roles.designer`` and ``vibesys.roles.single_agent``.
         """
         allowed = (
             f"{self.roadmap_location.rstrip('/')}/index.md"
@@ -258,69 +261,45 @@ class ProfileSingleTurns:
         return definition
 
     def _combined_context(
-        self, request: AttemptRequest, state: AttemptState, skills: list[ResolvedSkillSelection]
-    ) -> dict[str, object]:
+        self, request: AttemptRequest, state: AttemptState
+    ) -> SingleAgentRoundContext:
         view = self.ctx.environment.view
         plan = request.plan
         profiler = self._profiler()
         plan_artifact = issue_board.write_plan_artifact(
             self.progress_path, request.round_number, plan
         )
-        domain_context = self._domain_context()
-        return {
-            "reference_path": self.ctx.environment.reference_path,
-            "modality": self.modality,
-            "interface": self.options.interface,
-            "domain_single_agent": render_domain_section(
-                self.domain, DomainRole.SINGLE_AGENT, **domain_context
+        domain_ctx = self._domain_context()
+        return SingleAgentRoundContext(
+            domain_single_agent=render_domain_section(
+                self.domain, DomainRole.SINGLE_AGENT, **domain_ctx
             ),
-            "domain_profiler": render_domain_section(
-                self.domain, DomainRole.PROFILER, **domain_context
-            ),
-            "task": plan.task,
-            "pass_criteria": plan.pass_criteria,
-            "hypothesis_id": plan.hypothesis_id,
-            "hypothesis": plan.hypothesis,
-            "activation_evidence": plan.activation_evidence,
-            "falsification_criteria": plan.falsification_criteria,
-            "expected_effect": plan.expected_effect,
-            "minimum_acceptance_criteria": plan.minimum_acceptance_criteria,
-            "invariants": plan.invariants,
-            "progress_location": self.progress_location,
-            "pareto_archive_location": self.pareto_location,
-            "validation_location": issue_board.display_path(
+            domain_profiler=render_domain_section(self.domain, DomainRole.PROFILER, **domain_ctx),
+            interface=self.options.interface,
+            objective_location=view.paths.objective,
+            plan_artifact_location=issue_board.display_path(plan_artifact, self.workspace.path),
+            progress_location=self.progress_location,
+            pareto_archive_location=self.pareto_location,
+            validation_location=issue_board.display_path(
                 issue_board.validation_artifact_root(self.progress_path), self.workspace.path
             ),
-            "retry": state.retry,
-            "feedback": state.feedback,
-            "objective": self.objective,
-            "objective_location": view.paths.objective,
-            "plan_artifact_location": issue_board.display_path(plan_artifact, self.workspace.path),
-            "recommended_skills": skills,
-            "profile_focus": request.last_profile_focus,
-            "profiler_kind": self.ctx.environment.profiler_kind,
-            "profiler_support_name": profiler.support_name if profiler else None,
-            "profiler_mcp_name": profiler.mcp_name if profiler else None,
-            "supports_torch_profiler": self.domain.supports_torch_profiler,
-            "benchmark_command": view.paths.benchmark_command,
-            "accuracy_command": view.paths.accuracy_command,
-            "runtime_notes": view.prompt_notes,
-            "profile_execution": view.profile_execution,
-            "official_evaluation_due": request.planned_official_reason is not None,
-            "official_evaluation_reason": request.planned_official_reason,
-            "framework_benchmark_enabled": (
-                self.ctx.request.input_bundle.benchmark_result is not None
-                or self.ctx.request.input_bundle.benchmark_result_protocol is not None
-            ),
-        }
+            feedback=state.feedback,
+            profiler_kind=self.ctx.environment.profiler_kind.value,
+            profiler_support_name=profiler.support_name if profiler else None,
+            benchmark_command=view.paths.benchmark_command,
+            accuracy_command=view.paths.accuracy_command,
+            runtime_notes=view.prompt_notes,
+            official_evaluation_due=request.planned_official_reason is not None,
+            official_evaluation_reason=request.planned_official_reason,
+        )
 
     async def combined(
         self, request: AttemptRequest, state: AttemptState
     ) -> SingleAgentRoundResponse:
         """Execute the combined role and apply the strategy's Pareto guard."""
         plan = request.plan
-        plan.recommended_skills, resolved = self._skills(plan.recommended_skills)
-        context = self._combined_context(request, state, resolved)
+        plan.recommended_skills, _ = self._skills(plan.recommended_skills)
+        context = self._combined_context(request, state)
 
         async def mark_paid() -> None:
             issue_board.write_implementer_start_marker(

@@ -19,11 +19,11 @@ from vibesys.agent_run.evidence import _FAILED_HYPOTHESIS_OUTCOMES as OLD_FAILED
 from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.multi.session import _TerminalPolicy
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import (
     HypothesisOutcome,
-    ImplementerResponse,
     OrchestratorPlan,
-    Verdict,
 )
 from vibesys.search.hypothesis import ClosedRound, HypothesisConfig, HypothesisSearch
 from vibesys.search.hypothesis.transitions import (

@@ -15,6 +15,10 @@ from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState
 from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
+from vibesys.evaluators.validation_recipe import (
+    ValidationRecipe,
+    ValidationRecipeArtifact,
+)
 from vibesys.loops.multi.decisions import (
     STATIC_GUIDANCE,
     AttemptRequest,
@@ -27,17 +31,13 @@ from vibesys.loops.profile_multi.controller import HypothesisEngine as ProfileHy
 from vibesys.loops.profile_multi.session import ProfileMultiSession
 from vibesys.loops.single.session import SingleSession
 from vibesys.orchestration.runtime import GateRunResult
-from vibesys.schemas import (
-    ImplementerResponse,
-    JudgeResponse,
-    OrchestratorPlan,
-    PreRoundDecision,
-    ProfilerSummary,
-    SingleAgentRoundResponse,
-    ValidationRecipe,
-    ValidationRecipeArtifact,
-    Verdict,
-)
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
+from vibesys.roles.pre_round import PreRoundDecision
+from vibesys.roles.profiler import ProfilerSummary
+from vibesys.roles.single_agent import SingleAgentRoundResponse
+from vibesys.schemas import OrchestratorPlan
 from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
 from vibesys.search.hypothesis.transitions import CarryOver
 

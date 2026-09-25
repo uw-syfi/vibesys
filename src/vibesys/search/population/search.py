@@ -27,7 +27,7 @@ from vibesys.search.population.models import (
 
 if TYPE_CHECKING:
     from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
-    from vibesys.schemas import ProfilerSummary
+    from vibesys.evaluators.perf_reply import ProfilerSummary
 
 __all__ = ["PopulationSearch", "candidate_fitness"]
 

@@ -21,7 +21,7 @@ from typing import Any, ClassVar
 import pytest
 
 from vibesys.events import CommandResultPayload, JsonResultPayload
-from vibesys.schemas import JudgeResponse
+from vibesys.roles.judge import JudgeResponse
 from vs_agent.api import (
     AgentEvent,
     MCPServerSpec,

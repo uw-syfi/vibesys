@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from vibesys.agent_run.evidence import CarryOver
     from vibesys.agent_run.state import AgentRunState, Hypothesis
-    from vibesys.schemas import OrchestratorPlan, ProfilerSummary
+    from vibesys.roles.profiler import ProfilerSummary
+    from vibesys.schemas import OrchestratorPlan
     from vs_loop_state.api import RoundRecord
 
 

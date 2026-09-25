@@ -165,6 +165,11 @@ class Role:
     template: str
     reply: type[BaseModel]
     fallback: Callable[[], BaseModel]
+    context: type[BaseModel]
+    """The pydantic model this role's template renders from. ``ctx.agents.turn``
+    accepts any ``Mapping | BaseModel`` as ``context``, but every role
+    declares one so a contract test can assert its fields match the
+    template's free variables (see ``tests/vibesys/roles/test_prompt_contracts.py``)."""
     access: ReadOnly | Writes = field(default_factory=Writes)
     session: Fresh | Keyed | Reuse = field(default_factory=Fresh)
     paid: bool = False

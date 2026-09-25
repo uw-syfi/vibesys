@@ -19,6 +19,7 @@ from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed, JudgeSkipped
 from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
+from vibesys.evaluators.validation_recipe import ValidationRecipeArtifact
 from vibesys.loops.multi.decisions import STATIC_GUIDANCE, AttemptRequest
 from vibesys.loops.multi.session import (
     MultiRound,
@@ -27,13 +28,12 @@ from vibesys.loops.multi.session import (
     _TerminalPolicy,
 )
 from vibesys.orchestration.runtime import GateRunResult, WorkspaceRestoreError
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
 from vibesys.schemas import (
     HypothesisOutcome,
-    ImplementerResponse,
-    JudgeResponse,
     OrchestratorPlan,
-    ValidationRecipeArtifact,
-    Verdict,
 )
 from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch
 from vibesys.search.hypothesis.transitions import CarryOver

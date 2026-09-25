@@ -21,6 +21,7 @@ from vibesys.agent_run.evidence import CarryOver
 from vibesys.agent_run.state import AgentRunState
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
+from vibesys.evaluators.validation_recipe import ValidationRecipeArtifact
 from vibesys.loops.profile_multi.controller import HypothesisEngine
 from vibesys.loops.profile_multi.decisions import AttemptRequest, RoundSelection
 from vibesys.loops.profile_multi.session import (
@@ -31,13 +32,12 @@ from vibesys.loops.profile_multi.session import (
     _TerminalPolicy,
 )
 from vibesys.orchestration.runtime import GateRunResult, WorkspaceRestoreError
+from vibesys.roles.common import Verdict
+from vibesys.roles.implementer import ImplementerResponse
+from vibesys.roles.judge import JudgeResponse
 from vibesys.schemas import (
     HypothesisOutcome,
-    ImplementerResponse,
-    JudgeResponse,
     OrchestratorPlan,
-    ValidationRecipeArtifact,
-    Verdict,
 )
 from vs_loop_state.api import RoundHistory, RoundRecord
 
