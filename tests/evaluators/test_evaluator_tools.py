@@ -8,9 +8,11 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
+from tests.support import run_test_command
 
 from vibesys.evaluators import (
     CargoGitToolSpec,
@@ -24,6 +26,10 @@ from vibesys.evaluators import (
     tool_token,
 )
 from vs_sandbox.api import BeforeReadyContext, SandboxLifecycle
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from typing import Never
 
 
 def _spec() -> CargoGitToolSpec:
@@ -94,7 +100,7 @@ def _run_target_command(
     cwd: Path | None = None,
     **environment: str,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603
+    return run_test_command(
         shlex.split(command),
         capture_output=True,
         check=False,
@@ -147,7 +153,7 @@ def test_cargo_install_argv_uses_locked_revision_and_positional_package(tmp_path
 def test_prepare_tools_publishes_complete_install_and_reuses_it(tmp_path: Path) -> None:
     calls: list[tuple[str, ...]] = []
 
-    def install(arguments):  # noqa: ANN001, ANN202
+    def install(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
         normalized = tuple(arguments)
         calls.append(normalized)
         root = Path(normalized[normalized.index("--root") + 1])
@@ -432,7 +438,7 @@ def test_target_install_command_reports_missing_cargo(tmp_path: Path) -> None:
     (python_only / "python3").symlink_to(sys.executable)
     command = evaluator_tools_install_command({"example": _spec()}, tmp_path / "tools")
 
-    result = subprocess.run(  # noqa: S603
+    result = run_test_command(
         shlex.split(command),
         capture_output=True,
         check=False,
@@ -466,7 +472,7 @@ def test_target_install_command_rejects_missing_declared_binary(tmp_path: Path) 
 
 
 def test_prepare_tools_rejects_binary_changed_after_receipt(tmp_path: Path) -> None:
-    def install(arguments):  # noqa: ANN001, ANN202
+    def install(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
         normalized = tuple(arguments)
         root = Path(normalized[normalized.index("--root") + 1])
         for binary in ("runner", "tracegen"):
@@ -488,7 +494,7 @@ def test_prepare_tools_rejects_binary_changed_after_receipt(tmp_path: Path) -> N
 def test_prepare_tools_accepts_verified_concurrent_winner(tmp_path: Path) -> None:
     install_parent = tmp_path / "tools"
 
-    def write_binaries(arguments):  # noqa: ANN001, ANN202
+    def write_binaries(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
         normalized = tuple(arguments)
         root = Path(normalized[normalized.index("--root") + 1])
         for binary in ("runner", "tracegen"):
@@ -498,7 +504,7 @@ def test_prepare_tools_accepts_verified_concurrent_winner(tmp_path: Path) -> Non
             path.chmod(0o755)
         return subprocess.CompletedProcess(normalized, 0, "", "")
 
-    def publish_winner(arguments):  # noqa: ANN001, ANN202
+    def publish_winner(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
         result = write_binaries(arguments)
         prepare_evaluator_tools(
             {"example": _spec()},
@@ -521,7 +527,7 @@ def test_prepare_tools_accepts_verified_concurrent_winner(tmp_path: Path) -> Non
 
 
 def test_prepare_tools_translates_missing_cargo(tmp_path: Path) -> None:
-    def missing(arguments):  # noqa: ANN001, ANN202, ARG001
+    def missing(_arguments: Sequence[str]) -> Never:
         raise FileNotFoundError("cargo")
 
     with pytest.raises(EvaluatorToolError, match="cargo was not found"):
@@ -529,7 +535,7 @@ def test_prepare_tools_translates_missing_cargo(tmp_path: Path) -> None:
 
 
 def test_prepare_tools_reports_cargo_failure_and_cleans_staging(tmp_path: Path) -> None:
-    def fail(arguments):  # noqa: ANN001, ANN202
+    def fail(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             arguments,
             7,
@@ -545,7 +551,7 @@ def test_prepare_tools_reports_cargo_failure_and_cleans_staging(tmp_path: Path) 
 
 
 def test_prepare_tools_reports_timeout_and_cleans_staging(tmp_path: Path) -> None:
-    def timeout(arguments):  # noqa: ANN001, ANN202
+    def timeout(arguments: Sequence[str]) -> Never:
         raise subprocess.TimeoutExpired(arguments, 600)
 
     with pytest.raises(EvaluatorToolError, match="cargo install timed out"):

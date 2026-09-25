@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from vs_project.project import Project
 
@@ -29,7 +29,8 @@ def _normalize_project_paths(paths: Iterable[str | Path]) -> tuple[Path, ...]:
             or path == Path()
             or any(part in {"", ".", ".."} for part in path.parts)
         ):
-            raise ValueError(f"project path must be a normalized relative path: {raw}")  # noqa: TRY003  # tracked: #288
+            message = f"project path must be a normalized relative path: {raw}"
+            raise ValueError(message)
         normalized.append(path)
     return tuple(normalized)
 
@@ -50,7 +51,7 @@ class GitTracker:
     through repository-local Git configuration.
     """
 
-    _GIT_ENV_STATIC = {  # noqa: RUF012  # tracked: #288
+    _GIT_ENV_STATIC: ClassVar[dict[str, str]] = {
         "GIT_AUTHOR_NAME": "vibesys",
         "GIT_AUTHOR_EMAIL": "vibesys@local",
         "GIT_COMMITTER_NAME": "vibesys",
@@ -93,7 +94,7 @@ class GitTracker:
     # caller's thread (a frontend request thread, for instance) open forever.
     _READ_TIMEOUT_SECONDS = 10.0
 
-    def __init__(  # tracked: #288
+    def __init__(
         self,
         root: Path,
         *,
@@ -104,7 +105,8 @@ class GitTracker:
     ) -> None:
         self.root = root.expanduser().resolve()
         if not self.root.is_dir():
-            raise ValueError(f"project root must be an existing directory: {self.root}")  # noqa: TRY003  # tracked: #288
+            message = f"project root must be an existing directory: {self.root}"
+            raise ValueError(message)
         self._events = events
         self._excluded_dirs = frozenset(excluded_dirs)
         self.run_id = run_id
@@ -121,7 +123,7 @@ class GitTracker:
         self._exclude_file = self.root / ".git" / "info" / "exclude"
 
     @property
-    def _GIT_ENV(self) -> dict[str, str]:  # noqa: N802  # tracked: #288
+    def _git_env(self) -> dict[str, str]:
         """Git env pinned to the repository selected during initialization."""
         safe_directory = self._work_tree or self.root
         config = [("safe.directory", str(safe_directory))]
@@ -154,9 +156,9 @@ class GitTracker:
             env = os.environ.copy()
             for variable in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
                 env.pop(variable, None)
-            env.update(self._GIT_ENV)
-        result = subprocess.run(  # noqa: PLW1510, S603  # tracked: #288
-            cmd, cwd=self.root, capture_output=True, env=env, timeout=timeout
+            env.update(self._git_env)
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007106 [S603]; internally built Git argv operates on this repository without a shell.
+            cmd, cwd=self.root, capture_output=True, env=env, timeout=timeout, check=False
         )
         if check and result.returncode != 0:
             stderr = result.stderr.decode(errors="replace").strip()
@@ -167,7 +169,7 @@ class GitTracker:
             result.check_returncode()
         return result
 
-    def init(self, existing: bool, *, trusted_input_baseline: str | None = None) -> None:  # noqa: FBT001  # tracked: #288
+    def init(self, *, existing: bool, trusted_input_baseline: str | None = None) -> None:
         """Create a run branch, or resume the existing branch for this run."""
         self._init_project(
             existing=existing,
@@ -212,13 +214,15 @@ class GitTracker:
     def retain_candidate(self, candidate_id: str, commit: str) -> str:
         """Keep a candidate commit reachable after its worktree is removed."""
         if not self._CANDIDATE_ID.fullmatch(candidate_id):
-            raise ValueError(f"invalid candidate id: {candidate_id!r}")  # noqa: TRY003  # tracked: #288
+            message = f"invalid candidate id: {candidate_id!r}"
+            raise ValueError(message)
         resolved = self.run(
             ["git", "rev-parse", "--verify", f"{commit}^{{commit}}"],
             check=False,
         )
         if resolved.returncode != 0:
-            raise ValueError(f"candidate revision is not a commit: {commit!r}")  # noqa: TRY003  # tracked: #288
+            message = f"candidate revision is not a commit: {commit!r}"
+            raise ValueError(message)
         sha = resolved.stdout.decode(errors="replace").strip()
         ref = f"refs/vibesys/{self.run_id}/candidates/{candidate_id}"
         self.run(["git", "update-ref", ref, sha])
@@ -254,17 +258,17 @@ class GitTracker:
                 "GIT_CONFIG_VALUE_0": str(worktree_dir),
             }
         )
-        result = subprocess.run(  # noqa: PLW1510, S603  # tracked: #288
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007107 [S603]; internally built Git argv operates on this candidate worktree without a shell.
             command,
             cwd=worktree_dir,
             capture_output=True,
             env=env,
+            check=False,
         )
         if result.returncode != 0:
             stderr = result.stderr.decode(errors="replace").strip()
-            raise RuntimeError(  # noqa: TRY003  # tracked: #288
-                f"Git command failed in candidate worktree ({' '.join(command)}): {stderr}"
-            )
+            message = f"Git command failed in candidate worktree ({' '.join(command)}): {stderr}"
+            raise RuntimeError(message)
         return result
 
     def snapshot(self, label: str) -> None:
@@ -282,7 +286,8 @@ class GitTracker:
             .splitlines()
         )
         if not roots:
-            raise ValueError(f"cannot resolve workspace baseline for commit {commit}")  # noqa: TRY003  # tracked: #288
+            message = f"cannot resolve workspace baseline for commit {commit}"
+            raise ValueError(message)
         return self.run(
             [
                 "git",
@@ -314,7 +319,8 @@ class GitTracker:
         """
         for value in (base, head):
             if self._OBJECT_NAME.fullmatch(value) is None:
-                raise ValueError(f"not a commit object name: {value!r}")  # noqa: TRY003  # tracked: #288
+                message = f"not a commit object name: {value!r}"
+                raise ValueError(message)
         command = [
             "git",
             "diff",
@@ -420,9 +426,10 @@ class GitTracker:
         ]
         if unexpected or mismatched:
             shown = ", ".join(sorted({*unexpected, *mismatched}))
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            message = (
                 f"refusing to overwrite unexpectedly modified committed VibeSys metadata: {shown}"
             )
+            raise ValueError(message)
         return plan
 
     def framework_snapshot_status(self, snapshot: StateSnapshot) -> FrameworkSnapshotStatus:
@@ -446,9 +453,8 @@ class GitTracker:
         """Reconcile one namespace without replacing retained file inodes."""
         if plan.destination_root.exists():
             if not plan.destination_root.is_dir():
-                raise ValueError(  # noqa: TRY003  # tracked: #288
-                    f"framework state namespace is not a directory: {plan.destination_root}"
-                )
+                message = f"framework state namespace is not a directory: {plan.destination_root}"
+                raise ValueError(message)
             retained_files = {state_file.destination for state_file in plan.files}
             retained_directories = {
                 parent
@@ -489,10 +495,11 @@ class GitTracker:
             if not plan.contains_pathspec(path)
         ]
         if unexpected:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            message = (
                 "refusing to replace framework state while other committed "
                 f"VibeSys metadata has pending changes: {', '.join(unexpected)}"
             )
+            raise ValueError(message)
 
         tracked = self.run(["git", "ls-files", "--", plan.scope_pathspec]).stdout.strip()
         self._replace_framework_namespace_contents(plan)
@@ -531,7 +538,7 @@ class GitTracker:
             if result.returncode != 0:
                 return None
             return result.stdout.decode(errors="replace").strip()
-        except Exception:  # noqa: BLE001  # tracked: #288
+        except (OSError, subprocess.SubprocessError):
             return None
 
     @property
@@ -574,7 +581,7 @@ class GitTracker:
         return sorted(
             line[3:].removeprefix(prefix) if prefix else line[3:]
             for line in result.stdout.decode(errors="replace").splitlines()
-            if len(line) > 3  # noqa: PLR2004  # tracked: #288
+            if line[3:]
         )
 
     def checkout_tree(
@@ -620,11 +627,10 @@ class GitTracker:
                 clean_cmd.extend(["--", "."])
                 self.run(clean_cmd, check=False)
             self._restore_preserved_paths(preserved)
-            return True  # noqa: TRY300  # tracked: #288
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
+        except (OSError, subprocess.SubprocessError) as exc:
             try:
                 self._restore_preserved_paths(preserved)
-            except Exception as preserve_exc:  # noqa: BLE001  # tracked: #288
+            except OSError as preserve_exc:
                 self._events.warning(
                     "failed to restore preserved workspace memory after tree restore error",
                     detail=str(preserve_exc),
@@ -634,6 +640,8 @@ class GitTracker:
                 detail=str(exc),
             )
             return False
+        else:
+            return True
 
     def _capture_preserved_paths(self, paths: Iterable[str | Path]) -> dict[Path, bytes]:
         """Read regular files below workspace-relative *paths*."""
@@ -641,7 +649,8 @@ class GitTracker:
         for raw_path in paths:
             relative = Path(raw_path)
             if relative.is_absolute() or relative == Path() or ".." in relative.parts:
-                raise ValueError(f"preserved path must be workspace-relative: {raw_path}")  # noqa: TRY003  # tracked: #288
+                message = f"preserved path must be workspace-relative: {raw_path}"
+                raise ValueError(message)
             source = self.root / relative
             if source.is_file():
                 preserved[relative] = source.read_bytes()
@@ -705,7 +714,7 @@ class GitTracker:
         changes.update(
             workspace_relative(line[3:])
             for line in pending.stdout.decode(errors="replace").splitlines()
-            if len(line) > 3  # noqa: PLR2004  # tracked: #288
+            if line[3:]
         )
         return sorted(changes)
 
@@ -721,14 +730,16 @@ class GitTracker:
             check=False,
         )
         if resolved.returncode != 0:
-            raise ValueError(f"trusted input baseline {revision!r} is not a commit")  # noqa: TRY003  # tracked: #288
+            message = f"trusted input baseline {revision!r} is not a commit"
+            raise ValueError(message)
         commit = resolved.stdout.decode(errors="replace").strip()
         ancestor = self.run(
             ["git", "merge-base", "--is-ancestor", commit, "HEAD"],
             check=False,
         )
         if ancestor.returncode != 0:
-            raise ValueError(f"trusted input baseline {revision!r} is not an ancestor of HEAD")  # noqa: TRY003  # tracked: #288
+            message = f"trusted input baseline {revision!r} is not an ancestor of HEAD"
+            raise ValueError(message)
         return commit
 
     @property
@@ -766,26 +777,29 @@ class GitTracker:
         branch = self.project_branch
         valid = self.run(["git", "check-ref-format", "--branch", branch], check=False)
         if valid.returncode != 0:
-            raise ValueError(f"invalid VibeSys run id for a Git branch: {self.run_id!r}")  # noqa: TRY003  # tracked: #288
+            message = f"invalid VibeSys run id for a Git branch: {self.run_id!r}"
+            raise ValueError(message)
         return branch
 
     def _prepare_project_repository(self, *, existing: bool) -> bool:
         inside_work_tree = self._inside_work_tree()
         if not inside_work_tree:
             if existing:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
+                message = (
                     f"cannot resume VibeSys run {self.run_id!r}: no Git repository in {self.root}"
                 )
+                raise ValueError(message)
             self.run(["git", "init", "-q", "-b", "main"])
             return False
 
         top_level = self.run(["git", "rev-parse", "--show-toplevel"])
         repository_root = Path(top_level.stdout.decode(errors="replace").strip()).resolve()
         if repository_root != self.root.resolve():
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            message = (
                 "VibeSys Git tracking requires the input directory to be "
                 f"the repository root; found containing repository {repository_root}"
             )
+            raise ValueError(message)
         return True
 
     def _resume_user_project(
@@ -794,9 +808,8 @@ class GitTracker:
         trusted_input_baseline: str | None,
     ) -> None:
         if not self._branch_exists(branch):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"cannot resume VibeSys run {self.run_id!r}: branch {branch!r} does not exist"
-            )
+            message = f"cannot resume VibeSys run {self.run_id!r}: branch {branch!r} does not exist"
+            raise ValueError(message)
         if self._current_branch() != branch:
             self._require_clean_project(
                 "cannot switch to the resumed VibeSys branch with pending project changes"
@@ -813,13 +826,13 @@ class GitTracker:
         trusted_input_baseline: str | None,
     ) -> None:
         if trusted_input_baseline is not None:
-            raise ValueError("trusted input baseline is only valid when resuming a run")  # noqa: TRY003  # tracked: #288
+            message = "trusted input baseline is only valid when resuming a run"
+            raise ValueError(message)
 
         if inside_work_tree:
             if self.current_sha() is None:
-                raise ValueError(  # noqa: TRY003  # tracked: #288
-                    "existing project repository has no baseline commit"
-                )
+                message = "existing project repository has no baseline commit"
+                raise ValueError(message)
             self._require_clean_project(
                 "existing project repository must be clean before starting a VibeSys run"
             )
@@ -829,10 +842,12 @@ class GitTracker:
 
         branch_point = self.current_sha()
         if branch_point is None:
-            raise ValueError("user-project baseline commit could not be resolved")  # noqa: TRY003  # tracked: #288
+            message = "user-project baseline commit could not be resolved"
+            raise ValueError(message)
 
         if self._branch_exists(branch):
-            raise ValueError(f"VibeSys run branch already exists: {branch}")  # noqa: TRY003  # tracked: #288
+            message = f"VibeSys run branch already exists: {branch}"
+            raise ValueError(message)
         self.run(["git", "switch", "-c", branch])
         self._trusted_input_baseline = branch_point
         self._events.baseline_configured(branch_point)
@@ -861,7 +876,8 @@ class GitTracker:
             check=False,
         )
         if objects.returncode != 0:
-            raise ValueError("cannot inspect project Git history for private inputs")  # noqa: TRY003  # tracked: #288
+            message = "cannot inspect project Git history for private inputs"
+            raise ValueError(message)
         private_paths = sorted(
             {
                 path
@@ -870,11 +886,12 @@ class GitTracker:
             }
         )
         if private_paths:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            message = (
                 "project Git history contains private inputs that an optimization agent "
                 f"could recover: {', '.join(private_paths)}. Remove them from history or "
                 "start from a fresh repository."
             )
+            raise ValueError(message)
 
     @staticmethod
     def _is_private_project_input(path: str) -> bool:
@@ -894,7 +911,8 @@ class GitTracker:
     def _require_clean_project(self, message: str) -> None:
         changes = self.pending_changes()
         if changes:
-            raise ValueError(f"{message}: {', '.join(changes)}")  # noqa: TRY003  # tracked: #288
+            message = f"{message}: {', '.join(changes)}"
+            raise ValueError(message)
 
     def _branch_exists(self, branch: str) -> bool:
         result = self.run(
@@ -952,14 +970,14 @@ class GitTracker:
             for d in dirnames:
                 if d in ignored_dirs:
                     continue
-                full = os.path.join(dirpath, d)  # noqa: PTH118  # tracked: #288
+                full = Path(dirpath) / d
                 if os.access(full, os.R_OK | os.X_OK):
                     kept.append(d)
                 else:
                     unreadable.append(os.path.relpath(full, root))
             dirnames[:] = kept  # prune unsearchable dirs from the walk
             for f in filenames:
-                full = os.path.join(dirpath, f)  # noqa: PTH118  # tracked: #288
+                full = Path(dirpath) / f
                 if not os.access(full, os.R_OK):
                     unreadable.append(os.path.relpath(full, root))
         return unreadable
@@ -971,10 +989,10 @@ class GitTracker:
         Git prints e.g. ``error: open("foo"): Permission denied`` and
         ``error: unable to index file 'foo'``.
         """
-        paths: list[str] = []
-        for m in re.finditer(r'(?:open\("|unable to index file \')([^"\']+)', stderr):
-            paths.append(m.group(1))  # noqa: PERF401  # tracked: #288
-        return paths
+        return [
+            match.group(1)
+            for match in re.finditer(r'(?:open\("|unable to index file \')([^"\']+)', stderr)
+        ]
 
     def _exclude_paths(self, rel_paths: list[str]) -> None:
         """Append *rel_paths* to the framework-owned Git exclude file."""

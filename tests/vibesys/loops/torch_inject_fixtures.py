@@ -193,7 +193,7 @@ def run_python(
     script: str, *, env: dict[str, str], cwd: Path | None = None, timeout: float = 15.0
 ) -> subprocess.CompletedProcess[str]:
     """Run *script* via ``python -c`` under *env*, capturing text output."""
-    return subprocess.run(  # noqa: S603  # tracked: #288
+    return subprocess.run(  # noqa: S603  # LW-910384; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
         [sys.executable, "-c", script],
         env=env,
         cwd=str(cwd) if cwd else None,

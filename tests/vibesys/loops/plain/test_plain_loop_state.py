@@ -1,22 +1,24 @@
 """Tests for plain-loop resume decisions over typed state."""
 
+from pathlib import Path
+
 from vibesys.loops.plain.loop import PlainLoopState, _determine_resume_point
 from vs_issue_board.api import IssueBoard, IssueStatus, IssueType
 
 
-def _make_store(tmp_path) -> IssueBoard:  # noqa: ANN001  # tracked: #288
+def _make_store(tmp_path: Path) -> IssueBoard:
     return IssueBoard(tmp_path / "issues.json")
 
 
 class TestDetermineResumePoint:
-    def test_none_state_starts_fresh(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_none_state_starts_fresh(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         i, phase, issue_id = _determine_resume_point(None, store)
         assert i == 0
         assert phase == "implementer"
         assert issue_id is None
 
-    def test_mid_implementer_re_runs_implementer(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_mid_implementer_re_runs_implementer(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         issue = store.create(
             type=IssueType.BUG,
@@ -34,7 +36,7 @@ class TestDetermineResumePoint:
         assert phase == "implementer"
         assert issue_id == issue.id
 
-    def test_mid_judge_re_runs_judge(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_mid_judge_re_runs_judge(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         issue = store.create(
             type=IssueType.BUG,
@@ -52,7 +54,7 @@ class TestDetermineResumePoint:
         assert phase == "judge"
         assert issue_id == issue.id
 
-    def test_resume_picks_drain_when_open_issues_remain(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_resume_picks_drain_when_open_issues_remain(self, tmp_path: Path) -> None:
         store = _make_store(tmp_path)
         store.create(type=IssueType.BUG, title="t", description="d", created_by="x", iteration=1)
         # Loop was past judge, no current_issue_id
@@ -64,7 +66,7 @@ class TestDetermineResumePoint:
         assert phase == "implementer"
         assert issue_id is None
 
-    def test_resume_goes_to_implementer_when_no_open_issues(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_resume_goes_to_implementer_when_no_open_issues(self, tmp_path: Path) -> None:
         # When no open issues remain, _determine_resume_point returns
         # phase="implementer" — the drain loop in run_plain_loop will
         # immediately exit (next_open() is None) and fall through to
@@ -82,7 +84,7 @@ class TestDetermineResumePoint:
         assert phase == "implementer"
         assert issue_id is None
 
-    def test_resume_after_perf_eval_with_no_open_issues(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_resume_after_perf_eval_with_no_open_issues(self, tmp_path: Path) -> None:
         """If we crashed during/after perf_eval with no open issues left,
         _determine_resume_point should return phase='implementer'. The
         drain loop will then immediately exit (next_open() is None) and
@@ -100,7 +102,7 @@ class TestDetermineResumePoint:
         assert phase == "implementer"
         assert issue_id is None
 
-    def test_resume_skips_stale_current_issue_id_if_already_closed(self, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_resume_skips_stale_current_issue_id_if_already_closed(self, tmp_path: Path) -> None:
         # If state.current_issue_id points at an issue that the store says is
         # already CLOSED (race after a crash), we should NOT try to re-run
         # that phase. Instead, drain remaining open issues.

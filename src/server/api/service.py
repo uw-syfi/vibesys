@@ -118,7 +118,8 @@ class _DesignLogGitEvents(NullGitTrackerEvents):
 class RunApi:
     """Authoritative request API consumed by frontend clients."""
 
-    def __init__(  # noqa: PLR0913  # Explicit dependencies define the API boundary.
+    # lint-waiver: LW-009026 [PLR0913]; inject each request owner explicitly at the API composition boundary.
+    def __init__(  # noqa: PLR0913
         self,
         condition: threading.Condition,
         controller: RunController,
@@ -153,6 +154,7 @@ class RunApi:
             replay_filter=lambda _header: False,
         )
 
+    # lint-waiver: LW-009027 [C901, PLR0911]; exhaustive protocol dispatch keeps each request variant routed to its owning handler.
     def execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
         """Execute one typed request and return its protocol response."""
         if isinstance(request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand)):
@@ -214,9 +216,8 @@ class RunApi:
                 else self.events(request.after_sequence, request.before_sequence)
             )
             return Response(request_id=request.request_id, events=events)
-        raise TypeError(  # noqa: TRY003  # Include the invalid protocol model in the error.
-            f"Unsupported protocol request: {type(request).__name__}"
-        )
+        message = f"Unsupported protocol request: {type(request).__name__}"
+        raise TypeError(message)
 
     def _execute_command(
         self, request: PauseCommand | ResumeCommand | SteerCommand | StopCommand
@@ -543,7 +544,7 @@ class RunApi:
         """Answer from memory, loading once outside projection locks if needed.
 
         `ExperimentProjection` consumes `vibesys.api`'s `RunView`.
-        `_observe_committed_state` below feeds it a `RunView` projected
+        `observe_committed_state` below feeds it a `RunView` projected
         in-memory from the state object the run loop just committed, with no
         filesystem read (see `test_service_projects_committed_live_state_
         without_reloading_history` in `tests/server/test_experiments.py`, which
@@ -598,7 +599,7 @@ class RunApi:
         identity = f"{project_run.project.root.resolve()}\0{project_run.run_id}"
         return sha256(identity.encode()).hexdigest()[:16]
 
-    def _observe_committed_state(self, view: RunView, changed_keys: tuple[str, ...] | None) -> None:
+    def observe_committed_state(self, view: RunView, changed_keys: tuple[str, ...] | None) -> None:
         """Incrementally project a state object immediately after its commit.
 
         Registered as this run's `RunSession.on_committed_view` listener (see
@@ -616,6 +617,9 @@ class RunApi:
             view,
             changed_keys=changed_keys,
         )
+
+    # Keep the previous internal spelling for existing server-side observers.
+    _observe_committed_state = observe_committed_state
 
     def _observe_experiment_change(self, event: RunEvent) -> None:
         data = event.data

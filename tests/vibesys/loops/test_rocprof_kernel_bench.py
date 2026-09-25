@@ -61,7 +61,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
 # private-attribute access pattern.
 _load_module(_MODULE_NAME, _MODULE_PATH)
 
-from rocprof_kernel_bench_under_test import (  # noqa: E402  (module must load first)  # ty: ignore[unresolved-import]  # tracked: #288
+from rocprof_kernel_bench_under_test import (  # noqa: E402  (module must load first)  # ty: ignore[unresolved-import]  # LW-900101; the module-under-test is loaded by file path above, so the static import target does not exist on disk
     DEFAULT_THRESHOLD_PCT,
     MIN_PAIRS_FOR_VERDICT,
     MIN_SAMPLES_FOR_TREND,
@@ -83,7 +83,7 @@ def kb() -> ModuleType:
     return sys.modules[_MODULE_NAME]
 
 
-def test_module_imports_without_torch():  # noqa: ANN201
+def test_module_imports_without_torch():  # noqa: ANN201  # LW-920340; tracked migration debt from the pre-manifest ratchet scheme
     """The module never imports torch at import time (only inside time_callable/paired_ab)."""
     assert "torch" not in sys.modules
 
@@ -93,15 +93,15 @@ def test_module_imports_without_torch():  # noqa: ANN201
 # ---------------------------------------------------------------------------
 
 
-def test_percentile_of_empty_sequence_is_zero():  # noqa: ANN201
+def test_percentile_of_empty_sequence_is_zero():  # noqa: ANN201  # LW-920341; tracked migration debt from the pre-manifest ratchet scheme
     assert _percentile([], 50) == 0.0
 
 
-def test_percentile_of_single_value_is_that_value():  # noqa: ANN201
+def test_percentile_of_single_value_is_that_value():  # noqa: ANN201  # LW-920342; tracked migration debt from the pre-manifest ratchet scheme
     assert _percentile([7.0], 90) == 7.0
 
 
-def test_percentile_interpolates_linearly():  # noqa: ANN201
+def test_percentile_interpolates_linearly():  # noqa: ANN201  # LW-920343; tracked migration debt from the pre-manifest ratchet scheme
     values = [float(v) for v in range(1, 11)]  # 1..10, already sorted
 
     assert _percentile(values, 10) == pytest.approx(1.9)
@@ -109,12 +109,12 @@ def test_percentile_interpolates_linearly():  # noqa: ANN201
     assert _percentile(values, 50) == pytest.approx(5.5)
 
 
-def test_is_monotonic_increasing_requires_at_least_three_points():  # noqa: ANN201
+def test_is_monotonic_increasing_requires_at_least_three_points():  # noqa: ANN201  # LW-920344; tracked migration debt from the pre-manifest ratchet scheme
     assert _is_monotonic_increasing([1.0, 2.0]) is False
     assert _is_monotonic_increasing([1.0, 2.0, 3.0]) is True
 
 
-def test_is_monotonic_increasing_false_on_any_non_rise():  # noqa: ANN201
+def test_is_monotonic_increasing_false_on_any_non_rise():  # noqa: ANN201  # LW-920345; tracked migration debt from the pre-manifest ratchet scheme
     assert _is_monotonic_increasing([1.0, 2.0, 2.0, 3.0]) is False
     assert _is_monotonic_increasing([3.0, 2.0, 1.0]) is False
 
@@ -124,14 +124,14 @@ def test_is_monotonic_increasing_false_on_any_non_rise():  # noqa: ANN201
 # ---------------------------------------------------------------------------
 
 
-def test_summarize_series_drops_warmup(kb):  # noqa: ANN001, ANN201
+def test_summarize_series_drops_warmup(kb):  # noqa: ANN001, ANN201  # LW-920346; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     result = kb.summarize_series([100.0, 50.0, 10.0, 10.0, 10.0], warmup=2)
 
     assert result.warmup_ms == (100.0, 50.0)
     assert result.samples_ms == (10.0, 10.0, 10.0)
 
 
-def test_summarize_series_insufficient_samples(kb):  # noqa: ANN001, ANN201
+def test_summarize_series_insufficient_samples(kb):  # noqa: ANN001, ANN201  # LW-920347; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     result = kb.summarize_series([10.0], warmup=0)
 
     assert not result.converged
@@ -142,7 +142,7 @@ def test_summarize_series_insufficient_samples(kb):  # noqa: ANN001, ANN201
     assert result.spread_pct is None
 
 
-def test_summarize_series_flags_monotonic_increasing_as_not_converged(kb):  # noqa: ANN001, ANN201
+def test_summarize_series_flags_monotonic_increasing_as_not_converged(kb):  # noqa: ANN001, ANN201  # LW-920348; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     result = kb.summarize_series([1.0, 2.0, 3.0, 4.0], warmup=0)
 
     assert not result.converged
@@ -151,7 +151,7 @@ def test_summarize_series_flags_monotonic_increasing_as_not_converged(kb):  # no
     assert result.median_ms == pytest.approx(statistics.median([1.0, 2.0, 3.0, 4.0]))
 
 
-def test_summarize_series_converged_reports_correct_stats(kb):  # noqa: ANN001, ANN201
+def test_summarize_series_converged_reports_correct_stats(kb):  # noqa: ANN001, ANN201  # LW-920349; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     samples = [10.0, 12.0, 9.0, 11.0, 10.5]
 
     result = kb.summarize_series(samples, warmup=0)
@@ -166,7 +166,7 @@ def test_summarize_series_converged_reports_correct_stats(kb):  # noqa: ANN001, 
     assert result.spread_pct == pytest.approx(expected_spread)
 
 
-def test_timing_result_to_dict_round_trips_fields(kb):  # noqa: ANN001, ANN201
+def test_timing_result_to_dict_round_trips_fields(kb):  # noqa: ANN001, ANN201  # LW-920350; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     result = kb.summarize_series([10.0, 11.0, 9.0], warmup=0)
 
     payload = result.to_dict()
@@ -182,7 +182,7 @@ def test_timing_result_to_dict_round_trips_fields(kb):  # noqa: ANN001, ANN201
 # ---------------------------------------------------------------------------
 
 
-def test_assess_paired_not_converged_when_too_few_pairs(kb):  # noqa: ANN001, ANN201
+def test_assess_paired_not_converged_when_too_few_pairs(kb):  # noqa: ANN001, ANN201  # LW-920351; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     verdict = kb.assess_paired([(10.0, 9.0)])
 
     assert not verdict.decisive
@@ -190,7 +190,7 @@ def test_assess_paired_not_converged_when_too_few_pairs(kb):  # noqa: ANN001, AN
     assert verdict.median_delta_pct is None
 
 
-def test_assess_paired_not_converged_when_still_climbing(kb):  # noqa: ANN001, ANN201
+def test_assess_paired_not_converged_when_still_climbing(kb):  # noqa: ANN001, ANN201  # LW-920352; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     # Candidate side is monotonically increasing across pairs -- not settled yet.
     pairs = [(10.0, 8.0), (10.0, 9.0), (10.0, 10.0), (10.0, 11.0)]
 
@@ -200,7 +200,7 @@ def test_assess_paired_not_converged_when_still_climbing(kb):  # noqa: ANN001, A
     assert verdict.reason == "not_converged"
 
 
-def test_assess_paired_sign_disagreement(kb):  # noqa: ANN001, ANN201
+def test_assess_paired_sign_disagreement(kb):  # noqa: ANN001, ANN201  # LW-920353; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     # Candidate wins some pairs, loses others -- no consistent verdict.
     pairs = [(10.0, 8.0), (10.0, 12.0), (10.0, 8.5), (10.0, 11.5)]
 
@@ -211,7 +211,7 @@ def test_assess_paired_sign_disagreement(kb):  # noqa: ANN001, ANN201
     assert not verdict.candidate_faster
 
 
-def test_assess_paired_within_noise(kb):  # noqa: ANN001, ANN201
+def test_assess_paired_within_noise(kb):  # noqa: ANN001, ANN201  # LW-920354; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     # `assess_paired` requires every pair's delta to agree in sign (see
     # `sign_disagreement` below), so "within noise" here means consistently
     # signed but small, not straddling zero.
@@ -224,7 +224,7 @@ def test_assess_paired_within_noise(kb):  # noqa: ANN001, ANN201
     assert abs(verdict.median_delta_pct) <= 3.0
 
 
-def test_assess_paired_candidate_faster(kb):  # noqa: ANN001, ANN201
+def test_assess_paired_candidate_faster(kb):  # noqa: ANN001, ANN201  # LW-920355; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     pairs = [(10.0, 8.0), (10.0, 8.1), (10.0, 7.9), (10.0, 8.0)]
 
     verdict = kb.assess_paired(pairs, threshold_pct=3.0)
@@ -235,7 +235,7 @@ def test_assess_paired_candidate_faster(kb):  # noqa: ANN001, ANN201
     assert verdict.median_delta_pct < 0
 
 
-def test_assess_paired_candidate_slower(kb):  # noqa: ANN001, ANN201
+def test_assess_paired_candidate_slower(kb):  # noqa: ANN001, ANN201  # LW-920356; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     pairs = [(10.0, 12.0), (10.0, 12.1), (10.0, 11.9), (10.0, 12.0)]
 
     verdict = kb.assess_paired(pairs, threshold_pct=3.0)
@@ -246,7 +246,7 @@ def test_assess_paired_candidate_slower(kb):  # noqa: ANN001, ANN201
     assert verdict.median_delta_pct > 0
 
 
-def test_assess_paired_drops_non_positive_samples(kb):  # noqa: ANN001, ANN201
+def test_assess_paired_drops_non_positive_samples(kb):  # noqa: ANN001, ANN201  # LW-920357; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     pairs = [(10.0, 8.0), (0.0, 8.0), (-1.0, 8.0), (10.0, 8.1)]
 
     verdict = kb.assess_paired(pairs, threshold_pct=3.0)
@@ -257,7 +257,7 @@ def test_assess_paired_drops_non_positive_samples(kb):  # noqa: ANN001, ANN201
     assert verdict.reason == "faster"
 
 
-def test_paired_verdict_to_dict_round_trips(kb):  # noqa: ANN001, ANN201
+def test_paired_verdict_to_dict_round_trips(kb):  # noqa: ANN001, ANN201  # LW-920358; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     verdict = kb.assess_paired([(10.0, 8.0), (10.0, 8.1)], threshold_pct=3.0)
 
     payload = verdict.to_dict()
@@ -273,14 +273,14 @@ def test_paired_verdict_to_dict_round_trips(kb):  # noqa: ANN001, ANN201
 # ---------------------------------------------------------------------------
 
 
-def test_assess_unpaired_not_converged_when_either_side_lacks_samples(kb):  # noqa: ANN001, ANN201
+def test_assess_unpaired_not_converged_when_either_side_lacks_samples(kb):  # noqa: ANN001, ANN201  # LW-920359; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     verdict = kb.assess_unpaired([10.0], [10.0, 9.0, 10.5])
 
     assert not verdict.decisive
     assert verdict.reason == "not_converged"
 
 
-def test_assess_unpaired_faster_slower_and_within_noise(kb):  # noqa: ANN001, ANN201
+def test_assess_unpaired_faster_slower_and_within_noise(kb):  # noqa: ANN001, ANN201  # LW-920360; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     baseline = [10.0, 10.1, 9.9, 10.0]
 
     faster = kb.assess_unpaired(baseline, [8.0, 8.1, 7.9, 8.0], threshold_pct=3.0)
@@ -300,7 +300,7 @@ def test_assess_unpaired_faster_slower_and_within_noise(kb):  # noqa: ANN001, AN
 # ---------------------------------------------------------------------------
 
 
-def test_is_valid_pair():  # noqa: ANN201
+def test_is_valid_pair():  # noqa: ANN201  # LW-920361; tracked migration debt from the pre-manifest ratchet scheme
     assert _is_valid_pair([1.0, 2.0]) is True
     assert _is_valid_pair([1, 2]) is True
     assert _is_valid_pair([1.0, 2.0, 3.0]) is False
@@ -308,14 +308,14 @@ def test_is_valid_pair():  # noqa: ANN201
     assert _is_valid_pair("not-a-list") is False
 
 
-def test_load_wall_ms_reads_valid_file(tmp_path):  # noqa: ANN001, ANN201
+def test_load_wall_ms_reads_valid_file(tmp_path):  # noqa: ANN001, ANN201  # LW-920362; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     path = tmp_path / "samples.json"
     path.write_text(json.dumps({"wall_ms": [1.0, 2.5, 3]}), encoding="utf-8")
 
     assert _load_wall_ms(str(path)) == [1.0, 2.5, 3.0]
 
 
-def test_load_wall_ms_exits_when_key_missing(tmp_path):  # noqa: ANN001, ANN201
+def test_load_wall_ms_exits_when_key_missing(tmp_path):  # noqa: ANN001, ANN201  # LW-920363; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     path = tmp_path / "samples.json"
     path.write_text(json.dumps({"nope": []}), encoding="utf-8")
 
@@ -323,7 +323,7 @@ def test_load_wall_ms_exits_when_key_missing(tmp_path):  # noqa: ANN001, ANN201
         _load_wall_ms(str(path))
 
 
-def test_load_wall_ms_exits_on_non_numeric_values(tmp_path):  # noqa: ANN001, ANN201
+def test_load_wall_ms_exits_on_non_numeric_values(tmp_path):  # noqa: ANN001, ANN201  # LW-920364; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     path = tmp_path / "samples.json"
     path.write_text(json.dumps({"wall_ms": [1.0, "oops"]}), encoding="utf-8")
 
@@ -331,14 +331,14 @@ def test_load_wall_ms_exits_on_non_numeric_values(tmp_path):  # noqa: ANN001, AN
         _load_wall_ms(str(path))
 
 
-def test_load_pairs_reads_valid_file(tmp_path):  # noqa: ANN001, ANN201
+def test_load_pairs_reads_valid_file(tmp_path):  # noqa: ANN001, ANN201  # LW-920365; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     path = tmp_path / "pairs.json"
     path.write_text(json.dumps({"pairs": [[10.0, 8.0], [10.0, 8.1]]}), encoding="utf-8")
 
     assert _load_pairs(str(path)) == [(10.0, 8.0), (10.0, 8.1)]
 
 
-def test_load_pairs_exits_when_key_missing(tmp_path):  # noqa: ANN001, ANN201
+def test_load_pairs_exits_when_key_missing(tmp_path):  # noqa: ANN001, ANN201  # LW-920366; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     path = tmp_path / "pairs.json"
     path.write_text(json.dumps({"nope": []}), encoding="utf-8")
 
@@ -346,7 +346,7 @@ def test_load_pairs_exits_when_key_missing(tmp_path):  # noqa: ANN001, ANN201
         _load_pairs(str(path))
 
 
-def test_load_pairs_exits_on_malformed_pair(tmp_path):  # noqa: ANN001, ANN201
+def test_load_pairs_exits_on_malformed_pair(tmp_path):  # noqa: ANN001, ANN201  # LW-920367; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     path = tmp_path / "pairs.json"
     path.write_text(json.dumps({"pairs": [[10.0, 8.0], [10.0]]}), encoding="utf-8")
 
@@ -354,7 +354,7 @@ def test_load_pairs_exits_on_malformed_pair(tmp_path):  # noqa: ANN001, ANN201
         _load_pairs(str(path))
 
 
-def test_print_verdict_reports_decisive_and_pairs(capsys, kb):  # noqa: ANN001, ANN201
+def test_print_verdict_reports_decisive_and_pairs(capsys, kb):  # noqa: ANN001, ANN201  # LW-920368; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     verdict = kb.assess_paired([(10.0, 8.0), (10.0, 8.1)], threshold_pct=3.0)
 
     _print_verdict(verdict, "baseline", "candidate")
@@ -365,7 +365,7 @@ def test_print_verdict_reports_decisive_and_pairs(capsys, kb):  # noqa: ANN001, 
     assert "pairs used: 2" in out
 
 
-def test_print_verdict_reports_inconclusive_without_pairs_line(capsys, kb):  # noqa: ANN001, ANN201
+def test_print_verdict_reports_inconclusive_without_pairs_line(capsys, kb):  # noqa: ANN001, ANN201  # LW-920369; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     verdict = kb.assess_unpaired([10.0], [10.0, 9.0, 10.0])
 
     _print_verdict(verdict, "a.json", "b.json")
@@ -381,7 +381,7 @@ def test_print_verdict_reports_inconclusive_without_pairs_line(capsys, kb):  # n
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_parse_extracts_wall_ms_lines(tmp_path, capsys, kb):  # noqa: ANN001, ANN201
+def test_cmd_parse_extracts_wall_ms_lines(tmp_path, capsys, kb):  # noqa: ANN001, ANN201  # LW-920370; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     log = tmp_path / "driver.log"
     log.write_text(
         "starting up\nwall_ms: 12.3\nnoise line\nwall_ms: 11.9\nwall_ms: 1.2e1\n",
@@ -394,7 +394,7 @@ def test_cmd_parse_extracts_wall_ms_lines(tmp_path, capsys, kb):  # noqa: ANN001
     assert payload == {"wall_ms": [12.3, 11.9, 12.0]}
 
 
-def test_cmd_compare_prints_verdict(tmp_path, capsys, kb):  # noqa: ANN001, ANN201
+def test_cmd_compare_prints_verdict(tmp_path, capsys, kb):  # noqa: ANN001, ANN201  # LW-920371; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     file_a = tmp_path / "a.json"
     file_b = tmp_path / "b.json"
     file_a.write_text(json.dumps({"wall_ms": [10.0, 10.1, 9.9, 10.0]}), encoding="utf-8")
@@ -406,7 +406,7 @@ def test_cmd_compare_prints_verdict(tmp_path, capsys, kb):  # noqa: ANN001, ANN2
     assert "DECISIVE: faster" in out
 
 
-def test_cmd_verdict_prints_verdict(tmp_path, capsys, kb):  # noqa: ANN001, ANN201
+def test_cmd_verdict_prints_verdict(tmp_path, capsys, kb):  # noqa: ANN001, ANN201  # LW-920372; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     samples = tmp_path / "pairs.json"
     samples.write_text(
         json.dumps({"pairs": [[10.0, 8.0], [10.0, 8.1], [10.0, 7.9]]}), encoding="utf-8"
@@ -419,7 +419,7 @@ def test_cmd_verdict_prints_verdict(tmp_path, capsys, kb):  # noqa: ANN001, ANN2
     assert "pairs used: 3" in out
 
 
-def test_main_dispatches_parse(tmp_path, capsys, kb):  # noqa: ANN001, ANN201
+def test_main_dispatches_parse(tmp_path, capsys, kb):  # noqa: ANN001, ANN201  # LW-920373; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     log = tmp_path / "driver.log"
     log.write_text("wall_ms: 5.0\n", encoding="utf-8")
 
@@ -428,7 +428,7 @@ def test_main_dispatches_parse(tmp_path, capsys, kb):  # noqa: ANN001, ANN201
     assert json.loads(capsys.readouterr().out) == {"wall_ms": [5.0]}
 
 
-def test_main_dispatches_verdict_with_threshold_flag(tmp_path, capsys, kb):  # noqa: ANN001, ANN201
+def test_main_dispatches_verdict_with_threshold_flag(tmp_path, capsys, kb):  # noqa: ANN001, ANN201  # LW-920374; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     # Consistently signed (both slightly slower), so a tiny threshold makes
     # this a decisive "slower" instead of "within_noise".
     samples = tmp_path / "pairs.json"
@@ -440,7 +440,7 @@ def test_main_dispatches_verdict_with_threshold_flag(tmp_path, capsys, kb):  # n
     assert "DECISIVE: slower" in out
 
 
-def test_main_requires_a_subcommand(kb):  # noqa: ANN001, ANN201
+def test_main_requires_a_subcommand(kb):  # noqa: ANN001, ANN201  # LW-920375; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     with pytest.raises(SystemExit):
         kb.main([])
 
@@ -478,7 +478,7 @@ _MONOTONIC_SERIES = st.lists(_POS, min_size=MIN_SAMPLES_FOR_TREND, max_size=15).
     magnitude=st.floats(min_value=DEFAULT_THRESHOLD_PCT + 2.0, max_value=90.0),
     a_values=st.lists(_POS, min_size=MIN_PAIRS_FOR_VERDICT, max_size=15),
 )
-def test_assess_paired_swap_flips_faster_and_slower(direction, magnitude, a_values):  # noqa: ANN001, ANN201
+def test_assess_paired_swap_flips_faster_and_slower(direction, magnitude, a_values):  # noqa: ANN001, ANN201  # LW-920376; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     # Every pair shares the exact same signed delta -- decisively away from
     # the threshold and never sign-disagreeing -- so the verdict is
     # deterministic by construction instead of relying on `assume()` to
@@ -506,7 +506,7 @@ def test_assess_paired_swap_flips_faster_and_slower(direction, magnitude, a_valu
     magnitude=st.floats(min_value=DEFAULT_THRESHOLD_PCT + 2.0, max_value=90.0),
     samples_a=st.lists(_POS, min_size=MIN_SAMPLES_FOR_VERDICT, max_size=15),
 )
-def test_assess_unpaired_swap_flips_faster_and_slower(direction, magnitude, samples_a):  # noqa: ANN001, ANN201
+def test_assess_unpaired_swap_flips_faster_and_slower(direction, magnitude, samples_a):  # noqa: ANN001, ANN201  # LW-920377; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     # `assess_unpaired` compares medians, so scaling every A sample by the
     # same factor scales the median by the same factor -- deterministically
     # decisive, same rationale as the paired version above.
@@ -530,7 +530,7 @@ def test_assess_unpaired_swap_flips_faster_and_slower(direction, magnitude, samp
 
 @settings(max_examples=25, deadline=None)
 @given(samples=st.lists(_POS, min_size=_SELF_PAIR_MIN, max_size=15))
-def test_assess_paired_within_noise_when_pairing_each_value_with_itself(samples):  # noqa: ANN001, ANN201
+def test_assess_paired_within_noise_when_pairing_each_value_with_itself(samples):  # noqa: ANN001, ANN201  # LW-920378; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     assume(not _is_monotonic_increasing(samples))
 
     verdict = assess_paired([(x, x) for x in samples])
@@ -543,7 +543,7 @@ def test_assess_paired_within_noise_when_pairing_each_value_with_itself(samples)
 
 @settings(max_examples=25, deadline=None)
 @given(samples=st.lists(_POS, min_size=_SELF_PAIR_MIN, max_size=15))
-def test_assess_unpaired_within_noise_for_a_series_against_itself(samples):  # noqa: ANN001, ANN201
+def test_assess_unpaired_within_noise_for_a_series_against_itself(samples):  # noqa: ANN001, ANN201  # LW-920379; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     assume(not _is_monotonic_increasing(samples))
 
     verdict = assess_unpaired(samples, samples)
@@ -563,11 +563,11 @@ def test_assess_unpaired_within_noise_for_a_series_against_itself(samples):  # n
     n_slower=st.integers(min_value=1, max_value=5),
     n_faster=st.integers(min_value=1, max_value=5),
 )
-def test_assess_paired_sign_disagreement_from_mixed_pair_signs(  # noqa: ANN201
-    threshold_pct,  # noqa: ANN001
-    epsilon,  # noqa: ANN001
-    n_slower,  # noqa: ANN001
-    n_faster,  # noqa: ANN001
+def test_assess_paired_sign_disagreement_from_mixed_pair_signs(  # noqa: ANN201  # LW-920380; tracked migration debt from the pre-manifest ratchet scheme
+    threshold_pct,  # noqa: ANN001  # LW-920381; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
+    epsilon,  # noqa: ANN001  # LW-920382; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
+    n_slower,  # noqa: ANN001  # LW-920383; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
+    n_faster,  # noqa: ANN001  # LW-920384; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
 ):
     base = 100.0
     fraction = threshold_pct / 100.0 + epsilon
@@ -588,7 +588,7 @@ def test_assess_paired_sign_disagreement_from_mixed_pair_signs(  # noqa: ANN201
 
 @settings(max_examples=20, deadline=None)
 @given(series=_MONOTONIC_SERIES)
-def test_summarize_series_flags_strictly_increasing_series_as_not_converged(series):  # noqa: ANN001, ANN201
+def test_summarize_series_flags_strictly_increasing_series_as_not_converged(series):  # noqa: ANN001, ANN201  # LW-920385; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     result = summarize_series(series, warmup=0)
 
     assert result.converged is False
@@ -597,7 +597,7 @@ def test_summarize_series_flags_strictly_increasing_series_as_not_converged(seri
 
 @settings(max_examples=20, deadline=None)
 @given(data=st.data())
-def test_assess_paired_not_converged_when_either_side_is_monotonic(data):  # noqa: ANN001, ANN201
+def test_assess_paired_not_converged_when_either_side_is_monotonic(data):  # noqa: ANN001, ANN201  # LW-920386; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     monotonic = data.draw(_MONOTONIC_SERIES)
     other = data.draw(st.lists(_POS, min_size=len(monotonic), max_size=len(monotonic)))
 
@@ -612,7 +612,7 @@ def test_assess_paired_not_converged_when_either_side_is_monotonic(data):  # noq
 
 @settings(max_examples=20, deadline=None)
 @given(data=st.data())
-def test_assess_unpaired_not_converged_when_either_side_is_monotonic(data):  # noqa: ANN001, ANN201
+def test_assess_unpaired_not_converged_when_either_side_is_monotonic(data):  # noqa: ANN001, ANN201  # LW-920387; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     monotonic = data.draw(_MONOTONIC_SERIES)
     other = data.draw(st.lists(_POS, min_size=MIN_SAMPLES_FOR_VERDICT, max_size=15))
 

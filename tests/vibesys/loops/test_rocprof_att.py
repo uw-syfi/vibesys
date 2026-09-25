@@ -58,7 +58,7 @@ from tests.vibesys.loops.rocprof_strategies import FAST, FEWER, buffer_size_inpu
 _FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"
 
 
-def _run(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
+def _run(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # LW-910204; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this **kwargs parameter's type is intentionally left loose; annotating it now is separate cleanup work
     ns = argparse.Namespace(**kwargs)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -66,7 +66,7 @@ def _run(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
     return buf.getvalue()
 
 
-def test_stall_category_classifies_common_isa_mnemonics():  # noqa: ANN201  # tracked: #288
+def test_stall_category_classifies_common_isa_mnemonics():  # noqa: ANN201  # LW-910205; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert _stall_category("buffer_load_dwordx4 v[4:7], v0, s[8:11], 0 offen") == "VMEM-load"
     assert _stall_category("s_waitcnt vmcnt(0)") == "VMEM-wait"
     assert _stall_category("s_waitcnt lgkmcnt(0)") == "LDS/SMEM-wait"
@@ -76,7 +76,7 @@ def test_stall_category_classifies_common_isa_mnemonics():  # noqa: ANN201  # tr
     assert _stall_category("v_add_f32 v0, v1, v2") == "other"
 
 
-def test_stall_categories_cover_every_declared_category_once_reachable():  # noqa: ANN201  # tracked: #288
+def test_stall_categories_cover_every_declared_category_once_reachable():  # noqa: ANN201  # LW-910206; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     categories = {c for _, c in STALL_CATEGORIES}
     assert {
         "barrier",
@@ -89,24 +89,24 @@ def test_stall_categories_cover_every_declared_category_once_reachable():  # noq
     } <= categories
 
 
-def test_instruction_from_row_skips_rows_with_zero_or_missing_pc_index():  # noqa: ANN201  # tracked: #288
+def test_instruction_from_row_skips_rows_with_zero_or_missing_pc_index():  # noqa: ANN201  # LW-910207; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert _instruction_from_row(["s_endpgm", "", 0, "", "", 1, 1, 10, 0, 10]) is None
     assert _instruction_from_row(["short", "", 1]) is None
 
 
-def test_instruction_from_row_parses_a_full_row():  # noqa: ANN201  # tracked: #288
+def test_instruction_from_row_parses_a_full_row():  # noqa: ANN201  # LW-910208; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     inst = _instruction_from_row(
         ["buffer_load_dwordx4 v0", "", 3, "/k.py:38", "", 4108, 200, 9000, 8500, 500]
     )
     assert inst is not None
-    assert inst.pc_index == 3  # tracked: #288
+    assert inst.pc_index == 3
     assert inst.source_loc == "/k.py:38"
-    assert inst.stall_cycles == 8500  # tracked: #288
+    assert inst.stall_cycles == 8500
     assert inst.category == "VMEM-load"
     assert inst.stall_pct == pytest.approx(8500 / 9000 * 100)
 
 
-def test_instruction_stall_pct_is_zero_without_total_cycles():  # noqa: ANN201  # tracked: #288
+def test_instruction_stall_pct_is_zero_without_total_cycles():  # noqa: ANN201  # LW-910209; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     inst = Instruction(
         asm="nop",
         pc_index=1,
@@ -120,22 +120,22 @@ def test_instruction_stall_pct_is_zero_without_total_cycles():  # noqa: ANN201  
     assert inst.stall_pct == 0.0
 
 
-def test_find_code_json_prefers_a_direct_file():  # noqa: ANN201  # tracked: #288
+def test_find_code_json_prefers_a_direct_file():  # noqa: ANN201  # LW-910210; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     path = _find_code_json(_FIXTURES / "att" / "ui_output_agent_123_dispatch_1")
     assert path.name == "code.json"
 
 
-def test_find_code_json_descends_one_level_into_a_dispatch_dir():  # noqa: ANN201  # tracked: #288
+def test_find_code_json_descends_one_level_into_a_dispatch_dir():  # noqa: ANN201  # LW-910211; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     path = _find_code_json(_FIXTURES / "att")
     assert path.parent.name == "ui_output_agent_123_dispatch_1"
 
 
-def test_find_code_json_raises_a_clear_error_when_absent(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_find_code_json_raises_a_clear_error_when_absent(tmp_path: Path):  # noqa: ANN201  # LW-910212; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     with pytest.raises(AttOutputNotFoundError, match=r"no code\.json found"):
         _find_code_json(tmp_path)
 
 
-def test_find_code_json_raises_when_multiple_dispatch_dirs_are_ambiguous(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_find_code_json_raises_when_multiple_dispatch_dirs_are_ambiguous(tmp_path: Path):  # noqa: ANN201  # LW-910213; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     for name in ("ui_output_agent_1_dispatch_1", "ui_output_agent_1_dispatch_2"):
         d = tmp_path / name
         d.mkdir()
@@ -144,10 +144,10 @@ def test_find_code_json_raises_when_multiple_dispatch_dirs_are_ambiguous(tmp_pat
         _find_code_json(tmp_path)
 
 
-def test_load_instructions_parses_the_fixture():  # noqa: ANN201  # tracked: #288
+def test_load_instructions_parses_the_fixture():  # noqa: ANN201  # LW-910214; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     instructions = load_instructions(_FIXTURES / "att" / "ui_output_agent_123_dispatch_1")
     # The s_endpgm row (pc_index=0) is dropped.
-    assert len(instructions) == 5  # tracked: #288
+    assert len(instructions) == 5
     assert {i.category for i in instructions} == {
         "SMEM",
         "MFMA/FMA",
@@ -157,7 +157,7 @@ def test_load_instructions_parses_the_fixture():  # noqa: ANN201  # tracked: #28
     }
 
 
-def test_load_instructions_parses_real_mi210_att_decoder_output():  # noqa: ANN201  # tracked: #288
+def test_load_instructions_parses_real_mi210_att_decoder_output():  # noqa: ANN201  # LW-910215; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     """Regression test against real rocprofv3/rocprof-trace-decoder output (see module
     docstring), not just the docs-derived hand-built fixture: confirms the decoder's own
     ``header`` field ("ISA, _, LineNumber, Source, Codeobj, Vaddr, Hit, Latency, Stall, Idle")
@@ -165,19 +165,19 @@ def test_load_instructions_parses_real_mi210_att_decoder_output():  # noqa: ANN2
     cycles (the docs-only guess this toolkit originally shipped with)."""
     instructions = load_instructions(_FIXTURES / "att_real" / "ui_output_agent_14537_dispatch_1")
     # 26 rows total; the leading "; <mangled name>" comment row (pc_index=0) is dropped.
-    assert len(instructions) == 25  # tracked: #288
+    assert len(instructions) == 25
     first = instructions[0]
     assert first.asm == "s_load_dword s2, s[4:5], 0x24"
-    assert first.pc_index == 1  # tracked: #288
-    assert first.stall_cycles == 46468  # tracked: #288
-    assert first.idle_cycles == 30636  # tracked: #288
+    assert first.pc_index == 1
+    assert first.stall_cycles == 46468
+    assert first.idle_cycles == 30636
     assert first.category == "SMEM"
     real_source_insns = [i for i in instructions if i.source_loc.startswith("/src/")]
     assert real_source_insns  # DWARF-mapped instructions carry the compiled kernel's own source
     assert all(i.source_loc != "<unknown>" for i in instructions)
 
 
-def test_cmd_hotspots_on_real_att_data_ranks_the_actual_dominant_stall():  # noqa: ANN201  # tracked: #288
+def test_cmd_hotspots_on_real_att_data_ranks_the_actual_dominant_stall():  # noqa: ANN201  # LW-910216; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(cmd_hotspots, dispatch_dir=str(_FIXTURES / "att_real"), top=3)
     # The real capture is dominated by a single s_waitcnt vmcnt(0) waiting on a global load.
     assert "VMEM-wait" in out
@@ -185,37 +185,37 @@ def test_cmd_hotspots_on_real_att_data_ranks_the_actual_dominant_stall():  # noq
     assert "/src/tiny_kernel.cpp:8" in out
 
 
-def test_load_instructions_raises_on_malformed_json(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_load_instructions_raises_on_malformed_json(tmp_path: Path):  # noqa: ANN201  # LW-910217; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     (tmp_path / "code.json").write_text("{not valid json")
     with pytest.raises(AttOutputNotFoundError, match="could not parse"):
         load_instructions(tmp_path)
 
 
-def test_load_instructions_raises_without_a_code_list(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_load_instructions_raises_without_a_code_list(tmp_path: Path):  # noqa: ANN201  # LW-910218; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     (tmp_path / "code.json").write_text(json.dumps({"not_code": []}))
     with pytest.raises(AttOutputNotFoundError, match="expected top-level 'code' list"):
         load_instructions(tmp_path)
 
 
-def test_aggregate_by_source_sums_stall_cycles_per_line():  # noqa: ANN201  # tracked: #288
+def test_aggregate_by_source_sums_stall_cycles_per_line():  # noqa: ANN201  # LW-910219; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     instructions = load_instructions(_FIXTURES / "att" / "ui_output_agent_123_dispatch_1")
     hotspots = aggregate_by_source(instructions)
     assert hotspots[0].source_loc == "/kernels/attn.py:38"
-    assert hotspots[0].total_stall_cycles == 8500  # tracked: #288
+    assert hotspots[0].total_stall_cycles == 8500
     assert hotspots[0].dominant_category == "VMEM-load"
 
 
-def test_stall_category_totals_ranks_vmem_load_and_wait_highest():  # noqa: ANN201  # tracked: #288
+def test_stall_category_totals_ranks_vmem_load_and_wait_highest():  # noqa: ANN201  # LW-910220; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     instructions = load_instructions(_FIXTURES / "att" / "ui_output_agent_123_dispatch_1")
     totals = dict(stall_category_totals(instructions))
-    assert totals["VMEM-load"] == 8500  # tracked: #288
-    assert totals["VMEM-wait"] == 8400  # tracked: #288
+    assert totals["VMEM-load"] == 8500
+    assert totals["VMEM-wait"] == 8400
     assert list(dict(stall_category_totals(instructions))) == sorted(
         totals, key=lambda k: totals[k], reverse=True
     )
 
 
-def test_cmd_hotspots_prints_category_totals_and_top_instructions():  # noqa: ANN201  # tracked: #288
+def test_cmd_hotspots_prints_category_totals_and_top_instructions():  # noqa: ANN201  # LW-910221; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(cmd_hotspots, dispatch_dir=str(_FIXTURES / "att"), top=5)
     assert "Stall category totals" in out
     assert "VMEM-load" in out
@@ -224,18 +224,18 @@ def test_cmd_hotspots_prints_category_totals_and_top_instructions():  # noqa: AN
     assert "Top 5 source lines by aggregated stall cycles" in out
 
 
-def test_cmd_hotspots_reports_a_clean_error_for_a_missing_dispatch_dir(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_cmd_hotspots_reports_a_clean_error_for_a_missing_dispatch_dir(tmp_path: Path):  # noqa: ANN201  # LW-910222; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     missing = tmp_path / "does_not_exist"
     with pytest.raises(SystemExit, match="not a directory"):
         _run(cmd_hotspots, dispatch_dir=str(missing), top=5)
 
 
-def test_cmd_hotspots_reports_a_clean_error_when_decoder_output_is_absent(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_cmd_hotspots_reports_a_clean_error_when_decoder_output_is_absent(tmp_path: Path):  # noqa: ANN201  # LW-910223; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     with pytest.raises(SystemExit, match=r"no code\.json found"):
         _run(cmd_hotspots, dispatch_dir=str(tmp_path), top=5)
 
 
-def test_cmd_plan_prints_a_working_rocprofv3_command_line():  # noqa: ANN201  # tracked: #288
+def test_cmd_plan_prints_a_working_rocprofv3_command_line():  # noqa: ANN201  # LW-910224; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(
         cmd_plan,
         arch="gfx90a",
@@ -264,7 +264,7 @@ def test_cmd_plan_prints_a_working_rocprofv3_command_line():  # noqa: ANN201  # 
     assert "PLAIN DECIMAL INTEGER" in out
 
 
-def test_cmd_plan_without_a_command_prints_a_placeholder():  # noqa: ANN201  # tracked: #288
+def test_cmd_plan_without_a_command_prints_a_placeholder():  # noqa: ANN201  # LW-910225; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(
         cmd_plan,
         arch="gfx90a",
@@ -284,7 +284,7 @@ def test_cmd_plan_without_a_command_prints_a_placeholder():  # noqa: ANN201  # t
     assert "<dir containing librocprof-trace-decoder.so>" in out
 
 
-def test_cmd_plan_includes_an_iteration_range_when_given():  # noqa: ANN201  # tracked: #288
+def test_cmd_plan_includes_an_iteration_range_when_given():  # noqa: ANN201  # LW-910226; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(
         cmd_plan,
         arch="gfx90a",
@@ -303,7 +303,7 @@ def test_cmd_plan_includes_an_iteration_range_when_given():  # noqa: ANN201  # t
     assert "--kernel-iteration-range 2 3 4" in out
 
 
-def test_cmd_plan_can_write_the_command_to_a_script(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_cmd_plan_can_write_the_command_to_a_script(tmp_path: Path):  # noqa: ANN201  # LW-910227; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     script_path = tmp_path / "job.sh"
     _run(
         cmd_plan,
@@ -354,7 +354,7 @@ _COLUMN_VALUES: dict[str, object] = {
 
 @given(order=st.permutations(range(len(_DEFAULT_HEADER_COLUMNS))))
 @FAST
-def test_load_instructions_resolves_columns_by_header_name_under_any_permutation(order):  # noqa: ANN001, ANN201
+def test_load_instructions_resolves_columns_by_header_name_under_any_permutation(order):  # noqa: ANN001, ANN201  # LW-920208; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     columns = [_DEFAULT_HEADER_COLUMNS[i] for i in order]
     row = [_COLUMN_VALUES[c] for c in columns]
 
@@ -374,7 +374,7 @@ def test_load_instructions_resolves_columns_by_header_name_under_any_permutation
 
 @given(renamed_col=st.sampled_from(sorted(_HEADER_FIELD_MAP)))
 @FAST
-def test_parse_header_fails_clearly_when_a_required_column_is_renamed_away(renamed_col):  # noqa: ANN001, ANN201
+def test_parse_header_fails_clearly_when_a_required_column_is_renamed_away(renamed_col):  # noqa: ANN001, ANN201  # LW-920209; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     # Rename one required header column to something unrecognized -- every
     # other required column stays present and correct.
     columns = [c if c != renamed_col else "Unknown_Renamed_Column" for c in _DEFAULT_HEADER_COLUMNS]
@@ -383,7 +383,7 @@ def test_parse_header_fails_clearly_when_a_required_column_is_renamed_away(renam
         _parse_header(", ".join(columns))
 
 
-def test_load_instructions_reads_the_header_field_from_a_real_code_json_file(tmp_path: Path):  # noqa: ANN201
+def test_load_instructions_reads_the_header_field_from_a_real_code_json_file(tmp_path: Path):  # noqa: ANN201  # LW-920210; tracked migration debt from the pre-manifest ratchet scheme
     # End-to-end (through the filesystem) with a header order that does NOT
     # match the documented default -- proves `load_instructions` itself (not
     # just the in-memory helpers above) resolves columns by name.
@@ -402,7 +402,7 @@ def test_load_instructions_reads_the_header_field_from_a_real_code_json_file(tmp
     assert instructions[0].stall_cycles == 40
 
 
-def test_instruction_from_row_default_indices_still_match_the_documented_order():  # noqa: ANN201
+def test_instruction_from_row_default_indices_still_match_the_documented_order():  # noqa: ANN201  # LW-920211; tracked migration debt from the pre-manifest ratchet scheme
     # `_instruction_from_row`'s default `indices` argument (used when callers
     # -- including the existing hand-built-fixture tests above -- pass no
     # explicit mapping) must still match the module's own documented
@@ -421,7 +421,7 @@ def test_instruction_from_row_default_indices_still_match_the_documented_order()
 
 @given(value=buffer_size_input())
 @FEWER
-def test_cmd_plan_buffer_size_is_always_a_plain_integer_or_a_clear_cli_error(value):  # noqa: ANN001, ANN201
+def test_cmd_plan_buffer_size_is_always_a_plain_integer_or_a_clear_cli_error(value):  # noqa: ANN001, ANN201  # LW-920212; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     argv = ["plan", "--arch", "gfx90a", "--kernel", "x", "--buffer-size", str(value)]
     buf = io.StringIO()
     try:

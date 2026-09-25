@@ -271,7 +271,7 @@ def test_sigusr2_toggles_stop_early_without_killing_process(tmp_path: Path) -> N
         VIBESYS_TORCH_PROFILE="1",
         VIBESYS_TORCH_PROFILE_DELAY_S="0",
     )
-    proc = subprocess.Popen(  # tracked: #288
+    proc = subprocess.Popen(
         [sys.executable, "-c", "import torch\nimport time\ntime.sleep(2.0)\nprint('done')"],
         env=env,
         stdout=subprocess.PIPE,
@@ -309,9 +309,14 @@ def _wait_for_event_count(call_log: Path, event: str, count: int, *, timeout: fl
             return
         time.sleep(0.02)
     events = parse_call_log(call_log)
-    raise AssertionError(  # noqa: TRY003  # tracked: #288
+    raise AssertionError(  # noqa: TRY003  # LW-910310; this is a boundary error that deliberately embeds the offending value for the operator to act on
         f"{event!r} never reached count {count} within {timeout}s; events={events}"
     )
+
+
+# Generous: only reached on failure, and parallel test runs can stall a
+# subprocess for seconds.
+_WINDOW_TIMEOUT_S = 30.0
 
 
 def test_signal_mode_repeated_windows_produce_two_traces(tmp_path: Path) -> None:
@@ -321,8 +326,7 @@ def test_signal_mode_repeated_windows_produce_two_traces(tmp_path: Path) -> None
     unconditionally and ``start`` only acted ``if self._phase == "idle"``:
     there was no idle -> running cycle after the first stop, so a second
     SIGUSR1 was silently ignored (verified against a real MI210/ROCm 7.2.3
-    warm vLLM server -- see docs/contributing/amd-profiler-worklog.md and
-    the referenced warm_attach.md experiment notes). This drives the state
+    warm vLLM server). This drives the state
     machine through two full SIGUSR1/SIGUSR2 cycles in signal-trigger mode
     (the mode a warm target uses) and requires two distinct, non-empty
     traces.
@@ -337,30 +341,43 @@ def test_signal_mode_repeated_windows_produce_two_traces(tmp_path: Path) -> None
         VIBESYS_TORCH_PROFILE="1",
         VIBESYS_TORCH_PROFILE_TRIGGER="signal",
     )
-    proc = subprocess.Popen(  # tracked: #288
-        [sys.executable, "-c", "import torch\nimport time\ntime.sleep(5.0)\nprint('done')"],
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            # Block on stdin, not a fixed sleep, so a loaded machine can't
+            # end the process before both windows have run.
+            "import sys\nimport torch\nprint('imported', flush=True)\n"
+            "sys.stdin.readline()\nprint('done')",
+        ],
         env=env,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
     try:
-        _wait_for_event(call_log, "torch.imported", timeout=5.0)
+        # Wait for `import torch` to *finish*, not the fake's "torch.imported"
+        # event (logged at the top of its import): a SIGUSR1 delivered
+        # mid-import makes start()'s `from torch.profiler import ...` see a
+        # partially initialized module, so that window never starts.
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "imported"
 
         # Window 1.
         os.kill(proc.pid, signal.SIGUSR1)
-        _wait_for_event_count(call_log, "profile.start", 1, timeout=5.0)
+        _wait_for_event_count(call_log, "profile.start", 1, timeout=_WINDOW_TIMEOUT_S)
         os.kill(proc.pid, signal.SIGUSR2)
-        _wait_for_event_count(call_log, "profile.export_chrome_trace", 1, timeout=5.0)
+        _wait_for_event_count(call_log, "profile.export_chrome_trace", 1, timeout=_WINDOW_TIMEOUT_S)
 
         # Window 2: this second SIGUSR1 is exactly what the pre-fix state
         # machine silently dropped.
         os.kill(proc.pid, signal.SIGUSR1)
-        _wait_for_event_count(call_log, "profile.start", 2, timeout=5.0)
+        _wait_for_event_count(call_log, "profile.start", 2, timeout=_WINDOW_TIMEOUT_S)
         os.kill(proc.pid, signal.SIGUSR2)
-        _wait_for_event_count(call_log, "profile.export_chrome_trace", 2, timeout=5.0)
+        _wait_for_event_count(call_log, "profile.export_chrome_trace", 2, timeout=_WINDOW_TIMEOUT_S)
 
-        stdout, stderr = proc.communicate(timeout=10)
+        stdout, stderr = proc.communicate(input="\n", timeout=_WINDOW_TIMEOUT_S)
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -388,7 +405,7 @@ def test_sigint_exports_then_still_terminates_the_process(tmp_path: Path) -> Non
         VIBESYS_TORCH_PROFILE="1",
         VIBESYS_TORCH_PROFILE_DELAY_S="0",
     )
-    proc = subprocess.Popen(  # tracked: #288
+    proc = subprocess.Popen(
         [sys.executable, "-c", "import torch\nimport time\ntime.sleep(10)"],
         env=env,
         stdout=subprocess.PIPE,
@@ -417,7 +434,7 @@ def _wait_for_event(call_log: Path, event: str, *, timeout: float) -> None:
         if any(name == event for _ts, name in parse_call_log(call_log)):
             return
         time.sleep(0.02)
-    raise AssertionError(  # noqa: TRY003  # tracked: #288
+    raise AssertionError(  # noqa: TRY003  # LW-910311; this is a boundary error that deliberately embeds the offending value for the operator to act on
         f"{event!r} never appeared in {call_log} within {timeout}s"
     )
 

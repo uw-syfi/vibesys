@@ -11,39 +11,45 @@ import hashlib
 import json
 import shlex
 import subprocess
-from collections.abc import Sequence  # noqa: TC003  # tracked: #288
-from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import Any, Literal
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, Generic, Literal, NotRequired, TypedDict, TypeVar, Unpack
+
+from pydantic import BaseModel
 
 from vibesys import constants
 from vibesys.agent_spec_config import resolve_agent_driver
-from vibesys.config import Config, as_config
-from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
+from vibesys.config import as_config
 from vibesys.context import create_run_context
 from vibesys.domains.base import DomainDefinition, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.evaluators.input_manifest import (  # noqa: TC001  # tracked: #288
-    BenchmarkResult,
-    ProfileGuidedInput,
-    WorkspaceSource,
-)
 from vibesys.events import (
     CoreEventType,
     EventStatus,
     FrameworkSource,
+    GateFinishedData,
     GateKind,
     JudgeResultData,
     RoundFinishedData,
+    RunConfiguredData,
 )
 from vibesys.loops.agent import issue_board
+from vibesys.loops.agent._archive import (
+    _format_metric_row,
+    _pareto_archive_conflict,
+    _pareto_archive_dominators,
+    _pareto_archive_summary,
+    _pareto_frontier_records,
+    _provisional_candidate_retained,
+    _record_candidate_metrics,
+    _record_candidate_retained,
+    _select_final_candidate,
+)
 from vibesys.loops.agent.attempt import (
     JudgeOutcome,
     JudgeReviewed,
     JudgeSkipped,
     JudgeSkipReason,
-    attempt_was_reviewed,
     recorded_judge_verdict,
 )
 from vibesys.loops.agent.hypotheses import (
@@ -60,7 +66,6 @@ from vibesys.loops.agent.hypotheses import (
 from vibesys.loops.agent.hypothesis_controller import (
     HypothesisEngine,
     ProfileGuidanceOutcome,
-    ProfileGuidanceView,
     persist_active_hypothesis,
     persist_agent_run_state,
     plan_changed_keys,
@@ -75,6 +80,7 @@ from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.loops.gates import (
     GATE_LOG_TAIL_CHARS,
     GATE_RECORD_TAIL_CHARS,
+    AccuracyGateResult,
     BenchmarkContract,
     FrameworkBenchmarkOutcome,
     emit_gate_finished,
@@ -86,17 +92,18 @@ from vibesys.loops.gates import (
 from vibesys.loops.metrics import (
     Measurement,
     MetricSpace,
-    Objective,
 )
 from vibesys.loops.profiler import mcp_spec as profiler_mcp_spec
 from vibesys.profilers import (
+    ProfilerDefinition,
     ProfilerKind,
     profiler_definition,
     require_profiler_kind,
 )
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.render.sink import output_sink
-from vibesys.run import LocalRunIntegration, LoopContext, RepositoryVisibility, RunStateNamespace
+from vibesys.run import LocalRunIntegration, LoopContext, RunStateNamespace
+from vibesys.sandbox.model_requests import ModelRequestError, reconcile_model_requests
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
@@ -126,6 +133,7 @@ from vibesys.skills import (
 from vs_agent.api import (
     AgentBackend,
     AgentSessionKey,
+    MCPServerSpec,
     ResponseFallback,
     RoundProgress,
     SessionScope,
@@ -133,10 +141,33 @@ from vs_agent.api import (
 from vs_loop_state.api import PerfProvenance, RoundHistory, RoundRecord
 from vs_project.api import AgentRunConfiguration
 
+_ReadOnlyResponseT = TypeVar("_ReadOnlyResponseT", bound=BaseModel)
+
+
+class _ReadOnlyRoleInvokeOptions(TypedDict, Generic[_ReadOnlyResponseT]):
+    """Typed options forwarded to the run context's structured invoke API."""
+
+    kind: str
+    system_prompt: str
+    user_prompt: str
+    response_cls: type[_ReadOnlyResponseT]
+    fallback_factory: Callable[[], _ReadOnlyResponseT]
+    round_label: NotRequired[str]
+    reuse_session: NotRequired[bool]
+    mcp_servers: NotRequired[list[MCPServerSpec] | None]
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from vibesys.loops.request import LoopRunRequest
 # Candidate process boundaries selected by ``--interface``. Language, tooling,
 # and artifact requirements belong to the selected domain and input bundle.
 _INTERFACES = ("inprocess", "service")
+_HEALTH_CHECK_CRITERIA = "/health returns 200."
 DEFAULT_INTERFACE = "inprocess"
+_EN_DASH = "\N{EN DASH}"
 
 _INNER_LOOPS = ("multi-agent", "single-agent")
 
@@ -189,6 +220,9 @@ _FAILED_HYPOTHESIS_OUTCOMES = (
 ) | {"rejected"}
 _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW = 2
 _PARETO_ARCHIVE_PENDING_CLAIM_LIMIT = 8
+_ROLE_CHANGE_DISPLAY_LIMIT = 8
+_MAX_VALIDATION_INPUT_FILES = 4096
+_MAX_VALIDATION_INPUT_BYTES = 256 * 1024 * 1024
 
 
 def _implementation_requests_continuation(
@@ -234,269 +268,6 @@ def _implementation_keeps_hypothesis_active(
 # ---------------------------------------------------------------------------
 
 
-def _record_candidate_metrics(record: RoundRecord) -> dict[str, float]:
-    """Return the comparable objective row associated with *record*.
-
-    Official metrics remain authoritative when present. Candidate metrics are
-    a separate, explicitly provisional channel for representative evaluations
-    that are useful for branch retention but must not update the canonical
-    headline trajectory.
-    """
-    if record.official_evaluation and record.metrics:
-        return record.metrics
-    if _record_candidate_retained(record) is True:
-        return record.candidate_metrics
-    return {}
-
-
-def _record_candidate_retained(record: RoundRecord) -> bool | None:
-    """Read framework retention, with one isolated legacy-record adapter."""
-    if record.candidate_retained is not None:
-        return record.candidate_retained
-    if record.judge_verdict is not None:
-        # New records always carry the framework's typed verdict marker. For
-        # them, explicit unknown retention must remain unknown.
-        return None
-    if record.candidate_disposition in {
-        CandidateDisposition.PARETO_FRONTIER.value,
-        CandidateDisposition.PREREQUISITE.value,
-    }:
-        return True
-    if record.candidate_disposition == CandidateDisposition.DISCARD.value:
-        return False
-    if record.hypothesis_outcome == HypothesisResolution.PROVEN.value:
-        return True
-    return None
-
-
-def _provisional_candidate_retained(
-    disposition: CandidateDisposition,
-) -> bool | None:
-    """Translate an implementer disposition into provisional branch retention."""
-    if disposition is CandidateDisposition.DISCARD:
-        return False
-    if disposition in {
-        CandidateDisposition.PREREQUISITE,
-        CandidateDisposition.PARETO_FRONTIER,
-    }:
-        return True
-    return None
-
-
-def _trusted_candidate_records(records: list[RoundRecord], space: MetricSpace) -> list[RoundRecord]:
-    """Return reviewed checkpoints with complete comparable objective rows."""
-    trusted: list[RoundRecord] = []
-    for record in records:
-        if not space.complete(_record_candidate_metrics(record)):
-            continue
-        if not record.commit or not record.passed or not record.reviewed:
-            continue
-        if not trusted_perf_provenance(record.perf_provenance):
-            # An implementer self-reported headline metric may keep its commit
-            # as a provisional claim, but it must never seed the archive as a
-            # trusted Pareto parent or dominate later candidates.
-            continue
-        if _record_candidate_retained(record) is not True:
-            continue
-        trusted.append(record)
-    return trusted
-
-
-def _pareto_frontier_records(
-    records: list[RoundRecord],
-    space: MetricSpace,
-) -> list[RoundRecord]:
-    """Compute the noise-aware frontier over independently reviewed points."""
-    return space.frontier(
-        _trusted_candidate_records(records, space),
-        _record_candidate_metrics,
-    )
-
-
-def _pareto_archive_dominators(
-    candidate_metrics: dict[str, float],
-    records: list[RoundRecord],
-    space: MetricSpace,
-) -> list[RoundRecord]:
-    """Return trusted archive points that dominate a proposed candidate row."""
-    if not space.complete(candidate_metrics):
-        return []
-    return [
-        record
-        for record in _trusted_candidate_records(records, space)
-        if space.dominates(_record_candidate_metrics(record), candidate_metrics)
-    ]
-
-
-def _format_metric_row(metrics: dict[str, float], objectives: Sequence[Objective]) -> str:
-    return ", ".join(
-        f"{objective.name}={metrics[objective.name]:.6g} ({objective.direction})"
-        for objective in objectives
-        if objective.name in metrics
-    )
-
-
-def _pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> str:
-    """Render trusted frontier parents and any measured points awaiting review."""
-    objectives = space.objectives
-    latest = max(records, key=lambda record: record.round_number, default=None)
-    latest_metrics = (
-        _format_metric_row(latest.metrics, objectives)
-        if latest is not None
-        and latest.official_evaluation
-        and trusted_perf_provenance(latest.perf_provenance)
-        and objectives
-        and space.complete(latest.metrics)
-        else (
-            f"{latest.perf_metric:.6g} {latest.perf_unit or ''}".strip()
-            if latest is not None
-            and latest.official_evaluation
-            and trusted_perf_provenance(latest.perf_provenance)
-            and latest.perf_metric is not None
-            else "(none)"
-        )
-    )
-    latest_line = (
-        "Latest completed round: none."
-        if latest is None
-        else (
-            f"Latest completed round: round {latest.round_number}, "
-            f"commit {(latest.commit or '(missing)')[:12]}, "
-            f"official metrics: {latest_metrics}; "
-            f"retained: {_record_candidate_retained(latest)}."
-        )
-    )
-    if not objectives:
-        return (
-            "No objective axes are configured. Use objectives.toml to enable "
-            "multi-objective checkpoint retention; official scalar tracking remains active.\n"
-            f"{latest_line}"
-        )
-
-    lines = [
-        "Configured axes: "
-        + ", ".join(f"{objective.name}:{objective.direction}" for objective in objectives),
-        (
-            "Dominance is variance-aware: a point removes another only when it is no worse "
-            f"within {space.relative_noise:.0%} on every axis and better by more than "
-            f"{space.relative_noise:.0%} on at least one."
-        ),
-        latest_line,
-    ]
-    frontier = _pareto_frontier_records(records, space)
-    if frontier:
-        lines.append("Trusted frontier parents:")
-        for record in frontier:
-            assert record.commit is not None  # noqa: S101  # tracked: #288
-            evidence = "official" if record.official_evaluation else "reviewed provisional"
-            operating_point = record.candidate_operating_point or "canonical workload row"
-            artifact = record.candidate_evaluation_artifact or record.evaluation_artifact
-            lines.append(
-                f"- round {record.round_number}, commit {record.commit[:12]}, {evidence}: "
-                f"{_format_metric_row(_record_candidate_metrics(record), objectives)}; "
-                f"operating point: {operating_point}; artifact: {artifact or '(missing)'}"
-            )
-    else:
-        lines.append("Trusted frontier parents: none recorded yet.")
-
-    trusted_rounds = {record.round_number for record in _trusted_candidate_records(records, space)}
-    pending = [
-        record
-        for record in records
-        if record.round_number not in trusted_rounds
-        and record.commit
-        and _record_candidate_retained(record) is True
-        and all(objective.name in record.candidate_metrics for objective in objectives)
-    ]
-    if pending:
-        pending.sort(key=lambda record: record.round_number)
-        lines.append(
-            "Measured frontier claims not yet usable as trusted parents (retain the commit, "
-            "but do not treat it as a parent). A row lands here because its hard invariants "
-            "have not passed independent review, or because its numbers are the "
-            "implementer's own report rather than a framework measurement:"
-        )
-        omitted = pending[:-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT]
-        if omitted:
-            # This line is read by a model, so it agrees with itself: one
-            # omitted claim says "1 older untrusted claim", and a single
-            # omitted round says "round 4" rather than the degenerate
-            # "rounds 4-4".
-            claims = "claim" if len(omitted) == 1 else "claims"
-            first = omitted[0].round_number
-            last = omitted[-1].round_number
-            rounds = f"round {first}" if first == last else f"rounds {first}-{last}"
-            lines.append(
-                f"- {len(omitted)} older untrusted {claims} omitted from this context "
-                f"({rounds}); do not treat any omitted claim as a trusted parent."
-            )
-        for record in pending[-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT:]:
-            assert record.commit is not None  # noqa: S101  # tracked: #288
-            lines.append(
-                f"- round {record.round_number}, commit {record.commit[:12]}: "
-                f"{_format_metric_row(record.candidate_metrics, objectives)}; "
-                f"operating point: {record.candidate_operating_point or '(unspecified)'}; "
-                f"artifact: {record.candidate_evaluation_artifact or '(missing)'}; "
-                f"reason: {record.candidate_retention_reason or '(unspecified)'}"
-            )
-    return "\n".join(lines)
-
-
-def _headline_measurement(record: RoundRecord) -> Measurement | None:
-    """Return a record's scalar headline as a typed measurement."""
-    if record.perf_metric is None or record.perf_unit is None:
-        return None
-    return Measurement(
-        metric=record.perf_unit,
-        value=record.perf_metric,
-        direction=record.perf_direction,
-    )
-
-
-def _trusted_final_records(records: list[RoundRecord], space: MetricSpace) -> list[RoundRecord]:
-    """Return retained records with canonical framework-owned measurements."""
-    return [
-        record
-        for record in records
-        if record.commit
-        and record.passed
-        and record.reviewed
-        and record.official_evaluation
-        and trusted_perf_provenance(record.perf_provenance)
-        and _record_candidate_retained(record) is True
-        and (
-            space.complete(record.metrics)
-            if space.objectives
-            else space.direction(_headline_measurement(record)) is not None
-        )
-    ]
-
-
-def _select_final_candidate(records: list[RoundRecord], space: MetricSpace) -> RoundRecord | None:
-    """Select the latest noise-aware winner from trusted retained records."""
-    newest_first = sorted(
-        _trusted_final_records(records, space),
-        key=lambda record: record.round_number,
-        reverse=True,
-    )
-    if space.primary is not None:
-        frontier_rounds = {
-            record.round_number for record in _pareto_frontier_records(newest_first, space)
-        }
-        candidates = [record for record in newest_first if record.round_number in frontier_rounds]
-        primary = space.primary
-
-        def primary_measurement(record: RoundRecord) -> Measurement:
-            return Measurement(
-                metric=primary.name,
-                value=record.metrics[primary.name],
-                direction=primary.direction,
-            )
-
-        return space.best(candidates, primary_measurement)
-    return space.best(newest_first, _headline_measurement)
-
-
 def _finalize_agent_run(
     ctx: LoopContext,
     *,
@@ -524,24 +295,24 @@ def _finalize_agent_run(
     if winner is None:
         baseline = ctx.git.trusted_input_baseline
         if baseline is None:
-            raise RuntimeError(  # noqa: TRY003
-                "no trusted retained candidate or trusted input baseline is available"
-            )
+            message = "no trusted retained candidate or trusted input baseline is available"
+            raise RuntimeError(message)
         if not ctx.git.checkout_tree(baseline, clean=True, preserve_paths=relative_memory):
-            raise RuntimeError(  # noqa: TRY003
-                f"could not restore trusted input baseline at {baseline}"
-            )
+            message = f"could not restore trusted input baseline at {baseline}"
+            raise RuntimeError(message)
         ctx.snapshot_workspace("agent: restore trusted input baseline")
         ctx.lprint(
             f"\nNo evaluated winner was retained. Restored trusted input baseline {baseline[:12]}."
         )
         return
-    assert winner.commit is not None  # noqa: S101  # selected records require a commit
-    ctx.git.retain_candidate(f"selected-round-{winner.round_number:04d}", winner.commit)
-    if not ctx.git.checkout_tree(winner.commit, clean=True, preserve_paths=relative_memory):
-        raise RuntimeError(  # noqa: TRY003
-            f"could not materialize selected round {winner.round_number} at {winner.commit}"
-        )
+    winner_commit = winner.commit
+    if winner_commit is None:
+        message = "selected final candidate is missing its commit"
+        raise RuntimeError(message)
+    ctx.git.retain_candidate(f"selected-round-{winner.round_number:04d}", winner_commit)
+    if not ctx.git.checkout_tree(winner_commit, clean=True, preserve_paths=relative_memory):
+        message = f"could not materialize selected round {winner.round_number} at {winner_commit}"
+        raise RuntimeError(message)
     ctx.snapshot_workspace(f"agent: select round {winner.round_number}")
     metrics = (
         _format_metric_row(_record_candidate_metrics(winner), space.objectives)
@@ -550,34 +321,7 @@ def _finalize_agent_run(
     )
     ctx.lprint(
         f"\nFinal selected candidate: round {winner.round_number}, "
-        f"commit {winner.commit[:12]}, official metrics: {metrics.strip()}"
-    )
-
-
-def _pareto_archive_conflict(
-    *,
-    candidate_disposition: CandidateDisposition,
-    candidate_metrics: dict[str, float],
-    records: list[RoundRecord],
-    space: MetricSpace,
-) -> str | None:
-    """Explain why a claimed frontier row is dominated by the live archive."""
-    if candidate_disposition is not CandidateDisposition.PARETO_FRONTIER:
-        return None
-    dominators = _pareto_archive_dominators(candidate_metrics, records, space)
-    if not dominators:
-        return None
-    rows = "; ".join(
-        f"round {record.round_number} ({_format_metric_row(_record_candidate_metrics(record), space.objectives)})"
-        for record in dominators
-    )
-    return (
-        "The candidate's `pareto_frontier` disposition conflicts with the live "
-        f"noise-aware archive: it is dominated by {rows}. A numeric archive gate "
-        "frozen into the hypothesis plan does not override the current archive. "
-        "Report this row as `discard` unless its metrics or configured objective "
-        "comparability were recorded incorrectly; do not rerun an unchanged "
-        "candidate merely to repair the disposition."
+        f"commit {winner_commit[:12]}, official metrics: {metrics.strip()}"
     )
 
 
@@ -596,7 +340,9 @@ def _detect_plateau(
     threshold_pct: float = _PLATEAU_THRESHOLD_PCT,
     min_streak: int = _PLATEAU_MIN_STREAK,
 ) -> str | None:
-    """Return a warning string if the most recent ``min_streak`` rounds
+    """Return a warning string if recent same-unit rounds stayed steady.
+
+    Check whether the most recent ``min_streak`` rounds
     with **fresh, same-unit** perf metrics stayed within ``threshold_pct``
     of each other; else None.
 
@@ -614,7 +360,7 @@ def _detect_plateau(
 
     The orchestrator gets this verbatim in its prompt; phrasing is
     user-facing.
-    """  # noqa: D205  # tracked: #288
+    """
     fresh = [
         r
         for r in records
@@ -643,7 +389,7 @@ def _detect_plateau(
     rounds = [r.round_number for r in tail]
     return (
         f"The last {min_streak} rounds with a fresh perf measurement (rounds "
-        f"{rounds[0]}–{rounds[-1]}) all landed in {lo:.2f}–{hi:.2f}{unit_suffix} "  # noqa: RUF001  # tracked: #288
+        f"{rounds[0]}{_EN_DASH}{rounds[-1]}) all landed in {lo:.2f}{_EN_DASH}{hi:.2f}{unit_suffix} "
         f"— a {spread_pct:.2f}% spread, well within bench noise. Whatever you've "
         f"been working on for those rounds is not actually moving the headline "
         f"metric."
@@ -659,6 +405,19 @@ def _detect_plateau(
 class _CarryOver:
     regression_info: str | None = None
     exhaustion_info: str | None = None
+    profiler_summary: ProfilerSummary | None = None
+    single_agent_response: SingleAgentRoundResponse | None = None
+
+
+@dataclass(frozen=True)
+class _AgentRoundSession:
+    """Restored durable state and workspace location for a loop run."""
+
+    run_state: AgentRunState
+    history: RoundHistory
+    carry: _CarryOver
+    progress_path: Path
+    round_number: int
 
 
 def _review_due(
@@ -732,11 +491,10 @@ def _provisional_candidates_since_official(records: list[RoundRecord]) -> int:
     return count
 
 
-def _official_evaluation_reason(  # noqa: PLR0913  # tracked: #288
+def _official_evaluation_reason(
     *,
     records: list[RoundRecord],
-    round_number: int,
-    max_rounds: int,
+    progress: RoundProgress,
     official_eval_every: int,
     requested: bool,
     candidate_ready: bool,
@@ -748,7 +506,7 @@ def _official_evaluation_reason(  # noqa: PLR0913  # tracked: #288
     changes therefore cannot accidentally consume the expensive-evaluation
     budget.
     """
-    if round_number == max_rounds:
+    if progress.round_number == progress.total_rounds:
         return "final_round"
     if not candidate_ready:
         return None
@@ -862,8 +620,8 @@ def _invoke_read_only_role(
     role: str,
     checkpoint_label: str,
     allowed_workspace_paths: tuple[str, ...] = (),
-    **invoke_kwargs: Any,  # noqa: ANN401  # tracked: #288
-) -> Any:  # noqa: ANN401  # tracked: #288
+    **invoke_kwargs: Unpack[_ReadOnlyRoleInvokeOptions[_ReadOnlyResponseT]],
+) -> _ReadOnlyResponseT:
     """Invoke an evidence-reading role and undo unauthorized mutations.
 
     Prompt-level role boundaries are useful guidance, but they are not an
@@ -876,7 +634,8 @@ def _invoke_read_only_role(
     ctx.snapshot_workspace(checkpoint_label)
     checkpoint = ctx.git.current_sha()
     if checkpoint is None:
-        raise RuntimeError(f"Cannot isolate {role}: workspace checkpoint is unavailable")  # noqa: TRY003  # tracked: #288
+        message = f"Cannot isolate {role}: workspace checkpoint is unavailable"
+        raise RuntimeError(message)
 
     try:
         return ctx.invoke(**invoke_kwargs)
@@ -895,18 +654,24 @@ def _invoke_read_only_role(
             if allowed_workspace_paths:
                 checkout_kwargs["preserve_paths"] = allowed_workspace_paths
             if not ctx.git.checkout_tree(checkpoint, **checkout_kwargs):
-                raise RuntimeError(  # noqa: TRY003  # tracked: #288
+                message = (
                     f"Cannot isolate {role}: failed to restore workspace checkpoint "
                     f"{checkpoint[:12]}"
                 )
+                raise RuntimeError(message)
             remaining = [path for path in ctx.git.pending_changes() if not is_allowed(path)]
             if remaining:
-                raise RuntimeError(  # noqa: TRY003  # tracked: #288
+                message = (
                     f"Cannot isolate {role}: workspace is still modified after restore: "
-                    f"{', '.join(remaining[:8])}"
+                    f"{', '.join(remaining[:_ROLE_CHANGE_DISPLAY_LIMIT])}"
                 )
-            shown = ", ".join(unauthorized[:8])
-            suffix = "" if len(unauthorized) <= 8 else f", ... (+{len(unauthorized) - 8} more)"  # noqa: PLR2004  # tracked: #288
+                raise RuntimeError(message)
+            shown = ", ".join(unauthorized[:_ROLE_CHANGE_DISPLAY_LIMIT])
+            suffix = (
+                ""
+                if len(unauthorized) <= _ROLE_CHANGE_DISPLAY_LIMIT
+                else f", ... (+{len(unauthorized) - _ROLE_CHANGE_DISPLAY_LIMIT} more)"
+            )
             ctx.lprint(
                 f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
                 f"attempted by {role}: {shown}{suffix}"
@@ -918,16 +683,18 @@ def _is_fresh_cold_start(round_number: int, records: list[RoundRecord]) -> bool:
     return round_number == 1 and not records
 
 
-def _run_pre_round_decision(  # noqa: PLR0913  # tracked: #288
+def _run_pre_round_decision(
     ctx: LoopContext,
     *,
-    round_number: int,
-    objective: str,
+    request: LoopRunRequest,
+    progress: RoundProgress,
     carry: _CarryOver,
-    progress_path: Path,
-    progress_location: str,
-    has_history: bool = True,
+    has_history: bool,
 ) -> PreRoundDecision:
+    round_number = progress.round_number
+    objective = request.objective or request.input_bundle.objective
+    progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1]
+    progress_location = issue_board.display_path(progress_path, ctx.workspace)
     system_prompt = render_template(
         "orchestrator_pre_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -975,11 +742,11 @@ def _profiler_prompt_template(
     ).prompt_template
 
 
-def _effective_profiler_definition(  # noqa: ANN202  # tracked: #288
+def _effective_profiler_definition(
     profiler_kind: ProfilerKind,
     *,
     supports_torch_profiler: bool = False,
-):
+) -> ProfilerDefinition:
     """Return the already-resolved profiler declaration.
 
     Context creation resolves the requested profiler against both the domain
@@ -989,24 +756,30 @@ def _effective_profiler_definition(  # noqa: ANN202  # tracked: #288
     """
     kind = require_profiler_kind(profiler_kind)
     if kind is ProfilerKind.NONE:
-        raise ValueError("No profiler prompt exists when profiling is disabled.")  # noqa: TRY003  # tracked: #288
+        message = "No profiler prompt exists when profiling is disabled."
+        raise ValueError(message)
     definition = profiler_definition(kind)
     if definition.requires_domain_torch_support and not supports_torch_profiler:
-        raise ValueError("The selected domain does not provide Torch profiler support.")  # noqa: TRY003  # tracked: #288
+        message = "The selected domain does not provide Torch profiler support."
+        raise ValueError(message)
     return definition
 
 
-def _run_profiler(  # noqa: PLR0913  # tracked: #288
+def _run_profiler(
     ctx: LoopContext,
-    *,
-    round_number: int,
+    request: LoopRunRequest,
+    progress: RoundProgress,
     profile_focus: str,
-    modality: str | None,
-    interface: str,
-    domain_definition: DomainDefinition,
     progress_path: Path,
-    objective: str,
 ) -> ProfilerSummary | None:
+    bundle = request.input_bundle
+    round_number = progress.round_number
+    domain_definition = resolve_domain(bundle.domain)
+    modality = request.modality
+    if modality is None and bundle.domain is constants.DomainName.LLM_SERVING:
+        modality = "text_generation"
+    interface = request.interface
+    objective = request.objective or bundle.objective
     template = _profiler_prompt_template(
         ctx.profiler_kind,
         supports_torch_profiler=domain_definition.supports_torch_profiler,
@@ -1082,7 +855,7 @@ Write bounded durable profile evidence only below
             round_label=f"round-{round_number}-profiler",
             mcp_servers=[spec] if spec is not None else None,
         )
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010254 [BLE001]; configured profiler failures become framework warnings so candidate execution can continue.
         output_sink().framework_warning(
             "profiler failed",
             detail=str(exc),
@@ -1122,28 +895,37 @@ def _domain_render_context(
     }
 
 
-def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
+def _run_orchestrator_plan(
     ctx: LoopContext,
-    *,
-    agent_run_state: AgentRunState,
-    round_number: int,
-    objective: str,
-    profiler_summary: ProfilerSummary | None,
+    request: LoopRunRequest,
+    engine: HypothesisEngine,
     carry: _CarryOver,
-    progress_path: Path,
-    progress_location: str,
-    roadmap_location: str,
-    pareto_archive_location: str,
-    plateau_warning: str | None,
-    modality: str | None,
-    interface: str,
-    domain_definition: DomainDefinition,
-    framework_benchmark_enabled: bool = False,
-    official_eval_every: int = 3,
-    provisional_candidates: int = 0,
-    official_eval_cadence_due: bool = False,
-    profile_guidance: ProfileGuidanceView | None = None,
+    progress: RoundProgress,
 ) -> OrchestratorPlan:
+    bundle = request.input_bundle
+    round_number = progress.round_number
+    agent_run_state = engine.state
+    objective = request.objective or bundle.objective
+    modality = request.modality
+    if modality is None and bundle.domain is constants.DomainName.LLM_SERVING:
+        modality = "text_generation"
+    interface = request.interface
+    domain_definition = resolve_domain(bundle.domain)
+    roadmap_path, progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)
+    progress_location = issue_board.display_path(progress_path, ctx.workspace)
+    roadmap_location = issue_board.display_path(roadmap_path, ctx.workspace)
+    pareto_archive_location = issue_board.display_path(
+        issue_board.pareto_archive_path(progress_path), ctx.workspace
+    )
+    benchmark_contract = BenchmarkContract(
+        result_spec=bundle.benchmark_result,
+        result_protocol=bundle.benchmark_result_protocol,
+    )
+    official_eval_every = request.official_eval_every
+    provisional_candidates = _provisional_candidates_since_official(agent_run_state.rounds)
+    profile_guidance = engine.controller.guidance
+    plateau_warning = _detect_plateau(agent_run_state.rounds)
+    profiler_summary = carry.profiler_summary
     domain_orchestrator = render_domain_section(
         domain_definition,
         DomainRole.ORCHESTRATOR,
@@ -1164,10 +946,10 @@ def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
         domain_orchestrator=domain_orchestrator,
         runtime_notes=ctx.run_environment_view.prompt_notes,
         profile_execution=ctx.run_environment_view.profile_execution,
-        framework_benchmark_enabled=framework_benchmark_enabled,
+        framework_benchmark_enabled=benchmark_contract.declared,
         official_eval_every=official_eval_every,
         provisional_candidates=provisional_candidates,
-        official_eval_cadence_due=official_eval_cadence_due,
+        official_eval_cadence_due=(provisional_candidates + 1 >= official_eval_every),
         **(profile_guidance.plan_prompt_context() if profile_guidance else {}),
     )
     # One corrective reprompt: a plan that fails lifecycle validation (for
@@ -1210,7 +992,7 @@ def _run_orchestrator_plan(  # noqa: PLR0913  # tracked: #288
             response_cls=OrchestratorPlan,
             fallback_factory=lambda: OrchestratorPlan(
                 task="Re-check minimal server boots and /health returns 200.",
-                pass_criteria="/health returns 200.",  # noqa: S106  # tracked: #288
+                pass_criteria=_HEALTH_CHECK_CRITERIA,
                 reasoning="fallback: orchestrator produced no structured response",
             ),
             round_label=label,
@@ -1253,17 +1035,14 @@ def _validate_orchestrator_plan_state(
     if len({update.hypothesis_id for update in plan.hypothesis_updates}) != len(
         plan.hypothesis_updates
     ):
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            "Orchestrator hypothesis_updates must name each hypothesis once"
-        )
+        message = "Orchestrator hypothesis_updates must name each hypothesis once"
+        raise ValueError(message)
     if any(update.hypothesis_id == plan.hypothesis_id for update in plan.hypothesis_updates):
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            "Orchestrator hypothesis_updates must refer to prior hypotheses"
-        )
+        message = "Orchestrator hypothesis_updates must refer to prior hypotheses"
+        raise ValueError(message)
     if state.by_id(plan.hypothesis_id) is not None:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"hypothesis ID {plan.hypothesis_id!r} was already used"
-        )
+        message = f"hypothesis ID {plan.hypothesis_id!r} was already used"
+        raise ValueError(message)
     # Apply to a copy before any plan artifact is written. The real transition
     # is persisted after the operational active checkpoint is assembled.
     apply_strategy_updates(state, plan.hypothesis_updates)
@@ -1313,6 +1092,150 @@ class _ImplementerAttempt:
 
     response: ImplementerResponse
     synthesized: bool
+    retry: int
+
+
+@dataclass(frozen=True)
+class _RoundAttemptOutcome:
+    """Evidence produced by one round's implementer/judge retry cycle."""
+
+    passed: bool
+    feedback: str | None
+    implementation: ImplementerResponse | None
+    single_agent_response: SingleAgentRoundResponse | None = None
+    framework_perf_metric: float | None = None
+    framework_benchmark: FrameworkBenchmarkOutcome = field(
+        default_factory=FrameworkBenchmarkOutcome
+    )
+    accepted_metrics: dict[str, float] = field(default_factory=dict)
+    accepted_evaluation_artifact: str | None = None
+    completed_official_evaluation_reason: str | None = None
+    attempt_judge: JudgeOutcome = field(
+        default_factory=lambda: JudgeSkipped(JudgeSkipReason.NOT_REACHED)
+    )
+    retry: int = 0
+    round_number: int = 0
+    retry_limit: int = 0
+
+
+@dataclass
+class _AgentRoundAttempt:
+    """Mutable retry-cycle state for one active hypothesis round."""
+
+    engine: HypothesisEngine
+    run_state: AgentRunState
+    hypothesis: Hypothesis
+    state_store: AgentRunStateStore
+    feedback: str | None
+    framework_revalidation_required: bool
+    passed: bool = False
+    review_started: bool = False
+    implementation_attempt: _ImplementerAttempt | None = None
+    implementation: ImplementerResponse | None = None
+    single_agent_response: SingleAgentRoundResponse | None = None
+    framework_perf_metric: float | None = None
+    framework_benchmark: FrameworkBenchmarkOutcome = field(
+        default_factory=FrameworkBenchmarkOutcome
+    )
+    completed_official_evaluation_reason: str | None = None
+    attempt_judge: JudgeOutcome = field(
+        default_factory=lambda: JudgeSkipped(JudgeSkipReason.NOT_REACHED)
+    )
+    retry: int = 0
+    candidate_ready: bool = False
+    official_evaluation_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class _RoundPerformance:
+    """Trusted performance fields derived from a completed attempt."""
+
+    profile_skipped: bool
+    perf_metric: float | None
+    perf_unit: str | None
+    perf_provenance: PerfProvenance | None
+    accepted_metrics: dict[str, float]
+    accepted_evaluation_artifact: str | None
+
+
+@dataclass(frozen=True)
+class _CandidateEvidence:
+    """Candidate-side evidence carried from the final attempt or checkpoint."""
+
+    disposition: str
+    metrics: dict[str, float]
+    evaluation_artifact: str | None
+    operating_point: str
+    retention_reason: str
+
+
+def _complete_hypothesis_round(
+    engine: HypothesisEngine,
+    active_hypothesis: Hypothesis,
+    record: RoundRecord,
+    request: LoopRunRequest,
+    attempt: _RoundAttemptOutcome,
+) -> HypothesisEngine:
+    """Apply the completed attempt's outcome to hypothesis lifecycle state."""
+    next_active_hypothesis: Hypothesis | None = active_hypothesis.clone()
+    if (
+        request.inner_loop == "multi-agent"
+        and attempt.implementation is not None
+        and _implementation_keeps_hypothesis_active(
+            attempt.implementation,
+            continuation_rounds=next_active_hypothesis.continuation_rounds,
+        )
+    ):
+        next_active_hypothesis.feedback = (
+            attempt.feedback if record.reviewed and not attempt.passed else None
+        )
+        next_active_hypothesis.next_step = attempt.implementation.next_step
+        next_active_hypothesis.continuation_rounds += 1
+    elif attempt.passed:
+        next_active_hypothesis = None
+    elif (
+        record.reviewed
+        and next_active_hypothesis.continuation_rounds
+        < _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW
+    ):
+        # A rejected review may justify another scoped repair, but it consumes
+        # the same bounded ownership lease as an implementer continuation.
+        next_active_hypothesis.feedback = attempt.feedback
+        next_active_hypothesis.next_step = (
+            attempt.implementation.next_step
+            if attempt.implementation is not None
+            and _implementation_requests_continuation(attempt.implementation)
+            else None
+        )
+        next_active_hypothesis.continuation_rounds += 1
+    elif record.reviewed or (
+        attempt.implementation is not None
+        and not _implementation_keeps_hypothesis_active(
+            attempt.implementation,
+            continuation_rounds=next_active_hypothesis.continuation_rounds,
+        )
+    ):
+        next_active_hypothesis = None
+    else:
+        next_active_hypothesis.feedback = None
+        next_active_hypothesis.next_step = (
+            attempt.implementation.next_step if attempt.implementation is not None else None
+        )
+    profile_outcome = (
+        ProfileGuidanceOutcome.from_round(
+            record.round_number,
+            passed=attempt.passed,
+            official=record.official_evaluation,
+            delta_pct=record.perf_delta_pct,
+        )
+        if request.loop.value == "profile-guided"
+        else None
+    )
+    return engine.complete_round(
+        record,
+        next_active=next_active_hypothesis,
+        profile_outcome=profile_outcome,
+    )
 
 
 def _validate_skill_selections(
@@ -1367,34 +1290,58 @@ def _validate_skill_selections(
     return validated, resolved
 
 
-def _run_implementer(  # noqa: PLR0913  # tracked: #288
+def _run_implementer(
     ctx: LoopContext,
-    *,
-    round_number: int,
-    retry: int,
-    plan: OrchestratorPlan,
-    objective: str,
-    modality: str | None,
-    interface: str,
-    domain_definition: DomainDefinition,
-    feedback: str | None,
-    continuation_step: str | None,
-    framework_revert_applied: bool,
-    framework_revert_round: int | None,
-    framework_revert_commit: str | None,
-    progress_path: Path,
-    progress_location: str,
-    pareto_archive_location: str,
-    gate_revalidation_pending: bool = False,
-    gate_approved_perf_metric: float | None = None,
-    gate_approved_perf_unit: str | None = None,
-    gate_approved_evaluation_artifact: str | None = None,
-    framework_benchmark_enabled: bool = False,
-    official_evaluation_due: bool = False,
-    official_evaluation_reason: str | None = None,
-    prior_attempt_artifact_locations: tuple[str, ...] = (),
-    profile_guidance: ProfileGuidanceView | None = None,
+    request: LoopRunRequest,
+    hypothesis: Hypothesis,
+    engine: HypothesisEngine,
+    progress: RoundProgress,
 ) -> _ImplementerAttempt:
+    state = engine.state
+    retry = issue_board.next_implementer_attempt(
+        issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1],
+        progress.round_number,
+    )
+    bundle = request.input_bundle
+    round_number = progress.round_number
+    objective = request.objective or bundle.objective
+    modality = request.modality
+    if modality is None and bundle.domain is constants.DomainName.LLM_SERVING:
+        modality = "text_generation"
+    interface = request.interface
+    domain_definition = resolve_domain(bundle.domain)
+    progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1]
+    progress_location = issue_board.display_path(progress_path, ctx.workspace)
+    pareto_archive_location = issue_board.display_path(
+        issue_board.pareto_archive_path(progress_path), ctx.workspace
+    )
+    benchmark_contract = BenchmarkContract(
+        result_spec=bundle.benchmark_result,
+        result_protocol=bundle.benchmark_result_protocol,
+        timeout_seconds=framework_command_timeout(ctx, bundle.manifest.benchmark.timeout_seconds),
+    )
+    guidance = engine.controller.guidance
+    official_evaluation_reason = _official_evaluation_reason(
+        records=state.rounds,
+        progress=progress,
+        official_eval_every=request.official_eval_every,
+        requested=hypothesis.plan.request_official_evaluation,
+        candidate_ready=True,
+    )
+    if (
+        request.loop.value == "profile-guided"
+        and guidance.active_component
+        and official_evaluation_reason is None
+    ):
+        official_evaluation_reason = "profile-guided component measurement"
+    framework_benchmark_enabled = benchmark_contract.declared
+    official_evaluation_due = official_evaluation_reason is not None
+    prior_attempt_artifact_locations = tuple(
+        issue_board.display_path(path, ctx.workspace)
+        for path in issue_board.implementer_artifact_paths(progress_path, round_number)
+    )
+    plan = hypothesis.plan
+    continuation_step = hypothesis.next_step
     plan.recommended_skills, resolved_skills = _validate_skill_selections(
         ctx, plan.recommended_skills
     )
@@ -1435,15 +1382,15 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
         validation_location=validation_location,
         validation_recipe_contract_location=validation_recipe_contract_location,
         retry=retry,
-        feedback=feedback,
+        feedback=hypothesis.feedback,
         continuation_step=continuation_step,
-        framework_revert_applied=framework_revert_applied,
-        framework_revert_round=framework_revert_round,
-        framework_revert_commit=framework_revert_commit,
-        gate_revalidation_pending=gate_revalidation_pending,
-        gate_approved_perf_metric=gate_approved_perf_metric,
-        gate_approved_perf_unit=gate_approved_perf_unit,
-        gate_approved_evaluation_artifact=gate_approved_evaluation_artifact,
+        framework_revert_applied=hypothesis.revert_applied,
+        framework_revert_round=hypothesis.parent_round,
+        framework_revert_commit=hypothesis.revert_commit,
+        gate_revalidation_pending=hypothesis.gate_revalidation_pending,
+        gate_approved_perf_metric=hypothesis.gate_approved_perf_metric,
+        gate_approved_perf_unit=hypothesis.gate_approved_perf_unit,
+        gate_approved_evaluation_artifact=hypothesis.gate_approved_evaluation_artifact,
         runtime_notes=ctx.run_environment_view.prompt_notes,
         profile_execution=ctx.run_environment_view.profile_execution,
         framework_benchmark_enabled=framework_benchmark_enabled,
@@ -1451,7 +1398,7 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
         official_evaluation_reason=official_evaluation_reason,
         recommended_skills=resolved_skills,
         prior_attempt_artifact_locations=prior_attempt_artifact_locations,
-        **(profile_guidance.implementer_prompt_context() if profile_guidance else {}),
+        **guidance.implementer_prompt_context(),
     )
     # Make this attempt number durable before the turn starts. A process killed
     # mid-invoke writes no completed artifact, so a resume that counted only
@@ -1497,36 +1444,59 @@ def _run_implementer(  # noqa: PLR0913  # tracked: #288
     return _ImplementerAttempt(
         response=response,
         synthesized=fallback.synthesized or timed_out,
+        retry=retry,
     )
 
 
-def _run_judge(  # noqa: PLR0913  # tracked: #288
+def _run_judge(
     ctx: LoopContext,
-    *,
-    round_number: int,
-    retry: int,
-    plan: OrchestratorPlan,
-    implementation: ImplementerResponse,
-    modality: str | None,
-    interface: str,
-    domain_definition: DomainDefinition,
-    progress_path: Path,
-    progress_location: str,
-    pareto_archive_location: str,
-    objective: str,
-    framework_revert_applied: bool,
-    framework_revert_round: int | None,
-    framework_revert_commit: str | None,
-    gate_revalidation_pending: bool = False,
-    gate_approved_perf_metric: float | None = None,
-    gate_approved_perf_unit: str | None = None,
-    gate_approved_metrics: dict[str, float] | None = None,
-    gate_approved_evaluation_artifact: str | None = None,
-    framework_benchmark_enabled: bool = False,
-    official_evaluation_due: bool = False,
-    official_evaluation_reason: str | None = None,
-    pareto_archive_conflict: str | None = None,
+    request: LoopRunRequest,
+    engine: HypothesisEngine,
+    progress: RoundProgress,
+    attempt: _ImplementerAttempt,
 ) -> JudgeResponse:
+    state = engine.state
+    hypothesis = state.active_hypothesis
+    if hypothesis is None:
+        message = "cannot run a judge without an active hypothesis"
+        raise RuntimeError(message)
+    implementation = attempt.response
+    round_number = progress.round_number
+    retry = attempt.retry
+    bundle = request.input_bundle
+    objective = request.objective or bundle.objective
+    modality = request.modality
+    interface = request.interface
+    domain_definition = resolve_domain(bundle.domain)
+    progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1]
+    progress_location = issue_board.display_path(progress_path, ctx.workspace)
+    pareto_archive_location = issue_board.display_path(
+        issue_board.pareto_archive_path(progress_path), ctx.workspace
+    )
+    benchmark_contract = BenchmarkContract(
+        result_spec=bundle.benchmark_result,
+        result_protocol=bundle.benchmark_result_protocol,
+    )
+    official_evaluation_reason = _official_evaluation_reason(
+        records=state.rounds,
+        progress=progress,
+        official_eval_every=request.official_eval_every,
+        requested=hypothesis.plan.request_official_evaluation,
+        candidate_ready=True,
+    )
+    if (
+        request.loop.value == "profile-guided"
+        and engine.controller.guidance.active_component
+        and official_evaluation_reason is None
+    ):
+        official_evaluation_reason = "profile-guided component measurement"
+    pareto_archive_conflict = _pareto_archive_conflict(
+        candidate_disposition=implementation.candidate_disposition,
+        candidate_metrics=dict(implementation.candidate_metrics),
+        records=state.rounds,
+        space=state.metrics,
+    )
+    plan = hypothesis.plan
     # Rewrite both handoffs from the framework's parsed in-memory objects just
     # before review. Candidate code may write the shared workspace, so the
     # Judge must receive paths to fresh framework-owned records rather than
@@ -1588,20 +1558,20 @@ def _run_judge(  # noqa: PLR0913  # tracked: #288
         candidate_evaluation_artifact=implementation.candidate_evaluation_artifact,
         candidate_operating_point=implementation.candidate_operating_point,
         candidate_retention_reason=implementation.candidate_retention_reason,
-        gate_revalidation_pending=gate_revalidation_pending,
-        gate_approved_perf_metric=gate_approved_perf_metric,
-        gate_approved_perf_unit=gate_approved_perf_unit,
-        gate_approved_metrics=gate_approved_metrics or {},
-        gate_approved_evaluation_artifact=gate_approved_evaluation_artifact,
+        gate_revalidation_pending=hypothesis.gate_revalidation_pending,
+        gate_approved_perf_metric=hypothesis.gate_approved_perf_metric,
+        gate_approved_perf_unit=hypothesis.gate_approved_perf_unit,
+        gate_approved_metrics=dict(hypothesis.gate_approved_metrics),
+        gate_approved_evaluation_artifact=hypothesis.gate_approved_evaluation_artifact,
         progress_location=progress_location,
         pareto_archive_location=pareto_archive_location,
         validation_location=validation_location,
         validation_recipe_contract_location=validation_recipe_contract_location,
-        framework_revert_applied=framework_revert_applied,
-        framework_revert_round=framework_revert_round,
-        framework_revert_commit=framework_revert_commit,
-        framework_benchmark_enabled=framework_benchmark_enabled,
-        official_evaluation_due=official_evaluation_due,
+        framework_revert_applied=hypothesis.revert_applied,
+        framework_revert_round=hypothesis.parent_round,
+        framework_revert_commit=hypothesis.revert_commit,
+        framework_benchmark_enabled=benchmark_contract.declared,
+        official_evaluation_due=(official_evaluation_reason is not None),
         official_evaluation_reason=official_evaluation_reason,
         pareto_archive_conflict=pareto_archive_conflict,
     )
@@ -1650,26 +1620,12 @@ def _run_judge(  # noqa: PLR0913  # tracked: #288
     return response
 
 
-def _run_single_agent_round(  # noqa: PLR0913  # tracked: #288
+def _run_single_agent_round(
     ctx: LoopContext,
-    *,
-    round_number: int,
-    retry: int,
-    plan: OrchestratorPlan,
-    modality: str | None,
-    interface: str,
-    domain_definition: DomainDefinition,
-    feedback: str | None,
-    progress_path: Path,
-    progress_location: str,
-    pareto_archive_location: str,
-    objective: str,
-    profile_focus: str,
-    official_evaluation_due: bool = False,
-    official_evaluation_reason: str | None = None,
-    framework_benchmark_enabled: bool = False,
-    pareto_records: list[RoundRecord] | None = None,
-    space: MetricSpace,
+    request: LoopRunRequest,
+    hypothesis: Hypothesis,
+    engine: HypothesisEngine,
+    progress: RoundProgress,
 ) -> SingleAgentRoundResponse:
     """Invoke one agent that plays implementer + judge + profiler.
 
@@ -1677,6 +1633,45 @@ def _run_single_agent_round(  # noqa: PLR0913  # tracked: #288
     multi-agent loop hands to the implementer is used here — it has
     workspace write access plus shell access for benchmarks/profiling.
     """
+    state = engine.state
+    plan = hypothesis.plan
+    round_number = progress.round_number
+    progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1]
+    retry = issue_board.next_implementer_attempt(progress_path, round_number)
+    progress_location = issue_board.display_path(progress_path, ctx.workspace)
+    pareto_archive_location = issue_board.display_path(
+        issue_board.pareto_archive_path(progress_path), ctx.workspace
+    )
+    bundle = request.input_bundle
+    objective = request.objective or bundle.objective
+    modality = request.modality
+    if modality is None and bundle.domain is constants.DomainName.LLM_SERVING:
+        modality = "text_generation"
+    interface = request.interface
+    domain_definition = resolve_domain(bundle.domain)
+    profile_focus = "general latency hotspots on /v1/completions"
+    benchmark_contract = BenchmarkContract(
+        result_spec=bundle.benchmark_result,
+        result_protocol=bundle.benchmark_result_protocol,
+    )
+    official_evaluation_reason = _official_evaluation_reason(
+        records=state.rounds,
+        progress=progress,
+        official_eval_every=request.official_eval_every,
+        requested=plan.request_official_evaluation,
+        candidate_ready=True,
+    )
+    if (
+        request.loop.value == "profile-guided"
+        and engine.controller.guidance.active_component
+        and official_evaluation_reason is None
+    ):
+        official_evaluation_reason = "profile-guided component measurement"
+    official_evaluation_due = official_evaluation_reason is not None
+    framework_benchmark_enabled = benchmark_contract.declared
+    pareto_records = state.rounds
+    space = state.metrics
+    feedback = hypothesis.feedback
     plan.recommended_skills, resolved_skills = _validate_skill_selections(
         ctx, plan.recommended_skills
     )
@@ -1815,12 +1810,15 @@ def _validation_input_digest(workspace: Path, recipe: ValidationRecipe) -> str:
     for relative in sorted(recipe.input_paths):
         unresolved = workspace / relative
         if unresolved.is_symlink():
-            raise ValueError(f"validation input must not be a symlink: {relative}")  # noqa: TRY003  # tracked: #288
+            message = f"validation input must not be a symlink: {relative}"
+            raise ValueError(message)
         path = unresolved.resolve()
         if not path.is_relative_to(workspace_root):
-            raise ValueError(f"validation input escapes workspace: {relative}")  # noqa: TRY003  # tracked: #288
+            message = f"validation input escapes workspace: {relative}"
+            raise ValueError(message)
         if not path.exists():
-            raise ValueError(f"validation input does not exist: {relative}")  # noqa: TRY003  # tracked: #288
+            message = f"validation input does not exist: {relative}"
+            raise ValueError(message)
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0dir\0" if path.is_dir() else b"\0file\0")
         entries = [path]
@@ -1828,11 +1826,16 @@ def _validation_input_digest(workspace: Path, recipe: ValidationRecipe) -> str:
             entries = sorted(candidate for candidate in path.rglob("*") if candidate.is_file())
         for entry in entries:
             if entry.is_symlink():
-                raise ValueError(f"validation input must not be a symlink: {relative}")  # noqa: TRY003  # tracked: #288
+                message = f"validation input must not be a symlink: {relative}"
+                raise ValueError(message)
             total_files += 1
             total_bytes += entry.stat().st_size
-            if total_files > 4096 or total_bytes > 256 * 1024 * 1024:  # noqa: PLR2004  # tracked: #288
-                raise ValueError("validation inputs exceed the 4096-file/256-MiB reuse-hash limit")  # noqa: TRY003  # tracked: #288
+            if (
+                total_files > _MAX_VALIDATION_INPUT_FILES
+                or total_bytes > _MAX_VALIDATION_INPUT_BYTES
+            ):
+                message = "validation inputs exceed the 4096-file/256-MiB reuse-hash limit"
+                raise ValueError(message)
             entry_relative = entry.relative_to(workspace_root).as_posix()
             digest.update(entry_relative.encode("utf-8"))
             digest.update(b"\0")
@@ -1871,20 +1874,113 @@ def _load_validation_recipes(workspace: Path, artifact: str) -> list[ValidationR
     workspace_root = workspace.resolve()
     path = (workspace / artifact).resolve()
     if not path.is_relative_to(workspace_root):
-        raise ValueError("validation recipe artifact escapes the workspace")  # noqa: TRY003  # tracked: #288
+        message = "validation recipe artifact escapes the workspace"
+        raise ValueError(message)
     if not path.is_file():
-        raise ValueError(f"validation recipe artifact does not exist: {artifact}")  # noqa: TRY003  # tracked: #288
+        message = f"validation recipe artifact does not exist: {artifact}"
+        raise ValueError(message)
     try:
         payload = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"validation recipe artifact is not valid JSON: {exc}") from exc  # noqa: TRY003  # tracked: #288
+        message = f"validation recipe artifact is not valid JSON: {exc}"
+        raise ValueError(message) from exc
     try:
         return ValidationRecipeArtifact.model_validate(payload).recipes
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"validation recipe artifact does not match version 1: {exc}") from exc  # noqa: TRY003  # tracked: #288
+        message = f"validation recipe artifact does not match version 1: {exc}"
+        raise ValueError(message) from exc
 
 
-def _run_framework_validation_gate(  # noqa: C901, PLR0912, PLR0915  # tracked: #288
+def _execute_framework_validation_recipe(
+    ctx: LoopContext,
+    recipe: ValidationRecipe,
+    progress_path: Path,
+    round_number: int,
+) -> tuple[FrameworkValidationResult, bool]:
+    """Run or reuse one local validation recipe and report workspace mutation."""
+    try:
+        input_digest = _validation_input_digest(ctx.workspace, recipe)
+    except (OSError, ValueError) as exc:
+        return (
+            FrameworkValidationResult(
+                recipe=recipe,
+                input_digest="",
+                passed=False,
+                error=str(exc),
+            ),
+            False,
+        )
+
+    reused = _reusable_validation_result(progress_path, recipe, input_digest)
+    emit_gate_started(
+        GateKind.VALIDATION,
+        recipe=recipe.name,
+        command=recipe.command,
+        round_label=f"round-{round_number}",
+    )
+    if reused is not None:
+        emit_gate_finished(
+            GateFinishedData(
+                gate=GateKind.VALIDATION,
+                recipe=recipe.name,
+                reused=True,
+            ),
+            passed=True,
+            round_label=f"round-{round_number}",
+        )
+        return reused, False
+
+    try:
+        execution = ctx.judge_backend.execute(
+            recipe.command,
+            timeout=recipe.timeout_seconds,
+        )
+        output = execution.output.strip()
+        passed = execution.exit_code == 0
+        result = FrameworkValidationResult(
+            recipe=recipe,
+            input_digest=input_digest,
+            passed=passed,
+            exit_code=execution.exit_code,
+            output=output[-GATE_RECORD_TAIL_CHARS:],
+            error=None if passed else "command exited nonzero",
+        )
+    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010255 [BLE001]; command and backend failures become a failed validation result for the candidate.
+        result = FrameworkValidationResult(
+            recipe=recipe,
+            input_digest=input_digest,
+            passed=False,
+            error=f"command could not be executed: {exc}",
+        )
+
+    changes = ctx.git.pending_changes()
+    if changes:
+        shown = ", ".join(changes[:_ROLE_CHANGE_DISPLAY_LIMIT])
+        suffix = (
+            ""
+            if len(changes) <= _ROLE_CHANGE_DISPLAY_LIMIT
+            else f", ... (+{len(changes) - _ROLE_CHANGE_DISPLAY_LIMIT} more)"
+        )
+        result = result.model_copy(
+            update={
+                "passed": False,
+                "error": f"validation command mutated the workspace: {shown}{suffix}",
+            }
+        )
+    failure_detail = None if result.passed else (result.error or result.output or "unknown failure")
+    emit_gate_finished(
+        GateFinishedData(
+            gate=GateKind.VALIDATION,
+            recipe=recipe.name,
+            output_tail=(None if failure_detail is None else failure_detail[-GATE_LOG_TAIL_CHARS:]),
+        ),
+        passed=result.passed,
+        round_label=f"round-{round_number}",
+    )
+    return result, bool(changes)
+
+
+def _run_framework_validation_gate(
     ctx: LoopContext,
     *,
     recipe_artifact: str | None,
@@ -1919,99 +2015,21 @@ def _run_framework_validation_gate(  # noqa: C901, PLR0912, PLR0915  # tracked: 
     results: list[FrameworkValidationResult] = []
     restore_required = False
     for recipe in recipes:
-        try:
-            input_digest = _validation_input_digest(ctx.workspace, recipe)
-        except (OSError, ValueError) as exc:
-            results.append(
-                FrameworkValidationResult(
-                    recipe=recipe,
-                    input_digest="",
-                    passed=False,
-                    error=str(exc),
-                )
-            )
-            break
-
-        reused = _reusable_validation_result(progress_path, recipe, input_digest)
-        if reused is not None:
-            results.append(reused)
-            emit_gate_started(
-                GateKind.VALIDATION,
-                recipe=recipe.name,
-                command=recipe.command,
-                round_label=f"round-{round_number}",
-            )
-            emit_gate_finished(
-                GateKind.VALIDATION,
-                passed=True,
-                recipe=recipe.name,
-                reused=True,
-                round_label=f"round-{round_number}",
-            )
-            continue
-
-        emit_gate_started(
-            GateKind.VALIDATION,
-            recipe=recipe.name,
-            command=recipe.command,
-            round_label=f"round-{round_number}",
+        result, mutated = _execute_framework_validation_recipe(
+            ctx, recipe, progress_path, round_number
         )
-        try:
-            execution = ctx.judge_backend.execute(
-                recipe.command,
-                timeout=recipe.timeout_seconds,
-            )
-            output = execution.output.strip()
-            passed = execution.exit_code == 0
-            result = FrameworkValidationResult(
-                recipe=recipe,
-                input_digest=input_digest,
-                passed=passed,
-                exit_code=execution.exit_code,
-                output=output[-GATE_RECORD_TAIL_CHARS:],
-                error=None if passed else "command exited nonzero",
-            )
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
-            result = FrameworkValidationResult(
-                recipe=recipe,
-                input_digest=input_digest,
-                passed=False,
-                error=f"command could not be executed: {exc}",
-            )
-
-        changes = ctx.git.pending_changes()
-        if changes:
-            restore_required = True
-            shown = ", ".join(changes[:8])
-            suffix = "" if len(changes) <= 8 else f", ... (+{len(changes) - 8} more)"  # noqa: PLR2004  # tracked: #288
-            result = result.model_copy(
-                update={
-                    "passed": False,
-                    "error": (f"validation command mutated the workspace: {shown}{suffix}"),
-                }
-            )
         results.append(result)
-        failure_detail = (
-            None if result.passed else (result.error or result.output or "unknown failure")
-        )
-        emit_gate_finished(
-            GateKind.VALIDATION,
-            passed=result.passed,
-            recipe=recipe.name,
-            output_tail=(None if failure_detail is None else failure_detail[-GATE_LOG_TAIL_CHARS:]),
-            round_label=f"round-{round_number}",
-        )
+        restore_required |= mutated
         if not result.passed:
             break
 
-    if restore_required:  # noqa: SIM102  # tracked: #288
-        if not ctx.git.checkout_tree(checkpoint, clean=True):
-            results[-1] = results[-1].model_copy(
-                update={
-                    "passed": False,
-                    "error": "validation mutation could not be restored",
-                }
-            )
+    if restore_required and not ctx.git.checkout_tree(checkpoint, clean=True):
+        results[-1] = results[-1].model_copy(
+            update={
+                "passed": False,
+                "error": "validation mutation could not be restored",
+            }
+        )
 
     artifact = issue_board.write_validation_result_artifact(
         progress_path,
@@ -2060,31 +2078,42 @@ def _with_candidate_revision(
     return f"env {' '.join(environment)} {command}"
 
 
-def _run_framework_accuracy_gate(  # noqa: PLR0913  # tracked: #288
+def _candidate_revision(ctx: LoopContext) -> str | None:
+    revision = ctx.git.current_sha()
+    return revision if isinstance(revision, str) else None
+
+
+def _run_framework_accuracy_gate(
     ctx: LoopContext,
-    *,
-    round_number: int,
+    request: LoopRunRequest,
+    progress: RoundProgress,
     retry: int,
     progress_path: Path,
-    timeout_seconds: int | None = None,
-    candidate_revision: str | None = None,
-    release_deployment_after: bool = False,
 ) -> str | None:
     """Run the immutable manifest accuracy command after an agent reports PASS."""
+    round_number = progress.round_number
+    bundle = request.input_bundle
+    benchmark_contract = BenchmarkContract(
+        result_spec=bundle.benchmark_result,
+        result_protocol=bundle.benchmark_result_protocol,
+        timeout_seconds=framework_command_timeout(ctx, bundle.manifest.benchmark.timeout_seconds),
+    )
     command = ctx.judge_accuracy_command
     execution_command = None
     if command:
         execution_command = _with_candidate_revision(
             command,
-            candidate_revision,
+            _candidate_revision(ctx),
             release_deployment_env_var=(
-                _deployment_release_env_var(ctx) if release_deployment_after else None
+                _deployment_release_env_var(ctx)
+                if not benchmark_contract.declared or not ctx.judge_benchmark_command
+                else None
             ),
         )
     result = run_accuracy_gate(
         ctx,
         process_id=f"accuracy-{round_number}-{retry}",
-        timeout_seconds=framework_command_timeout(ctx, timeout_seconds),
+        timeout_seconds=framework_command_timeout(ctx, bundle.manifest.accuracy.timeout_seconds),
         execution_command=execution_command,
         round_label=f"round-{round_number}",
     )
@@ -2095,25 +2124,18 @@ def _run_framework_accuracy_gate(  # noqa: PLR0913  # tracked: #288
         progress_path,
         round_number,
         retry,
-        command=result.command or "(not configured)",
-        passed=result.passed,
-        output=result.output[-GATE_RECORD_TAIL_CHARS:],
+        result=replace(result, output=result.output[-GATE_RECORD_TAIL_CHARS:]),
     )
     ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-framework-accuracy")
     return result.feedback
 
 
-def _run_framework_benchmark(  # noqa: PLR0913  # tracked: #288
+def _run_framework_benchmark(
     ctx: LoopContext,
-    *,
-    result_spec: BenchmarkResult | None,
-    result_protocol: Literal[2] | None = None,
-    objectives: Sequence[Objective] = (),
-    round_number: int,
+    request: LoopRunRequest,
+    progress: RoundProgress,
     retry: int,
     progress_path: Path,
-    timeout_seconds: int | None = None,
-    candidate_revision: str | None = None,
 ) -> FrameworkBenchmarkOutcome:
     """Run the shared benchmark gate and record its agent-loop bookkeeping.
 
@@ -2122,21 +2144,26 @@ def _run_framework_benchmark(  # noqa: PLR0913  # tracked: #288
     this wrapper owns what is agent-loop specific: progress notes and
     workspace snapshots.
     """
+    round_number = progress.round_number
+    bundle = request.input_bundle
+    benchmark_contract = BenchmarkContract(
+        result_spec=bundle.benchmark_result,
+        result_protocol=bundle.benchmark_result_protocol,
+        timeout_seconds=framework_command_timeout(ctx, bundle.manifest.benchmark.timeout_seconds),
+    )
     execution_base = None
     if ctx.judge_benchmark_command:
         execution_base = _with_candidate_revision(
             ctx.judge_benchmark_command,
-            candidate_revision,
+            _candidate_revision(ctx),
             release_deployment_env_var=_deployment_release_env_var(ctx),
         )
     result = run_benchmark_gate(
         ctx,
-        result_spec=result_spec,
-        result_protocol=result_protocol,
-        objectives=objectives,
+        contract=benchmark_contract,
+        space=request.metrics,
         process_id=f"benchmark-{round_number}-{retry}",
         output_slug=f"{round_number}-{retry}",
-        timeout_seconds=framework_command_timeout(ctx, timeout_seconds),
         execution_base=execution_base,
         round_label=f"round-{round_number}",
     )
@@ -2147,13 +2174,15 @@ def _run_framework_benchmark(  # noqa: PLR0913  # tracked: #288
         progress_path,
         round_number,
         retry,
-        command=result.command or "(not configured)",
-        passed=result.passed,
+        result=replace(result, output=result.output[-GATE_RECORD_TAIL_CHARS:]),
         metric_name=(
-            result.outcome.metric_name or (result_spec.metric if result_spec is not None else None)
+            result.outcome.metric_name
+            or (
+                benchmark_contract.result_spec.metric
+                if benchmark_contract.result_spec is not None
+                else None
+            )
         ),
-        metric_value=result.outcome.metric_value,
-        output=result.output[-GATE_RECORD_TAIL_CHARS:],
     )
     ctx.snapshot_workspace(f"round-{round_number}-retry-{retry}-framework-benchmark")
     return result.outcome
@@ -2171,11 +2200,6 @@ def _reconcile_model_requests(ctx: LoopContext) -> str | None:
     """
     if getattr(ctx.run_environment_view, "env_kind", "local") != "modal":
         return None
-    from vibesys.sandbox.model_requests import (  # noqa: PLC0415  # tracked: #288
-        ModelRequestError,
-        reconcile_model_requests,
-    )
-
     try:
         volumes = reconcile_model_requests(ctx.workspace, log=ctx.lprint)
     except ModelRequestError as exc:
@@ -2186,42 +2210,48 @@ def _reconcile_model_requests(ctx: LoopContext) -> str | None:
     return None
 
 
-def _run_framework_gates(  # noqa: PLR0913  # tracked: #288
+def _run_framework_gates(
     ctx: LoopContext,
-    *,
-    benchmark_result: BenchmarkResult | None,
-    benchmark_result_protocol: Literal[2] | None = None,
-    objectives: Sequence[Objective] = (),
-    round_number: int,
+    request: LoopRunRequest,
+    progress: RoundProgress,
     retry: int,
-    progress_path: Path,
-    accuracy_timeout_seconds: int | None = None,
-    benchmark_timeout_seconds: int | None = None,
-    reuse_accuracy_pass: bool = False,
-    candidate_revision: str | None = None,
-) -> tuple[str | None, FrameworkBenchmarkOutcome, bool]:
+    hypothesis: Hypothesis,
+) -> tuple[str | None, FrameworkBenchmarkOutcome, bool, str | None]:
     """Run the framework-owned gates, returning the first failure's feedback.
 
     The benchmark outcome is always returned so a passing protocol-path run can
     carry its complete metric row to the round record; it is empty whenever the
     benchmark did not run.
     """
+    round_number = progress.round_number
+    progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1]
+    candidate_revision = _candidate_revision(ctx)
+    reuse_accuracy_pass = bool(
+        hypothesis.gate_revalidation_pending
+        and candidate_revision is not None
+        and hypothesis.gate_candidate_commit == candidate_revision
+        and hypothesis.gate_accuracy_passed
+    )
     if ctx.agent_client.backend_name == "stub":
-        return None, FrameworkBenchmarkOutcome(), False
+        return None, FrameworkBenchmarkOutcome(), False, candidate_revision
     resource_feedback = _reconcile_model_requests(ctx)
     if resource_feedback is not None:
-        return resource_feedback, FrameworkBenchmarkOutcome(), False
+        return resource_feedback, FrameworkBenchmarkOutcome(), False, candidate_revision
     if reuse_accuracy_pass:
         feedback = None
         issue_board.append_framework_accuracy_gate(
             progress_path,
             round_number,
             retry,
-            command=ctx.judge_accuracy_command or "(not configured)",
-            passed=True,
-            output=(
-                "Reused the prior framework-owned PASS for this exact candidate "
-                "commit; a later gate, not accuracy, caused the retry."
+            result=AccuracyGateResult(
+                command=ctx.judge_accuracy_command,
+                passed=True,
+                output=(
+                    "Reused the prior framework-owned PASS for this exact candidate "
+                    "commit; a later gate, not accuracy, caused the retry."
+                ),
+                feedback=None,
+                executed=False,
             ),
         )
         emit_gate_started(
@@ -2230,38 +2260,392 @@ def _run_framework_gates(  # noqa: PLR0913  # tracked: #288
             round_label=f"round-{round_number}",
         )
         emit_gate_finished(
-            GateKind.ACCURACY,
+            GateFinishedData(gate=GateKind.ACCURACY, reused=True),
             passed=True,
-            reused=True,
             round_label=f"round-{round_number}",
         )
     else:
-        feedback = _run_framework_accuracy_gate(
-            ctx,
-            round_number=round_number,
-            retry=retry,
-            progress_path=progress_path,
-            timeout_seconds=accuracy_timeout_seconds,
-            candidate_revision=candidate_revision,
-            release_deployment_after=(
-                (benchmark_result is None and benchmark_result_protocol is None)
-                or not ctx.judge_benchmark_command
+        feedback = _run_framework_accuracy_gate(ctx, request, progress, retry, progress_path)
+    if feedback is not None:
+        return feedback, FrameworkBenchmarkOutcome(), False, candidate_revision
+    benchmark = _run_framework_benchmark(ctx, request, progress, retry, progress_path)
+    return benchmark.feedback, benchmark, True, candidate_revision
+
+
+def _validate_agent_request(request: LoopRunRequest) -> DomainDefinition:
+    """Validate agent-loop options and resolve the requested domain."""
+    if request.inner_loop not in _INNER_LOOPS:
+        message = (
+            f"Unknown inner_loop {request.inner_loop!r}; choose from {', '.join(_INNER_LOOPS)}"
+        )
+        raise ValueError(message)
+    if request.max_retries_per_round < 1:
+        message = f"max_retries_per_round must be >= 1, got {request.max_retries_per_round}"
+        raise ValueError(message)
+    if request.judge_every < 1:
+        message = f"judge_every must be >= 1, got {request.judge_every}"
+        raise ValueError(message)
+    if request.official_eval_every < 1:
+        message = f"official_eval_every must be >= 1, got {request.official_eval_every}"
+        raise ValueError(message)
+    if request.memory_layout not in issue_board.MEMORY_LAYOUTS:
+        message = (
+            f"Unknown memory_layout {request.memory_layout!r}; "
+            f"choose from {', '.join(issue_board.MEMORY_LAYOUTS)}"
+        )
+        raise ValueError(message)
+    if request.interface not in _INTERFACES:
+        message = f"Unknown interface {request.interface!r}; choose from {', '.join(_INTERFACES)}"
+        raise ValueError(message)
+    if (
+        request.loop.value == "profile-guided"
+        and request.input_bundle.manifest.profile_guided is None
+    ):
+        message = "profile-guided runs require profile guidance settings"
+        raise ValueError(message)
+    return resolve_domain(request.input_bundle.domain)
+
+
+def _handle_agent_round_limit(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    history: RoundHistory,
+    progress_path: Path,
+    round_number: int,
+) -> bool | None:
+    """Finalize a completed resumed run or reject an exhausted total budget."""
+    max_rounds = request.max_rounds if request.max_rounds is not None else 24
+    if round_number <= max_rounds:
+        return None
+    try:
+        if request.resume is not None and history.records:
+            ctx.lprint(
+                f"This run already completed {len(history.records)} rounds; "
+                "finalizing its retained result."
+            )
+            _finalize_agent_run(
+                ctx,
+                records=history.records,
+                space=request.metrics,
+                progress_path=progress_path,
+            )
+            return True
+        message = (
+            f"This run has completed {round_number - 1} rounds; max_rounds={max_rounds} "
+            "is a total limit. Increase --max-rounds to continue."
+        )
+        raise ValueError(message)
+    finally:
+        ctx.close()
+
+
+def _plan_agent_round(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    engine: HypothesisEngine,
+    carry: _CarryOver,
+    progress: RoundProgress,
+) -> tuple[HypothesisEngine, OrchestratorPlan]:
+    """Select a new hypothesis or continue the active one."""
+    round_number = progress.round_number
+    bundle = request.input_bundle
+    active_hypothesis = engine.state.active_hypothesis
+    progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1]
+    if active_hypothesis is None:
+        profile_guided = (
+            bundle.manifest.profile_guided if request.loop.value == "profile-guided" else None
+        )
+        if profile_guided is not None:
+            engine = engine.prepare_profile(ctx, profile_guided, round_number=round_number)
+            persist_agent_run_state(
+                ctx,
+                AgentRunStateStore(ctx.state.portable(RunStateNamespace.AGENT)),
+                engine.state,
+                label=f"profile-guided: prepare round {round_number}",
+            )
+        profiler_summary: ProfilerSummary | None = None
+        if request.inner_loop == "multi-agent":
+            pre_decision = _run_pre_round_decision(
+                ctx,
+                request=request,
+                progress=progress,
+                carry=carry,
+                has_history=not _is_fresh_cold_start(round_number, engine.state.rounds),
+            )
+            if pre_decision.need_profile and ctx.profiler_kind is not ProfilerKind.NONE:
+                profiler_summary = _run_profiler(
+                    ctx,
+                    request,
+                    progress,
+                    pre_decision.profile_focus or "general steady-state benchmark hotspots",
+                    progress_path=progress_path,
+                )
+        elif carry.single_agent_response is not None:
+            profiler_summary = _profiler_summary_from_single_agent(carry.single_agent_response)
+        carry.profiler_summary = profiler_summary
+        plan = _run_orchestrator_plan(ctx, request, engine, carry, progress)
+        parent_round = (
+            plan.revert_to_round
+            if plan.revert_to_round is not None
+            else round_number - 1
+            if round_number > 1
+            else None
+        )
+        parent_record = next(
+            (
+                record
+                for record in reversed(engine.state.rounds)
+                if record.round_number == parent_round
+            ),
+            None,
+        )
+        engine = engine.start(
+            plan,
+            started_round=round_number,
+            parent_round=parent_round,
+            parent_commit=(
+                parent_record.commit
+                if parent_record is not None and parent_record.commit is not None
+                else ctx.git.current_sha()
             ),
         )
-    if feedback is not None:
-        return feedback, FrameworkBenchmarkOutcome(), False
-    benchmark = _run_framework_benchmark(
-        ctx,
-        result_spec=benchmark_result,
-        result_protocol=benchmark_result_protocol,
-        objectives=objectives,
-        round_number=round_number,
-        retry=retry,
-        progress_path=progress_path,
-        timeout_seconds=benchmark_timeout_seconds,
-        candidate_revision=candidate_revision,
+        active_hypothesis = _require_active_hypothesis(engine)
+        plan = active_hypothesis.plan
+        persist_agent_run_state(
+            ctx,
+            AgentRunStateStore(ctx.state.portable(RunStateNamespace.AGENT)),
+            engine.state,
+            label=f"agent: start hypothesis {plan.hypothesis_id}",
+        )
+        publish_experiments_changed(
+            ctx, engine.state, "active_hypothesis_changed", plan_changed_keys(plan)
+        )
+        return engine, plan
+
+    plan = active_hypothesis.plan
+    issue_board.append_hypothesis_continuation(
+        progress_path,
+        round_number,
+        plan=plan,
+        started_round=active_hypothesis.started_round,
+        continuation_step=active_hypothesis.next_step or plan.task,
     )
-    return benchmark.feedback, benchmark, True
+    ctx.lprint(f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped")
+    return engine, plan
+
+
+def _apply_agent_rollback(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    plan: OrchestratorPlan,
+    history: RoundHistory,
+    engine: HypothesisEngine,
+) -> HypothesisEngine:
+    """Restore an explicitly selected parent checkpoint for a new hypothesis."""
+    hypothesis = _require_active_hypothesis(engine)
+    if plan.revert_to_round is None or hypothesis.revert_applied:
+        return engine
+    target = next(
+        (record for record in history.records if record.round_number == plan.revert_to_round),
+        None,
+    )
+    if target is None or target.commit is None:
+        output_sink().framework_warning(
+            f"cannot revert: no commit recorded for round {plan.revert_to_round}",
+            source=FrameworkSource.LOOP,
+        )
+        return engine
+    rollback_commit, failed_child_round = history.resolve_rollback_commit(
+        target, _FAILED_HYPOTHESIS_OUTCOMES
+    )
+    if rollback_commit is None:
+        message = f"rollback target round {target.round_number} has no commit"
+        raise RuntimeError(message)
+    roadmap_path, progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)
+    memory_paths = tuple(
+        str(path.relative_to(ctx.workspace))
+        for path in (roadmap_path, progress_path, issue_board.pareto_archive_path(progress_path))
+    )
+    if not ctx.git.checkout_tree(rollback_commit, clean=True, preserve_paths=memory_paths):
+        output_sink().framework_warning(
+            "rollback was not applied; will retry round "
+            f"{plan.revert_to_round} on the next continuation",
+            source=FrameworkSource.LOOP,
+        )
+        return engine
+    if failed_child_round is None:
+        ctx.lprint(f"Reverted workspace to round {plan.revert_to_round} ({rollback_commit[:8]}).")
+    else:
+        ctx.lprint(
+            "Reverted workspace to the pre-hypothesis parent of "
+            f"failed round {failed_child_round} ({rollback_commit[:8]}), "
+            f"based on parent round {plan.revert_to_round}."
+        )
+    hypothesis.revert_applied = True
+    hypothesis.revert_commit = rollback_commit
+    hypothesis.parent_commit = rollback_commit
+    state = persist_active_hypothesis(
+        ctx,
+        AgentRunStateStore(ctx.state.portable(RunStateNamespace.AGENT)),
+        engine.state,
+        hypothesis,
+        label=f"agent: set hypothesis {plan.hypothesis_id} parent",
+    )
+    return engine.replace_state(state)
+
+
+def _build_completed_round_record(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    engine: HypothesisEngine,
+    history: RoundHistory,
+    attempt: _RoundAttemptOutcome,
+) -> RoundRecord:
+    """Construct the trusted durable record for a completed retry cycle."""
+    hypothesis = _require_active_hypothesis(engine)
+    performance = _round_performance(request, hypothesis, attempt)
+    candidate = _candidate_evidence(attempt, hypothesis)
+    implementation = attempt.implementation
+    response = attempt.single_agent_response
+    reviewed = isinstance(attempt.attempt_judge, JudgeReviewed)
+    declared_outcome = (
+        implementation.hypothesis_outcome
+        if implementation is not None
+        else HypothesisOutcome.NOMINATED
+        if response is not None
+        else None
+    )
+    bundle = request.input_bundle
+    framework_benchmark_configured = (
+        bundle.benchmark_result is not None or bundle.benchmark_result_protocol is not None
+    )
+    official_evaluation = (
+        attempt.passed
+        and attempt.completed_official_evaluation_reason is not None
+        and ctx.agent_client.backend_name != "stub"
+        and (bool(ctx.judge_accuracy_command) or framework_benchmark_configured)
+    )
+    primary_objective = request.metrics.objectives[0] if request.metrics.objectives else None
+    metric_name = (
+        attempt.framework_benchmark.metric_name
+        or (primary_objective.name if primary_objective is not None else None)
+        or performance.perf_unit
+    )
+    metric_direction = attempt.framework_benchmark.metric_direction or (
+        primary_objective.direction if primary_objective is not None else None
+    )
+    accepted_metrics = dict(performance.accepted_metrics)
+    if attempt.framework_benchmark.row is not None and performance.perf_metric is not None:
+        accepted_metrics = dict(attempt.framework_benchmark.row)
+    if not accepted_metrics and performance.perf_metric is not None and performance.perf_unit:
+        accepted_metrics = {performance.perf_unit: performance.perf_metric}
+    official_metric = (
+        accepted_metrics.get(metric_name) if metric_name is not None else performance.perf_metric
+    )
+    if official_metric is None and not accepted_metrics:
+        official_metric = performance.perf_metric
+    parent = metric_baseline(
+        parent_round=hypothesis.parent_round,
+        parent_commit=hypothesis.parent_commit,
+        metric=metric_name,
+        rounds=history.records,
+    )
+    baseline_metric = record_metric_value(parent, metric_name) if parent is not None else None
+    framework_provenance = trusted_perf_provenance(performance.perf_provenance)
+    official_reading = (
+        Measurement(metric=metric_name, value=official_metric, direction=metric_direction)
+        if metric_name is not None and official_metric is not None
+        else None
+    )
+    comparison = (
+        engine.state.metrics.compare(
+            official_reading,
+            Measurement(metric=metric_name, value=baseline_metric, direction=metric_direction)
+            if metric_name is not None and baseline_metric is not None
+            else None,
+        )
+        if official_evaluation and official_metric is not None and framework_provenance
+        else None
+    )
+    resolution = resolve_hypothesis_outcome(
+        ResolutionEvidence(
+            declared=declared_outcome,
+            passed=attempt.passed,
+            reviewed=reviewed,
+            comparison=comparison,
+        )
+    )
+    disposition = CandidateDisposition(candidate.disposition)
+    if not reviewed:
+        candidate_retained = _provisional_candidate_retained(disposition)
+    elif not attempt.passed:
+        candidate_retained = False
+    elif (
+        official_evaluation
+        and framework_provenance
+        and request.metrics.objectives
+        and accepted_metrics
+    ):
+        candidate_retained = not _pareto_archive_dominators(
+            accepted_metrics, history.records, engine.state.metrics
+        )
+    elif official_evaluation and framework_provenance:
+        prior_readings = [
+            Measurement(metric=metric_name, value=value, direction=metric_direction)
+            for record in history.records
+            if metric_name is not None
+            and record.official_evaluation
+            and trusted_perf_provenance(record.perf_provenance)
+            and (value := record_metric_value(record, metric_name)) is not None
+        ]
+        candidate_retained = scalar_candidate_retained(
+            engine.state.metrics.compare_to_best(official_reading, prior_readings)
+        )
+    else:
+        candidate_retained = _provisional_candidate_retained(disposition)
+    delta = None
+    if framework_provenance and official_metric is not None and baseline_metric not in (None, 0):
+        delta = (official_metric - baseline_metric) / abs(baseline_metric) * 100
+    return RoundRecord(
+        round_number=attempt.round_number,
+        commit=ctx.git.current_sha(),
+        perf_metric=performance.perf_metric,
+        perf_unit=performance.perf_unit,
+        passed=attempt.passed,
+        profile_skipped=performance.profile_skipped,
+        hypothesis_id=hypothesis.plan.hypothesis_id,
+        hypothesis_declared_outcome=declared_outcome.value if declared_outcome else None,
+        judge_verdict=recorded_judge_verdict(attempt.attempt_judge),
+        hypothesis_outcome=resolution.value
+        if resolution is not None
+        else (declared_outcome.value if declared_outcome else None),
+        hypothesis_claim=hypothesis.plan.hypothesis or None,
+        hypothesis_task=hypothesis.plan.task or None,
+        hypothesis_parent_round=hypothesis.parent_round,
+        hypothesis_parent_commit=hypothesis.parent_commit,
+        metrics=accepted_metrics,
+        evaluation_artifact=performance.accepted_evaluation_artifact,
+        official_evaluation=official_evaluation,
+        official_evaluation_reason=(
+            attempt.completed_official_evaluation_reason if official_evaluation else None
+        ),
+        candidate_disposition=candidate.disposition,
+        candidate_metrics=candidate.metrics,
+        candidate_evaluation_artifact=candidate.evaluation_artifact,
+        candidate_operating_point=candidate.operating_point,
+        candidate_retention_reason=candidate.retention_reason,
+        candidate_retained=candidate_retained,
+        perf_direction=metric_direction,
+        perf_baseline_round=parent.round_number if parent is not None else None,
+        perf_baseline_commit=parent.commit if parent is not None else None,
+        perf_baseline_metric=baseline_metric,
+        perf_delta_pct=delta,
+        perf_comparison=comparison,
+        perf_provenance=performance.perf_provenance,
+        implementer_driver=ctx.agent_client.driver_name,
+        implementer_provider=ctx.agent_client.provider,
+        implementer_model=ctx.agent_client.model_for_kind("implementer"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2269,131 +2653,573 @@ def _run_framework_gates(  # noqa: PLR0913  # tracked: #288
 # ---------------------------------------------------------------------------
 
 
-def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
-    config: Config,
-    exp_name: str,
-    input_path: str,
-    accuracy_command: str,
-    benchmark_command: str,
-    objective: str,
-    *,
-    runs_dir: Path | None,
-    task_name: str | None = None,
-    task_root: Path | None = None,
-    metrics: MetricSpace,
-    workspace_sources: tuple[WorkspaceSource, ...] = (),
-    evaluator_path: Path | None = None,
-    evaluator_package_root: Path | None = None,
-    benchmark_result: BenchmarkResult | None = None,
-    benchmark_result_protocol: Literal[2] | None = None,
-    accuracy_timeout_seconds: int | None = None,
-    benchmark_timeout_seconds: int | None = None,
-    max_rounds: int = 24,
-    max_retries_per_round: int = 3,
-    judge_every: int = 3,
-    official_eval_every: int = 3,
-    memory_layout: str = "files",
-    start_round: int | None = 1,
-    existing: bool = False,
-    operator_constraints: tuple[str, ...] = (),
-    trusted_input_baseline: str | None = None,
-    debug: bool = False,
-    profiler_kind: ProfilerKind = ProfilerKind.AUTO,
-    skills_dirs: list[str] | None = None,
-    run_environment: RunEnvironmentSpec | None = None,
-    agent_backend: str | None = None,
-    cli_provider: str | None = None,
-    backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
-    modality: str | None = None,
-    inner_loop: str = "multi-agent",
-    domain: constants.DomainName | None = None,
-    interface: str = DEFAULT_INTERFACE,
-    remote_repo: str | None = None,
-    repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
-    integration: LocalRunIntegration | None = None,
-    outer_loop: Literal["agent", "profile-guided"] = "agent",
-    profile_guided: ProfileGuidedInput | None = None,
-) -> bool:
-    """Run the orchestrator-driven build loop.
-
-    Returns True iff the orchestrator declared the objective met within
-    ``max_rounds``.  Returns False when the round budget is exhausted.
-
-    ``inner_loop`` selects how each round's implement/judge/profile work
-    is dispatched:
-
-    - ``"multi-agent"`` (default): three specialist agents — implementer,
-      judge, profiler — invoked in sequence.
-    - ``"single-agent"``: one agent does all three in a single
-      invocation per retry. Pre-round decision and standalone profiler
-      passes are skipped; the prior round's profile output is fed to the
-      orchestrator as ``profiler_summary``.
-
-    ``interface`` selects only the evaluator-to-candidate process boundary:
-
-    - ``"inprocess"`` (default): evaluator-owned code invokes the candidate
-      directly using the input-defined contract.
-    - ``"service"``: evaluator-owned code communicates with a running service
-      through its network interface.
-
-    Language, tooling, and artifact requirements come from the domain and input
-    bundle rather than the process-boundary mode.
-    """
-    if inner_loop not in _INNER_LOOPS:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"Unknown inner_loop {inner_loop!r}; choose from {', '.join(_INNER_LOOPS)}"
-        )
-    if max_retries_per_round < 1:
-        # Guard against a zero-iteration retry loop: with no attempts the
-        # round bookkeeping below would reference an unbound loop variable.
-        raise ValueError(f"max_retries_per_round must be >= 1, got {max_retries_per_round}")  # noqa: TRY003  # tracked: #288
-    if judge_every < 1:
-        raise ValueError(f"judge_every must be >= 1, got {judge_every}")  # noqa: TRY003  # tracked: #288
-    if official_eval_every < 1:
-        raise ValueError(f"official_eval_every must be >= 1, got {official_eval_every}")  # noqa: TRY003  # tracked: #288
-    if memory_layout not in issue_board.MEMORY_LAYOUTS:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"Unknown memory_layout {memory_layout!r}; "
-            f"choose from {', '.join(issue_board.MEMORY_LAYOUTS)}"
-        )
-    if interface not in _INTERFACES:
-        raise ValueError(f"Unknown interface {interface!r}; choose from {', '.join(_INTERFACES)}")  # noqa: TRY003  # tracked: #288
-    if domain is None:
-        raise ValueError("domain is required; declare [agent].domain in vibesys.input.toml")  # noqa: TRY003  # tracked: #288
-    if outer_loop == "profile-guided" and profile_guided is None:
-        raise ValueError("profile-guided runs require profile guidance settings")  # noqa: TRY003
-    # Resolve the registered domain once (fail fast on an unknown name). The
-    # per-role files carry language, tooling, and use-case-specific contracts.
-    domain_definition = resolve_domain(domain)
-    objectives = list(metrics.objectives)
-    # Either result contract means a framework-owned benchmark runs this round,
-    # which is what the prompts and the official-evaluation record key off.
-    framework_benchmark_configured = benchmark_result is not None or (
-        benchmark_result_protocol is not None
+def _persist_agent_hypothesis_checkpoint(
+    ctx: LoopContext,
+    state_store: AgentRunStateStore,
+    state: AgentRunState,
+    hypothesis: Hypothesis,
+    hypothesis_id: str,
+) -> AgentRunState:
+    """Persist one approved or feedback-bearing hypothesis checkpoint."""
+    return persist_active_hypothesis(
+        ctx,
+        state_store,
+        state,
+        hypothesis,
+        label=f"agent: checkpoint hypothesis {hypothesis_id}",
     )
-    # Axes recorded in the run manifest. The server reads them back to build a
-    # metric space for runs whose unified state predates one; they include the
-    # framework benchmark's own axis, which is not a frontier axis.
+
+
+def _run_agent_framework_gates(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    hypothesis: Hypothesis,
+    progress: RoundProgress,
+    retry: int,
+) -> tuple[str | None, FrameworkBenchmarkOutcome, bool, str | None]:
+    """Run framework gates for the exact candidate currently under review."""
+    return _run_framework_gates(ctx, request, progress, retry, hypothesis)
+
+
+def _persist_round_attempt_hypothesis(
+    ctx: LoopContext,
+    attempt: _AgentRoundAttempt,
+) -> None:
+    attempt.run_state = _persist_agent_hypothesis_checkpoint(
+        ctx,
+        attempt.state_store,
+        attempt.run_state,
+        attempt.hypothesis,
+        attempt.hypothesis.plan.hypothesis_id,
+    )
+
+
+def _run_official_candidate_gates(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    round_history: RoundHistory,
+    round_progress: RoundProgress,
+    attempt: _AgentRoundAttempt,
+) -> bool:
+    """Run requested official gates; return whether another retry is needed."""
+    progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1]
+    issue_board.append_official_evaluation_decision(
+        progress_path,
+        round_progress.round_number,
+        attempt.retry,
+        run=True,
+        reason=attempt.official_evaluation_reason or "requested",
+        official_eval_every=request.official_eval_every,
+        provisional_candidates=_provisional_candidates_since_official(round_history.records),
+    )
+    (
+        gate_feedback,
+        attempt.framework_benchmark,
+        accuracy_passed,
+        candidate_commit,
+    ) = _run_agent_framework_gates(ctx, request, attempt.hypothesis, round_progress, attempt.retry)
+    attempt.framework_perf_metric = attempt.framework_benchmark.metric_value
+    if gate_feedback is None:
+        attempt.passed = True
+        attempt.completed_official_evaluation_reason = attempt.official_evaluation_reason
+        return False
+
+    attempt.feedback = gate_feedback
+    attempt.framework_revalidation_required = request.inner_loop == "multi-agent"
+    attempt.hypothesis.gate_revalidation_pending = True
+    attempt.hypothesis.gate_candidate_commit = candidate_commit
+    attempt.hypothesis.gate_accuracy_passed = accuracy_passed
+    attempt.hypothesis.feedback = gate_feedback
+    _persist_round_attempt_hypothesis(ctx, attempt)
+    return True
+
+
+def _finish_multi_agent_pass(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    round_history: RoundHistory,
+    round_progress: RoundProgress,
+    attempt: _AgentRoundAttempt,
+) -> bool:
+    """Apply audited candidate evidence and its optional official evaluation."""
+    implementation = attempt.implementation
+    if implementation is None:
+        message = "passed implementer review has no response"
+        raise RuntimeError(message)
+    progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1]
+    validation_feedback = _run_framework_validation_gate(
+        ctx,
+        recipe_artifact=implementation.validation_recipe_artifact,
+        round_number=round_progress.round_number,
+        retry=attempt.retry,
+        progress_path=progress_path,
+    )
+    if validation_feedback is not None:
+        attempt.feedback = validation_feedback
+        attempt.hypothesis.feedback = validation_feedback
+        _persist_round_attempt_hypothesis(ctx, attempt)
+        return True
+
+    if implementation.candidate_disposition is CandidateDisposition.PARETO_FRONTIER:
+        attempt.hypothesis.gate_approved_candidate_disposition = (
+            implementation.candidate_disposition.value
+        )
+        attempt.hypothesis.gate_approved_candidate_metrics = dict(implementation.candidate_metrics)
+        attempt.hypothesis.gate_approved_candidate_evaluation_artifact = (
+            implementation.candidate_evaluation_artifact
+        )
+        attempt.hypothesis.gate_approved_candidate_operating_point = (
+            implementation.candidate_operating_point
+        )
+        attempt.hypothesis.gate_approved_candidate_retention_reason = (
+            implementation.candidate_retention_reason
+        )
+        _persist_round_attempt_hypothesis(ctx, attempt)
+
+    attempt.candidate_ready = (
+        implementation.hypothesis_outcome
+        in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
+        or implementation.candidate_disposition is CandidateDisposition.PARETO_FRONTIER
+    )
+    attempt.official_evaluation_reason = _official_evaluation_reason(
+        records=round_history.records,
+        progress=round_progress,
+        official_eval_every=request.official_eval_every,
+        requested=attempt.hypothesis.plan.request_official_evaluation,
+        candidate_ready=attempt.candidate_ready,
+    )
+    if attempt.official_evaluation_reason is None:
+        if attempt.candidate_ready:
+            issue_board.append_official_evaluation_decision(
+                progress_path,
+                round_progress.round_number,
+                attempt.retry,
+                run=False,
+                reason="cadence_not_due",
+                official_eval_every=request.official_eval_every,
+                provisional_candidates=_provisional_candidates_since_official(
+                    round_history.records
+                ),
+            )
+            ctx.lprint(
+                "[official-evaluation] deferred; candidate "
+                "retained as a provisional working checkpoint"
+            )
+        attempt.passed = True
+        return False
+
+    if implementation.perf_metric is not None:
+        attempt.hypothesis.gate_approved_perf_metric = implementation.perf_metric
+        attempt.hypothesis.gate_approved_perf_unit = implementation.perf_unit
+        attempt.hypothesis.gate_approved_metrics = dict(implementation.metrics)
+        attempt.hypothesis.gate_approved_evaluation_artifact = implementation.evaluation_artifact
+        _persist_round_attempt_hypothesis(ctx, attempt)
+    return _run_official_candidate_gates(ctx, request, round_history, round_progress, attempt)
+
+
+def _run_multi_agent_retry(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    round_history: RoundHistory,
+    round_progress: RoundProgress,
+    attempt: _AgentRoundAttempt,
+) -> bool:
+    """Run one implementer/judge attempt; return whether retrying is appropriate."""
+    ctx.reselect_gpu()
+    implementer_attempt = _run_implementer(
+        ctx,
+        request,
+        attempt.hypothesis,
+        attempt.engine,
+        round_progress,
+    )
+    attempt.implementation_attempt = implementer_attempt
+    attempt.implementation = implementer_attempt.response
+    if implementer_attempt.synthesized:
+        attempt.attempt_judge = JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
+        ctx.lprint(
+            f"[implementer] attempt {attempt.retry}/{request.max_retries_per_round} "
+            "returned no parseable structured response; the framework synthesized "
+            "a fail-closed one. "
+            + (
+                "Retrying within the same round."
+                if attempt.retry < request.max_retries_per_round
+                else "Retries are exhausted; completing the round with it."
+            )
+        )
+        return True
+
+    implementation = attempt.implementation
+    records = round_history.records
+    review_due = _review_due(
+        round_number=round_progress.round_number,
+        max_rounds=round_progress.total_rounds,
+        judge_every=request.judge_every,
+        outcome=implementation.hypothesis_outcome,
+        candidate_evidence_fresh=_candidate_evidence_is_fresh(implementation, records),
+    )
+    if attempt.review_started and not _implementation_requests_continuation(implementation):
+        review_due = True
+    if (
+        attempt.review_started
+        and round_progress.round_number != round_progress.total_rounds
+        and _implementation_requests_continuation(implementation)
+        and implementation.candidate_disposition is not CandidateDisposition.PARETO_FRONTIER
+        and not attempt.framework_revalidation_required
+    ):
+        review_due = False
+    if not review_due:
+        attempt.attempt_judge = JudgeSkipped(JudgeSkipReason.SPARSE_REVIEW_POLICY)
+        issue_board.append_judge_skipped(
+            issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1],
+            round_progress.round_number,
+            outcome=implementation.hypothesis_outcome.value,
+            judge_every=request.judge_every,
+        )
+        ctx.lprint("[judge] deferred by sparse-review policy; official gates were not run")
+        return False
+
+    attempt.review_started = True
+    attempt.framework_revalidation_required = False
+    ctx.reselect_gpu()
+    verdict = _run_judge(
+        ctx,
+        request,
+        attempt.engine,
+        round_progress,
+        implementer_attempt,
+    )
+    attempt.attempt_judge = JudgeReviewed(verdict.verdict)
+    if verdict.verdict == Verdict.PASS:
+        return _finish_multi_agent_pass(ctx, request, round_history, round_progress, attempt)
+
+    attempt.feedback = verdict.feedback
+    attempt.hypothesis.feedback = verdict.feedback
+    _persist_round_attempt_hypothesis(ctx, attempt)
+    return True
+
+
+def _run_single_agent_retry(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    round_history: RoundHistory,
+    round_progress: RoundProgress,
+    attempt: _AgentRoundAttempt,
+) -> bool:
+    """Run one single-agent attempt and its official evaluation phase."""
+    ctx.reselect_gpu()
+    response = _run_single_agent_round(
+        ctx,
+        request,
+        attempt.hypothesis,
+        attempt.engine,
+        round_progress,
+    )
+    attempt.single_agent_response = response
+    attempt.attempt_judge = JudgeReviewed(response.verdict)
+    if response.verdict != Verdict.PASS:
+        attempt.feedback = response.feedback
+        attempt.hypothesis.feedback = response.feedback
+        _persist_round_attempt_hypothesis(ctx, attempt)
+        return True
+
+    attempt.candidate_ready = True
+    attempt.official_evaluation_reason = _official_evaluation_reason(
+        records=round_history.records,
+        progress=round_progress,
+        official_eval_every=request.official_eval_every,
+        requested=attempt.hypothesis.plan.request_official_evaluation,
+        candidate_ready=True,
+    )
+    if attempt.official_evaluation_reason is None:
+        issue_board.append_official_evaluation_decision(
+            issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1],
+            round_progress.round_number,
+            attempt.retry,
+            run=False,
+            reason="cadence_not_due",
+            official_eval_every=request.official_eval_every,
+            provisional_candidates=_provisional_candidates_since_official(round_history.records),
+        )
+        ctx.lprint(
+            "[official-evaluation] deferred; candidate retained as a provisional working checkpoint"
+        )
+        attempt.passed = True
+        return False
+    return _run_official_candidate_gates(ctx, request, round_history, round_progress, attempt)
+
+
+def _run_agent_attempts(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    engine: HypothesisEngine,
+    round_history: RoundHistory,
+    round_progress: RoundProgress,
+) -> tuple[HypothesisEngine, _RoundAttemptOutcome]:
+    """Run one round's mode-specific retry phases and framework gates."""
+    run_state = engine.state
+    hypothesis = _require_active_hypothesis(engine)
+    state_store = AgentRunStateStore(ctx.state.portable(RunStateNamespace.AGENT))
+    attempt = _AgentRoundAttempt(
+        engine=engine,
+        run_state=run_state,
+        hypothesis=hypothesis,
+        state_store=state_store,
+        feedback=hypothesis.feedback,
+        framework_revalidation_required=hypothesis.gate_revalidation_pending,
+    )
+    progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)[1]
+    max_retries = request.max_retries_per_round
+    first_retry = issue_board.next_implementer_attempt(progress_path, round_progress.round_number)
+    if first_retry > max_retries:
+        message = (
+            f"Round {round_progress.round_number} already persisted "
+            f"{first_retry - 1} implementer attempts, exhausting "
+            f"max_retries_per_round={max_retries}; refusing "
+            "to overwrite or replay paid work."
+        )
+        raise RuntimeError(message)
+    if first_retry > 1:
+        ctx.lprint(
+            f"[resume] round {round_progress.round_number} continues at durable "
+            f"attempt {first_retry}/{max_retries}"
+        )
+
+    for retry in range(first_retry, max_retries + 1):
+        if attempt.engine.state is not attempt.run_state:
+            attempt.engine = attempt.engine.replace_state(attempt.run_state)
+        attempt.hypothesis = _require_active_hypothesis(attempt.engine)
+        attempt.retry = retry
+        ctx.lprint(f"\n--- attempt {retry}/{max_retries} ---\n")
+        # A skipped audit belongs to the current implementation only; it must
+        # never inherit an earlier attempt's verdict.
+        attempt.attempt_judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
+        keep_retrying = (
+            _run_multi_agent_retry(ctx, request, round_history, round_progress, attempt)
+            if request.inner_loop == "multi-agent"
+            else _run_single_agent_retry(ctx, request, round_history, round_progress, attempt)
+        )
+        if not keep_retrying:
+            break
+
+    attempt.run_state = update_active_hypothesis(attempt.run_state, attempt.hypothesis)
+    attempt.engine = attempt.engine.replace_state(attempt.run_state)
+    return attempt.engine, _RoundAttemptOutcome(
+        passed=attempt.passed,
+        feedback=attempt.feedback,
+        implementation=attempt.implementation,
+        single_agent_response=attempt.single_agent_response,
+        framework_perf_metric=attempt.framework_perf_metric,
+        framework_benchmark=attempt.framework_benchmark,
+        completed_official_evaluation_reason=attempt.completed_official_evaluation_reason,
+        attempt_judge=attempt.attempt_judge,
+        retry=attempt.retry,
+        round_number=round_progress.round_number,
+        retry_limit=max_retries,
+    )
+
+
+def _round_performance(
+    request: LoopRunRequest,
+    active_hypothesis: Hypothesis,
+    attempt: _RoundAttemptOutcome,
+) -> _RoundPerformance:
+    """Resolve the trusted headline measurement from the final attempt."""
+    accepted_metrics = dict(attempt.accepted_metrics)
+    accepted_evaluation_artifact = attempt.accepted_evaluation_artifact
+    perf_provenance: PerfProvenance | None = None
+    single_agent_response = attempt.single_agent_response
+    implementation = attempt.implementation
+    if request.inner_loop == "single-agent":
+        if (
+            single_agent_response is not None
+            and attempt.framework_perf_metric is not None
+            and attempt.completed_official_evaluation_reason is not None
+        ):
+            single_agent_response.perf_metric = attempt.framework_perf_metric
+            single_agent_response.perf_unit = attempt.framework_benchmark.metric_name
+            perf_provenance = "framework"
+        profile_skipped = single_agent_response is None or (
+            single_agent_response.perf_metric is None
+        )
+        perf_metric = (
+            single_agent_response.perf_metric
+            if (
+                single_agent_response
+                and attempt.passed
+                and attempt.completed_official_evaluation_reason is not None
+            )
+            else None
+        )
+        perf_unit = (
+            single_agent_response.perf_unit
+            if (
+                single_agent_response
+                and attempt.passed
+                and attempt.completed_official_evaluation_reason is not None
+            )
+            else None
+        )
+        if perf_metric is not None and perf_provenance is None:
+            # Not overridden by the framework benchmark above, so this
+            # headline number is the agent's own report.
+            perf_provenance = "implementer"
+    else:
+        implementation_metric = (
+            implementation.perf_metric
+            if (
+                implementation is not None
+                and attempt.passed
+                and attempt.completed_official_evaluation_reason is not None
+            )
+            else None
+        )
+        if (
+            implementation_metric is None
+            and attempt.passed
+            and implementation is not None
+            and implementation.hypothesis_outcome
+            in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
+            and active_hypothesis.gate_revalidation_pending
+            and attempt.completed_official_evaluation_reason is not None
+        ):
+            implementation_metric = active_hypothesis.gate_approved_perf_metric
+        profile_skipped = attempt.framework_perf_metric is None and implementation_metric is None
+        if (
+            attempt.framework_perf_metric is not None
+            and attempt.passed
+            and attempt.completed_official_evaluation_reason is not None
+        ):
+            perf_metric = attempt.framework_perf_metric
+            perf_unit = attempt.framework_benchmark.metric_name
+            perf_provenance = "framework"
+        elif implementation_metric is not None:
+            perf_metric = implementation_metric
+            perf_provenance = "implementer"
+            if implementation is not None and implementation.perf_metric is not None:
+                perf_unit = implementation.perf_unit
+                accepted_metrics = dict(implementation.metrics)
+                accepted_evaluation_artifact = implementation.evaluation_artifact
+            else:
+                perf_unit = active_hypothesis.gate_approved_perf_unit
+                accepted_metrics = dict(active_hypothesis.gate_approved_metrics)
+                accepted_evaluation_artifact = active_hypothesis.gate_approved_evaluation_artifact
+        else:
+            # Profiles and directional probes inform the designer, but only
+            # an official checkpoint updates portable round records.
+            perf_metric = None
+            perf_unit = None
+    return _RoundPerformance(
+        profile_skipped=profile_skipped,
+        perf_metric=perf_metric,
+        perf_unit=perf_unit,
+        perf_provenance=perf_provenance,
+        accepted_metrics=accepted_metrics,
+        accepted_evaluation_artifact=accepted_evaluation_artifact,
+    )
+
+
+def _candidate_evidence(
+    attempt: _RoundAttemptOutcome,
+    active_hypothesis: Hypothesis,
+) -> _CandidateEvidence:
+    """Select candidate evidence from the final attempt or approved checkpoint."""
+    if attempt.implementation is not None:
+        implementation = attempt.implementation
+        disposition = implementation.candidate_disposition.value
+        metrics = dict(implementation.candidate_metrics)
+        evaluation_artifact = implementation.candidate_evaluation_artifact
+        operating_point = implementation.candidate_operating_point
+        retention_reason = implementation.candidate_retention_reason
+    elif attempt.single_agent_response is not None:
+        response = attempt.single_agent_response
+        disposition = response.candidate_disposition.value
+        metrics = dict(response.candidate_metrics)
+        evaluation_artifact = response.candidate_evaluation_artifact
+        operating_point = response.candidate_operating_point
+        retention_reason = response.candidate_retention_reason
+    else:
+        disposition = CandidateDisposition.UNASSESSED.value
+        metrics = {}
+        evaluation_artifact = None
+        operating_point = ""
+        retention_reason = ""
+    # A framework-gate retry may return no fresh candidate row. Preserve the
+    # judge-approved provisional evidence for the unchanged checkpoint.
+    if (
+        disposition == CandidateDisposition.UNASSESSED.value
+        and active_hypothesis.gate_revalidation_pending
+        and active_hypothesis.gate_approved_candidate_disposition
+        == CandidateDisposition.PARETO_FRONTIER.value
+    ):
+        disposition = active_hypothesis.gate_approved_candidate_disposition
+        metrics = dict(active_hypothesis.gate_approved_candidate_metrics)
+        evaluation_artifact = active_hypothesis.gate_approved_candidate_evaluation_artifact
+        operating_point = active_hypothesis.gate_approved_candidate_operating_point
+        retention_reason = active_hypothesis.gate_approved_candidate_retention_reason
+    return _CandidateEvidence(
+        disposition=disposition,
+        metrics=metrics,
+        evaluation_artifact=evaluation_artifact,
+        operating_point=operating_point,
+        retention_reason=retention_reason,
+    )
+
+
+def _restore_agent_run_state(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    state_store: AgentRunStateStore,
+) -> AgentRunState:
+    """Migrate legacy checkpoints and persist the authoritative run state."""
+    legacy_records = ctx.state.completed_rounds()
+    local_namespace = ctx.state.local(RunStateNamespace.AGENT)
+    state = state_store.migrate_legacy(
+        rounds=legacy_records,
+        local_namespace=local_namespace,
+        legacy_space=request.metrics,
+    )
+    # The launching task defines the run's metric space. Persist it once so
+    # resume, retention, and server projections all share the same axes.
+    state = adopt_metric_space(state, request.metrics)
+    active_hypothesis = state.active_hypothesis
+    if active_hypothesis is not None and _backfill_revert_commit(active_hypothesis, state.rounds):
+        state = update_active_hypothesis(state, active_hypothesis)
+    state_store.save(state)
+    state_store.cleanup_legacy_portable([record.round_number for record in legacy_records])
+    ctx.state.commit("agent: migrate unified hypothesis state", state_store.namespace)
+    ctx.publish_committed_state("agent", state)
+    state_store.cleanup_legacy_local(local_namespace)
+    return state
+
+
+def _agent_project_configuration(
+    request: LoopRunRequest,
+    run_environment: RunEnvironmentSpec,
+    modality: str | None,
+) -> AgentRunConfiguration:
+    """Build the persisted effective configuration for one agent run."""
+    bundle = request.input_bundle
+    metrics = request.metrics
+    benchmark_result = bundle.benchmark_result
+    objectives = list(metrics.objectives)
     manifest_axes: dict[str, Literal["max", "min"]] = {
         objective.name: objective.direction for objective in objectives
     }
     if benchmark_result is not None:
-        # The legacy scalar result contract has always defined its metric as maximized.
         manifest_axes.setdefault(benchmark_result.metric, "max")
-    if modality is None and domain_definition.name is constants.DomainName.LLM_SERVING:
-        modality = "text_generation"
-    run_environment = run_environment or make_run_environment_spec()
-    normalized_config = as_config(config)
+    normalized_config = as_config(request.config)
+    agent_backend = request.agent_backend
     resolved_agent_backend = (
         "stub"
         if agent_backend == "stub"
         else str(agent_backend or normalized_config.agent.backend or AgentBackend.CLI)
     )
-    project_configuration = AgentRunConfiguration(
-        outer_loop=outer_loop,
+    return AgentRunConfiguration(
+        outer_loop="profile-guided" if request.loop.value == "profile-guided" else "agent",
         run_environment=run_environment_record(run_environment),
-        inner_loop=inner_loop,
-        interface=interface,
+        inner_loop=request.inner_loop,
+        interface=request.interface,
         model=normalized_config.model.name,
         agent_backend=resolved_agent_backend,
         agent_driver=(
@@ -2402,17 +3228,17 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
             else None
         ),
         cli_provider=(
-            cli_provider or normalized_config.agent.cli_provider or "codex"
+            request.cli_provider or normalized_config.agent.cli_provider or "codex"
             if agent_backend != "stub"
             else None
         ),
-        compute_backend=backend.value,
-        profiler=profiler_kind.value,
-        max_rounds=max_rounds,
-        max_retries_per_round=max_retries_per_round,
-        judge_every=judge_every,
-        official_eval_every=official_eval_every,
-        memory_layout=memory_layout,
+        compute_backend=request.backend.value,
+        profiler=request.profiler_kind.value,
+        max_rounds=request.max_rounds if request.max_rounds is not None else 24,
+        max_retries_per_round=request.max_retries_per_round,
+        judge_every=request.judge_every,
+        official_eval_every=request.official_eval_every,
+        memory_layout=request.memory_layout,
         modality=modality,
         cli_timeout=normalized_config.agent.cli_timeout,
         default_reasoning_effort=normalized_config.thinking.level,
@@ -2420,1291 +3246,333 @@ def run_agent_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         outer_reasoning_effort=normalized_config.agent.outer.reasoning_effort,
         inner_model=normalized_config.agent.inner.model,
         inner_reasoning_effort=normalized_config.agent.inner.reasoning_effort,
-        operator_constraints=operator_constraints,
+        operator_constraints=request.operator_constraints,
         objectives=tuple(f"{name}:{direction}" for name, direction in manifest_axes.items()),
     )
-    ctx = create_run_context(
+
+
+def _create_agent_run_context(
+    request: LoopRunRequest,
+    integration: LocalRunIntegration | None,
+) -> LoopContext:
+    """Validate the request and assemble its configured run context."""
+    bundle = request.input_bundle
+    existing = request.resume is not None
+    exp_name = request.resume.run_id if request.resume is not None else request.exp_name
+    if exp_name is None:
+        message = "exp_name must be set for a fresh (non-resume) run"
+        raise ValueError(message)
+    domain_definition = _validate_agent_request(request)
+    modality = request.modality
+    if modality is None and domain_definition.name is constants.DomainName.LLM_SERVING:
+        modality = "text_generation"
+    run_environment = request.run_environment or make_run_environment_spec()
+    benchmark_contract = BenchmarkContract(
+        result_spec=bundle.benchmark_result,
+        result_protocol=bundle.benchmark_result_protocol,
+    )
+    normalized_config = as_config(request.config)
+    project_configuration = _agent_project_configuration(request, run_environment, modality)
+    return create_run_context(
         config=normalized_config,
         exp_name=exp_name,
-        runs_dir=runs_dir,
-        input_path=input_path,
-        accuracy_command=accuracy_command,
-        benchmark_command=benchmark_command,
-        task_name=task_name,
-        task_root=task_root,
-        workspace_sources=workspace_sources,
-        evaluator_path=evaluator_path,
-        evaluator_package_root=evaluator_package_root,
-        benchmark_output_argument=BenchmarkContract(
-            result_spec=benchmark_result,
-            result_protocol=benchmark_result_protocol,
-        ).output_argument,
-        objective=objective,
+        runs_dir=request.runs_dir,
+        input_path=str(bundle.root),
+        accuracy_command=bundle.accuracy_command_display,
+        benchmark_command=bundle.benchmark_command_display,
+        task_name=bundle.task_name,
+        task_root=bundle.task_root,
+        workspace_sources=bundle.workspace_sources,
+        evaluator_path=bundle.evaluator_path,
+        evaluator_package_root=bundle.evaluator_package_root,
+        benchmark_output_argument=benchmark_contract.output_argument,
+        objective=request.objective or bundle.objective,
         existing=existing,
         project_configuration=project_configuration,
-        trusted_input_baseline=trusted_input_baseline,
-        debug=debug,
-        profiler_kind=profiler_kind,
+        trusted_input_baseline=None,
+        debug=request.debug,
+        profiler_kind=request.profiler_kind,
         profiler_domain=domain_definition.name,
-        skills_dirs=skills_dirs,
+        skills_dirs=request.skills_dirs,
         run_environment=run_environment,
-        agent_backend=agent_backend,
-        cli_provider=cli_provider,
-        backend=backend,
+        agent_backend=request.agent_backend,
+        cli_provider=request.cli_provider,
+        backend=request.backend,
         environment_hooks=domain_definition.environment_hooks,
-        remote_repo=remote_repo,
-        repo_visibility=repo_visibility,
+        remote_repo=request.remote_repo,
+        repo_visibility=request.repo_visibility,
         agent_state_model_type=AgentRunState,
         integration=integration,
     )
-    output_sink().run_configured(
-        run_log_path=str(ctx.run_log_path),
-        project_root=str(ctx.project_root),
-        objective=objective,
+
+
+def _update_round_carry_over(
+    carry: _CarryOver,
+    active_hypothesis: Hypothesis,
+    round_history: RoundHistory,
+    attempt: _RoundAttemptOutcome,
+    progress_path: Path,
+) -> None:
+    """Set designer feedback from one durably recorded round."""
+    record = round_history.records[-1]
+    implementation = attempt.implementation
+    if not record.passed and record.reviewed:
+        issue_board.append_exhaustion_note(
+            progress_path,
+            record.round_number,
+            attempt.retry_limit,
+            attempt.feedback or "",
+        )
+        carry.exhaustion_info = (
+            f"Round {record.round_number} did not pass after "
+            f"{attempt.retry_limit} attempts. Last judge feedback: "
+            f"{attempt.feedback or '(empty)'}"
+        )
+        carry.regression_info = None
+    elif record.passed:
+        carry.exhaustion_info = None
+        if (
+            attempt.single_agent_response is None
+            and implementation is not None
+            and not _implementation_keeps_hypothesis_active(
+                implementation,
+                continuation_rounds=active_hypothesis.continuation_rounds,
+            )
+            and implementation.hypothesis_outcome is not HypothesisOutcome.NOMINATED
+        ):
+            carry.regression_info = _terminal_workspace_notice(round_history.records)
+        elif record.official_evaluation and record.candidate_retained is False:
+            perf_value = record.perf_metric
+            perf_unit = record.perf_unit
+            carry.regression_info = (
+                f"Round {record.round_number}'s official candidate was not retained: "
+                f"{perf_value}{(' ' + perf_unit) if perf_unit else ''}. "
+                "Use its recorded parent and objective directions when choosing "
+                "the next checkpoint."
+            )
+        else:
+            carry.regression_info = None
+    else:
+        carry.exhaustion_info = None
+        carry.regression_info = (
+            None
+            if _implementation_keeps_hypothesis_active(
+                implementation,
+                continuation_rounds=active_hypothesis.continuation_rounds,
+            )
+            else _terminal_workspace_notice(round_history.records)
+        )
+
+
+def _begin_completed_agent_round(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    engine: HypothesisEngine,
+    record: RoundRecord,
+    attempt: _RoundAttemptOutcome,
+) -> HypothesisEngine:
+    """Journal the transition and begin persistence for one completed round."""
+    active_hypothesis = engine.state.active_hypothesis
+    if active_hypothesis is None:
+        message = "hypothesis engine did not retain the current hypothesis"
+        raise RuntimeError(message)
+    engine = _complete_hypothesis_round(engine, active_hypothesis, record, request, attempt)
+    state_store = AgentRunStateStore(ctx.state.portable(RunStateNamespace.AGENT))
+    ctx.begin_completed_round(
+        record.round_number,
+        state_transition=state_store.transition(engine.state),
     )
-    roadmap_path, progress_path = issue_board.resolve_paths(ctx.workspace, memory_layout)
+    return engine
+
+
+def _persist_completed_agent_round(
+    ctx: LoopContext,
+    engine: HypothesisEngine,
+    record: RoundRecord,
+    attempt: _RoundAttemptOutcome,
+) -> None:
+    """Persist a completed round and publish its lifecycle event."""
+    state = engine.state
+    ctx.persist_completed_round()
+    publish_experiments_changed(ctx, state, "round_persisted", (record.hypothesis_id,))
+    ctx.events.emit(
+        CoreEventType.ROUND_FINISHED,
+        status=(
+            EventStatus.COMPLETED if attempt.passed or not record.reviewed else EventStatus.FAILED
+        ),
+        round_label=f"round-{record.round_number}",
+        data=RoundFinishedData(
+            attempts=attempt.retry,
+            judge_verdict=("pass" if attempt.passed else "fail" if record.reviewed else "skipped"),
+            perf_metric=record.perf_metric,
+            perf_unit=record.perf_unit,
+            profile_skipped=record.profile_skipped,
+        ),
+    )
+
+
+def _prepare_agent_round_session(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    start_round: int | None,
+) -> _AgentRoundSession:
+    """Prepare the durable history and workspace files for round execution."""
+    existing = request.resume is not None
+    first_round = (1 if not existing else None) if start_round is None else start_round
+    roadmap_path, progress_path = issue_board.resolve_paths(ctx.workspace, request.memory_layout)
     issue_board.ensure_progress_file(progress_path)
     issue_board.ensure_roadmap_file(roadmap_path)
     issue_board.write_validation_recipe_schema(progress_path)
-    progress_location = issue_board.display_path(progress_path, ctx.workspace)
-    roadmap_location = issue_board.display_path(roadmap_path, ctx.workspace)
-    pareto_archive_path = issue_board.pareto_archive_path(progress_path)
-    pareto_archive_location = issue_board.display_path(pareto_archive_path, ctx.workspace)
-    portable_agent_state = ctx.state.portable(RunStateNamespace.AGENT)
-    local_agent_state = ctx.state.local(RunStateNamespace.AGENT)
-    state_store = AgentRunStateStore(portable_agent_state)
-    legacy_records = ctx.state.completed_rounds()
-    agent_run_state = state_store.migrate_legacy(
-        rounds=legacy_records,
-        local_namespace=local_agent_state,
-        legacy_space=metrics,
+    state_store = AgentRunStateStore(ctx.state.portable(RunStateNamespace.AGENT))
+    run_state = _restore_agent_run_state(ctx, request, state_store)
+    history = RoundHistory(records=run_state.rounds)
+    return _AgentRoundSession(
+        run_state=run_state,
+        history=history,
+        carry=_CarryOver(regression_info=_terminal_workspace_notice(history.records)),
+        progress_path=progress_path,
+        round_number=(first_round if first_round is not None else len(history.records) + 1),
     )
-    # The one write of the run's metric space. Everything downstream -- round
-    # projection, retention, the Pareto frontier, ``--resume`` reprojection,
-    # and the server read path -- takes it from the persisted state, so the
-    # launching task file wins here and nowhere else re-reads it. Rounds that
-    # already recorded a comparison keep it; only their derivation changes.
-    agent_run_state = adopt_metric_space(agent_run_state, metrics)
-    active_hypothesis = agent_run_state.active_hypothesis
-    if active_hypothesis is not None and _backfill_revert_commit(
-        active_hypothesis, agent_run_state.rounds
-    ):
-        agent_run_state = update_active_hypothesis(agent_run_state, active_hypothesis)
-    # Replace the legacy portable namespace exactly, then remove the local
-    # restart checkpoint only after its unified replacement is committed.
-    state_store.save(agent_run_state)
-    state_store.cleanup_legacy_portable([record.round_number for record in legacy_records])
-    ctx.state.commit("agent: migrate unified hypothesis state", state_store.namespace)
-    ctx.publish_committed_state("agent", agent_run_state)
-    state_store.cleanup_legacy_local(local_agent_state)
-    round_history = RoundHistory(records=agent_run_state.rounds)
-    records = round_history.records
-    carry = _CarryOver(regression_info=_terminal_workspace_notice(records))
-    round_number = start_round if start_round is not None else len(records) + 1
-    if round_number > max_rounds:
-        try:
-            if existing and records:
-                ctx.lprint(
-                    f"This run already completed {len(records)} rounds; "
-                    "finalizing its retained result."
-                )
-                _finalize_agent_run(
-                    ctx,
-                    records=records,
-                    space=agent_run_state.metrics,
-                    progress_path=progress_path,
-                )
-                return True
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"This run has completed {round_number - 1} rounds; max_rounds={max_rounds} "
-                "is a total limit. Increase --max-rounds to continue."
-            )
-        finally:
-            ctx.close()
 
-    # When inner_loop == "single-agent", we don't run a separate
-    # pre-round decision or profiler invocation. We thread the previous
-    # round's combined response into the orchestrator's next plan as a
-    # synthesized ProfilerSummary, and remember its profile focus across
-    # rounds. The first round has no prior profile to feed forward.
-    last_single_agent_response: SingleAgentRoundResponse | None = None
-    last_profile_focus: str = "general latency hotspots on /v1/completions"
-    engine = HypothesisEngine.create(
-        agent_run_state,
-        config=profile_guided if outer_loop == "profile-guided" else None,
+
+def _create_agent_hypothesis_engine(
+    request: LoopRunRequest,
+    run_state: AgentRunState,
+) -> HypothesisEngine:
+    """Create the controller with profile-guidance settings for this run."""
+    profile_guidance = (
+        request.input_bundle.manifest.profile_guided
+        if request.loop.value == "profile-guided"
+        else None
     )
+    return HypothesisEngine.create(run_state, config=profile_guidance)
+
+
+def _require_active_hypothesis(engine: HypothesisEngine) -> Hypothesis:
+    """Return the engine's active hypothesis or report its broken invariant."""
+    active_hypothesis = engine.state.active_hypothesis
+    if active_hypothesis is None:
+        message = "hypothesis engine did not retain the current hypothesis"
+        raise RuntimeError(message)
+    return active_hypothesis
+
+
+def _begin_agent_round(
+    ctx: LoopContext,
+    records: list[RoundRecord],
+    run_state: AgentRunState,
+    progress_path: Path,
+    progress: RoundProgress,
+) -> None:
+    """Select the round log, refresh its Pareto archive, and print its heading."""
+    ctx.switch_log_file(f"round{progress.round_number:03d}")
+    issue_board.write_pareto_archive(
+        progress_path,
+        _pareto_archive_summary(records, run_state.metrics),
+    )
+    ctx.lprint(f"\n{'=' * 60}\n  {progress.label()}\n{'=' * 60}\n")
+
+
+def _finish_agent_rounds(
+    ctx: LoopContext,
+    records: list[RoundRecord],
+    metrics: MetricSpace,
+    progress_path: Path,
+    max_rounds: int,
+) -> bool:
+    """Finalize the completed loop after it reaches its round budget."""
+    ctx.lprint(f"Reached max_rounds={max_rounds}. Stopping.")
+    _finalize_agent_run(ctx, records=records, space=metrics, progress_path=progress_path)
+    return True
+
+
+def _run_agent_rounds(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    start_round: int | None,
+) -> bool:
+    """Restore durable loop state, run the requested rounds, and finalize."""
+    max_rounds = request.max_rounds if request.max_rounds is not None else 24
+    inner_loop = request.inner_loop
+    session = _prepare_agent_round_session(ctx, request, start_round)
+    agent_run_state = session.run_state
+    round_history = session.history
+    records = round_history.records
+    carry = session.carry
+    progress_path = session.progress_path
+    round_number = session.round_number
+    round_limit_result = _handle_agent_round_limit(
+        ctx, request, round_history, progress_path, round_number
+    )
+    if round_limit_result is not None:
+        return round_limit_result
+
+    engine = _create_agent_hypothesis_engine(request, agent_run_state)
     try:
         while round_number <= max_rounds:
-            ctx.switch_log_file(f"round{round_number:03d}")
-            issue_board.write_pareto_archive(
-                progress_path,
-                _pareto_archive_summary(records, agent_run_state.metrics),
-            )
             round_progress = RoundProgress(round_number, max_rounds)
-            ctx.lprint(f"\n{'=' * 60}\n  {round_progress.label()}\n{'=' * 60}\n")
+            _begin_agent_round(ctx, records, agent_run_state, progress_path, round_progress)
             with ctx.progress(round_progress):
-                # The designer runs only when selecting a new causal claim.
-                # A continuing hypothesis remains owned by its persistent
-                # implementer session without another designer intervention.
-                profiler_summary: ProfilerSummary | None = None
-                pre_decision: PreRoundDecision | None = None
-                if active_hypothesis is None:
-                    if profile_guided is not None and outer_loop == "profile-guided":
-                        engine = engine.replace_state(agent_run_state).prepare_profile(
-                            ctx, profile_guided, round_number=round_number
-                        )
-                        agent_run_state = engine.state
-                        persist_agent_run_state(
-                            ctx,
-                            state_store,
-                            agent_run_state,
-                            label=f"profile-guided: prepare round {round_number}",
-                        )
-                    if inner_loop == "multi-agent":
-                        # Round 1 used to skip this decision, which also skipped
-                        # the profiler nested under it: the round holding the
-                        # least evidence was the one round where nothing could
-                        # ask for measurement. It now decides like every other
-                        # round, told by ``has_history`` that it has no prior
-                        # entry to read and must establish runnability itself.
-                        pre_decision = _run_pre_round_decision(
-                            ctx,
-                            round_number=round_number,
-                            objective=objective,
-                            carry=carry,
-                            progress_path=progress_path,
-                            progress_location=progress_location,
-                            has_history=not _is_fresh_cold_start(round_number, records),
-                        )
-                        if pre_decision.need_profile and ctx.profiler_kind is not ProfilerKind.NONE:
-                            profiler_summary = _run_profiler(
-                                ctx,
-                                round_number=round_number,
-                                profile_focus=pre_decision.profile_focus
-                                or "general steady-state benchmark hotspots",
-                                modality=modality,
-                                interface=interface,
-                                domain_definition=domain_definition,
-                                progress_path=progress_path,
-                                objective=objective,
-                            )
-                    elif last_single_agent_response is not None:
-                        profiler_summary = _profiler_summary_from_single_agent(
-                            last_single_agent_response
-                        )
-                    plateau_warning = _detect_plateau(records)
-                    provisional_candidates = _provisional_candidates_since_official(records)
-                    plan = _run_orchestrator_plan(
-                        ctx,
-                        agent_run_state=agent_run_state,
-                        round_number=round_number,
-                        objective=objective,
-                        profiler_summary=profiler_summary,
-                        carry=carry,
-                        progress_path=progress_path,
-                        progress_location=progress_location,
-                        roadmap_location=roadmap_location,
-                        pareto_archive_location=pareto_archive_location,
-                        plateau_warning=plateau_warning,
-                        modality=modality,
-                        interface=interface,
-                        domain_definition=domain_definition,
-                        framework_benchmark_enabled=framework_benchmark_configured,
-                        official_eval_every=official_eval_every,
-                        provisional_candidates=provisional_candidates,
-                        official_eval_cadence_due=(
-                            provisional_candidates + 1 >= official_eval_every
-                        ),
-                        profile_guidance=engine.controller.guidance,
-                    )
-                    parent_round = (
-                        plan.revert_to_round
-                        if plan.revert_to_round is not None
-                        else round_number - 1
-                        if round_number > 1
-                        else None
-                    )
-                    parent_record = next(
-                        (
-                            record
-                            for record in reversed(records)
-                            if record.round_number == parent_round
-                        ),
-                        None,
-                    )
-                    engine = engine.replace_state(agent_run_state).start(
-                        plan,
-                        started_round=round_number,
-                        parent_round=parent_round,
-                        parent_commit=(
-                            parent_record.commit
-                            if parent_record is not None and parent_record.commit is not None
-                            else ctx.git.current_sha()
-                        ),
-                    )
-                    agent_run_state = engine.state
-                    active_hypothesis = agent_run_state.active_hypothesis
-                    assert active_hypothesis is not None  # noqa: S101  # started above
-                    plan = active_hypothesis.plan
-                    persist_agent_run_state(
-                        ctx,
-                        state_store,
-                        agent_run_state,
-                        label=f"agent: start hypothesis {plan.hypothesis_id}",
-                    )
-                    publish_experiments_changed(
-                        ctx, agent_run_state, "active_hypothesis_changed", plan_changed_keys(plan)
-                    )
-                else:
-                    plan = active_hypothesis.plan
-                    issue_board.append_hypothesis_continuation(
-                        progress_path,
-                        round_number,
-                        plan=plan,
-                        started_round=active_hypothesis.started_round,
-                        continuation_step=active_hypothesis.next_step or plan.task,
-                    )
-                    ctx.lprint(
-                        f"[hypothesis] continuing {plan.hypothesis_id}; designer invocation skipped"
-                    )
-                planned_official_reason = _official_evaluation_reason(
-                    records=records,
-                    round_number=round_number,
-                    max_rounds=max_rounds,
-                    official_eval_every=official_eval_every,
-                    requested=plan.request_official_evaluation,
-                    candidate_ready=True,
+                engine, plan = _plan_agent_round(ctx, request, engine, carry, round_progress)
+                agent_run_state = engine.state
+                active_hypothesis = _require_active_hypothesis(engine)
+                engine = _apply_agent_rollback(ctx, request, plan, round_history, engine)
+                agent_run_state = engine.state
+                active_hypothesis = _require_active_hypothesis(engine)
+                engine, attempt_outcome = _run_agent_attempts(
+                    ctx, request, engine, round_history, round_progress
                 )
-                if outer_loop == "profile-guided" and engine.controller.guidance.active_component:
-                    planned_official_reason = (
-                        planned_official_reason or "profile-guided component measurement"
-                    )
-                # No early stop. Previously OrchestratorPlan had a ``done`` field that
-                # could halt the loop; it was removed because the orchestrator
-                # can't reliably tell when the objective is "fully met" and
-                # early-stopping masks further optimization opportunities.
-                # --- Optional rollback ---
-                if plan.revert_to_round is not None and not active_hypothesis.revert_applied:
-                    target = next(
-                        (r for r in records if r.round_number == plan.revert_to_round),
-                        None,
-                    )
-                    if target and target.commit:
-                        rollback_commit, failed_child_round = round_history.resolve_rollback_commit(
-                            target, _FAILED_HYPOTHESIS_OUTCOMES
-                        )
-                        assert rollback_commit is not None  # noqa: S101  # tracked: #288
-                        # Restore the tree without moving HEAD so subsequent
-                        # commits land on the current branch as new commits
-                        # after the reverted state.
-                        memory_paths = tuple(
-                            str(path.relative_to(ctx.workspace))
-                            for path in (roadmap_path, progress_path, pareto_archive_path)
-                        )
-                        if ctx.git.checkout_tree(
-                            rollback_commit,
-                            clean=True,
-                            preserve_paths=memory_paths,
-                        ):
-                            if failed_child_round is None:
-                                ctx.lprint(
-                                    "Reverted workspace to round "
-                                    f"{plan.revert_to_round} ({rollback_commit[:8]})."
-                                )
-                            else:
-                                ctx.lprint(
-                                    "Reverted workspace to the pre-hypothesis parent of "
-                                    f"failed round {failed_child_round} ({rollback_commit[:8]}), "
-                                    f"based on parent round {plan.revert_to_round}."
-                                )
-                            active_hypothesis.revert_applied = True
-                            active_hypothesis.revert_commit = rollback_commit
-                            active_hypothesis.parent_commit = rollback_commit
-                            agent_run_state = persist_active_hypothesis(
-                                ctx,
-                                state_store,
-                                agent_run_state,
-                                active_hypothesis,
-                                label=(f"agent: set hypothesis {plan.hypothesis_id} parent"),
-                            )
-                        else:
-                            output_sink().framework_warning(
-                                "rollback was not applied; will retry round "
-                                f"{plan.revert_to_round} on the next continuation",
-                                source=FrameworkSource.LOOP,
-                            )
-                    else:
-                        output_sink().framework_warning(
-                            f"cannot revert: no commit recorded for round {plan.revert_to_round}",
-                            source=FrameworkSource.LOOP,
-                        )
-                # --- Implementer / Judge retry loop ---
-                # Round-scoped accumulators: these describe the round as a
-                # whole and intentionally survive every attempt (the best
-                # accepted implementation, the official evaluation the round
-                # completed, and the feedback carried forward). A failed review
-                # can carry targeted feedback into the same persistent
-                # hypothesis on the next framework round.
-                feedback: str | None = active_hypothesis.feedback
-                passed = False
-                review_started = False
-                framework_revalidation_required = active_hypothesis.gate_revalidation_pending
-                implementation: ImplementerResponse | None = None
-                single_agent_response: SingleAgentRoundResponse | None = None
-                framework_perf_metric: float | None = None
-                framework_benchmark = FrameworkBenchmarkOutcome()
-                accepted_metrics: dict[str, float] = {}
-                accepted_evaluation_artifact: str | None = None
-                completed_official_evaluation_reason: str | None = None
-                # Attempt-scoped state: one immutable value describing the
-                # judge's treatment of the current attempt only. It is replaced
-                # wholesale at the top of every iteration and never updated in
-                # place, so an earlier attempt's verdict cannot survive into
-                # the round record (issue #503).
-                attempt_judge: JudgeOutcome = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
-                # ``max_retries_per_round >= 1`` is validated at entry, so the
-                # loop always runs; the initializer keeps ``retry`` provably
-                # bound for the post-loop round bookkeeping.
-                retry = 0
-                first_retry = issue_board.next_implementer_attempt(progress_path, round_number)
-                if first_retry > max_retries_per_round:
-                    raise RuntimeError(  # noqa: TRY003  # tracked: #288
-                        f"Round {round_number} already persisted "
-                        f"{first_retry - 1} implementer attempts, exhausting "
-                        f"max_retries_per_round={max_retries_per_round}; refusing "
-                        "to overwrite or replay paid work."
-                    )
-                if first_retry > 1:
-                    ctx.lprint(
-                        f"[resume] round {round_number} continues at durable "
-                        f"attempt {first_retry}/{max_retries_per_round}"
-                    )
-                for retry in range(first_retry, max_retries_per_round + 1):
-                    ctx.lprint(f"\n--- attempt {retry}/{max_retries_per_round} ---\n")
-                    # The persisted record must reflect this attempt, not an
-                    # earlier audit.  A cadence review of attempt N returns a
-                    # verdict; if the final attempt N+1 defers re-review (the
-                    # sparse-review break below), that verdict belongs to a
-                    # different implementation and must not survive.
-                    attempt_judge = JudgeSkipped(JudgeSkipReason.NOT_REACHED)
-                    if inner_loop == "multi-agent":
-                        prior_attempt_artifact_locations = tuple(
-                            issue_board.display_path(path, ctx.workspace)
-                            for path in issue_board.implementer_artifact_paths(
-                                progress_path, round_number
-                            )
-                        )
-                        ctx.reselect_gpu()
-                        attempt = _run_implementer(
-                            ctx,
-                            round_number=round_number,
-                            retry=retry,
-                            plan=plan,
-                            objective=objective,
-                            modality=modality,
-                            interface=interface,
-                            domain_definition=domain_definition,
-                            feedback=feedback,
-                            continuation_step=active_hypothesis.next_step,
-                            framework_revert_applied=active_hypothesis.revert_applied,
-                            framework_revert_round=active_hypothesis.parent_round,
-                            framework_revert_commit=active_hypothesis.revert_commit,
-                            gate_revalidation_pending=(active_hypothesis.gate_revalidation_pending),
-                            gate_approved_perf_metric=(active_hypothesis.gate_approved_perf_metric),
-                            gate_approved_perf_unit=(active_hypothesis.gate_approved_perf_unit),
-                            gate_approved_evaluation_artifact=(
-                                active_hypothesis.gate_approved_evaluation_artifact
-                            ),
-                            progress_path=progress_path,
-                            progress_location=progress_location,
-                            pareto_archive_location=pareto_archive_location,
-                            framework_benchmark_enabled=framework_benchmark_configured,
-                            official_evaluation_due=(planned_official_reason is not None),
-                            official_evaluation_reason=planned_official_reason,
-                            prior_attempt_artifact_locations=prior_attempt_artifact_locations,
-                            profile_guidance=engine.controller.guidance,
-                        )
-                        implementation = attempt.response
-                        if attempt.synthesized:
-                            # The framework, not the implementer, wrote this
-                            # response because the turn's output did not parse.
-                            # It carries no reviewable evidence, so spend a
-                            # retry on a real turn instead of letting a parse
-                            # failure silently consume the whole round. When
-                            # retries are exhausted the round still commits the
-                            # fail-closed response, unreviewed, as before.
-                            attempt_judge = JudgeSkipped(JudgeSkipReason.UNPARSEABLE_IMPLEMENTATION)
-                            ctx.lprint(
-                                f"[implementer] attempt {retry}/{max_retries_per_round} "
-                                "returned no parseable structured response; the framework "
-                                "synthesized a fail-closed one. "
-                                + (
-                                    "Retrying within the same round."
-                                    if retry < max_retries_per_round
-                                    else "Retries are exhausted; completing the round with it."
-                                )
-                            )
-                            continue
-                        review_due = _review_due(
-                            round_number=round_number,
-                            max_rounds=max_rounds,
-                            judge_every=judge_every,
-                            outcome=implementation.hypothesis_outcome,
-                            candidate_evidence_fresh=_candidate_evidence_is_fresh(
-                                implementation, records
-                            ),
-                        )
-                        if review_started and not _implementation_requests_continuation(
-                            implementation
-                        ):
-                            # Re-review a terminal response to feedback from a
-                            # failed judge. Sparse cadence controls the first
-                            # audit of a round, not whether the resulting repair
-                            # is independently verified.
-                            review_due = True
-                        if (
-                            review_started
-                            and round_number != max_rounds
-                            and _implementation_requests_continuation(implementation)
-                            and implementation.candidate_disposition
-                            is not CandidateDisposition.PARETO_FRONTIER
-                            and not framework_revalidation_required
-                        ):
-                            # A cadence-triggered review has already supplied
-                            # feedback for this round.  Let a provisional retry
-                            # that still owns the hypothesis continue in the
-                            # next framework round instead of paying for the
-                            # same independent audit twice.  A terminal retry
-                            # must be re-reviewed: otherwise a judge-requested
-                            # repair could be accepted without independent
-                            # verification merely because sparse cadence is not
-                            # due again.
-                            review_due = False
-                        if not review_due:
-                            attempt_judge = JudgeSkipped(JudgeSkipReason.SPARSE_REVIEW_POLICY)
-                            issue_board.append_judge_skipped(
-                                progress_path,
-                                round_number,
-                                outcome=implementation.hypothesis_outcome.value,
-                                judge_every=judge_every,
-                            )
-                            ctx.lprint(
-                                "[judge] deferred by sparse-review policy; "
-                                "official gates were not run"
-                            )
-                            break
-                        review_started = True
-                        framework_revalidation_required = False
-                        candidate_archive_conflict = _pareto_archive_conflict(
-                            candidate_disposition=implementation.candidate_disposition,
-                            candidate_metrics=dict(implementation.candidate_metrics),
-                            records=records,
-                            space=agent_run_state.metrics,
-                        )
-                        ctx.reselect_gpu()
-                        verdict = _run_judge(
-                            ctx,
-                            round_number=round_number,
-                            retry=retry,
-                            plan=plan,
-                            implementation=implementation,
-                            modality=modality,
-                            interface=interface,
-                            domain_definition=domain_definition,
-                            progress_path=progress_path,
-                            progress_location=progress_location,
-                            pareto_archive_location=pareto_archive_location,
-                            objective=objective,
-                            framework_revert_applied=active_hypothesis.revert_applied,
-                            framework_revert_round=active_hypothesis.parent_round,
-                            framework_revert_commit=active_hypothesis.revert_commit,
-                            gate_revalidation_pending=(active_hypothesis.gate_revalidation_pending),
-                            gate_approved_perf_metric=(active_hypothesis.gate_approved_perf_metric),
-                            gate_approved_perf_unit=(active_hypothesis.gate_approved_perf_unit),
-                            gate_approved_metrics=active_hypothesis.gate_approved_metrics,
-                            gate_approved_evaluation_artifact=(
-                                active_hypothesis.gate_approved_evaluation_artifact
-                            ),
-                            framework_benchmark_enabled=framework_benchmark_configured,
-                            official_evaluation_due=(planned_official_reason is not None),
-                            official_evaluation_reason=planned_official_reason,
-                            pareto_archive_conflict=candidate_archive_conflict,
-                        )
-                        attempt_judge = JudgeReviewed(verdict.verdict)
-                        if verdict.verdict == Verdict.PASS:
-                            validation_feedback = _run_framework_validation_gate(
-                                ctx,
-                                recipe_artifact=implementation.validation_recipe_artifact,
-                                round_number=round_number,
-                                retry=retry,
-                                progress_path=progress_path,
-                            )
-                            if validation_feedback is not None:
-                                feedback = validation_feedback
-                                active_hypothesis.feedback = feedback
-                                agent_run_state = persist_active_hypothesis(
-                                    ctx,
-                                    state_store,
-                                    agent_run_state,
-                                    active_hypothesis,
-                                    label=f"agent: checkpoint hypothesis {plan.hypothesis_id}",
-                                )
-                                continue
-                            if (
-                                implementation.candidate_disposition
-                                is CandidateDisposition.PARETO_FRONTIER
-                            ):
-                                active_hypothesis.gate_approved_candidate_disposition = (
-                                    implementation.candidate_disposition.value
-                                )
-                                active_hypothesis.gate_approved_candidate_metrics = dict(
-                                    implementation.candidate_metrics
-                                )
-                                active_hypothesis.gate_approved_candidate_evaluation_artifact = (
-                                    implementation.candidate_evaluation_artifact
-                                )
-                                active_hypothesis.gate_approved_candidate_operating_point = (
-                                    implementation.candidate_operating_point
-                                )
-                                active_hypothesis.gate_approved_candidate_retention_reason = (
-                                    implementation.candidate_retention_reason
-                                )
-                                agent_run_state = persist_active_hypothesis(
-                                    ctx,
-                                    state_store,
-                                    agent_run_state,
-                                    active_hypothesis,
-                                    label=f"agent: checkpoint hypothesis {plan.hypothesis_id}",
-                                )
-                            candidate_ready = implementation.hypothesis_outcome in {
-                                HypothesisOutcome.SUPPORTED,
-                                HypothesisOutcome.NOMINATED,
-                            } or (
-                                implementation.candidate_disposition
-                                is CandidateDisposition.PARETO_FRONTIER
-                            )
-                            official_reason = _official_evaluation_reason(
-                                records=records,
-                                round_number=round_number,
-                                max_rounds=max_rounds,
-                                official_eval_every=official_eval_every,
-                                requested=plan.request_official_evaluation,
-                                candidate_ready=candidate_ready,
-                            )
-                            if official_reason is None:
-                                if candidate_ready:
-                                    issue_board.append_official_evaluation_decision(
-                                        progress_path,
-                                        round_number,
-                                        retry,
-                                        run=False,
-                                        reason="cadence_not_due",
-                                        official_eval_every=official_eval_every,
-                                        provisional_candidates=(
-                                            _provisional_candidates_since_official(records)
-                                        ),
-                                    )
-                                    ctx.lprint(
-                                        "[official-evaluation] deferred; candidate "
-                                        "retained as a provisional working checkpoint"
-                                    )
-                                passed = True
-                                break
-                            if implementation.perf_metric is not None:
-                                active_hypothesis.gate_approved_perf_metric = (
-                                    implementation.perf_metric
-                                )
-                                active_hypothesis.gate_approved_perf_unit = implementation.perf_unit
-                                active_hypothesis.gate_approved_metrics = dict(
-                                    implementation.metrics
-                                )
-                                active_hypothesis.gate_approved_evaluation_artifact = (
-                                    implementation.evaluation_artifact
-                                )
-                                agent_run_state = persist_active_hypothesis(
-                                    ctx,
-                                    state_store,
-                                    agent_run_state,
-                                    active_hypothesis,
-                                    label=f"agent: checkpoint hypothesis {plan.hypothesis_id}",
-                                )
-                            issue_board.append_official_evaluation_decision(
-                                progress_path,
-                                round_number,
-                                retry,
-                                run=True,
-                                reason=official_reason,
-                                official_eval_every=official_eval_every,
-                                provisional_candidates=(
-                                    _provisional_candidates_since_official(records)
-                                ),
-                            )
-                            candidate_commit = ctx.git.current_sha()
-                            reuse_accuracy_pass = bool(
-                                active_hypothesis.gate_revalidation_pending
-                                and candidate_commit is not None
-                                and active_hypothesis.gate_candidate_commit == candidate_commit
-                                and active_hypothesis.gate_accuracy_passed
-                            )
-                            (
-                                gate_feedback,
-                                framework_benchmark,
-                                accuracy_passed,
-                            ) = _run_framework_gates(
-                                ctx,
-                                benchmark_result=benchmark_result,
-                                benchmark_result_protocol=benchmark_result_protocol,
-                                objectives=objectives,
-                                round_number=round_number,
-                                retry=retry,
-                                progress_path=progress_path,
-                                accuracy_timeout_seconds=accuracy_timeout_seconds,
-                                benchmark_timeout_seconds=benchmark_timeout_seconds,
-                                reuse_accuracy_pass=reuse_accuracy_pass,
-                                candidate_revision=candidate_commit,
-                            )
-                            framework_perf_metric = framework_benchmark.metric_value
-                            if gate_feedback is None:
-                                passed = True
-                                completed_official_evaluation_reason = official_reason
-                                break
-                            feedback = gate_feedback
-                            framework_revalidation_required = True
-                            active_hypothesis.gate_revalidation_pending = True
-                            active_hypothesis.gate_candidate_commit = candidate_commit
-                            active_hypothesis.gate_accuracy_passed = accuracy_passed
-                            active_hypothesis.feedback = feedback
-                            agent_run_state = persist_active_hypothesis(
-                                ctx,
-                                state_store,
-                                agent_run_state,
-                                active_hypothesis,
-                                label=f"agent: checkpoint hypothesis {plan.hypothesis_id}",
-                            )
-                            continue
-                        feedback = verdict.feedback
-                        active_hypothesis.feedback = feedback
-                        agent_run_state = persist_active_hypothesis(
-                            ctx,
-                            state_store,
-                            agent_run_state,
-                            active_hypothesis,
-                            label=f"agent: checkpoint hypothesis {plan.hypothesis_id}",
-                        )
-                    else:
-                        ctx.reselect_gpu()
-                        single_agent_response = _run_single_agent_round(
-                            ctx,
-                            round_number=round_number,
-                            retry=retry,
-                            plan=plan,
-                            modality=modality,
-                            interface=interface,
-                            domain_definition=domain_definition,
-                            feedback=feedback,
-                            progress_path=progress_path,
-                            progress_location=progress_location,
-                            pareto_archive_location=pareto_archive_location,
-                            objective=objective,
-                            profile_focus=last_profile_focus,
-                            official_evaluation_due=(planned_official_reason is not None),
-                            official_evaluation_reason=planned_official_reason,
-                            framework_benchmark_enabled=framework_benchmark_configured,
-                            pareto_records=records,
-                            space=agent_run_state.metrics,
-                        )
-                        attempt_judge = JudgeReviewed(single_agent_response.verdict)
-                        if single_agent_response.verdict == Verdict.PASS:
-                            official_reason = _official_evaluation_reason(
-                                records=records,
-                                round_number=round_number,
-                                max_rounds=max_rounds,
-                                official_eval_every=official_eval_every,
-                                requested=plan.request_official_evaluation,
-                                candidate_ready=True,
-                            )
-                            if official_reason is None:
-                                issue_board.append_official_evaluation_decision(
-                                    progress_path,
-                                    round_number,
-                                    retry,
-                                    run=False,
-                                    reason="cadence_not_due",
-                                    official_eval_every=official_eval_every,
-                                    provisional_candidates=(
-                                        _provisional_candidates_since_official(records)
-                                    ),
-                                )
-                                ctx.lprint(
-                                    "[official-evaluation] deferred; candidate "
-                                    "retained as a provisional working checkpoint"
-                                )
-                                passed = True
-                                break
-                            issue_board.append_official_evaluation_decision(
-                                progress_path,
-                                round_number,
-                                retry,
-                                run=True,
-                                reason=official_reason,
-                                official_eval_every=official_eval_every,
-                                provisional_candidates=(
-                                    _provisional_candidates_since_official(records)
-                                ),
-                            )
-                            candidate_commit = ctx.git.current_sha()
-                            reuse_accuracy_pass = bool(
-                                active_hypothesis.gate_revalidation_pending
-                                and candidate_commit is not None
-                                and active_hypothesis.gate_candidate_commit == candidate_commit
-                                and active_hypothesis.gate_accuracy_passed
-                            )
-                            (
-                                gate_feedback,
-                                framework_benchmark,
-                                accuracy_passed,
-                            ) = _run_framework_gates(
-                                ctx,
-                                benchmark_result=benchmark_result,
-                                benchmark_result_protocol=benchmark_result_protocol,
-                                objectives=objectives,
-                                round_number=round_number,
-                                retry=retry,
-                                progress_path=progress_path,
-                                accuracy_timeout_seconds=accuracy_timeout_seconds,
-                                benchmark_timeout_seconds=benchmark_timeout_seconds,
-                                reuse_accuracy_pass=reuse_accuracy_pass,
-                                candidate_revision=candidate_commit,
-                            )
-                            framework_perf_metric = framework_benchmark.metric_value
-                            if gate_feedback is None:
-                                passed = True
-                                completed_official_evaluation_reason = official_reason
-                                break
-                            feedback = gate_feedback
-                            active_hypothesis.gate_revalidation_pending = True
-                            active_hypothesis.gate_candidate_commit = candidate_commit
-                            active_hypothesis.gate_accuracy_passed = accuracy_passed
-                            active_hypothesis.feedback = feedback
-                            agent_run_state = persist_active_hypothesis(
-                                ctx,
-                                state_store,
-                                agent_run_state,
-                                active_hypothesis,
-                                label=f"agent: checkpoint hypothesis {plan.hypothesis_id}",
-                            )
-                            continue
-                        feedback = single_agent_response.feedback
-                        active_hypothesis.feedback = feedback
-                        agent_run_state = persist_active_hypothesis(
-                            ctx,
-                            state_store,
-                            agent_run_state,
-                            active_hypothesis,
-                            label=f"agent: checkpoint hypothesis {plan.hypothesis_id}",
-                        )
-                # --- Record round result & update carry-over ---
-                # Only the final attempt describes the round, so its outcome is
-                # the one the record and the lifecycle transition read.
-                final_attempt_reviewed = attempt_was_reviewed(attempt_judge)
-                commit = ctx.git.current_sha()
-                # `profile_skipped` is True when no fresh profile ran this round
-                # (cold-start or the orchestrator/framework decided to skip).
-                # The plateau detector ignores skipped-profile rounds so cached
-                # / inherited perf numbers don't masquerade as fresh measurements.
-                #
-                # For single-agent inner loop, `profiler_summary` carries the
-                # PREVIOUS round's profile (fed forward to the orchestrator),
-                # so this round's perf comes from `single_agent_response` instead.
-                perf_provenance: PerfProvenance | None = None
-                if inner_loop == "single-agent":
-                    if (
-                        single_agent_response is not None
-                        and framework_perf_metric is not None
-                        and completed_official_evaluation_reason is not None
-                    ):
-                        single_agent_response.perf_metric = framework_perf_metric
-                        single_agent_response.perf_unit = framework_benchmark.metric_name
-                        perf_provenance = "framework"
-                    profile_skipped = single_agent_response is None or (
-                        single_agent_response.perf_metric is None
-                    )
-                    perf_metric = (
-                        single_agent_response.perf_metric
-                        if (
-                            single_agent_response
-                            and passed
-                            and completed_official_evaluation_reason is not None
-                        )
-                        else None
-                    )
-                    perf_unit = (
-                        single_agent_response.perf_unit
-                        if (
-                            single_agent_response
-                            and passed
-                            and completed_official_evaluation_reason is not None
-                        )
-                        else None
-                    )
-                    if perf_metric is not None and perf_provenance is None:
-                        # Not overridden by the framework benchmark above, so
-                        # this headline number is the agent's own report.
-                        perf_provenance = "implementer"
-                    # Remember the latest profile for the orchestrator's next plan
-                    # and carry forward the implicit profile focus.
-                    if single_agent_response is not None:
-                        last_single_agent_response = single_agent_response
-                else:
-                    implementation_metric = (
-                        implementation.perf_metric
-                        if (
-                            implementation is not None
-                            and passed
-                            and completed_official_evaluation_reason is not None
-                        )
-                        else None
-                    )
-                    if (
-                        implementation_metric is None
-                        and passed
-                        and implementation is not None
-                        and implementation.hypothesis_outcome
-                        in {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED}
-                        and active_hypothesis.gate_revalidation_pending
-                        and completed_official_evaluation_reason is not None
-                    ):
-                        implementation_metric = active_hypothesis.gate_approved_perf_metric
-                    profile_skipped = (
-                        framework_perf_metric is None and implementation_metric is None
-                    )
-                    if (
-                        framework_perf_metric is not None
-                        and passed
-                        and completed_official_evaluation_reason is not None
-                    ):
-                        perf_metric = framework_perf_metric
-                        perf_unit = framework_benchmark.metric_name
-                        perf_provenance = "framework"
-                    elif implementation_metric is not None:
-                        perf_metric = implementation_metric
-                        perf_provenance = "implementer"
-                        if implementation is not None and implementation.perf_metric is not None:
-                            perf_unit = implementation.perf_unit
-                            accepted_metrics = dict(implementation.metrics)
-                            accepted_evaluation_artifact = implementation.evaluation_artifact
-                        else:
-                            perf_unit = active_hypothesis.gate_approved_perf_unit
-                            accepted_metrics = dict(active_hypothesis.gate_approved_metrics)
-                            accepted_evaluation_artifact = (
-                                active_hypothesis.gate_approved_evaluation_artifact
-                            )
-                    else:
-                        # Profiles and directional probes inform the designer,
-                        # but only an official checkpoint may update the
-                        # verified headline trajectory in portable round records.
-                        perf_metric = None
-                        perf_unit = None
-                # A prior retry may have been reviewed before the implementer
-                # returned a different terminal result.  Record and transition
-                # from the final attempt, not from any earlier audit in the
-                # round; otherwise an unreviewed ``disproven`` retry is
-                # mislabeled rejected and the dead hypothesis stays active.
-                reviewed = final_attempt_reviewed if inner_loop == "multi-agent" else True
-                if implementation is not None:
-                    candidate_disposition = implementation.candidate_disposition.value
-                    candidate_metrics = dict(implementation.candidate_metrics)
-                    candidate_evaluation_artifact = implementation.candidate_evaluation_artifact
-                    candidate_operating_point = implementation.candidate_operating_point
-                    candidate_retention_reason = implementation.candidate_retention_reason
-                elif single_agent_response is not None:
-                    candidate_disposition = single_agent_response.candidate_disposition.value
-                    candidate_metrics = dict(single_agent_response.candidate_metrics)
-                    candidate_evaluation_artifact = (
-                        single_agent_response.candidate_evaluation_artifact
-                    )
-                    candidate_operating_point = single_agent_response.candidate_operating_point
-                    candidate_retention_reason = single_agent_response.candidate_retention_reason
-                else:
-                    candidate_disposition = CandidateDisposition.UNASSESSED.value
-                    candidate_metrics = {}
-                    candidate_evaluation_artifact = None
-                    candidate_operating_point = ""
-                    candidate_retention_reason = ""
-                # A framework-gate retry may correctly return no fresh candidate
-                # row. Preserve the judge-approved provisional evidence for the
-                # unchanged checkpoint just as canonical evidence is preserved.
-                if (
-                    candidate_disposition == CandidateDisposition.UNASSESSED.value
-                    and active_hypothesis.gate_revalidation_pending
-                    and active_hypothesis.gate_approved_candidate_disposition
-                    == CandidateDisposition.PARETO_FRONTIER.value
-                ):
-                    candidate_disposition = active_hypothesis.gate_approved_candidate_disposition
-                    candidate_metrics = dict(active_hypothesis.gate_approved_candidate_metrics)
-                    candidate_evaluation_artifact = (
-                        active_hypothesis.gate_approved_candidate_evaluation_artifact
-                    )
-                    candidate_operating_point = (
-                        active_hypothesis.gate_approved_candidate_operating_point
-                    )
-                    candidate_retention_reason = (
-                        active_hypothesis.gate_approved_candidate_retention_reason
-                    )
-                # A result-protocol benchmark measures the complete objective
-                # row, so it replaces the provisional metrics outright.
-                if perf_metric is not None and framework_benchmark.row is not None:
-                    accepted_metrics = dict(framework_benchmark.row)
-                # A legacy [benchmark.result] benchmark reports a single trusted
-                # scalar via perf_metric/perf_unit but leaves accepted_metrics
-                # empty (only implementer-reported evals populate it). Without a
-                # comparable objective row, _record_candidate_metrics falls back
-                # to the provisional candidate_metrics for frontier dominance.
-                # Promote the trusted scalar into the objective row so official
-                # framework measurements drive the frontier. Does not apply when
-                # a protocol row is present: the row above is already complete.
-                if not accepted_metrics and perf_metric is not None and perf_unit is not None:
-                    accepted_metrics = {perf_unit: perf_metric}
-                official_evaluation = (
-                    passed
-                    and completed_official_evaluation_reason is not None
-                    and ctx.agent_client.backend_name != "stub"
-                    and (bool(ctx.judge_accuracy_command) or framework_benchmark_configured)
+                completed_record = _build_completed_round_record(
+                    ctx, request, engine, round_history, attempt_outcome
                 )
-                declared_outcome = (
-                    implementation.hypothesis_outcome
-                    if implementation is not None
-                    else HypothesisOutcome.NOMINATED
-                    if single_agent_response is not None
-                    else None
-                )
-                primary_objective = objectives[0] if objectives else None
-                metric_name = (
-                    framework_benchmark.metric_name
-                    or (primary_objective.name if primary_objective is not None else None)
-                    or perf_unit
-                )
-                metric_direction = framework_benchmark.metric_direction or (
-                    primary_objective.direction if primary_objective is not None else None
-                )
-                official_metric = (
-                    accepted_metrics.get(metric_name) if metric_name is not None else perf_metric
-                )
-                if official_metric is None and not accepted_metrics:
-                    official_metric = perf_metric
-                parent_record = metric_baseline(
-                    parent_round=active_hypothesis.parent_round,
-                    parent_commit=active_hypothesis.parent_commit,
-                    metric=metric_name,
-                    rounds=records,
-                )
-                baseline_metric = (
-                    record_metric_value(parent_record, metric_name)
-                    if parent_record is not None
-                    else None
-                )
-                # A headline metric is framework-owned unless the implementer
-                # self-reported it. This is the trust boundary the rest of the
-                # round applies: resolution, scalar and Pareto retention, the
-                # recorded delta, and trusted Pareto-parent selection all read
-                # it, so an untrusted number never drives a dominance decision.
-                framework_provenance = trusted_perf_provenance(perf_provenance)
-                # The round's headline reading is ordered against its causal
-                # baseline exactly once, here, and stored on the record. Every
-                # later reader -- resume reprojection and the server -- consumes
-                # the stored answer instead of re-deriving it.
-                #
-                # An implementer-reported number is never ordered at all: the
-                # comparison stays None, which is what makes the hypothesis
-                # resolve UNMEASURED rather than borrowing a verdict from a
-                # number the framework did not measure.
-                space = agent_run_state.metrics
-                official_reading = (
-                    Measurement(
-                        metric=metric_name,
-                        value=official_metric,
-                        direction=metric_direction,
-                    )
-                    if metric_name is not None and official_metric is not None
-                    else None
-                )
-                perf_comparison = (
-                    space.compare(
-                        official_reading,
-                        Measurement(
-                            metric=metric_name,
-                            value=baseline_metric,
-                            direction=metric_direction,
-                        )
-                        if metric_name is not None and baseline_metric is not None
-                        else None,
-                    )
-                    if official_evaluation and official_metric is not None and framework_provenance
-                    else None
-                )
-                hypothesis_resolution = resolve_hypothesis_outcome(
-                    ResolutionEvidence(
-                        declared=declared_outcome,
-                        passed=passed,
-                        reviewed=reviewed,
-                        comparison=perf_comparison,
-                    )
-                )
-                disposition = CandidateDisposition(candidate_disposition)
-                if not reviewed:
-                    candidate_retained = _provisional_candidate_retained(disposition)
-                elif not passed:
-                    candidate_retained = False
-                elif (
-                    official_evaluation and framework_provenance and objectives and accepted_metrics
-                ):
-                    candidate_retained = not _pareto_archive_dominators(
-                        accepted_metrics,
-                        records,
-                        space,
-                    )
-                elif official_evaluation and framework_provenance:
-                    prior_readings = [
-                        Measurement(
-                            metric=metric_name,
-                            value=value,
-                            direction=metric_direction,
-                        )
-                        for record in records
-                        if metric_name is not None
-                        and record.official_evaluation
-                        and trusted_perf_provenance(record.perf_provenance)
-                        and (value := record_metric_value(record, metric_name)) is not None
-                    ]
-                    candidate_retained = scalar_candidate_retained(
-                        space.compare_to_best(official_reading, prior_readings)
-                    )
-                else:
-                    # No trusted framework measurement (or an implementer
-                    # self-report): retain provisionally on the implementer's
-                    # disposition, never on the untrusted metric.
-                    candidate_retained = _provisional_candidate_retained(disposition)
-                perf_delta_pct = None
-                if (
-                    framework_provenance
-                    and official_metric is not None
-                    and baseline_metric is not None
-                    and baseline_metric != 0
-                ):
-                    perf_delta_pct = (
-                        (official_metric - baseline_metric) / abs(baseline_metric) * 100
-                    )
-                completed_record = RoundRecord(
-                    round_number=round_number,
-                    commit=commit,
-                    perf_metric=perf_metric,
-                    perf_unit=perf_unit,
-                    passed=passed,
-                    profile_skipped=profile_skipped,
-                    hypothesis_id=plan.hypothesis_id,
-                    hypothesis_declared_outcome=(
-                        declared_outcome.value if declared_outcome is not None else None
-                    ),
-                    # ``RoundRecord.reviewed`` derives from this verdict, so
-                    # the record cannot claim a verdict it never received.
-                    judge_verdict=recorded_judge_verdict(attempt_judge),
-                    hypothesis_outcome=(
-                        hypothesis_resolution.value
-                        if hypothesis_resolution is not None
-                        else declared_outcome.value
-                        if declared_outcome is not None
-                        else None
-                    ),
-                    hypothesis_claim=plan.hypothesis or None,
-                    hypothesis_task=plan.task or None,
-                    hypothesis_parent_round=active_hypothesis.parent_round,
-                    hypothesis_parent_commit=active_hypothesis.parent_commit,
-                    metrics=accepted_metrics,
-                    evaluation_artifact=accepted_evaluation_artifact,
-                    official_evaluation=official_evaluation,
-                    official_evaluation_reason=(
-                        completed_official_evaluation_reason
-                        if (
-                            ctx.agent_client.backend_name != "stub"
-                            and (bool(ctx.judge_accuracy_command) or framework_benchmark_configured)
-                        )
-                        else None
-                    ),
-                    candidate_disposition=candidate_disposition,
-                    candidate_metrics=candidate_metrics,
-                    candidate_evaluation_artifact=candidate_evaluation_artifact,
-                    candidate_operating_point=candidate_operating_point,
-                    candidate_retention_reason=candidate_retention_reason,
-                    candidate_retained=candidate_retained,
-                    perf_direction=metric_direction,
-                    perf_baseline_round=(
-                        parent_record.round_number if parent_record is not None else None
-                    ),
-                    perf_baseline_commit=(
-                        parent_record.commit if parent_record is not None else None
-                    ),
-                    perf_baseline_metric=baseline_metric,
-                    perf_delta_pct=perf_delta_pct,
-                    perf_comparison=perf_comparison,
-                    perf_provenance=perf_provenance,
-                    implementer_driver=ctx.agent_client.driver_name,
-                    implementer_provider=ctx.agent_client.provider,
-                    implementer_model=ctx.agent_client.model_for_kind("implementer"),
-                )
-                # Compute the completed lifecycle transition in memory so its
-                # exact representation can enter the write-ahead journal before
-                # progress notes or durable state are mutated.
-                next_active_hypothesis = active_hypothesis.clone()
-                if inner_loop == "multi-agent" and _implementation_keeps_hypothesis_active(
-                    implementation,
-                    continuation_rounds=next_active_hypothesis.continuation_rounds,
-                ):
-                    next_active_hypothesis.feedback = feedback if reviewed and not passed else None
-                    assert implementation is not None  # noqa: S101  # tracked: #288
-                    next_active_hypothesis.next_step = implementation.next_step
-                    next_active_hypothesis.continuation_rounds += 1
-                elif passed:
-                    next_active_hypothesis = None
-                elif (
-                    reviewed
-                    and next_active_hypothesis.continuation_rounds
-                    < _MAX_CONTINUATION_ROUNDS_WITHOUT_DESIGN_REVIEW
-                ):
-                    # A rejected review may justify another scoped repair, but
-                    # it consumes the same bounded ownership lease as an
-                    # implementer-declared continuation. Otherwise repeated
-                    # judge failures can bypass the designer indefinitely.
-                    next_active_hypothesis.feedback = feedback
-                    next_active_hypothesis.next_step = (
-                        implementation.next_step
-                        if implementation is not None
-                        and _implementation_requests_continuation(implementation)
-                        else None
-                    )
-                    next_active_hypothesis.continuation_rounds += 1
-                elif reviewed or (
-                    implementation is not None
-                    and not _implementation_keeps_hypothesis_active(
-                        implementation,
-                        continuation_rounds=next_active_hypothesis.continuation_rounds,
-                    )
-                ):
-                    next_active_hypothesis = None
-                else:
-                    next_active_hypothesis.feedback = None
-                    next_active_hypothesis.next_step = (
-                        implementation.next_step if implementation is not None else None
-                    )
-                profile_outcome = (
-                    ProfileGuidanceOutcome.from_round(
-                        round_number, passed, official_evaluation, perf_delta_pct
-                    )
-                    if outer_loop == "profile-guided"
-                    else None
-                )
-                engine = engine.replace_state(agent_run_state).complete_round(
-                    completed_record,
-                    next_active=next_active_hypothesis,
-                    profile_outcome=profile_outcome,
-                )
-                next_agent_run_state = engine.state
-                state_transition = state_store.transition(next_agent_run_state)
-                ctx.begin_completed_round(
-                    round_number,
-                    state_transition=state_transition,
+                agent_run_state = engine.state
+                active_hypothesis = _require_active_hypothesis(engine)
+                records = round_history.records
+                round_number = attempt_outcome.round_number
+                single_agent_response = attempt_outcome.single_agent_response
+                if inner_loop == "single-agent" and single_agent_response is not None:
+                    carry.single_agent_response = single_agent_response
+                engine = _begin_completed_agent_round(
+                    ctx, request, engine, completed_record, attempt_outcome
                 )
                 records.append(completed_record)
 
-                if not passed and records[-1].reviewed:
-                    issue_board.append_exhaustion_note(
-                        progress_path,
-                        round_number,
-                        max_retries_per_round,
-                        feedback or "",
-                    )
-                    carry.exhaustion_info = (
-                        f"Round {round_number} did not pass after "
-                        f"{max_retries_per_round} attempts. Last judge feedback: "
-                        f"{feedback or '(empty)'}"
-                    )
-                    carry.regression_info = None
-                elif passed:
-                    carry.exhaustion_info = None
-                    if (
-                        inner_loop == "multi-agent"
-                        and implementation is not None
-                        and not _implementation_keeps_hypothesis_active(
-                            implementation,
-                            continuation_rounds=active_hypothesis.continuation_rounds,
-                        )
-                        and implementation.hypothesis_outcome is not HypothesisOutcome.NOMINATED
-                    ):
-                        # A reviewed terminal classification is accepted, but
-                        # its implementation edits are still in the workspace.
-                        # Give the next designer the same explicit parent-state
-                        # decision as an unreviewed terminal result.
-                        carry.regression_info = _terminal_workspace_notice(records)
-                    elif official_evaluation and candidate_retained is False:
-                        carry.regression_info = (
-                            f"Round {round_number}'s official candidate was not retained: "
-                            f"{perf_metric}{(' ' + perf_unit) if perf_unit else ''}. "
-                            "Use its recorded parent and objective directions when choosing "
-                            "the next checkpoint."
-                        )
-                    else:
-                        carry.regression_info = None
-                else:
-                    # A provisional round is normal hypothesis work, not a
-                    # judge-loop exhaustion or a performance regression.
-                    carry.exhaustion_info = None
-                    carry.regression_info = (
-                        None
-                        if _implementation_keeps_hypothesis_active(
-                            implementation,
-                            continuation_rounds=active_hypothesis.continuation_rounds,
-                        )
-                        else _terminal_workspace_notice(records)
-                    )
+                _update_round_carry_over(
+                    carry, active_hypothesis, round_history, attempt_outcome, progress_path
+                )
 
-                # The framework, rather than the designer, owns this lifecycle.
-                # A continuing implementation keeps its plan and session. An
-                # unreviewed terminal result hands control back to the designer;
-                # a rejected review keeps the same claim plus reviewer feedback
-                # so the implementer can address it on the next round.
-                ctx.persist_completed_round()
-                agent_run_state = next_agent_run_state
+                _persist_completed_agent_round(ctx, engine, completed_record, attempt_outcome)
+                agent_run_state = engine.state
                 active_hypothesis = agent_run_state.active_hypothesis
-                publish_experiments_changed(
-                    ctx, agent_run_state, "round_persisted", (completed_record.hypothesis_id,)
-                )
-                ctx.events.emit(
-                    CoreEventType.ROUND_FINISHED,
-                    status=(
-                        EventStatus.COMPLETED
-                        if passed or not records[-1].reviewed
-                        else EventStatus.FAILED
-                    ),
-                    round_label=f"round-{round_number}",
-                    data=RoundFinishedData(
-                        attempts=retry,
-                        judge_verdict=(
-                            "pass" if passed else "fail" if records[-1].reviewed else "skipped"
-                        ),
-                        perf_metric=perf_metric,
-                        perf_unit=perf_unit,
-                        profile_skipped=profile_skipped,
-                    ),
-                )
 
                 round_number += 1
 
-        ctx.lprint(f"Reached max_rounds={max_rounds}. Stopping.")
-        _finalize_agent_run(
-            ctx,
-            records=records,
-            space=agent_run_state.metrics,
-            progress_path=progress_path,
+        return _finish_agent_rounds(
+            ctx, records, agent_run_state.metrics, progress_path, max_rounds
         )
-        return True
     finally:
         ctx.close()
+
+
+def run_agent_loop(
+    request: LoopRunRequest,
+    *,
+    integration: LocalRunIntegration | None = None,
+    start_round: int | None = None,
+) -> bool:
+    """Run the orchestrator-driven build loop.
+
+    Returns True iff the orchestrator declared the objective met within
+    ``max_rounds``. Returns False when the round budget is exhausted.
+    """
+    existing = request.resume is not None
+    start_round = (1 if not existing else None) if start_round is None else start_round
+    ctx = _create_agent_run_context(request, integration)
+    output_sink().run_configured(
+        RunConfiguredData(
+            run_log_path=str(ctx.run_log_path),
+            project_root=str(ctx.project_root),
+            objective=request.objective or request.input_bundle.objective,
+        )
+    )
+    return _run_agent_rounds(ctx, request, start_round)

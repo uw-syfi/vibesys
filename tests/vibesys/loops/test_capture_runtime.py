@@ -2,8 +2,7 @@
 
 ``resources/profilers/_common/capture_runtime.py`` is a standalone script
 (stdlib only, no ``vibesys`` imports — it is staged alongside every profiler
-plugin, see ``docs/contributing/amd-profiler-worklog.md``), so it is loaded
-by file path here rather than imported as a package, mirroring
+plugin), so it is loaded by file path here rather than imported as a package, mirroring
 ``tests/vibesys/loops/test_profiler_mcp.py`` and
 ``tests/vibesys/loops/test_torch_profile_analyzer.py``.
 
@@ -85,7 +84,7 @@ def _is_alive(pid: int) -> bool:
     return True
 
 
-def _wait_until(predicate, *, timeout: float = 3.0, interval: float = 0.05) -> bool:  # noqa: ANN001  # tracked: #288
+def _wait_until(predicate, *, timeout: float = 3.0, interval: float = 0.05) -> bool:  # noqa: ANN001  # LW-910179; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
@@ -358,8 +357,7 @@ def test_timeout_kills_setsid_grandchild_via_proc_walk(fake_profiler: Path, tmp_
 #
 # rocprofv3 LD_PRELOADs its SDK into the entire environment handed to the
 # profiled process tree, and nothing suppresses the resulting init/banner
-# print (confirmed on real MI210 hardware -- see
-# docs/contributing/amd-profiler-worklog.md). setup_command exists so a step
+# print (confirmed on real MI210 hardware). setup_command exists so a step
 # whose own output must stay clean (e.g. picking a free port) can run
 # entirely outside that tree. _FAKE_INJECTING_PROFILER_SOURCE below models
 # the real mechanism generically: an env var standing in for LD_PRELOAD,
@@ -731,7 +729,7 @@ def test_manifest_written_and_parseable(tmp_path: Path) -> None:
 
 def test_manifest_redacts_env_values_not_keys(tmp_path: Path) -> None:
     out_dir = tmp_path / "c"
-    secret = "super-secret-token-xyz"  # noqa: S105  # tracked: #288
+    secret = "super-secret-token-xyz"  # noqa: S105  # LW-910180; this is a placeholder/test credential, not a real secret
     lifecycle = cr.Lifecycle(command="exit 0", env={"MY_TOKEN": secret}, timeout_s=5.0)
     result = cr.run_capture([], lifecycle, kind="unit", out_dir=out_dir, meta={})
 
@@ -863,8 +861,8 @@ def test_property_script_text_is_byte_for_byte_and_matches_bash_c(
     tmp_path = tmp_path_factory.mktemp("cr")
     text = f"cat <<'VIBESYS_EOF'\n{content}\nVIBESYS_EOF\n"
 
-    direct = subprocess.run(  # noqa: S603  # tracked: #288
-        ["bash", "-c", text],  # noqa: S607  # tracked: #288
+    direct = subprocess.run(  # noqa: S603  # LW-910181; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
+        ["bash", "-c", text],  # noqa: S607  # LW-910182; the executable is resolved from the fixed rocprof/torch toolchain name, not a user-controlled path
         capture_output=True,
         text=True,
         timeout=10,
@@ -1135,7 +1133,7 @@ def _find_common_dir(plugin_dir: Path) -> Path:
         candidate = base / name
         if (candidate / "capture_runtime.py").is_file():
             return candidate
-    raise AssertionError("capture_runtime.py not found via either shim name")  # noqa: TRY003
+    raise AssertionError("capture_runtime.py not found via either shim name")  # noqa: TRY003  # LW-920207; this is a boundary error that deliberately embeds the offending value for the operator to act on
 
 
 @pytest.mark.parametrize(

@@ -9,7 +9,6 @@ CLI arguments, agent providers, or evaluator implementations.
 # SLF001: these private values are shared only between cooperating types in this
 # module. TRY003: these boundary errors deliberately embed the offending
 # metadata path and value.
-# ruff: noqa: SLF001, TRY003
 
 from __future__ import annotations
 
@@ -62,6 +61,7 @@ _CONFIG_DIRECTORY_NAME = project_paths.CONFIGURATION_DIRECTORY_NAME
 _STATE_DIRECTORY_PARTS = project_paths.STATE_DIRECTORY_PARTS
 _STATE_DIRECTORY_PATH = project_paths.STATE_DIRECTORY_PATH
 _STATE_DIRECTORY_POSIX = project_paths.STATE_DIRECTORY_POSIX
+_RUN_NAMESPACE_PART_COUNT = len(_STATE_DIRECTORY_PARTS) + 3
 _IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,127}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 _GIT_OBJECT_ID_PATTERN = r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
@@ -93,7 +93,7 @@ def is_project_state_path(relative_path: Path | str) -> bool:
     """Return whether a safe project-relative path is owned by this package."""
     path = Path(relative_path)
     if path.is_absolute() or path == Path() or ".." in path.parts:
-        raise ProjectStateError(f"Project path must be a safe relative path: {relative_path}")
+        raise ProjectStateError.unsafe_relative_path(relative_path)
     return any(
         path.parts[index : index + len(_STATE_DIRECTORY_PARTS)] == _STATE_DIRECTORY_PARTS
         for index in range(len(path.parts) - len(_STATE_DIRECTORY_PARTS) + 1)
@@ -124,13 +124,16 @@ class StateDocument:
         """Construct a validated package-owned document."""
         _validate_project_state_path(project_relative_path)
         if not isinstance(contents, bytes):
-            raise TypeError("state document contents must be bytes")
+            message = "state document contents must be bytes"
+            raise TypeError(message)
         try:
             payload = json.loads(contents)
         except (UnicodeDecodeError, ValueError) as exc:
-            raise ValueError("state document contents must be a JSON object") from exc
+            message = "state document contents must be a JSON object"
+            raise ValueError(message) from exc
         if not isinstance(payload, dict):
-            raise TypeError("state document contents must be a JSON object")
+            message = "state document contents must be a JSON object"
+            raise TypeError(message)
         document = object.__new__(cls)
         object.__setattr__(document, "_project_relative_path", project_relative_path)
         object.__setattr__(document, "_contents", contents)
@@ -154,9 +157,10 @@ class StateTransition:
         _validate_project_state_path(project_relative_path)
         if (
             next_document is not None
-            and next_document._project_relative_path != project_relative_path
+            and next_document._project_relative_path != project_relative_path  # noqa: SLF001  # lint-waiver: LW-008211 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
         ):
-            raise ValueError("state transition document path must match its target path")
+            message = "state transition document path must match its target path"
+            raise ValueError(message)
         transition = object.__new__(cls)
         object.__setattr__(transition, "_project_relative_path", project_relative_path)
         object.__setattr__(transition, "_next_document", next_document)
@@ -177,7 +181,8 @@ class StateFile:
         """Reject unsafe paths and mutable or textual contents."""
         _validate_snapshot_relative_path(self.relative_path)
         if not isinstance(self.contents, bytes):
-            raise TypeError("state snapshot file contents must be bytes")
+            message = "state snapshot file contents must be bytes"
+            raise TypeError(message)
 
 
 @dataclass(frozen=True, init=False)
@@ -197,20 +202,23 @@ class StateSnapshot:
         """Construct a validated package-owned snapshot."""
         _validate_snapshot_root(namespace_root)
         if not isinstance(files, tuple):
-            raise TypeError("state snapshot files must be an immutable tuple")
+            message = "state snapshot files must be an immutable tuple"
+            raise TypeError(message)
         if any(not isinstance(item, StateFile) for item in files):
-            raise TypeError("state snapshot files must contain StateFile values")
+            message = "state snapshot files must contain StateFile values"
+            raise TypeError(message)
         paths = tuple(item.relative_path for item in files)
         if paths != tuple(sorted(paths, key=PurePosixPath.as_posix)):
-            raise ValueError("state snapshot files must be ordered by relative path")
+            message = "state snapshot files must be ordered by relative path"
+            raise ValueError(message)
         if len(paths) != len(set(paths)):
-            raise ValueError("state snapshot files must have unique relative paths")
+            message = "state snapshot files must have unique relative paths"
+            raise ValueError(message)
         for path in paths:
             combined = namespace_root / path
             if combined.parts[:3] == (*_STATE_DIRECTORY_PARTS, "local"):
-                raise ValueError(
-                    "portable state snapshots must not contain .vibesys/state/local files"
-                )
+                message = "portable state snapshots must not contain .vibesys/state/local files"
+                raise ValueError(message)
         snapshot = object.__new__(cls)
         object.__setattr__(snapshot, "_namespace_root", namespace_root)
         object.__setattr__(snapshot, "files", files)
@@ -277,7 +285,7 @@ class ProjectGitIntegration:
     def validate_candidate_worktree(self, path: Path) -> Path:
         """Resolve a candidate worktree below this run's machine-local area."""
         store = ProjectState(self._project_root)
-        worktrees_root = store._worktrees_dir(self._run_id)
+        worktrees_root = store._worktrees_dir(self._run_id)  # noqa: SLF001  # lint-waiver: LW-008212 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
         raw_destination = path.expanduser()
         if not raw_destination.is_absolute():
             raw_destination = self._project_root / raw_destination
@@ -288,19 +296,22 @@ class ProjectGitIntegration:
                 kind="candidate worktree",
             )
         except ProjectStateError as exc:
-            raise ValueError(f"candidate worktree must be below {worktrees_root}: {path}") from exc
+            message = f"candidate worktree must be below {worktrees_root}: {path}"
+            raise ValueError(message) from exc
         destination = destination.resolve()
         if destination == worktrees_root.resolve():
-            raise ValueError(f"candidate worktree must be below {worktrees_root}: {path}")
+            message = f"candidate worktree must be below {worktrees_root}: {path}"
+            raise ValueError(message)
         return destination
 
     def resolve_snapshot(self, snapshot: StateSnapshot) -> GitSnapshotPlan:
         """Resolve a validated portable snapshot into opaque Git capabilities."""
         ProjectState(self._project_root)
-        namespace_root = snapshot._namespace_root
+        namespace_root = snapshot._namespace_root  # noqa: SLF001  # lint-waiver: LW-008213 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
         parts = namespace_root.parts
         if parts != _STATE_DIRECTORY_PARTS and parts[3] != self._run_id:
-            raise ValueError(f"state snapshot belongs to run {parts[3]!r}, not {self._run_id!r}")
+            message = f"state snapshot belongs to run {parts[3]!r}, not {self._run_id!r}"
+            raise ValueError(message)
         destination_root = _contained_without_symlinks(
             self._project_root,
             self._project_root.joinpath(*namespace_root.parts),
@@ -326,12 +337,16 @@ class ProjectGitIntegration:
 
     def resolve_replacement_snapshot(self, snapshot: StateSnapshot) -> GitSnapshotPlan:
         """Resolve an exact replacement of one namespace owned by this run."""
-        namespace_root = snapshot._namespace_root
-        if len(namespace_root.parts) != 5 or namespace_root.parts[3] != self._run_id:  # noqa: PLR2004
-            raise ValueError(
+        namespace_root = snapshot._namespace_root  # noqa: SLF001  # lint-waiver: LW-008214 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+        if (
+            len(namespace_root.parts) != _RUN_NAMESPACE_PART_COUNT
+            or namespace_root.parts[3] != self._run_id
+        ):
+            message = (
                 "framework state snapshot must select a dedicated namespace "
                 f"for run {self._run_id!r}"
             )
+            raise ValueError(message)
         return self.resolve_snapshot(snapshot)
 
 
@@ -422,32 +437,29 @@ class StateNamespace:
         document = (
             None
             if model is None
-            else StateDocument._create(project_relative_path, _serialize_state_model(model))
+            else StateDocument._create(project_relative_path, _serialize_state_model(model))  # noqa: SLF001  # lint-waiver: LW-008215 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
         )
-        return StateTransition._create(project_relative_path, document)
+        return StateTransition._create(project_relative_path, document)  # noqa: SLF001  # lint-waiver: LW-008216 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
 
     def apply(self, transition: StateTransition) -> None:
         """Atomically apply a transition prepared for this namespace."""
         self._validated_root()
         try:
-            relative_path = transition._project_relative_path.relative_to(self._namespace_root)
+            relative_path = transition._project_relative_path.relative_to(self._namespace_root)  # noqa: SLF001  # lint-waiver: LW-008217 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
         except ValueError as exc:
-            raise ProjectStateError(
-                f"State transition target is outside this namespace: "
-                f"{transition._project_relative_path}"
+            raise ProjectStateError.transition_outside_namespace(
+                transition._project_relative_path  # noqa: SLF001  # lint-waiver: LW-008218 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
             ) from exc
         path = self._resolve_file(relative_path)
         try:
-            if transition._next_document is None:
+            if transition._next_document is None:  # noqa: SLF001  # lint-waiver: LW-008219 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
                 if path.exists() and not path.is_file():
-                    raise ProjectStateError(f"VibeSys state path is not a file: {path}")
+                    raise ProjectStateError.state_path_not_file(path)
                 path.unlink(missing_ok=True)
             else:
-                _atomic_write_bytes(path, transition._next_document._contents)
+                _atomic_write_bytes(path, transition._next_document._contents)  # noqa: SLF001  # lint-waiver: LW-008220 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
         except OSError as exc:
-            raise ProjectStateError(
-                f"Could not apply VibeSys state transition at {path}: {exc}"
-            ) from exc
+            raise ProjectStateError.transition_apply_failed(path, exc) from exc
 
     def delete(self, relative_path: str | PurePosixPath) -> bool:
         """Delete one state file, returning whether it existed."""
@@ -455,22 +467,21 @@ class StateNamespace:
         if not path.exists():
             return False
         if not path.is_file():
-            raise ProjectStateError(f"VibeSys state path is not a file: {path}")
+            raise ProjectStateError.state_path_not_file(path)
         try:
             path.unlink()
         except OSError as exc:
-            raise ProjectStateError(
-                f"Could not delete VibeSys state model at {path}: {exc}"
-            ) from exc
+            message = f"Could not delete VibeSys state model at {path}: {exc}"
+            raise ProjectStateError(message) from exc
         return True
 
     def snapshot(self) -> StateSnapshot:
         """Return an ordered immutable snapshot of this portable namespace."""
         if not self._portable:
-            raise ProjectStateError("Machine-local VibeSys state namespaces cannot be snapshotted")
+            raise ProjectStateError.local_state_cannot_snapshot()
         root = self._validated_root()
         if not root.exists():
-            return StateSnapshot._create(self._namespace_root, ())
+            return StateSnapshot._create(self._namespace_root, ())  # noqa: SLF001  # lint-waiver: LW-008221 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
 
         files: list[StateFile] = []
         try:
@@ -478,15 +489,11 @@ class StateNamespace:
             for path in paths:
                 relative = path.relative_to(root)
                 if path.is_symlink():
-                    raise ProjectStateError(
-                        f"VibeSys {self._kind} state must not contain symlinks: {path}"
-                    )
+                    raise ProjectStateError.namespace_snapshot_symlink(self._kind, path)
                 if path.is_dir():
                     continue
                 if not path.is_file():
-                    raise ProjectStateError(
-                        f"VibeSys {self._kind} state contains an unsupported file type: {path}"
-                    )
+                    raise ProjectStateError.namespace_snapshot_unsupported_file(self._kind, path)
                 files.append(
                     StateFile(
                         relative_path=PurePosixPath(relative.as_posix()),
@@ -494,10 +501,8 @@ class StateNamespace:
                     )
                 )
         except OSError as exc:
-            raise ProjectStateError(
-                f"Could not snapshot VibeSys {self._kind} state at {root}: {exc}"
-            ) from exc
-        return StateSnapshot._create(self._namespace_root, tuple(files))
+            raise ProjectStateError.namespace_snapshot_failed(self._kind, root, exc) from exc
+        return StateSnapshot._create(self._namespace_root, tuple(files))  # noqa: SLF001  # lint-waiver: LW-008222 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
 
     def agent_visible_path(self, relative_path: str | PurePosixPath | None = None) -> str:
         """Return a safe project-relative location for an agent-facing prompt.
@@ -505,7 +510,7 @@ class StateNamespace:
         Filesystem reads and writes must still use this namespace's typed methods.
         """
         if not self._portable:
-            raise ProjectStateError("Machine-local VibeSys state is not agent-visible")
+            raise ProjectStateError.local_state_not_agent_visible()
         return self._project_relative_path(relative_path).as_posix()
 
     def equivalent_external_file(
@@ -515,10 +520,10 @@ class StateNamespace:
     ) -> Path:
         """Resolve the equivalent state file inside another project worktree."""
         if not self._portable:
-            raise ProjectStateError("Machine-local VibeSys state has no worktree equivalent")
+            raise ProjectStateError.local_state_has_no_worktree_equivalent()
         root = Path(project_root).resolve()
         if not root.is_dir():
-            raise ProjectStateError(f"Project root is not a directory: {root}")
+            raise ProjectStateError.project_root_not_directory(root)
         relative = self._project_relative_path(relative_path)
         return _contained_without_symlinks(
             root,
@@ -556,13 +561,11 @@ class StateNamespace:
         )
         try:
             if directory.exists() and not directory.is_dir():
-                raise ProjectStateError(
-                    f"VibeSys {self._kind} external state path is not a directory: {directory}"
-                )
+                raise ProjectStateError.external_state_path_not_directory(self._kind, directory)
             directory.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            raise ProjectStateError(
-                f"Could not create VibeSys {self._kind} external state directory {directory}: {exc}"
+            raise ProjectStateError.external_state_directory_create_failed(
+                self._kind, directory, exc
             ) from exc
         return directory
 
@@ -574,12 +577,10 @@ class StateNamespace:
         )
         try:
             if root.exists() and not root.is_dir():
-                raise ProjectStateError(
-                    f"VibeSys {self._kind} state namespace is not a directory: {root}"
-                )
+                raise ProjectStateError.state_namespace_not_directory(self._kind, root)
         except OSError as exc:
-            raise ProjectStateError(
-                f"Could not validate VibeSys {self._kind} state namespace {root}: {exc}"
+            raise ProjectStateError.state_namespace_validation_failed(
+                self._kind, root, exc
             ) from exc
         return root
 
@@ -628,8 +629,8 @@ class StateSlot[ModelT: BaseModel]:
         validated = self.validate_transition(transition)
         document = (
             None
-            if validated._next_document is None
-            else json.loads(validated._next_document._contents)
+            if validated._next_document is None  # noqa: SLF001  # lint-waiver: LW-008223 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+            else json.loads(validated._next_document._contents)  # noqa: SLF001  # lint-waiver: LW-008224 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
         )
         return _serialize_json_object(
             {
@@ -648,14 +649,14 @@ class StateSlot[ModelT: BaseModel]:
         after applying the deletion instead.
         """
         validated = self.validate_transition(transition)
-        if validated._next_document is None:
-            raise ProjectStateError("Cannot create a state snapshot from a deletion transition")
-        return StateSnapshot._create(
-            namespace_root=self._namespace._namespace_root,
+        if validated._next_document is None:  # noqa: SLF001  # lint-waiver: LW-008225 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+            raise ProjectStateError.snapshot_from_deletion_transition()
+        return StateSnapshot._create(  # noqa: SLF001  # lint-waiver: LW-008226 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+            namespace_root=self._namespace._namespace_root,  # noqa: SLF001  # lint-waiver: LW-008227 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
             files=(
                 StateFile(
                     relative_path=self._relative_path,
-                    contents=validated._next_document._contents,
+                    contents=validated._next_document._contents,  # noqa: SLF001  # lint-waiver: LW-008228 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
                 ),
             ),
         )
@@ -663,51 +664,46 @@ class StateSlot[ModelT: BaseModel]:
     def deserialize_transition(self, payload: bytes) -> StateTransition:
         """Parse and schema-validate a transition for exactly this slot."""
         if not isinstance(payload, bytes):
-            raise TypeError("serialized state transition must be bytes")
+            message = "serialized state transition must be bytes"
+            raise TypeError(message)
         try:
             raw = json.loads(payload)
         except (UnicodeDecodeError, ValueError) as exc:
-            raise ProjectStateError("Serialized state transition is not valid JSON") from exc
+            raise ProjectStateError.serialized_transition_invalid_json() from exc
         if not isinstance(raw, dict):
-            raise ProjectStateError("Serialized state transition must be a JSON object")
+            raise ProjectStateError.serialized_transition_not_object()
         if set(raw) != {"schema_version", "document"} or raw["schema_version"] != 1:
-            raise ProjectStateError("Serialized state transition has an invalid schema")
+            raise ProjectStateError.serialized_transition_invalid_schema()
         document = raw["document"]
         if document is None:
             return self.transition(None)
         if not isinstance(document, dict):
-            raise ProjectStateError("Serialized state transition document must be an object")
+            raise ProjectStateError.serialized_transition_document_not_object()
         try:
             model = self._model_type.model_validate_json(
                 json.dumps(document),
                 strict=True,
             )
         except ValidationError as exc:
-            raise ProjectStateError(
-                f"Serialized state transition does not match the slot schema: {exc}"
-            ) from exc
+            raise ProjectStateError.serialized_transition_model_mismatch(exc) from exc
         return self.transition(model)
 
     def validate_transition(self, transition: StateTransition) -> StateTransition:
         """Validate a reconstructed transition's target and replacement schema."""
-        expected_path = self._namespace._project_relative_path(self._relative_path)
-        if transition._project_relative_path != expected_path:
-            raise ProjectStateError(
-                "State transition must target the typed slot: "
-                f"expected {expected_path}, got "
-                f"{transition._project_relative_path}"
+        expected_path = self._namespace._project_relative_path(self._relative_path)  # noqa: SLF001  # lint-waiver: LW-008229 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+        if transition._project_relative_path != expected_path:  # noqa: SLF001  # lint-waiver: LW-008230 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+            raise ProjectStateError.typed_transition_target_mismatch(
+                expected_path,
+                transition._project_relative_path,  # noqa: SLF001  # lint-waiver: LW-008231 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
             )
-        if transition._next_document is not None:
+        if transition._next_document is not None:  # noqa: SLF001  # lint-waiver: LW-008232 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
             try:
                 self._model_type.model_validate_json(
-                    transition._next_document._contents,
+                    transition._next_document._contents,  # noqa: SLF001  # lint-waiver: LW-008233 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
                     strict=True,
                 )
             except ValidationError as exc:
-                raise ProjectStateError(
-                    "State transition document does not match the typed slot schema at "
-                    f"{expected_path}: {exc}"
-                ) from exc
+                raise ProjectStateError.typed_transition_model_mismatch(expected_path, exc) from exc
         return transition
 
     def apply(self, transition: StateTransition) -> None:
@@ -848,7 +844,8 @@ class EvolveRunConfiguration(_BaseRunConfiguration):
         if self.search_policy == "vibesys" and any(
             value is not None for value in openevolve_values
         ):
-            raise ValueError("OpenEvolve settings require search_policy='openevolve'")
+            message = "OpenEvolve settings require search_policy='openevolve'"
+            raise ValueError(message)
         return self
 
 
@@ -893,7 +890,7 @@ def generate_run_id(
     """
     timestamp = now or datetime.now(UTC)
     if timestamp.tzinfo is None:
-        raise ProjectStateError("Run ID timestamp must include a timezone")
+        raise ProjectStateError.run_id_timestamp_timezone_missing()
     timestamp = timestamp.astimezone(UTC)
     suffix = (unique or uuid.uuid4()).hex[:8]
     normalized = unicodedata.normalize("NFKD", display_name).encode("ascii", "ignore").decode()
@@ -909,7 +906,7 @@ class ProjectState:
         """Bind the store to an existing project directory."""
         root = Path(project_root).resolve()
         if not root.is_dir():
-            raise ProjectStateError(f"Project root is not a directory: {root}")
+            raise ProjectStateError.project_root_not_directory(root)
         self.project_root = root
         self._config_dir = root / _CONFIG_DIRECTORY_NAME
         self._metadata_dir = root / _STATE_DIRECTORY_PATH
@@ -954,7 +951,8 @@ class ProjectState:
         try:
             children = tuple(root.iterdir())
         except OSError as exc:
-            raise ProjectStateError(f"Could not inspect project collection {root}: {exc}") from exc
+            message = f"Could not inspect project collection {root}: {exc}"
+            raise ProjectStateError(message) from exc
         return tuple(
             sorted(
                 (child.resolve() for child in children if cls.is_project_root(child)),
@@ -967,7 +965,7 @@ class ProjectState:
         """Return a run log destination before the project root is materialized."""
         root = Path(project_root).expanduser().resolve()
         if root.exists() and not root.is_dir():
-            raise ProjectStateError(f"Project root is not a directory: {root}")
+            raise ProjectStateError.project_root_not_directory(root)
         normalized = _validate_run_id(run_id)
         state_home = _state_home()
         _prepare_state_home(state_home)
@@ -1071,7 +1069,7 @@ class ProjectState:
         self._validate_storage_roots()
         return _load_model(self._project_manifest_path, ProjectManifest)
 
-    def new_run_manifest(  # noqa: PLR0913
+    def new_run_manifest(  # noqa: PLR0913  # lint-waiver: LW-008237 [PLR0913]; the public manifest factory keeps each run field independently named for existing callers.
         self,
         display_name: str,
         *,
@@ -1110,15 +1108,17 @@ class ProjectState:
         self._validate_storage_roots()
         project = self.load_project()
         if manifest.project_id != project.project_id:
-            raise ProjectStateError(
+            message = (
                 f"Run {manifest.run_id!r} belongs to project {manifest.project_id!r}, "
                 f"not {project.project_id!r}"
             )
+            raise ProjectStateError(message)
         path = self._run_manifest_path(manifest.run_id)
         if path.exists():
             existing = self.load_run(manifest.run_id)
             if existing != manifest:
-                raise ProjectStateError(f"Run metadata already exists with different data: {path}")
+                message = f"Run metadata already exists with different data: {path}"
+                raise ProjectStateError(message)
         else:
             _atomic_write_model(path, manifest)
         self.log_directory(manifest.run_id).mkdir(parents=True, exist_ok=True)
@@ -1162,23 +1162,27 @@ class ProjectState:
         raw = _read_json_object(path)
         recorded_version = raw.get("schema_version")
         if recorded_version == RUN_SCHEMA_VERSION:
-            raise ProjectStateError(
+            message = (
                 f"Run metadata at {path} is already at run schema version {RUN_SCHEMA_VERSION}"
             )
+            raise ProjectStateError(message)
         if recorded_version not in {1, 2}:
-            raise ProjectStateError(
+            message = (
                 f"Run metadata at {path} records unsupported run schema version "
                 f"{recorded_version!r}; only versions 1 and 2 can be migrated"
             )
+            raise ProjectStateError(message)
         configuration = raw.get("configuration")
         if not isinstance(configuration, dict):
-            raise ProjectStateError(f"Run metadata at {path} has no configuration object")
+            message = f"Run metadata at {path} has no configuration object"
+            raise ProjectStateError(message)
         if recorded_version == 1:
             if "run_environment" in configuration:
-                raise ProjectStateError(
+                message = (
                     f"Run metadata at {path} already records a run environment; "
                     "its schema version is inconsistent with its contents"
                 )
+                raise ProjectStateError(message)
             migrated_environment = run_environment
         else:
             recorded_environment = configuration.get("run_environment")
@@ -1187,14 +1191,14 @@ class ProjectState:
                     recorded_environment, strict=True
                 )
             except (TypeError, ValueError) as exc:
-                raise ProjectStateError(
-                    f"Run metadata at {path} has an invalid run environment: {exc}"
-                ) from exc
+                message = f"Run metadata at {path} has an invalid run environment: {exc}"
+                raise ProjectStateError(message) from exc
             if migrated_environment != run_environment:
-                raise ProjectStateError(
+                message = (
                     f"Run metadata at {path} records a different run environment; "
                     "supply the environment already recorded by version 2"
                 )
+                raise ProjectStateError(message)
         migrated = {
             **raw,
             "schema_version": RUN_SCHEMA_VERSION,
@@ -1206,7 +1210,8 @@ class ProjectState:
         try:
             manifest = RunManifest.model_validate_json(json.dumps(migrated), strict=True)
         except (TypeError, ValueError) as exc:
-            raise ProjectStateError(f"Could not migrate VibeSys metadata at {path}: {exc}") from exc
+            message = f"Could not migrate VibeSys metadata at {path}: {exc}"
+            raise ProjectStateError(message) from exc
         _atomic_write_model(path, manifest)
         return manifest
 
@@ -1229,10 +1234,11 @@ class ProjectState:
         self._validate_storage_roots()
         manifest = self.load_run(run_id)
         if configuration.outer_loop != manifest.configuration.outer_loop:
-            raise ProjectStateError(
+            message = (
                 f"Run {manifest.run_id!r} uses outer loop "
                 f"{manifest.configuration.outer_loop!r}, not {configuration.outer_loop!r}"
             )
+            raise ProjectStateError(message)
         path = self._run_manifest_path(run_id)
         updated = manifest.model_copy(update={"configuration": configuration})
         if updated != manifest:
@@ -1247,7 +1253,8 @@ class ProjectState:
         manifests: list[RunManifest] = []
         for child in sorted(runs_dir.iterdir()):
             if not child.is_dir():
-                raise ProjectStateError(f"Unexpected file in VibeSys runs directory: {child}")
+                message = f"Unexpected file in VibeSys runs directory: {child}"
+                raise ProjectStateError(message)
             manifests.append(self.load_run(child.name))
         return sorted(manifests, key=lambda manifest: (manifest.created_at, manifest.run_id))
 
@@ -1264,9 +1271,8 @@ class ProjectState:
         try:
             value = self._current_run_path.read_text(encoding="utf-8").strip()
         except OSError as exc:
-            raise ProjectStateError(
-                f"Could not read current run pointer {self._current_run_path}: {exc}"
-            ) from exc
+            message = f"Could not read current run pointer {self._current_run_path}: {exc}"
+            raise ProjectStateError(message) from exc
         return _validate_run_id(value, source=self._current_run_path)
 
     def set_current_run(self, run_id: str | None) -> None:
@@ -1288,7 +1294,8 @@ class ProjectState:
             return self.load_run(current)
         latest = self.latest_run()
         if latest is None:
-            raise ProjectStateError(f"No VibeSys runs exist under {self._metadata_dir}")
+            message = f"No VibeSys runs exist under {self._metadata_dir}"
+            raise ProjectStateError(message)
         return latest
 
     def save_round(self, run_id: str, record: RoundRecord) -> StateSnapshot:
@@ -1301,15 +1308,12 @@ class ProjectState:
         if record.round_number <= len(completed):
             existing = completed[record.round_number - 1]
             if existing != record:
-                raise ProjectStateError(
-                    f"Completed round already exists with different data: {path}"
-                )
+                raise ProjectStateError.completed_round_data_conflict(path)
             return self.completed_round_snapshot(run_id, record.round_number)
         next_round = len(completed) + 1
         if record.round_number != next_round:
-            raise ProjectStateError(
-                f"Completed rounds must be appended in order: expected round {next_round}, "
-                f"got {record.round_number}"
+            raise ProjectStateError.completed_round_append_out_of_order(
+                next_round, record.round_number
             )
         _atomic_write_text(path, contents.decode("utf-8"))
         return self.completed_round_snapshot(run_id, record.round_number)
@@ -1324,7 +1328,7 @@ class ProjectState:
         _validate_portable_round(record, source=self.project_root)
         root = self._portable_state_dir(run_id, "agent")
         round_path = self._rounds_dir(run_id) / f"{record.round_number:04d}.json"
-        return StateSnapshot._create(
+        return StateSnapshot._create(  # noqa: SLF001  # lint-waiver: LW-008234 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
             namespace_root=PurePosixPath(root.relative_to(self.project_root).as_posix()),
             files=(
                 StateFile(
@@ -1354,20 +1358,18 @@ class ProjectState:
         for path in directory.iterdir():
             match = _ROUND_FILE_PATTERN.fullmatch(path.name)
             if not path.is_file() or match is None:
-                raise ProjectStateError(f"Unexpected completed-round entry: {path}")
+                raise ProjectStateError.unexpected_completed_round_entry(path)
             numbered_paths.append((int(match.group("round")), path))
         records: list[RoundRecord] = []
         for sequence_number, (file_number, path) in enumerate(sorted(numbered_paths), start=1):
             if file_number != sequence_number:
-                raise ProjectStateError(
-                    "Completed rounds must form a contiguous sequence starting at 1: "
-                    f"expected round {sequence_number}, found {file_number} at {path}"
+                raise ProjectStateError.completed_rounds_not_contiguous(
+                    sequence_number, file_number, path
                 )
             record = self._load_round(path)
             if record.round_number != file_number:
-                raise ProjectStateError(
-                    f"Round file {path} contains round {record.round_number}, "
-                    f"expected {file_number}"
+                raise ProjectStateError.completed_round_file_mismatch(
+                    path, record.round_number, file_number
                 )
             records.append(record)
         return records
@@ -1375,12 +1377,10 @@ class ProjectState:
     def completed_round_snapshot(self, run_id: str, round_number: int) -> StateSnapshot:
         """Snapshot one validated completed-round record."""
         if round_number < 1:
-            raise ProjectStateError(f"Round number must be positive, got {round_number}")
+            raise ProjectStateError.invalid_round_number(round_number)
         records = self.load_rounds(run_id)
         if round_number > len(records):
-            raise ProjectStateError(
-                f"Completed round {round_number} does not exist for run {run_id!r}"
-            )
+            raise ProjectStateError.completed_round_missing(round_number, run_id)
         root = self._portable_state_dir(run_id, "agent")
         path = self._rounds_dir(run_id) / f"{round_number:04d}.json"
         return _snapshot_selected_files(
@@ -1497,9 +1497,10 @@ class ProjectState:
                 else ""
             )
         except OSError as exc:
-            raise ProjectStateError(
+            message = (
                 f"Could not read VibeSys ignore contract {self._metadata_gitignore_path}: {exc}"
-            ) from exc
+            )
+            raise ProjectStateError(message) from exc
         if required in existing.splitlines():
             return
         separator = "" if not existing or existing.endswith("\n") else "\n"
@@ -1511,9 +1512,8 @@ class ProjectState:
         try:
             record = parse_round_record(payload)
         except ValidationError as exc:
-            raise ProjectStateError(
-                f"Invalid completed-round metadata at {path}: {_validation_message(exc)}"
-            ) from exc
+            message = f"Invalid completed-round metadata at {path}: {_validation_message(exc)}"
+            raise ProjectStateError(message) from exc
         _validate_portable_round(record, source=path)
         return record
 
@@ -1521,7 +1521,7 @@ class ProjectState:
     def _validate_round_restore_position(cls, directory: Path, round_number: int) -> None:
         """Require valid predecessors while permitting repair of the target file."""
         if round_number < 1:
-            raise ProjectStateError(f"Round number must be positive, got {round_number}")
+            raise ProjectStateError.invalid_round_number(round_number)
         if not directory.exists():
             existing: dict[int, Path] = {}
         else:
@@ -1529,38 +1529,32 @@ class ProjectState:
             for path in directory.iterdir():
                 match = _ROUND_FILE_PATTERN.fullmatch(path.name)
                 if not path.is_file() or path.is_symlink() or match is None:
-                    raise ProjectStateError(f"Unexpected completed-round entry: {path}")
+                    raise ProjectStateError.unexpected_completed_round_entry(path)
                 file_number = int(match.group("round"))
                 if file_number in existing:
-                    raise ProjectStateError(
-                        f"Duplicate completed-round number {file_number}: "
-                        f"{existing[file_number]} and {path}"
+                    raise ProjectStateError.duplicate_completed_round(
+                        file_number, existing[file_number], path
                     )
                 existing[file_number] = path
 
         unexpected_later = sorted(number for number in existing if number > round_number)
         if unexpected_later:
-            raise ProjectStateError(
-                f"Cannot restore round {round_number} before existing round {unexpected_later[0]}"
-            )
+            raise ProjectStateError.restore_before_existing_round(round_number, unexpected_later[0])
         for predecessor in range(1, round_number):
             path = existing.get(predecessor)
             if path is None:
-                raise ProjectStateError(
-                    f"Cannot restore round {round_number} without completed round {predecessor}"
-                )
+                raise ProjectStateError.restore_without_predecessor(round_number, predecessor)
             restored = cls._load_round(path)
             if restored.round_number != predecessor:
-                raise ProjectStateError(
-                    f"Round file {path} contains round {restored.round_number}, "
-                    f"expected {predecessor}"
+                raise ProjectStateError.completed_round_file_mismatch(
+                    path, restored.round_number, predecessor
                 )
 
 
 def _aware_now(value: datetime | None) -> datetime:
     timestamp = value or datetime.now(UTC)
     if timestamp.tzinfo is None:
-        raise ProjectStateError("Metadata timestamp must include a timezone")
+        raise ProjectStateError.metadata_timestamp_timezone_missing()
     return timestamp.astimezone(UTC)
 
 
@@ -1576,10 +1570,10 @@ def _state_home() -> Path:
     configured = os.environ.get(_STATE_HOME_ENV)
     if configured is not None:
         if not configured.strip():
-            raise ProjectStateError(f"{_STATE_HOME_ENV} must not be empty")
+            raise ProjectStateError.state_home_empty(_STATE_HOME_ENV)
         root = Path(configured).expanduser()
         if not root.is_absolute():
-            raise ProjectStateError(f"{_STATE_HOME_ENV} must be an absolute path: {configured}")
+            raise ProjectStateError.state_home_not_absolute(_STATE_HOME_ENV, configured)
     else:
         root = Path.home() / ".vibesys"
     return root.resolve()
@@ -1593,9 +1587,7 @@ def _external_project_state_directory(state_home: Path, project_root: Path) -> P
     digest = hashlib.sha256(project_root.as_posix().encode("utf-8")).hexdigest()[:12]
     destination = state_home / "projects" / f"{slug}-{digest}"
     if destination.resolve().is_relative_to(project_root.resolve()):
-        raise ProjectStateError(
-            f"{_STATE_HOME_ENV} must place machine-local state outside the project: {state_home}"
-        )
+        raise ProjectStateError.state_home_inside_project(_STATE_HOME_ENV, state_home)
     return destination
 
 
@@ -1605,7 +1597,8 @@ def _prepare_state_home(state_home: Path) -> None:
         state_home.mkdir(parents=True, exist_ok=True, mode=0o700)
         (state_home / "projects").mkdir(exist_ok=True, mode=0o700)
     except OSError as exc:
-        raise ProjectStateError(f"Could not create VibeSys state home {state_home}: {exc}") from exc
+        message = f"Could not create VibeSys state home {state_home}: {exc}"
+        raise ProjectStateError(message) from exc
 
 
 def _migrate_legacy_local_directory(source: Path, destination: Path) -> None:
@@ -1628,9 +1621,8 @@ def _migrate_legacy_local_directory(source: Path, destination: Path) -> None:
                 raise
         _remove_migrated_legacy_entries(source)
     except OSError as exc:
-        raise ProjectStateError(
-            f"Could not migrate VibeSys local state from {source} to {destination}: {exc}"
-        ) from exc
+        message = f"Could not migrate VibeSys local state from {source} to {destination}: {exc}"
+        raise ProjectStateError(message) from exc
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
 
@@ -1681,25 +1673,18 @@ def _validate_legacy_migration_tree(source: Path) -> None:
         ):
             continue
         if path.is_symlink():
-            raise ProjectStateError(f"VibeSys local metadata path must not be a symlink: {path}")
+            raise ProjectStateError.local_state_symlink(path)
 
 
 def _validate_run_id(run_id: str, *, source: Path | None = None) -> str:
     if re.fullmatch(_IDENTIFIER_PATTERN, run_id) is None:
-        location = f" in {source}" if source is not None else ""
-        raise ProjectStateError(
-            f"Invalid VibeSys run ID{location}: {run_id!r}. "
-            "Use lowercase letters, digits, dots, underscores, or hyphens."
-        )
+        raise ProjectStateError.invalid_run_id(run_id, source)
     return run_id
 
 
 def _validate_namespace(namespace: str) -> str:
     if re.fullmatch(_IDENTIFIER_PATTERN, namespace) is None:
-        raise ProjectStateError(
-            f"Invalid VibeSys state namespace: {namespace!r}. "
-            "Use lowercase letters, digits, dots, underscores, or hyphens."
-        )
+        raise ProjectStateError.invalid_state_namespace(namespace)
     return namespace
 
 
@@ -1707,9 +1692,7 @@ def _validate_state_relative_path(raw_path: str | PurePosixPath) -> PurePosixPat
     if isinstance(raw_path, str):
         value = raw_path
         if not value or "\\" in value or any(not part for part in value.split("/")):
-            raise ProjectStateError(
-                f"VibeSys state file path must be a non-empty portable relative path: {raw_path!r}"
-            )
+            raise ProjectStateError.invalid_state_file_path(raw_path, portable=True)
     else:
         value = raw_path.as_posix()
     path = PurePosixPath(value)
@@ -1718,26 +1701,27 @@ def _validate_state_relative_path(raw_path: str | PurePosixPath) -> PurePosixPat
         or path == PurePosixPath(".")
         or any(part in {"", ".", ".."} for part in path.parts)
     ):
-        raise ProjectStateError(
-            f"VibeSys state file path must be a safe portable relative path: {raw_path!r}"
-        )
+        raise ProjectStateError.invalid_state_file_path(raw_path, portable=False)
     return path
 
 
 def _validate_project_state_path(path: PurePosixPath) -> None:
     if not isinstance(path, PurePosixPath):
-        raise TypeError("state document paths must be PurePosixPath values")
+        message = "state document paths must be PurePosixPath values"
+        raise TypeError(message)
     try:
         _validate_state_relative_path(path)
     except ProjectStateError as exc:
         raise ValueError(str(exc)) from exc
     if path.parts[:2] != _STATE_DIRECTORY_PARTS or path == _STATE_DIRECTORY_POSIX:
-        raise ValueError("state document paths must identify a file below .vibesys/state")
+        message = "state document paths must identify a file below .vibesys/state"
+        raise ValueError(message)
 
 
 def _validate_snapshot_relative_path(path: PurePosixPath) -> None:
     if not isinstance(path, PurePosixPath):
-        raise TypeError("state snapshot paths must be PurePosixPath values")
+        message = "state snapshot paths must be PurePosixPath values"
+        raise TypeError(message)
     try:
         _validate_state_relative_path(path)
     except ProjectStateError as exc:
@@ -1750,17 +1734,24 @@ def _validate_snapshot_root(path: PurePosixPath) -> None:
     if parts == _STATE_DIRECTORY_PARTS:
         return
     if parts[:3] == (*_STATE_DIRECTORY_PARTS, "local"):
-        raise ValueError("portable state snapshot root must not be below .vibesys/state/local")
+        message = "portable state snapshot root must not be below .vibesys/state/local"
+        raise ValueError(message)
     if parts[:3] != (*_STATE_DIRECTORY_PARTS, "runs") or len(parts) not in {4, 5}:
-        raise ValueError(
+        message = (
             "portable state snapshot root must be .vibesys/state, "
             ".vibesys/state/runs/<run-id>, or "
             ".vibesys/state/runs/<run-id>/<namespace>"
         )
+        raise ValueError(message)
     if re.fullmatch(_IDENTIFIER_PATTERN, parts[3]) is None:
-        raise ValueError(f"portable state snapshot root contains an invalid run ID: {path}")
-    if len(parts) == 5 and re.fullmatch(_IDENTIFIER_PATTERN, parts[4]) is None:  # noqa: PLR2004
-        raise ValueError(f"portable state snapshot root contains an invalid namespace: {path}")
+        message = f"portable state snapshot root contains an invalid run ID: {path}"
+        raise ValueError(message)
+    if (
+        len(parts) == _RUN_NAMESPACE_PART_COUNT
+        and re.fullmatch(_IDENTIFIER_PATTERN, parts[4]) is None
+    ):
+        message = f"portable state snapshot root contains an invalid namespace: {path}"
+        raise ValueError(message)
 
 
 def _snapshot_selected_files(
@@ -1784,10 +1775,8 @@ def _snapshot_selected_files(
             )
             if not path.is_file():
                 if not path.exists():
-                    raise ProjectStateError(
-                        f"Portable VibeSys snapshot file does not exist: {path}"
-                    )
-                raise ProjectStateError(f"Portable VibeSys snapshot path is not a file: {path}")
+                    raise ProjectStateError.portable_snapshot_file_missing(path)
+                raise ProjectStateError.portable_snapshot_path_not_file(path)
             files.append(
                 StateFile(
                     relative_path=PurePosixPath(path.relative_to(snapshot_root).as_posix()),
@@ -1795,11 +1784,9 @@ def _snapshot_selected_files(
                 )
             )
     except OSError as exc:
-        raise ProjectStateError(
-            f"Could not read portable VibeSys snapshot below {snapshot_root}: {exc}"
-        ) from exc
+        raise ProjectStateError.portable_snapshot_read_failed(snapshot_root, exc) from exc
     files.sort(key=lambda item: item.relative_path.as_posix())
-    return StateSnapshot._create(
+    return StateSnapshot._create(  # noqa: SLF001  # lint-waiver: LW-008235 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
         PurePosixPath(snapshot_root.relative_to(project_root).as_posix()),
         tuple(files),
     )
@@ -1812,7 +1799,7 @@ def _snapshot_directory(*, project_root: Path, root: Path) -> StateSnapshot:
         kind="portable snapshot root",
     )
     if not snapshot_root.exists():
-        return StateSnapshot._create(
+        return StateSnapshot._create(  # noqa: SLF001  # lint-waiver: LW-008236 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
             PurePosixPath(snapshot_root.relative_to(project_root).as_posix()),
             (),
         )
@@ -1825,14 +1812,10 @@ def _snapshot_directory(*, project_root: Path, root: Path) -> StateSnapshot:
         )
         symlinks = tuple(path for path in entries if path.is_symlink())
         if symlinks:
-            raise ProjectStateError(
-                f"Portable VibeSys snapshot must not contain symlinks: {symlinks[0]}"
-            )
+            raise ProjectStateError.portable_snapshot_contains_symlink(symlinks[0])
         paths = tuple(path for path in entries if not path.is_dir())
     except OSError as exc:
-        raise ProjectStateError(
-            f"Could not inspect portable VibeSys snapshot below {snapshot_root}: {exc}"
-        ) from exc
+        raise ProjectStateError.portable_snapshot_inspection_failed(snapshot_root, exc) from exc
     return _snapshot_selected_files(
         project_root=project_root,
         root=snapshot_root,
@@ -1848,11 +1831,10 @@ def _contained_state_dir(parent: Path, namespace: str, *, kind: str) -> Path:
     )
     try:
         if path.exists() and not path.is_dir():
-            raise ProjectStateError(f"VibeSys {kind} state path is not a directory: {path}")
+            raise ProjectStateError.state_path_not_directory(kind, path)
     except OSError as exc:
-        raise ProjectStateError(
-            f"Could not validate VibeSys {kind} state directory {path}: {exc}"
-        ) from exc
+        message = f"Could not validate VibeSys {kind} state directory {path}: {exc}"
+        raise ProjectStateError(message) from exc
     return path
 
 
@@ -1863,11 +1845,10 @@ def _contained_without_symlinks(parent: Path, child: Path, *, kind: str) -> Path
         current /= component
         try:
             if current.is_symlink():
-                raise ProjectStateError(f"VibeSys {kind} path must not be a symlink: {current}")
+                raise ProjectStateError.state_path_symlink(kind, current)
         except OSError as exc:
-            raise ProjectStateError(
-                f"Could not validate VibeSys {kind} path {current}: {exc}"
-            ) from exc
+            message = f"Could not validate VibeSys {kind} path {current}: {exc}"
+            raise ProjectStateError(message) from exc
     return path
 
 
@@ -1875,24 +1856,23 @@ def _contained(parent: Path, child: Path) -> Path:
     parent_resolved = parent.resolve()
     child_resolved = child.resolve()
     if not child_resolved.is_relative_to(parent_resolved):
-        raise ProjectStateError(f"VibeSys metadata path escapes {parent_resolved}: {child}")
+        raise ProjectStateError.path_escapes_root(parent_resolved, child)
     return child
 
 
 def _validate_storage_root(path: Path, parent: Path, *, name: str) -> None:
     try:
         if path.is_symlink():
-            raise ProjectStateError(f"VibeSys {name} root must not be a symlink: {path}")
+            raise ProjectStateError.storage_root_symlink(name, path)
         if path.exists() and not path.is_dir():
-            raise ProjectStateError(f"VibeSys {name} root is not a directory: {path}")
+            raise ProjectStateError.storage_root_not_directory(name, path)
         parent_resolved = parent.resolve()
         path_resolved = path.resolve()
     except OSError as exc:
-        raise ProjectStateError(f"Could not validate VibeSys {name} root {path}: {exc}") from exc
+        message = f"Could not validate VibeSys {name} root {path}: {exc}"
+        raise ProjectStateError(message) from exc
     if not path_resolved.is_relative_to(parent_resolved):
-        raise ProjectStateError(
-            f"VibeSys {name} root escapes {parent_resolved}: {path} resolves to {path_resolved}"
-        )
+        raise ProjectStateError.storage_root_escapes(name, parent_resolved, path, path_resolved)
 
 
 def _is_excluded(relative: Path) -> bool:
@@ -1925,9 +1905,11 @@ def _update_fingerprint(digest: _Digest, path: Path, relative: Path) -> None:
                     update(block)
             update(b"\0")
         else:
-            raise ProjectStateError(f"Unsupported input file type: {path}")
+            message = f"Unsupported input file type: {path}"
+            raise ProjectStateError(message)
     except OSError as exc:
-        raise ProjectStateError(f"Could not fingerprint project input {path}: {exc}") from exc
+        message = f"Could not fingerprint project input {path}: {exc}"
+        raise ProjectStateError(message) from exc
 
 
 def _require_current_run_schema(path: Path, run_id: str) -> None:
@@ -1946,12 +1928,10 @@ def _require_current_run_schema(path: Path, run_id: str) -> None:
         if recorded_version == 1
         else "portable compute-resource requirements"
     )
-    raise RunSchemaMigrationRequiredError(
-        f"Run metadata at {path} uses run schema version {recorded_version}, but this "
-        f"VibeSys requires version {RUN_SCHEMA_VERSION}, which records "
-        f"{missing_contract}. Migrate the run with the environment it was launched "
-        "with; VibeSys cannot infer missing execution metadata.",
+    raise RunSchemaMigrationRequiredError.older_schema(
         path=path,
         run_id=run_id,
         recorded_version=recorded_version,
+        required_version=RUN_SCHEMA_VERSION,
+        missing_contract=missing_contract,
     )

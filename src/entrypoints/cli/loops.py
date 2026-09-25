@@ -172,13 +172,13 @@ def _run_migrate_run_environment(argv: list[str]) -> None:
             exit_code=1,
         )
 
-    print(  # noqa: T201  # tracked: #288
+    sys.stdout.write(
         f"Migrated run {manifest.run_id} to run schema version "
         f"{manifest.schema_version}: run environment "
-        f"{manifest.configuration.run_environment.name}"
+        f"{manifest.configuration.run_environment.name}\n"
     )
-    print(f"  metadata: {project_root}")  # noqa: T201  # tracked: #288
-    print("  commit the updated run metadata to keep the run branch clean.")  # noqa: T201  # tracked: #288
+    sys.stdout.write(f"  metadata: {project_root}\n")
+    sys.stdout.write("  commit the updated run metadata to keep the run branch clean.\n")
 
 
 def _build_agent_request(args: argparse.Namespace) -> RunRequest:
@@ -199,7 +199,7 @@ def _build_agent_request(args: argparse.Namespace) -> RunRequest:
             objective = with_operator_constraints(bundle.objective, args.constraint)
 
         if args.resume is not None:
-            print(f"Resuming VibeSys run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
+            sys.stdout.write(f"Resuming VibeSys run {args.resume} in {bundle.root}/\n")
 
         with boot_trace.span("load_objectives_toml"):
             metrics = _load_metric_space_toml(bundle.task_root)
@@ -248,9 +248,9 @@ def _run_agent(args: argparse.Namespace) -> None:
     result = _execute_run_request(request)
 
     if result.succeeded:
-        print(f"\nAgent loop completed {args.max_rounds} rounds.")  # noqa: T201  # tracked: #288
+        sys.stdout.write(f"\nAgent loop completed {args.max_rounds} rounds.\n")
     else:
-        print("\nAgent loop stopped early (exception or KeyboardInterrupt).")  # noqa: T201  # tracked: #288
+        sys.stdout.write("\nAgent loop stopped early (exception or KeyboardInterrupt).\n")
         sys.exit(1)
 
 
@@ -275,23 +275,21 @@ def _load_metric_space_toml(input_path: Path) -> MetricSpace:
         name = entry.get("name")
         direction = entry.get("direction")
         if not name or direction not in ("max", "min"):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"Malformed entry in {path}: {entry!r}. Each [[objective]] "
-                f"must set name and direction (max|min)."
-            )
+            _exception_message_2 = f"Malformed entry in {path}: {entry!r}. Each [[objective]] must set name and direction (max|min)."
+            raise ValueError(_exception_message_2)
         objectives.append(Objective(name=name, direction=direction))
     raw_value = (data.get("pareto") or {}).get("relative_noise", 0.0)
     if isinstance(raw_value, bool):
-        raise ValueError(f"Malformed pareto.relative_noise in {path}: {raw_value!r}")  # noqa: TRY003, TRY004  # tracked: #288
+        message = f"Malformed pareto.relative_noise in {path}: {raw_value!r}"
+        raise ValueError(message)  # noqa: TRY004  # lint-waiver: LW-010200 [TRY004]; malformed objective files use the CLI's established ValueError diagnostic contract.
     try:
         value = float(raw_value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"Malformed pareto.relative_noise in {path}: {raw_value!r}") from exc  # noqa: TRY003  # tracked: #288
+        _exception_message_3 = f"Malformed pareto.relative_noise in {path}: {raw_value!r}"
+        raise ValueError(_exception_message_3) from exc
     if not math.isfinite(value) or not 0 <= value < 1:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"Malformed pareto.relative_noise in {path}: expected a finite value "
-            f"in [0, 1), got {raw_value!r}"
-        )
+        _exception_message = f"Malformed pareto.relative_noise in {path}: expected a finite value in [0, 1), got {raw_value!r}"
+        raise ValueError(_exception_message)
     return MetricSpace(objectives=tuple(objectives), relative_noise=value)
 
 
@@ -310,15 +308,8 @@ def _resolve_metric_space(args: argparse.Namespace) -> MetricSpace:
     return space
 
 
-def _validate_evolve(args: argparse.Namespace) -> None:  # noqa: C901  # tracked: #288
-    _validate_target_inputs(args)
-    _validate_run_environment_profiler(args)
-    if args.children_per_generation < 1:
-        _configuration_error("--children-per-generation must be >= 1.")
-    if args.max_generations < 1:
-        _configuration_error("--max-generations must be >= 1.")
-    if args.selection_temperature <= 0:
-        _configuration_error("--selection-temperature must be > 0.")
+def _validate_openevolve_options(args: argparse.Namespace) -> None:
+    """Validate options specific to the OpenEvolve search policy."""
     if args.search_policy == "vibesys" and any(
         value is not None
         for value in (
@@ -342,6 +333,18 @@ def _validate_evolve(args: argparse.Namespace) -> None:  # noqa: C901  # tracked
         0.0 <= args.openevolve_migration_rate <= 1.0
     ):
         _configuration_error("--openevolve-migration-rate must be in [0, 1].")
+
+
+def _validate_evolve(args: argparse.Namespace) -> None:
+    _validate_target_inputs(args)
+    _validate_run_environment_profiler(args)
+    if args.children_per_generation < 1:
+        _configuration_error("--children-per-generation must be >= 1.")
+    if args.max_generations < 1:
+        _configuration_error("--max-generations must be >= 1.")
+    if args.selection_temperature <= 0:
+        _configuration_error("--selection-temperature must be > 0.")
+    _validate_openevolve_options(args)
     if not (0.0 <= args.frontier_bias <= 1.0):
         _configuration_error("--frontier-bias must be in [0, 1].")
     if args.bootstrap_max_attempts < 1:
@@ -395,12 +398,12 @@ def _build_evolve_request(args: argparse.Namespace) -> RunRequest:
     space = _resolve_metric_space(args)
 
     if args.resume is not None:
-        print(f"Resuming evolve run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
+        sys.stdout.write(f"Resuming evolve run {args.resume} in {bundle.root}/\n")
     if space.objectives:
         spec = ", ".join(f"{o.name}({o.direction})" for o in space.objectives)
-        print(  # noqa: T201  # tracked: #288
+        sys.stdout.write(
             f"Pareto mode active: [{spec}]; frontier_bias={args.frontier_bias}; "
-            f"tolerance={space.relative_noise:.0%}"
+            f"tolerance={space.relative_noise:.0%}\n"
         )
 
     search_policy, openevolve_config = _resolve_openevolve_options(args)
@@ -445,12 +448,12 @@ def _run_evolve(args: argparse.Namespace) -> None:
     result = _execute_run_request(request)
 
     if result.succeeded:
-        print(  # noqa: T201  # tracked: #288
+        sys.stdout.write(
             f"\nEvolve loop completed {args.max_generations} generations "
-            f"× {args.children_per_generation} cands."  # noqa: RUF001  # tracked: #288
+            f"with {args.children_per_generation} candidates each.\n"
         )
     else:
-        print("\nEvolve loop stopped early (exception or KeyboardInterrupt).")  # noqa: T201  # tracked: #288
+        sys.stdout.write("\nEvolve loop stopped early (exception or KeyboardInterrupt).\n")
         sys.exit(1)
 
 
@@ -471,7 +474,7 @@ def _build_plain_request(args: argparse.Namespace) -> RunRequest:
     _prepare_experiment_repository(args, config)
 
     if args.resume is not None:
-        print(f"Resuming plain run {args.resume} in {bundle.root}/")  # noqa: T201  # tracked: #288
+        sys.stdout.write(f"Resuming plain run {args.resume} in {bundle.root}/\n")
 
     return RunRequest(
         project_root=bundle.root,
@@ -501,9 +504,9 @@ def _run_plain(args: argparse.Namespace) -> None:
     result = _execute_run_request(request)
 
     if result.succeeded:
-        print("\nPlain loop completed: no remaining open issues.")  # noqa: T201  # tracked: #288
+        sys.stdout.write("\nPlain loop completed: no remaining open issues.\n")
     else:
-        print(f"\nPlain loop did not complete after {args.max_rounds} rounds.")  # noqa: T201  # tracked: #288
+        sys.stdout.write(f"\nPlain loop did not complete after {args.max_rounds} rounds.\n")
         sys.exit(1)
 
 

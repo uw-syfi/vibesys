@@ -41,7 +41,7 @@ _REPO = Path(__file__).resolve().parents[3]
 _TORCH_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "torch"
 
 
-def _load_analyzer():  # noqa: ANN202  # tracked: #288
+def _load_analyzer():  # noqa: ANN202  # LW-910312; this private helper's return type is intentionally left loose; annotating it now is separate cleanup work
     path = _REPO / "resources" / "profilers" / "torch" / "analyze_torch_profile.py"
     spec = importlib.util.spec_from_file_location("_analyze_torch_profile", str(path))
     assert spec is not None
@@ -63,7 +63,7 @@ def _load_analyzer():  # noqa: ANN202  # tracked: #288
 
 
 @pytest.fixture(scope="module")
-def analyzer():  # noqa: ANN201  # tracked: #288
+def analyzer():  # noqa: ANN201  # LW-910313; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     return _load_analyzer()
 
 
@@ -293,7 +293,7 @@ _kernel_intervals = st.lists(_kernel_interval, max_size=10)
 
 
 class TestChromeTraceIndexing:
-    def test_indexes_events_by_category(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_indexes_events_by_category(self, analyzer):  # noqa: ANN001, ANN201  # LW-910314; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         events = [
             {"ph": "M", "name": "process_name", "pid": 1, "args": {}},
             *_gemm_call(0, ts=100),
@@ -307,7 +307,7 @@ class TestChromeTraceIndexing:
         assert index.trace_ts_min == 100
         assert index.trace_ts_max == 410
 
-    def test_detects_device_from_properties(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_detects_device_from_properties(self, analyzer):  # noqa: ANN001, ANN201  # LW-910315; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         assert (
             analyzer._detect_device_key(_trace([], device_name="AMD Instinct MI300X")) == "mi300x"
         )
@@ -316,7 +316,7 @@ class TestChromeTraceIndexing:
         )
         assert analyzer._detect_device_key(_trace([], device_name="Unknown Accelerator")) is None
 
-    def test_detects_mi210_from_real_trace_device_properties_with_blank_name(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_detects_mi210_from_real_trace_device_properties_with_blank_name(self, analyzer):  # noqa: ANN001, ANN201  # LW-910316; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         """Regression: real ROCm 7.2.3/torch 2.12 MI210 captures ship
         ``deviceProperties[].name == ""`` -- confirmed on an actual
         vLLM/Qwen3.5-9B torch.profiler trace off an AMD HPC Fund MI210 node
@@ -333,7 +333,7 @@ class TestChromeTraceIndexing:
         trace = _trace([], device_name="", device_props=real_mi210_props)
         assert analyzer._detect_device_key(trace) == "mi210"
 
-    def test_signature_fallback_does_not_fire_for_unrecognized_amd_signature(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_signature_fallback_does_not_fire_for_unrecognized_amd_signature(self, analyzer):  # noqa: ANN001, ANN201  # LW-910317; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         trace = _trace(
             [],
             device_name="",
@@ -346,7 +346,7 @@ class TestChromeTraceIndexing:
         )
         assert analyzer._detect_device_key(trace) is None
 
-    def test_signature_fallback_never_raises_on_missing_or_malformed_fields(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_signature_fallback_never_raises_on_missing_or_malformed_fields(self, analyzer):  # noqa: ANN001, ANN201  # LW-910318; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         for props in (
             {},
             {"computeMajor": "not-a-number"},
@@ -356,7 +356,7 @@ class TestChromeTraceIndexing:
 
 
 class TestCorrelation:
-    def test_links_cpu_op_to_kernel_via_external_id_and_correlation(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_links_cpu_op_to_kernel_via_external_id_and_correlation(self, analyzer):  # noqa: ANN001, ANN201  # LW-910319; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         events = _gemm_call(0, ts=100, gpu_dur=333)
         index = analyzer._index_trace(_trace(events))
 
@@ -366,7 +366,7 @@ class TestCorrelation:
         assert len(op_to_kernels[0]) == 1
         assert op_to_kernels[0][0]["dur"] == 333
 
-    def test_falls_back_to_external_id_stamped_directly_on_kernel(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_falls_back_to_external_id_stamped_directly_on_kernel(self, analyzer):  # noqa: ANN001, ANN201  # LW-910320; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         # Some exporters skip the runtime-launch hop and stamp "External id"
         # directly on the kernel event.
         op = _op(ts=100, dur=200, dims=(_ADDMM_DIMS, _ADDMM_TYPES))
@@ -386,7 +386,7 @@ class TestCorrelation:
 
         assert op_to_kernels == {0: [kernel]}
 
-    def test_no_correlation_when_external_ids_are_absent(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_no_correlation_when_external_ids_are_absent(self, analyzer):  # noqa: ANN001, ANN201  # LW-910321; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         op = {
             "ph": "X",
             "cat": "cpu_op",
@@ -413,7 +413,7 @@ class TestCorrelation:
 
 
 class TestSelfTime:
-    def test_flat_calls_have_full_self_time(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_flat_calls_have_full_self_time(self, analyzer):  # noqa: ANN001, ANN201  # LW-910322; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         ops = [
             _op(ts=0, dur=100, name="aten::addmm"),
             _op(ts=200, dur=50, name="aten::addmm"),
@@ -424,7 +424,7 @@ class TestSelfTime:
         assert agg["aten::addmm"]["total_us"] == 150.0
         assert agg["aten::addmm"]["count"] == 2
 
-    def test_nested_call_subtracts_child_from_parent_self_time(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_nested_call_subtracts_child_from_parent_self_time(self, analyzer):  # noqa: ANN001, ANN201  # LW-910323; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         # aten::linear (0..400) wraps a nested aten::addmm (10..390, dur 380).
         ops = [
             _op(ts=0, dur=400, name="aten::linear"),
@@ -436,7 +436,7 @@ class TestSelfTime:
         assert agg["aten::linear"]["total_us"] == 400.0
         assert agg["aten::addmm"]["self_us"] == 380.0
 
-    def test_self_time_is_grouped_per_thread(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_self_time_is_grouped_per_thread(self, analyzer):  # noqa: ANN001, ANN201  # LW-910324; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         # Two threads with overlapping timestamps must not be treated as nested.
         ops = [
             _op(ts=0, dur=100, name="aten::mm", tid=1),
@@ -448,7 +448,7 @@ class TestSelfTime:
 
 
 class TestMergedDuration:
-    def test_merges_overlapping_intervals(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_merges_overlapping_intervals(self, analyzer):  # noqa: ANN001, ANN201  # LW-910325; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         events = [
             {"ts": 0, "dur": 100},
             {"ts": 50, "dur": 100},  # overlaps [0,100) -> extends to 150
@@ -456,7 +456,7 @@ class TestMergedDuration:
         ]
         assert analyzer._merged_duration(events) == 160.0
 
-    def test_empty_is_zero(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_empty_is_zero(self, analyzer):  # noqa: ANN001, ANN201  # LW-910326; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         assert analyzer._merged_duration([]) == 0.0
 
 
@@ -476,16 +476,16 @@ class TestGemmShapeExtraction:
             ),
         ],
     )
-    def test_recognized_gemm_family_shapes(self, analyzer, op_name, dims, expected):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_recognized_gemm_family_shapes(self, analyzer, op_name, dims, expected):  # noqa: ANN001, ANN201  # LW-910327; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         assert analyzer._shape_for_gemm_op(op_name, dims) == expected
 
-    def test_rejects_mismatched_inner_dimension(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_rejects_mismatched_inner_dimension(self, analyzer):  # noqa: ANN001, ANN201  # LW-910328; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         assert analyzer._shape_for_gemm_op("aten::mm", [[32, 4096], [2048, 11008]]) is None
 
-    def test_unrecognized_op_returns_none(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_unrecognized_op_returns_none(self, analyzer):  # noqa: ANN001, ANN201  # LW-910329; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         assert analyzer._shape_for_gemm_op("aten::relu", [[32, 4096]]) is None
 
-    def test_dedups_repeated_calls_and_sums_gpu_time(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_dedups_repeated_calls_and_sums_gpu_time(self, analyzer):  # noqa: ANN001, ANN201  # LW-910330; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         events: list[dict] = []
         for i, gpu_dur in enumerate((300, 310, 350)):
             events.extend(_gemm_call(i, ts=100 + i * 500, gpu_dur=gpu_dur))
@@ -500,13 +500,13 @@ class TestGemmShapeExtraction:
         assert shape.call_count == 3
         assert shape.total_gpu_time_us == 960.0
 
-    def test_skips_ops_missing_input_dims(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_skips_ops_missing_input_dims(self, analyzer):  # noqa: ANN001, ANN201  # LW-910331; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         op = _op(ts=0, dur=10)  # no Input Dims (record_shapes off)
         index = analyzer._index_trace(_trace([op]))
         shapes = analyzer._extract_gemm_shapes(index, {})
         assert shapes == []
 
-    def test_skips_gemm_family_wrapper_ops_with_no_correlated_kernel(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_skips_gemm_family_wrapper_ops_with_no_correlated_kernel(self, analyzer):  # noqa: ANN001, ANN201  # LW-910332; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         """Regression: real vLLM/torch traces nest a GEMM call several
         levels deep -- e.g. ``vllm::rocm_unquantized_gemm`` ->
         ``aten::linear`` -> ``aten::matmul`` -> ``aten::mm`` -- with the
@@ -540,7 +540,7 @@ class TestGemmShapeExtraction:
 
 
 class TestCertify:
-    def test_pass_on_a_well_formed_trace(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_pass_on_a_well_formed_trace(self, analyzer):  # noqa: ANN001, ANN201  # LW-910333; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         events = [
             {
                 "ph": "X",
@@ -567,7 +567,7 @@ class TestCertify:
         assert by_check["step_markers"].status == "PASS"
         assert by_check["graph_replay"].status == "PASS"
 
-    def test_fails_with_zero_kernels(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_fails_with_zero_kernels(self, analyzer):  # noqa: ANN001, ANN201  # LW-910334; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         op = _op(ts=0, dur=10, dims=(_ADDMM_DIMS, _ADDMM_TYPES))
         index = analyzer._index_trace(_trace([op]))
 
@@ -578,7 +578,7 @@ class TestCertify:
         assert by_check["gpu_kernels"].status == "FAIL"
         assert "ProfilerActivity" in by_check["gpu_kernels"].fix
 
-    def test_fails_without_record_shapes(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_fails_without_record_shapes(self, analyzer):  # noqa: ANN001, ANN201  # LW-910335; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         events = []
         for i in range(6):
             op = _op(ts=10 + i * 100, dur=90)  # no Input Dims
@@ -599,7 +599,7 @@ class TestCertify:
         assert by_check["record_shapes"].status == "FAIL"
         assert "record_shapes=True" in by_check["record_shapes"].fix
 
-    def test_warns_on_graph_replay_launches(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_warns_on_graph_replay_launches(self, analyzer):  # noqa: ANN001, ANN201  # LW-910336; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         events = _gemm_call(0, ts=100)
         events.append(_kernel(ts=1000, dur=50, correlation=9999, name="hipGraphLaunch"))
         index = analyzer._index_trace(_trace(events))
@@ -611,7 +611,7 @@ class TestCertify:
         assert by_check["graph_replay"].status == "WARN"
         assert "graph replay" in by_check["graph_replay"].fix
 
-    def test_fails_gpu_busy_when_window_is_mostly_idle(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_fails_gpu_busy_when_window_is_mostly_idle(self, analyzer):  # noqa: ANN001, ANN201  # LW-910337; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         events = _gemm_call(0, ts=0, gpu_dur=10)
         # A kernel far in the future stretches the window without adding busy time.
         events.append(_kernel(ts=1_000_000, dur=1, correlation=8888))
@@ -626,12 +626,12 @@ class TestCertify:
 
 
 class TestRoofline:
-    def test_gemm_flops_bytes(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_gemm_flops_bytes(self, analyzer):  # noqa: ANN001, ANN201  # LW-910338; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         flops, total_bytes = analyzer._gemm_flops_bytes(32, 11008, 4096, 1, "c10::BFloat16")
         assert flops == 2.0 * 32 * 11008 * 4096
         assert total_bytes == (32 * 4096 + 4096 * 11008 + 32 * 11008) * 2
 
-    def test_classifies_memory_bound_below_ridge(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_classifies_memory_bound_below_ridge(self, analyzer):  # noqa: ANN001, ANN201  # LW-910339; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         # MI210 ridge = 181e12 / 1600e9 ~= 113 FLOP/Byte. A skinny M=32 GEMM
         # in bf16 has AI well below that.
         metrics = analyzer._OpFlopsBytes(
@@ -646,7 +646,7 @@ class TestRoofline:
         assert row.bound == "memory"
         assert row.arithmetic_intensity < 113.0
 
-    def test_classifies_compute_bound_above_ridge(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_classifies_compute_bound_above_ridge(self, analyzer):  # noqa: ANN001, ANN201  # LW-910340; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         # A large square GEMM has high arithmetic intensity -> compute-bound.
         m = n = k = 4096
         metrics = analyzer._OpFlopsBytes(
@@ -660,13 +660,13 @@ class TestRoofline:
         row = analyzer._roofline_row(metrics, peak_tflops=181.0, peak_gbps=1600.0)
         assert row.bound == "compute"
 
-    def test_resolve_peaks_prefers_explicit_over_device(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_resolve_peaks_prefers_explicit_over_device(self, analyzer):  # noqa: ANN001, ANN201  # LW-910341; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         args = argparse.Namespace(peak_tflops=100.0, peak_gbps=1000.0, device="mi210")
         tflops, gbps, label = analyzer._resolve_peaks(args, _trace([]))
         assert (tflops, gbps) == (100.0, 1000.0)
         assert "MI210" in label
 
-    def test_resolve_peaks_autodetects_from_device_properties(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_resolve_peaks_autodetects_from_device_properties(self, analyzer):  # noqa: ANN001, ANN201  # LW-910342; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         args = argparse.Namespace(peak_tflops=None, peak_gbps=None, device=None)
         tflops, gbps, label = analyzer._resolve_peaks(
             args, _trace([], device_name="AMD Instinct MI300X")
@@ -675,19 +675,19 @@ class TestRoofline:
         assert gbps == analyzer._DEVICE_PEAKS["mi300x"].peak_gbps
         assert "MI300X" in label
 
-    def test_resolve_peaks_raises_when_nothing_available(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_resolve_peaks_raises_when_nothing_available(self, analyzer):  # noqa: ANN001, ANN201  # LW-910343; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         args = argparse.Namespace(peak_tflops=None, peak_gbps=None, device=None)
         with pytest.raises(SystemExit, match="roofline needs --device"):
             analyzer._resolve_peaks(args, _trace([], device_name="Totally Unknown GPU"))
 
-    def test_resolve_peaks_rejects_unknown_device_key(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_resolve_peaks_rejects_unknown_device_key(self, analyzer):  # noqa: ANN001, ANN201  # LW-910344; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         args = argparse.Namespace(peak_tflops=None, peak_gbps=None, device="mi9999")
         with pytest.raises(SystemExit, match="unknown --device"):
             analyzer._resolve_peaks(args, _trace([]))
 
 
 class TestChromeTraceSummaryConversion:
-    def test_summarize_chrome_trace_matches_summarize_prof_schema(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_summarize_chrome_trace_matches_summarize_prof_schema(self, analyzer):  # noqa: ANN001, ANN201  # LW-910345; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         events = _gemm_call(0, ts=0, cpu_dur=200, gpu_dur=300)
         summary = analyzer._summarize_chrome_trace(_trace(events))
 
@@ -698,7 +698,7 @@ class TestChromeTraceSummaryConversion:
         assert "aten::addmm" in names
         assert "Cijk_Ailk_Bljk_HHS_BH" in names
 
-    def test_operator_events_carry_correlated_cuda_time_not_a_flat_zero(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_operator_events_carry_correlated_cuda_time_not_a_flat_zero(self, analyzer):  # noqa: ANN001, ANN201  # LW-910346; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         """Regression: the "operators" table's CUDA-time column always
         printed 0.0 us against a raw Kineto trace, because ``cpu_op``
         events were hardcoded to ``cuda_time_us: 0.0`` in the chrome-trace
@@ -714,7 +714,7 @@ class TestChromeTraceSummaryConversion:
         # Not double-counted against the kernel-category total.
         assert summary["total_cuda_time_us"] == 300.0
 
-    def test_load_auto_detects_a_raw_trace_and_a_summarized_report(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_load_auto_detects_a_raw_trace_and_a_summarized_report(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # LW-910347; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         trace_path = tmp_path / "trace.pt.trace.json"
         trace_path.write_text(json.dumps(_trace(_gemm_call(0, ts=0))))
         loaded = analyzer._load(str(trace_path))
@@ -728,7 +728,7 @@ class TestChromeTraceSummaryConversion:
         )
         assert analyzer._load(str(report_path))["total_cuda_time_us"] == 1.0
 
-    def test_load_reads_gzipped_trace(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_load_reads_gzipped_trace(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # LW-910348; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         trace_path = tmp_path / "trace.pt.trace.json.gz"
         with gzip.open(trace_path, "wt", encoding="utf-8") as f:
             json.dump(_trace(_gemm_call(0, ts=0)), f)
@@ -738,7 +738,7 @@ class TestChromeTraceSummaryConversion:
 
 
 class TestCliCommands:
-    def test_cmd_certify_rejects_a_summarized_report(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_cmd_certify_rejects_a_summarized_report(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # LW-910349; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         report_path = tmp_path / "prof.json"
         report_path.write_text(
             json.dumps(
@@ -749,7 +749,7 @@ class TestCliCommands:
         with pytest.raises(SystemExit, match="not a raw Kineto/Chrome trace"):
             analyzer.cmd_certify(args)
 
-    def test_cmd_gemm_shapes_writes_json_and_prints_table(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_cmd_gemm_shapes_writes_json_and_prints_table(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # LW-910350; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         trace_path = tmp_path / "trace.pt.trace.json"
         events: list[dict] = []
         for i, gpu_dur in enumerate((300, 310)):
@@ -776,7 +776,7 @@ class TestCliCommands:
             }
         ]
 
-    def test_cmd_summary_runs_certify_before_the_usual_sections(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_cmd_summary_runs_certify_before_the_usual_sections(self, analyzer, tmp_path):  # noqa: ANN001, ANN201  # LW-910351; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         trace_path = tmp_path / "trace.pt.trace.json"
         trace_path.write_text(json.dumps(_trace(_gemm_call(0, ts=0))))
 
@@ -786,7 +786,7 @@ class TestCliCommands:
         assert "Trace Certification" in out
         assert out.index("Trace Certification") < out.index("Top GPU Kernels")
 
-    def test_cmd_summary_reads_the_trace_file_exactly_once(self, analyzer, tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_cmd_summary_reads_the_trace_file_exactly_once(self, analyzer, tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # LW-910352; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         """Regression: ``cmd_summary`` used to call ``cmd_cpu_overhead``/
         ``cmd_kernels``/``cmd_operators``/``cmd_memory`` as subroutines,
         each of which independently re-read and re-parsed the whole trace
@@ -834,7 +834,7 @@ class TestFuzzMalformedTraceFields:
 
     @given(events=_fuzzy_events)
     @FAST
-    def test_certify_gemm_shapes_and_roofline_never_raise(self, analyzer, events):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_certify_gemm_shapes_and_roofline_never_raise(self, analyzer, events):  # noqa: ANN001, ANN201  # LW-910353; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         index = analyzer._index_trace(_trace(events))
         op_to_kernels = analyzer._build_op_to_kernels(index)
 
@@ -874,7 +874,7 @@ class TestGemmShapeGeneralization:
         out_features=st.integers(min_value=1, max_value=8192),
     )
     @FAST
-    def test_linear_weight_transposition(self, analyzer, leading, in_features, out_features):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_linear_weight_transposition(self, analyzer, leading, in_features, out_features):  # noqa: ANN001, ANN201  # LW-910354; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         # nn.Linear.weight is (out_features, in_features) -- x @ weight.T.
         input_dims = [*leading, in_features]
         weight_dims = [out_features, in_features]
@@ -888,7 +888,7 @@ class TestGemmShapeGeneralization:
 
     @given(m=st.integers(1, 8192), k=st.integers(1, 8192), n=st.integers(1, 8192))
     @FAST
-    def test_dense_2d_shape_for_mm_matmul_and_scaled_mm(self, analyzer, m, k, n):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_dense_2d_shape_for_mm_matmul_and_scaled_mm(self, analyzer, m, k, n):  # noqa: ANN001, ANN201  # LW-910355; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         assert analyzer._shape_dense_2d([m, k], [k, n]) == (m, n, k, 1)
         for op_name in ("aten::mm", "aten::matmul", "aten::_scaled_mm"):
             assert analyzer._shape_for_gemm_op(op_name, [[m, k], [k, n]]) == (m, n, k, 1)
@@ -900,7 +900,7 @@ class TestGemmShapeGeneralization:
         n=st.integers(1, 8192),
     )
     @FAST
-    def test_dense_2d_returns_none_not_a_wrong_shape_on_mismatch(self, analyzer, m, k1, k2, n):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_dense_2d_returns_none_not_a_wrong_shape_on_mismatch(self, analyzer, m, k1, k2, n):  # noqa: ANN001, ANN201  # LW-910356; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         assume(k1 != k2)
         assert analyzer._shape_dense_2d([m, k1], [k2, n]) is None
 
@@ -911,7 +911,7 @@ class TestGemmShapeGeneralization:
         n=st.integers(1, 4096),
     )
     @FAST
-    def test_batched_preserves_batch_dim(self, analyzer, batch, m, k, n):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_batched_preserves_batch_dim(self, analyzer, batch, m, k, n):  # noqa: ANN001, ANN201  # LW-910357; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         assert analyzer._shape_batched([batch, m, k], [batch, k, n]) == (m, n, k, batch)
         assert analyzer._shape_for_gemm_op("aten::bmm", [[batch, m, k], [batch, k, n]]) == (
             m,
@@ -927,7 +927,7 @@ class TestGemmShapeGeneralization:
         n=st.integers(1, 8192),
     )
     @FAST
-    def test_addmm_ignores_bias_operand_shape(self, analyzer, bias_dims, m, k, n):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_addmm_ignores_bias_operand_shape(self, analyzer, bias_dims, m, k, n):  # noqa: ANN001, ANN201  # LW-910358; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         # addmm's operand order is (bias, mat1, mat2) -- the bias shape must
         # never influence the extracted (M, N, K).
         shape = analyzer._shape_for_gemm_op("aten::addmm", [bias_dims, [m, k], [k, n]])
@@ -942,7 +942,7 @@ class TestGpuBusyFractionRobustness:
 
     @given(ivals=_kernel_intervals)
     @FAST
-    def test_busy_fraction_stays_in_unit_interval(self, analyzer, ivals):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_busy_fraction_stays_in_unit_interval(self, analyzer, ivals):  # noqa: ANN001, ANN201  # LW-910359; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         kernels = [
             _kernel(ts=start, dur=dur, correlation=1000 + i) for i, (start, dur) in enumerate(ivals)
         ]
@@ -969,7 +969,7 @@ class TestRooflineFlopsBytesGeneralization:
         dtype=st.text(min_size=0, max_size=20),
     )
     @FEWER
-    def test_gemm_flops_is_exactly_2mnk_batch(self, analyzer, m, n, k, batch, dtype):  # noqa: ANN001, ANN201, PLR0913  # tracked: #288
+    def test_gemm_flops_is_exactly_2mnk_batch(self, analyzer, m, n, k, batch, dtype):  # noqa: ANN001, ANN201, PLR0913  # LW-910360; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
         # dtype affects only bytes (element size), never FLOPs.
         flops, _total_bytes = analyzer._gemm_flops_bytes(m, n, k, batch, dtype)
         assert flops == 2.0 * batch * m * n * k
@@ -990,7 +990,7 @@ class TestRooflineFlopsBytesGeneralization:
         nbytes=st.floats(min_value=0.0, max_value=1e15, allow_nan=False, allow_infinity=False),
     )
     @FEWER
-    def test_roofline_row_finite_and_nonneg(self, analyzer, gpu_us, tflops, gbps, flops, nbytes):  # noqa: ANN001, ANN201, PLR0913  # tracked: #288
+    def test_roofline_row_finite_and_nonneg(self, analyzer, gpu_us, tflops, gbps, flops, nbytes):  # noqa: ANN001, ANN201, PLR0913  # LW-910361; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
         metrics = analyzer._OpFlopsBytes(
             op_label="mm",
             shape="fuzz",
@@ -1008,7 +1008,7 @@ class TestRooflineFlopsBytesGeneralization:
         assert row.pct_of_peak >= 0.0
         assert row.bound in ("compute", "memory")
 
-    def test_roofline_row_zero_gpu_time_does_not_divide_by_zero(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_roofline_row_zero_gpu_time_does_not_divide_by_zero(self, analyzer):  # noqa: ANN001, ANN201  # LW-910362; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         metrics = analyzer._OpFlopsBytes(
             op_label="mm",
             shape="4096x4096x4096",
@@ -1040,7 +1040,7 @@ class TestGemmShapeCorrelationGeneralization:
         gpu_dur=st.integers(min_value=1, max_value=10_000),
     )
     @FAST
-    def test_only_correlated_ops_contribute_shapes(self, analyzer, correlated_flags, gpu_dur):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_only_correlated_ops_contribute_shapes(self, analyzer, correlated_flags, gpu_dur):  # noqa: ANN001, ANN201  # LW-910363; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         dims = ([[8, 4096], [4096, 12288]], ["c10::BFloat16", "c10::BFloat16"])
         events: list[dict] = []
         n_correlated = 0
@@ -1085,13 +1085,13 @@ class TestDeviceDetectionGeneralization:
         ),
     )
     @FAST
-    def test_never_raises_and_only_returns_known_devices(  # noqa: ANN201  # tracked: #288
+    def test_never_raises_and_only_returns_known_devices(  # noqa: ANN201  # LW-910364; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         self,
-        analyzer,  # noqa: ANN001
-        major,  # noqa: ANN001
-        minor,  # noqa: ANN001
-        num_sms,  # noqa: ANN001
-        mem_bytes,  # noqa: ANN001
+        analyzer,  # noqa: ANN001  # LW-920400; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
+        major,  # noqa: ANN001  # LW-920401; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
+        minor,  # noqa: ANN001  # LW-920402; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
+        num_sms,  # noqa: ANN001  # LW-920403; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
+        mem_bytes,  # noqa: ANN001  # LW-920404; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     ):
         props: dict = {}
         if major is not None:
@@ -1109,7 +1109,7 @@ class TestDeviceDetectionGeneralization:
 
     @given(extra_sms=st.integers(min_value=1, max_value=500))
     @FAST
-    def test_exact_signature_always_resolves_the_documented_mi210(self, analyzer, extra_sms):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_exact_signature_always_resolves_the_documented_mi210(self, analyzer, extra_sms):  # noqa: ANN001, ANN201  # LW-910365; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         """The one signature this fallback is required to resolve
         (gfx90a/104 CUs/64GiB -> mi210, from real hardware) must always
         match regardless of unrelated fields (mem within the tolerance
@@ -1163,7 +1163,7 @@ class TestRealTraceFixtures:
         assert path.is_file(), f"missing fixture {path}"
         return str(path)
 
-    def test_certify_eager_trace(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_certify_eager_trace(self, analyzer):  # noqa: ANN001, ANN201  # LW-910366; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         raw = json.loads(Path(self._fixture("eager_trimmed.pt.trace.json")).read_text())
         index = analyzer._index_trace(raw)
         op_to_kernels = analyzer._build_op_to_kernels(index)
@@ -1179,7 +1179,7 @@ class TestRealTraceFixtures:
         # about the source capture (which measured 17.9% busy, a WARN).
         assert by_check["gpu_busy"] == "FAIL"
 
-    def test_certify_graph_trace_flags_attribution_degraded(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_certify_graph_trace_flags_attribution_degraded(self, analyzer):  # noqa: ANN001, ANN201  # LW-910367; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         """Hand-check from the task: graph mode must be flagged as
         attribution-degraded (HIP-graph replay breaks cpu_op -> kernel
         correlation for most launches)."""
@@ -1193,7 +1193,7 @@ class TestRealTraceFixtures:
         assert by_check["record_shapes"] == "PASS"
         assert by_check["step_markers"] == "PASS"
 
-    def test_gemm_shapes_match_qwen3_5_9b_projection_dims(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_gemm_shapes_match_qwen3_5_9b_projection_dims(self, analyzer):  # noqa: ANN001, ANN201  # LW-910368; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         """Hand-check from the task: GEMM K (contraction) dim should be the
         model's hidden size (~4096 for Qwen3.5-9B -- confirmed independently
         from this same capture's ``aten::embedding`` weight shape,
@@ -1217,7 +1217,7 @@ class TestRealTraceFixtures:
         prefill_shapes = [s for s in shapes if s.m > 8]  # prefill: M = token count, not batch
         assert prefill_shapes, [s.m for s in shapes]
 
-    def test_roofline_auto_detects_mi210_and_reports_sane_percentages(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_roofline_auto_detects_mi210_and_reports_sane_percentages(self, analyzer):  # noqa: ANN001, ANN201  # LW-910369; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         """Hand-check from the task: device auto-detection must pick MI210
         from ``deviceProperties`` (this fixture's is verbatim from real
         hardware, blank ``name`` included), FLOPs must be 2*M*N*K, and
@@ -1243,7 +1243,7 @@ class TestRealTraceFixtures:
             assert 0.0 <= row.pct_of_peak <= 100.0
             assert row.bound in ("compute", "memory")
 
-    def test_cmd_summary_runs_on_both_fixtures_without_raising(self, analyzer):  # noqa: ANN001, ANN201  # tracked: #288
+    def test_cmd_summary_runs_on_both_fixtures_without_raising(self, analyzer):  # noqa: ANN001, ANN201  # LW-910370; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         for fixture in ("eager_trimmed.pt.trace.json", "graph_trimmed.pt.trace.json"):
             args = argparse.Namespace(report=self._fixture(fixture))
             out = _run_capturing_stdout(analyzer.cmd_summary, args)

@@ -4,16 +4,17 @@ import math
 
 import pytest
 from pydantic import ValidationError
+from tests.support import make_orchestrator_plan
 
 from vibesys.loops.agent.model import AgentRunState, Hypothesis
 from vibesys.schemas import OrchestratorPlan
 
 
 def _plan() -> OrchestratorPlan:
-    return OrchestratorPlan(
+    return make_orchestrator_plan(
         hypothesis_id="h1",
         task="optimize the queue",
-        pass_criteria="the checker passes",  # noqa: S106
+        criteria="the checker passes",
         reasoning="reduce contention",
     )
 

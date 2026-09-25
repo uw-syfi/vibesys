@@ -38,11 +38,15 @@ the sampler exists to follow.
 from __future__ import annotations
 
 import math
-import random  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from vibesys.loops.metrics import Measurement, MetricSpace, Objective
 
+_SCORE_SPAN_EPSILON = 1e-12
+
+if TYPE_CHECKING:
+    import random
 __all__ = [
     "Individual",
     "Population",
@@ -92,7 +96,8 @@ class Individual:
     policy_parent_id: str | None = None
     policy_target_island: int | None = None
 
-    def __post_init__(self) -> None:  # noqa: D105  # tracked: #288
+    def __post_init__(self) -> None:
+        """Reject non-finite fitness values during candidate construction."""
         self.validate_fitness()
 
     def validate_fitness(self) -> None:
@@ -108,42 +113,50 @@ class Individual:
 
 
 class Population:
-    """A flat archive of individuals, with fitness-weighted parent sampling
-    and diversity-aware inspiration sampling.
+    """A flat archive of individuals with fitness-weighted parent sampling.
+
+    Sampling inspiration is diversity-aware.
 
     Failed individuals (``passed=False``) are kept but excluded from
     selection so the mutator only ever evolves from a working baseline.
-    """  # noqa: D205  # tracked: #288
+    """
 
-    def __init__(self, individuals: list[Individual] | None = None) -> None:  # noqa: D107  # tracked: #288
+    def __init__(self, individuals: list[Individual] | None = None) -> None:
+        """Initialize a population from an optional ordered individual list."""
         self._individuals: list[Individual] = list(individuals or [])
 
     # -- accessors -----------------------------------------------------------
 
     @property
-    def all(self) -> list[Individual]:  # noqa: D102  # tracked: #288
+    def all(self) -> list[Individual]:
+        """Return individuals in insertion order."""
         return list(self._individuals)
 
     @property
-    def passed(self) -> list[Individual]:  # noqa: D102  # tracked: #288
+    def passed(self) -> list[Individual]:
+        """Return passed individuals with committed candidates."""
         passed = [i for i in self._individuals if i.passed and i.commit]
         for individual in passed:
             individual.validate_fitness()
         return passed
 
-    def __len__(self) -> int:  # noqa: D105  # tracked: #288
+    def __len__(self) -> int:
+        """Return the number of tracked individuals."""
         return len(self._individuals)
 
-    def next_id(self) -> int:  # noqa: D102  # tracked: #288
+    def next_id(self) -> int:
+        """Return the next unused individual ID."""
         return (max((i.id for i in self._individuals), default=0)) + 1
 
-    def get(self, ind_id: int) -> Individual | None:  # noqa: D102  # tracked: #288
+    def get(self, ind_id: int) -> Individual | None:
+        """Find an individual by ID without changing population state."""
         for i in self._individuals:
             if i.id == ind_id:
                 return i
         return None
 
-    def add(self, ind: Individual) -> None:  # noqa: D102  # tracked: #288
+    def add(self, ind: Individual) -> None:
+        """Validate and append an individual to the population."""
         ind.validate_fitness()
         self._individuals.append(ind)
 
@@ -225,7 +238,7 @@ class Population:
             return ranked[0]
         scores = [space.signed_primary(i.perf_metric) for i in ranked if i.perf_metric is not None]
         lo, hi = min(scores), max(scores)
-        if hi - lo < 1e-12:  # noqa: PLR2004  # tracked: #288
+        if hi - lo < _SCORE_SPAN_EPSILON:
             return rng.choice(ranked)
         normed = [(score - lo) / (hi - lo) for score in scores]
         t = max(temperature, 1e-6)
@@ -320,7 +333,9 @@ def _headline_space(space: MetricSpace) -> MetricSpace:
 def _headline_reading(individual: Individual, headline: MetricSpace) -> Measurement | None:
     """Read *individual* on the headline axis of an already-resolved space."""
     primary = headline.primary
-    assert primary is not None  # noqa: S101  # guaranteed by _headline_space
+    if primary is None:
+        message = "headline metric space has no primary objective"
+        raise RuntimeError(message)
     value = individual.metrics.get(primary.name, individual.perf_metric)
     if value is None:
         return None
@@ -331,4 +346,5 @@ def _require_finite_metric(value: float | None, field_name: str) -> None:
     if value is None:
         return
     if isinstance(value, bool) or not math.isfinite(value):
-        raise ValueError(f"{field_name} must be a finite number")  # noqa: TRY003  # tracked: #288
+        message = f"{field_name} must be a finite number"
+        raise ValueError(message)

@@ -10,8 +10,7 @@ change to the profiled program itself.
 Standalone module: stdlib + ``torch`` only (``torch`` imported lazily, never
 at module scope), Python 3.10+, no ``vibesys`` imports. It is staged as a
 sibling of ``analyze_torch_profile.py``/``capture_ops.py`` inside
-``torch_profiler/inject/`` (see ``docs/contributing/amd-profiler-worklog.md``
-for the general profiler-plugin staging convention), and does nothing at all
+``torch_profiler/inject/``, and does nothing at all
 unless ``VIBESYS_TORCH_PROFILE=1`` is set — every other process on the
 machine that happens to inherit this file on its ``PYTHONPATH`` (e.g. a
 child of a profiled process) pays only the cost of the flag check below.
@@ -26,8 +25,8 @@ When armed, it:
 2. Waits (in a background daemon thread, not the main thread) for ``torch``
    to actually be imported by the host program, then checks
    ``torch.cuda.is_available()`` — true for both real CUDA and ROCm builds,
-   since ROCm's torch reports HIP devices under the same ``torch.cuda`` API
-   (see the AMD profiler worklog). A process that never imports torch, or
+   since ROCm's torch reports HIP devices under the same ``torch.cuda`` API.
+   A process that never imports torch, or
    imports it but has no visible GPU, is left completely alone: no profiler
    object is ever constructed.
 3. Once armed, waits ``VIBESYS_TORCH_PROFILE_DELAY_S`` (default 0), then
@@ -142,8 +141,8 @@ issuing thread to have started after ``prof.start()``.
 
 ## The ROCm post-export hang
 
-Per the AMD profiler worklog: exiting a ``torch.profiler`` session can hang
-for minutes on ROCm (reproduced on ROCm 6.4/torch 2.9.1 and ROCm 7.2.3/torch
+Exiting a ``torch.profiler`` session can hang for minutes on ROCm
+(reproduced on ROCm 6.4/torch 2.9.1 and ROCm 7.2.3/torch
 2.12) with the trace file already complete and valid on disk. So the order
 here is fixed: ``prof.stop()``, then ``export_chrome_trace()`` immediately,
 and only *after* the trace file is safely on disk does this module attempt a
@@ -215,7 +214,7 @@ def _log(message: str) -> None:
     stderr stream does not guarantee.
     """
     with contextlib.suppress(Exception):
-        print(  # noqa: T201  # tracked: #288
+        print(  # noqa: T201  # LW-910120; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
             f"{_LOG_PREFIX} t={time.monotonic():.6f} pid={os.getpid()}: {message}",
             file=sys.stderr,
             flush=True,
@@ -244,7 +243,7 @@ def _chain_sitecustomize() -> None:
         if spec is not None and spec.loader is not None:
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-    except Exception as exc:  # noqa: BLE001  # never break host startup over a sibling shim
+    except Exception as exc:  # noqa: BLE001  # never break host startup over a sibling shim  # LW-920183; this boundary code deliberately catches any exception from an external tool or subprocess call
         _log(f"chained sitecustomize import failed (continuing): {exc!r}")
 
 
@@ -300,8 +299,11 @@ class _Capture:
                 return
             out_dir = self._resolve_window_out_dir()
             try:
-                import torch  # noqa: PLC0415
-                from torch.profiler import ProfilerActivity, profile  # noqa: PLC0415
+                import torch  # noqa: PLC0415  # LW-920184; this import is deferred to avoid a hard dependency on an optional/heavy library at module load time
+                from torch.profiler import (  # noqa: PLC0415  # LW-920185; this import is deferred to avoid a hard dependency on an optional/heavy library at module load time
+                    ProfilerActivity,
+                    profile,
+                )
 
                 out_dir.mkdir(parents=True, exist_ok=True)
                 prof = profile(
@@ -310,7 +312,7 @@ class _Capture:
                     with_stack=False,
                 )
                 prof.start()
-            except Exception as exc:  # noqa: BLE001  # tracked: #288
+            except Exception as exc:  # noqa: BLE001  # LW-910121; this boundary code deliberately catches any exception from an external tool or subprocess call
                 # self._phase was never touched above, so it is still "idle":
                 # a later SIGUSR1 can retry (e.g. a warm target signaled
                 # before the host program has imported torch yet).
@@ -342,12 +344,12 @@ class _Capture:
             self._phase = "idle"  # ready for the next SIGUSR1 window
             try:
                 prof.stop()
-            except Exception as exc:  # noqa: BLE001  # tracked: #288
+            except Exception as exc:  # noqa: BLE001  # LW-910122; this boundary code deliberately catches any exception from an external tool or subprocess call
                 _log(f"torch.profiler stop() raised (continuing): {exc!r}")
                 return
             self._export(prof, out_dir=out_dir, window=window)
 
-    def _export(self, prof, *, out_dir: Path, window: int) -> None:  # noqa: ANN001  # tracked: #288
+    def _export(self, prof, *, out_dir: Path, window: int) -> None:  # noqa: ANN001  # LW-910123; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -362,7 +364,7 @@ class _Capture:
             prof.export_chrome_trace(str(raw_path))
             with raw_path.open("rb") as src, gzip.open(gz_path, "wb") as dst:
                 shutil.copyfileobj(src, dst)
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
+        except Exception as exc:  # noqa: BLE001  # LW-910124; this boundary code deliberately catches any exception from an external tool or subprocess call
             _log(f"failed to export chrome trace: {exc!r}")
             return
         finally:
@@ -380,8 +382,8 @@ class _Capture:
         this step affects nothing but this call's own return latency.
         """
         try:
-            import torch  # noqa: PLC0415
-        except Exception:  # noqa: BLE001  # tracked: #288
+            import torch  # noqa: PLC0415  # LW-920186; this import is deferred to avoid a hard dependency on an optional/heavy library at module load time
+        except Exception:  # noqa: BLE001  # LW-910125; this boundary code deliberately catches any exception from an external tool or subprocess call
             return
 
         def _sync() -> None:
@@ -403,7 +405,7 @@ class _Capture:
 # ---------------------------------------------------------------------------
 
 
-def _install_chained_handler(sig: signal.Signals, handler) -> None:  # noqa: ANN001  # tracked: #288
+def _install_chained_handler(sig: signal.Signals, handler) -> None:  # noqa: ANN001  # LW-910126; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     """Install *handler* for *sig*, calling any prior handler after it runs.
 
     Only callable from the main thread (a Python restriction on
@@ -412,7 +414,7 @@ def _install_chained_handler(sig: signal.Signals, handler) -> None:  # noqa: ANN
     """
     previous = signal.getsignal(sig)
 
-    def _wrapped(signum: int, frame) -> None:  # noqa: ANN001  # tracked: #288
+    def _wrapped(signum: int, frame) -> None:  # noqa: ANN001  # LW-910127; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
         handler(signum, frame)
         if callable(previous):
             previous(signum, frame)
@@ -469,7 +471,7 @@ def _arm(capture: _Capture, *, delay_s: float, duration_s: float | None, trigger
     _install_chained_handler(signal.SIGINT, lambda *_a: capture.stop_and_export())
     atexit.register(capture.stop_and_export)
 
-    if trigger == _TRIGGER_SIGNAL and capture._control_dir is not None:  # noqa: SLF001  # tracked: #288
+    if trigger == _TRIGGER_SIGNAL and capture._control_dir is not None:  # noqa: SLF001  # LW-910128; this test exercises the standalone script's underscore-prefixed helpers directly; there is no other entry point
         # Signals sent before this point (interpreter/site startup, this
         # function running) hit whatever disposition the process inherited
         # across exec, not these handlers -- a signal delivered that early
@@ -478,11 +480,11 @@ def _arm(capture: _Capture, *, delay_s: float, duration_s: float | None, trigger
         # sending the first SIGUSR1. This marker file is that readiness
         # signal; see capture_ops.start_target's default ready_command.
         with contextlib.suppress(OSError):
-            capture._control_dir.mkdir(parents=True, exist_ok=True)  # noqa: SLF001  # tracked: #288
-            (capture._control_dir / "armed").write_text("1")  # noqa: SLF001  # tracked: #288
+            capture._control_dir.mkdir(parents=True, exist_ok=True)  # noqa: SLF001  # LW-910129; this test exercises the standalone script's underscore-prefixed helpers directly; there is no other entry point
+            (capture._control_dir / "armed").write_text("1")  # noqa: SLF001  # LW-910130; this test exercises the standalone script's underscore-prefixed helpers directly; there is no other entry point
 
 
-def _wait_for_torch(stop_event: threading.Event):  # noqa: ANN202  # tracked: #288
+def _wait_for_torch(stop_event: threading.Event):  # noqa: ANN202  # LW-910131; this private helper's return type is intentionally left loose; annotating it now is separate cleanup work
     """Poll ``sys.modules`` until the host program imports torch, or forever.
 
     Cheap (a dict lookup + sleep) and opt-in only (this whole module is a
@@ -493,8 +495,8 @@ def _wait_for_torch(stop_event: threading.Event):  # noqa: ANN202  # tracked: #2
     while not stop_event.is_set():
         if "torch" in sys.modules:
             try:
-                import torch  # noqa: PLC0415
-            except Exception as exc:  # noqa: BLE001  # tracked: #288
+                import torch  # noqa: PLC0415  # LW-920187; this import is deferred to avoid a hard dependency on an optional/heavy library at module load time
+            except Exception as exc:  # noqa: BLE001  # LW-910132; this boundary code deliberately catches any exception from an external tool or subprocess call
                 _log(f"torch present in sys.modules but import failed: {exc!r}")
                 return None
             return torch
@@ -502,7 +504,7 @@ def _wait_for_torch(stop_event: threading.Event):  # noqa: ANN202  # tracked: #2
     return None
 
 
-def _gpu_available(torch_module) -> bool:  # noqa: ANN001  # tracked: #288
+def _gpu_available(torch_module) -> bool:  # noqa: ANN001  # LW-910133; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     """``torch.cuda.is_available()``, tolerant of torch still mid-import.
 
     ``sys.modules["torch"]`` is populated at the *start* of ``import torch``
@@ -515,7 +517,7 @@ def _gpu_available(torch_module) -> bool:  # noqa: ANN001  # tracked: #288
             return bool(torch_module.cuda.is_available())
         except AttributeError:
             time.sleep(_TORCH_INIT_GRACE_INTERVAL_S)
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
+        except Exception as exc:  # noqa: BLE001  # LW-910134; this boundary code deliberately catches any exception from an external tool or subprocess call
             _log(f"torch.cuda.is_available() raised (treating as no GPU): {exc!r}")
             return False
     _log("torch.cuda never became available after import; treating as no GPU")
@@ -564,7 +566,7 @@ def _main() -> None:
             control_dir=control_dir,
         )
         _arm(capture, delay_s=delay_s, duration_s=duration_s, trigger=trigger)
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:  # noqa: BLE001  # LW-910135; this boundary code deliberately catches any exception from an external tool or subprocess call
         _log(f"failed to arm torch.profiler injection (host program unaffected): {exc!r}")
 
 

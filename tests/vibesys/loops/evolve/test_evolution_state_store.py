@@ -1,5 +1,6 @@
 """Filesystem contract tests for evolutionary population state."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from vibesys.loops.evolve.population import Individual, Population
@@ -9,7 +10,7 @@ from vibesys.run import RunState, RunStateNamespace
 from vs_project.api import EvolveRunConfiguration, Project, RunEnvironmentRecord
 
 
-def _store(tmp_path) -> EvolutionStateStore:  # noqa: ANN001
+def _store(tmp_path: Path) -> EvolutionStateStore:
     project = Project.open(tmp_path)
     project.state.create_project("test")
     run = project.state.new_run_manifest(
@@ -43,7 +44,7 @@ def _store(tmp_path) -> EvolutionStateStore:  # noqa: ANN001
     return EvolutionStateStore(state.portable(RunStateNamespace.EVOLVE))
 
 
-def test_evolution_state_store_distinguishes_empty_from_persisted(tmp_path) -> None:  # noqa: ANN001
+def test_evolution_state_store_distinguishes_empty_from_persisted(tmp_path: Path) -> None:
     store = _store(tmp_path)
     assert store.load_population().all == []
 
@@ -65,7 +66,7 @@ def test_evolution_state_store_distinguishes_empty_from_persisted(tmp_path) -> N
     assert store.load_population().all == population.all
 
 
-def test_metric_space_defaults_to_strict_before_a_run_records_one(tmp_path) -> None:  # noqa: ANN001
+def test_metric_space_defaults_to_strict_before_a_run_records_one(tmp_path: Path) -> None:
     """State written before the space was persisted has no document.
 
     It loads as the empty strict space, which is exactly how those runs already
@@ -74,7 +75,7 @@ def test_metric_space_defaults_to_strict_before_a_run_records_one(tmp_path) -> N
     assert _store(tmp_path).load_metric_space() == MetricSpace()
 
 
-def test_metric_space_round_trips_through_its_own_document(tmp_path) -> None:  # noqa: ANN001
+def test_metric_space_round_trips_through_its_own_document(tmp_path: Path) -> None:
     store = _store(tmp_path)
     space = MetricSpace(
         objectives=(

@@ -225,7 +225,7 @@ def _python_satisfies_deps(python: str, rocprof_bin: str) -> bool:
     profiling work.
     """
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(  # noqa: S603  # LW-920129; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
             [python, rocprof_bin, "--help"],
             capture_output=True,
             timeout=DEFAULT_DEPS_CHECK_TIMEOUT,
@@ -251,7 +251,7 @@ def check_pandas_version(python: str) -> tuple[bool, str]:
     rocprof-compute's CSV-to-report conversion silently breaks on pandas>=3.
     """
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(  # noqa: S603  # LW-920130; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
             [python, "-c", "import pandas; print(pandas.__version__)"],
             capture_output=True,
             text=True,
@@ -266,7 +266,7 @@ def check_pandas_version(python: str) -> tuple[bool, str]:
     major = version.split(".", 1)[0]
     if not major.isdigit():
         return False, f"unparsable pandas version {version!r} under {python}"
-    if int(major) >= 3:  # noqa: PLR2004
+    if int(major) >= 3:  # noqa: PLR2004  # LW-920131; this is a well-known, self-explanatory constant from the file format/tool being parsed
         return False, f"pandas {version} under {python} is >=3 (rocprof-compute needs pandas<3)"
     return True, f"pandas {version} under {python}"
 
@@ -367,7 +367,7 @@ def _check_version(rocprof_bin: str | None, deps_python: str | None) -> _DoctorC
     if not rocprof_bin or not deps_python:
         return _DoctorCheck("SKIP", "version: no runnable rocprof-compute to check")
     try:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(  # noqa: S603  # LW-920132; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
             [deps_python, rocprof_bin, "--version"],
             capture_output=True,
             text=True,
@@ -398,14 +398,14 @@ def cmd_doctor(ns: argparse.Namespace) -> None:
         _check_aqlprofile(),
     ]
 
-    print("\n".join(f"{_STATUS_PREFIXES[c.status]} {c.line}" for c in checks))  # noqa: T201
+    print("\n".join(f"{_STATUS_PREFIXES[c.status]} {c.line}" for c in checks))  # noqa: T201  # LW-920133; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     fixes = [c.fix for c in checks if c.fix]
     if fixes:
-        print("\nFixes:")  # noqa: T201
+        print("\nFixes:")  # noqa: T201  # LW-920134; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         for i, fix in enumerate(fixes, 1):
-            print(f"  {i}. {fix}")  # noqa: T201
+            print(f"  {i}. {fix}")  # noqa: T201  # LW-920135; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     else:
-        print("\nAll checks passed.")  # noqa: T201
+        print("\nAll checks passed.")  # noqa: T201  # LW-920136; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
 # ---------------------------------------------------------------------------
@@ -480,8 +480,8 @@ def run_with_timeout(
     timeout: float,
 ) -> tuple[int, str]:
     """Run ``cmd`` in its own process group; kill the whole tree on timeout."""
-    global _ACTIVE_PROC  # noqa: PLW0603
-    proc = subprocess.Popen(  # noqa: S603
+    global _ACTIVE_PROC  # noqa: PLW0603  # LW-920137; this module holds intentional process-lifetime state (a capture slot) mutated across calls
+    proc = subprocess.Popen(  # noqa: S603  # LW-920138; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
         cmd,
         cwd=cwd,
         env=env,
@@ -562,8 +562,8 @@ def _maybe_preflight_torch_import(ns: argparse.Namespace, cmd: list[str]) -> Non
     ok, detail = check_torch_import_under_rocprofv3(cmd[0])
     if ok:
         return
-    print(f"[FAIL] rocprofv3 cannot import torch under {cmd[0]!r}; not profiling.")  # noqa: T201
-    print(detail)  # noqa: T201
+    print(f"[FAIL] rocprofv3 cannot import torch under {cmd[0]!r}; not profiling.")  # noqa: T201  # LW-920139; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(detail)  # noqa: T201  # LW-920140; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     sys.exit(3)
 
 
@@ -646,24 +646,24 @@ def _report_profile_result(
     empty_match = _log_shows_zero_contexts(log) or _EMPTY_JOIN_KEYERROR in log
 
     if rc != 0:
-        print("PROFILE FAILED.")  # noqa: T201
+        print("PROFILE FAILED.")  # noqa: T201  # LW-920141; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         if empty_match:
-            print(_empty_match_message(kernel, dispatch))  # noqa: T201
-        print(log[-2000:])  # noqa: T201
+            print(_empty_match_message(kernel, dispatch))  # noqa: T201  # LW-920142; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+        print(log[-2000:])  # noqa: T201  # LW-920143; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         sys.exit(1)
 
     if not workload_dir.is_dir():
-        print("PROFILE completed but produced no workload directory.")  # noqa: T201
-        print(log[-1000:])  # noqa: T201
+        print("PROFILE completed but produced no workload directory.")  # noqa: T201  # LW-920144; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+        print(log[-1000:])  # noqa: T201  # LW-920145; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         sys.exit(1)
 
     if empty_match or _workload_has_kernel_data(workload_dir) is False:
-        print("PROFILE completed but matched no kernel dispatches.")  # noqa: T201
-        print(_empty_match_message(kernel, dispatch))  # noqa: T201
+        print("PROFILE completed but matched no kernel dispatches.")  # noqa: T201  # LW-920146; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+        print(_empty_match_message(kernel, dispatch))  # noqa: T201  # LW-920147; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         sys.exit(1)
 
-    print(f"Workload written to: {workload_dir}")  # noqa: T201
-    print(  # noqa: T201
+    print(f"Workload written to: {workload_dir}")  # noqa: T201  # LW-920148; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(  # noqa: T201  # LW-920149; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         "Raw counters (pmc_perf.csv etc.) live under that directory. Analyze with:\n"
         f"  python compute.py analyze {workload_dir}"
     )
@@ -744,15 +744,15 @@ def _print_top_kernels_from_csv(path: Path, *, max_rows: int) -> bool:
         rows = list(csv.DictReader(f))
     if not rows:
         return False
-    print(f"\n--- top kernels by time ({path.name}) ---")  # noqa: T201
+    print(f"\n--- top kernels by time ({path.name}) ---")  # noqa: T201  # LW-920150; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     for row in rows[:max_rows]:
         name = _shorten_kernel_name(row.get("Kernel_Name", "?"))
         pct = _format_percent(row.get("Pct", "?"))
         count = row.get("Count", "?")
         total_ns = row.get("Sum(ns)", "?")
-        print(f"  {pct:>6}%  {name}  (count={count}, sum={total_ns}ns)")  # noqa: T201
+        print(f"  {pct:>6}%  {name}  (count={count}, sum={total_ns}ns)")  # noqa: T201  # LW-920151; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     if len(rows) > max_rows:
-        print(f"  ... ({len(rows) - max_rows} more kernels omitted)")  # noqa: T201
+        print(f"  ... ({len(rows) - max_rows} more kernels omitted)")  # noqa: T201  # LW-920152; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     return True
 
 
@@ -803,9 +803,9 @@ def _print_pmc_perf_ratios(path: Path) -> bool:
         lines.append(f"  MFMA share of VALU+MFMA issue slots: {100 * mfma / (valu + mfma):.1f}%")
     if not lines:
         return False
-    print(f"\n--- rough counter ratios from {path.name} (not peak-normalized) ---")  # noqa: T201
+    print(f"\n--- rough counter ratios from {path.name} (not peak-normalized) ---")  # noqa: T201  # LW-920153; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     for line in lines:
-        print(line)  # noqa: T201
+        print(line)  # noqa: T201  # LW-920154; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     return True
 
 
@@ -813,7 +813,7 @@ def _print_csv_fallback(workload: str, *, max_rows: int) -> None:
     workload_path = Path(workload)
     csvs = _find_workload_csvs(workload)
     if not csvs:
-        print(f"No CSVs found under {workload} either.")  # noqa: T201
+        print(f"No CSVs found under {workload} either.")  # noqa: T201  # LW-920155; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         return
 
     printed = False
@@ -830,7 +830,7 @@ def _print_csv_fallback(workload: str, *, max_rows: int) -> None:
         with roofline.open(newline="", encoding="utf-8") as f:
             roofline_rows = list(csv.reader(f))
         if len(roofline_rows) > 1:
-            print(  # noqa: T201
+            print(  # noqa: T201  # LW-920156; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
                 f"\n--- {roofline.name} also present: {len(roofline_rows[0])} columns, "
                 f"{len(roofline_rows) - 1} device row(s) (device peak/achieved FLOPs and "
                 "bandwidth; not expanded here)"
@@ -844,17 +844,17 @@ def _print_csv_fallback(workload: str, *, max_rows: int) -> None:
     # promising raw CSV, same as before, clearly marked as unprocessed.
     preferred = [c for c in csvs if c.name == "pmc_perf.csv"] or csvs[:1]
     for path in preferred:
-        print(f"\n--- {path} ---")  # noqa: T201
+        print(f"\n--- {path} ---")  # noqa: T201  # LW-920157; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         with path.open(newline="", encoding="utf-8") as f:
             rows = list(csv.reader(f))
         if not rows:
-            print("(empty)")  # noqa: T201
+            print("(empty)")  # noqa: T201  # LW-920158; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             continue
         header, body = rows[0], rows[1:]
-        print(f"columns ({len(header)}): {', '.join(header)}")  # noqa: T201
-        print(f"{len(body)} data rows; showing first {min(max_rows, len(body))}:")  # noqa: T201
+        print(f"columns ({len(header)}): {', '.join(header)}")  # noqa: T201  # LW-920159; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+        print(f"{len(body)} data rows; showing first {min(max_rows, len(body))}:")  # noqa: T201  # LW-920160; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         for row in body[:max_rows]:
-            print("  " + ", ".join(row))  # noqa: T201
+            print("  " + ", ".join(row))  # noqa: T201  # LW-920161; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
 def cmd_analyze(ns: argparse.Namespace) -> None:
@@ -885,19 +885,19 @@ def cmd_analyze(ns: argparse.Namespace) -> None:
             cmd += ["-k", ns.kernel]
         rc, output = run_with_timeout(cmd, timeout=ns.timeout)
         if rc == 0:
-            print(_clean_analyze_output(output))  # noqa: T201
+            print(_clean_analyze_output(output))  # noqa: T201  # LW-920162; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             return
         reason = f"`rocprof-compute analyze` exited {rc}"
         tail = output[-500:]
     else:
         reason = "rocprof-compute binary or a deps-satisfying interpreter is not available"
 
-    print(  # noqa: T201
+    print(  # noqa: T201  # LW-920163; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         f"NOTE: analyze failed ({reason}); falling back to raw CSVs under {workload} "
         "(uninterpreted -- no rocprof-compute derived metrics)."
     )
     if tail:
-        print(f"analyze output tail:\n{tail}")  # noqa: T201
+        print(f"analyze output tail:\n{tail}")  # noqa: T201  # LW-920164; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     _print_csv_fallback(workload, max_rows=ns.max_stat)
 
 

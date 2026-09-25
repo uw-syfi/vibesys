@@ -28,8 +28,10 @@ class _RecordingHooks(SandboxLifecycleHooks):
 
 
 class _FailingHooks(SandboxLifecycleHooks):
-    def before_ready(self, context: BeforeReadyContext) -> None:  # noqa: ARG002
-        raise ValueError("setup exploded")  # noqa: TRY003
+    def before_ready(self, context: BeforeReadyContext) -> None:
+        del context
+        _failure_message = "setup exploded"
+        raise ValueError(_failure_message)
 
 
 def _sandbox() -> Sandbox:

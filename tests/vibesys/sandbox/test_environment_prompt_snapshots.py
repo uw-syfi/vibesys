@@ -81,7 +81,7 @@ _MODAL_RUNTIME_NOTES_CASES = {
 }
 
 
-@pytest.mark.parametrize("case_name,context", _MODAL_RUNTIME_NOTES_CASES.items())  # noqa: PT006  # tracked: #288
+@pytest.mark.parametrize(("case_name", "context"), _MODAL_RUNTIME_NOTES_CASES.items())
 def test_modal_runtime_notes_snapshot(case_name: str, context: dict[str, object]) -> None:
     rendered = render_template("modal/runtime_notes.j2", template_dir=_ENVIRONMENTS_DIR, **context)
     _assert_matches_snapshot("modal", case_name, "runtime_notes", rendered)
@@ -118,7 +118,7 @@ _DOCKER_PROMPT_NOTES_CASES = {
 }
 
 
-@pytest.mark.parametrize("case_name,context", _DOCKER_PROMPT_NOTES_CASES.items())  # noqa: PT006  # tracked: #288
+@pytest.mark.parametrize(("case_name", "context"), _DOCKER_PROMPT_NOTES_CASES.items())
 def test_docker_prompt_notes_snapshot(case_name: str, context: dict[str, object]) -> None:
     rendered = render_template("docker/prompt_notes.j2", template_dir=_ENVIRONMENTS_DIR, **context)
     _assert_matches_snapshot("docker", case_name, "prompt_notes", rendered)

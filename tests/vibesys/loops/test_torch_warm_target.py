@@ -6,11 +6,9 @@ capture_runtime.py``) and the torch plugin's ``capture_ops.start_target`` +
 ``profile_ops(target=...)`` (``resources/profilers/torch/capture_ops.py``),
 which together let an agent take more than one op-level torch.profiler
 window against the same already-running process instead of relaunching it
-per capture (see ``docs/contributing/amd-profiler-worklog.md`` and the
-``warm_attach.md`` experiment notes it references: on a ROCm build without
-rocprofiler-sdk default-attachment support, rocprofv3 --attach cannot do
-this at all, but the torch plugin's own signal-window injection can, once
-armed for repeated windows).
+per capture (on a ROCm build without rocprofiler-sdk default-attachment
+support, rocprofv3 --attach cannot do this at all, but the torch plugin's
+own signal-window injection can, once armed for repeated windows).
 
 Exercised end to end via real subprocesses using the fake ``torch`` package
 from ``torch_inject_fixtures.py`` (this dev environment has no real torch
@@ -103,7 +101,7 @@ def _all_trace_files(root: Path) -> list[Path]:
 # ---------------------------------------------------------------------------
 
 
-def test_start_target_keeps_process_running_until_stopped(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001  # tracked: #288
+def test_start_target_keeps_process_running_until_stopped(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001  # LW-910371; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     fake_torch = write_fake_torch(tmp_path / "fake_torch")
     command, env = _target_command(fake_torch)
     target_id = capture_ops.start_target(command, env=env)
@@ -117,12 +115,12 @@ def test_start_target_keeps_process_running_until_stopped(capture_ops, tmp_path:
     assert capture_ops.capture_runtime.list_targets() == []
 
 
-def test_stop_target_unknown_id_raises_key_error(capture_ops) -> None:  # noqa: ANN001  # tracked: #288
+def test_stop_target_unknown_id_raises_key_error(capture_ops) -> None:  # noqa: ANN001  # LW-910372; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     with pytest.raises(KeyError):
         capture_ops.capture_runtime.stop_target("does-not-exist")
 
 
-def test_stop_all_targets_stops_every_live_target(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001  # tracked: #288
+def test_stop_all_targets_stops_every_live_target(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001  # LW-910373; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     """Mirrors what each server.py registers via ``atexit`` on process exit."""
     fake_torch = write_fake_torch(tmp_path / "fake_torch")
     pids = []
@@ -144,8 +142,8 @@ def test_stop_all_targets_stops_every_live_target(capture_ops, tmp_path: Path) -
 # ---------------------------------------------------------------------------
 
 
-def test_two_consecutive_windows_produce_two_traces_and_target_stays_up(  # noqa: ANN201  # tracked: #288
-    capture_ops,  # noqa: ANN001  # tracked: #288
+def test_two_consecutive_windows_produce_two_traces_and_target_stays_up(  # noqa: ANN201  # LW-910374; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+    capture_ops,  # noqa: ANN001  # LW-910375; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     tmp_path: Path,
 ):
     fake_torch = write_fake_torch(tmp_path / "fake_torch")
@@ -170,18 +168,18 @@ def test_two_consecutive_windows_produce_two_traces_and_target_stays_up(  # noqa
     assert not _is_alive(pid)
 
 
-def test_profile_ops_target_requires_load_command(capture_ops) -> None:  # noqa: ANN001  # tracked: #288
+def test_profile_ops_target_requires_load_command(capture_ops) -> None:  # noqa: ANN001  # LW-910376; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     out = capture_ops.profile_ops(target="whatever")
     assert "requires load_command" in out
 
 
-def test_profile_ops_unknown_target_returns_clear_error(capture_ops) -> None:  # noqa: ANN001  # tracked: #288
+def test_profile_ops_unknown_target_returns_clear_error(capture_ops) -> None:  # noqa: ANN001  # LW-910377; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     out = capture_ops.profile_ops(target="does-not-exist", load_command="true")
     assert "error" in out
     assert "does-not-exist" in out
 
 
-def test_profile_ops_requires_command_or_target(capture_ops) -> None:  # noqa: ANN001  # tracked: #288
+def test_profile_ops_requires_command_or_target(capture_ops) -> None:  # noqa: ANN001  # LW-910378; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     out = capture_ops.profile_ops()
     assert "requires either command=" in out
 
@@ -191,8 +189,8 @@ def test_profile_ops_requires_command_or_target(capture_ops) -> None:  # noqa: A
 # ---------------------------------------------------------------------------
 
 
-def test_target_window_is_busy_while_another_capture_holds_the_slot(  # noqa: ANN201  # tracked: #288
-    capture_ops,  # noqa: ANN001  # tracked: #288
+def test_target_window_is_busy_while_another_capture_holds_the_slot(  # noqa: ANN201  # LW-910379; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+    capture_ops,  # noqa: ANN001  # LW-910380; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     tmp_path: Path,
 ):
     fake_torch = write_fake_torch(tmp_path / "fake_torch")
@@ -212,7 +210,7 @@ def test_target_window_is_busy_while_another_capture_holds_the_slot(  # noqa: AN
     capture_ops.capture_runtime.stop_target(target_id)
 
 
-def test_starting_a_target_does_not_hold_the_capture_slot(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001  # tracked: #288
+def test_starting_a_target_does_not_hold_the_capture_slot(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001  # LW-910381; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     """start_target itself is not a capture: it must not block a concurrent one."""
     fake_torch = write_fake_torch(tmp_path / "fake_torch")
     command, env = _target_command(fake_torch)
@@ -229,8 +227,8 @@ def test_starting_a_target_does_not_hold_the_capture_slot(capture_ops, tmp_path:
 
 @PROC_SETTINGS
 @given(window_counts=st.lists(st.integers(min_value=0, max_value=3), min_size=1, max_size=3))
-def test_random_start_window_stop_sequences_leak_nothing(  # noqa: ANN201  # tracked: #288
-    tmp_path_factory,  # noqa: ANN001  # tracked: #288
+def test_random_start_window_stop_sequences_leak_nothing(  # noqa: ANN201  # LW-910382; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+    tmp_path_factory,  # noqa: ANN001  # LW-910383; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     window_counts: list[int],
 ):
     """Several target lifetimes, each with a random number of windows.

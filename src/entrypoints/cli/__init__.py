@@ -25,7 +25,6 @@ mode entries share.
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn
 
@@ -78,6 +77,7 @@ from vibesys.api.request import load_objective, with_operator_constraints
 
 if TYPE_CHECKING:
     import argparse
+    from collections.abc import Callable
 
 # Aliases the tests reach for by name; the submodules use the imported names.
 _load_objective = load_objective
@@ -87,6 +87,7 @@ __all__ = [
     "_MODALITIES",
     "_OUTER_LOOPS",
     "CliInvocation",
+    "RunArgumentParser",
     "_RunArgumentParser",
     "_add_common_args",
     "_apply_bundle_profiler_default",
@@ -111,15 +112,20 @@ __all__ = [
     "_validate_target_inputs",
     "_with_operator_constraints",
     "build_run_request",
+    "configuration_error",
     "dispatch",
     "load_config_and_skills",
+    "load_config_or_stub_default",
+    "option_from_argv",
     "parse_cli_invocation",
+    "parse_runs_dir",
+    "render_configuration_error",
     "run_environment_spec_from_args",
 ]
 
 
 @dataclass(frozen=True)
-class CliInvocation:  # tracked: #288
+class CliInvocation:
     """One parsed, validated CLI invocation: its loop kind and namespace."""
 
     loop_kind: str
@@ -172,7 +178,7 @@ def _explicit_cli_dests(
     """Return parser destinations whose option strings occur in *argv*."""
     destinations = {
         option: action.dest
-        for action in parser._actions  # noqa: SLF001  # argparse exposes no public lookup
+        for action in parser._actions  # noqa: SLF001  # lint-waiver: LW-009023 [SLF001]; argparse has no public API for enumerating configured option actions.
         for option in action.option_strings
     }
     return frozenset(
@@ -240,7 +246,16 @@ def _option_from_argv(argv: list[str], option: str) -> str | None:
 def _render_configuration_error(error: ConfigurationError) -> NoReturn:
     """Print a configuration error to stderr and exit with its code."""
     diagnostic = error.diagnostic
-    print(f"vibesys: {diagnostic.message}", file=sys.stderr)  # noqa: T201  # tracked: #288
+    sys.stderr.write(f"vibesys: {diagnostic.message}\n")
     if diagnostic.usage:
-        print(diagnostic.usage, file=sys.stderr)  # noqa: T201  # tracked: #288
+        sys.stderr.write(diagnostic.usage + "\n")
     raise SystemExit(diagnostic.exit_code)
+
+
+# Public bootstrap helpers shared with the serving entrypoint.
+RunArgumentParser = _RunArgumentParser
+configuration_error = _configuration_error
+load_config_or_stub_default = _load_config_or_stub_default
+option_from_argv = _option_from_argv
+parse_runs_dir = _parse_runs_dir
+render_configuration_error = _render_configuration_error

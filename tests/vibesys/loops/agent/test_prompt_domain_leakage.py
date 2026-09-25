@@ -8,7 +8,7 @@ packs against an existing keyword set.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,6 +19,8 @@ from vibesys.loops.agent import issue_board
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import PROMPTS_DIR, render_template
 
+if TYPE_CHECKING:
+    from pathlib import Path
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 
 
@@ -247,9 +249,9 @@ def _render_prompt_bundle(domain: DomainName, *, modality: str | None) -> dict[s
 
 
 @pytest.mark.parametrize("leak_check", DOMAIN_LEAK_CHECKS, ids=lambda check: check.source_domain)
-def test_domain_specific_keywords_do_not_leak_to_vetted_domains(  # noqa: ANN201  # tracked: #288
+def test_domain_specific_keywords_do_not_leak_to_vetted_domains(
     leak_check: DomainLeakCheck,
-):
+) -> None:
     failures: list[str] = []
     keywords = tuple((keyword, keyword.casefold()) for keyword in leak_check.keywords)
 
@@ -266,7 +268,7 @@ def test_domain_specific_keywords_do_not_leak_to_vetted_domains(  # noqa: ANN201
     )
 
 
-def test_profiler_prompts_calibrate_observer_effects():  # noqa: ANN201  # tracked: #288
+def test_profiler_prompts_calibrate_observer_effects() -> None:
     prompts = _render_prompt_bundle(DomainName.LLM_SERVING, modality="text_generation")
 
     for prompt_name in (
@@ -282,7 +284,7 @@ def test_profiler_prompts_calibrate_observer_effects():  # noqa: ANN201  # track
         assert "must not be converted into exclusive phase shares" in rendered
 
 
-def test_llm_serving_profiler_prompts_point_to_engine_and_rocm_references():  # noqa: ANN201  # tracked: #288
+def test_llm_serving_profiler_prompts_point_to_engine_and_rocm_references() -> None:
     """The profiler .j2 templates stay domain-neutral; the concrete
     ``serving-systems/references/...`` pointers must still reach a serving
     agent through the llm-serving domain's own ``profiler`` section rather
@@ -331,7 +333,7 @@ def test_llm_serving_profiler_prompts_point_to_engine_and_rocm_references():  # 
         assert "serving-systems/references/platforms/rocm/profiler.md" in rendered
 
 
-def test_microservice_otel_profiler_uses_critical_path_as_diagnostic_evidence():  # noqa: ANN201  # tracked: #288
+def test_microservice_otel_profiler_uses_critical_path_as_diagnostic_evidence() -> None:
     context = _NEUTRAL_CONTEXT
     rendered = render_template(
         "profilers/otel.j2",

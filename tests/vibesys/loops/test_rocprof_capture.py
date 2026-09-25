@@ -564,8 +564,7 @@ def test_profile_timeline_records_hip_api_and_kernel_include_in_manifest(
 def _install_fake_diag_helper_unsuppressible(bin_dir: Path) -> Path:
     """A helper mimicking real rocprofv3's own, confirmed-unsuppressible SPM banner.
 
-    Models the real, hardware-confirmed mechanism (see
-    ``docs/contributing/amd-profiler-worklog.md``): rocprofv3 injects its
+    Models the real, hardware-confirmed mechanism: rocprofv3 injects its
     tool library into every process in the launched tree via inherited env
     (a stand-in for its real ``LD_PRELOAD`` injection), and that library
     prints a diagnostic banner the moment it loads -- with **no** env var or
@@ -642,8 +641,7 @@ def test_profile_timeline_setup_command_avoids_the_unsuppressible_rocprofv3_bann
     rocprofv3 (faked here to inject an unsuppressible marker into
     everything it launches) would corrupt that same value if the helper
     ran inside ``command`` instead. There is no quiet-env mitigation to
-    fall back on (confirmed dead on real hardware -- see
-    ``docs/contributing/amd-profiler-worklog.md``); ``setup_command`` is
+    fall back on (confirmed dead on real hardware); ``setup_command`` is
     the only fix, since ``run_capture`` never wraps it in
     ``profiler_prefix``. Fails on code that runs ``setup_command`` through
     the profiler (or has no ``setup_command`` at all): verified by

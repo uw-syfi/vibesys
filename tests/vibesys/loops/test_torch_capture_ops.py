@@ -269,7 +269,7 @@ def test_profile_ops_finds_a_sibling_trace_that_exports_after_the_tracked_proces
 def test_build_capture_env_prepends_inject_dir_to_pythonpath(
     capture_ops: ModuleType, tmp_path: Path
 ) -> None:
-    env = capture_ops._build_capture_env(  # noqa: SLF001
+    env = capture_ops._build_capture_env(  # noqa: SLF001  # LW-920389; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
         user_env={"PYTHONPATH": "/existing/path"},
         out_dir=tmp_path,
         delay_s=1.5,
@@ -277,7 +277,7 @@ def test_build_capture_env_prepends_inject_dir_to_pythonpath(
         record_shapes=True,
     )
     parts = env["PYTHONPATH"].split(":")
-    assert parts[0] == str(capture_ops._INJECT_DIR)  # noqa: SLF001
+    assert parts[0] == str(capture_ops._INJECT_DIR)  # noqa: SLF001  # LW-920390; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
     assert "/existing/path" in parts
     assert env["VIBESYS_TORCH_PROFILE"] == "1"
     assert env["VIBESYS_TORCH_PROFILE_DELAY_S"] == "1.5"
@@ -288,7 +288,7 @@ def test_build_capture_env_prepends_inject_dir_to_pythonpath(
 def test_build_capture_env_sets_duration_when_given(
     capture_ops: ModuleType, tmp_path: Path
 ) -> None:
-    env = capture_ops._build_capture_env(  # noqa: SLF001
+    env = capture_ops._build_capture_env(  # noqa: SLF001  # LW-920391; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
         user_env=None, out_dir=tmp_path, delay_s=0.0, duration_s=30.0, record_shapes=False
     )
     assert env["VIBESYS_TORCH_PROFILE_DURATION_S"] == "30.0"
@@ -298,7 +298,7 @@ def test_build_capture_env_sets_duration_when_given(
 def test_build_capture_env_user_env_wins_on_conflict(
     capture_ops: ModuleType, tmp_path: Path
 ) -> None:
-    env = capture_ops._build_capture_env(  # noqa: SLF001
+    env = capture_ops._build_capture_env(  # noqa: SLF001  # LW-920392; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
         user_env={"VIBESYS_TORCH_PROFILE": "0"},
         out_dir=tmp_path,
         delay_s=0.0,
@@ -329,7 +329,7 @@ def test_build_capture_env_user_env_wins_on_conflict(
 def test_build_capture_env_inject_false_skips_injection_but_keeps_out_dir(
     capture_ops: ModuleType, tmp_path: Path
 ) -> None:
-    env = capture_ops._build_capture_env(  # noqa: SLF001
+    env = capture_ops._build_capture_env(  # noqa: SLF001  # LW-920393; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
         user_env=None,
         out_dir=tmp_path,
         delay_s=5.0,
@@ -348,7 +348,7 @@ def test_build_capture_env_inject_false_skips_injection_but_keeps_out_dir(
 def test_build_capture_env_inject_false_preserves_user_pythonpath(
     capture_ops: ModuleType, tmp_path: Path
 ) -> None:
-    env = capture_ops._build_capture_env(  # noqa: SLF001
+    env = capture_ops._build_capture_env(  # noqa: SLF001  # LW-920394; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
         user_env={"PYTHONPATH": "/existing/path"},
         out_dir=tmp_path,
         delay_s=0.0,
@@ -369,19 +369,19 @@ def test_build_capture_env_inject_false_preserves_user_pythonpath(
     inject=st.booleans(),
 )
 @FAST
-def test_build_capture_env_injection_keys_gated_exactly_by_inject(  # noqa: PLR0913  # tracked: #288
+def test_build_capture_env_injection_keys_gated_exactly_by_inject(  # noqa: PLR0913  # LW-910309; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     capture_ops: ModuleType,
     tmp_path: Path,
     delay_s: float,
     duration_s: float | None,
-    record_shapes: bool,  # noqa: FBT001
-    inject: bool,  # noqa: FBT001
+    record_shapes: bool,  # noqa: FBT001  # LW-920395; tracked migration debt from the pre-manifest ratchet scheme
+    inject: bool,  # noqa: FBT001  # LW-920396; tracked migration debt from the pre-manifest ratchet scheme
 ) -> None:
     """Property: every VIBESYS_TORCH_PROFILE* injection key, and the
     PYTHONPATH prepend, appear if and only if inject=True -- regardless of
     delay_s/duration_s/record_shapes -- while VIBESYS_TORCH_PROFILE_OUT_DIR
     is set unconditionally either way."""
-    env = capture_ops._build_capture_env(  # noqa: SLF001
+    env = capture_ops._build_capture_env(  # noqa: SLF001  # LW-920397; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
         user_env=None,
         out_dir=tmp_path,
         delay_s=delay_s,
@@ -399,7 +399,7 @@ def test_build_capture_env_injection_keys_gated_exactly_by_inject(  # noqa: PLR0
     present = injection_keys & env.keys()
     if inject:
         assert present == injection_keys
-        assert env["PYTHONPATH"].split(os.pathsep)[0] == str(capture_ops._INJECT_DIR)  # noqa: SLF001
+        assert env["PYTHONPATH"].split(os.pathsep)[0] == str(capture_ops._INJECT_DIR)  # noqa: SLF001  # LW-920398; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
     else:
         assert present == set()
         assert ("VIBESYS_TORCH_PROFILE_DURATION_S" in env) is False

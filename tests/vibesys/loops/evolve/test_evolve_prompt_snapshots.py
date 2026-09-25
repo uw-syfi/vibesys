@@ -154,7 +154,7 @@ def _render_prompt(case: _Case, role: str) -> str:
             "judge_prompt.j2",
             **common,
             domain_judge=_domain_section(case, DomainRole.JUDGE),
-            pass_criteria="The candidate passes correctness and improves the headline metric.",  # noqa: S106  # tracked: #288
+            pass_criteria=_CRITERIA,
         )
     if role == "profiler":
         definition = profiler_definition(case.profiler)
@@ -166,7 +166,8 @@ def _render_prompt(case: _Case, role: str) -> str:
             profiler_support_name=definition.support_name,
             profiler_mcp_name=definition.mcp_name,
         )
-    raise AssertionError(f"unknown prompt role: {role}")  # noqa: TRY003  # tracked: #288
+    _failure_message = f"unknown prompt role: {role}"
+    raise AssertionError(_failure_message)
 
 
 def _snapshot_path(case: _Case, role: str) -> Path:
@@ -190,6 +191,9 @@ def _assert_matches_snapshot(case: _Case, role: str, rendered: str) -> None:
         )
     )
     pytest.fail(f"Rendered prompt changed: {snapshot}\n{diff}")
+
+
+_CRITERIA = "The candidate passes correctness and improves the headline metric."
 
 
 @pytest.mark.parametrize("case", _CASES, ids=lambda case: f"{case.domain.value}-{case.phase}")

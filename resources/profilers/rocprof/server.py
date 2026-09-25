@@ -39,25 +39,25 @@ for _common_name in ("_common", "profilers_common"):
         if str(_common_candidate) not in sys.path:
             sys.path.insert(0, str(_common_candidate))
         break
-import capture_runtime  # noqa: E402
-import mcp_async  # noqa: E402
+import capture_runtime  # noqa: E402  # LW-920170; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
+import mcp_async  # noqa: E402  # LW-920171; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 
 # Import the analysis + capture modules by path so this file is usable both
 # from inside the workspace (``rocprof_profiler/server.py``) and as a
 # host-side helper. None of these modules import each other except through
 # ``capture``, so import order otherwise doesn't matter.
 sys.path.insert(0, str(_HERE))
-import analyze_rocprof  # noqa: E402
-import att  # noqa: E402
-import capture  # noqa: E402
-import compute  # noqa: E402
-import counters  # noqa: E402
-import kernel_bench  # noqa: E402
+import analyze_rocprof  # noqa: E402  # LW-920172; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
+import att  # noqa: E402  # LW-920173; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
+import capture  # noqa: E402  # LW-920174; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
+import compute  # noqa: E402  # LW-920175; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
+import counters  # noqa: E402  # LW-920176; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
+import kernel_bench  # noqa: E402  # LW-920177; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 
 _capture_cli = capture.run_cli
 
 
-def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
+def build_server() -> FastMCP:  # noqa: C901, PLR0915  # LW-910097; this function implements one cohesive parsing/validation routine that resists a clean split
     """Construct the FastMCP instance with the curated rocprof tool set.
 
     Exposed separately so unit tests can introspect registered tools
@@ -78,7 +78,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
     # -- profile_*: capture tools, one per altitude ----------------------
 
     @mcp.tool()
-    async def profile_timeline(  # noqa: PLR0913  # tracked: #288
+    async def profile_timeline(  # noqa: PLR0913  # LW-910098; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
         command: str,
         *,
         cwd: str | None = None,
@@ -176,7 +176,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             return capture_runtime.format_busy(exc.active)
 
     @mcp.tool()
-    async def profile_counters(  # noqa: PLR0913  # tracked: #288
+    async def profile_counters(  # noqa: PLR0913  # LW-910099; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
         command: str,
         *,
         cwd: str | None = None,
@@ -243,7 +243,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             return capture_runtime.format_busy(exc.active)
 
     @mcp.tool()
-    async def profile_kernel_deep(  # noqa: PLR0913  # tracked: #288
+    async def profile_kernel_deep(  # noqa: PLR0913  # LW-910100; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
         command: str,
         *,
         cwd: str | None = None,
@@ -306,7 +306,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             return capture_runtime.format_busy(exc.active)
 
     @mcp.tool()
-    async def profile_instructions(  # noqa: PLR0913  # tracked: #288
+    async def profile_instructions(  # noqa: PLR0913  # LW-910101; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
         command: str,
         *,
         cwd: str | None = None,
@@ -371,7 +371,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             return capture_runtime.format_busy(exc.active)
 
     @mcp.tool()
-    async def profile_ops(  # noqa: PLR0913  # tracked: #288
+    async def profile_ops(  # noqa: PLR0913  # LW-910102; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
         command: str | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
@@ -384,8 +384,8 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         timeout_s: float = 1800.0,
         delay_s: float = 0.0,
         duration_s: float | None = None,
-        record_shapes: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
-        inject: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
+        record_shapes: bool = True,  # noqa: FBT001, FBT002  # LW-910103; this boolean parameter mirrors an external tool's own boolean flag
+        inject: bool = True,  # noqa: FBT001, FBT002  # LW-910104; this boolean parameter mirrors an external tool's own boolean flag
         target: str | None = None,
     ) -> str:
         """Capture an in-process torch.profiler trace of any candidate program.
@@ -450,7 +450,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             return capture_runtime.format_busy(exc.active)
 
     @mcp.tool()
-    def start_target(  # noqa: PLR0913  # tracked: #288
+    def start_target(  # noqa: PLR0913  # LW-910105; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
         command: str,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
@@ -889,7 +889,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
     return mcp
 
 
-def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
+def main(argv: list[str] | None = None) -> None:  # noqa: D103  # LW-910106; this is a small standalone-script helper whose name and body are self-explanatory
     parser = argparse.ArgumentParser(
         prog="vibesys-rocprof-mcp",
         description="Stdio MCP server exposing the rocprof capture + analysis toolkit.",

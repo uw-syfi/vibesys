@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import platform
+from typing import TypedDict, cast
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.constants import DomainName
+from vibesys.linux_cpu_profiler import (
+    Capability,
+    DiagnosticCode,
+    LinuxProfilerTool,
+)
+from vibesys.macos_cpu_profiler import Capability as MacOSCapability
+from vibesys.macos_cpu_profiler import MacOSProfilerTool
 from vibesys.profilers import (
     ACTIVE_PROFILER_KINDS,
     PROFILER_DEFINITIONS,
@@ -15,6 +23,8 @@ from vibesys.profilers import (
     allowed_profiler_kinds,
     coerce_profiler_kind,
     preflight_profiler_kind,
+    profiler_definition,
+    require_domain_name,
     resolve_profiler_kind,
 )
 
@@ -28,7 +38,13 @@ _ENVIRONMENT_DEFAULTS = (
 _PROFILER_VALUES = frozenset(kind.value for kind in ProfilerKind)
 
 
-def test_profiler_definitions_derive_uniform_packaging_names():  # noqa: ANN201  # tracked: #288
+class _ResolutionInputs(TypedDict):
+    domain: DomainName
+    backend_profiler_kind: ProfilerKind | None
+    environment_default_profiler_kind: ProfilerKind
+
+
+def test_profiler_definitions_derive_uniform_packaging_names() -> None:
     assert frozenset(PROFILER_DEFINITIONS) == ACTIVE_PROFILER_KINDS
     for kind, definition in PROFILER_DEFINITIONS.items():
         assert definition.support_name == f"{kind.value}_profiler"
@@ -37,7 +53,7 @@ def test_profiler_definitions_derive_uniform_packaging_names():  # noqa: ANN201 
         assert definition.mcp_name == f"vibesys-{kind.value.replace('_', '-')}-profiler"
 
 
-def test_profiler_definition_needs_no_path_or_dispatch_declaration():  # noqa: ANN201  # tracked: #288
+def test_profiler_definition_needs_no_path_or_dispatch_declaration() -> None:
     definition = ProfilerDefinition(
         kind=ProfilerKind.NSYS,
         domains=frozenset({DomainName.GENERIC}),
@@ -47,7 +63,7 @@ def test_profiler_definition_needs_no_path_or_dispatch_declaration():  # noqa: A
     assert definition.prompt_template == "profilers/nsys.j2"
 
 
-def _expected_resolved(  # noqa: PLR0911  # tracked: #288
+def _expected_resolved(
     requested: ProfilerKind,
     *,
     domain: DomainName,
@@ -61,11 +77,10 @@ def _expected_resolved(  # noqa: PLR0911  # tracked: #288
         return requested
     if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
         system = platform.system()
-        if system == "Darwin":
-            return ProfilerKind.MACOS_CPU
-        if system == "Linux":
-            return ProfilerKind.LINUX_CPU
-        return ProfilerKind.NONE
+        return {
+            "Darwin": ProfilerKind.MACOS_CPU,
+            "Linux": ProfilerKind.LINUX_CPU,
+        }.get(system, ProfilerKind.NONE)
     if domain is DomainName.MICROSERVICES:
         return ProfilerKind.NONE
     if allowed == frozenset({ProfilerKind.NONE}):
@@ -84,27 +99,29 @@ def _expected_resolved(  # noqa: PLR0911  # tracked: #288
 @pytest.mark.parametrize("requested", _REQUESTED)
 @pytest.mark.parametrize("backend_profiler_kind", _BACKEND_KINDS)
 @pytest.mark.parametrize("environment_default_profiler_kind", _ENVIRONMENT_DEFAULTS)
-def test_profiler_auto_resolution_exhaustive(  # noqa: ANN201  # tracked: #288
-    domain,  # noqa: ANN001  # tracked: #288
-    requested,  # noqa: ANN001  # tracked: #288
-    backend_profiler_kind,  # noqa: ANN001  # tracked: #288
-    environment_default_profiler_kind,  # noqa: ANN001  # tracked: #288
-):
-    kwargs = dict(  # noqa: C408  # tracked: #288
-        domain=domain,
-        backend_profiler_kind=backend_profiler_kind,
-        environment_default_profiler_kind=environment_default_profiler_kind,
-    )
+def test_profiler_auto_resolution_exhaustive(
+    domain: DomainName,
+    requested: ProfilerKind,
+    backend_profiler_kind: ProfilerKind | None,
+    environment_default_profiler_kind: ProfilerKind,
+) -> None:
+    kwargs: _ResolutionInputs = {
+        "domain": domain,
+        "backend_profiler_kind": backend_profiler_kind,
+        "environment_default_profiler_kind": environment_default_profiler_kind,
+    }
     try:
         expected = _expected_resolved(requested, **kwargs)
     except ValueError:
-        with pytest.raises(ValueError):  # noqa: PT011  # tracked: #288
+        with pytest.raises(ValueError, match="not supported"):
             resolve_profiler_kind(requested, **kwargs)
     else:
         assert resolve_profiler_kind(requested, **kwargs) is expected
 
 
-def test_generic_auto_uses_none_when_host_has_no_native_cpu_profiler(monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_generic_auto_uses_none_when_host_has_no_native_cpu_profiler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(platform, "system", lambda: "FreeBSD")
 
     assert (
@@ -118,7 +135,9 @@ def test_generic_auto_uses_none_when_host_has_no_native_cpu_profiler(monkeypatch
     )
 
 
-def test_generic_auto_respects_environment_profiler_capabilities(monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_generic_auto_respects_environment_profiler_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(platform, "system", lambda: "Linux")
 
     assert (
@@ -135,7 +154,7 @@ def test_generic_auto_respects_environment_profiler_capabilities(monkeypatch):  
     )
 
 
-def test_explicit_profiler_respects_environment_capabilities():  # noqa: ANN201  # tracked: #288
+def test_explicit_profiler_respects_environment_capabilities() -> None:
     with pytest.raises(ValueError, match="selected run environment"):
         resolve_profiler_kind(
             ProfilerKind.NSYS,
@@ -148,7 +167,7 @@ def test_explicit_profiler_respects_environment_capabilities():  # noqa: ANN201 
         )
 
 
-def test_auto_profiler_falls_back_by_environment_capability_not_provider_name():  # noqa: ANN201  # tracked: #288
+def test_auto_profiler_falls_back_by_environment_capability_not_provider_name() -> None:
     assert (
         resolve_profiler_kind(
             ProfilerKind.AUTO,
@@ -169,20 +188,20 @@ def test_auto_profiler_falls_back_by_environment_capability_not_provider_name():
     backend_profiler_kind=st.sampled_from(_BACKEND_KINDS),
     environment_default_profiler_kind=st.sampled_from(_ENVIRONMENT_DEFAULTS),
 )
-def test_profiler_resolution_invariants(  # noqa: ANN201  # tracked: #288
-    domain,  # noqa: ANN001  # tracked: #288
-    requested,  # noqa: ANN001  # tracked: #288
-    backend_profiler_kind,  # noqa: ANN001  # tracked: #288
-    environment_default_profiler_kind,  # noqa: ANN001  # tracked: #288
-):
-    kwargs = dict(  # noqa: C408  # tracked: #288
-        domain=domain,
-        backend_profiler_kind=backend_profiler_kind,
-        environment_default_profiler_kind=environment_default_profiler_kind,
-    )
+def test_profiler_resolution_invariants(
+    domain: DomainName,
+    requested: ProfilerKind,
+    backend_profiler_kind: ProfilerKind | None,
+    environment_default_profiler_kind: ProfilerKind,
+) -> None:
+    kwargs: _ResolutionInputs = {
+        "domain": domain,
+        "backend_profiler_kind": backend_profiler_kind,
+        "environment_default_profiler_kind": environment_default_profiler_kind,
+    }
     allowed = allowed_profiler_kinds(domain)
     if requested is not ProfilerKind.AUTO and requested not in allowed:
-        with pytest.raises(ValueError):  # noqa: PT011  # tracked: #288
+        with pytest.raises(ValueError, match="not supported"):
             resolve_profiler_kind(requested, **kwargs)
         return
 
@@ -208,7 +227,7 @@ def test_profiler_resolution_invariants(  # noqa: ANN201  # tracked: #288
 
 
 @given(value=st.text(min_size=1, max_size=12).filter(lambda text: text not in _PROFILER_VALUES))
-def test_unknown_profiler_names_raise(value):  # noqa: ANN001, ANN201  # tracked: #288
+def test_unknown_profiler_names_raise(value: str) -> None:
     with pytest.raises(ValueError, match="Unknown"):
         coerce_profiler_kind(value)
 
@@ -218,22 +237,19 @@ def test_unknown_profiler_names_raise(value):  # noqa: ANN001, ANN201  # tracked
         lambda text: text not in _PROFILER_VALUES
     )
 )
-def test_resolver_rejects_unparsed_backend_profiler_metadata(backend_profiler_kind):  # noqa: ANN001, ANN201  # tracked: #288
+def test_resolver_rejects_unparsed_backend_profiler_metadata(backend_profiler_kind: str) -> None:
     with pytest.raises(TypeError, match="backend profiler"):
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.LLM_SERVING,
-            backend_profiler_kind=backend_profiler_kind,
+            backend_profiler_kind=cast("ProfilerKind", backend_profiler_kind),
             environment_default_profiler_kind=ProfilerKind.NSYS,
         )
 
 
-def test_linux_cpu_preflight_fails_when_perf_is_unavailable(monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.linux_cpu_profiler import (  # noqa: PLC0415  # tracked: #288
-        Capability,
-        DiagnosticCode,
-        LinuxProfilerTool,
-    )
+def test_linux_cpu_preflight_fails_when_perf_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
 
     monkeypatch.setattr(
         "vibesys.linux_cpu_profiler.detect_capability",
@@ -258,12 +274,9 @@ def test_linux_cpu_preflight_fails_when_perf_is_unavailable(monkeypatch):  # noq
     assert "perf_unavailable" in result.error_message()
 
 
-def test_linux_cpu_preflight_accepts_perf_with_nonblocking_symbol_restrictions(monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.linux_cpu_profiler import (  # noqa: PLC0415  # tracked: #288
-        Capability,
-        DiagnosticCode,
-        LinuxProfilerTool,
-    )
+def test_linux_cpu_preflight_accepts_perf_with_nonblocking_symbol_restrictions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
 
     monkeypatch.setattr(
         "vibesys.linux_cpu_profiler.detect_capability",
@@ -283,7 +296,7 @@ def test_linux_cpu_preflight_accepts_perf_with_nonblocking_symbol_restrictions(m
     assert result.diagnostics == ("kernel_symbols_restricted",)
 
 
-def test_headroom_profiler_domains_and_preflight():  # noqa: ANN201  # tracked: #288
+def test_headroom_profiler_domains_and_preflight() -> None:
     definition = PROFILER_DEFINITIONS[ProfilerKind.HEADROOM]
 
     assert definition.domains == frozenset({DomainName.LLM_SERVING})
@@ -295,7 +308,7 @@ def test_headroom_profiler_domains_and_preflight():  # noqa: ANN201  # tracked: 
     assert preflight_profiler_kind(ProfilerKind.HEADROOM).usable
 
 
-def test_rocprof_profiler_domains_and_preflight():  # noqa: ANN201  # tracked: #288
+def test_rocprof_profiler_domains_and_preflight() -> None:
     definition = PROFILER_DEFINITIONS[ProfilerKind.ROCPROF]
 
     assert definition.domains == frozenset({DomainName.LLM_SERVING})
@@ -312,7 +325,7 @@ def test_rocprof_profiler_domains_and_preflight():  # noqa: ANN201  # tracked: #
     assert definition.extra_support_kinds == frozenset({ProfilerKind.TORCH})
 
 
-def test_extra_support_kinds_default_empty_and_are_runnable_kinds():  # noqa: ANN201  # tracked: #288
+def test_extra_support_kinds_default_empty_and_are_runnable_kinds() -> None:
     for kind, definition in PROFILER_DEFINITIONS.items():
         if kind is ProfilerKind.ROCPROF:
             continue
@@ -320,3 +333,95 @@ def test_extra_support_kinds_default_empty_and_are_runnable_kinds():  # noqa: AN
     for definition in PROFILER_DEFINITIONS.values():
         for extra_kind in definition.extra_support_kinds:
             assert extra_kind in PROFILER_DEFINITIONS
+
+
+@pytest.mark.parametrize("kind", [ProfilerKind.AUTO, ProfilerKind.NONE])
+def test_profiler_definition_rejects_non_runnable_kinds(kind: ProfilerKind) -> None:
+    with pytest.raises(ValueError, match=f"Profiler {kind.value!r} is not runnable"):
+        profiler_definition(kind)
+
+
+def test_profiler_definition_returns_declaration_for_runnable_kind() -> None:
+    assert profiler_definition(ProfilerKind.NSYS) is PROFILER_DEFINITIONS[ProfilerKind.NSYS]
+
+
+def test_require_domain_name_rejects_raw_strings() -> None:
+    with pytest.raises(TypeError, match="domain must be a DomainName, got str"):
+        require_domain_name("generic")
+    assert require_domain_name(DomainName.GENERIC) is DomainName.GENERIC
+
+
+def test_generic_auto_falls_back_to_supported_environment_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.GENERIC,
+            backend_profiler_kind=None,
+            environment_default_profiler_kind=ProfilerKind.MACOS_CPU,
+            environment_supported_profiler_kinds=frozenset(
+                {ProfilerKind.MACOS_CPU, ProfilerKind.NSYS}
+            ),
+        )
+        is ProfilerKind.MACOS_CPU
+    )
+
+
+def test_generic_auto_errors_when_environment_supports_no_generic_profiler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+
+    with pytest.raises(
+        ValueError, match=r"No profiler supported by both.*environment allows: nsys"
+    ):
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.GENERIC,
+            backend_profiler_kind=None,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+            environment_supported_profiler_kinds=frozenset({ProfilerKind.NSYS}),
+        )
+
+
+def test_auto_rejects_environment_default_the_environment_cannot_run() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"Resolved profiler 'torch' is not supported by the selected run environment; "
+        r"allowed: none",
+    ):
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.LLM_SERVING,
+            backend_profiler_kind=ProfilerKind.NSYS,
+            environment_default_profiler_kind=ProfilerKind.TORCH,
+            environment_supported_profiler_kinds=frozenset({ProfilerKind.NONE}),
+        )
+
+
+@pytest.mark.parametrize(
+    ("tool", "sample_path"),
+    [(MacOSProfilerTool.SAMPLE, "/usr/bin/sample"), (MacOSProfilerTool.NONE, None)],
+)
+def test_macos_cpu_preflight_reports_tool_availability(
+    monkeypatch: pytest.MonkeyPatch,
+    tool: MacOSProfilerTool,
+    sample_path: str | None,
+) -> None:
+    monkeypatch.setattr(
+        "vibesys.macos_cpu_profiler.detect_capability",
+        lambda: MacOSCapability(tool, None, None, sample_path, None, ()),
+    )
+
+    result = preflight_profiler_kind(ProfilerKind.MACOS_CPU)
+
+    assert result.usable is (tool is MacOSProfilerTool.SAMPLE)
+    assert result.diagnostics == ()
+    assert result.details == (
+        "xcode_path=missing",
+        "xctrace_path=missing",
+        f"sample_path={sample_path or 'missing'}",
+    )

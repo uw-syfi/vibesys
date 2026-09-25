@@ -207,10 +207,8 @@ class _LocalRunSession:
         """
         handoff = self._resource_handoff
         if handoff is None:
-            raise RuntimeError(  # noqa: TRY003
-                "open_agent_environment() called before this run published its resources "
-                "(register a listener via on_run_resources first)"
-            )
+            message = "open_agent_environment() called before this run published its resources (register a listener via on_run_resources first)"
+            raise RuntimeError(message)
         request = replace(
             handoff.environment_request,
             environment_bind_mounts=(

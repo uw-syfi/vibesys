@@ -32,40 +32,30 @@ from __future__ import annotations
 
 import random
 import threading
-from collections.abc import Sequence  # noqa: TC003  # tracked: #288
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
-from pathlib import Path  # noqa: TC003  # tracked: #288
-from typing import Any, Literal, cast
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, cast
 
 from jinja2 import Environment, FileSystemLoader
 
 from vibesys.agent_spec_config import resolve_agent_driver
 from vibesys.config import Config, as_config
-from vibesys.constants import (
-    DEFAULT_COMPUTE_BACKEND,
-    ComputeBackend,
-    DomainName,
-)
+from vibesys.constants import DomainName
 from vibesys.context import create_candidate_context, create_run_context
 from vibesys.domains.base import DomainDefinition, DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.evaluators.input_manifest import (  # noqa: TC001  # tracked: #288
-    BenchmarkResult,
-    WorkspaceSource,
-)
-from vibesys.events import FrameworkSource
+from vibesys.events import FrameworkSource, RunConfiguredData
 from vibesys.loops.evolve.population import (
     Individual,
     Population,
 )
 from vibesys.loops.evolve.search_policy import (
-    OpenEvolveSearchConfig,
     OpenEvolveSearchPolicy,
     SearchPolicy,
     SearchPolicyName,
     SearchSelection,
+    SearchSelectionParameters,
     VibeSysSearchPolicy,
 )
 from vibesys.loops.evolve.state import EvolutionStateStore
@@ -82,16 +72,25 @@ from vibesys.loops.profiler import invoke_profiler
 from vibesys.profilers import ProfilerKind, profiler_definition
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.render.sink import output_sink
-from vibesys.run import LocalRunIntegration, LoopContext, RepositoryVisibility, RunStateNamespace
+from vibesys.run import LocalRunIntegration, LoopContext, RunStateNamespace
 from vibesys.sandbox.run_environment import (
     RunEnvironmentSpec,
     make_run_environment_spec,
     run_environment_record,
 )
 from vibesys.schemas import JudgeResponse, MutatorResponse, ProfilerSummary, Verdict
-from vs_agent.api import AgentBackend, CandidateProgress
+from vs_agent.api import AgentBackend, CandidateProgress, RoundProgress
 from vs_project.api import EvolveRunConfiguration
 
+_DEFAULT_CRITERIA = (
+    "The candidate obeys the input bundle's contract, the accuracy command passes, and the "
+    "benchmark sanity step completes without modifying evaluator-owned files."
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from vibesys.loops.request import LoopRunRequest
 _TEMPLATE_DIR = PROMPTS_DIR / "loops" / "evolve"
 _AGENT_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "agent"
 _INTERFACE = "inprocess"
@@ -103,7 +102,7 @@ _NO_BENCHMARK_CONTRACT = BenchmarkContract()
 # Evolve owns its top-level mutator and judge prompts but reuses the agent
 # loop's modality fragments and profiler prompts. Domain role files are rendered
 # separately and injected into both sets of neutral templates.
-_jinja_env = Environment(  # noqa: S701  # tracked: #288
+_jinja_env = Environment(  # noqa: S701  # lint-waiver: LW-010209 [S701]; these are plain-text agent prompts, and HTML escaping would alter their instructions.
     loader=FileSystemLoader([str(_TEMPLATE_DIR), str(_AGENT_TEMPLATE_DIR)]),
     keep_trailing_newline=True,
     trim_blocks=True,
@@ -125,12 +124,14 @@ def _persist_evolve_state(
 def _materialize_selected_candidate(ctx: LoopContext, individual: Individual) -> None:
     """Make one deterministic selected candidate the run branch's final tree."""
     if not individual.commit:
-        raise RuntimeError(f"selected individual {individual.id} has no Git commit")  # noqa: TRY003  # tracked: #288
+        message = f"selected individual {individual.id} has no Git commit"
+        raise RuntimeError(message)
     ctx.git.retain_candidate(f"selected-{individual.id}", individual.commit)
     if not ctx.git.checkout_tree(individual.commit, clean=True):
-        raise RuntimeError(  # noqa: TRY003  # tracked: #288
+        message = (
             f"could not materialize selected individual {individual.id} at {individual.commit}"
         )
+        raise RuntimeError(message)
     ctx.snapshot_workspace(f"evolve: select individual {individual.id}")
 
 
@@ -165,7 +166,7 @@ def _discard_working_tree(ctx: LoopContext) -> None:
                 "discard working tree failed",
                 source=FrameworkSource.LOOP,
             )
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010256 [BLE001]; cleanup warnings must not replace an earlier candidate failure.
         output_sink().framework_warning(
             "discard working tree failed",
             detail=str(exc),
@@ -270,23 +271,35 @@ def _candidate_runtime_notes(
     return runtime.prompt_notes, runtime.deployment_name
 
 
-def _run_mutator(  # noqa: PLR0913  # tracked: #288
+def _run_mutator(
     ctx: LoopContext,
     *,
-    generation: int,
-    child_idx: int,
-    objective: str,
-    parent: Individual | None,
-    inspirations: list[Individual],
-    modality: str | None,
-    domain_definition: DomainDefinition,
-    is_cold_start: bool,
-    space: MetricSpace,
-    failed_lessons: list[str] | None = None,
-    num_failed_attempts: int = 0,
-    repair_seed: bool = False,
+    search: _EvolutionSearchSession,
+    progress: CandidateProgress,
+    selection: SearchSelection | None,
     runtime_notes: str | None = None,
 ) -> MutatorResponse:
+    request = search.request
+    population = search.population
+    generation = progress.round_number
+    child_idx = progress.candidate_number
+    objective = _required_evolve_objective(request)
+    space = request.space
+    bundle = request.input_bundle
+    modality = request.modality
+    domain_definition = resolve_domain(bundle.domain)
+    if modality is None and domain_definition.name is DomainName.LLM_SERVING:
+        modality = "text_generation"
+    is_cold_start = selection is None
+    failed_lessons = _recent_failure_lessons(population) if population is not None else None
+    num_failed_attempts = (
+        sum(1 for individual in population.all if not individual.passed)
+        if population is not None
+        else 0
+    )
+    repair_seed = population is not None and _latest_wip_seed(population) is not None
+    parent = selection.parent if selection is not None else None
+    inspirations = selection.inspirations if selection is not None else []
     prompt_runtime_notes = (
         runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
     )
@@ -331,17 +344,23 @@ def _run_mutator(  # noqa: PLR0913  # tracked: #288
     )
 
 
-def _run_judge(  # noqa: PLR0913  # tracked: #288
+def _run_judge(
     ctx: LoopContext,
     *,
-    generation: int,
-    child_idx: int,
-    modality: str | None,
-    domain_definition: DomainDefinition,
-    objective: str,
-    pass_criteria: str,
+    search: _EvolutionSearchSession,
+    progress: CandidateProgress,
     runtime_notes: str | None = None,
 ) -> JudgeResponse:
+    request = search.request
+    pass_criteria = search.pass_criteria
+    generation = progress.round_number
+    child_idx = progress.candidate_number
+    objective = _required_evolve_objective(request)
+    bundle = request.input_bundle
+    modality = request.modality
+    domain_definition = resolve_domain(bundle.domain)
+    if modality is None and domain_definition.name is DomainName.LLM_SERVING:
+        modality = "text_generation"
     prompt_runtime_notes = (
         runtime_notes if runtime_notes is not None else ctx.run_environment_view.prompt_notes
     )
@@ -396,17 +415,22 @@ def _format_objectives_for_profiler(objectives: Sequence[Objective]) -> str:
     )
 
 
-def _run_profiler(  # noqa: PLR0913  # tracked: #288
+def _run_profiler(
     ctx: LoopContext,
     *,
-    generation: int,
-    child_idx: int,
-    modality: str | None,
-    domain_definition: DomainDefinition,
-    objective: str,
-    space: MetricSpace,
+    request: LoopRunRequest,
+    progress: CandidateProgress,
     runtime_notes: str | None = None,
 ) -> ProfilerSummary | None:
+    generation = progress.round_number
+    child_idx = progress.candidate_number
+    objective = _required_evolve_objective(request)
+    space = request.space
+    bundle = request.input_bundle
+    modality = request.modality
+    domain_definition = resolve_domain(bundle.domain)
+    if modality is None and domain_definition.name is DomainName.LLM_SERVING:
+        modality = "text_generation"
     if ctx.profiler_kind is ProfilerKind.NONE:
         return None
     definition = profiler_definition(ctx.profiler_kind)
@@ -469,6 +493,19 @@ class _CandidateOutcome:
     metrics: dict[str, float] = field(default_factory=dict)
     policy_parent_id: str | None = None
     target_island: int | None = None
+    generation: int = 0
+
+
+@dataclass
+class _EvolutionSearchSession:
+    """Mutable state shared across one evolutionary search's generations."""
+
+    request: LoopRunRequest
+    pass_criteria: str
+    population: Population
+    rng: random.Random
+    search_policy: SearchPolicy
+    worktree_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 def _run_framework_accuracy_gate(
@@ -505,25 +542,33 @@ def _run_framework_benchmark_gate(
     """
     return run_benchmark_gate(
         ctx,
-        result_spec=contract.result_spec,
-        result_protocol=contract.result_protocol,
-        objectives=space.objectives,
+        contract=replace(
+            contract,
+            timeout_seconds=framework_command_timeout(ctx, contract.timeout_seconds),
+        ),
+        space=space,
         process_id=f"evolve-benchmark-{generation}-{child_idx}",
         output_slug=f"gen{generation}-cand{child_idx}",
-        timeout_seconds=framework_command_timeout(ctx, contract.timeout_seconds),
         round_label=f"gen-{generation}-cand-{child_idx}",
     )
 
 
-def _run_candidate_gates(  # noqa: PLR0913  # tracked: #288
+def _run_candidate_gates(
     ctx: LoopContext,
     *,
-    generation: int,
-    child_idx: int,
-    contract: BenchmarkContract,
-    space: MetricSpace,
-    accuracy_timeout_seconds: int | None,
+    request: LoopRunRequest,
+    progress: CandidateProgress,
 ) -> tuple[str | None, FrameworkBenchmarkOutcome | None]:
+    generation = progress.round_number
+    child_idx = progress.candidate_number
+    bundle = request.input_bundle
+    contract = BenchmarkContract(
+        result_spec=bundle.benchmark_result,
+        result_protocol=bundle.benchmark_result_protocol,
+        timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
+    )
+    space = request.space
+    accuracy_timeout_seconds = bundle.manifest.accuracy.timeout_seconds
     """Run the accuracy gate, then the benchmark contract when one is declared.
 
     Returns ``(failure_feedback, benchmark)``. ``failure_feedback`` is ``None``
@@ -591,24 +636,12 @@ def _candidate_fitness(
     )
 
 
-def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
+def _evaluate_candidate(
     ctx: LoopContext,
     *,
-    generation: int,
-    child_idx: int,
-    parent: Individual,
-    inspirations: list[Individual],
-    objective: str,
-    space: MetricSpace,
-    modality: str | None,
-    domain_definition: DomainDefinition,
-    pass_criteria: str,
-    keep_deployments: bool,
-    policy_parent_id: str | None = None,
-    target_island: int | None = None,
-    isolated_deployment: bool = False,
-    accuracy_timeout_seconds: int | None = None,
-    benchmark_contract: BenchmarkContract = _NO_BENCHMARK_CONTRACT,
+    search: _EvolutionSearchSession,
+    progress: CandidateProgress,
+    selection: SearchSelection,
 ) -> _CandidateOutcome:
     """Mutate → judge → accuracy gate → benchmark gate → (profile → commit) one candidate.
 
@@ -623,6 +656,16 @@ def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
     per-candidate name. In parallel mode each candidate's sub-context already
     owns a distinct deployment, so no further suffixing is needed.
     """
+    request = search.request
+    generation = progress.round_number
+    child_idx = progress.candidate_number
+    keep_deployments = request.keep_deployments
+    parent = selection.parent
+    inspirations = selection.inspirations
+    isolated_deployment = (
+        request.max_parallelism > 1
+        and ctx.run_environment_view.supports_parallel_candidate_evaluation
+    )
     if isolated_deployment:
         cand_notes = ctx.run_environment_view.prompt_notes
         cand_deployment = ctx.run_environment_view.deployment_namespace
@@ -642,15 +685,9 @@ def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
         ctx.reselect_gpu()
         mutator = _run_mutator(
             ctx,
-            generation=generation,
-            child_idx=child_idx,
-            objective=objective,
-            parent=parent,
-            inspirations=inspirations,
-            modality=modality,
-            domain_definition=domain_definition,
-            is_cold_start=False,
-            space=space,
+            search=search,
+            progress=progress,
+            selection=selection,
             runtime_notes=cand_notes,
         )
 
@@ -658,12 +695,8 @@ def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
         ctx.reselect_gpu()
         verdict = _run_judge(
             ctx,
-            generation=generation,
-            child_idx=child_idx,
-            modality=modality,
-            domain_definition=domain_definition,
-            objective=objective,
-            pass_criteria=pass_criteria,
+            search=search,
+            progress=progress,
             runtime_notes=cand_notes,
         )
 
@@ -674,8 +707,8 @@ def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
                 inspiration_ids=inspiration_ids,
                 summary=mutator.summary,
                 feedback=verdict.feedback,
-                policy_parent_id=policy_parent_id,
-                target_island=target_island,
+                policy_parent_id=selection.policy_parent_id,
+                target_island=selection.target_island,
             )
 
         # 3. Framework-owned accuracy gate, then the benchmark result contract
@@ -685,11 +718,8 @@ def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
         # failing benchmark short-circuits the expensive diagnostic pass.
         gate_feedback, benchmark = _run_candidate_gates(
             ctx,
-            generation=generation,
-            child_idx=child_idx,
-            contract=benchmark_contract,
-            space=space,
-            accuracy_timeout_seconds=accuracy_timeout_seconds,
+            request=request,
+            progress=progress,
         )
         if gate_feedback is not None:
             return _CandidateOutcome(
@@ -698,8 +728,8 @@ def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
                 inspiration_ids=inspiration_ids,
                 summary=mutator.summary,
                 feedback=gate_feedback,
-                policy_parent_id=policy_parent_id,
-                target_island=target_island,
+                policy_parent_id=selection.policy_parent_id,
+                target_island=selection.target_island,
             )
 
         # 4. Profile the offspring; diagnostics plus the fitness fallback when
@@ -707,12 +737,8 @@ def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
         ctx.reselect_gpu()
         summary = _run_profiler(
             ctx,
-            generation=generation,
-            child_idx=child_idx,
-            modality=modality,
-            domain_definition=domain_definition,
-            objective=objective,
-            space=space,
+            request=request,
+            progress=progress,
             runtime_notes=cand_notes,
         )
 
@@ -730,22 +756,19 @@ def _evaluate_candidate(  # noqa: PLR0913  # tracked: #288
             perf_metric=perf_metric,
             perf_unit=perf_unit,
             metrics=metrics,
-            policy_parent_id=policy_parent_id,
-            target_island=target_island,
+            policy_parent_id=selection.policy_parent_id,
+            target_island=selection.target_island,
         )
     finally:
         _teardown_candidate_deployment(ctx, cand_deployment, keep=keep_deployments)
 
 
-def _record_outcome(  # noqa: PLR0913  # tracked: #288
+def _record_outcome(
     ctx: LoopContext,
     population: Population,
-    state_store: EvolutionStateStore,
+    request: LoopRunRequest,
     outcome: _CandidateOutcome,
-    *,
-    generation: int,
     search_policy: SearchPolicy,
-    space: MetricSpace,
 ) -> Individual:
     """Assign an id, add the individual to the population, and persist it.
 
@@ -753,6 +776,8 @@ def _record_outcome(  # noqa: PLR0913  # tracked: #288
     thread after each candidate's evaluation returns, so ``next_id`` and
     ``Population`` mutation never race even when evaluation ran in parallel.
     """
+    generation = outcome.generation
+    state_store = EvolutionStateStore(ctx.state.portable(RunStateNamespace.EVOLVE))
     individual = Individual(
         id=population.next_id(),
         generation=generation,
@@ -781,7 +806,7 @@ def _record_outcome(  # noqa: PLR0913  # tracked: #288
                 ),
                 policy_parent_id=outcome.policy_parent_id,
                 target_island=outcome.target_island,
-                space=space,
+                space=request.space,
             )
         metrics_repr = (
             " ".join(f"{k}={v:g}" for k, v in individual.metrics.items())
@@ -800,17 +825,11 @@ def _record_outcome(  # noqa: PLR0913  # tracked: #288
     return individual
 
 
-def _plan_candidate(  # noqa: PLR0913  # tracked: #288
+def _plan_candidate(
     ctx: LoopContext,
     population: Population,
     state_store: EvolutionStateStore,
-    rng: random.Random,
-    *,
-    k_top_inspirations: int,
-    k_random_inspirations: int,
-    selection_temperature: float,
-    space: MetricSpace,
-    frontier_bias: float,
+    parameters: SearchSelectionParameters,
     search_policy: SearchPolicy | None = None,
 ) -> SearchSelection | None:
     """Select a (parent, inspirations) pair from the current population.
@@ -824,15 +843,7 @@ def _plan_candidate(  # noqa: PLR0913  # tracked: #288
     loop never cold-starts.
     """
     policy = search_policy or VibeSysSearchPolicy()
-    selection = policy.select(
-        population,
-        rng=rng,
-        k_top_inspirations=k_top_inspirations,
-        k_random_inspirations=k_random_inspirations,
-        selection_temperature=selection_temperature,
-        space=space,
-        frontier_bias=frontier_bias,
-    )
+    selection = policy.select(population, parameters)
     _persist_evolve_state(
         ctx,
         state_store,
@@ -846,33 +857,25 @@ def _plan_candidate(  # noqa: PLR0913  # tracked: #288
     return selection
 
 
-def _run_generation_serial(  # noqa: PLR0913  # tracked: #288
+def _run_generation_serial(
     ctx: LoopContext,
     *,
-    generation: int,
-    max_generations: int,
-    children_per_generation: int,
-    population: Population,
-    state_store: EvolutionStateStore,
-    rng: random.Random,
-    k_top_inspirations: int,
-    k_random_inspirations: int,
-    selection_temperature: float,
-    objective: str,
-    space: MetricSpace,
-    frontier_bias: float,
-    modality: str | None,
-    domain_definition: DomainDefinition,
-    pass_criteria: str,
-    keep_deployments: bool,
-    search_policy: SearchPolicy,
-    accuracy_timeout_seconds: int | None = None,
-    benchmark_contract: BenchmarkContract = _NO_BENCHMARK_CONTRACT,
+    progress: RoundProgress,
+    search: _EvolutionSearchSession,
 ) -> None:
     """Evaluate a generation's candidates one at a time on the shared context."""
-    for child_idx in range(1, children_per_generation + 1):
+    request = search.request
+    population = search.population
+    rng = search.rng
+    search_policy = search.search_policy
+    generation = progress.round_number
+    state_store = EvolutionStateStore(ctx.state.portable(RunStateNamespace.EVOLVE))
+    for child_idx in range(1, request.children_per_generation + 1):
         candidate_progress = CandidateProgress(
-            generation, max_generations, child_idx, children_per_generation
+            generation,
+            request.max_generations,
+            child_idx,
+            request.children_per_generation,
         )
         with ctx.progress(candidate_progress):
             ctx.lprint(f"\n--- {candidate_progress.label()} ---\n")
@@ -880,18 +883,19 @@ def _run_generation_serial(  # noqa: PLR0913  # tracked: #288
                 ctx,
                 population,
                 state_store,
-                rng,
-                k_top_inspirations=k_top_inspirations,
-                k_random_inspirations=k_random_inspirations,
-                selection_temperature=selection_temperature,
-                space=space,
-                frontier_bias=frontier_bias,
+                SearchSelectionParameters(
+                    rng=rng,
+                    k_top_inspirations=request.k_top_inspirations,
+                    k_random_inspirations=request.k_random_inspirations,
+                    selection_temperature=request.selection_temperature,
+                    space=request.space,
+                    frontier_bias=request.frontier_bias,
+                ),
                 search_policy=search_policy,
             )
             if plan is None:
                 continue
             parent = plan.parent
-            inspirations = plan.inspirations
             if parent.commit and not ctx.git.checkout_tree(parent.commit, clean=True):
                 output_sink().framework_warning(
                     f"could not check out parent {parent.id} "
@@ -902,29 +906,17 @@ def _run_generation_serial(  # noqa: PLR0913  # tracked: #288
 
             outcome = _evaluate_candidate(
                 ctx,
-                generation=generation,
-                child_idx=child_idx,
-                parent=parent,
-                inspirations=inspirations,
-                objective=objective,
-                space=space,
-                modality=modality,
-                domain_definition=domain_definition,
-                pass_criteria=pass_criteria,
-                keep_deployments=keep_deployments,
-                policy_parent_id=plan.policy_parent_id,
-                target_island=plan.target_island,
-                accuracy_timeout_seconds=accuracy_timeout_seconds,
-                benchmark_contract=benchmark_contract,
+                search=search,
+                progress=candidate_progress,
+                selection=plan,
             )
+            outcome.generation = generation
             individual = _record_outcome(
                 ctx,
                 population,
-                state_store,
+                request,
                 outcome,
-                generation=generation,
                 search_policy=search_policy,
-                space=space,
             )
             if not outcome.passed:
                 # Dead-end mutation: revert the dirty tree back to the passing
@@ -937,36 +929,30 @@ def _run_generation_serial(  # noqa: PLR0913  # tracked: #288
             )
 
 
-def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
+def _evaluate_in_subcontext(
     parent_ctx: LoopContext,
     *,
-    config: Config,
-    agent_backend: str | None,
-    cli_provider: str | None,
-    generation: int,
-    child_idx: int,
-    parent: Individual,
-    inspirations: list[Individual],
-    objective: str,
-    space: MetricSpace,
-    modality: str | None,
-    domain_definition: DomainDefinition,
-    pass_criteria: str,
-    keep_deployments: bool,
-    policy_parent_id: str | None,
-    target_island: int | None,
-    worktree_lock: threading.Lock,
-    accuracy_timeout_seconds: int | None = None,
-    benchmark_contract: BenchmarkContract = _NO_BENCHMARK_CONTRACT,
+    search: _EvolutionSearchSession,
+    progress: CandidateProgress,
+    selection: SearchSelection,
 ) -> _CandidateOutcome:
     """Run one candidate in its own isolated sub-context (worker thread).
 
     Never raises: setup/evaluation/teardown failures are logged and folded into
     a failed ``_CandidateOutcome`` so one bad candidate can't sink the pool. The
-    ``worktree_lock`` serializes ``git worktree add`` (which mutates the shared
-    repo's admin area); everything after — the container, agent calls, and the
-    candidate's own commit — is fully isolated per worktree.
+    The search session's ``worktree_lock`` serializes ``git worktree add``
+    (which mutates the shared repo's admin area); everything after — the
+    container, agent calls, and the candidate's own commit — is fully isolated
+    per worktree.
     """
+    request = search.request
+    config = request.config
+    agent_backend = request.agent_backend
+    cli_provider = request.cli_provider
+    generation = progress.round_number
+    child_idx = progress.candidate_number
+    parent = selection.parent
+    inspirations = selection.inspirations
     inspiration_ids = [i.id for i in inspirations]
     label = f"g{generation}c{child_idx}"
     commit = parent.commit
@@ -983,7 +969,7 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
             feedback="parent individual has no commit to branch from",
         )
     try:
-        with worktree_lock:
+        with search.worktree_lock:
             subctx = create_candidate_context(
                 cast("Any", parent_ctx),
                 config=config,
@@ -993,7 +979,7 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
                 agent_backend=agent_backend,
                 cli_provider=cli_provider,
             )
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010257 [BLE001]; arbitrary provider setup failures are reported as a failed candidate.
         output_sink().framework_warning(
             f"candidate {label} setup failed",
             detail=str(exc),
@@ -1009,28 +995,16 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
     try:
         outcome = _evaluate_candidate(
             subctx,
-            generation=generation,
-            child_idx=child_idx,
-            parent=parent,
-            inspirations=inspirations,
-            objective=objective,
-            space=space,
-            modality=modality,
-            domain_definition=domain_definition,
-            pass_criteria=pass_criteria,
-            keep_deployments=keep_deployments,
-            policy_parent_id=policy_parent_id,
-            target_island=target_island,
-            isolated_deployment=True,
-            accuracy_timeout_seconds=accuracy_timeout_seconds,
-            benchmark_contract=benchmark_contract,
+            search=search,
+            progress=progress,
+            selection=selection,
         )
         if outcome.commit:
             # Subcontext teardown removes the linked worktree. Retain its
             # detached commit first so durable population state cannot name an
             # object that Git is then free to prune.
             parent_ctx.git.retain_candidate(label, outcome.commit)
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010258 [BLE001]; evaluator failures become candidate outcomes so the generation can continue.
         output_sink().framework_warning(
             f"candidate {label} evaluation raised",
             detail=str(exc),
@@ -1048,7 +1022,7 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
     finally:
         try:
             subctx.close()
-        except Exception as exc:  # noqa: BLE001  # tracked: #288
+        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010259 [BLE001]; teardown failure is reported without hiding the candidate result.
             output_sink().framework_warning(
                 f"candidate {label} teardown failed",
                 detail=str(exc),
@@ -1056,31 +1030,11 @@ def _evaluate_in_subcontext(  # noqa: PLR0913  # tracked: #288
             )
 
 
-def _run_generation_parallel(  # noqa: PLR0913  # tracked: #288
+def _run_generation_parallel(
     parent_ctx: LoopContext,
     *,
-    config: Config,
-    agent_backend: str | None,
-    cli_provider: str | None,
-    max_parallelism: int,
-    generation: int,
-    children_per_generation: int,
-    population: Population,
-    state_store: EvolutionStateStore,
-    rng: random.Random,
-    k_top_inspirations: int,
-    k_random_inspirations: int,
-    selection_temperature: float,
-    objective: str,
-    space: MetricSpace,
-    frontier_bias: float,
-    modality: str | None,
-    domain_definition: DomainDefinition,
-    pass_criteria: str,
-    keep_deployments: bool,
-    search_policy: SearchPolicy,
-    accuracy_timeout_seconds: int | None = None,
-    benchmark_contract: BenchmarkContract = _NO_BENCHMARK_CONTRACT,
+    progress: RoundProgress,
+    search: _EvolutionSearchSession,
 ) -> None:
     """Evaluate a generation's candidates concurrently in isolated sub-contexts.
 
@@ -1091,18 +1045,33 @@ def _run_generation_parallel(  # noqa: PLR0913  # tracked: #288
     after the pool drains — so id assignment and ``Population`` mutation stay on
     one thread.
     """
+    request = search.request
+    population = search.population
+    rng = search.rng
+    search_policy = search.search_policy
+    max_parallelism = request.max_parallelism
+    generation = progress.round_number
+    children_per_generation = request.children_per_generation
+    state_store = EvolutionStateStore(parent_ctx.state.portable(RunStateNamespace.EVOLVE))
+    k_top_inspirations = request.k_top_inspirations
+    k_random_inspirations = request.k_random_inspirations
+    selection_temperature = request.selection_temperature
+    space = request.space
+    frontier_bias = request.frontier_bias
     plans: list[tuple[int, SearchSelection]] = []
     for child_idx in range(1, children_per_generation + 1):
         plan = _plan_candidate(
             parent_ctx,
             population,
             state_store,
-            rng,
-            k_top_inspirations=k_top_inspirations,
-            k_random_inspirations=k_random_inspirations,
-            selection_temperature=selection_temperature,
-            space=space,
-            frontier_bias=frontier_bias,
+            SearchSelectionParameters(
+                rng=rng,
+                k_top_inspirations=k_top_inspirations,
+                k_random_inspirations=k_random_inspirations,
+                selection_temperature=selection_temperature,
+                space=space,
+                frontier_bias=frontier_bias,
+            ),
             search_policy=search_policy,
         )
         if plan is None:
@@ -1125,47 +1094,37 @@ def _run_generation_parallel(  # noqa: PLR0913  # tracked: #288
         f"[parallel] generation {generation}: evaluating {len(plans)} "
         f"candidate(s), up to {cap} concurrently"
     )
-    worktree_lock = threading.Lock()
     outcomes: dict[int, _CandidateOutcome] = {}
     with ThreadPoolExecutor(max_workers=cap, thread_name_prefix=f"gen{generation}") as pool:
         futures = {
             pool.submit(
                 _evaluate_in_subcontext,
                 parent_ctx,
-                config=config,
-                agent_backend=agent_backend,
-                cli_provider=cli_provider,
-                generation=generation,
-                child_idx=child_idx,
-                parent=plan.parent,
-                inspirations=plan.inspirations,
-                objective=objective,
-                space=space,
-                modality=modality,
-                domain_definition=domain_definition,
-                pass_criteria=pass_criteria,
-                keep_deployments=keep_deployments,
-                policy_parent_id=plan.policy_parent_id,
-                target_island=plan.target_island,
-                worktree_lock=worktree_lock,
-                accuracy_timeout_seconds=accuracy_timeout_seconds,
-                benchmark_contract=benchmark_contract,
+                search=search,
+                progress=CandidateProgress(
+                    generation,
+                    request.max_generations,
+                    child_idx,
+                    children_per_generation,
+                ),
+                selection=plan,
             ): child_idx
             for (child_idx, plan) in plans
         }
         for future in as_completed(futures):
-            outcomes[futures[future]] = future.result()
+            child_idx = futures[future]
+            outcome = future.result()
+            outcome.generation = generation
+            outcomes[child_idx] = outcome
 
     # Record serially, in child order, on this (single) thread.
     for child_idx in sorted(outcomes):
         individual = _record_outcome(
             parent_ctx,
             population,
-            state_store,
+            request,
             outcomes[child_idx],
-            generation=generation,
             search_policy=search_policy,
-            space=space,
         )
         _persist_evolve_state(
             parent_ctx,
@@ -1179,22 +1138,53 @@ def _run_generation_parallel(  # noqa: PLR0913  # tracked: #288
 # ---------------------------------------------------------------------------
 
 
-def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
+def _record_failed_bootstrap(
     ctx: LoopContext,
-    *,
-    objective: str,
-    space: MetricSpace,
-    modality: str | None,
-    domain_definition: DomainDefinition,
-    pass_criteria: str,
-    max_attempts: int,
-    rng: random.Random,  # noqa: ARG001  # tracked: #288
     population: Population,
-    state_store: EvolutionStateStore,
-    search_policy: SearchPolicy,
-    keep_deployments: bool = False,
-    accuracy_timeout_seconds: int | None = None,
-    benchmark_contract: BenchmarkContract = _NO_BENCHMARK_CONTRACT,
+    attempt: int,
+    mutator: MutatorResponse,
+    failure_feedback: str,
+) -> None:
+    """Snapshot one failed seed for the next fix-forward attempt."""
+    wip_commit = None
+    try:
+        sha_before = ctx.git.current_sha()
+        ctx.snapshot_workspace(f"wip-seed-bootstrap{attempt}")
+        sha_after = ctx.git.current_sha()
+        if sha_after and sha_after != sha_before:
+            wip_commit = sha_after
+    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010260 [BLE001]; failed best-effort seed snapshot is reported while retaining the verified seed.
+        output_sink().framework_warning(
+            "wip-seed snapshot failed",
+            detail=str(exc),
+            source=FrameworkSource.LOOP,
+        )
+    failed = Individual(
+        id=population.next_id(),
+        generation=0,
+        parent_id=None,
+        inspiration_ids=[],
+        commit=wip_commit,
+        perf_metric=None,
+        perf_unit=None,
+        passed=False,
+        summary=mutator.summary,
+        feedback=failure_feedback,
+    )
+    population.add(failed)
+    state_store = EvolutionStateStore(ctx.state.portable(RunStateNamespace.EVOLVE))
+    state_store.save_population(population)
+    _persist_evolve_state(
+        ctx,
+        state_store,
+        label=f"evolve: record failed bootstrap {attempt}",
+    )
+    ctx.lprint(f"[bootstrap {attempt}] FAILED — feedback: {failure_feedback.splitlines()[0][:120]}")
+
+
+def _bootstrap_seed(
+    ctx: LoopContext,
+    search: _EvolutionSearchSession,
 ) -> Individual | None:
     """Iterate implementer → judge → accuracy until a first passing seed exists.
 
@@ -1206,9 +1196,13 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
     ``Individual`` so the next attempt can repair it in place. Returns ``None``
     if every attempt fails — the caller aborts the run.
 
-    ``rng`` is accepted for signature parity with the generation loop (bootstrap
-    does no parent/inspiration sampling) and forward-compatibility.
     """
+    request = search.request
+    population = search.population
+    search_policy = search.search_policy
+    max_attempts = request.bootstrap_max_attempts
+    state_store = EvolutionStateStore(ctx.state.portable(RunStateNamespace.EVOLVE))
+    keep_deployments = request.keep_deployments
     ctx.switch_log_file("bootstrap")
     ctx.lprint(
         f"\n{'=' * 60}\n  Bootstrap — first passing seed "
@@ -1216,26 +1210,28 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
     )
 
     for attempt in range(1, max_attempts + 1):
+        progress = CandidateProgress(0, max_attempts, attempt, max_attempts)
         ctx.lprint(f"\n--- bootstrap attempt {attempt}/{max_attempts} ---\n")
 
         # Fix-forward from the most-recent failed WIP seed, if one was
         # snapshotted; otherwise the workspace stays as the framework seeded it
         # (the bare reference tree).
         wip_seed = _latest_wip_seed(population)
-        if wip_seed is not None and wip_seed.commit:  # noqa: SIM102  # tracked: #288
-            if not ctx.git.checkout_tree(wip_seed.commit, clean=True):
-                output_sink().framework_warning(
-                    f"could not check out WIP seed {wip_seed.id} "
-                    f"(commit {wip_seed.commit[:8]}); starting from reference",
-                    source=FrameworkSource.LOOP,
-                )
-                wip_seed = None
+        if (
+            wip_seed is not None
+            and wip_seed.commit
+            and not ctx.git.checkout_tree(wip_seed.commit, clean=True)
+        ):
+            output_sink().framework_warning(
+                f"could not check out WIP seed {wip_seed.id} "
+                f"(commit {wip_seed.commit[:8]}); starting from reference",
+                source=FrameworkSource.LOOP,
+            )
+            wip_seed = None
 
         # Use an environment-owned candidate deployment so a failed attempt's
         # cumulative state never poisons the next attempt's judge.
         cand_notes, cand_deployment = _candidate_runtime_notes(ctx, 0, attempt)
-        failed_lessons = _recent_failure_lessons(population)
-        num_failed_attempts = sum(1 for i in population.all if not i.passed)
         base_desc = "reference" if wip_seed is None else f"repair-seed #{wip_seed.id}"
         ctx.lprint(
             f"bootstrap base={base_desc}"
@@ -1249,18 +1245,9 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
             ctx.reselect_gpu()
             mutator = _run_mutator(
                 ctx,
-                generation=0,
-                child_idx=attempt,
-                objective=objective,
-                parent=None,
-                inspirations=[],
-                modality=modality,
-                domain_definition=domain_definition,
-                is_cold_start=True,
-                space=space,
-                failed_lessons=failed_lessons,
-                num_failed_attempts=num_failed_attempts,
-                repair_seed=wip_seed is not None,
+                search=search,
+                progress=progress,
+                selection=None,
                 runtime_notes=cand_notes,
             )
 
@@ -1268,12 +1255,8 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
             ctx.reselect_gpu()
             verdict = _run_judge(
                 ctx,
-                generation=0,
-                child_idx=attempt,
-                modality=modality,
-                domain_definition=domain_definition,
-                objective=objective,
-                pass_criteria=pass_criteria,
+                search=search,
+                progress=progress,
                 runtime_notes=cand_notes,
             )
 
@@ -1281,54 +1264,19 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
             if verdict.verdict == Verdict.PASS:
                 failure_feedback, benchmark = _run_candidate_gates(
                     ctx,
-                    generation=0,
-                    child_idx=attempt,
-                    contract=benchmark_contract,
-                    space=space,
-                    accuracy_timeout_seconds=accuracy_timeout_seconds,
+                    request=request,
+                    progress=progress,
                 )
             else:
                 failure_feedback = verdict.feedback
 
             if failure_feedback is not None:
-                # Snapshot the failed tree so the next attempt repairs it in place.
-                # Only tag a WIP repair-seed when the snapshot actually committed new
-                # work (the tree changed); an unedited tree is nothing to fix-forward.
-                wip_commit = None
-                try:
-                    sha_before = ctx.git.current_sha()
-                    ctx.snapshot_workspace(f"wip-seed-bootstrap{attempt}")
-                    sha_after = ctx.git.current_sha()
-                    if sha_after and sha_after != sha_before:
-                        wip_commit = sha_after
-                except Exception as exc:  # noqa: BLE001  # tracked: #288
-                    output_sink().framework_warning(
-                        "wip-seed snapshot failed",
-                        detail=str(exc),
-                        source=FrameworkSource.LOOP,
-                    )
-                failed = Individual(
-                    id=population.next_id(),
-                    generation=0,
-                    parent_id=None,
-                    inspiration_ids=[],
-                    commit=wip_commit,
-                    perf_metric=None,
-                    perf_unit=None,
-                    passed=False,
-                    summary=mutator.summary,
-                    feedback=failure_feedback,
-                )
-                population.add(failed)
-                state_store.save_population(population)
-                _persist_evolve_state(
+                _record_failed_bootstrap(
                     ctx,
-                    state_store,
-                    label=f"evolve: record failed bootstrap {attempt}",
-                )
-                ctx.lprint(
-                    f"[bootstrap {attempt}] FAILED — feedback: "
-                    f"{failure_feedback.splitlines()[0][:120] if failure_feedback else ''}"
+                    population,
+                    attempt,
+                    mutator,
+                    failure_feedback,
                 )
                 continue
 
@@ -1336,12 +1284,8 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
             ctx.reselect_gpu()
             summary = _run_profiler(
                 ctx,
-                generation=0,
-                child_idx=attempt,
-                modality=modality,
-                domain_definition=domain_definition,
-                objective=objective,
-                space=space,
+                request=request,
+                progress=progress,
                 runtime_notes=cand_notes,
             )
             ctx.snapshot_workspace("gen-0-seed")
@@ -1368,7 +1312,7 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
                     code=_candidate_code(ctx, commit) if search_policy.requires_code else "",
                     policy_parent_id=None,
                     target_island=None,
-                    space=space,
+                    space=request.space,
                 )
                 ctx.git.retain_candidate(f"individual-{seed.id}", commit)
             _persist_evolve_state(
@@ -1394,17 +1338,17 @@ def _bootstrap_seed(  # noqa: PLR0913, PLR0915  # tracked: #288
 # ---------------------------------------------------------------------------
 
 
-def _initialize_search_policy(  # noqa: PLR0913  # tracked: #288
+def _initialize_search_policy(
     ctx: LoopContext,
     population: Population,
     state_store: EvolutionStateStore,
-    *,
-    requested: SearchPolicyName | str | None,
-    seed: int | None,
-    config: OpenEvolveSearchConfig | None,
-    space: MetricSpace,
+    request: LoopRunRequest,
 ) -> tuple[SearchPolicyName, SearchPolicy]:
     state_dir = state_store.namespace.external_directory("openevolve")
+    requested = request.search_policy
+    seed = request.seed
+    config = request.openevolve_config
+    space = request.space
     if requested is None:
         policy_name = (
             SearchPolicyName.OPENEVOLVE
@@ -1414,7 +1358,8 @@ def _initialize_search_policy(  # noqa: PLR0913  # tracked: #288
     else:
         policy_name = SearchPolicyName(requested)
         if policy_name is SearchPolicyName.VIBESYS and config is not None:
-            raise ValueError("OpenEvolve configuration requires the OpenEvolve search policy")  # noqa: TRY003  # tracked: #288
+            message = "OpenEvolve configuration requires the OpenEvolve search policy"
+            raise ValueError(message)
     if policy_name is not SearchPolicyName.OPENEVOLVE:
         return policy_name, VibeSysSearchPolicy()
 
@@ -1440,85 +1385,153 @@ def _initialize_search_policy(  # noqa: PLR0913  # tracked: #288
     return policy_name, policy
 
 
-def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
-    config: Config,
-    exp_name: str,
-    input_path: str,
-    accuracy_command: str,
-    benchmark_command: str,
-    objective: str,
-    *,
-    runs_dir: Path | None,
-    task_name: str | None = None,
-    task_root: Path | None = None,
-    workspace_sources: tuple[WorkspaceSource, ...] = (),
-    evaluator_path: Path | None = None,
-    evaluator_package_root: Path | None = None,
-    accuracy_timeout_seconds: int | None = None,
-    benchmark_result: BenchmarkResult | None = None,
-    benchmark_result_protocol: Literal[2] | None = None,
-    benchmark_timeout_seconds: int | None = None,
-    max_generations: int = 8,
-    children_per_generation: int = 2,
-    k_top_inspirations: int = 2,
-    k_random_inspirations: int = 2,
-    selection_temperature: float = 0.5,
-    seed: int | None = None,
-    pass_criteria: str = (
-        "The candidate obeys the input bundle's contract, the accuracy "  # noqa: S107  # tracked: #288
-        "command passes, and the benchmark sanity step completes without "
-        "modifying evaluator-owned files."
-    ),
-    existing: bool = False,
-    debug: bool = False,
-    profiler_kind: ProfilerKind = ProfilerKind.AUTO,
-    skills_dirs: list[str] | None = None,
-    run_environment: RunEnvironmentSpec | None = None,
-    agent_backend: str | None = None,
-    cli_provider: str | None = None,
-    backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND,
-    modality: str | None = None,
-    domain: DomainName | None = None,
+def _report_final_population(
+    ctx: LoopContext,
+    population: Population,
     space: MetricSpace,
-    frontier_bias: float = 0.7,
-    bootstrap_max_attempts: int = 5,
-    keep_deployments: bool = False,
-    max_parallelism: int = 1,
-    search_policy: SearchPolicyName | str | None = None,
-    openevolve_config: OpenEvolveSearchConfig | None = None,
-    remote_repo: str | None = None,
-    repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE,
-    integration: LocalRunIntegration | None = None,
+) -> None:
+    """Render the final Pareto frontier and materialize the selected result."""
+    if space.objectives:
+        front = population.frontier(space)
+        if front:
+            ctx.lprint(f"\nFinal Pareto frontier ({len(front)} individuals):")
+            for individual in front:
+                metrics_repr = " ".join(
+                    f"{objective.name}={individual.metrics.get(objective.name, 'n/a'):g}"
+                    if isinstance(individual.metrics.get(objective.name), (int, float))
+                    else f"{objective.name}=n/a"
+                    for objective in space.objectives
+                )
+                ctx.lprint(
+                    f"  #{individual.id}: {metrics_repr} "
+                    f"(commit {individual.commit[:8] if individual.commit else 'n/a'})"
+                )
+        else:
+            ctx.lprint("\nFrontier is empty (no individual reported all objective metrics).")
+
+    best = population.best(space)
+    if best is None and population.passed:
+        # A profiler-disabled run has no scalar fitness. Prefer the latest
+        # passing individual, matching the search-policy fallback.
+        best = max(population.passed, key=lambda individual: individual.id)
+    if best is not None:
+        _materialize_selected_candidate(ctx, best)
+        ctx.lprint(
+            f"\nFinal scalar-best: individual #{best.id} "
+            f"perf={best.perf_metric} {best.perf_unit or ''} "
+            f"(commit {best.commit[:8] if best.commit else 'n/a'})"
+        )
+    else:
+        ctx.lprint("\nNo passing individual produced. Inspect logs.")
+
+
+def _required_evolve_objective(request: LoopRunRequest) -> str:
+    """Return the objective required by evolutionary runs."""
+    if request.objective is None:
+        message = "RunRequest for outer loop 'evolve' must set objective"
+        raise ValueError(message)
+    return request.objective
+
+
+def _run_evolve_generations(
+    ctx: LoopContext,
+    search: _EvolutionSearchSession,
+) -> None:
+    """Evaluate the configured generations with the selected search policy."""
+    request = search.request
+    population = search.population
+    policy = search.search_policy
+    state_store = EvolutionStateStore(ctx.state.portable(RunStateNamespace.EVOLVE))
+    max_generations = request.max_generations
+    max_parallelism = request.max_parallelism
+    parallel = (
+        max_parallelism > 1 and ctx.run_environment_view.supports_parallel_candidate_evaluation
+    )
+    if max_parallelism > 1 and not parallel:
+        ctx.lprint(
+            f"[parallel] --max-parallelism={max_parallelism} ignored: parallel "
+            "candidate evaluation is unsupported by the selected environment "
+            f"(env_kind={ctx.run_environment_view.env_kind}); running serially"
+        )
+
+    for generation in range(1, max_generations + 1):
+        ctx.switch_log_file(f"gen{generation:03d}")
+        ctx.lprint(
+            f"\n{'=' * 60}\n  Generation {generation}/{max_generations} — "
+            f"population={len(population)} (passed={len(population.passed)})\n"
+            f"{'=' * 60}\n"
+        )
+        if parallel:
+            _run_generation_parallel(
+                ctx,
+                progress=RoundProgress(generation, max_generations),
+                search=search,
+            )
+        else:
+            _run_generation_serial(
+                ctx,
+                progress=RoundProgress(generation, max_generations),
+                search=search,
+            )
+        policy.finish_generation(generation)
+        _persist_evolve_state(
+            ctx,
+            state_store,
+            label=f"evolve: complete generation {generation}",
+        )
+
+
+def _run_evolve_search(
+    ctx: LoopContext,
+    search: _EvolutionSearchSession,
 ) -> bool:
-    """Run an LLM-driven evolutionary search.
+    """Bootstrap a passing seed, run all generations, and report the result."""
+    request = search.request
+    population = search.population
+    space = request.space
+    try:
+        if not population.passed:
+            seed_individual = _bootstrap_seed(
+                ctx,
+                search,
+            )
+            if seed_individual is None:
+                ctx.lprint(
+                    "[evolutionary] bootstrap could not produce a passing seed in "
+                    f"{request.bootstrap_max_attempts} attempt(s); aborting before the "
+                    "generation loop."
+                )
+                return False
 
-    Returns True if the loop completed normally; False on early
-    exception / KeyboardInterrupt.
+        _run_evolve_generations(ctx, search)
+        _report_final_population(ctx, population, space)
+    except KeyboardInterrupt:
+        ctx.lprint("[evolutionary] interrupted; population preserved.")
+        return False
+    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010262 [BLE001]; unexpected loop failures are rendered as run failures after preserving state.
+        ctx.lprint(f"[evolutionary] aborted with: {exc}")
+        return False
+    return True
 
-    ``space`` is the run's metric space: the objective axes the task declares
-    and the relative tolerance below which two readings are indistinguishable.
-    It is persisted with the run and is the only thing that decides whether one
-    candidate beats another, so selection honors the declared tolerance.
 
-    When the space has axes the loop runs in **multi-objective mode**: parent /
-    inspiration sampling biases toward the Pareto frontier with probability
-    ``frontier_bias`` and the profiler is expected to populate
-    ``ProfilerSummary.metrics`` with values for every objective name. With no
-    axes the loop runs in single-objective mode using ``perf_metric`` only —
-    the legacy behavior, kept for back-compat.
-    """
-    if domain is None:
-        raise ValueError("domain is required; declare [agent].domain in vibesys.input.toml")  # noqa: TRY003  # tracked: #288
-    domain_definition = resolve_domain(domain)
+def _evolve_run_configuration(
+    request: LoopRunRequest,
+    normalized_config: Config,
+    run_environment: RunEnvironmentSpec,
+    domain_definition: DomainDefinition,
+) -> EvolveRunConfiguration:
+    modality = request.modality
     if modality is None and domain_definition.name is DomainName.LLM_SERVING:
         modality = "text_generation"
-    run_environment = run_environment or make_run_environment_spec()
-    normalized_config = as_config(config)
-    selected_policy = SearchPolicyName(search_policy).value if search_policy is not None else None
-    resolved_agent_backend = str(
-        agent_backend or normalized_config.agent.backend or AgentBackend.CLI
+    selected_policy = (
+        SearchPolicyName(request.search_policy).value if request.search_policy is not None else None
     )
-    run_configuration = EvolveRunConfiguration(
+    resolved_agent_backend = str(
+        request.agent_backend or normalized_config.agent.backend or AgentBackend.CLI
+    )
+    openevolve_config = request.openevolve_config
+    space = request.space
+    return EvolveRunConfiguration(
         outer_loop="evolve",
         run_environment=run_environment_record(run_environment),
         model=normalized_config.model.name,
@@ -1528,22 +1541,22 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
             if resolved_agent_backend == "cli"
             else None
         ),
-        cli_provider=cli_provider or normalized_config.agent.cli_provider or "codex",
+        cli_provider=request.cli_provider or normalized_config.agent.cli_provider or "codex",
         cli_timeout=normalized_config.agent.cli_timeout,
-        compute_backend=backend.value,
-        profiler=profiler_kind.value,
+        compute_backend=request.backend.value,
+        profiler=request.profiler_kind.value,
         modality=modality,
         default_reasoning_effort=normalized_config.thinking.level,
         outer_model=normalized_config.agent.outer.model,
         outer_reasoning_effort=normalized_config.agent.outer.reasoning_effort,
         inner_model=normalized_config.agent.inner.model,
         inner_reasoning_effort=normalized_config.agent.inner.reasoning_effort,
-        max_generations=max_generations,
-        children_per_generation=children_per_generation,
-        k_top_inspirations=k_top_inspirations,
-        k_random_inspirations=k_random_inspirations,
-        selection_temperature=selection_temperature,
-        seed=seed,
+        max_generations=request.max_generations,
+        children_per_generation=request.children_per_generation,
+        k_top_inspirations=request.k_top_inspirations,
+        k_random_inspirations=request.k_random_inspirations,
+        selection_temperature=request.selection_temperature,
+        seed=request.seed,
         search_policy=selected_policy,
         openevolve_population_size=(
             openevolve_config.population_size if openevolve_config is not None else None
@@ -1560,11 +1573,59 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         openevolve_migration_rate=(
             openevolve_config.migration_rate if openevolve_config is not None else None
         ),
-        frontier_bias=frontier_bias,
-        bootstrap_max_attempts=bootstrap_max_attempts,
-        keep_deployments=keep_deployments,
-        max_parallelism=max_parallelism,
+        frontier_bias=request.frontier_bias,
+        bootstrap_max_attempts=request.bootstrap_max_attempts,
+        keep_deployments=request.keep_deployments,
+        max_parallelism=request.max_parallelism,
         objectives=tuple(f"{item.name}:{item.direction}" for item in space.objectives),
+    )
+
+
+def _create_evolve_context(
+    request: LoopRunRequest,
+    integration: LocalRunIntegration | None,
+) -> tuple[LoopContext, BenchmarkContract]:
+    bundle = request.input_bundle
+    config = request.config
+    if request.resume is not None:
+        exp_name = request.resume.run_id
+        existing = True
+    elif request.exp_name is not None:
+        exp_name = request.exp_name
+        existing = False
+    else:
+        message = "RunRequest.exp_name must be set for a fresh (non-resume) run"
+        raise ValueError(message)
+    input_path = str(bundle.root)
+    accuracy_command = bundle.accuracy_command_display
+    benchmark_command = bundle.benchmark_command_display
+    task_name = bundle.task_name
+    task_root = bundle.task_root
+    workspace_sources = bundle.workspace_sources
+    evaluator_path = bundle.evaluator_path
+    evaluator_package_root = bundle.evaluator_package_root
+    benchmark_result = bundle.benchmark_result
+    benchmark_result_protocol = bundle.benchmark_result_protocol
+    benchmark_timeout_seconds = bundle.manifest.benchmark.timeout_seconds
+    runs_dir = request.runs_dir
+    debug = request.debug
+    profiler_kind = request.profiler_kind
+    skills_dirs = request.skills_dirs
+    run_environment = request.run_environment
+    agent_backend = request.agent_backend
+    cli_provider = request.cli_provider
+    backend = request.backend
+    domain = bundle.domain
+    remote_repo = request.remote_repo
+    repo_visibility = request.repo_visibility
+    domain_definition = resolve_domain(domain)
+    run_environment = run_environment or make_run_environment_spec()
+    normalized_config = as_config(config)
+    run_configuration = _evolve_run_configuration(
+        request,
+        normalized_config,
+        run_environment,
+        domain_definition,
     )
     benchmark_contract = BenchmarkContract(
         result_spec=benchmark_result,
@@ -1599,211 +1660,116 @@ def run_evolve_loop(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
         repo_visibility=repo_visibility,
         integration=integration,
     )
+    return ctx, benchmark_contract
+
+
+def _initialize_evolve_run(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+) -> tuple[Population, SearchPolicyName, SearchPolicy]:
     state_store = EvolutionStateStore(ctx.state.portable(RunStateNamespace.EVOLVE))
+    space = request.space
+    population = state_store.load_population()
+    # A resumed run whose task file has been edited selects by the new
+    # space from here on; say so rather than letting the change be silent.
+    if state_store.load_metric_space() not in {space, MetricSpace()}:
+        output_sink().framework_warning(
+            "this run recorded a different metric space; the task file "
+            f"wins and selection now uses {len(space.objectives)} axes within "
+            f"a {space.relative_noise:.0%} tolerance",
+            source=FrameworkSource.LOOP,
+        )
+    # Materialize an empty population too, so a newly initialized run has
+    # one complete, inspectable persistence contract from the start. The
+    # metric space is written the same way and in the same place: one
+    # record of how this run decides that a candidate is better.
+    state_store.save_population(population)
+    state_store.save_metric_space(space)
+    policy_name, policy = _initialize_search_policy(
+        ctx,
+        population,
+        state_store,
+        request,
+    )
+    _persist_evolve_state(
+        ctx,
+        state_store,
+        label="evolve: initialize search state",
+    )
+    return population, policy_name, policy
+
+
+def _emit_evolve_run_configured(
+    ctx: LoopContext,
+    request: LoopRunRequest,
+    policy_name: SearchPolicyName,
+    benchmark_contract: BenchmarkContract,
+) -> None:
+    space = request.space
+    pareto_objectives = None
+    if space.objectives:
+        spec = ", ".join(f"{item.name}({item.direction})" for item in space.objectives)
+        pareto_objectives = (
+            f"[{spec}], frontier_bias={request.frontier_bias}, tolerance={space.relative_noise:.0%}"
+        )
+    output_sink().run_configured(
+        RunConfiguredData(
+            run_log_path=str(ctx.run_log_path),
+            project_root=str(ctx.project_root),
+            objective=_required_evolve_objective(request),
+            search_policy=policy_name.value,
+            benchmark_contract=benchmark_contract.declared,
+            pareto_objectives=pareto_objectives,
+        )
+    )
+
+
+def run_evolve_loop(
+    request: LoopRunRequest,
+    *,
+    pass_criteria: str = _DEFAULT_CRITERIA,
+    integration: LocalRunIntegration | None = None,
+) -> bool:
+    """Run an LLM-driven evolutionary search.
+
+    Returns True if the loop completed normally; False on early
+    exception / KeyboardInterrupt.
+
+    ``space`` is the run's metric space: the objective axes the task declares
+    and the relative tolerance below which two readings are indistinguishable.
+    It is persisted with the run and is the only thing that decides whether one
+    candidate beats another, so selection honors the declared tolerance.
+
+    When the space has axes the loop runs in **multi-objective mode**: parent /
+    inspiration sampling biases toward the Pareto frontier with probability
+    ``frontier_bias`` and the profiler is expected to populate
+    ``ProfilerSummary.metrics`` with values for every objective name. With no
+    axes the loop runs in single-objective mode using ``perf_metric`` only —
+    the legacy behavior, kept for back-compat.
+    """
+    ctx, benchmark_contract = _create_evolve_context(request, integration)
     try:
-        population = state_store.load_population()
-        # A resumed run whose task file has been edited selects by the new
-        # space from here on; say so rather than letting the change be silent.
-        if state_store.load_metric_space() not in {space, MetricSpace()}:
-            output_sink().framework_warning(
-                "this run recorded a different metric space; the task file "
-                f"wins and selection now uses {len(space.objectives)} axes within "
-                f"a {space.relative_noise:.0%} tolerance",
-                source=FrameworkSource.LOOP,
-            )
-        # Materialize an empty population too, so a newly initialized run has
-        # one complete, inspectable persistence contract from the start. The
-        # metric space is written the same way and in the same place: one
-        # record of how this run decides that a candidate is better.
-        state_store.save_population(population)
-        state_store.save_metric_space(space)
-        policy_name, policy = _initialize_search_policy(
-            ctx,
-            population,
-            state_store,
-            requested=search_policy,
-            seed=seed,
-            config=openevolve_config,
-            space=space,
-        )
-        _persist_evolve_state(
-            ctx,
-            state_store,
-            label="evolve: initialize search state",
-        )
+        population, policy_name, policy = _initialize_evolve_run(ctx, request)
     except KeyboardInterrupt:
         ctx.lprint("[evolutionary] interrupted during search-policy initialization.")
         ctx.close()
         return False
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
+    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010261 [BLE001]; search policy initialization errors become run diagnostics and still trigger cleanup.
         ctx.lprint(f"[evolutionary] search-policy initialization failed: {exc}")
         ctx.close()
         return False
 
-    # One event per run, emitted only after the search policy resolves so the
-    # payload is complete; a run that dies during initialization emits none.
-    pareto_objectives = None
-    if space.objectives:
-        spec = ", ".join(f"{o.name}({o.direction})" for o in space.objectives)
-        pareto_objectives = (
-            f"[{spec}], frontier_bias={frontier_bias}, tolerance={space.relative_noise:.0%}"
-        )
-    output_sink().run_configured(
-        run_log_path=str(ctx.run_log_path),
-        project_root=str(ctx.project_root),
-        objective=objective,
-        search_policy=policy_name.value,
-        benchmark_contract=benchmark_contract.declared,
-        pareto_objectives=pareto_objectives,
+    # Emit only after policy resolution so the payload is complete.
+    _emit_evolve_run_configured(ctx, request, policy_name, benchmark_contract)
+
+    search = _EvolutionSearchSession(
+        request=request,
+        pass_criteria=pass_criteria,
+        population=population,
+        rng=random.Random(request.seed),  # noqa: S311  # lint-waiver: LW-010204 [S311]; fixed-seed search selection must resume reproducibly.
+        search_policy=policy,
     )
-
-    rng = random.Random(seed)  # noqa: S311  # tracked: #288
-
     try:
-        # Bootstrap phase: guarantee a passing generation-0 seed before the
-        # generation loop, so evolution never cold-starts. Skipped when a
-        # passing individual already exists (e.g. --resume).
-        if not population.passed:
-            seed_individual = _bootstrap_seed(
-                ctx,
-                objective=objective,
-                space=space,
-                modality=modality,
-                domain_definition=domain_definition,
-                pass_criteria=pass_criteria,
-                max_attempts=bootstrap_max_attempts,
-                rng=rng,
-                population=population,
-                state_store=state_store,
-                search_policy=policy,
-                keep_deployments=keep_deployments,
-                accuracy_timeout_seconds=accuracy_timeout_seconds,
-                benchmark_contract=benchmark_contract,
-            )
-            if seed_individual is None:
-                ctx.lprint(
-                    "[evolutionary] bootstrap could not produce a passing seed in "
-                    f"{bootstrap_max_attempts} attempt(s); aborting before the "
-                    "generation loop."
-                )
-                return False
-
-        # The selected run environment declares whether isolated candidate
-        # evaluations can execute concurrently. Local single-device backends
-        # normally leave this false; remote deployment adapters may enable it.
-        env_kind = ctx.run_environment_view.env_kind
-        supports_parallel = ctx.run_environment_view.supports_parallel_candidate_evaluation
-        parallel = max_parallelism > 1 and supports_parallel
-        if max_parallelism > 1 and not parallel:
-            ctx.lprint(
-                f"[parallel] --max-parallelism={max_parallelism} ignored: parallel "
-                "candidate evaluation is unsupported by the selected environment "
-                f"(env_kind={env_kind}); running serially"
-            )
-
-        for generation in range(1, max_generations + 1):
-            ctx.switch_log_file(f"gen{generation:03d}")
-            ctx.lprint(
-                f"\n{'=' * 60}\n  Generation {generation}/{max_generations} — "
-                f"population={len(population)} (passed={len(population.passed)})\n"
-                f"{'=' * 60}\n"
-            )
-
-            if parallel:
-                _run_generation_parallel(
-                    ctx,
-                    config=config,
-                    agent_backend=agent_backend,
-                    cli_provider=cli_provider,
-                    max_parallelism=max_parallelism,
-                    generation=generation,
-                    children_per_generation=children_per_generation,
-                    population=population,
-                    state_store=state_store,
-                    rng=rng,
-                    k_top_inspirations=k_top_inspirations,
-                    k_random_inspirations=k_random_inspirations,
-                    selection_temperature=selection_temperature,
-                    objective=objective,
-                    space=space,
-                    frontier_bias=frontier_bias,
-                    modality=modality,
-                    domain_definition=domain_definition,
-                    pass_criteria=pass_criteria,
-                    keep_deployments=keep_deployments,
-                    search_policy=policy,
-                    accuracy_timeout_seconds=accuracy_timeout_seconds,
-                    benchmark_contract=benchmark_contract,
-                )
-            else:
-                _run_generation_serial(
-                    ctx,
-                    generation=generation,
-                    max_generations=max_generations,
-                    children_per_generation=children_per_generation,
-                    population=population,
-                    state_store=state_store,
-                    rng=rng,
-                    k_top_inspirations=k_top_inspirations,
-                    k_random_inspirations=k_random_inspirations,
-                    selection_temperature=selection_temperature,
-                    objective=objective,
-                    space=space,
-                    frontier_bias=frontier_bias,
-                    modality=modality,
-                    domain_definition=domain_definition,
-                    pass_criteria=pass_criteria,
-                    keep_deployments=keep_deployments,
-                    search_policy=policy,
-                    accuracy_timeout_seconds=accuracy_timeout_seconds,
-                    benchmark_contract=benchmark_contract,
-                )
-
-            policy.finish_generation(generation)
-            _persist_evolve_state(
-                ctx,
-                state_store,
-                label=f"evolve: complete generation {generation}",
-            )
-
-        if space.objectives:
-            front = population.frontier(space)
-            if front:
-                ctx.lprint(f"\nFinal Pareto frontier ({len(front)} individuals):")
-                for ind in front:
-                    metrics_repr = " ".join(
-                        f"{o.name}={ind.metrics.get(o.name, 'n/a'):g}"
-                        if isinstance(ind.metrics.get(o.name), (int, float))
-                        else f"{o.name}=n/a"
-                        for o in space.objectives
-                    )
-                    ctx.lprint(
-                        f"  #{ind.id}: {metrics_repr} "
-                        f"(commit {ind.commit[:8] if ind.commit else 'n/a'})"
-                    )
-            else:
-                ctx.lprint("\nFrontier is empty (no individual reported all objective metrics).")
-
-        best = population.best(space)
-        if best is None and population.passed:
-            # A profiler-disabled run has no scalar fitness. Prefer the latest
-            # passing individual, matching the search-policy fallback.
-            best = max(population.passed, key=lambda individual: individual.id)
-        if best is not None:
-            _materialize_selected_candidate(ctx, best)
-            ctx.lprint(
-                f"\nFinal scalar-best: individual #{best.id} "
-                f"perf={best.perf_metric} {best.perf_unit or ''} "
-                f"(commit {best.commit[:8] if best.commit else 'n/a'})"
-            )
-        else:
-            ctx.lprint("\nNo passing individual produced. Inspect logs.")
-        return True  # noqa: TRY300  # tracked: #288
-    except KeyboardInterrupt:
-        ctx.lprint("[evolutionary] interrupted; population preserved.")
-        return False
-    except Exception as exc:  # noqa: BLE001  # tracked: #288
-        ctx.lprint(f"[evolutionary] aborted with: {exc}")
-        return False
+        return _run_evolve_search(ctx, search)
     finally:
         ctx.close()

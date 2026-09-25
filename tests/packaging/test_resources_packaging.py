@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -17,6 +17,9 @@ from resources_packaging import (
 
 from vibesys import resource_paths
 from vibesys.constants import PROJECT_ROOT
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _make_fake_repo(root: Path) -> Path:
@@ -41,7 +44,7 @@ def _make_fake_repo(root: Path) -> Path:
     return root
 
 
-def test_stage_resources_copies_trees_and_drops_vendored_checkouts(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_stage_resources_copies_trees_and_drops_vendored_checkouts(tmp_path: Path) -> None:
     repo = _make_fake_repo(tmp_path / "repo")
     dest = tmp_path / "build" / "vibesys" / "_resources"
 
@@ -56,7 +59,7 @@ def test_stage_resources_copies_trees_and_drops_vendored_checkouts(tmp_path):  #
     assert not (dest / "profilers" / "nsys" / "__pycache__").exists()
 
 
-def test_stage_resources_is_idempotent(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_stage_resources_is_idempotent(tmp_path: Path) -> None:
     repo = _make_fake_repo(tmp_path / "repo")
     dest = tmp_path / "dest"
 
@@ -65,14 +68,14 @@ def test_stage_resources_is_idempotent(tmp_path):  # noqa: ANN001, ANN201  # tra
     assert (dest / "profilers" / "nsys" / "server.py").is_file()
 
 
-def test_stage_resources_without_resources_dir_is_a_noop(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_stage_resources_without_resources_dir_is_a_noop(tmp_path: Path) -> None:
     dest = tmp_path / "dest"
 
     assert not stage_resources(tmp_path / "empty-repo", dest)
     assert not dest.exists()
 
 
-def test_required_resource_staging_rejects_a_missing_tree(tmp_path):  # noqa: ANN001, ANN201
+def test_required_resource_staging_rejects_a_missing_tree(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     (repo / "resources" / "profilers").mkdir(parents=True)
 
@@ -80,7 +83,7 @@ def test_required_resource_staging_rejects_a_missing_tree(tmp_path):  # noqa: AN
         stage_resources(repo, tmp_path / "dest", required=True)
 
 
-def test_stage_sdk_copies_only_the_installable_project(tmp_path):  # noqa: ANN001, ANN201
+def test_stage_sdk_copies_only_the_installable_project(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     sdk = repo / "sdk" / "vs-bench"
     (sdk / "src" / "vs_bench" / "__pycache__").mkdir(parents=True)
@@ -101,7 +104,7 @@ def test_stage_sdk_copies_only_the_installable_project(tmp_path):  # noqa: ANN00
     assert not (dest / "vs-bench" / "src" / "vs_bench" / "__pycache__").exists()
 
 
-def test_required_sdk_staging_rejects_an_incomplete_project(tmp_path):  # noqa: ANN001, ANN201
+def test_required_sdk_staging_rejects_an_incomplete_project(tmp_path: Path) -> None:
     sdk = tmp_path / "repo" / "sdk" / "vs-bench"
     sdk.mkdir(parents=True)
     (sdk / "pyproject.toml").write_text("[project]\nname = 'vs-bench'\n")
@@ -110,25 +113,25 @@ def test_required_sdk_staging_rejects_an_incomplete_project(tmp_path):  # noqa: 
         stage_sdk(tmp_path / "repo", tmp_path / "dest", required=True)
 
 
-def test_resources_root_prefers_the_checkout():  # noqa: ANN201  # tracked: #288
+def test_resources_root_prefers_the_checkout() -> None:
     assert resource_paths.resources_root() == PROJECT_ROOT / "resources"
 
 
-def test_profiler_support_dir_resolves_known_kind_and_rejects_unknown():  # noqa: ANN201  # tracked: #288
+def test_profiler_support_dir_resolves_known_kind_and_rejects_unknown() -> None:
     nsys = resource_paths.profiler_support_dir("nsys")
     assert nsys is not None
     assert (nsys / "server.py").is_file()
     assert resource_paths.profiler_support_dir("no-such-profiler") is None
 
 
-def test_profiler_support_common_dir_points_at_the_shared_capture_runtime():  # noqa: ANN201  # tracked: #288
+def test_profiler_support_common_dir_points_at_the_shared_capture_runtime() -> None:
     common = resource_paths.profiler_support_common_dir()
     assert common is not None
     assert (common / "capture_runtime.py").is_file()
     assert resource_paths.PROFILERS_COMMON_STAGED_NAME == "profilers_common"
 
 
-def test_default_skill_roots_point_at_the_resources_tree():  # noqa: ANN201  # tracked: #288
+def test_default_skill_roots_point_at_the_resources_tree() -> None:
     roots = resource_paths.default_skill_roots()
     assert roots == (PROJECT_ROOT / "resources" / "skills",)
 
@@ -137,7 +140,9 @@ def test_evaluator_packages_dir_points_at_the_resources_tree() -> None:
     assert resource_paths.evaluator_packages_dir() == PROJECT_ROOT / "resources" / "evaluators"
 
 
-def test_resources_root_falls_back_to_the_staged_wheel_copy(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_resources_root_falls_back_to_the_staged_wheel_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fake_checkout = tmp_path / "no-checkout"
     fake_package = tmp_path / "site-packages" / "vibesys"
     staged = fake_package / "_resources"
@@ -160,7 +165,9 @@ def test_resources_root_falls_back_to_the_staged_wheel_copy(tmp_path, monkeypatc
     assert resource_paths.default_skill_roots() == (staged / "skills",)
 
 
-def test_resources_root_is_none_without_checkout_or_staged_copy(tmp_path, monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_resources_root_is_none_without_checkout_or_staged_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(resource_paths, "PROJECT_ROOT", tmp_path / "nowhere")
     monkeypatch.setattr(resource_paths, "files", lambda _package: tmp_path / "no-package")
 

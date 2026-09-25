@@ -290,7 +290,7 @@ def assess_unpaired(
 def _time_one(fn: Callable[[], object], *, use_cuda: bool) -> float:
     """Time one call to ``fn`` in milliseconds, synchronized correctly."""
     if use_cuda:
-        import torch  # noqa: PLC0415
+        import torch  # noqa: PLC0415  # LW-920165; this import is deferred to avoid a hard dependency on an optional/heavy library at module load time
 
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
@@ -306,7 +306,7 @@ def _time_one(fn: Callable[[], object], *, use_cuda: bool) -> float:
 
 
 def _use_cuda(device: str | None) -> bool:
-    import torch  # noqa: PLC0415
+    import torch  # noqa: PLC0415  # LW-920166; this import is deferred to avoid a hard dependency on an optional/heavy library at module load time
 
     return device != "cpu" and torch.cuda.is_available()
 
@@ -397,16 +397,16 @@ def _load_pairs(path: str) -> list[tuple[float, float]]:
 def _print_verdict(verdict: PairedVerdict, label_a: str, label_b: str) -> None:
     status = "DECISIVE" if verdict.decisive else "INCONCLUSIVE"
     delta = f"{verdict.median_delta_pct:+.2f}%" if verdict.median_delta_pct is not None else "n/a"
-    print(f"{status}: {verdict.reason}  (median delta {label_a} -> {label_b}: {delta})")  # noqa: T201
+    print(f"{status}: {verdict.reason}  (median delta {label_a} -> {label_b}: {delta})")  # noqa: T201  # LW-920167; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     if verdict.pairs:
-        print(f"pairs used: {len(verdict.pairs)}")  # noqa: T201
+        print(f"pairs used: {len(verdict.pairs)}")  # noqa: T201  # LW-920168; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
 def cmd_parse(ns: argparse.Namespace) -> None:
     """Extract ``wall_ms: <float>`` lines from a driver log into JSON."""
     text = Path(ns.log).read_text(encoding="utf-8")
     values = [float(m) for m in WALL_MS_RE.findall(text)]
-    print(json.dumps({"wall_ms": values}))  # noqa: T201
+    print(json.dumps({"wall_ms": values}))  # noqa: T201  # LW-920169; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
 def cmd_compare(ns: argparse.Namespace) -> None:

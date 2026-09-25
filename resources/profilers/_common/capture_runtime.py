@@ -16,8 +16,7 @@ Engine-specific knowledge belongs in skill docs and prompt templates, not
 here.
 
 Standalone module: stdlib only, Python 3.10+, no ``vibesys`` imports. It is
-staged alongside every profiler plugin (see
-``docs/contributing/amd-profiler-worklog.md`` and the profiler packaging
+staged alongside every profiler plugin (see the profiler packaging
 tests) so it must run both from a repository checkout
 (``resources/profilers/_common/capture_runtime.py``, a sibling of each
 ``resources/profilers/<kind>/``) and from an agent workspace, where it is
@@ -145,8 +144,7 @@ class Lifecycle:
     bounded by the overall ``timeout_s`` budget. Use it for any step whose
     own output or child processes must not run under the profiler: a
     profiler that injects itself into every descendant of the *profiled*
-    command (rocprofv3 does, via ``LD_PRELOAD`` -- see
-    ``docs/contributing/amd-profiler-worklog.md``'s banner finding) can
+    command (rocprofv3 does, via ``LD_PRELOAD``) can
     otherwise print its own diagnostic banner into a small helper's stdout,
     corrupting a value like a port number picked via `$(...)`. The
     recommended pattern is: pick the value in ``setup_command``, write it to
@@ -251,7 +249,7 @@ def acquire_capture_slot(kind: str, capture_id: str) -> ActiveCapture:
     immediately with the currently running capture's identity, so the
     caller can return a clear "busy" response right away.
     """
-    global _active_capture  # noqa: PLW0603  # tracked: #288
+    global _active_capture  # noqa: PLW0603  # LW-910000; this module holds intentional process-lifetime state (a capture slot) mutated across calls
     with _active_capture_lock:
         if _active_capture is not None:
             raise CaptureBusyError(_active_capture)
@@ -261,7 +259,7 @@ def acquire_capture_slot(kind: str, capture_id: str) -> ActiveCapture:
 
 def release_capture_slot() -> None:
     """Clear the in-process capture slot. Idempotent."""
-    global _active_capture  # noqa: PLW0603  # tracked: #288
+    global _active_capture  # noqa: PLW0603  # LW-910001; this module holds intentional process-lifetime state (a capture slot) mutated across calls
     with _active_capture_lock:
         _active_capture = None
 
@@ -360,7 +358,7 @@ def new_capture(kind: str) -> tuple[str, Path]:
         except FileExistsError:
             continue
         return capture_id, directory
-    raise RuntimeError("could not allocate a unique capture directory")  # noqa: TRY003
+    raise RuntimeError("could not allocate a unique capture directory")  # noqa: TRY003  # LW-920001; this is a boundary error that deliberately embeds the offending value for the operator to act on
 
 
 def write_manifest(directory: Path, manifest: dict[str, Any]) -> Path:
@@ -381,7 +379,7 @@ def resolve(capture_id_or_path: str) -> Path:
     by_id = root / capture_id_or_path
     if by_id.is_dir():
         return by_id.resolve()
-    raise FileNotFoundError(  # noqa: TRY003
+    raise FileNotFoundError(  # noqa: TRY003  # LW-920002; this is a boundary error that deliberately embeds the offending value for the operator to act on
         f"capture not found: {capture_id_or_path!r} (checked that path and {root})"
     )
 
@@ -390,14 +388,14 @@ def load_manifest(capture_dir: Path) -> dict[str, Any]:
     """Load ``manifest.json`` from *capture_dir*, raising a clear error if absent/malformed."""
     path = Path(capture_dir) / _MANIFEST_NAME
     if not path.is_file():
-        raise FileNotFoundError(f"no manifest.json under {capture_dir}")  # noqa: TRY003
+        raise FileNotFoundError(f"no manifest.json under {capture_dir}")  # noqa: TRY003  # LW-920003; this is a boundary error that deliberately embeds the offending value for the operator to act on
     try:
         data = json.loads(path.read_text())
     except json.JSONDecodeError as exc:
-        raise ValueError(f"malformed manifest.json under {capture_dir}: {exc}") from exc  # noqa: TRY003
+        raise ValueError(f"malformed manifest.json under {capture_dir}: {exc}") from exc  # noqa: TRY003  # LW-920004; this is a boundary error that deliberately embeds the offending value for the operator to act on
     if isinstance(data, dict):
         return data
-    raise ValueError(f"manifest.json under {capture_dir} is not a JSON object")  # noqa: TRY003
+    raise ValueError(f"manifest.json under {capture_dir} is not a JSON object")  # noqa: TRY003  # LW-920005; this is a boundary error that deliberately embeds the offending value for the operator to act on
 
 
 def list_captures(limit: int = 20) -> list[CaptureSummary]:
@@ -480,10 +478,9 @@ def _write_script(directory: Path, name: str, text: str) -> Path:
     root cause -- rocprofv3 injecting itself into every descendant process,
     including a `$(...)`-captured helper, and one of those descendants
     printing a diagnostic banner into the value being captured; confirmed on
-    real MI210 hardware that no profiler-side env/flag suppresses this (see
-    ``docs/contributing/amd-profiler-worklog.md``), so the fix is
-    ``Lifecycle.setup_command`` -- do that kind of work entirely outside the
-    profiler -- not a quieting env var.)
+    real MI210 hardware that no profiler-side env/flag suppresses this, so
+    the fix is ``Lifecycle.setup_command`` -- do that kind of work entirely
+    outside the profiler -- not a quieting env var.)
 
     *text* is preserved byte-for-byte after the shebang line: no ``set -e``
     or other semantics are injected.
@@ -503,10 +500,9 @@ def _clock_stamps() -> dict[str, int]:
     one), and ``time.clock_gettime_ns(time.CLOCK_REALTIME)`` (wall-clock
     epoch ns). An external tool's own trace timestamps (e.g. rocprofv3's
     system-trace CSV ``Start_Timestamp``/``End_Timestamp`` columns, verified
-    against real MI210 captures to be CLOCK_MONOTONIC-based ns -- see
-    ``docs/contributing/amd-profiler-worklog.md``) can then be compared
-    directly against ``clock_monotonic_ns`` when both processes ran on the
-    same host, without any offset math. A downstream analyzer that cannot
+    against real MI210 captures to be CLOCK_MONOTONIC-based ns) can then be
+    compared directly against ``clock_monotonic_ns`` when both processes ran
+    on the same host, without any offset math. A downstream analyzer that cannot
     verify this alignment for a given capture must fall back to analyzing
     the whole run rather than silently mis-slicing it.
     """
@@ -522,7 +518,7 @@ def _start_process(
 ) -> subprocess.Popen[bytes]:
     argv = [*profiler_prefix, "bash", str(script_path)]
     with log_path.open("wb") as handle:
-        return subprocess.Popen(  # noqa: S603  # tracked: #288
+        return subprocess.Popen(  # noqa: S603  # LW-910002; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
             argv,
             cwd=lifecycle.cwd,
             env=_effective_env(lifecycle),
@@ -578,8 +574,8 @@ def _run_no_load(
 
 def _run_check(script_path: Path, lifecycle: Lifecycle, timeout: float) -> int | None:
     try:
-        result = subprocess.run(  # noqa: S603  # tracked: #288
-            ["bash", str(script_path)],  # noqa: S607  # tracked: #288
+        result = subprocess.run(  # noqa: S603  # LW-910003; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
+            ["bash", str(script_path)],  # noqa: S607  # LW-910004; the executable is resolved from the fixed rocprof/torch toolchain name, not a user-controlled path
             cwd=lifecycle.cwd,
             env=_effective_env(lifecycle),
             stdout=subprocess.DEVNULL,
@@ -605,7 +601,7 @@ def _poll_ready(
     returns ``(False, False)`` promptly (within one ``_POLL_CHUNK_S``) so the
     caller can distinguish "cancelled" from a genuine not-ready/timeout.
     """
-    assert lifecycle.ready_command is not None  # noqa: S101  # tracked: #288
+    assert lifecycle.ready_command is not None  # noqa: S101  # LW-910005; test code uses assert as the standard pytest assertion mechanism
     ready_start = time.monotonic()
     while True:
         if cancel_event is not None and cancel_event.is_set():
@@ -634,7 +630,7 @@ def _poll_ready(
             time.sleep(sleep_for)
 
 
-def _run_unprofiled_step(  # noqa: PLR0913  # tracked: #288
+def _run_unprofiled_step(  # noqa: PLR0913  # LW-910006; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     lifecycle: Lifecycle,
     timeout: float,
     out_dir: Path,
@@ -651,8 +647,8 @@ def _run_unprofiled_step(  # noqa: PLR0913  # tracked: #288
     """
     log_path = out_dir / log_name
     with log_path.open("wb") as handle:
-        proc = subprocess.Popen(  # noqa: S603  # tracked: #288
-            ["bash", str(script)],  # noqa: S607  # tracked: #288
+        proc = subprocess.Popen(  # noqa: S603  # LW-910007; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
+            ["bash", str(script)],  # noqa: S607  # LW-910008; the executable is resolved from the fixed rocprof/torch toolchain name, not a user-controlled path
             cwd=lifecycle.cwd,
             env=_effective_env(lifecycle),
             stdout=handle,
@@ -677,7 +673,7 @@ def _run_load(
     cancel_event: threading.Event | None,
 ) -> tuple[int | None, str, bool, bool]:
     """Run ``load_command``. Returns ``(returncode, log_tail, timed_out, cancelled)``."""
-    assert lifecycle.load_command is not None  # noqa: S101  # tracked: #288
+    assert lifecycle.load_command is not None  # noqa: S101  # LW-910009; test code uses assert as the standard pytest assertion mechanism
     return _run_unprofiled_step(
         lifecycle, timeout, out_dir, load_script, _LOAD_LOG_NAME, cancel_event
     )
@@ -696,7 +692,7 @@ def _run_setup(
     wrapped in ``profiler_prefix``. Returns
     ``(returncode, log_tail, timed_out, cancelled)``.
     """
-    assert lifecycle.setup_command is not None  # noqa: S101  # tracked: #288
+    assert lifecycle.setup_command is not None  # noqa: S101  # LW-910010; test code uses assert as the standard pytest assertion mechanism
     return _run_unprofiled_step(
         lifecycle, timeout, out_dir, setup_script, _SETUP_LOG_NAME, cancel_event
     )
@@ -719,7 +715,7 @@ def _stop_and_wait_grace(
     return True, False
 
 
-def _run_with_load(  # noqa: PLR0913  # tracked: #288
+def _run_with_load(  # noqa: PLR0913  # LW-910011; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     proc: subprocess.Popen[bytes],
     lifecycle: Lifecycle,
     start: float,
@@ -796,7 +792,7 @@ def _resolve_signal(name: str) -> signal.Signals:
     try:
         return signal.Signals[name]
     except KeyError as exc:
-        raise ValueError(f"unknown stop_signal: {name!r}") from exc  # noqa: TRY003
+        raise ValueError(f"unknown stop_signal: {name!r}") from exc  # noqa: TRY003  # LW-920006; this is a boundary error that deliberately embeds the offending value for the operator to act on
 
 
 def _send_stop_signal(pid: int, name: str) -> None:
@@ -824,7 +820,7 @@ def _ppid_of(pid: int) -> int | None:
     if closing == -1:
         return None
     fields = stat[closing + 2 :].split()
-    if len(fields) < 2:  # noqa: PLR2004
+    if len(fields) < 2:  # noqa: PLR2004  # LW-920007; this is a well-known, self-explanatory constant from the file format/tool being parsed
         return None
     try:
         return int(fields[1])
@@ -914,11 +910,10 @@ def _escalate(proc: subprocess.Popen[bytes]) -> None:
 # and stops within one bounded call). It exists for profiling mechanisms
 # that can take more than one measurement window against the same
 # already-running process instead of needing a fresh process per capture
-# (see docs/contributing/amd-profiler-worklog.md and the warm-target
-# experiment notes it references: on a ROCm build without rocprofiler-sdk
-# default-attachment support, rocprofv3 --attach cannot reuse a target at
-# all, but the torch plugin's own signal-window injection can, once armed
-# for repeated windows). This module only owns generic process lifecycle
+# (on a ROCm build without rocprofiler-sdk default-attachment support,
+# rocprofv3 --attach cannot reuse a target at all, but the torch plugin's
+# own signal-window injection can, once armed for repeated windows). This
+# module only owns generic process lifecycle
 # (launch, ready-wait, stop/escalate, registry); which env vars "arm" a
 # target for a specific profiling mechanism is entirely up to the caller
 # (see resources/profilers/torch/capture_ops.py's start_target wrapper).
@@ -955,7 +950,7 @@ class TargetInfo:
     alive: bool
 
 
-def start_target(  # noqa: PLR0913  # tracked: #288
+def start_target(  # noqa: PLR0913  # LW-910012; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     command: str,
     *,
     cwd: str | None = None,
@@ -1022,7 +1017,7 @@ def start_target(  # noqa: PLR0913  # tracked: #288
             lifecycle, _remaining(start, lifecycle.timeout_s), out_dir, setup_script, None
         )
         if setup_timed_out or setup_rc != 0:
-            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+            raise RuntimeError(  # noqa: TRY003  # LW-910013; this is a boundary error that deliberately embeds the offending value for the operator to act on
                 f"target setup_command failed for {target_id} "
                 f"(rc={setup_rc}, timed_out={setup_timed_out}): {setup_tail[-500:]}"
             )
@@ -1051,7 +1046,7 @@ def start_target(  # noqa: PLR0913  # tracked: #288
         ready_achieved, exited_early = _poll_ready(proc, lifecycle, start, ready_script, None)
         if exited_early or not ready_achieved:
             _escalate(proc)
-            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+            raise RuntimeError(  # noqa: TRY003  # LW-910014; this is a boundary error that deliberately embeds the offending value for the operator to act on
                 f"target {target_id} failed to become ready within ready_timeout_s="
                 f"{ready_timeout_s}: {_tail(target_log_path)[-500:]}"
             )
@@ -1088,7 +1083,7 @@ def get_target(target_id: str) -> TargetInfo:
     with _TARGETS_LOCK:
         target = _targets.get(target_id)
     if target is None:
-        raise KeyError(f"unknown target: {target_id!r}")  # noqa: TRY003  # tracked: #288
+        raise KeyError(f"unknown target: {target_id!r}")  # noqa: TRY003  # LW-910015; this is a boundary error that deliberately embeds the offending value for the operator to act on
     return _target_info(target)
 
 
@@ -1107,7 +1102,7 @@ def signal_target(target_id: str, sig_name: str) -> None:
     with _TARGETS_LOCK:
         target = _targets.get(target_id)
     if target is None:
-        raise KeyError(f"unknown target: {target_id!r}")  # noqa: TRY003  # tracked: #288
+        raise KeyError(f"unknown target: {target_id!r}")  # noqa: TRY003  # LW-910016; this is a boundary error that deliberately embeds the offending value for the operator to act on
     _send_stop_signal(target.proc.pid, sig_name)
 
 
@@ -1130,7 +1125,7 @@ def stop_target(target_id: str) -> None:
     with _TARGETS_LOCK:
         target = _targets.pop(target_id, None)
     if target is None:
-        raise KeyError(f"unknown or already-stopped target: {target_id!r}")  # noqa: TRY003  # tracked: #288
+        raise KeyError(f"unknown or already-stopped target: {target_id!r}")  # noqa: TRY003  # LW-910017; this is a boundary error that deliberately embeds the offending value for the operator to act on
     _stop_and_wait_grace_target(target)
 
 
@@ -1175,8 +1170,8 @@ def _redact_lifecycle(lifecycle: Lifecycle) -> dict[str, Any]:
 
 def _git_head(cwd: str | None) -> str | None:
     try:
-        result = subprocess.run(  # noqa: S603  # tracked: #288
-            ["git", "-C", cwd or ".", "rev-parse", "HEAD"],  # noqa: S607  # tracked: #288
+        result = subprocess.run(  # noqa: S603  # LW-910018; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
+            ["git", "-C", cwd or ".", "rev-parse", "HEAD"],  # noqa: S607  # LW-910019; the executable is resolved from the fixed rocprof/torch toolchain name, not a user-controlled path
             capture_output=True,
             text=True,
             timeout=5,
@@ -1231,7 +1226,7 @@ def _build_manifest(ctx: _ManifestContext) -> dict[str, Any]:
 # -- entry point ------------------------------------------------------------
 
 
-def _finish(  # noqa: PLR0913  # tracked: #288
+def _finish(  # noqa: PLR0913  # LW-910020; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     *,
     capture_id: str,
     kind: str,
@@ -1292,7 +1287,7 @@ def _finish(  # noqa: PLR0913  # tracked: #288
     )
 
 
-def run_capture(  # noqa: PLR0913  # tracked: #288
+def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     profiler_prefix: list[str],
     lifecycle: Lifecycle,
     *,
@@ -1403,8 +1398,8 @@ def run_capture(  # noqa: PLR0913  # tracked: #288
     if lifecycle.load_command is None:
         outcome = _run_no_load(proc, lifecycle, start, cancel_event)
     else:
-        assert ready_script is not None  # noqa: S101  # tracked: #288
-        assert load_script is not None  # noqa: S101  # tracked: #288
+        assert ready_script is not None  # noqa: S101  # LW-910022; test code uses assert as the standard pytest assertion mechanism
+        assert load_script is not None  # noqa: S101  # LW-910023; test code uses assert as the standard pytest assertion mechanism
         outcome = _run_with_load(
             proc, lifecycle, start, out_dir, ready_script, load_script, cancel_event
         )

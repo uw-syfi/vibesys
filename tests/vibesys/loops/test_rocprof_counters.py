@@ -88,7 +88,7 @@ from tests.vibesys.loops.rocprof_strategies import (
 _FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"
 
 
-def _run(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
+def _run(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # LW-910228; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this **kwargs parameter's type is intentionally left loose; annotating it now is separate cleanup work
     ns = argparse.Namespace(**kwargs)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -96,39 +96,39 @@ def _run(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
     return buf.getvalue()
 
 
-def test_normalize_arch_maps_known_skus():  # noqa: ANN201  # tracked: #288
+def test_normalize_arch_maps_known_skus():  # noqa: ANN201  # LW-910229; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert normalize_arch("MI210") == "gfx90a"
     assert normalize_arch("mi300x") == "gfx942"
     assert normalize_arch("MI355X") == "gfx950"
 
 
-def test_normalize_arch_passes_through_gfx_ids():  # noqa: ANN201  # tracked: #288
+def test_normalize_arch_passes_through_gfx_ids():  # noqa: ANN201  # LW-910230; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert normalize_arch("gfx90a") == "gfx90a"
     assert normalize_arch("GFX942") == "gfx942"
 
 
-def test_normalize_arch_rejects_unknown_name():  # noqa: ANN201  # tracked: #288
+def test_normalize_arch_rejects_unknown_name():  # noqa: ANN201  # LW-910231; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     with pytest.raises(ValueError, match="unknown architecture"):
         normalize_arch("rtx4090")
 
 
-def test_every_sku_alias_resolves_to_a_cataloged_family():  # noqa: ANN201  # tracked: #288
+def test_every_sku_alias_resolves_to_a_cataloged_family():  # noqa: ANN201  # LW-910232; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     for family in ARCH_ALIASES.values():
         assert family in COUNTER_SETS
         assert family in PEAK_SPECS
 
 
-def test_counter_set_rejects_more_than_four_counters():  # noqa: ANN201  # tracked: #288
+def test_counter_set_rejects_more_than_four_counters():  # noqa: ANN201  # LW-910233; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     with pytest.raises(ValueError, match="1-4 counters"):
         CounterSet(("A", "B", "C", "D", "E"), verified=False)
 
 
-def test_counter_set_rejects_empty_counters():  # noqa: ANN201  # tracked: #288
+def test_counter_set_rejects_empty_counters():  # noqa: ANN201  # LW-910234; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     with pytest.raises(ValueError, match="1-4 counters"):
         CounterSet((), verified=False)
 
 
-def test_every_catalogued_set_has_at_most_four_counters():  # noqa: ANN201  # tracked: #288
+def test_every_catalogued_set_has_at_most_four_counters():  # noqa: ANN201  # LW-910235; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     for family, sets in COUNTER_SETS.items():
         for name, cset in sets.items():
             assert 1 <= len(cset.counters) <= 4, (
@@ -136,13 +136,13 @@ def test_every_catalogued_set_has_at_most_four_counters():  # noqa: ANN201  # tr
             )
 
 
-def test_all_three_arch_families_expose_the_same_set_names():  # noqa: ANN201  # tracked: #288
+def test_all_three_arch_families_expose_the_same_set_names():  # noqa: ANN201  # LW-910236; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     names_by_family = {family: set(sets) for family, sets in COUNTER_SETS.items()}
     common = set.intersection(*names_by_family.values())
     assert common == {"occupancy", "mfma", "valu", "l2", "hbm", "lds"}
 
 
-def test_gfx942_l2_and_hbm_sets_are_marked_verified():  # noqa: ANN201  # tracked: #288
+def test_gfx942_l2_and_hbm_sets_are_marked_verified():  # noqa: ANN201  # LW-910237; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # These specific counter names come from a working rocprofv3 config; every
     # other set in the catalogue is explicitly UNVERIFIED until confirmed
     # against a real capture or `rocprofv3 --list-avail`.
@@ -150,7 +150,7 @@ def test_gfx942_l2_and_hbm_sets_are_marked_verified():  # noqa: ANN201  # tracke
     assert COUNTER_SETS["gfx942"]["hbm"].verified
 
 
-def test_gfx90a_mfma_set_prioritizes_the_measured_busy_cycles_formula():  # noqa: ANN201  # tracked: #288
+def test_gfx90a_mfma_set_prioritizes_the_measured_busy_cycles_formula():  # noqa: ANN201  # LW-910238; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # SQ_VALU_MFMA_BUSY_CYCLES + GRBM_GUI_ACTIVE are what the fraction-of-peak
     # formula needs (mirrors rocprof-compute's own MfmaUtil derived metric);
     # SQ_INSTS_MFMA + GRBM_COUNT stay as the fallback path.
@@ -164,17 +164,17 @@ def test_gfx90a_mfma_set_prioritizes_the_measured_busy_cycles_formula():  # noqa
     )
 
 
-def test_ridge_points_match_known_generational_trend():  # noqa: ANN201  # tracked: #288
+def test_ridge_points_match_known_generational_trend():  # noqa: ANN201  # LW-910239; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # gfx90a ~113, gfx942 ~247, gfx950 ~312 FLOP/byte -- the ridge should move
     # right each generation as matrix throughput outgrew HBM bandwidth.
     ridge = {family: spec.ridge_flop_per_byte for family, spec in PEAK_SPECS.items()}
     assert ridge["gfx90a"] < ridge["gfx942"] < ridge["gfx950"]
-    assert 100 < ridge["gfx90a"] < 125  # tracked: #288
-    assert 235 < ridge["gfx942"] < 260  # tracked: #288
-    assert 300 < ridge["gfx950"] < 325  # tracked: #288
+    assert 100 < ridge["gfx90a"] < 125
+    assert 235 < ridge["gfx942"] < 260
+    assert 300 < ridge["gfx950"] < 325
 
 
-def test_row_from_mapping_accepts_both_casing_styles():  # noqa: ANN201  # tracked: #288
+def test_row_from_mapping_accepts_both_casing_styles():  # noqa: ANN201  # LW-910240; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     pascal = _row_from_mapping(
         {
             "Kernel_Name": "k",
@@ -195,20 +195,20 @@ def test_row_from_mapping_accepts_both_casing_styles():  # noqa: ANN201  # track
     assert pascal == snake
 
 
-def test_row_from_mapping_skips_incomplete_rows():  # noqa: ANN201  # tracked: #288
+def test_row_from_mapping_skips_incomplete_rows():  # noqa: ANN201  # LW-910241; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert _row_from_mapping({"Kernel_Name": "k", "Counter_Name": "X", "Counter_Value": ""}) is None
     assert _row_from_mapping({"Counter_Name": "X", "Counter_Value": "1"}) is None
 
 
-def test_load_counter_rows_reads_fixture_csvs():  # noqa: ANN201  # tracked: #288
+def test_load_counter_rows_reads_fixture_csvs():  # noqa: ANN201  # LW-910242; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     l2_csv = _FIXTURES / "pmc" / "l2" / "pass_1" / "l2_counter_collection.csv"
     rows = _load_counter_rows([l2_csv])
-    assert len(rows) == 4  # tracked: #288
+    assert len(rows) == 4
     assert {r.counter_name for r in rows} == {"TCC_HIT_sum", "TCC_MISS_sum"}
     assert all(r.kernel_name == "flash_attn_decode_kernel" for r in rows)
 
 
-def test_walk_json_records_finds_rows_in_a_nested_rocprofv3_shape():  # noqa: ANN201  # tracked: #288
+def test_walk_json_records_finds_rows_in_a_nested_rocprofv3_shape():  # noqa: ANN201  # LW-910243; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     data = {
         "rocprofiler-sdk-tool": {
             "counter_collection": [
@@ -218,15 +218,15 @@ def test_walk_json_records_finds_rows_in_a_nested_rocprofv3_shape():  # noqa: AN
         }
     }
     records = _walk_json_records(data)
-    assert len(records) == 2  # tracked: #288
+    assert len(records) == 2
 
 
-def test_walk_json_records_handles_a_flat_list():  # noqa: ANN201  # tracked: #288
+def test_walk_json_records_handles_a_flat_list():  # noqa: ANN201  # LW-910244; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     data = [{"Kernel_Name": "k", "Counter_Name": "GRBM_COUNT", "Counter_Value": 10}]
     assert _walk_json_records(data) == data
 
 
-def test_load_counter_rows_reads_json(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_load_counter_rows_reads_json(tmp_path: Path):  # noqa: ANN201  # LW-910245; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     path = tmp_path / "valu_counter_collection.json"
     path.write_text(
         json.dumps(
@@ -251,10 +251,10 @@ def test_load_counter_rows_reads_json(tmp_path: Path):  # noqa: ANN201  # tracke
     rows = _load_counter_rows([path])
     assert len(rows) == 1
     assert rows[0].kernel_name == "gemm_kernel"
-    assert rows[0].counter_value == 900.0  # tracked: #288
+    assert rows[0].counter_value == 900.0
 
 
-def test_load_counter_rows_warns_and_skips_unparseable_file(tmp_path: Path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_load_counter_rows_warns_and_skips_unparseable_file(tmp_path: Path, capsys):  # noqa: ANN001, ANN201  # LW-910246; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     bad = tmp_path / "broken_counter_collection.json"
     bad.write_text("{not valid json")
     rows = _load_counter_rows([bad])
@@ -262,21 +262,21 @@ def test_load_counter_rows_warns_and_skips_unparseable_file(tmp_path: Path, caps
     assert "could not parse" in capsys.readouterr().err
 
 
-def test_aggregate_by_kernel_sums_counters_and_tracks_peak_resources():  # noqa: ANN201  # tracked: #288
+def test_aggregate_by_kernel_sums_counters_and_tracks_peak_resources():  # noqa: ANN201  # LW-910247; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     rows = _load_counter_rows([_FIXTURES / "pmc" / "l2" / "pass_1" / "l2_counter_collection.csv"])
     aggs = _aggregate_by_kernel(rows)
     agg = aggs["flash_attn_decode_kernel"]
-    assert agg.counters["TCC_HIT_sum"] == 2100.0  # tracked: #288
-    assert agg.counters["TCC_MISS_sum"] == 17800.0  # tracked: #288
-    assert agg.dispatch_count == 2  # tracked: #288
-    assert agg.vgpr_count == 128  # tracked: #288
+    assert agg.counters["TCC_HIT_sum"] == 2100.0
+    assert agg.counters["TCC_MISS_sum"] == 17800.0
+    assert agg.dispatch_count == 2
+    assert agg.vgpr_count == 128
 
 
-def test_kernel_agg_dispatch_count_defaults_to_one_without_dispatch_ids():  # noqa: ANN201  # tracked: #288
+def test_kernel_agg_dispatch_count_defaults_to_one_without_dispatch_ids():  # noqa: ANN201  # LW-910248; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert KernelAgg(name="k").dispatch_count == 1
 
 
-def test_filter_kernels_applies_regex_and_sorts_by_dispatch_count():  # noqa: ANN201  # tracked: #288
+def test_filter_kernels_applies_regex_and_sorts_by_dispatch_count():  # noqa: ANN201  # LW-910249; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     aggs = {
         "attn": KernelAgg(name="attn", dispatch_ids={"1", "2", "3"}),
         "gemm": KernelAgg(name="gemm", dispatch_ids={"1"}),
@@ -289,24 +289,24 @@ def test_filter_kernels_applies_regex_and_sorts_by_dispatch_count():  # noqa: AN
     assert [a.name for a in filtered] == ["gemm"]
 
 
-def test_resource_occupancy_is_vgpr_bound_for_a_heavy_kernel():  # noqa: ANN201  # tracked: #288
+def test_resource_occupancy_is_vgpr_bound_for_a_heavy_kernel():  # noqa: ANN201  # LW-910250; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     occ = resource_occupancy(
         vgpr_count=260, sgpr_count=40, lds_block_size=0, workgroup_size=256, arch="gfx90a"
     )
     assert occ.bound_by == "VGPR"
     assert occ.waves_per_simd == 1
-    assert occ.waves_per_cu == 4  # tracked: #288
+    assert occ.waves_per_cu == 4
 
 
-def test_resource_occupancy_full_at_low_register_pressure():  # noqa: ANN201  # tracked: #288
+def test_resource_occupancy_full_at_low_register_pressure():  # noqa: ANN201  # LW-910251; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     occ = resource_occupancy(
         vgpr_count=64, sgpr_count=24, lds_block_size=0, workgroup_size=256, arch="gfx942"
     )
-    assert occ.waves_per_simd == 8  # tracked: #288
-    assert occ.waves_per_cu == 32  # tracked: #288
+    assert occ.waves_per_simd == 8
+    assert occ.waves_per_cu == 32
 
 
-def test_resource_occupancy_lds_uses_the_wider_gfx950_budget():  # noqa: ANN201  # tracked: #288
+def test_resource_occupancy_lds_uses_the_wider_gfx950_budget():  # noqa: ANN201  # LW-910252; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # Same LDS-per-workgroup on gfx942 (64KB/CU) vs. gfx950 (160KB/CU) must
     # give gfx950 more room, not less.
     common = {"vgpr_count": 32, "sgpr_count": 16, "lds_block_size": 20000, "workgroup_size": 256}
@@ -316,30 +316,30 @@ def test_resource_occupancy_lds_uses_the_wider_gfx950_budget():  # noqa: ANN201 
     assert occ_950.lds_total_bytes > occ_942.lds_total_bytes
 
 
-def test_resource_occupancy_rejects_unknown_arch():  # noqa: ANN201  # tracked: #288
+def test_resource_occupancy_rejects_unknown_arch():  # noqa: ANN201  # LW-910253; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     with pytest.raises(ValueError, match="unknown architecture"):
         resource_occupancy(
             vgpr_count=32, sgpr_count=16, lds_block_size=0, workgroup_size=64, arch="rtx4090"
         )
 
 
-def test_lookup_tries_every_candidate_name_in_order():  # noqa: ANN201  # tracked: #288
+def test_lookup_tries_every_candidate_name_in_order():  # noqa: ANN201  # LW-910254; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert CANDIDATES["hbm_rdreq"] == ("TCC_EA0_RDREQ_sum", "TCC_EA_RDREQ_sum")
     assert _lookup({"TCC_EA_RDREQ_sum": 5.0}, "hbm_rdreq") == 5.0
     assert _lookup({}, "hbm_rdreq") is None
 
 
-def test_hbm_bytes_combines_full_and_partial_lines():  # noqa: ANN201  # tracked: #288
+def test_hbm_bytes_combines_full_and_partial_lines():  # noqa: ANN201  # LW-910255; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # 495000 full (64B) + 5000 partial (32B) requests, matching the hbm fixture.
     total = _hbm_bytes({"TCC_EA0_RDREQ_sum": 500000.0, "TCC_EA0_RDREQ_32B_sum": 5000.0})
-    assert total == 31_840_000.0  # tracked: #288
+    assert total == 31_840_000.0
 
 
-def test_hbm_bytes_is_none_without_a_request_counter():  # noqa: ANN201  # tracked: #288
+def test_hbm_bytes_is_none_without_a_request_counter():  # noqa: ANN201  # LW-910256; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert _hbm_bytes({"TCC_HIT_sum": 1.0}) is None
 
 
-def test_derive_metrics_computes_l2_hit_rate_and_bandwidth():  # noqa: ANN201  # tracked: #288
+def test_derive_metrics_computes_l2_hit_rate_and_bandwidth():  # noqa: ANN201  # LW-910257; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     agg = KernelAgg(
         name="k",
         counters={"TCC_HIT_sum": 2100.0, "TCC_MISS_sum": 17800.0, "TCC_EA0_RDREQ_sum": 500000.0},
@@ -353,7 +353,7 @@ def test_derive_metrics_computes_l2_hit_rate_and_bandwidth():  # noqa: ANN201  #
     assert metrics.mfma_issue_rate is None
 
 
-def test_derive_metrics_computes_gpu_busy_and_mfma_issue_rate():  # noqa: ANN201  # tracked: #288
+def test_derive_metrics_computes_gpu_busy_and_mfma_issue_rate():  # noqa: ANN201  # LW-910258; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     agg = KernelAgg(
         name="k",
         counters={
@@ -368,13 +368,13 @@ def test_derive_metrics_computes_gpu_busy_and_mfma_issue_rate():  # noqa: ANN201
     assert metrics.achieved_bw_gb_s is None
 
 
-def test_derive_metrics_computes_lds_bank_conflict_rate():  # noqa: ANN201  # tracked: #288
+def test_derive_metrics_computes_lds_bank_conflict_rate():  # noqa: ANN201  # LW-910259; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     agg = KernelAgg(name="k", counters={"SQ_INSTS_LDS": 1000.0, "SQ_LDS_BANK_CONFLICT": 50.0})
     metrics = derive_metrics(agg, duration_ns=None)
     assert metrics.lds_bank_conflict_rate_pct == pytest.approx(5.0)
 
 
-def test_derive_metrics_returns_all_none_without_matching_counters():  # noqa: ANN201  # tracked: #288
+def test_derive_metrics_returns_all_none_without_matching_counters():  # noqa: ANN201  # LW-910260; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     metrics = derive_metrics(
         KernelAgg(name="k", counters={"SOME_OTHER_COUNTER": 1.0}), duration_ns=None
     )
@@ -385,16 +385,16 @@ def test_derive_metrics_returns_all_none_without_matching_counters():  # noqa: A
     assert metrics.lds_bank_conflict_rate_pct is None
 
 
-def test_load_kernel_trace_durations_sums_per_kernel():  # noqa: ANN201  # tracked: #288
+def test_load_kernel_trace_durations_sums_per_kernel():  # noqa: ANN201  # LW-910261; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     durations = _load_kernel_trace_durations([str(_FIXTURES / "kernel_trace")])
     assert durations["flash_attn_decode_kernel"] == pytest.approx(417_000.0)
 
 
-def test_load_kernel_trace_durations_is_empty_without_a_matching_file(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_load_kernel_trace_durations_is_empty_without_a_matching_file(tmp_path: Path):  # noqa: ANN201  # LW-910262; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert _load_kernel_trace_durations([str(tmp_path)]) == {}
 
 
-def test_load_agent_info_reads_the_real_mi210_capture():  # noqa: ANN201  # tracked: #288
+def test_load_agent_info_reads_the_real_mi210_capture():  # noqa: ANN201  # LW-910263; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # 782163_agent_info.csv is a real rocprofv3 capture from the same MI210
     # job (gpu-node) the real_mi210_gfx90a counter fixtures come
     # from -- Cu_Count=104, Simd_Count=416 (416/104=4 SIMD/CU), matching the
@@ -404,17 +404,17 @@ def test_load_agent_info_reads_the_real_mi210_capture():  # noqa: ANN201  # trac
     assert agent_info.simd_num == 416
 
 
-def test_load_agent_info_is_none_without_a_matching_file(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_load_agent_info_is_none_without_a_matching_file(tmp_path: Path):  # noqa: ANN201  # LW-910264; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert _load_agent_info([str(tmp_path)]) is None
 
 
-def test_load_agent_info_skips_the_cpu_row(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_load_agent_info_skips_the_cpu_row(tmp_path: Path):  # noqa: ANN201  # LW-910265; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     path = tmp_path / "x_agent_info.csv"
     path.write_text("Agent_Type,Cu_Count,Simd_Count\nCPU,16,0\nGPU,104,416\n")
     assert _load_agent_info([str(tmp_path)]) == AgentInfo(cu_count=104, simds_per_cu=4)
 
 
-def test_simd_num_for_prefers_agent_info_over_the_static_spec_table():  # noqa: ANN201  # tracked: #288
+def test_simd_num_for_prefers_agent_info_over_the_static_spec_table():  # noqa: ANN201  # LW-910266; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     spec = PEAK_SPECS["gfx942"]  # 304 CUs in the static table
     real = AgentInfo(cu_count=228, simds_per_cu=4)  # e.g. an MI300A capture
     assert _simd_num_for(spec, real) == real.simd_num
@@ -422,19 +422,19 @@ def test_simd_num_for_prefers_agent_info_over_the_static_spec_table():  # noqa: 
     assert _simd_num_for(None, None) is None
 
 
-def test_cmd_list_sets_prints_the_catalogue_for_one_arch():  # noqa: ANN201  # tracked: #288
+def test_cmd_list_sets_prints_the_catalogue_for_one_arch():  # noqa: ANN201  # LW-910267; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(cmd_list_sets, arch="mi210")
     assert "gfx90a" in out
     assert "l2" in out
     assert "hbm" in out
 
 
-def test_cmd_list_sets_rejects_unknown_arch():  # noqa: ANN201  # tracked: #288
+def test_cmd_list_sets_rejects_unknown_arch():  # noqa: ANN201  # LW-910268; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     with pytest.raises(SystemExit):
         _run(cmd_list_sets, arch="rtx4090")
 
 
-def test_cmd_plan_prints_one_pass_per_set_with_separate_output_dirs():  # noqa: ANN201  # tracked: #288
+def test_cmd_plan_prints_one_pass_per_set_with_separate_output_dirs():  # noqa: ANN201  # LW-910269; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(
         cmd_plan,
         arch="gfx90a",
@@ -443,24 +443,24 @@ def test_cmd_plan_prints_one_pass_per_set_with_separate_output_dirs():  # noqa: 
         out_dir="rocprof_pmc",
         command=["--", "python", "bench.py"],
     )
-    assert out.count("rocprofv3 --pmc") == 2  # tracked: #288
+    assert out.count("rocprofv3 --pmc") == 2
     assert "rocprof_pmc/gfx90a/l2" in out
     assert "rocprof_pmc/gfx90a/hbm" in out
     assert "-- python bench.py" in out
     assert "-- -- python bench.py" not in out  # the leading -- must not be duplicated
 
 
-def test_cmd_plan_rejects_unknown_counter_set():  # noqa: ANN201  # tracked: #288
+def test_cmd_plan_rejects_unknown_counter_set():  # noqa: ANN201  # LW-910270; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     with pytest.raises(SystemExit, match="unknown counter set"):
         _run(cmd_plan, arch="gfx90a", sets="bogus", kernel=None, out_dir="rocprof_pmc", command=[])
 
 
-def test_cmd_plan_without_a_command_prints_a_placeholder():  # noqa: ANN201  # tracked: #288
+def test_cmd_plan_without_a_command_prints_a_placeholder():  # noqa: ANN201  # LW-910271; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(cmd_plan, arch="gfx90a", sets="l2", kernel=None, out_dir="rocprof_pmc", command=[])
     assert "<your_command_and_args>" in out
 
 
-def test_cmd_report_merges_passes_and_prints_resource_usage_and_derived_metrics():  # noqa: ANN201  # tracked: #288
+def test_cmd_report_merges_passes_and_prints_resource_usage_and_derived_metrics():  # noqa: ANN201  # LW-910272; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     dirs = [
         str(_FIXTURES / "pmc" / "l2"),
         str(_FIXTURES / "pmc" / "hbm"),
@@ -474,18 +474,18 @@ def test_cmd_report_merges_passes_and_prints_resource_usage_and_derived_metrics(
     assert "achieved BW: 76." in out
 
 
-def test_cmd_report_applies_kernel_regex_filter():  # noqa: ANN201  # tracked: #288
+def test_cmd_report_applies_kernel_regex_filter():  # noqa: ANN201  # LW-910273; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     dirs = [str(_FIXTURES / "pmc" / "l2")]
     out = _run(cmd_report, dirs=dirs, kernel="does_not_exist", top=15, arch=None)
     assert "0 kernel(s) matched" in out
 
 
-def test_cmd_report_reports_no_files_found(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_cmd_report_reports_no_files_found(tmp_path: Path):  # noqa: ANN201  # LW-910274; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(cmd_report, dirs=[str(tmp_path)], kernel=None, top=15, arch=None)
     assert "no *counter_collection*" in out
 
 
-def test_cmd_triage_classifies_occupancy_bandwidth_compute_and_launch_kernels():  # noqa: ANN201  # tracked: #288
+def test_cmd_triage_classifies_occupancy_bandwidth_compute_and_launch_kernels():  # noqa: ANN201  # LW-910275; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     occ_dir = str(_FIXTURES / "pmc" / "occupancy_low")
     out = _run(cmd_triage, dirs=[occ_dir], kernel=None, top=15, arch="gfx90a")
 
@@ -500,7 +500,7 @@ def test_cmd_triage_classifies_occupancy_bandwidth_compute_and_launch_kernels():
     assert "not an achievable ceiling" in out
 
 
-def test_cmd_triage_falls_back_to_latency_bound_when_bandwidth_is_well_under_peak():  # noqa: ANN201  # tracked: #288
+def test_cmd_triage_falls_back_to_latency_bound_when_bandwidth_is_well_under_peak():  # noqa: ANN201  # LW-910276; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # 76 GB/s achieved is ~5% of the 1.6 TB/s gfx90a HBM peak -- nowhere near
     # the 50% bandwidth-bound threshold -- and occupancy/grid are both fine,
     # so this lands in the residual LATENCY-BOUND bucket.
@@ -511,18 +511,18 @@ def test_cmd_triage_falls_back_to_latency_bound_when_bandwidth_is_well_under_pea
     assert "capture an ATT trace" in out
 
 
-def test_cmd_triage_rejects_unknown_arch():  # noqa: ANN201  # tracked: #288
+def test_cmd_triage_rejects_unknown_arch():  # noqa: ANN201  # LW-910277; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     with pytest.raises(SystemExit, match="unknown architecture"):
         _run(cmd_triage, dirs=[str(_FIXTURES / "pmc" / "l2")], kernel=None, top=15, arch="rtx4090")
 
 
-def test_cmd_triage_rejects_a_gfx_id_with_no_catalogued_peak_spec():  # noqa: ANN201  # tracked: #288
+def test_cmd_triage_rejects_a_gfx_id_with_no_catalogued_peak_spec():  # noqa: ANN201  # LW-910278; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # gfx908 (MI100, CDNA1) parses as a valid gfx id but has no PEAK_SPECS entry.
     with pytest.raises(SystemExit, match="no peak spec"):
         _run(cmd_triage, dirs=[str(_FIXTURES / "pmc" / "l2")], kernel=None, top=15, arch="gfx908")
 
 
-def test_cmd_triage_reports_no_files_found(tmp_path: Path):  # noqa: ANN201  # tracked: #288
+def test_cmd_triage_reports_no_files_found(tmp_path: Path):  # noqa: ANN201  # LW-910279; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(cmd_triage, dirs=[str(tmp_path)], kernel=None, top=15, arch="gfx90a")
     assert "no *counter_collection*" in out
 
@@ -547,7 +547,7 @@ def _real_mi210_dirs() -> list[str]:
     return [str(_REAL_MI210 / f"pass{i}") for i in (1, 2, 3)]
 
 
-def test_real_mi210_report_finds_the_nested_pmc_1_output_and_derives_duration():  # noqa: ANN201  # tracked: #288
+def test_real_mi210_report_finds_the_nested_pmc_1_output_and_derives_duration():  # noqa: ANN201  # LW-910280; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # rocprofv3 nests output under <out_dir>/pmc_1/<hostname>/<pid>_* rather
     # than directly under <out_dir>; _discover must still find it via rglob,
     # and duration must come from the PMC rows' own timestamps (no separate
@@ -558,7 +558,7 @@ def test_real_mi210_report_finds_the_nested_pmc_1_output_and_derives_duration():
     assert "2 dispatch(es)" in out
 
 
-def test_real_mi210_report_attributes_gemm_as_mfma_heavy_and_ew_as_bandwidth_heavy():  # noqa: ANN201  # tracked: #288
+def test_real_mi210_report_attributes_gemm_as_mfma_heavy_and_ew_as_bandwidth_heavy():  # noqa: ANN201  # LW-910281; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(cmd_report, dirs=_real_mi210_dirs(), kernel=None, top=15, arch="gfx90a")
     assert _REAL_GEMM_KERNEL in out
     # SQ_INSTS_MFMA / GRBM_GUI_ACTIVE from the real capture -> ~5.45 insts/cycle.
@@ -567,7 +567,7 @@ def test_real_mi210_report_attributes_gemm_as_mfma_heavy_and_ew_as_bandwidth_hea
     assert "achieved BW: 1428.9 GB/s" in out
 
 
-def test_real_mi210_report_shortens_the_long_real_kernel_names():  # noqa: ANN201  # tracked: #288
+def test_real_mi210_report_shortens_the_long_real_kernel_names():  # noqa: ANN201  # LW-910282; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # The real Tensile GEMM kernel name is 442 chars; report must not print
     # it in full (this toolkit is meant to feed an LLM prompt).
     out = _run(cmd_report, dirs=_real_mi210_dirs(), kernel=None, top=15, arch="gfx90a")
@@ -575,7 +575,7 @@ def test_real_mi210_report_shortens_the_long_real_kernel_names():  # noqa: ANN20
     assert "WS64_WG64_4_1" not in out  # the tail of the full 442-char name is gone
 
 
-def test_real_mi210_triage_classifies_gemm_compute_bound_and_ew_bandwidth_bound():  # noqa: ANN201  # tracked: #288
+def test_real_mi210_triage_classifies_gemm_compute_bound_and_ew_bandwidth_bound():  # noqa: ANN201  # LW-910283; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     out = _run(cmd_triage, dirs=_real_mi210_dirs(), kernel=None, top=15, arch="gfx90a")
     assert _REAL_GEMM_KERNEL in out
     assert "verdict: COMPUTE-BOUND" in out
@@ -589,7 +589,7 @@ def test_real_mi210_triage_classifies_gemm_compute_bound_and_ew_bandwidth_bound(
     assert "achieved 211 GB/s" not in out  # GEMM's bandwidth isn't the verdict driver
 
 
-def test_real_mi210_triage_without_flops_falls_back_to_the_uninterpretable_raw_rate():  # noqa: ANN201  # tracked: #288
+def test_real_mi210_triage_without_flops_falls_back_to_the_uninterpretable_raw_rate():  # noqa: ANN201  # LW-910284; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # Documents the pre-fix behavior this fixture still exercises when neither
     # SQ_VALU_MFMA_BUSY_CYCLES nor --flops is available (job1 pass1 didn't
     # capture the busy-cycles counter): the raw insts/cycle number is kept as
@@ -601,7 +601,7 @@ def test_real_mi210_triage_without_flops_falls_back_to_the_uninterpretable_raw_r
     assert "MFMA busy" not in out  # the new peak-normalized evidence didn't fire
 
 
-def test_real_mi210_triage_expresses_mfma_utilization_as_a_fraction_of_spec_peak():  # noqa: ANN201  # tracked: #288
+def test_real_mi210_triage_expresses_mfma_utilization_as_a_fraction_of_spec_peak():  # noqa: ANN201  # LW-910285; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # The real capture (job1 pass1) never requested SQ_VALU_MFMA_BUSY_CYCLES,
     # so this exercises the --flops fallback end to end. --flops is FLOPs for
     # ONE dispatch (2*M*N*K for the fixture's bf16 4096^3 GEMM, see the "Real
@@ -634,7 +634,7 @@ def test_real_mi210_triage_expresses_mfma_utilization_as_a_fraction_of_spec_peak
     assert "MFMA issue rate" not in out
 
 
-def test_real_mi210_triage_flops_hint_is_scaled_by_dispatch_count_not_divided_by_it():  # noqa: ANN201  # tracked: #288
+def test_real_mi210_triage_flops_hint_is_scaled_by_dispatch_count_not_divided_by_it():  # noqa: ANN201  # LW-910286; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # Regression for the per-dispatch-FLOPs-vs-aggregated-duration mix-up:
     # --flops documents "FLOP count for the matched kernel's dispatch" (one
     # dispatch), but the duration passed to derive_metrics is summed across
@@ -680,7 +680,7 @@ def test_real_mi210_triage_flops_hint_is_scaled_by_dispatch_count_not_divided_by
     duration_ns=st.floats(min_value=1e6, max_value=1e12, allow_nan=False, allow_infinity=False),
 )
 @FAST
-def test_flops_hint_scales_achieved_throughput_with_dispatch_count(  # noqa: ANN201
+def test_flops_hint_scales_achieved_throughput_with_dispatch_count(  # noqa: ANN201  # LW-920319; tracked migration debt from the pre-manifest ratchet scheme
     dispatch_count: int, flops_per_dispatch: float, duration_ns: float
 ):
     # Generalizes the real-MI210 regression above: --flops is a *per-dispatch*
@@ -750,7 +750,7 @@ _REAL_PACKED_DURATION_NS = 199_361.0
 _REAL_PACKED_BW_GB_S = _REAL_PACKED_HBM_BYTES / (_REAL_PACKED_DURATION_NS / 1e9) / 1e9
 
 
-def test_real_mi210_packed_pass_discover_counts_the_shared_directory_once():  # noqa: ANN201  # tracked: #288
+def test_real_mi210_packed_pass_discover_counts_the_shared_directory_once():  # noqa: ANN201  # LW-910287; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # Lowest-layer reproduction: `_discover` must not add the same physical
     # counter_collection.csv twice just because the caller's `dirs` list
     # repeats its directory (mirroring `set_dirs.values()` for a packed
@@ -763,7 +763,7 @@ def test_real_mi210_packed_pass_discover_counts_the_shared_directory_once():  # 
     assert repeated == single
 
 
-def test_real_mi210_packed_pass_report_matches_between_single_and_repeated_dirs():  # noqa: ANN201  # tracked: #288
+def test_real_mi210_packed_pass_report_matches_between_single_and_repeated_dirs():  # noqa: ANN201  # LW-910288; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # End-to-end: cmd_report on a `dirs` list with the packed pass directory
     # listed once vs. twice (as `list({"hbm": d, "mfma": d}.values())` would
     # produce) must report identical HBM bytes/achieved BW, not double.
@@ -792,7 +792,7 @@ def test_real_mi210_packed_pass_report_matches_between_single_and_repeated_dirs(
     assert f"achieved BW: {doubled_bw:.1f} GB/s" not in repeated
 
 
-def test_real_mi210_packed_pass_kernel_metrics_by_name_matches_manual_arithmetic():  # noqa: ANN201  # tracked: #288
+def test_real_mi210_packed_pass_kernel_metrics_by_name_matches_manual_arithmetic():  # noqa: ANN201  # LW-910289; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     metrics = kernel_metrics_by_name(
         [str(_REAL_MI210_PACKED)], kernel=_REAL_PACKED_KERNEL, arch="gfx90a"
     )
@@ -802,7 +802,7 @@ def test_real_mi210_packed_pass_kernel_metrics_by_name_matches_manual_arithmetic
     assert kernel_metrics.achieved_bw_gb_s == pytest.approx(_REAL_PACKED_BW_GB_S)
 
 
-def test_bw_exceeds_spec_note_is_none_at_or_under_peak_and_present_above_it():  # noqa: ANN201  # tracked: #288
+def test_bw_exceeds_spec_note_is_none_at_or_under_peak_and_present_above_it():  # noqa: ANN201  # LW-910290; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     spec = PEAK_SPECS["gfx90a"]  # 1.6 TB/s -> 1600 GB/s
     assert _bw_exceeds_spec_note(1600.0, spec) is None
     assert _bw_exceeds_spec_note(1599.9, spec) is None
@@ -822,7 +822,7 @@ def test_bw_exceeds_spec_note_is_none_at_or_under_peak_and_present_above_it():  
 
 @given(repeat=st.integers(min_value=1, max_value=6))
 @FAST
-def test_discover_is_invariant_to_how_many_times_a_directory_is_repeated(  # noqa: ANN201
+def test_discover_is_invariant_to_how_many_times_a_directory_is_repeated(  # noqa: ANN201  # LW-920320; tracked migration debt from the pre-manifest ratchet scheme
     repeat: int,
 ):
     # Generalizes the fixture regression above: for ANY repeat count (not
@@ -841,7 +841,7 @@ def test_discover_is_invariant_to_how_many_times_a_directory_is_repeated(  # noq
 
 @given(repeat=st.integers(min_value=1, max_value=5))
 @FAST
-def test_packing_sets_into_one_pass_is_invariant_to_dirs_list_repetition(  # noqa: ANN201
+def test_packing_sets_into_one_pass_is_invariant_to_dirs_list_repetition(  # noqa: ANN201  # LW-920321; tracked migration debt from the pre-manifest ratchet scheme
     repeat: int,
 ):
     # "Packed into one pass" (dirs=[d]) and "N sets happened to share that
@@ -865,7 +865,7 @@ def test_packing_sets_into_one_pass_is_invariant_to_dirs_list_repetition(  # noq
     ),
 )
 @FAST
-def test_aggregating_n_identical_dispatches_preserves_per_dispatch_bandwidth(  # noqa: ANN201
+def test_aggregating_n_identical_dispatches_preserves_per_dispatch_bandwidth(  # noqa: ANN201  # LW-920322; tracked migration debt from the pre-manifest ratchet scheme
     dispatch_count: int, bytes_per_dispatch: float, duration_per_dispatch_ns: float
 ):
     # N separate, genuinely distinct dispatches of the same kernel (distinct
@@ -913,7 +913,7 @@ def test_aggregating_n_identical_dispatches_preserves_per_dispatch_bandwidth(  #
     repeat=st.integers(min_value=1, max_value=8),
 )
 @FAST
-def test_counting_the_same_counters_n_times_scales_achieved_bandwidth_by_n(  # noqa: ANN201
+def test_counting_the_same_counters_n_times_scales_achieved_bandwidth_by_n(  # noqa: ANN201  # LW-920323; tracked migration debt from the pre-manifest ratchet scheme
     rd_req: int, rd_32b: int, duration_ns: float, repeat: int
 ):
     # Derived bandwidth must stay exactly consistent with hbm_bytes/duration:
@@ -995,7 +995,7 @@ def _assert_finite_and_nonnegative(value: float | None) -> None:
     ),
 )
 @FAST
-def test_derive_metrics_never_crashes_or_emits_nan_inf_negative_for_any_counter_subset(  # noqa: ANN201
+def test_derive_metrics_never_crashes_or_emits_nan_inf_negative_for_any_counter_subset(  # noqa: ANN201  # LW-920324; tracked migration debt from the pre-manifest ratchet scheme
     data: tuple[str, dict[str, float]], duration_ns: float | None
 ):
     _arch, counters = data
@@ -1047,7 +1047,7 @@ def test_derive_metrics_never_crashes_or_emits_nan_inf_negative_for_any_counter_
 
 @given(arch=arch_name)
 @FEWER
-def test_report_and_triage_never_crash_over_every_arch_counter_set_in_isolation(arch: str):  # noqa: ANN201
+def test_report_and_triage_never_crash_over_every_arch_counter_set_in_isolation(arch: str):  # noqa: ANN201  # LW-920325; tracked migration debt from the pre-manifest ratchet scheme
     # One CSV per catalogued counter set for this arch, each row using every
     # counter that set names -- mirrors a real multi-pass capture directory.
     rows = []
@@ -1095,7 +1095,7 @@ def test_report_and_triage_never_crash_over_every_arch_counter_set_in_isolation(
     simd_num=st.integers(min_value=1, max_value=2000),
 )
 @FAST
-def test_mfma_busy_fraction_measured_path_always_in_unit_interval(  # noqa: ANN201
+def test_mfma_busy_fraction_measured_path_always_in_unit_interval(  # noqa: ANN201  # LW-920326; tracked migration debt from the pre-manifest ratchet scheme
     mfma_busy_cycles: float, grbm_gui_active: float, simd_num: int
 ):
     fraction, source = _mfma_busy_fraction(
@@ -1116,7 +1116,7 @@ def test_mfma_busy_fraction_measured_path_always_in_unit_interval(  # noqa: ANN2
     simd_num=st.integers(min_value=1, max_value=2000),
 )
 @FAST
-def test_mfma_busy_fraction_is_monotone_in_busy_cycles(  # noqa: ANN201
+def test_mfma_busy_fraction_is_monotone_in_busy_cycles(  # noqa: ANN201  # LW-920327; tracked migration debt from the pre-manifest ratchet scheme
     mfma_busy_cycles: float, extra_busy_cycles: float, grbm_gui_active: float, simd_num: int
 ):
     lower, _ = _mfma_busy_fraction(
@@ -1143,7 +1143,7 @@ def test_mfma_busy_fraction_is_monotone_in_busy_cycles(  # noqa: ANN201
     scale=st.floats(min_value=1e-3, max_value=1e3, allow_nan=False, allow_infinity=False),
 )
 @FAST
-def test_mfma_busy_fraction_is_invariant_to_scaling_all_cycle_counters_together(  # noqa: ANN201
+def test_mfma_busy_fraction_is_invariant_to_scaling_all_cycle_counters_together(  # noqa: ANN201  # LW-920328; tracked migration debt from the pre-manifest ratchet scheme
     mfma_busy_cycles: float, grbm_gui_active: float, simd_num: int, scale: float
 ):
     # Scaling both the numerator (SQ_VALU_MFMA_BUSY_CYCLES) and the busy-cycle
@@ -1168,7 +1168,7 @@ def test_mfma_busy_fraction_is_invariant_to_scaling_all_cycle_counters_together(
     assert scaled == pytest.approx(base, rel=1e-6, abs=1e-9)
 
 
-def test_mfma_busy_fraction_clamps_and_warns_when_measured_value_exceeds_peak(capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_mfma_busy_fraction_clamps_and_warns_when_measured_value_exceeds_peak(capsys):  # noqa: ANN001, ANN201  # LW-910291; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # SQ_VALU_MFMA_BUSY_CYCLES far larger than busy_cycles*simd_num could
     # allow -- inconsistent counters (stitched passes, a measurement race).
     fraction, source = _mfma_busy_fraction(
@@ -1182,7 +1182,7 @@ def test_mfma_busy_fraction_clamps_and_warns_when_measured_value_exceeds_peak(ca
     assert "warning" in capsys.readouterr().err.lower()
 
 
-def test_mfma_busy_fraction_flops_hint_only_fires_when_the_kernel_has_mfma_activity():  # noqa: ANN201  # tracked: #288
+def test_mfma_busy_fraction_flops_hint_only_fires_when_the_kernel_has_mfma_activity():  # noqa: ANN201  # LW-910292; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # A --flops hint must never manufacture a compute-bound signal for a
     # kernel that issued zero MFMA instructions (e.g. the elementwise kernel
     # in the real_mi210 fixture) even if a peak spec and duration are given.
@@ -1196,7 +1196,7 @@ def test_mfma_busy_fraction_flops_hint_only_fires_when_the_kernel_has_mfma_activ
     assert source is None
 
 
-def test_mfma_busy_fraction_prefers_measured_over_flops_hint_when_both_are_present():  # noqa: ANN201  # tracked: #288
+def test_mfma_busy_fraction_prefers_measured_over_flops_hint_when_both_are_present():  # noqa: ANN201  # LW-910293; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     fraction, source = _mfma_busy_fraction(
         counters={"SQ_VALU_MFMA_BUSY_CYCLES": 100.0, "SQ_INSTS_MFMA": 1.0},
         busy_cycles=1000.0,
@@ -1207,7 +1207,7 @@ def test_mfma_busy_fraction_prefers_measured_over_flops_hint_when_both_are_prese
     assert fraction == pytest.approx(100.0 / (1000.0 * 416))
 
 
-def test_mfma_busy_fraction_compute_bound_threshold_is_well_below_the_practical_tuned_gemm_ceiling():  # noqa: ANN201  # tracked: #288
+def test_mfma_busy_fraction_compute_bound_threshold_is_well_below_the_practical_tuned_gemm_ceiling():  # noqa: ANN201  # LW-910294; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # 45-55% of spec peak is the documented realistic ceiling for a tuned
     # GEMM (see PeakSpec's docstring); the compute-bound threshold must sit
     # comfortably below that so a well-tuned kernel is still classified
@@ -1215,7 +1215,7 @@ def test_mfma_busy_fraction_compute_bound_threshold_is_well_below_the_practical_
     assert 0.0 < MFMA_BUSY_FRACTION_COMPUTE_BOUND < 0.45
 
 
-def test_mfma_compute_bound_below_threshold_does_not_fall_back_to_uninterpretable_rate():  # noqa: ANN201  # tracked: #288
+def test_mfma_compute_bound_below_threshold_does_not_fall_back_to_uninterpretable_rate():  # noqa: ANN201  # LW-910295; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # Real MI210 bug (Qwen3.5-9B decode-phase GEMM triage, mfma+hbm counter
     # sets in one triage call): a kernel with a genuinely LOW measured MFMA
     # busy fraction (5.1% of peak, well under the 30% compute-bound
@@ -1239,7 +1239,7 @@ def test_mfma_compute_bound_below_threshold_does_not_fall_back_to_uninterpretabl
     assert verdict is None
 
 
-def test_mfma_compute_bound_still_uses_raw_rate_fallback_when_no_peak_reference_exists():  # noqa: ANN201  # tracked: #288
+def test_mfma_compute_bound_still_uses_raw_rate_fallback_when_no_peak_reference_exists():  # noqa: ANN201  # LW-910296; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # Contrast case: when SQ_VALU_MFMA_BUSY_CYCLES truly wasn't captured
     # (mfma_busy_fraction is None), the honestly-labeled raw-rate fallback
     # must still fire -- this function's other branch is not the bug.
@@ -1269,7 +1269,7 @@ def test_mfma_compute_bound_still_uses_raw_rate_fallback_when_no_peak_reference_
     gpu_busy_pct=st.one_of(st.none(), st.floats(min_value=0.0, max_value=100.0)),
 )
 @FAST
-def test_mfma_compute_bound_never_emits_no_peak_reference_when_a_fraction_was_computed(  # noqa: ANN201
+def test_mfma_compute_bound_never_emits_no_peak_reference_when_a_fraction_was_computed(  # noqa: ANN201  # LW-920329; tracked migration debt from the pre-manifest ratchet scheme
     mfma_busy_fraction: float, mfma_issue_rate: float | None, gpu_busy_pct: float | None
 ):
     # Generalizes the fixed bug: for ANY sub-threshold measured/flops-hint
@@ -1305,7 +1305,7 @@ def test_mfma_compute_bound_never_emits_no_peak_reference_when_a_fraction_was_co
     ea_prefix=st.sampled_from(("TCC_EA0_", "TCC_EA_")),
 )
 @FAST
-def test_hbm_bytes_matches_the_documented_formula_and_is_symmetric_across_conventions(  # noqa: ANN201
+def test_hbm_bytes_matches_the_documented_formula_and_is_symmetric_across_conventions(  # noqa: ANN201  # LW-920330; tracked migration debt from the pre-manifest ratchet scheme
     full: int, partial: int, ea_prefix: str
 ):
     expected = float(full * 64 + partial * 32)
@@ -1331,7 +1331,7 @@ def test_hbm_bytes_matches_the_documented_formula_and_is_symmetric_across_conven
     partial=st.integers(min_value=0, max_value=1_000_000),
 )
 @FAST
-def test_hbm_bytes_without_a_write_breakdown_assumes_every_request_is_a_full_line(  # noqa: ANN201
+def test_hbm_bytes_without_a_write_breakdown_assumes_every_request_is_a_full_line(  # noqa: ANN201  # LW-920331; tracked migration debt from the pre-manifest ratchet scheme
     full: int, partial: int
 ):
     # No *_WRREQ_64B_sum captured at all -- must conservatively assume every
@@ -1347,7 +1347,7 @@ def test_hbm_bytes_without_a_write_breakdown_assumes_every_request_is_a_full_lin
     side=st.sampled_from(("read", "write")),
 )
 @FAST
-def test_hbm_bytes_never_goes_negative_when_a_breakdown_counter_exceeds_the_total(  # noqa: ANN201
+def test_hbm_bytes_never_goes_negative_when_a_breakdown_counter_exceeds_the_total(  # noqa: ANN201  # LW-920332; tracked migration debt from the pre-manifest ratchet scheme
     req: float, breakdown: float, side: str
 ):
     # Regression for a bug this property suite itself found: real counters
@@ -1378,7 +1378,7 @@ def test_hbm_bytes_never_goes_negative_when_a_breakdown_counter_exceeds_the_tota
     dur=st.floats(min_value=1, max_value=1e6, allow_nan=False, allow_infinity=False),
 )
 @FAST
-def test_duration_from_counter_rows_dedupes_by_dispatch_not_by_counter_count(  # noqa: ANN201
+def test_duration_from_counter_rows_dedupes_by_dispatch_not_by_counter_count(  # noqa: ANN201  # LW-920333; tracked migration debt from the pre-manifest ratchet scheme
     dispatch_count: int, counters_per_dispatch: int, start: float, dur: float
 ):
     rows = []
@@ -1408,7 +1408,7 @@ def test_duration_from_counter_rows_dedupes_by_dispatch_not_by_counter_count(  #
     assert durations["k"] == pytest.approx(expected_total)
 
 
-def test_kernel_trace_duration_overrides_pmc_derived_duration_when_both_present():  # noqa: ANN201
+def test_kernel_trace_duration_overrides_pmc_derived_duration_when_both_present():  # noqa: ANN201  # LW-920334; tracked migration debt from the pre-manifest ratchet scheme
     pmc_rows = [
         CounterRow(
             kernel_name="k",
@@ -1469,7 +1469,7 @@ _COUNTERS_CSV_HEADER = [
     kernel_name_col=case_variant("Kernel_Name"),
 )
 @FEWER
-def test_load_counter_rows_handles_permuted_noisy_and_huge_name_csvs_without_crashing(  # noqa: ANN201
+def test_load_counter_rows_handles_permuted_noisy_and_huge_name_csvs_without_crashing(  # noqa: ANN201  # LW-920335; tracked migration debt from the pre-manifest ratchet scheme
     order: list[int], *, include_unknown_column: bool, kernel_name: str, kernel_name_col: str
 ):
     header = list(_COUNTERS_CSV_HEADER)
@@ -1530,7 +1530,7 @@ def test_load_counter_rows_handles_permuted_noisy_and_huge_name_csvs_without_cra
     )
 )
 @FAST
-def test_row_from_mapping_tolerates_any_subset_of_missing_optional_columns(dropped: list[str]):  # noqa: ANN201
+def test_row_from_mapping_tolerates_any_subset_of_missing_optional_columns(dropped: list[str]):  # noqa: ANN201  # LW-920336; tracked migration debt from the pre-manifest ratchet scheme
     row = {
         "Kernel_Name": "k",
         "Counter_Name": "TCC_HIT_sum",
@@ -1551,7 +1551,7 @@ def test_row_from_mapping_tolerates_any_subset_of_missing_optional_columns(dropp
     assert parsed.counter_value == 5.0
 
 
-def test_load_counter_rows_handles_a_header_only_empty_csv(tmp_path: Path):  # noqa: ANN201
+def test_load_counter_rows_handles_a_header_only_empty_csv(tmp_path: Path):  # noqa: ANN201  # LW-920337; tracked migration debt from the pre-manifest ratchet scheme
     path = tmp_path / "empty_counter_collection.csv"
     path.write_text(
         "Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,Grid_Size,"
@@ -1569,7 +1569,7 @@ _LINE_WIDTH_BOUND = 200
 
 @given(kernel_name=huge_kernel_name())
 @FEWER
-def test_cmd_report_bounds_line_width_for_a_huge_real_shaped_kernel_name(  # noqa: ANN201
+def test_cmd_report_bounds_line_width_for_a_huge_real_shaped_kernel_name(  # noqa: ANN201  # LW-920338; tracked migration debt from the pre-manifest ratchet scheme
     tmp_path_factory: pytest.TempPathFactory, kernel_name: str
 ):
     d = tmp_path_factory.mktemp("huge_kernel_name")
@@ -1604,7 +1604,7 @@ def _pmc_counter_lists_from_plan_output(out: str) -> list[list[str]]:
 
 @given(arch=arch_name, data=st.data())
 @FEWER
-def test_plan_never_emits_more_than_four_counters_and_stays_in_the_arch_catalogue(  # noqa: ANN201
+def test_plan_never_emits_more_than_four_counters_and_stays_in_the_arch_catalogue(  # noqa: ANN201  # LW-920339; tracked migration debt from the pre-manifest ratchet scheme
     arch: str, data: st.DataObject
 ):
     catalogue = COUNTER_SETS[arch]
@@ -1637,13 +1637,13 @@ def test_plan_never_emits_more_than_four_counters_and_stays_in_the_arch_catalogu
 # ---------------------------------------------------------------------------
 
 
-def test_counter_block_reads_the_amd_block_prefix():  # noqa: ANN201  # tracked: #288
+def test_counter_block_reads_the_amd_block_prefix():  # noqa: ANN201  # LW-910297; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert counter_block("SQ_INSTS_MFMA") == "SQ"
     assert counter_block("TCC_EA_RDREQ_sum") == "TCC"
     assert counter_block("GRBM_COUNT") == "GRBM"
 
 
-def test_plan_passes_packs_the_two_real_mi210_validated_combos():  # noqa: ANN201  # tracked: #288
+def test_plan_passes_packs_the_two_real_mi210_validated_combos():  # noqa: ANN201  # LW-910298; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     """Regression: real MI210 validation packed mfma+hbm and mfma+l2 into one pass each.
 
     Fails on the pre-packing code, which always emitted one singleton group
@@ -1657,7 +1657,7 @@ def test_plan_passes_packs_the_two_real_mi210_validated_combos():  # noqa: ANN20
     assert plan_passes(catalogue, ["mfma", "l2"]) == [["mfma", "l2"]]
 
 
-def test_plan_passes_keeps_an_unvalidated_combo_separate():  # noqa: ANN201  # tracked: #288
+def test_plan_passes_keeps_an_unvalidated_combo_separate():  # noqa: ANN201  # LW-910299; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     """l2+hbm was not validated together on real hardware and shouldn't pack.
 
     l2 (TCC:2, TCP:1) + hbm (TCC:4, TCP:1) would need TCC:6, over
@@ -1671,7 +1671,7 @@ def test_plan_passes_keeps_an_unvalidated_combo_separate():  # noqa: ANN201  # t
     assert groups == [["l2"], ["hbm"]]
 
 
-def test_plan_passes_preserves_request_order_within_and_across_groups():  # noqa: ANN201  # tracked: #288
+def test_plan_passes_preserves_request_order_within_and_across_groups():  # noqa: ANN201  # LW-910300; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     catalogue = COUNTER_SETS["gfx90a"]
 
     groups = plan_passes(catalogue, ["occupancy", "mfma", "hbm", "valu"])
@@ -1684,7 +1684,7 @@ def test_plan_passes_preserves_request_order_within_and_across_groups():  # noqa
     assert groups == [["occupancy", "mfma", "hbm"], ["valu"]]
 
 
-def test_plan_passes_never_splits_a_single_set():  # noqa: ANN201  # tracked: #288
+def test_plan_passes_never_splits_a_single_set():  # noqa: ANN201  # LW-910301; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     catalogue = COUNTER_SETS["gfx90a"]
     for set_name in catalogue:
         groups = plan_passes(catalogue, [set_name])
@@ -1693,7 +1693,7 @@ def test_plan_passes_never_splits_a_single_set():  # noqa: ANN201  # tracked: #2
 
 @given(arch=arch_name, data=st.data())
 @FEWER
-def test_plan_passes_never_exceeds_the_per_block_limit(arch: str, data: st.DataObject):  # noqa: ANN201  # tracked: #288
+def test_plan_passes_never_exceeds_the_per_block_limit(arch: str, data: st.DataObject):  # noqa: ANN201  # LW-910302; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     """Property: every packed group's combined per-block counter count stays in budget.
 
     Holds for any subset/order of the arch's own counter-set catalogue, not
@@ -1718,7 +1718,7 @@ def test_plan_passes_never_exceeds_the_per_block_limit(arch: str, data: st.DataO
         assert all(n <= PER_BLOCK_COUNTER_LIMIT for n in combined.values())
 
 
-def test_pass_counters_dedupes_and_unions_a_packed_group():  # noqa: ANN201  # tracked: #288
+def test_pass_counters_dedupes_and_unions_a_packed_group():  # noqa: ANN201  # LW-910303; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     catalogue = COUNTER_SETS["gfx90a"]
 
     result = pass_counters(catalogue, ["mfma", "hbm"])
@@ -1732,7 +1732,7 @@ def test_pass_counters_dedupes_and_unions_a_packed_group():  # noqa: ANN201  # t
     assert len(result) == len(set(result))
 
 
-def test_dedupe_preserve_order_keeps_first_occurrence():  # noqa: ANN201  # tracked: #288
+def test_dedupe_preserve_order_keeps_first_occurrence():  # noqa: ANN201  # LW-910304; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert dedupe_preserve_order(["a", "b", "a", "c", "b"]) == ["a", "b", "c"]
 
 
@@ -1750,11 +1750,11 @@ def test_dedupe_preserve_order_keeps_first_occurrence():  # noqa: ANN201  # trac
         "the requested set exceeds the counter limit for block TCC",
     ],
 )
-def test_looks_like_packed_pass_rejection_matches_known_phrasings(log_tail: str):  # noqa: ANN201  # tracked: #288
+def test_looks_like_packed_pass_rejection_matches_known_phrasings(log_tail: str):  # noqa: ANN201  # LW-910305; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert looks_like_packed_pass_rejection(status_ok=False, log_tail=log_tail) is True
 
 
-def test_looks_like_packed_pass_rejection_false_when_pass_actually_succeeded():  # noqa: ANN201  # tracked: #288
+def test_looks_like_packed_pass_rejection_false_when_pass_actually_succeeded():  # noqa: ANN201  # LW-910306; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # Matching text in an otherwise-clean pass's log (e.g. incidental
     # workload output) must never trigger a fallback: only a pass that
     # actually failed can be a packing rejection.
@@ -1766,7 +1766,7 @@ def test_looks_like_packed_pass_rejection_false_when_pass_actually_succeeded(): 
     )
 
 
-def test_looks_like_packed_pass_rejection_false_for_an_unrelated_failure():  # noqa: ANN201  # tracked: #288
+def test_looks_like_packed_pass_rejection_false_for_an_unrelated_failure():  # noqa: ANN201  # LW-910307; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert (
         looks_like_packed_pass_rejection(status_ok=False, log_tail="command not found: rocprofv3")
         is False
@@ -1775,7 +1775,7 @@ def test_looks_like_packed_pass_rejection_false_for_an_unrelated_failure():  # n
 
 @given(text=st.text())
 @FAST
-def test_packed_pass_rejection_regex_never_raises(text: str):  # noqa: ANN201  # tracked: #288
+def test_packed_pass_rejection_regex_never_raises(text: str):  # noqa: ANN201  # LW-910308; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # Pure robustness: arbitrary log text must never crash the classifier.
     looks_like_packed_pass_rejection(status_ok=False, log_tail=text)
     assert PACKED_PASS_REJECTION_RE.pattern  # sanity: the pattern itself compiled

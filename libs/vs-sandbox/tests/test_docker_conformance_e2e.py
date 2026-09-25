@@ -19,7 +19,14 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from tests.support import run_test_command
 
+from vibesys.sandbox.images import (
+    agent_image,
+)
+from vs_sandbox.docker_sandbox import (
+    DockerSandbox,
+)
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
 
 pytestmark = pytest.mark.e2e
@@ -75,8 +82,6 @@ def test_docker_probe_enforces_the_shared_resource_contract(tmp_path: Path) -> N
     per-backend teardown and a container must be stopped and removed however
     the test ends.
     """
-    from vibesys.sandbox.images import agent_image  # noqa: PLC0415  # tracked: #288
-    from vs_sandbox.docker_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -101,7 +106,7 @@ def test_docker_probe_enforces_the_shared_resource_contract(tmp_path: Path) -> N
             Path(sandbox.agent_path(readonly_path)),
             unlisted_path,
         )
-        result = subprocess.run(  # noqa: S603
+        result = run_test_command(
             sandbox.wrap(["/bin/sh", "-c", script], workspace),
             capture_output=True,
             text=True,

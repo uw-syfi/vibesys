@@ -64,7 +64,7 @@ handles a flat ``[{"Counter_Name": ..., "Counter_Value": ...}, ...]`` shape
 (or nested lists/dicts of it) and will silently find zero rows against real
 rocprofv3 JSON. Treat JSON support as unverified; CSV is the confirmed,
 recommended format, and ``plan`` only asks for CSV.
-"""  # noqa: EXE001  # tracked: #288
+"""
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ def normalize_arch(name: str) -> str:
     if key.startswith("gfx"):
         return key
     known = sorted(set(ARCH_ALIASES.values()))
-    raise ValueError(f"unknown architecture {name!r}; known families: {', '.join(known)}")  # noqa: TRY003  # tracked: #288
+    raise ValueError(f"unknown architecture {name!r}; known families: {', '.join(known)}")  # noqa: TRY003  # LW-910062; this is a boundary error that deliberately embeds the offending value for the operator to act on
 
 
 def _normalize_arch_or_exit(name: str) -> str:
@@ -177,8 +177,9 @@ class CounterSet:
     verified: bool
     note: str = ""
 
-    def __post_init__(self) -> None:  # noqa: D105  # tracked: #288
-        if not 1 <= len(self.counters) <= 4:  # noqa: PLR2004  # tracked: #288
+    def __post_init__(self) -> None:
+        """Reject a counter set outside rocprofv3's 1-4 ``--pmc`` group size."""
+        if not 1 <= len(self.counters) <= 4:  # noqa: PLR2004  # LW-910063; tracked migration debt from the pre-manifest ratchet scheme
             msg = f"counter set must have 1-4 counters, got {len(self.counters)}"
             raise ValueError(msg)
 
@@ -328,8 +329,8 @@ COUNTER_SETS: dict[str, dict[str, CounterSet]] = {
 # ---------------------------------------------------------------------------
 
 # Real MI210 (gfx90a) validation packed mfma+hbm and mfma+l2 into a single
-# rocprofv3 --pmc pass successfully (see docs/contributing/amd-profiler-worklog.md);
-# l2+hbm was not validated together. The counters in each of those sets sit
+# rocprofv3 --pmc pass successfully; l2+hbm was not validated together.
+# The counters in each of those sets sit
 # on different hardware counter blocks (SQ/GRBM for mfma; TCC/TCP for l2 and
 # hbm), which is what actually lets them share a pass: rocprofv3 allocates
 # counter slots per block, not one shared global budget, and this toolkit's
@@ -585,7 +586,7 @@ def _load_counter_rows(files: list[Path]) -> list[CounterRow]:
             else:
                 rows.extend(_iter_csv_rows(path))
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"warning: could not parse {path}: {exc}", file=sys.stderr)  # noqa: T201  # tracked: #288
+            print(f"warning: could not parse {path}: {exc}", file=sys.stderr)  # noqa: T201  # LW-910064; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
     return rows
 
 
@@ -613,7 +614,7 @@ def _discover(dirs: list[str], substring: str, suffixes: tuple[str, ...]) -> lis
     for raw in dirs:
         base = Path(raw)
         if not base.exists():
-            print(f"warning: directory not found: {raw}", file=sys.stderr)  # noqa: T201  # tracked: #288
+            print(f"warning: directory not found: {raw}", file=sys.stderr)  # noqa: T201  # LW-910065; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
             continue
         for path in sorted(base.rglob("*")):
             if not (path.is_file() and substring in path.name and path.suffix in suffixes):
@@ -627,9 +628,10 @@ def _discover(dirs: list[str], substring: str, suffixes: tuple[str, ...]) -> lis
 
 
 def _load_kernel_trace_durations(dirs: list[str]) -> dict[str, float]:
-    """Sum kernel wall-clock duration (ns) per Kernel_Name from any
-    ``*kernel_trace*.csv`` files under the given directories.
-    """  # noqa: D205  # tracked: #288
+    """Sum kernel wall-clock duration (ns) per Kernel_Name.
+
+    Reads any ``*kernel_trace*.csv`` files under the given directories.
+    """
     totals: dict[str, float] = defaultdict(float)
     for path in _discover(dirs, "kernel_trace", (".csv",)):
         with path.open(newline="", encoding="utf-8") as f:
@@ -673,13 +675,13 @@ def _load_agent_info(dirs: list[str]) -> AgentInfo | None:
     the given directories -- every fixture and real capture this toolkit
     targets is a single-GPU job. Returns ``None`` when no such file exists;
     the caller then falls back to the static per-arch ``PeakSpec`` table.
-    """  # tracked: #288
+    """
     for path in _discover(dirs, "agent_info", (".csv",)):
         try:
             with path.open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
         except (OSError, csv.Error) as exc:
-            print(f"warning: could not parse {path}: {exc}", file=sys.stderr)  # noqa: T201  # tracked: #288
+            print(f"warning: could not parse {path}: {exc}", file=sys.stderr)  # noqa: T201  # LW-910066; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
             continue
         for row in rows:
             if row.get("Agent_Type") != "GPU":
@@ -701,15 +703,15 @@ def _simd_num_for(spec: PeakSpec | None, agent_info: AgentInfo | None) -> int | 
 
 
 def _duration_from_counter_rows(rows: list[CounterRow]) -> dict[str, float]:
-    """Sum per-dispatch wall-clock duration (ns) straight from the PMC rows'
-    own ``Start_Timestamp``/``End_Timestamp`` columns.
+    """Sum per-dispatch wall-clock duration (ns) from the PMC rows.
 
-    Real rocprofv3 6.4.1 ``*_counter_collection.csv`` carries these on every
+    Uses the rows' own ``Start_Timestamp``/``End_Timestamp`` columns. Real
+    rocprofv3 6.4.1 ``*_counter_collection.csv`` carries these on every
     row; a dedicated ``--kernel-trace`` capture is not required to get
     duration data. Every counter row for the same dispatch repeats the same
     (start, end) pair, so dedup by (kernel_name, dispatch_id) before summing
     to avoid multiplying duration by however many counters were collected.
-    """  # noqa: D205  # tracked: #288
+    """
     seen: dict[tuple[str, str], tuple[float, float]] = {}
     for row in rows:
         if row.start_ns is None or row.end_ns is None or not row.dispatch_id:
@@ -926,7 +928,7 @@ def _clamp_unit_fraction(value: float, source: str) -> float:
     """
     if 0.0 <= value <= 1.0:
         return value
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910067; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         f"warning: MFMA busy fraction from {source} was {value:.4f}, outside [0, 1] -- clamping; "
         "this usually means inconsistent/stitched counters or a --flops hint that doesn't match "
         "the kernel that ran",
@@ -1111,12 +1113,12 @@ def cmd_list_sets(ns: argparse.Namespace) -> None:
             known = ", ".join(sorted(PEAK_SPECS))
             sys.exit(f"no counter-set catalogue for {family!r}; known families: {known}")
         spec = PEAK_SPECS[family]
-        print(f"\n{family} ({spec.label})")  # noqa: T201  # tracked: #288
+        print(f"\n{family} ({spec.label})")  # noqa: T201  # LW-910068; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         for set_name, cset in sorted(COUNTER_SETS[family].items()):
             flag = "verified" if cset.verified else "UNVERIFIED"
-            print(f"  {set_name:<12} [{flag}] {', '.join(cset.counters)}")  # noqa: T201  # tracked: #288
+            print(f"  {set_name:<12} [{flag}] {', '.join(cset.counters)}")  # noqa: T201  # LW-910069; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
             if cset.note:
-                print(f"               {cset.note}")  # noqa: T201  # tracked: #288
+                print(f"               {cset.note}")  # noqa: T201  # LW-910070; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
 
 
 def _plan_command(*, out_dir: str, cset: CounterSet, ns: argparse.Namespace) -> str:
@@ -1138,10 +1140,10 @@ def _plan_command(*, out_dir: str, cset: CounterSet, ns: argparse.Namespace) -> 
 def _plan_one_set(*, arch: str, set_name: str, cset: CounterSet, ns: argparse.Namespace) -> None:
     out_dir = f"{ns.out_dir}/{arch}/{set_name}"
     flag = "verified" if cset.verified else "UNVERIFIED -- confirm with `rocprofv3 --list-avail`"
-    print(f"\n# {set_name} [{flag}]")  # noqa: T201  # tracked: #288
+    print(f"\n# {set_name} [{flag}]")  # noqa: T201  # LW-910071; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
     if cset.note:
-        print(f"# {cset.note}")  # noqa: T201  # tracked: #288
-    print(_plan_command(out_dir=out_dir, cset=cset, ns=ns))  # noqa: T201  # tracked: #288
+        print(f"# {cset.note}")  # noqa: T201  # LW-910072; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
+    print(_plan_command(out_dir=out_dir, cset=cset, ns=ns))  # noqa: T201  # LW-910073; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
 
 
 def cmd_plan(ns: argparse.Namespace) -> None:
@@ -1150,7 +1152,7 @@ def cmd_plan(ns: argparse.Namespace) -> None:
     Each set gets its own process invocation and its own output directory --
     never combine sets into one --pmc call, and never re-use an output
     directory across passes.
-    """  # tracked: #288
+    """
     arch = _normalize_arch_or_exit(ns.arch)
     if arch not in COUNTER_SETS:
         known = ", ".join(sorted(COUNTER_SETS))
@@ -1164,10 +1166,10 @@ def cmd_plan(ns: argparse.Namespace) -> None:
 
     spec = PEAK_SPECS[arch]
     header = f"# {len(requested)} pass(es) for {arch} ({spec.label}); one process per pass, own output dir each."
-    print(header)  # noqa: T201  # tracked: #288
+    print(header)  # noqa: T201  # LW-910074; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
     for set_name in requested:
         _plan_one_set(arch=arch, set_name=set_name, cset=catalogue[set_name], ns=ns)
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910075; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         "\n# Note: rocprofv3 nests output under <out_dir>/pmc_1/<hostname>/<pid>_*, not "
         "directly under <out_dir> (confirmed on real MI210 hardware) -- report/triage "
         "discover files recursively so this doesn't matter.\n"
@@ -1177,12 +1179,12 @@ def cmd_plan(ns: argparse.Namespace) -> None:
 
 
 def _print_kernel_resources(agg: KernelAgg, occ: Occupancy) -> None:
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910076; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         f"  grid={agg.grid_size} wg={agg.workgroup_size} "
         f"vgpr={agg.vgpr_count} sgpr={agg.sgpr_count} "
         f"lds={agg.lds_block_size}B scratch={agg.scratch_size}B"
     )
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910077; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         f"  occupancy: {occ.waves_per_simd}/{MAX_WAVES_PER_SIMD} waves/SIMD "
         f"({occ.waves_per_cu} waves/CU), bound by {occ.bound_by} "
         f"(vgpr<={occ.vgpr_limit} lds<={occ.lds_limit} sgpr<={occ.sgpr_limit})"
@@ -1235,13 +1237,13 @@ def _bw_exceeds_spec_note(bw_gb_s: float | None, spec: PeakSpec | None) -> str |
 
 
 def _print_derived(metrics: DerivedMetrics, spec: PeakSpec | None = None) -> None:
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910078; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         f"  L2 hit rate: {_fmt(metrics.l2_hit_rate_pct, '%', 1)}   "
         f"GPU busy: {_fmt(metrics.gpu_busy_pct, '%', 1)}   "
         f"MFMA issue rate: {_fmt(metrics.mfma_issue_rate, ' insts/cycle', 4)}"
     )
     bw_note = _bw_exceeds_spec_note(metrics.achieved_bw_gb_s, spec)
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910079; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         f"  HBM bytes: {_fmt(metrics.hbm_bytes, ' B', 0)}   "
         f"achieved BW: {_fmt(metrics.achieved_bw_gb_s, ' GB/s', 1)}"
         + (
@@ -1251,7 +1253,7 @@ def _print_derived(metrics: DerivedMetrics, spec: PeakSpec | None = None) -> Non
         )
         + (f"  [{bw_note}]" if bw_note else "")
     )
-    print(f"  LDS bank-conflict rate: {_fmt(metrics.lds_bank_conflict_rate_pct, '%', 1)}")  # noqa: T201  # tracked: #288
+    print(f"  LDS bank-conflict rate: {_fmt(metrics.lds_bank_conflict_rate_pct, '%', 1)}")  # noqa: T201  # LW-910080; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
 
 
 def _report_arch_for(ns: argparse.Namespace) -> str | None:
@@ -1263,11 +1265,11 @@ def cmd_report(ns: argparse.Namespace) -> None:
     """Merge PMC passes per kernel and print resource usage + derived metrics."""
     counter_files = _discover(ns.dirs, "counter_collection", (".csv", ".json"))
     if not counter_files:
-        print("(no *counter_collection*.csv/.json files found under the given directories)")  # noqa: T201  # tracked: #288
+        print("(no *counter_collection*.csv/.json files found under the given directories)")  # noqa: T201  # LW-910081; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         return
     rows = _load_counter_rows(counter_files)
     if not rows:
-        print("(counter files found but no usable rows parsed)")  # noqa: T201  # tracked: #288
+        print("(counter files found but no usable rows parsed)")  # noqa: T201  # LW-910082; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         return
     # Prefer a dedicated kernel_trace capture (PMC-overhead-free) over the
     # PMC rows' own timestamps when both are present.
@@ -1278,9 +1280,9 @@ def cmd_report(ns: argparse.Namespace) -> None:
     arch = _report_arch_for(ns)
     spec = PEAK_SPECS.get(arch) if arch else None
 
-    print(f"Merged {len(counter_files)} counter file(s), {len(kernels)} kernel(s) matched.")  # noqa: T201  # tracked: #288
+    print(f"Merged {len(counter_files)} counter file(s), {len(kernels)} kernel(s) matched.")  # noqa: T201  # LW-910083; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
     if durations:
-        print(f"Duration data available for {len(durations)} kernel name(s).")  # noqa: T201  # tracked: #288
+        print(f"Duration data available for {len(durations)} kernel name(s).")  # noqa: T201  # LW-910084; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
 
     for agg in kernels[: ns.top]:
         duration = durations.get(agg.name)
@@ -1292,13 +1294,13 @@ def cmd_report(ns: argparse.Namespace) -> None:
             arch=arch or "gfx942",
         )
         metrics = derive_metrics(agg, duration, spec=spec)
-        print(f"\n{_short_kernel_name(agg.name)}  ({agg.dispatch_count} dispatch(es))")  # noqa: T201  # tracked: #288
+        print(f"\n{_short_kernel_name(agg.name)}  ({agg.dispatch_count} dispatch(es))")  # noqa: T201  # LW-910085; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         _print_kernel_resources(agg, occ)
         _print_derived(metrics, spec)
 
     remainder = kernels[ns.top :]
     if remainder:
-        print(f"\n( +{len(remainder)} more kernel(s) not shown; raise --top )")  # noqa: T201  # tracked: #288
+        print(f"\n( +{len(remainder)} more kernel(s) not shown; raise --top )")  # noqa: T201  # LW-910086; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
 
 
 OCCUPANCY_LOW_WAVES_PER_CU = 8  # out of a max of 32 (8 waves/SIMD * 4 SIMD/CU)
@@ -1368,7 +1370,7 @@ def _classify_mfma_compute_bound(metrics: DerivedMetrics) -> Verdict | None:
 
 def _classify(
     *, agg: KernelAgg, occ: Occupancy, metrics: DerivedMetrics, spec: PeakSpec
-) -> Verdict:  # tracked: #288
+) -> Verdict:
     if occ.waves_per_cu < OCCUPANCY_LOW_WAVES_PER_CU:
         return Verdict(
             "OCCUPANCY-LIMITED",
@@ -1419,19 +1421,19 @@ def _classify(
 
 
 def _print_peak_table(spec: PeakSpec, arch: str) -> None:
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910087; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         f"Peak constants for {arch} ({spec.label}) -- SPEC PEAKS, not an achievable ceiling:"
     )
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910088; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         f"  {spec.compute_units} CUs, {spec.dense_bf16_fp16_tflops:.1f} TFLOP/s dense bf16/fp16, "
         f"{spec.hbm_tb_s:.1f} TB/s HBM, {spec.hbm_gb} GB   (ridge: {spec.ridge_flop_per_byte:.0f} FLOP/byte)"
     )
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910089; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         "  Practical ceiling for tuned GEMM is ~45-55% of the compute peak, and clean streaming "
         "reads land ~50-60% of the HBM peak -- do not treat the spec numbers as achievable."
     )
     if arch == "gfx942":
-        print(f"  {PEAK_ARCH_NOTE}")  # noqa: T201  # tracked: #288
+        print(f"  {PEAK_ARCH_NOTE}")  # noqa: T201  # LW-910090; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
 
 
 def _peak_spec_for(arch: str) -> tuple[str, PeakSpec]:
@@ -1447,7 +1449,7 @@ def cmd_triage(ns: argparse.Namespace) -> None:
     arch, spec = _peak_spec_for(ns.arch)
     counter_files = _discover(ns.dirs, "counter_collection", (".csv", ".json"))
     if not counter_files:
-        print("(no *counter_collection*.csv/.json files found under the given directories)")  # noqa: T201  # tracked: #288
+        print("(no *counter_collection*.csv/.json files found under the given directories)")  # noqa: T201  # LW-910091; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         return
     rows = _load_counter_rows(counter_files)
     durations = _duration_from_counter_rows(rows)
@@ -1470,10 +1472,10 @@ def cmd_triage(ns: argparse.Namespace) -> None:
             agg, durations.get(agg.name), simd_num=simd_num, spec=spec, flops=flops
         )
         verdict = _classify(agg=agg, occ=occ, metrics=metrics, spec=spec)
-        print(f"\n{_short_kernel_name(agg.name)}")  # noqa: T201  # tracked: #288
-        print(f"  verdict: {verdict.label}")  # noqa: T201  # tracked: #288
-        print(f"  evidence: {verdict.evidence}")  # noqa: T201  # tracked: #288
-        print(f"  next lever: {verdict.lever}")  # noqa: T201  # tracked: #288
+        print(f"\n{_short_kernel_name(agg.name)}")  # noqa: T201  # LW-910092; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
+        print(f"  verdict: {verdict.label}")  # noqa: T201  # LW-910093; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
+        print(f"  evidence: {verdict.evidence}")  # noqa: T201  # LW-910094; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
+        print(f"  next lever: {verdict.lever}")  # noqa: T201  # LW-910095; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
 
 
 def _add_dirs_arg(parser: argparse.ArgumentParser) -> None:
@@ -1482,7 +1484,7 @@ def _add_dirs_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--top", type=int, default=15)
 
 
-def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
+def main(argv: list[str] | None = None) -> None:  # noqa: D103  # LW-910096; this is a small standalone-script helper whose name and body are self-explanatory
     parser = argparse.ArgumentParser(
         prog="counters",
         description="rocprofv3 PMC counter-set catalogue, report aggregation, and bottleneck triage.",

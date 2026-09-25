@@ -54,10 +54,7 @@ def _config() -> ProfileGuidedInput:
 
 
 def _framed(payload: str) -> str:
-    return (
-        f"diagnostic\n{runner._ATTRIBUTION_MARKER}\n{payload}\n"  # noqa: SLF001
-        f"{runner._ATTRIBUTION_END_MARKER}\n"  # noqa: SLF001
-    )
+    return f"diagnostic\n__VIBESYS_ATTRIBUTION_BEGIN__\n{payload}\n__VIBESYS_ATTRIBUTION_END__\n"
 
 
 def test_run_attribution_uses_manifest_command_timeout_and_fixed_output_flag(

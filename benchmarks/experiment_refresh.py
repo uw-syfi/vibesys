@@ -1,15 +1,15 @@
 """Measure revisioned experiment refresh projection and response size."""
 
-# ruff: noqa: INP001, S101, S106
-
 from __future__ import annotations
 
 import os
 import statistics
+import sys
 import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import TextIO
 
 from server.api.experiments import build_experiment_log
 from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEntry
@@ -27,8 +27,54 @@ from vibesys.schemas import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
 from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
 
+
+def _print(
+    *values: object,
+    sep: str = " ",
+    end: str = "\n",
+    file: TextIO | None = None,
+    flush: bool = False,
+) -> None:
+    """Print user-facing benchmark output."""
+    if file is None:
+        sys.stdout.write(sep.join(map(str, values)) + end)
+        if flush:
+            sys.stdout.flush()
+    else:
+        print(*values, sep=sep, end=end, file=file, flush=flush)
+
+
 SIZES = (20, 100, 500)
 SAMPLES = 30
+
+
+class ProjectionInvariantError(AssertionError):
+    """Report an inconsistency in incremental experiment projection."""
+
+    @classmethod
+    def initial_update_missing(cls) -> ProjectionInvariantError:
+        """Return the initial update invariant error."""
+        return cls("initial experiment query omitted its update")
+
+    @classmethod
+    def incremental_update_missing(cls) -> ProjectionInvariantError:
+        """Return the incremental update invariant error."""
+        return cls("incremental experiment query omitted its update")
+
+    @classmethod
+    def changed_entry_count(cls) -> ProjectionInvariantError:
+        """Return the changed-entry count invariant error."""
+        return cls("incremental query did not return exactly one changed entry")
+
+    @classmethod
+    def projection_mismatch(cls) -> ProjectionInvariantError:
+        """Return the projection mismatch invariant error."""
+        return cls("incremental projection differs from full projection")
+
+    @classmethod
+    def round_number_mismatch(cls) -> ProjectionInvariantError:
+        """Return the round number invariant error."""
+        return cls("incremental projection has an unexpected round number")
 
 
 def _build_api(project: Project, run_id: str) -> tuple[RunApi, RunIntegrationAdapter, EventJournal]:
@@ -46,13 +92,14 @@ def _build_api(project: Project, run_id: str) -> tuple[RunApi, RunIntegrationAda
 def _hypothesis(index: int) -> Hypothesis:
     identifier = f"H-{index:04d}"
     first_round = (index - 1) * 3 + 1
+    criteria = "The benchmark improves."
     return Hypothesis(
         hypothesis_id=identifier,
         plan=OrchestratorPlan(
             hypothesis_id=identifier,
             hypothesis=f"Claim {index}",
             task=f"Measure hypothesis {index}",
-            pass_criteria="The benchmark improves.",
+            pass_criteria=criteria,
             reasoning="Synthetic benchmark entry.",
         ),
         started_round=first_round,
@@ -122,7 +169,8 @@ def _measure(count: int) -> tuple[float, float, float, int, int, int]:
         full_bytes = len(full.model_dump_json().encode())
         projected_entries = {entry.hypothesis_id: entry for entry in full.experiments}
         update = full.experiment_update
-        assert update is not None
+        if update is None:
+            raise ProjectionInvariantError.initial_update_missing()
         cursor = ExperimentCursor(
             run_id=run_id,
             projection_id=update.projection_id,
@@ -168,12 +216,16 @@ def _measure(count: int) -> tuple[float, float, float, int, int, int]:
             delta = api.execute(ExperimentQuery(after=cursor))
             changed_times.append((time.perf_counter_ns() - started) / 1_000_000)
             delta_bytes = len(delta.model_dump_json().encode())
-            assert delta.experiment_update is not None
-            assert len(delta.experiments) == 1
+            if delta.experiment_update is None:
+                raise ProjectionInvariantError.incremental_update_missing()
+            if len(delta.experiments) != 1:
+                raise ProjectionInvariantError.changed_entry_count()
             projected_entries[changed_id] = delta.experiments[0]
             fresh = build_experiment_log(state)
-            assert _ordered(projected_entries) == fresh
-            assert delta.experiments[0].rounds[-1].round == count * 3 + sample + 1
+            if _ordered(projected_entries) != fresh:
+                raise ProjectionInvariantError.projection_mismatch()
+            if delta.experiments[0].rounds[-1].round != count * 3 + sample + 1:
+                raise ProjectionInvariantError.round_number_mismatch()
             cursor = cursor.model_copy(
                 update={"revision": delta.experiment_update.through_revision}
             )
@@ -194,16 +246,16 @@ def _ordered(entries: dict[str, HypothesisEntry]) -> list[HypothesisEntry]:
 
 def main() -> None:
     """Print a Markdown table suitable for the pull request."""
-    print(  # noqa: T201
+    _print(
         "| hypotheses | full projection ms | unchanged refresh ms | "
         "one-change refresh ms | full bytes | unchanged bytes | delta bytes |"
     )
-    print("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |")  # noqa: T201
+    _print("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for count in SIZES:
         full_ms, unchanged_ms, changed_ms, full_bytes, unchanged_bytes, delta_bytes = _measure(
             count
         )
-        print(  # noqa: T201
+        _print(
             f"| {count} | {full_ms:.3f} | {unchanged_ms:.3f} | {changed_ms:.3f} | "
             f"{full_bytes} | {unchanged_bytes} | {delta_bytes} |"
         )

@@ -55,7 +55,7 @@ PTY_OUTPUT_LIMIT = 64 * 1024
 
 def resolved_runtime_root(path: Path | None = None) -> Path:
     """Resolve the clean-room root, including macOS's ``/tmp`` symlink."""
-    configured = path or Path(os.environ.get("VIBESYS_RELEASE_RUNTIME_ROOT", "/tmp"))  # noqa: S108
+    configured = path or Path(os.environ.get("VIBESYS_RELEASE_RUNTIME_ROOT", tempfile.gettempdir()))
     return configured.resolve()
 
 
@@ -483,6 +483,7 @@ def _mutable_install_paths(prefix: Path) -> set[Path]:
 def _run_in_pty(command: list[str], *, env: dict[str, str], timeout: int) -> None:
     master_fd, slave_fd = pty.openpty()
     try:
+        # lint-waiver: LW-008033 [S603]; The release smoke passes a controlled argv vector to a PTY child without a shell.
         process = subprocess.Popen(  # noqa: S603
             command,
             env=env,
@@ -577,6 +578,7 @@ def _run(
     timeout: int,
 ) -> None:
     try:
+        # lint-waiver: LW-008034 [S603]; Release-verification commands are assembled internally as argv vectors and run without a shell.
         subprocess.run(  # noqa: S603
             command,
             cwd=cwd,
@@ -590,6 +592,7 @@ def _run(
 
 def _run_capture(command: list[str], *, timeout: int) -> str:
     try:
+        # lint-waiver: LW-008035 [S603]; Release-verification commands are assembled internally as argv vectors and run without a shell.
         result = subprocess.run(  # noqa: S603
             command,
             check=True,

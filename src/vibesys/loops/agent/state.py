@@ -119,7 +119,8 @@ class AgentRunStateStore:
         """Remove legacy portable documents before an exact namespace commit."""
         unique_rounds = sorted(set(round_numbers))
         if any(number <= 0 for number in unique_rounds):
-            raise ValueError("legacy round numbers must be positive")  # noqa: TRY003
+            message = "legacy round numbers must be positive"
+            raise ValueError(message)
         self._namespace.apply(self._namespace.transition(self._LEGACY_LEDGER_FILE, None))
         for number in unique_rounds:
             self._namespace.apply(self._namespace.transition(f"rounds/{number:04d}.json", None))
@@ -242,7 +243,9 @@ def _migrate_legacy_state(
             else replace(round_record, hypothesis_id=identifier)
         )
         hypothesis = state.by_id(identifier)
-        assert hypothesis is not None  # noqa: S101  # created above
+        if hypothesis is None:
+            message = f"created hypothesis {identifier!r} is missing from the run state"
+            raise RuntimeError(message)
         projected = project_round_evidence(
             hypothesis,
             normalized_record,

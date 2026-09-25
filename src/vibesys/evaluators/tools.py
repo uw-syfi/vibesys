@@ -257,6 +257,81 @@ except Exception as exc:
 class EvaluatorToolError(RuntimeError):
     """Raised when an evaluator tool cannot be prepared safely."""
 
+    @classmethod
+    def cache_ownership_failed(cls, detail: str) -> EvaluatorToolError:
+        """Describe a tool-cache ownership change that failed in Docker."""
+        return cls(
+            "Docker evaluator tool builder could not return cache ownership "
+            f"to the host user: {detail}"
+        )
+
+    @classmethod
+    def builder_incomplete(cls) -> EvaluatorToolError:
+        """Describe a builder that failed to publish every declared tool."""
+        return cls("Docker evaluator tool builder did not publish every declared tool")
+
+    @classmethod
+    def docker_image_unconfigured(cls) -> EvaluatorToolError:
+        """Describe Docker execution without a configured backend image."""
+        return cls("Docker execution requires a configured backend image")
+
+    @classmethod
+    def docker_missing(cls) -> EvaluatorToolError:
+        """Describe Docker being absent while resolving an evaluator image."""
+        return cls("Docker was not found while resolving the evaluator image")
+
+    @classmethod
+    def docker_pull_timed_out(cls, image: str) -> EvaluatorToolError:
+        """Describe an evaluator image pull that exceeded its timeout."""
+        return cls(f"Docker image pull timed out: {image}")
+
+    @classmethod
+    def docker_image_unresolvable(cls, image: str, detail: str) -> EvaluatorToolError:
+        """Describe a failed Docker image pull and its diagnostic output."""
+        return cls(f"Could not resolve Docker image {image!r}: {detail}")
+
+    @classmethod
+    def docker_image_id_missing(cls, image: str) -> EvaluatorToolError:
+        """Describe an image without an immutable ID after a successful pull."""
+        return cls(f"Docker image {image!r} has no resolvable immutable image ID after pull")
+
+    @classmethod
+    def sandbox_installation_failed(cls, exit_code: int | None, details: str) -> EvaluatorToolError:
+        """Describe a nonzero exit from the target-side tool installer."""
+        return cls(f"evaluator tool sandbox installation failed (exit {exit_code}): {details}")
+
+    @classmethod
+    def receipt_verification_failed(cls, target: Path) -> EvaluatorToolError:
+        """Describe a tool cache entry whose receipt does not verify."""
+        return cls(f"evaluator tool installation failed receipt verification: {target}")
+
+    @classmethod
+    def cargo_missing(cls, name: str) -> EvaluatorToolError:
+        """Describe Cargo being absent while installing a named tool."""
+        return cls(f"cannot install evaluator tool {name!r}: cargo was not found")
+
+    @classmethod
+    def cargo_install_timed_out(cls, name: str) -> EvaluatorToolError:
+        """Describe Cargo installation exceeding its timeout."""
+        return cls(f"cannot install evaluator tool {name!r}: cargo install timed out")
+
+    @classmethod
+    def cargo_install_failed(cls, name: str, details: str) -> EvaluatorToolError:
+        """Describe Cargo failing to install a named tool."""
+        return cls(f"cannot install evaluator tool {name!r}: {details}")
+
+    @classmethod
+    def declared_binaries_missing(cls, name: str, suffix: str) -> EvaluatorToolError:
+        """Describe an install that did not produce all declared executables."""
+        return cls(
+            f"cargo did not install every declared binary for evaluator tool {name!r}{suffix}"
+        )
+
+    @classmethod
+    def install_publish_failed(cls, target: Path) -> EvaluatorToolError:
+        """Describe a staged tool installation that could not be published."""
+        return cls(f"cannot publish evaluator tool installation: {target}")
+
 
 class EvaluatorToolLifecycleHooks(SandboxLifecycleHooks):
     """Install evaluator-declared tools while a sandbox becomes ready."""
@@ -282,9 +357,7 @@ class EvaluatorToolLifecycleHooks(SandboxLifecycleHooks):
         )
         if result.exit_code != 0:
             detail = _bounded_install_detail(result.output or "target-side installer failed")
-            raise EvaluatorToolError(  # noqa: TRY003
-                f"evaluator tool sandbox installation failed (exit {result.exit_code}): {detail}"
-            )
+            raise EvaluatorToolError.sandbox_installation_failed(result.exit_code, detail)
 
 
 class _EvaluatorToolReceipt(BaseModel):
@@ -315,7 +388,8 @@ def evaluator_tools_install_command(
         None,
     )
     if invalid_name is not None:
-        raise ValueError(f"invalid evaluator tool name: {invalid_name!r}")  # noqa: TRY003
+        message = f"invalid evaluator tool name: {invalid_name!r}"
+        raise ValueError(message)
     document = {
         "schema_version": 1,
         "tools": {name: spec.model_dump(mode="json") for name, spec in sorted(tools.items())},
@@ -356,9 +430,7 @@ def prepare_evaluator_tools(
         target = tool_install_root(install_parent, name, spec)
         if not _verified_install(target, spec):
             if target.exists():
-                raise EvaluatorToolError(  # noqa: TRY003
-                    f"evaluator tool installation failed receipt verification: {target}"
-                )
+                raise EvaluatorToolError.receipt_verification_failed(target)
             _install_tool(name, spec, target, runner)
         replacements.update(tool_path_replacements({name: spec}, install_parent))
     return replacements
@@ -401,27 +473,19 @@ def _install_tool(
         try:
             result = runner(cargo_install_argv(spec, staging))
         except FileNotFoundError as exc:
-            raise EvaluatorToolError(  # noqa: TRY003
-                f"cannot install evaluator tool {name!r}: cargo was not found"
-            ) from exc
+            raise EvaluatorToolError.cargo_missing(name) from exc
         except subprocess.TimeoutExpired as exc:
-            raise EvaluatorToolError(  # noqa: TRY003
-                f"cannot install evaluator tool {name!r}: cargo install timed out"
-            ) from exc
+            raise EvaluatorToolError.cargo_install_timed_out(name) from exc
         if result.returncode != 0:
             detail = _bounded_install_detail(
                 result.stderr or result.stdout or "cargo install failed"
             )
-            raise EvaluatorToolError(  # noqa: TRY003
-                f"cannot install evaluator tool {name!r}: {detail}"
-            )
+            raise EvaluatorToolError.cargo_install_failed(name, detail)
         binaries = _installed_binary_hashes(staging, spec)
         if binaries is None:
             detail = _bounded_install_detail(result.stderr or result.stdout)
             suffix = f": {detail}" if detail else ""
-            raise EvaluatorToolError(
-                f"cargo did not install every declared binary for evaluator tool {name!r}" + suffix
-            )
+            raise EvaluatorToolError.declared_binaries_missing(name, suffix)
         _write_receipt(
             staging,
             _EvaluatorToolReceipt(schema_version=1, spec=spec, binaries=binaries),
@@ -430,9 +494,7 @@ def _install_tool(
             staging.replace(target)
         except OSError as exc:
             if not target.exists() or not _verified_install(target, spec):
-                raise EvaluatorToolError(  # noqa: TRY003
-                    f"cannot publish evaluator tool installation: {target}"
-                ) from exc
+                raise EvaluatorToolError.install_publish_failed(target) from exc
     finally:
         if staging.exists():
             shutil.rmtree(staging)
@@ -518,7 +580,7 @@ def _run_cargo(arguments: Sequence[str]) -> subprocess.CompletedProcess[str]:
         cargo_environment["CARGO_HOME"] = cargo_home
         if "RUSTUP_HOME" in os.environ:
             cargo_environment["RUSTUP_HOME"] = os.environ["RUSTUP_HOME"]
-        return subprocess.run(  # noqa: S603
+        return subprocess.run(  # noqa: S603  # lint-waiver: LW-010234 [S603]; the trusted evaluator command is passed as argv without a host shell.
             list(arguments),
             capture_output=True,
             check=False,

@@ -37,15 +37,11 @@ class RunState:
     def __post_init__(self) -> None:
         """Require state persistence and Git history to identify the same run."""
         if self.project.root != self.git.history_root:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "run state project root does not match Git history root: "
-                f"{self.project.root} != {self.git.history_root}"
-            )
+            message = f"run state project root does not match Git history root: {self.project.root} != {self.git.history_root}"
+            raise ValueError(message)
         if self.run_id != self.git.run_id:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"run state ID does not match Git history run ID: {self.run_id!r} != "
-                f"{self.git.run_id!r}"
-            )
+            _exception_message = f"run state ID does not match Git history run ID: {self.run_id!r} != {self.git.run_id!r}"
+            raise ValueError(_exception_message)
 
     def portable(self, namespace: RunStateNamespace) -> StateNamespace:
         """Return the portable state handle for ``namespace``."""

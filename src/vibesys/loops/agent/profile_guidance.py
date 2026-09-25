@@ -40,7 +40,7 @@ def run_attribution(
     round_number: int,
 ) -> tuple[ProfileBottleneck, ...]:
     """Run the configured profiler and validate profile result protocol v1."""
-    output_path = f"/tmp/vibesys-attribution-{round_number}-{uuid.uuid4().hex[:12]}.json"  # noqa: S108
+    output_path = f"/tmp/vibesys-attribution-{round_number}-{uuid.uuid4().hex[:12]}.json"  # noqa: S108  # lint-waiver: LW-010206 [S108]; profiler and benchmark commands exchange output through the evaluator's shared /tmp namespace.
     profiler_command = shlex.join((*config.command, "--vs-output", output_path))
     command = (
         f"rm -f -- {shlex.quote(output_path)}"
@@ -53,34 +53,29 @@ def run_attribution(
     try:
         result = ctx.judge_backend.execute(command, timeout=config.timeout_seconds)
     except Exception as exc:
-        raise ProfileGuidanceError(  # noqa: TRY003  # tracked: #288
-            f"profile-guided attribution command could not be executed: {exc}"
-        ) from exc
+        _exception_message_3 = f"profile-guided attribution command could not be executed: {exc}"
+        raise ProfileGuidanceError(_exception_message_3) from exc
     finally:
         with contextlib.suppress(Exception):
             ctx.judge_backend.execute(f"rm -f -- {shlex.quote(output_path)}")
     if result.exit_code != 0:
-        raise ProfileGuidanceError(  # noqa: TRY003  # tracked: #288
-            "profile-guided attribution command failed "
-            f"with exit code {result.exit_code}; check its output above"
-        )
+        message = f"profile-guided attribution command failed with exit code {result.exit_code}; check its output above"
+        raise ProfileGuidanceError(message)
     payload = _framed_payload(result.output)
     if payload is None:
-        raise ProfileGuidanceError(  # noqa: TRY003  # tracked: #288
-            "profile-guided attribution produced no result artifact; "
-            "the command must write protocol v1 JSON to the path passed by --vs-output"
-        )
+        _exception_message = "profile-guided attribution produced no result artifact; the command must write protocol v1 JSON to the path passed by --vs-output"
+        raise ProfileGuidanceError(_exception_message)
     try:
         result_v1 = _ProfileResultV1.model_validate_json(payload, strict=True)
     except ValueError as exc:
-        raise ProfileGuidanceError(  # noqa: TRY003  # tracked: #288
+        _exception_message_4 = (
             f"profile-guided attribution returned invalid result protocol v1 JSON: {exc}"
-        ) from exc
+        )
+        raise ProfileGuidanceError(_exception_message_4) from exc
     names = [component.name for component in result_v1.components]
     if len(names) != len(set(names)):
-        raise ProfileGuidanceError(  # noqa: TRY003  # tracked: #288
-            "profile-guided attribution component names must be unique"
-        )
+        _exception_message_2 = "profile-guided attribution component names must be unique"
+        raise ProfileGuidanceError(_exception_message_2)
     return tuple(sorted(result_v1.components, key=lambda item: (-item.cost, item.name)))
 
 

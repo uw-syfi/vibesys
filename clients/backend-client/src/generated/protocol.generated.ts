@@ -204,6 +204,9 @@ export type ProtocolVersion18 = 1;
 export type Sequence1 = number;
 export type RunId2 = string;
 export type Timestamp17 = string;
+/**
+ * Wire event kinds persisted in the event log.
+ */
 export type EventType =
   | "server_started"
   | "server_ready"
@@ -241,6 +244,9 @@ export type EventType =
   | "run_configured"
   | "framework_warning";
 export type Text2 = string;
+/**
+ * Lifecycle and command states reported in events.
+ */
 export type EventStatus =
   "active" | "answered" | "pending" | "consumed" | "completed" | "failed" | "cancelled" | "interrupted";
 export type RoundLabel2 = string | null;
@@ -564,6 +570,9 @@ export type RequestId18 = string | null;
 export type Code2 = string;
 export type Message1 = string;
 
+/**
+ * Root schema document for the public server protocol.
+ */
 export interface ProtocolDocument {
   request: Request;
   response: Response;
@@ -572,6 +581,9 @@ export interface ProtocolDocument {
   server_message: ServerMessage;
   [k: string]: unknown;
 }
+/**
+ * Request pausing after the active agent call.
+ */
 export interface PauseCommand {
   protocol_version?: ProtocolVersion;
   request_id?: RequestId;
@@ -579,12 +591,18 @@ export interface PauseCommand {
   type?: Type;
   mode?: Mode;
 }
+/**
+ * Request resuming a paused run.
+ */
 export interface ResumeCommand {
   protocol_version?: ProtocolVersion1;
   request_id?: RequestId1;
   timestamp?: Timestamp1;
   type?: Type1;
 }
+/**
+ * Send steering text to the active run.
+ */
 export interface SteerCommand {
   protocol_version?: ProtocolVersion2;
   request_id?: RequestId2;
@@ -592,6 +610,9 @@ export interface SteerCommand {
   type?: Type2;
   text: Text;
 }
+/**
+ * Request stopping after the active agent call.
+ */
 export interface StopCommand {
   protocol_version?: ProtocolVersion3;
   request_id?: RequestId3;
@@ -599,12 +620,18 @@ export interface StopCommand {
   type?: Type3;
   mode?: Mode1;
 }
+/**
+ * Request the current run snapshot.
+ */
 export interface SnapshotQuery {
   protocol_version?: ProtocolVersion4;
   request_id?: RequestId4;
   timestamp?: Timestamp4;
   type?: Type4;
 }
+/**
+ * Send a message to an experiment-chat thread.
+ */
 export interface ChatQuery {
   protocol_version?: ProtocolVersion5;
   request_id?: RequestId5;
@@ -654,12 +681,18 @@ export interface TuiDefaultsQuery {
   timestamp?: Timestamp8;
   type?: Type8;
 }
+/**
+ * Request persisted run history.
+ */
 export interface HistoryQuery {
   protocol_version?: ProtocolVersion9;
   request_id?: RequestId9;
   timestamp?: Timestamp9;
   type?: Type9;
 }
+/**
+ * Request the run's performance history.
+ */
 export interface PerformanceQuery {
   protocol_version?: ProtocolVersion10;
   request_id?: RequestId10;
@@ -715,6 +748,9 @@ export interface DesignPatchQuery {
   head: Head;
   path: Path;
 }
+/**
+ * Request run events in a sequence interval.
+ */
 export interface EventsQuery {
   protocol_version?: ProtocolVersion14;
   request_id?: RequestId14;
@@ -724,6 +760,9 @@ export interface EventsQuery {
   before_sequence?: BeforeSequence;
   timeout_ms?: TimeoutMs;
 }
+/**
+ * Subscribe to run events, optionally replaying a recent tail.
+ */
 export interface SubscribeRequest {
   protocol_version?: ProtocolVersion15;
   request_id?: RequestId15;
@@ -733,6 +772,9 @@ export interface SubscribeRequest {
   tail?: Tail;
   store_id?: StoreId;
 }
+/**
+ * Response envelope for all protocol requests.
+ */
 export interface Response {
   protocol_version?: ProtocolVersion16;
   request_id: RequestId16;
@@ -775,10 +817,16 @@ export interface Diagnostic {
   debug_ref?: DebugRef;
   source?: Source;
 }
+/**
+ * Acknowledgment of a requested run command.
+ */
 export interface CommandAck {
   action: Action;
   status: Status;
 }
+/**
+ * Answer and thread identity returned by experiment chat.
+ */
 export interface ChatResult {
   question: Question;
   answer: Answer;
@@ -828,6 +876,9 @@ export interface InteractiveSetupDefaults {
   visibility: RepositoryVisibility;
   theme: TuiTheme;
 }
+/**
+ * Current server projection of a run's public state.
+ */
 export interface RunSnapshot {
   protocol_version?: ProtocolVersion17;
   run_id: RunId1;
@@ -887,6 +938,9 @@ export interface RunEvent {
   chat_thread_id?: ChatThreadId;
   data?: Data;
 }
+/**
+ * Completed answer and optional thread-turn identity.
+ */
 export interface ChatData {
   kind?: Kind1;
   answer: Answer1;
@@ -910,12 +964,18 @@ export interface ChatThreadCreatedData {
   created_at: CreatedAt;
   [k: string]: unknown;
 }
+/**
+ * Prompts submitted at the start of a model invocation.
+ */
 export interface InvocationStartedData {
   kind?: Kind3;
   system_prompt: SystemPrompt;
   user_prompt: UserPrompt;
   [k: string]: unknown;
 }
+/**
+ * Result or error recorded when a model invocation ends.
+ */
 export interface InvocationFinishedData {
   kind?: Kind4;
   result?: Result;
@@ -952,6 +1012,9 @@ export interface AgentExecutionFinishedData {
 export interface Result1 {
   [k: string]: unknown;
 }
+/**
+ * Captured line of server output and its stream.
+ */
 export interface OutputData {
   kind?: Kind7;
   stream: Stream;
@@ -959,11 +1022,17 @@ export interface OutputData {
   content: Content;
   [k: string]: unknown;
 }
+/**
+ * Transport details emitted once the server is ready.
+ */
 export interface ServerReadyData {
   kind?: Kind8;
   socket_protocol?: SocketProtocol;
   [k: string]: unknown;
 }
+/**
+ * Initial input and loop settings for a run.
+ */
 export interface RunStartedData {
   kind?: Kind9;
   outer_loop: OuterLoop;
@@ -972,6 +1041,9 @@ export interface RunStartedData {
   expected_roles?: ExpectedRoles;
   [k: string]: unknown;
 }
+/**
+ * Reason and optional signal for an interrupted run.
+ */
 export interface RunInterruptedData {
   kind?: Kind10;
   reason: Reason;
@@ -993,12 +1065,18 @@ export interface RunStatusChangedData {
   previous: RunStatus;
   [k: string]: unknown;
 }
+/**
+ * Reason and revision for a changed experiment projection.
+ */
 export interface ExperimentsChangedData {
   kind?: Kind12;
   reason: Reason1;
   revision?: Revision1;
   [k: string]: unknown;
 }
+/**
+ * Diagnostic details for configuration-stage failure.
+ */
 export interface ConfigurationFailedData {
   kind?: Kind13;
   code: Code1;
@@ -1008,12 +1086,18 @@ export interface ConfigurationFailedData {
   exit_code: ExitCode;
   [k: string]: unknown;
 }
+/**
+ * Name and optional attempt number for a loop phase.
+ */
 export interface PhaseData {
   kind?: Kind14;
   phase: Phase;
   attempt?: Attempt2;
   [k: string]: unknown;
 }
+/**
+ * Incremental output produced during agent execution.
+ */
 export interface AgentOutputChunkData {
   kind?: Kind15;
   channel: Channel;
@@ -1036,6 +1120,9 @@ export interface AgentStatusData {
   context_window?: ContextWindow;
   [k: string]: unknown;
 }
+/**
+ * Captured output from a managed subprocess.
+ */
 export interface SubprocessOutputData {
   kind?: Kind16;
   process_id: ProcessId;
@@ -1044,6 +1131,9 @@ export interface SubprocessOutputData {
   content: Content2;
   [k: string]: unknown;
 }
+/**
+ * Verdict and feedback returned by the judge.
+ */
 export interface JudgeResultData {
   kind?: Kind17;
   verdict: Verdict;
@@ -1051,6 +1141,9 @@ export interface JudgeResultData {
   attempt: Attempt3;
   [k: string]: unknown;
 }
+/**
+ * Metric result emitted by a benchmark stage.
+ */
 export interface BenchmarkResultData {
   kind?: Kind18;
   metric: Metric;
@@ -1058,6 +1151,9 @@ export interface BenchmarkResultData {
   unit: Unit;
   [k: string]: unknown;
 }
+/**
+ * Summary of attempt, judge, and performance outcomes for a round.
+ */
 export interface RoundFinishedData {
   kind?: Kind19;
   attempts: Attempts;
@@ -1067,6 +1163,9 @@ export interface RoundFinishedData {
   profile_skipped?: ProfileSkipped;
   [k: string]: unknown;
 }
+/**
+ * Tool name, call identity, and arguments emitted by an agent.
+ */
 export interface ToolCallData {
   kind?: Kind20;
   tool: Tool1;
@@ -1078,6 +1177,9 @@ export interface ToolCallData {
 export interface Args {
   [k: string]: unknown;
 }
+/**
+ * Raw tool result and optional structured rendering payload.
+ */
 export interface ToolResultData {
   kind?: Kind21;
   tool: Tool2;
@@ -1106,16 +1208,25 @@ export interface JsonResultPayload {
   value: Value1;
   [k: string]: unknown;
 }
+/**
+ * Current todo list reported by an agent.
+ */
 export interface TodoUpdateData {
   kind?: Kind24;
   todos?: Todos;
   [k: string]: unknown;
 }
+/**
+ * One item in the agent's reported todo list.
+ */
 export interface TodoItemData {
   content: Content4;
   status: Status1;
   [k: string]: unknown;
 }
+/**
+ * Token usage reported by the active model.
+ */
 export interface UsageUpdateData {
   kind?: Kind25;
   input_tokens: InputTokens1;
@@ -1202,6 +1313,9 @@ export interface FrameworkWarningData {
   source_label?: SourceLabel2;
   [k: string]: unknown;
 }
+/**
+ * One measured performance result in a run.
+ */
 export interface PerformanceRound {
   round: Round;
   perf_metric: PerfMetric1;
@@ -1347,16 +1461,25 @@ export interface DesignPatch {
   patch?: Patch;
   truncated?: Truncated;
 }
+/**
+ * Initial acknowledgment for an event subscription.
+ */
 export interface SubscribedMessage {
   type?: Type16;
   request_id: RequestId17;
   run_id: RunId4;
   latest_sequence: LatestSequence;
 }
+/**
+ * Single-event message for the legacy streaming protocol.
+ */
 export interface EventMessage {
   type?: Type17;
   event: RunEvent;
 }
+/**
+ * Event batch and cursor metadata sent to subscribers.
+ */
 export interface EventBatchMessage {
   type?: Type18;
   events: Events1;
@@ -1365,6 +1488,9 @@ export interface EventBatchMessage {
   store_id?: StoreId1;
   history_after_sequence?: HistoryAfterSequence;
 }
+/**
+ * Structured error envelope for protocol failures.
+ */
 export interface ProtocolErrorMessage {
   type?: Type19;
   request_id?: RequestId18;

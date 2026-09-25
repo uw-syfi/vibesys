@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Torch profiler analysis toolkit — subcommand-based.
+r"""Torch profiler analysis toolkit — subcommand-based.
 
 This is the in-process counterpart to analyze_nsys.py. Unlike nsys,
 ``torch.profiler`` uses CUPTI's Callback API and does **not** need access
@@ -57,7 +57,7 @@ Output schema (``prof.json``):
             ...
         ]
     }
-"""  # noqa: D301, EXE001  # tracked: #288
+"""
 
 from __future__ import annotations
 
@@ -68,20 +68,92 @@ import json
 import math
 import sys
 import time
+import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TextIO
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import ModuleType
+
+_MICROSECONDS_PER_SECOND = 1_000_000
+_MICROSECONDS_PER_MILLISECOND = 1000
+_KERNEL_NAME_WIDTH = 58
+_OPERATOR_NAME_WIDTH = 48
+_CPU_BOUND_RATIO = 2.0
+_GPU_BOUND_RATIO = 0.5
+_MEMORY_NAME_WIDTH = 38
+
+
+class ModelEntrypointNotFoundError(FileNotFoundError):
+    """Report a model directory that does not contain its entrypoint."""
+
+    @classmethod
+    def for_path(cls, path: Path) -> ModelEntrypointNotFoundError:
+        """Create a missing-main error with the expected model directory."""
+        return cls(
+            f"main.py not found at {path} — pass --model-dir pointing "
+            "to the workspace root that contains main.py."
+        )
+
+
+class ModelInterfaceError(AttributeError):
+    """Report a model entrypoint that does not follow the profiling contract."""
+
+    @classmethod
+    def missing_model_class(cls, path: Path) -> ModelInterfaceError:
+        """Create an error for an entrypoint without VibeServeModel."""
+        return cls(
+            f"main.py at {path} does not export VibeServeModel. "
+            "The accuracy-checker interface requires this symbol."
+        )
+
+
+class ProfileServerURLError(ValueError):
+    """Report a profile server URL that cannot be used safely."""
+
+    @classmethod
+    def unsupported_scheme(cls) -> ProfileServerURLError:
+        """Create an error when the profile server URL is not HTTP or HTTPS."""
+        return cls("Profile server URL must use HTTP or HTTPS")
+
+
+class ProfileServerContractError(RuntimeError):
+    """Report a response that violates the profile server contract."""
+
+    @classmethod
+    def missing_events(cls) -> ProfileServerContractError:
+        """Create an error when the profile response has no events key."""
+        return cls(
+            "/admin/profile/stop response missing 'events' key — "
+            "is the server implementing the expected contract?"
+        )
+
+
+def _print(
+    *values: object,
+    sep: str = " ",
+    end: str = "\n",
+    file: TextIO | None = None,
+    flush: bool = False,
+) -> None:
+    """Print user-facing command-line output."""
+    if file is None:
+        sys.stdout.write(sep.join(map(str, values)) + end)
+        if flush:
+            sys.stdout.flush()
+    else:
+        print(*values, sep=sep, end=end, file=file, flush=flush)
+
 
 # ---------------------------------------------------------------------------
 # Capture: in-process (loads VibeServeModel from main.py)
 # ---------------------------------------------------------------------------
 
 
-def _load_main_module(model_dir: str):  # noqa: ANN202  # tracked: #288
+def _load_main_module(model_dir: str) -> ModuleType:
     """Import ``main.py`` from *model_dir* and return the module.
 
     The agent's server always exports ``VibeServeModel`` from ``main.py``,
@@ -89,10 +161,7 @@ def _load_main_module(model_dir: str):  # noqa: ANN202  # tracked: #288
     """
     main_path = Path(model_dir) / "main.py"
     if not main_path.is_file():
-        raise FileNotFoundError(  # noqa: TRY003  # tracked: #288
-            f"main.py not found at {main_path} — pass --model-dir pointing "
-            f"to the workspace root that contains main.py."
-        )
+        raise ModelEntrypointNotFoundError.for_path(main_path)
     spec = importlib.util.spec_from_file_location("vs_main", str(main_path))
     module = importlib.util.module_from_spec(spec)
     sys.path.insert(0, str(main_path.parent))
@@ -102,28 +171,26 @@ def _load_main_module(model_dir: str):  # noqa: ANN202  # tracked: #288
         if str(main_path.parent) in sys.path:
             sys.path.remove(str(main_path.parent))
     if not hasattr(module, "VibeServeModel"):
-        raise AttributeError(  # noqa: TRY003  # tracked: #288
-            f"main.py at {main_path} does not export VibeServeModel. "
-            f"The accuracy-checker interface requires this symbol."
-        )
+        raise ModelInterfaceError.missing_model_class(main_path)
     return module
 
 
 def cmd_capture(args: argparse.Namespace) -> None:
     """Profile VibeServeModel.generate under torch.profiler, dump JSON."""
-    import torch  # noqa: PLC0415  # tracked: #288
-    from torch.profiler import ProfilerActivity, profile  # noqa: PLC0415  # tracked: #288
+    torch_module = torch if torch is not None else importlib.import_module("torch")
+    profiler_activity = torch_module.profiler.ProfilerActivity
+    profile = torch_module.profiler.profile
 
     dtype = {
-        "bfloat16": torch.bfloat16,
-        "float16": torch.float16,
-        "float32": torch.float32,
-    }.get(args.dtype, torch.bfloat16)
+        "bfloat16": torch_module.bfloat16,
+        "float16": torch_module.float16,
+        "float32": torch_module.float32,
+    }.get(args.dtype, torch_module.bfloat16)
 
     model_dir = args.model_dir
     weights_dir = args.weights_dir or "/model"
 
-    print(  # noqa: T201  # tracked: #288
+    _print(
         f"[capture] loading VibeServeModel from {model_dir}/main.py "
         f"(weights: {weights_dir}, device={args.device}, dtype={args.dtype})",
         file=sys.stderr,
@@ -140,26 +207,27 @@ def cmd_capture(args: argparse.Namespace) -> None:
     # transformers directly against weights_dir.
     tokenizer = getattr(model, "tokenizer", None)
     if tokenizer is None:
-        from transformers import AutoTokenizer  # noqa: PLC0415  # tracked: #288
+        # lint-waiver: LW-008026 [PLC0415]; Transformers is an optional fallback used only when the loaded model does not provide a tokenizer.
+        from transformers import AutoTokenizer  # noqa: PLC0415
 
         tokenizer = AutoTokenizer.from_pretrained(weights_dir)
 
     input_ids = tokenizer(args.prompt, return_tensors="pt").input_ids.to(args.device)
 
     # Warmup — first call compiles kernels, allocates KV cache, etc.
-    print(f"[capture] warmup ({args.warmup} iters)...", file=sys.stderr)  # noqa: T201  # tracked: #288
+    _print(f"[capture] warmup ({args.warmup} iters)...", file=sys.stderr)
     for _ in range(args.warmup):
         with torch.no_grad():
             model.generate(input_ids=input_ids, max_new_tokens=args.max_tokens)
     torch.cuda.synchronize()
 
-    print(  # noqa: T201  # tracked: #288
+    _print(
         f"[capture] profiling ({args.num_iters} iters, max_new_tokens={args.max_tokens})...",
         file=sys.stderr,
     )
     t0 = time.time()
     with profile(
-        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        activities=[profiler_activity.CPU, profiler_activity.CUDA],
         record_shapes=False,
         profile_memory=True,
         with_stack=False,
@@ -169,9 +237,9 @@ def cmd_capture(args: argparse.Namespace) -> None:
                 model.generate(input_ids=input_ids, max_new_tokens=args.max_tokens)
         torch.cuda.synchronize()
     wall = time.time() - t0
-    print(f"[capture] elapsed {wall:.2f}s", file=sys.stderr)  # noqa: T201  # tracked: #288
+    _print(f"[capture] elapsed {wall:.2f}s", file=sys.stderr)
 
-    events_json = _summarize_prof(prof, num_iters=args.num_iters)
+    events_json = _summarize_prof(prof)
     events_json.update(
         {
             "captured_at": datetime.now(UTC).isoformat(),
@@ -185,7 +253,7 @@ def cmd_capture(args: argparse.Namespace) -> None:
         }
     )
     Path(args.output).write_text(json.dumps(events_json, indent=2))
-    print(  # noqa: T201  # tracked: #288
+    _print(
         f"[capture] wrote {args.output} "
         f"({events_json['total_cuda_time_us']:.0f} us CUDA, "
         f"{events_json['total_cpu_time_us']:.0f} us CPU, "
@@ -210,23 +278,29 @@ def cmd_capture_server(args: argparse.Namespace) -> None:
     server-path profiling (captures HTTP/batching overhead).  When
     absent, use ``capture`` (in-process) instead.
     """
-    import urllib.request  # noqa: PLC0415  # tracked: #288
 
     def _post(path: str, body: dict | None = None) -> dict:
+        url = args.url.rstrip("/") + path
+        if not url.startswith(("http:", "https:")):
+            raise ProfileServerURLError.unsupported_scheme()
         data = json.dumps(body or {}).encode("utf-8")
-        req = urllib.request.Request(  # noqa: S310  # tracked: #288
-            args.url.rstrip("/") + path,
+        # lint-waiver: LW-008024 [S310]; This request uses a scheme-validated URL, and its opener accepts only HTTP and HTTPS handlers.
+        req = urllib.request.Request(  # noqa: S310
+            url,
             data=data,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=args.timeout) as resp:  # noqa: S310  # tracked: #288
+        opener = urllib.request.OpenerDirector()
+        opener.add_handler(urllib.request.HTTPHandler())
+        opener.add_handler(urllib.request.HTTPSHandler())
+        with opener.open(req, timeout=args.timeout) as resp:
             return json.loads(resp.read())
 
-    print(f"[capture-server] POST {args.url}/admin/profile/start", file=sys.stderr)  # noqa: T201  # tracked: #288
+    _print(f"[capture-server] POST {args.url}/admin/profile/start", file=sys.stderr)
     _post("/admin/profile/start")
 
-    print(  # noqa: T201  # tracked: #288
+    _print(
         f"[capture-server] sending {args.requests} requests (max_tokens={args.max_tokens})...",
         file=sys.stderr,
     )
@@ -240,20 +314,17 @@ def cmd_capture_server(args: argparse.Namespace) -> None:
             },
         )
 
-    print(f"[capture-server] POST {args.url}/admin/profile/stop", file=sys.stderr)  # noqa: T201  # tracked: #288
+    _print(f"[capture-server] POST {args.url}/admin/profile/stop", file=sys.stderr)
     result = _post("/admin/profile/stop")
 
     if "events" not in result:
-        raise RuntimeError(  # noqa: TRY003  # tracked: #288
-            "/admin/profile/stop response missing 'events' key — "
-            "is the server implementing the expected contract?"
-        )
+        raise ProfileServerContractError.missing_events()
 
     result.setdefault("captured_at", datetime.now(UTC).isoformat())
     result.setdefault("mode", "server")
     result.setdefault("num_iters", args.requests)
     Path(args.output).write_text(json.dumps(result, indent=2))
-    print(f"[capture-server] wrote {args.output}", file=sys.stderr)  # noqa: T201  # tracked: #288
+    _print(f"[capture-server] wrote {args.output}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +332,7 @@ def cmd_capture_server(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _summarize_prof(prof, num_iters: int) -> dict:  # noqa: ANN001, ARG001  # tracked: #288
+def _summarize_prof(prof: object) -> dict:
     """Extract a structured summary from a torch.profiler profile object."""
     totals = prof.key_averages()
     events: list[dict] = []
@@ -283,7 +354,7 @@ def _summarize_prof(prof, num_iters: int) -> dict:  # noqa: ANN001, ARG001  # tr
             or (cuda_us > 0 and cpu_us < cuda_us / 4)
         ):
             category = "kernel"
-        elif name.startswith("aten::") or name.startswith("torch::"):  # noqa: PIE810  # tracked: #288
+        elif name.startswith(("aten::", "torch::")):
             category = "operator"
         elif (
             "memcpy" in name.lower()
@@ -320,7 +391,7 @@ def _summarize_prof(prof, num_iters: int) -> dict:  # noqa: ANN001, ARG001  # tr
 try:
     import torch
 except ImportError:  # pragma: no cover
-    torch = None  # type: ignore  # noqa: PGH003  # tracked: #288
+    torch = None
 
 
 # ---------------------------------------------------------------------------
@@ -361,10 +432,10 @@ def _load(path: str) -> dict:
 
 
 def _fmt_us(us: float) -> str:
-    if us >= 1_000_000:  # noqa: PLR2004  # tracked: #288
-        return f"{us / 1_000_000:.2f} s"
-    if us >= 1000:  # noqa: PLR2004  # tracked: #288
-        return f"{us / 1000:.2f} ms"
+    if us >= _MICROSECONDS_PER_SECOND:
+        return f"{us / _MICROSECONDS_PER_SECOND:.2f} s"
+    if us >= _MICROSECONDS_PER_MILLISECOND:
+        return f"{us / _MICROSECONDS_PER_MILLISECOND:.2f} ms"
     return f"{us:.1f} us"
 
 
@@ -373,16 +444,16 @@ def _print_kernels(data: dict, top: int) -> None:
     kernels = [e for e in data["events"] if e["self_cuda_time_us"] > 0]
     kernels.sort(key=lambda e: e["self_cuda_time_us"], reverse=True)
     total = data["total_cuda_time_us"] or 1.0
-    print(f"Total self-CUDA time: {_fmt_us(total)}")  # noqa: T201  # tracked: #288
-    print()  # noqa: T201  # tracked: #288
-    print(f"{'Name':<60}{'Self CUDA':>14}{'% of total':>12}{'Count':>10}")  # noqa: T201  # tracked: #288
-    print("-" * 96)  # noqa: T201  # tracked: #288
+    _print(f"Total self-CUDA time: {_fmt_us(total)}")
+    _print()
+    _print(f"{'Name':<60}{'Self CUDA':>14}{'% of total':>12}{'Count':>10}")
+    _print("-" * 96)
     for ev in kernels[:top]:
         pct = 100.0 * ev["self_cuda_time_us"] / total
         name = ev["name"]
-        if len(name) > 58:  # noqa: PLR2004  # tracked: #288
+        if len(name) > _KERNEL_NAME_WIDTH:
             name = name[:55] + "..."
-        print(f"{name:<60}{_fmt_us(ev['self_cuda_time_us']):>14}{pct:>11.1f}%{ev['count']:>10}")  # noqa: T201  # tracked: #288
+        _print(f"{name:<60}{_fmt_us(ev['self_cuda_time_us']):>14}{pct:>11.1f}%{ev['count']:>10}")
 
 
 def cmd_kernels(args: argparse.Namespace) -> None:
@@ -395,16 +466,16 @@ def _print_operators(data: dict, top: int) -> None:
     ops = [e for e in data["events"] if e["category"] == "operator"]
     ops.sort(key=lambda e: e["self_cpu_time_us"], reverse=True)
     total_cpu = data["total_cpu_time_us"] or 1.0
-    print(f"Total self-CPU time: {_fmt_us(total_cpu)}")  # noqa: T201  # tracked: #288
-    print()  # noqa: T201  # tracked: #288
-    print(f"{'Operator':<50}{'Self CPU':>14}{'CUDA time':>14}{'% CPU':>10}{'Count':>10}")  # noqa: T201  # tracked: #288
-    print("-" * 98)  # noqa: T201  # tracked: #288
+    _print(f"Total self-CPU time: {_fmt_us(total_cpu)}")
+    _print()
+    _print(f"{'Operator':<50}{'Self CPU':>14}{'CUDA time':>14}{'% CPU':>10}{'Count':>10}")
+    _print("-" * 98)
     for ev in ops[:top]:
         pct = 100.0 * ev["self_cpu_time_us"] / total_cpu
         name = ev["name"]
-        if len(name) > 48:  # noqa: PLR2004  # tracked: #288
+        if len(name) > _OPERATOR_NAME_WIDTH:
             name = name[:45] + "..."
-        print(  # noqa: T201  # tracked: #288
+        _print(
             f"{name:<50}{_fmt_us(ev['self_cpu_time_us']):>14}"
             f"{_fmt_us(ev['cuda_time_us']):>14}{pct:>9.1f}%{ev['count']:>10}"
         )
@@ -420,24 +491,24 @@ def _print_cpu_overhead(data: dict) -> None:
     total_cpu = data["total_cpu_time_us"]
     total_cuda = data["total_cuda_time_us"]
     ratio = total_cpu / total_cuda if total_cuda else float("inf")
-    print(f"Total self-CPU time:  {_fmt_us(total_cpu)}")  # noqa: T201  # tracked: #288
-    print(f"Total self-CUDA time: {_fmt_us(total_cuda)}")  # noqa: T201  # tracked: #288
-    print(f"CPU/CUDA ratio:       {ratio:.2f}x")  # noqa: T201  # tracked: #288
-    if ratio > 2.0:  # noqa: PLR2004  # tracked: #288
-        print()  # noqa: T201  # tracked: #288
-        print(  # noqa: T201  # tracked: #288
+    _print(f"Total self-CPU time:  {_fmt_us(total_cpu)}")
+    _print(f"Total self-CUDA time: {_fmt_us(total_cuda)}")
+    _print(f"CPU/CUDA ratio:       {ratio:.2f}x")
+    if ratio > _CPU_BOUND_RATIO:
+        _print()
+        _print(
             "Interpretation: CPU time dominates (>2x GPU). Likely launch-bound"
             " — consider CUDA graphs, fewer kernels, or larger batches."
         )
-    elif ratio < 0.5:  # noqa: PLR2004  # tracked: #288
-        print()  # noqa: T201  # tracked: #288
-        print(  # noqa: T201  # tracked: #288
+    elif ratio < _GPU_BOUND_RATIO:
+        _print()
+        _print(
             "Interpretation: GPU time dominates (<0.5x CPU). Compute-bound —"
             " focus on kernel fusion, flash attention, better algorithms."
         )
     else:
-        print()  # noqa: T201  # tracked: #288
-        print(  # noqa: T201  # tracked: #288
+        _print()
+        _print(
             "Interpretation: CPU and GPU roughly balanced. Both axes may benefit from optimization."
         )
 
@@ -452,15 +523,15 @@ def _print_memory(data: dict) -> None:
     mem = [e for e in data["events"] if e["category"] == "memory"]
     mem.sort(key=lambda e: e["cuda_time_us"] + e["cpu_time_us"], reverse=True)
     if not mem:
-        print("(no memory events recorded)")  # noqa: T201  # tracked: #288
+        _print("(no memory events recorded)")
         return
-    print(f"{'Operation':<40}{'Total CUDA':>14}{'Total CPU':>14}{'Count':>10}")  # noqa: T201  # tracked: #288
-    print("-" * 78)  # noqa: T201  # tracked: #288
+    _print(f"{'Operation':<40}{'Total CUDA':>14}{'Total CPU':>14}{'Count':>10}")
+    _print("-" * 78)
     for ev in mem:
         name = ev["name"]
-        if len(name) > 38:  # noqa: PLR2004  # tracked: #288
+        if len(name) > _MEMORY_NAME_WIDTH:
             name = name[:35] + "..."
-        print(  # noqa: T201  # tracked: #288
+        _print(
             f"{name:<40}{_fmt_us(ev['cuda_time_us']):>14}"
             f"{_fmt_us(ev['cpu_time_us']):>14}{ev['count']:>10}"
         )
@@ -486,31 +557,31 @@ def cmd_summary(args: argparse.Namespace) -> None:
     """
     top = getattr(args, "top", 15)
 
-    print("=" * 80)  # noqa: T201  # tracked: #288
-    print("  TORCH PROFILER SUMMARY")  # noqa: T201  # tracked: #288
-    print("=" * 80)  # noqa: T201  # tracked: #288
+    _print("=" * 80)
+    _print("  TORCH PROFILER SUMMARY")
+    _print("=" * 80)
 
     raw = _read_json_maybe_gz(args.report)
     if _is_chrome_trace(raw):
-        print("\n## Trace Certification\n")  # noqa: T201  # tracked: #288
+        _print("\n## Trace Certification\n")
         index = _index_trace(raw)
         op_to_kernels = _build_op_to_kernels(index)
         _print_certify(_certify(index, op_to_kernels))
         data = _summarize_chrome_trace(raw)
     else:
         data = raw
-    print(f"\nCaptured: {data.get('captured_at', '?')}")  # noqa: T201  # tracked: #288
-    print(f"Mode:     {data.get('mode', '?')}")  # noqa: T201  # tracked: #288
-    print(f"Device:   {data.get('device', '?')} ({data.get('dtype', '?')})")  # noqa: T201  # tracked: #288
+    _print(f"\nCaptured: {data.get('captured_at', '?')}")
+    _print(f"Mode:     {data.get('mode', '?')}")
+    _print(f"Device:   {data.get('device', '?')} ({data.get('dtype', '?')})")
     if "wall_time_sec" in data:
-        print(f"Wall:     {data['wall_time_sec']:.2f}s over {data.get('num_iters', '?')} iters")  # noqa: T201  # tracked: #288
-    print("\n## CPU / GPU Overhead\n")  # noqa: T201  # tracked: #288
+        _print(f"Wall:     {data['wall_time_sec']:.2f}s over {data.get('num_iters', '?')} iters")
+    _print("\n## CPU / GPU Overhead\n")
     _print_cpu_overhead(data)
-    print("\n## Top GPU Kernels\n")  # noqa: T201  # tracked: #288
+    _print("\n## Top GPU Kernels\n")
     _print_kernels(data, top)
-    print("\n## Top Operators\n")  # noqa: T201  # tracked: #288
+    _print("\n## Top Operators\n")
     _print_operators(data, top)
-    print("\n## Memory Operations\n")  # noqa: T201  # tracked: #288
+    _print("\n## Memory Operations\n")
     _print_memory(data)
 
 
@@ -520,15 +591,15 @@ def cmd_tables(args: argparse.Namespace) -> None:
     categories: dict[str, int] = {}
     for ev in data["events"]:
         categories[ev["category"]] = categories.get(ev["category"], 0) + 1
-    print(f"Captured:   {data.get('captured_at', '?')}")  # noqa: T201  # tracked: #288
-    print(f"Mode:       {data.get('mode', '?')}")  # noqa: T201  # tracked: #288
-    print(f"Num events: {data.get('num_events', len(data.get('events', [])))}")  # noqa: T201  # tracked: #288
-    print(f"Total CUDA: {_fmt_us(data.get('total_cuda_time_us', 0))}")  # noqa: T201  # tracked: #288
-    print(f"Total CPU:  {_fmt_us(data.get('total_cpu_time_us', 0))}")  # noqa: T201  # tracked: #288
-    print("\nEvent categories:")  # noqa: T201  # tracked: #288
+    _print(f"Captured:   {data.get('captured_at', '?')}")
+    _print(f"Mode:       {data.get('mode', '?')}")
+    _print(f"Num events: {data.get('num_events', len(data.get('events', [])))}")
+    _print(f"Total CUDA: {_fmt_us(data.get('total_cuda_time_us', 0))}")
+    _print(f"Total CPU:  {_fmt_us(data.get('total_cpu_time_us', 0))}")
+    _print("\nEvent categories:")
     for cat, n in sorted(categories.items(), key=lambda kv: -kv[1]):
-        print(f"  {cat:<10} {n:>6} events")  # noqa: T201  # tracked: #288
-    print(  # noqa: T201  # tracked: #288
+        _print(f"  {cat:<10} {n:>6} events")
+    _print(
         "\nAvailable subcommands: kernels, operators, cpu-overhead, memory, summary, "
         "certify, gemm-shapes, roofline"
     )
@@ -1014,7 +1085,10 @@ def _looks_like_step_marker(name: str) -> bool:
     return name.lower().startswith(("profilerstep", "execute_"))
 
 
-def _certify(index: TraceIndex, op_to_kernels: dict[int, list[dict]]) -> list[CertifyItem]:  # noqa: C901, PLR0912  # tracked: #288
+# lint-waiver: LW-900001 [C901, PLR0912]; certify runs a fixed checklist of independent
+# > structural checks over one trace; splitting it would scatter the checklist across
+# > files a reviewer has to read together to see what "certify" actually verifies.
+def _certify(index: TraceIndex, op_to_kernels: dict[int, list[dict]]) -> list[CertifyItem]:  # noqa: C901, PLR0912
     items: list[CertifyItem] = []
     n_ops = len(index.cpu_ops)
     n_kernels = len(index.kernels)
@@ -1185,19 +1259,21 @@ def _certify_verdict(items: list[CertifyItem]) -> str:
 def _print_certify(items: list[CertifyItem]) -> None:
     order = {"FAIL": 0, "WARN": 1, "PASS": 2}
     ordered = sorted(items, key=lambda i: order[i.status])
-    print(f"Trace certification: {_certify_verdict(items)}")  # noqa: T201  # tracked: #288
-    print()  # noqa: T201  # tracked: #288
+    _print(f"Trace certification: {_certify_verdict(items)}")
+    _print()
     for item in ordered:
-        print(f"[{item.status}] {item.check}: {item.detail}")  # noqa: T201  # tracked: #288
+        _print(f"[{item.status}] {item.check}: {item.detail}")
         if item.fix and item.status != "PASS":
-            print(f"       -> {item.fix}")  # noqa: T201  # tracked: #288
+            _print(f"       -> {item.fix}")
 
 
 def cmd_certify(args: argparse.Namespace) -> None:
     """Structural validity check on a raw Kineto/Chrome trace before trusting it."""
     raw = _read_json_maybe_gz(args.trace)
     if not _is_chrome_trace(raw):
-        raise SystemExit(  # noqa: TRY003  # tracked: #288
+        # lint-waiver: LW-900002 [TRY003]; this is a CLI usage error whose message
+        # > must embed the offending value so the operator can fix the command line.
+        raise SystemExit(  # noqa: TRY003
             f"{args.trace} is not a raw Kineto/Chrome trace (no 'traceEvents' key). "
             "certify expects the *.pt.trace.json(.gz) file torch.profiler / a serving "
             "engine's profiler-stop endpoint writes, not a summarized prof.json."
@@ -1349,19 +1425,19 @@ def _shape_label(m: int, n: int, k: int, batch: int) -> str:
 
 def _print_gemm_table(shapes: list[GemmShape]) -> None:
     if not shapes:
-        print(  # noqa: T201  # tracked: #288
+        _print(
             "(no GEMM ops with both 'Input Dims' and a correlated GPU kernel found -- "
             "run `certify` on this trace first)"
         )
         return
     total = sum(s.total_gpu_time_us for s in shapes) or 1.0
     header = f"{'Op':<10}{'Shape (batch x M x N x K)':<28}{'Dtype':<18}{'Calls':>8}{'GPU time':>14}{'% total':>10}"
-    print(header)  # noqa: T201  # tracked: #288
-    print("-" * 88)  # noqa: T201  # tracked: #288
+    _print(header)
+    _print("-" * 88)
     for s in shapes:
         pct = 100.0 * s.total_gpu_time_us / total
         shape_str = _shape_label(s.m, s.n, s.k, s.batch)
-        print(  # noqa: T201  # tracked: #288
+        _print(
             f"{s.op:<10}{shape_str:<28}{s.dtype:<18}{s.call_count:>8}"
             f"{_fmt_us(s.total_gpu_time_us):>14}{pct:>9.1f}%"
         )
@@ -1371,7 +1447,9 @@ def cmd_gemm_shapes(args: argparse.Namespace) -> None:
     """Extract (M, N, K, dtype) GEMM demand from a raw trace, ranked by GPU time."""
     raw = _read_json_maybe_gz(args.trace)
     if not _is_chrome_trace(raw):
-        raise SystemExit(  # noqa: TRY003  # tracked: #288
+        # lint-waiver: LW-900003 [TRY003]; this is a CLI usage error whose message
+        # > must embed the offending value so the operator can fix the command line.
+        raise SystemExit(  # noqa: TRY003
             f"{args.trace} is not a raw Kineto/Chrome trace (no 'traceEvents' key). "
             "gemm-shapes needs the *.pt.trace.json(.gz) file, not a summarized prof.json."
         )
@@ -1383,7 +1461,7 @@ def cmd_gemm_shapes(args: argparse.Namespace) -> None:
     _print_gemm_table(top)
     if args.out:
         Path(args.out).write_text(json.dumps([asdict(s) for s in top], indent=2))
-        print(f"\n[gemm-shapes] wrote {args.out} ({len(top)} shapes)", file=sys.stderr)  # noqa: T201  # tracked: #288
+        _print(f"\n[gemm-shapes] wrote {args.out} ({len(top)} shapes)", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -1457,7 +1535,9 @@ def _resolve_peaks(args: argparse.Namespace, raw: dict) -> tuple[float, float, s
     if args.device:
         key = args.device.lower()
         if key not in _DEVICE_PEAKS:
-            raise SystemExit(  # noqa: TRY003  # tracked: #288
+            # lint-waiver: LW-900004 [TRY003]; this is a CLI usage error whose message
+            # > must embed the offending value so the operator can fix the command line.
+            raise SystemExit(  # noqa: TRY003
                 f"unknown --device {args.device!r}; known: {', '.join(sorted(_DEVICE_PEAKS))}"
             )
         peak = _DEVICE_PEAKS[key]
@@ -1465,9 +1545,11 @@ def _resolve_peaks(args: argparse.Namespace, raw: dict) -> tuple[float, float, s
     detected = _detect_device_key(raw)
     if detected:
         peak = _DEVICE_PEAKS[detected]
-        print(f"[roofline] auto-detected device: {peak.label}", file=sys.stderr)  # noqa: T201  # tracked: #288
+        _print(f"[roofline] auto-detected device: {peak.label}", file=sys.stderr)
         return peak.peak_tflops, peak.peak_gbps, peak.label
-    raise SystemExit(  # noqa: TRY003  # tracked: #288
+    # lint-waiver: LW-900005 [TRY003]; this is a CLI usage error whose message
+    # > must embed the offending value so the operator can fix the command line.
+    raise SystemExit(  # noqa: TRY003
         "roofline needs --device <key> or --peak-tflops/--peak-gbps (could not "
         f"auto-detect device from trace deviceProperties); known --device values: "
         f"{', '.join(sorted(_DEVICE_PEAKS))}"
@@ -1572,21 +1654,21 @@ def _print_roofline(
     peaks_line = (
         f"Device peaks: {device_label} -- {peak_tflops:.1f} TFLOP/s (dense), {peak_gbps:.0f} GB/s"
     )
-    print(peaks_line)  # noqa: T201  # tracked: #288
-    print()  # noqa: T201  # tracked: #288
+    _print(peaks_line)
+    _print()
     if not rows:
-        print(  # noqa: T201  # tracked: #288
+        _print(
             "(no GEMM/attention ops with both shape and correlated GPU kernel time found -- "
             "run `certify` on this trace first)"
         )
         return
-    print(  # noqa: T201  # tracked: #288
+    _print(
         f"{'Op':<12}{'Shape':<22}{'Dtype':<14}{'GPU time':>12}{'TFLOP/s':>10}"
         f"{'GB/s':>10}{'AI':>8}{'% peak':>9}  Bound"
     )
-    print("-" * 104)  # noqa: T201  # tracked: #288
+    _print("-" * 104)
     for r in rows:
-        print(  # noqa: T201  # tracked: #288
+        _print(
             f"{r.op:<12}{r.shape:<22}{r.dtype:<14}{_fmt_us(r.gpu_time_us):>12}"
             f"{r.achieved_tflops:>10.1f}{r.achieved_gbps:>10.0f}{r.arithmetic_intensity:>8.1f}"
             f"{r.pct_of_peak:>8.1f}%  {r.bound}"
@@ -1600,13 +1682,13 @@ def _print_roofline_diagnosis(index: TraceIndex, rows: list[RooflineRow]) -> Non
         if "graphlaunch" in ev.get("name", "").lower()
     ]
     if graph_launches:
-        print(  # noqa: T201  # tracked: #288
+        _print(
             f"\nNote: {len(graph_launches)} hipGraphLaunch/cudaGraphLaunch replay events found -- "
             "per-kernel attribution for GEMMs launched inside a graph replay is unreliable. "
             "Re-profile in eager mode for trustworthy op-level roofline numbers."
         )
     if not rows:
-        print(  # noqa: T201  # tracked: #288
+        _print(
             "\nNo hot kernels attributed to a GEMM/attention op -- if the host looks idle, "
             "re-profile under sustained load (see `certify`'s gpu_busy check)."
         )
@@ -1616,7 +1698,9 @@ def cmd_roofline(args: argparse.Namespace) -> None:
     """Achieved TFLOP/s, GB/s, arithmetic intensity, and bound class for GEMM/attention ops."""
     raw = _read_json_maybe_gz(args.trace)
     if not _is_chrome_trace(raw):
-        raise SystemExit(  # noqa: TRY003  # tracked: #288
+        # lint-waiver: LW-900006 [TRY003]; this is a CLI usage error whose message
+        # > must embed the offending value so the operator can fix the command line.
+        raise SystemExit(  # noqa: TRY003
             f"{args.trace} is not a raw Kineto/Chrome trace (no 'traceEvents' key). "
             "roofline needs the *.pt.trace.json(.gz) file, not a summarized prof.json."
         )
@@ -1635,7 +1719,8 @@ def cmd_roofline(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:  # noqa: D103  # tracked: #288
+def main() -> None:
+    """Run the command-line entry point."""
     p = argparse.ArgumentParser(
         description="Torch profiler analysis toolkit.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

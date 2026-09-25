@@ -241,34 +241,16 @@ class ExperimentProjection:
         self._ready = True
         self._force_reset = False
 
-    def _advance(  # noqa: C901  # Fallback validation keeps cache updates safe.
+    def _advance(  # Fallback validation keeps cache updates safe.
         self,
         run_view: RunView,
         *,
         changed_keys: tuple[str, ...] | None,
     ) -> None:
-        if run_view.experiment_revision < self._revision:
-            # The persisted cursor regressed under the same run id. This can
-            # only be a restored or legacy state, so the old delta chain is no
-            # longer a valid base for any client.
-            self._replace(run_view, rotate=True)
-            return
-        if run_view.experiment_revision == self._revision:
-            # A complete committed snapshot at the current revision can come
-            # from restoring legacy state. It starts a new cursor chain so no
-            # client can mistake different contents for an unchanged result.
-            if changed_keys is None:
-                self._replace(run_view, rotate=True)
+        if self._reset_stale_revision(run_view, changed_keys):
             return
         if changed_keys is None:
-            previous_ids = set(self._entries)
-            current_ids = {hypothesis.hypothesis_id for hypothesis in run_view.hypotheses}
-            removed_ids = previous_ids - current_ids
-            changed_ids = {
-                hypothesis.hypothesis_id
-                for hypothesis in run_view.hypotheses
-                if hypothesis.last_experiment_revision > self._revision
-            }
+            removed_ids, changed_ids = self._revision_changes(run_view)
         else:
             removed_ids = set()
             changed_ids = set(changed_keys)
@@ -307,6 +289,37 @@ class ExperimentProjection:
             )
         )
         self._revision = run_view.experiment_revision
+
+    def _reset_stale_revision(
+        self, run_view: RunView, changed_keys: tuple[str, ...] | None
+    ) -> bool:
+        """Reset when persisted revisions rewind or a full legacy snapshot repeats."""
+        if run_view.experiment_revision < self._revision:
+            # The persisted cursor regressed under the same run id. This can
+            # only be a restored or legacy state, so the old delta chain is no
+            # longer a valid base for any client.
+            self._replace(run_view, rotate=True)
+            return True
+        if run_view.experiment_revision == self._revision:
+            # A complete committed snapshot at the current revision can come
+            # from restoring legacy state. It starts a new cursor chain so no
+            # client can mistake different contents for an unchanged result.
+            if changed_keys is None:
+                self._replace(run_view, rotate=True)
+            return True
+        return False
+
+    def _revision_changes(self, run_view: RunView) -> tuple[set[str], set[str]]:
+        """Compute entry deltas when a writer omitted changed-key metadata."""
+        previous_ids = set(self._entries)
+        current_ids = {hypothesis.hypothesis_id for hypothesis in run_view.hypotheses}
+        removed_ids = previous_ids - current_ids
+        changed_ids = {
+            hypothesis.hypothesis_id
+            for hypothesis in run_view.hypotheses
+            if hypothesis.last_experiment_revision > self._revision
+        }
+        return removed_ids, changed_ids
 
     def _changes_after(self, revision: int) -> tuple[set[str], set[str]] | None:
         cursor = revision

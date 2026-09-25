@@ -6,15 +6,19 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterable  # noqa: TC003  # tracked: #288
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+from tests.support import run_test_command
 
 import vs_sandbox.api as sandbox_api
 from vs_sandbox import host_sandbox
 from vs_sandbox.host_resources import HostResource
 from vs_sandbox.project_paths import ProjectPathPolicy, ProjectPathPolicyError
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -54,7 +58,7 @@ def _working_bwrap() -> str | None:
     probe = "/usr/bin/true" if Path("/usr/bin/true").exists() else "/bin/true"
     command.append(probe)
     try:
-        result = subprocess.run(  # noqa: S603
+        result = run_test_command(
             command,
             capture_output=True,
             check=False,
@@ -223,7 +227,7 @@ class TestBubblewrapProjectPaths:
         )
         (workspace / ".state" / "local" / "host-secret").write_text("secret\n")
 
-        result = subprocess.run(  # noqa: S603
+        result = run_test_command(
             sandbox.wrap(["/bin/sh", "-c", script]),
             capture_output=True,
             check=False,

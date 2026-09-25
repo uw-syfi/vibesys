@@ -133,12 +133,12 @@ def _hip_api_stats(d: Path, *rows: str) -> None:
     )
 
 
-def _ns(report: str, **kwargs) -> argparse.Namespace:  # noqa: ANN003
+def _ns(report: str, **kwargs) -> argparse.Namespace:  # noqa: ANN003  # LW-920192; tracked migration debt from the pre-manifest ratchet scheme
     return argparse.Namespace(report=report, **kwargs)
 
 
 # ---------------------------------------------------------------------------
-# discover  # noqa: ERA001
+# discover  # noqa: ERA001  # LW-920193; this is a section-header comment formatted like a heading, not commented-out code
 # ---------------------------------------------------------------------------
 
 
@@ -237,7 +237,7 @@ def test_classify_family_survives_a_deep_aiter_namespace() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_files_reports_counts_processes_and_agents(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_files_reports_counts_processes_and_agents(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910142; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _kernel_trace(d, "my_kernel,0,0,1,1000,2000,4242")
     _hip_api_trace(d, "hipLaunchKernel,1,900,1000,4242")
@@ -254,7 +254,7 @@ def test_cmd_files_reports_counts_processes_and_agents(tmp_path, capsys):  # noq
     assert "gfx=90a10" in out
 
 
-def test_cmd_files_reports_nothing_found_for_an_empty_dir(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_files_reports_nothing_found_for_an_empty_dir(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910143; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     cmd_files(_ns(str(tmp_path)))
     out = capsys.readouterr().out
 
@@ -276,7 +276,7 @@ def _mixed_family_trace(d: Path) -> None:
     )
 
 
-def test_cmd_kernels_ranks_by_total_time_and_labels_family(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_kernels_ranks_by_total_time_and_labels_family(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910144; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _mixed_family_trace(d)
 
@@ -290,13 +290,13 @@ def test_cmd_kernels_ranks_by_total_time_and_labels_family(tmp_path, capsys):  #
     assert "Total GPU kernel time" in out
 
 
-def test_cmd_kernels_reports_no_data_for_an_empty_report(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_kernels_reports_no_data_for_an_empty_report(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910145; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     cmd_kernels(_ns(str(tmp_path), top=10))
     out = capsys.readouterr().out
     assert "no kernel data found" in out
 
 
-def test_cmd_kernels_falls_back_to_stats_when_trace_is_absent(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_kernels_falls_back_to_stats_when_trace_is_absent(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910146; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _kernel_stats(d, "rocblas_gemm_ex,10,50000,4000,6000")
 
@@ -308,7 +308,7 @@ def test_cmd_kernels_falls_back_to_stats_when_trace_is_absent(tmp_path, capsys):
     assert "rocBLAS" in out
 
 
-def test_cmd_families_flags_gemm_or_attention_in_a_fallback_family(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_families_flags_gemm_or_attention_in_a_fallback_family(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910147; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _mixed_family_trace(d)
 
@@ -321,7 +321,7 @@ def test_cmd_families_flags_gemm_or_attention_in_a_fallback_family(tmp_path, cap
     assert "AITER_LOG_TUNED_CONFIG" in out
 
 
-def test_cmd_families_does_not_flag_a_clean_aiter_dominant_trace(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_families_does_not_flag_a_clean_aiter_dominant_trace(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910148; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _kernel_trace(d, "aiter::fmha_fwd_v3_kernel,0,0,101,1000,90000,4242")
 
@@ -332,16 +332,15 @@ def test_cmd_families_does_not_flag_a_clean_aiter_dominant_trace(tmp_path, capsy
     assert "*** Finding:" not in out
 
 
-def test_cmd_families_percent_gpu_uses_merged_busy_time_not_naive_sum_of_overlapping_queues(  # noqa: ANN201
-    tmp_path,  # noqa: ANN001
-    capsys,  # noqa: ANN001
+def test_cmd_families_percent_gpu_uses_merged_busy_time_not_naive_sum_of_overlapping_queues(  # noqa: ANN201  # LW-920194; tracked migration debt from the pre-manifest ratchet scheme
+    tmp_path,  # noqa: ANN001  # LW-920195; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
+    capsys,  # noqa: ANN001  # LW-920196; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
 ):
     # Regression for the %GPU denominator bug: two families dispatched on
     # DIFFERENT HW queues of the same GPU but fully overlapping in
     # wall-clock time (real on rocprofv3 vLLM-serving captures with
-    # concurrent queues -- see the rocprof worklog's %GPU denominator note,
-    # and analyze_rocprof.py's module docstring on per-(agent,queue)
-    # merged-interval accounting). Summing each kernel's own duration
+    # concurrent queues -- see analyze_rocprof.py's module docstring on
+    # per-(agent,queue) merged-interval accounting). Summing each kernel's own duration
     # double-counts the overlap: the old code reported each family at 50%
     # of an artificially 2x-inflated "total" (1000ns each / 2000ns naive
     # sum), silently hiding that the GPU spent its whole 1000ns window on
@@ -369,7 +368,7 @@ def test_cmd_families_percent_gpu_uses_merged_busy_time_not_naive_sum_of_overlap
 
 @given(gap_ns=st.integers(min_value=0, max_value=10_000_000))
 @FAST
-def test_gpu_busy_denominator_never_exceeds_the_naive_sum(tmp_path_factory, gap_ns):  # noqa: ANN001, ANN201
+def test_gpu_busy_denominator_never_exceeds_the_naive_sum(tmp_path_factory, gap_ns):  # noqa: ANN001, ANN201  # LW-920197; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     # Generalizes the regression above: for ANY separation between two
     # same-duration kernels on different queues (from fully overlapping,
     # gap_ns=0, to fully disjoint), the merged-union %GPU denominator must
@@ -385,9 +384,9 @@ def test_gpu_busy_denominator_never_exceeds_the_naive_sum(tmp_path_factory, gap_
     )
 
     disc = discover(str(root))
-    bundle = analyze_rocprof._get_kernel_bundle(disc)  # noqa: SLF001
+    bundle = analyze_rocprof._get_kernel_bundle(disc)  # noqa: SLF001  # LW-920198; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
     naive_sum = sum(e["total_ns"] for e in bundle.by_name.values())
-    denom = analyze_rocprof._gpu_busy_denominator_ns(bundle, naive_sum)  # noqa: SLF001
+    denom = analyze_rocprof._gpu_busy_denominator_ns(bundle, naive_sum)  # noqa: SLF001  # LW-920199; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
     assert denom <= naive_sum + 1e-6
     # And when the two windows don't overlap at all, merging changes nothing.
     if gap_ns >= dur:
@@ -399,7 +398,7 @@ def test_gpu_busy_denominator_never_exceeds_the_naive_sum(tmp_path_factory, gap_
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_idle_gaps_finds_the_largest_gap(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_idle_gaps_finds_the_largest_gap(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910149; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _kernel_trace(
         d,
@@ -417,7 +416,7 @@ def test_cmd_idle_gaps_finds_the_largest_gap(tmp_path, capsys):  # noqa: ANN001,
     assert "kernel_c" in out
 
 
-def test_cmd_idle_gaps_needs_a_trace_not_just_stats(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_idle_gaps_needs_a_trace_not_just_stats(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910150; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _kernel_stats(d, "some_kernel,5,10000,1000,3000")
 
@@ -432,7 +431,7 @@ def test_cmd_idle_gaps_needs_a_trace_not_just_stats(tmp_path, capsys):  # noqa: 
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_cpu_overhead_computes_matched_launch_bound_ratio(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_cpu_overhead_computes_matched_launch_bound_ratio(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910151; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     # CPU launch overhead (100ns) exceeds GPU exec time (50ns) -> launch-bound.
     _kernel_trace(d, "tiny_kernel,0,0,1,1000,1050,4242")
@@ -450,7 +449,7 @@ def test_cmd_cpu_overhead_computes_matched_launch_bound_ratio(tmp_path, capsys):
     assert "LAUNCH-BOUND" in out
 
 
-def test_cmd_cpu_overhead_falls_back_to_coarse_stats_ratio(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_cpu_overhead_falls_back_to_coarse_stats_ratio(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910152; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _kernel_stats(d, "some_kernel,5,1000,100,300")
     _hip_api_stats(d, "hipLaunchKernel,5,5000,800,1200")
@@ -462,7 +461,7 @@ def test_cmd_cpu_overhead_falls_back_to_coarse_stats_ratio(tmp_path, capsys):  #
     assert "Coarse CPU-launch-time / GPU-kernel-time ratio" in out
 
 
-def test_cmd_cpu_overhead_reports_no_data(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_cpu_overhead_reports_no_data(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910153; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     cmd_cpu_overhead(_ns(str(tmp_path)))
     out = capsys.readouterr().out
     assert "no HIP API data found" in out
@@ -473,7 +472,7 @@ def test_cmd_cpu_overhead_reports_no_data(tmp_path, capsys):  # noqa: ANN001, AN
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_memory_reports_direction_bytes_and_bandwidth(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_memory_reports_direction_bytes_and_bandwidth(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910154; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _memory_copy_trace(
         d,
@@ -490,7 +489,7 @@ def test_cmd_memory_reports_direction_bytes_and_bandwidth(tmp_path, capsys):  # 
     assert "Total memory copy" in out
 
 
-def test_cmd_memory_reports_no_data(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_memory_reports_no_data(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910155; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     cmd_memory(_ns(str(tmp_path)))
     out = capsys.readouterr().out
     assert "no memory copy data found" in out
@@ -501,7 +500,7 @@ def test_cmd_memory_reports_no_data(tmp_path, capsys):  # noqa: ANN001, ANN201  
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_graphs_reports_healthy_attribution_with_no_graph_launches(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_graphs_reports_healthy_attribution_with_no_graph_launches(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910156; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _kernel_trace(d, "kernel_a,0,0,1,0,1000,4242")
     _hip_api_trace(d, "hipLaunchKernel,1,0,100,4242")
@@ -513,7 +512,7 @@ def test_cmd_graphs_reports_healthy_attribution_with_no_graph_launches(tmp_path,
     assert "should be reliable" in out
 
 
-def test_cmd_graphs_flags_degraded_attribution_under_heavy_graph_use(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_graphs_flags_degraded_attribution_under_heavy_graph_use(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910157; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     # One hipGraphLaunch call fans out into many kernels sharing its
     # Correlation_Id, and there is only one direct hipLaunchKernel call.
@@ -540,7 +539,7 @@ def test_cmd_graphs_flags_degraded_attribution_under_heavy_graph_use(tmp_path, c
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_host_idle_flags_a_mostly_idle_capture(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_host_idle_flags_a_mostly_idle_capture(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910158; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     # One tiny kernel inside a huge capture window -> mostly host-idle.
     _kernel_trace(d, "one_kernel,0,0,1,0,10,4242")
@@ -553,7 +552,7 @@ def test_cmd_host_idle_flags_a_mostly_idle_capture(tmp_path, capsys):  # noqa: A
     assert "re-capture under active load" in out
 
 
-def test_cmd_host_idle_verdict_ok_when_gpu_is_active(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_host_idle_verdict_ok_when_gpu_is_active(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910159; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _kernel_trace(
         d,
@@ -567,7 +566,7 @@ def test_cmd_host_idle_verdict_ok_when_gpu_is_active(tmp_path, capsys):  # noqa:
     assert "trace looks valid" in out
 
 
-def test_cmd_host_idle_reports_no_timestamped_data(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_host_idle_reports_no_timestamped_data(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910160; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _kernel_stats(d, "some_kernel,5,1000,100,300")
 
@@ -582,13 +581,13 @@ def test_cmd_host_idle_reports_no_timestamped_data(tmp_path, capsys):  # noqa: A
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_query_explains_when_no_rocpd_db_is_present(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_query_explains_when_no_rocpd_db_is_present(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910161; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     cmd_query(_ns(str(tmp_path), sql="select 1"))
     out = capsys.readouterr().out
     assert "no rocpd SQLite" in out
 
 
-def test_cmd_query_runs_sql_against_a_rocpd_db(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_query_runs_sql_against_a_rocpd_db(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910162; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     db_path = d / "trace.db"
     conn = sqlite3.connect(str(db_path))
@@ -605,7 +604,7 @@ def test_cmd_query_runs_sql_against_a_rocpd_db(tmp_path, capsys):  # noqa: ANN00
     assert "2\tb" in out
 
 
-def test_cmd_query_reports_sql_errors_and_exits_nonzero(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_query_reports_sql_errors_and_exits_nonzero(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910163; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     sqlite3.connect(str(d / "trace.db")).close()
 
@@ -621,7 +620,7 @@ def test_cmd_query_reports_sql_errors_and_exits_nonzero(tmp_path, capsys):  # no
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_summary_runs_every_section_and_stays_prompt_sized(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_summary_runs_every_section_and_stays_prompt_sized(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910164; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _mixed_family_trace(d)
     _hip_api_trace(
@@ -696,7 +695,7 @@ _MARKER_FAMILY: dict[str, str] = {
 
 @given(marker=st.sampled_from(tuple(_MARKER_FAMILY)), data=st.data())
 @FAST
-def test_classify_family_is_invariant_to_short_name_and_namespace_noise(marker, data):  # noqa: ANN001, ANN201  # tracked: #288
+def test_classify_family_is_invariant_to_short_name_and_namespace_noise(marker, data):  # noqa: ANN001, ANN201  # LW-910165; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     name = data.draw(wrap_with_namespace_and_template_noise(marker))
     expected = _MARKER_FAMILY[marker]
     # Build the exclusion set from _FAMILY_RULES: every marker belonging to
@@ -704,7 +703,7 @@ def test_classify_family_is_invariant_to_short_name_and_namespace_noise(marker, 
     # is incomplete (e.g. missing "asm_pa_" from AITER); using the full
     # classifier's rules ensures we skip all collisions.
     other_markers = set()
-    for family_name, markers in analyze_rocprof._FAMILY_RULES:  # noqa: SLF001
+    for family_name, markers in analyze_rocprof._FAMILY_RULES:  # noqa: SLF001  # LW-920200; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
         if family_name != expected:
             other_markers.update(markers)
     assume(not any(m in name.lower() for m in other_markers))
@@ -732,7 +731,7 @@ _KNOWN_COLUMN_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 @given(data=st.data())
 @FAST
-def test_get_resolves_known_aliases_under_permutation_case_and_unknown_columns(data):  # noqa: ANN001, ANN201  # tracked: #288
+def test_get_resolves_known_aliases_under_permutation_case_and_unknown_columns(data):  # noqa: ANN001, ANN201  # LW-910166; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     names: list[str] = []
     values: list[object] = []
     for value, aliases in _KNOWN_COLUMN_SPECS:
@@ -751,7 +750,7 @@ def test_get_resolves_known_aliases_under_permutation_case_and_unknown_columns(d
         assert _get(row, aliases) == expected
 
 
-def test_cmd_kernels_handles_a_header_only_kernel_trace_cleanly(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_kernels_handles_a_header_only_kernel_trace_cleanly(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910167; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     (d / "out_kernel_trace.csv").write_text("Kernel_Name,Start_Timestamp,End_Timestamp\n")
 
@@ -770,7 +769,7 @@ _DIR_NAME = st.text(alphabet=string.ascii_letters + string.digits + "_-", min_si
 
 @given(parts=st.lists(_DIR_NAME, min_size=0, max_size=3))
 @FEWER
-def test_discover_finds_trace_files_under_arbitrary_nesting_depth(tmp_path_factory, parts):  # noqa: ANN001, ANN201  # tracked: #288
+def test_discover_finds_trace_files_under_arbitrary_nesting_depth(tmp_path_factory, parts):  # noqa: ANN001, ANN201  # LW-910168; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     root = tmp_path_factory.mktemp("nesting")
     d = root.joinpath(*parts) if parts else root
     d.mkdir(parents=True, exist_ok=True)
@@ -793,7 +792,7 @@ def test_discover_finds_trace_files_under_arbitrary_nesting_depth(tmp_path_facto
 # ---------------------------------------------------------------------------
 
 
-def test_union_duration_merges_overlapping_intervals_without_double_counting():  # noqa: ANN201  # tracked: #288
+def test_union_duration_merges_overlapping_intervals_without_double_counting():  # noqa: ANN201  # LW-910169; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     events = [
         {"start_ns": 0.0, "end_ns": 100.0},
         {"start_ns": 50.0, "end_ns": 150.0},  # overlaps
@@ -804,7 +803,7 @@ def test_union_duration_merges_overlapping_intervals_without_double_counting(): 
 
 @given(ivals=intervals())
 @FAST
-def test_union_duration_never_exceeds_the_window(ivals):  # noqa: ANN001, ANN201  # tracked: #288
+def test_union_duration_never_exceeds_the_window(ivals):  # noqa: ANN001, ANN201  # LW-910170; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     events = [{"start_ns": float(s), "end_ns": float(s + d)} for s, d in ivals]
     busy = _union_duration(events)
 
@@ -818,20 +817,20 @@ def test_union_duration_never_exceeds_the_window(ivals):  # noqa: ANN001, ANN201
 
 @given(ivals=intervals())
 @FAST
-def test_gaps_for_key_busy_plus_all_gaps_equals_window_with_no_negative_gap(ivals):  # noqa: ANN001, ANN201  # tracked: #288
+def test_gaps_for_key_busy_plus_all_gaps_equals_window_with_no_negative_gap(ivals):  # noqa: ANN001, ANN201  # LW-910171; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # Force every positive gap to be reported (no threshold filtering), so
     # busy + idle can be checked against the window exactly using only real
     # merge/gap code, not a reimplementation of it. Set directly on the module
     # (not via the function-scoped `monkeypatch` fixture, which hypothesis
     # flags as unsafe to reuse across `@given` examples) and restore it
     # unconditionally afterwards.
-    original_threshold = analyze_rocprof._IDLE_GAP_THRESHOLD_NS  # noqa: SLF001  # tracked: #288
-    analyze_rocprof._IDLE_GAP_THRESHOLD_NS = -1.0  # noqa: SLF001  # ty: ignore[invalid-assignment]  # tracked: #288
+    original_threshold = analyze_rocprof._IDLE_GAP_THRESHOLD_NS  # noqa: SLF001  # LW-910172; this test exercises the standalone script's underscore-prefixed helpers directly; there is no other entry point
+    analyze_rocprof._IDLE_GAP_THRESHOLD_NS = -1.0  # noqa: SLF001  # ty: ignore[invalid-assignment]  # LW-900103; monkeypatches the analyzer's module-level threshold constant for this one deterministic test
     try:
         evs = [(float(s), float(s + d), f"k{i}") for i, (s, d) in enumerate(ivals)]
         busy_ns, gaps = _gaps_for_key(("agent0", "queue0"), evs)
     finally:
-        analyze_rocprof._IDLE_GAP_THRESHOLD_NS = original_threshold  # noqa: SLF001  # tracked: #288
+        analyze_rocprof._IDLE_GAP_THRESHOLD_NS = original_threshold  # noqa: SLF001  # LW-910173; this test exercises the standalone script's underscore-prefixed helpers directly; there is no other entry point
 
     assert all(gap[3] >= 0 for gap in gaps)
     if len(evs) < 2:
@@ -852,7 +851,7 @@ def _write_kernel_trace_csv(path: Path, header: list[str], rows: list[list[objec
 
 @given(name=huge_kernel_name())
 @FEWER
-def test_cmd_kernels_and_idle_gaps_bound_line_width_for_huge_kernel_names(tmp_path_factory, name):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_kernels_and_idle_gaps_bound_line_width_for_huge_kernel_names(tmp_path_factory, name):  # noqa: ANN001, ANN201  # LW-910174; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     root = tmp_path_factory.mktemp("huge-name")
     d = _process_dir(root)
     _write_kernel_trace_csv(
@@ -930,13 +929,13 @@ def test_classify_family_does_not_misclassify_templated_or_mangled_names_as_trit
 
 @given(name=triton_jit_style_kernel_name())
 @FAST
-def test_classify_family_matches_triton_jit_style_names(name):  # noqa: ANN001, ANN201  # tracked: #288
+def test_classify_family_matches_triton_jit_style_names(name):  # noqa: ANN001, ANN201  # LW-910175; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     assert _classify_family(name) == "Triton (JIT)"
 
 
 @given(name=cpp_template_kernel_name())
 @FAST
-def test_classify_family_never_matches_templated_names_via_the_triton_fallback(name):  # noqa: ANN001, ANN201  # tracked: #288
+def test_classify_family_never_matches_templated_names_via_the_triton_fallback(name):  # noqa: ANN001, ANN201  # LW-910176; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     # The base name is deliberately built to look Triton-shaped (leading
     # underscore chance, "_kernel" substring); only the "<...>" template args
     # should rule out the fallback, regardless of what _FAMILY_RULES pattern
@@ -971,7 +970,7 @@ def test_classify_family_does_not_misattribute_interior_substring_collisions() -
     family_marker=st.sampled_from(
         [
             (family, sub)
-            for family, subs in analyze_rocprof._FAMILY_RULES  # noqa: SLF001
+            for family, subs in analyze_rocprof._FAMILY_RULES  # noqa: SLF001  # LW-920201; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
             for sub in subs
         ]
     ),
@@ -1000,7 +999,7 @@ def test_classify_family_requires_an_identifier_boundary_before_the_marker(
     # covers cross-family collisions.
     other_markers = {
         sub
-        for _fam, subs in analyze_rocprof._FAMILY_RULES  # noqa: SLF001
+        for _fam, subs in analyze_rocprof._FAMILY_RULES  # noqa: SLF001  # LW-920202; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
         for sub in subs
     } - {marker}
     assume(not any(m in interior.lower() for m in other_markers))
@@ -1024,7 +1023,7 @@ def test_classify_family_requires_an_identifier_boundary_before_the_marker(
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_memory_reports_bytes_unavailable_instead_of_a_misleading_zero(tmp_path, capsys):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_memory_reports_bytes_unavailable_instead_of_a_misleading_zero(tmp_path, capsys):  # noqa: ANN001, ANN201  # LW-910177; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     d = _process_dir(tmp_path)
     _write(
         d / "out_memory_copy_trace.csv",
@@ -1045,7 +1044,7 @@ def test_cmd_memory_reports_bytes_unavailable_instead_of_a_misleading_zero(tmp_p
 
 @given(byte_counts=st.lists(st.integers(min_value=0, max_value=10_000_000), min_size=1, max_size=6))
 @FAST
-def test_cmd_memory_bytes_available_never_prints_unavailable_note(tmp_path_factory, byte_counts):  # noqa: ANN001, ANN201  # tracked: #288
+def test_cmd_memory_bytes_available_never_prints_unavailable_note(tmp_path_factory, byte_counts):  # noqa: ANN001, ANN201  # LW-910178; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
     root = tmp_path_factory.mktemp("mem-bytes")
     d = _process_dir(root)
     rows = [f"HostToDevice,{i * 10000},{i * 10000 + 500},{b}" for i, b in enumerate(byte_counts)]
@@ -1101,9 +1100,9 @@ def test_families_on_the_real_graph_trace_classifies_the_replayed_kernels_too() 
 
 
 def test_families_on_the_real_graph_trace_flags_the_implausible_fmha_outlier() -> None:
-    """Regression for the "27 calls, 9.13s, 338ms/call, 31% GPU" investigation
-    (docs/contributing/amd-profiler-worklog.md): the real graph-mode trace's
-    Composable Kernel FmhaFwdKernel dispatches (trimmed to 3 of the real 27 in
+    """Regression for the "27 calls, 9.13s, 338ms/call, 31% GPU" investigation:
+    the real graph-mode trace's Composable Kernel FmhaFwdKernel dispatches
+    (trimmed to 3 of the real 27 in
     this fixture) average ~336ms/call while every other sampled family
     averages tens-to-hundreds of *microseconds* per call -- a >1000x outlier
     that must not pass through silently as a plain %GPU line.
@@ -1128,7 +1127,7 @@ def test_families_on_the_real_graph_trace_flags_the_implausible_fmha_outlier() -
     )
 )
 @FAST
-def test_outlier_family_note_never_fires_when_every_family_is_within_the_threshold(  # noqa: ANN201
+def test_outlier_family_note_never_fires_when_every_family_is_within_the_threshold(  # noqa: ANN201  # LW-920203; tracked migration debt from the pre-manifest ratchet scheme
     avgs_ns: list[float],
 ):
     # If every family's per-call average is within _OUTLIER_AVG_MULTIPLE of
@@ -1141,7 +1140,7 @@ def test_outlier_family_note_never_fires_when_every_family_is_within_the_thresho
     assert _outlier_family_note(ordered) is None
 
 
-def test_outlier_family_note_silent_exactly_at_the_threshold_multiple():  # noqa: ANN201
+def test_outlier_family_note_silent_exactly_at_the_threshold_multiple():  # noqa: ANN201  # LW-920204; tracked migration debt from the pre-manifest ratchet scheme
     """Deterministic pin of the boundary the property test above only sometimes explores.
 
     A top family averaging *exactly* 20x (``_OUTLIER_AVG_MULTIPLE``) the
@@ -1164,7 +1163,7 @@ def test_outlier_family_note_silent_exactly_at_the_threshold_multiple():  # noqa
     n_peers=st.integers(min_value=2, max_value=8),
 )
 @FAST
-def test_outlier_family_note_always_fires_when_one_family_dwarfs_its_peers(  # noqa: ANN201
+def test_outlier_family_note_always_fires_when_one_family_dwarfs_its_peers(  # noqa: ANN201  # LW-920205; tracked migration debt from the pre-manifest ratchet scheme
     base_ns: float, multiple: float, n_peers: int
 ):
     # Generalizes the real-graph-trace regression above: ANY family whose
@@ -1223,7 +1222,7 @@ def _stamp(ns: float) -> dict:
     return {"monotonic_ns": ns, "clock_monotonic_ns": ns, "realtime_ns": ns}
 
 
-def _write_manifest(  # noqa: PLR0913
+def _write_manifest(  # noqa: PLR0913  # LW-920206; tracked migration debt from the pre-manifest ratchet scheme
     root: Path,
     *,
     capture_start_ns: float,

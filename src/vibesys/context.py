@@ -7,11 +7,11 @@ import time
 import uuid
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import Any, TextIO, TypeVar, overload
+from typing import TYPE_CHECKING, Any, TextIO, TypeVar, cast, overload
 
 from pydantic import BaseModel
 
@@ -88,6 +88,7 @@ from vibesys.run.round_transaction import (
     RoundRecoveryOutcome,
     RoundTransaction,
     RoundTransactionCoordinator,
+    RoundTransactionError,
 )
 from vibesys.sandbox.run_environment import (
     RunEnvironment,
@@ -116,6 +117,9 @@ from vs_project.api import (
     generate_run_id,
 )
 from vs_sandbox.api import HostResource
+
+if TYPE_CHECKING:
+    from vs_agent.api import AgentSpec
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -160,9 +164,11 @@ def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
         return None
     p = Path(raw).expanduser().resolve()
     if not p.exists():
-        raise ValueError(f"{label} path does not exist: {raw}")  # noqa: TRY003  # tracked: #288
+        message = f"{label} path does not exist: {raw}"
+        raise ValueError(message)
     if not p.is_dir():
-        raise ValueError(f"{label} path is not a directory: {raw}")  # noqa: TRY003  # tracked: #288
+        message = f"{label} path is not a directory: {raw}"
+        raise ValueError(message)
     return p
 
 
@@ -244,14 +250,51 @@ def _coerce_skills_dirs(raw_dirs: list[str] | None) -> list[Path]:
             p = PROJECT_ROOT / p
         p = p.resolve()
         if not p.exists():
-            raise ValueError(f"--skills-dir path does not exist: {raw}")  # noqa: TRY003  # tracked: #288
+            message = f"--skills-dir path does not exist: {raw}"
+            raise ValueError(message)
         if not p.is_dir():
-            raise ValueError(f"--skills-dir path is not a directory: {raw}")  # noqa: TRY003  # tracked: #288
+            message = f"--skills-dir path is not a directory: {raw}"
+            raise ValueError(message)
         result.append(p)
     return result
 
 
-def create_run_context(  # noqa: PLR0913  # tracked: #288
+@dataclass(frozen=True, slots=True)
+class _RunContextOptions:
+    """Inputs needed to assemble a run after the public factory validates them."""
+
+    config: Config
+    exp_name: str
+    input_path: str
+    accuracy_command: str
+    benchmark_command: str
+    runs_dir: Path | None
+    task_name: str | None
+    task_root: Path | None
+    workspace_sources: tuple[WorkspaceSource, ...]
+    evaluator_path: Path | None
+    evaluator_package_root: Path | None
+    benchmark_output_argument: str | None
+    objective: str | None
+    existing: bool
+    project_configuration: RunConfiguration
+    trusted_input_baseline: str | None
+    debug: bool
+    profiler_kind: ProfilerKind
+    profiler_domain: DomainName
+    skills_dirs: list[str] | None
+    run_environment: RunEnvironmentSpec | None
+    agent_backend: str | None
+    cli_provider: str | None
+    backend: ComputeBackend
+    environment_hooks: EnvironmentHooks | None
+    remote_repo: str | None
+    repo_visibility: RepositoryVisibility
+    agent_state_model_type: type[BaseModel] | None
+    integration: LocalRunIntegration | None
+
+
+def create_run_context(  # noqa: PLR0913  # lint-waiver: LW-008202 [PLR0913]; the CLI factory preserves its named setup options as a stable caller interface.
     config: Config,
     exp_name: str,
     input_path: str,
@@ -295,35 +338,37 @@ def create_run_context(  # noqa: PLR0913  # tracked: #288
     try:
         return _assemble_run_context(
             teardown_stack=teardown_stack,
-            config=config,
-            exp_name=exp_name,
-            input_path=input_path,
-            accuracy_command=accuracy_command,
-            benchmark_command=benchmark_command,
-            runs_dir=runs_dir,
-            task_name=task_name,
-            task_root=task_root,
-            workspace_sources=workspace_sources,
-            evaluator_path=evaluator_path,
-            evaluator_package_root=evaluator_package_root,
-            benchmark_output_argument=benchmark_output_argument,
-            objective=objective,
-            existing=existing,
-            project_configuration=project_configuration,
-            trusted_input_baseline=trusted_input_baseline,
-            debug=debug,
-            profiler_kind=profiler_kind,
-            profiler_domain=profiler_domain,
-            skills_dirs=skills_dirs,
-            run_environment=run_environment,
-            agent_backend=agent_backend,
-            cli_provider=cli_provider,
-            backend=backend,
-            environment_hooks=environment_hooks,
-            remote_repo=remote_repo,
-            repo_visibility=repo_visibility,
-            agent_state_model_type=agent_state_model_type,
-            integration=integration,
+            options=_RunContextOptions(
+                config=config,
+                exp_name=exp_name,
+                input_path=input_path,
+                accuracy_command=accuracy_command,
+                benchmark_command=benchmark_command,
+                runs_dir=runs_dir,
+                task_name=task_name,
+                task_root=task_root,
+                workspace_sources=workspace_sources,
+                evaluator_path=evaluator_path,
+                evaluator_package_root=evaluator_package_root,
+                benchmark_output_argument=benchmark_output_argument,
+                objective=objective,
+                existing=existing,
+                project_configuration=project_configuration,
+                trusted_input_baseline=trusted_input_baseline,
+                debug=debug,
+                profiler_kind=profiler_kind,
+                profiler_domain=profiler_domain,
+                skills_dirs=skills_dirs,
+                run_environment=run_environment,
+                agent_backend=agent_backend,
+                cli_provider=cli_provider,
+                backend=backend,
+                environment_hooks=environment_hooks,
+                remote_repo=remote_repo,
+                repo_visibility=repo_visibility,
+                agent_state_model_type=agent_state_model_type,
+                integration=integration,
+            ),
         )
     except BaseException as construction_error:
         _close_after_construction_failure(teardown_stack, construction_error)
@@ -336,46 +381,45 @@ def _close_after_construction_failure(
     """Unwind partial resource construction without replacing its root cause."""
     try:
         teardown_stack.close()
-    except BaseException as cleanup_error:  # noqa: BLE001  # tracked: #288
+    except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-008203 [BLE001]; cleanup must annotate the original construction failure even if teardown raises a BaseException.
         construction_error.add_note(
             "Additional error while cleaning up partial resource construction: "
             f"{type(cleanup_error).__name__}: {cleanup_error}"
         )
 
 
-def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: #288
-    *,
-    teardown_stack: ExitStack,
-    config: Config,
-    exp_name: str,
-    input_path: str,
-    accuracy_command: str,
-    benchmark_command: str,
-    runs_dir: Path | None,
-    task_name: str | None,
-    task_root: Path | None,
-    workspace_sources: tuple[WorkspaceSource, ...],
-    evaluator_path: Path | None,
-    evaluator_package_root: Path | None,
-    benchmark_output_argument: str | None,
-    objective: str | None,
-    existing: bool,
-    project_configuration: RunConfiguration,
-    trusted_input_baseline: str | None,
-    debug: bool,
-    profiler_kind: ProfilerKind,
-    profiler_domain: DomainName,
-    skills_dirs: list[str] | None,
-    run_environment: RunEnvironmentSpec | None,
-    agent_backend: str | None,
-    cli_provider: str | None,
-    backend: ComputeBackend,
-    environment_hooks: EnvironmentHooks | None,
-    remote_repo: str | None,
-    repo_visibility: RepositoryVisibility,
-    agent_state_model_type: type[BaseModel] | None,
-    integration: LocalRunIntegration | None,
+def _assemble_run_context(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0915]; ordered resource setup and ExitStack rollback share mutable lifecycle state, which helper boundaries would obscure.
+    *, teardown_stack: ExitStack, options: _RunContextOptions
 ) -> "_RunContext":
+    config = options.config
+    exp_name = options.exp_name
+    input_path = options.input_path
+    accuracy_command = options.accuracy_command
+    benchmark_command = options.benchmark_command
+    runs_dir = options.runs_dir
+    task_name = options.task_name
+    task_root = options.task_root
+    workspace_sources = options.workspace_sources
+    evaluator_path = options.evaluator_path
+    evaluator_package_root = options.evaluator_package_root
+    benchmark_output_argument = options.benchmark_output_argument
+    objective = options.objective
+    existing = options.existing
+    project_configuration = options.project_configuration
+    trusted_input_baseline = options.trusted_input_baseline
+    debug = options.debug
+    profiler_kind = options.profiler_kind
+    profiler_domain = options.profiler_domain
+    skills_dirs = options.skills_dirs
+    run_environment = options.run_environment
+    agent_backend = options.agent_backend
+    cli_provider = options.cli_provider
+    backend = options.backend
+    environment_hooks = options.environment_hooks
+    remote_repo = options.remote_repo
+    repo_visibility = options.repo_visibility
+    agent_state_model_type = options.agent_state_model_type
+    integration = options.integration
     context_start = time.perf_counter()
     # Boot spans recorded before this function ran (the dispatch preamble)
     # come first, so the run log reads in the order the work happened once
@@ -411,11 +455,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             run_id = exp_name if existing else generate_run_id(exp_name)
             collection_root = runs_dir.expanduser().resolve() if runs_dir is not None else None
             copied_project = not existing and collection_root is not None
-            if copied_project:
-                assert collection_root is not None  # noqa: S101  # tracked: #288
-                project_root = collection_root / run_id
-            else:
-                project_root = input_dir
+            project_root = collection_root / run_id if copied_project else input_dir
             evaluator_source = _coerce_dir(evaluator_path, "evaluator.source")
 
             if not copied_project and workspace_sources:
@@ -468,7 +508,10 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 environment_default_profiler_kind=environment.default_profiler_kind,
                 environment_supported_profiler_kinds=environment.supported_profiler_kinds,
             )
-            driver_supports_mcp = agent_driver_supports_mcp_servers(agent_spec)
+            supports_mcp_servers = cast(
+                "Callable[[AgentSpec], bool | None]", agent_driver_supports_mcp_servers
+            )
+            driver_supports_mcp = supports_mcp_servers(agent_spec)
             if resolved_profiler_kind in ACTIVE_PROFILER_KINDS and driver_supports_mcp is False:
                 driver_name = resolve_agent_driver(config)
                 definition = profiler_definition(resolved_profiler_kind)
@@ -515,10 +558,10 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             environment_patch: EnvironmentPatch | None = None
 
             def _teardown_environment_hooks() -> None:
-                assert environment_context is not None  # noqa: S101  # tracked: #288
+                context = cast("EnvironmentContext", environment_context)
                 try:
-                    hooks.teardown(environment_context)
-                except Exception as exc:  # noqa: BLE001  # tracked: #288
+                    hooks.teardown(context)
+                except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-008205 [BLE001]; hook teardown is best effort and logs arbitrary hook failures without masking run cleanup.
                     hook_log[0](f"[warn] environment hook teardown failed: {exc}")
 
             workspace_files = Workspace(
@@ -531,7 +574,6 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
             )
             construction_complete = False
             if copied_project:
-                assert collection_root is not None  # noqa: S101  # tracked: #288
 
                 def _remove_incomplete_project() -> None:
                     if not construction_complete and project_root.exists():
@@ -621,7 +663,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                     evaluator_source=evaluator_source,
                 ),
             )
-            git.init(existing, trusted_input_baseline=trusted_input_baseline)
+            git.init(existing=existing, trusted_input_baseline=trusted_input_baseline)
         with boot_trace.span("project_state_resume"):
             effective_configuration = project_configuration.model_copy(
                 update={"profiler": resolved_profiler_kind.value}
@@ -782,7 +824,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
                 )
                 environment_patch = hooks.prepare(environment_context)
                 teardown_stack.callback(_teardown_environment_hooks)
-            assert environment_patch is not None  # noqa: S101  # tracked: #288
+            environment_patch = cast("EnvironmentPatch", environment_patch)
 
             plan = workspace_files.plan_setup(
                 existing=True,
@@ -1041,7 +1083,7 @@ def _assemble_run_context(  # noqa: C901, PLR0912, PLR0913, PLR0915  # tracked: 
     return result
 
 
-def create_candidate_context(  # noqa: PLR0913  # tracked: #288
+def create_candidate_context(  # noqa: PLR0913  # lint-waiver: LW-008206 [PLR0913]; this factory keeps candidate workspace options explicit for its caller.
     parent: "_RunContext",
     *,
     config: Config,
@@ -1086,7 +1128,7 @@ def create_candidate_context(  # noqa: PLR0913  # tracked: #288
         raise
 
 
-def _assemble_candidate_context(  # noqa: PLR0913  # tracked: #288
+def _assemble_candidate_context(  # noqa: PLR0913  # lint-waiver: LW-008207 [PLR0913]; these values are the candidate's resource ownership boundary and are assembled together for teardown.
     *,
     teardown_stack: ExitStack,
     parent: "_RunContext",
@@ -1283,7 +1325,7 @@ class _RunContext:
     sandbox session.
     """
 
-    def __init__(  # noqa: ANN204, PLR0913  # tracked: #288
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-008208 [PLR0913]; `_RunContext` receives already-owned runtime resources explicitly, without a second mutable parameter container.
         self,
         *,
         backend: ComputeBackend,
@@ -1325,7 +1367,7 @@ class _RunContext:
         run_id: str,
         round_transaction_coordinator: RoundTransactionCoordinator | None = None,
         agent_host_resources: tuple[HostResource, ...] = (),
-    ):
+    ) -> None:
         self.backend = backend
         # Retained so a candidate sub-context can hand its own agent runner the
         # same declarations the parent computed, rather than recomputing them
@@ -1405,7 +1447,7 @@ class _RunContext:
         if self._round_transaction_coordinator is None:
             return
         if self._pending_round_transaction is not None:
-            raise RuntimeError("a completed-round transaction is already active")  # noqa: TRY003  # tracked: #288
+            raise RoundTransactionError.already_active()
         self._pending_round_transaction = self._round_transaction_coordinator.begin(
             round_number,
             state_transition=state_transition,
@@ -1417,7 +1459,7 @@ class _RunContext:
             return
         transaction = self._pending_round_transaction
         if transaction is None:
-            raise RuntimeError("begin_completed_round must precede project round persistence")  # noqa: TRY003  # tracked: #288
+            raise RoundTransactionError.begin_required()
         transaction.complete()
         self._pending_round_transaction = None
 
@@ -1488,7 +1530,7 @@ class _RunContext:
             return None
         return self._progress_stack[-1]
 
-    def invoke(  # noqa: PLR0913  # tracked: #288
+    def invoke(  # noqa: PLR0913  # lint-waiver: LW-008209 [PLR0913]; this typed wrapper keeps core agent options named while preserving direct provider-extension forwarding.
         self,
         *,
         kind: str,
@@ -1498,7 +1540,7 @@ class _RunContext:
         fallback_factory: Callable[[], T],
         round_label: str = "",
         progress: AgentProgress | None = None,
-        **extra: Any,  # noqa: ANN401  # tracked: #288
+        **extra: Any,  # noqa: ANN401  # lint-waiver: LW-008210 [ANN401]; arbitrary provider-specific options are forwarded unchanged to the protocol method.
     ) -> T:
         """Invoke an agent through ``self.agent_client`` with workspace+env defaults.
 
@@ -1574,10 +1616,11 @@ class _RunContext:
                 progress=progress if progress is not None else self.current_progress(),
                 **extra,
             )
-            return result  # noqa: RET504, TRY300  # tracked: #288
         except BaseException as exc:
             error = exc
             raise
+        else:
+            return result
         finally:
             status = _execution_status(error)
             error_text = f"{type(error).__name__}: {error}" if error is not None else None

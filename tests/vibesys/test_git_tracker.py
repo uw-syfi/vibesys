@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support import run_test_command
 
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
@@ -27,8 +27,8 @@ _IDENTITY = {
 
 
 def _git(root: Path, *args: str, check: bool = True) -> str:
-    return subprocess.run(  # noqa: S603  # tracked: #288
-        ["git", *args],  # noqa: S607  # tracked: #288
+    return run_test_command(
+        ["git", *args],
         cwd=root,
         check=check,
         capture_output=True,
@@ -583,11 +583,11 @@ def test_events_report_unreadable_path_exclusions(tmp_path: Path) -> None:
     tracker, events = _recording_tracker(tmp_path)
     unreadable = tmp_path / "system_profile.json"
     unreadable.write_text("{}", encoding="utf-8")
-    os.chmod(unreadable, 0o000)  # noqa: PTH101
+    unreadable.chmod(0o000)
     try:
         tracker.snapshot("round-1")
     finally:
-        os.chmod(unreadable, 0o644)  # noqa: PTH101
+        unreadable.chmod(0o644)
 
     assert any("/system_profile.json" in paths for paths in events.excluded)
 

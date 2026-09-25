@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from server.api.service import RunApi
 from server.chat.manager import ChatManager
 from server.controller import RunController
-from server.execution import ExecutionTracker
+from server.execution import AgentExecutionRequest, ExecutionHandle, ExecutionTracker
 from server.integration import RunIntegrationAdapter
 from server.journal import EventJournal
 from server.read_model import RunInspector
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from server.chat.factory import ChatAgentBuilder
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunView
+    from vs_agent.api import AgentSelection
     from vs_project.api import Project
 
 
@@ -66,6 +67,33 @@ class ServerParts:
     core_events: CoreEventJournal
     control: RunControlChannel
 
+    def start_execution(
+        self,
+        *args: str,
+        participates_in_run_control: bool = True,
+        emit_lifecycle: bool = True,
+        agent_selection: AgentSelection | None = None,
+    ) -> ExecutionHandle:
+        """Build a lifecycle request for terse controller-focused tests."""
+        if len(args) not in (3, 4):
+            message = "start_execution expects kind, round, prompt, and optional system prompt"
+            raise TypeError(message)
+        kind, round_label, user_prompt = args[:3]
+        system_prompt = args[3] if len(args) == 4 else ""
+        return self.controller.start_agent_execution(
+            AgentExecutionRequest(
+                kind=kind,
+                round_label=round_label,
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                participates_in_run_control=participates_in_run_control,
+                emit_lifecycle=emit_lifecycle,
+                driver=agent_selection.driver if agent_selection is not None else None,
+                provider=agent_selection.provider if agent_selection is not None else None,
+                model=agent_selection.model if agent_selection is not None else None,
+            )
+        )
+
     def attach(
         self,
         log_dir: Path,
@@ -93,10 +121,10 @@ class ServerParts:
         """Feed a projected view to the API as `RunSession.on_committed_view` would.
 
         Production wires this through `ServerRuntime.drive`
-        (`session.on_committed_view(self.api._observe_committed_state)`); this
+        (`session.on_committed_view(self.api.observe_committed_state)`); this
         harness has no session, so it calls the same method directly.
         """
-        self.api._observe_committed_state(view, changed_keys)  # noqa: SLF001
+        self.api.observe_committed_state(view, changed_keys)
 
 
 def build_server_parts(

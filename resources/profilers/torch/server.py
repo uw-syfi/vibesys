@@ -10,7 +10,7 @@ Launch:
 
     python torch_profiler/server.py
     # or
-    uv run python torch_profiler/server.py
+    uv run python torch_profiler/server.py.
 """
 
 from __future__ import annotations
@@ -23,8 +23,12 @@ import sys
 import threading
 import types
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _HERE = Path(__file__).resolve().parent
 
@@ -36,15 +40,16 @@ for _name in ("_common", "profilers_common"):
     if (_candidate / "capture_runtime.py").is_file():
         sys.path.insert(0, str(_candidate))
         break
-import capture_runtime  # noqa: E402
-import mcp_async  # noqa: E402
+import capture_runtime  # noqa: E402  # LW-920188; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
+import mcp_async  # noqa: E402  # LW-920189; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 
 sys.path.insert(0, str(_HERE))
+# lint-waiver: LW-008019 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
 import analyze_torch_profile  # noqa: E402
-import capture_ops  # noqa: E402
+import capture_ops  # noqa: E402  # LW-920191; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 
 
-def _capture(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
+def _capture(fn: Callable[..., None], **kwargs: object) -> str:
     ns = types.SimpleNamespace(**kwargs)
     buf = io.StringIO()
     try:
@@ -73,19 +78,19 @@ def _resolve_report(report: str) -> str:
     with contextlib.suppress(FileNotFoundError, ValueError):
         primary = capture_runtime.load_manifest(capture_dir).get("primary_trace")
     if not primary:
-        raise FileNotFoundError(  # noqa: TRY003  # tracked: #288
+        raise FileNotFoundError(  # noqa: TRY003  # LW-910136; this is a boundary error that deliberately embeds the offending value for the operator to act on
             f"capture {report!r} resolved to {capture_dir} but has no recorded primary trace "
             "(manifest.json missing 'primary_trace'); pass an explicit trace file path instead."
         )
     return str(capture_dir / primary)
 
 
-def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
+def build_server() -> FastMCP:  # noqa: C901  # LW-910137; this function implements one cohesive parsing/validation routine that resists a clean split
     """Construct the FastMCP instance with torch-profiler analysis tools."""
     mcp = FastMCP("vibesys-torch-profiler")
 
     @mcp.tool()
-    async def profile_ops(  # noqa: PLR0913  # tracked: #288
+    async def profile_ops(  # noqa: PLR0913  # LW-910138; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
         command: str | None = None,
         cwd: str | None = None,
         env: dict | None = None,
@@ -98,8 +103,8 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
         timeout_s: float = 1800.0,
         delay_s: float = 0.0,
         duration_s: float | None = None,
-        record_shapes: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
-        inject: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
+        record_shapes: bool = True,  # noqa: FBT001, FBT002  # LW-910139; this boolean parameter mirrors an external tool's own boolean flag
+        inject: bool = True,  # noqa: FBT001, FBT002  # LW-910140; this boolean parameter mirrors an external tool's own boolean flag
         target: str | None = None,
     ) -> str:
         """Generic in-process torch.profiler capture of any candidate program.
@@ -212,7 +217,7 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
             return capture_runtime.format_busy(exc.active)
 
     @mcp.tool()
-    def start_target(  # noqa: PLR0913  # tracked: #288
+    def start_target(  # noqa: PLR0913  # LW-910141; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
         command: str,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
@@ -411,7 +416,8 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
     return mcp
 
 
-def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
+def main(argv: list[str] | None = None) -> None:
+    """Run the command-line entry point."""
     parser = argparse.ArgumentParser(
         prog="vibesys-torch-mcp",
         description="Stdio MCP server exposing torch.profiler analyses.",

@@ -375,7 +375,7 @@ def discover(report: str) -> DiscoveredReport:
         candidates = [p]
         disc = DiscoveredReport(root=p.parent)
     else:
-        raise FileNotFoundError(f"report path not found: {report}")  # noqa: TRY003
+        raise FileNotFoundError(f"report path not found: {report}")  # noqa: TRY003  # LW-920008; this is a boundary error that deliberately embeds the offending value for the operator to act on
     for f in candidates:
         bucket = _bucket_for(f.name)
         if bucket:
@@ -1111,8 +1111,7 @@ def _get_memcpy_bundle(
 # (process launch -> capture end) in the manifest; rocprofv3's own CSV trace
 # timestamps are CLOCK_MONOTONIC-based ns too (verified against real MI210
 # fixtures: magnitude matches plausible system uptime, many orders of
-# magnitude below a CLOCK_REALTIME epoch value -- see
-# docs/contributing/amd-profiler-worklog.md), so both are directly
+# magnitude below a CLOCK_REALTIME epoch value), so both are directly
 # comparable with no offset math *when they came from the same host/boot*.
 # The functions below turn a requested window name into concrete
 # CLOCK_MONOTONIC-ns bounds, defaulting to 'load' and falling back to 'all'
@@ -1360,7 +1359,7 @@ def family_time_totals(report: str, window: str | None = "load") -> dict[str, fl
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: files  # noqa: ERA001
+# Subcommand: files  # noqa: ERA001  # LW-920009; this is a section-header comment formatted like a heading, not commented-out code
 # ---------------------------------------------------------------------------
 
 
@@ -1377,50 +1376,50 @@ def _print_file_buckets(disc: DiscoveredReport) -> bool:
         ("agent_info", disc.agent_info),
     )
     any_found = False
-    print("\nDiscovered CSV files:")  # noqa: T201
+    print("\nDiscovered CSV files:")  # noqa: T201  # LW-920010; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     for label, files in buckets:
         if not files:
             continue
         any_found = True
         rows = sum(_csv_row_count(f) for f in files)
-        print(f"  {label:<20s}: {len(files)} file(s), {rows} row(s)")  # noqa: T201
+        print(f"  {label:<20s}: {len(files)} file(s), {rows} row(s)")  # noqa: T201  # LW-920011; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     for label, files in (("json", disc.json_files), ("rocpd sqlite (.db)", disc.db_files)):
         if files:
             any_found = True
-            print(f"  {label:<20s}: {len(files)} file(s)")  # noqa: T201
+            print(f"  {label:<20s}: {len(files)} file(s)")  # noqa: T201  # LW-920012; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     if disc.other_csv:
-        print(f"  {'other .csv':<20s}: {len(disc.other_csv)} file(s) (unrecognized — not analyzed)")  # noqa: T201
+        print(f"  {'other .csv':<20s}: {len(disc.other_csv)} file(s) (unrecognized — not analyzed)")  # noqa: T201  # LW-920013; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     if not any_found:
-        print("  (none found)")  # noqa: T201
+        print("  (none found)")  # noqa: T201  # LW-920014; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     return any_found
 
 
 def cmd_files(ns: argparse.Namespace) -> None:
     """Discover output files, process captures, agents, and row counts."""
     disc = discover(ns.report)
-    print(f"Report root: {disc.root}")  # noqa: T201
+    print(f"Report root: {disc.root}")  # noqa: T201  # LW-920015; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
     if not _print_file_buckets(disc):
-        print(f"\n(no rocprofv3 output recognized under {disc.root})")  # noqa: T201
+        print(f"\n(no rocprofv3 output recognized under {disc.root})")  # noqa: T201  # LW-920016; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         return
 
     process_dirs = _process_dirs(disc)
     if process_dirs:
-        print("\nProcess captures:")  # noqa: T201
+        print("\nProcess captures:")  # noqa: T201  # LW-920017; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         for d in process_dirs:
-            print(f"  {_describe_process_dir(d, disc.root)}")  # noqa: T201
+            print(f"  {_describe_process_dir(d, disc.root)}")  # noqa: T201  # LW-920018; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
     agents = _load_agents(disc)
     if agents:
-        print("\nGPU/CPU agents:")  # noqa: T201
+        print("\nGPU/CPU agents:")  # noqa: T201  # LW-920019; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         for a in agents:
-            print(f"  agent {a['agent']:<6s} {a['name']:<24s} gfx={a['gfx']:<12s} type={a['type']}")  # noqa: T201
+            print(f"  agent {a['agent']:<6s} {a['name']:<24s} gfx={a['gfx']:<12s} type={a['type']}")  # noqa: T201  # LW-920020; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
-    print("\nStart with `kernels`, `families`, or `summary`.")  # noqa: T201
+    print("\nStart with `kernels`, `families`, or `summary`.")  # noqa: T201  # LW-920021; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: kernels  # noqa: ERA001
+# Subcommand: kernels  # noqa: ERA001  # LW-920022; this is a section-header comment formatted like a heading, not commented-out code
 # ---------------------------------------------------------------------------
 
 
@@ -1431,7 +1430,7 @@ def _gpu_busy_denominator_ns(bundle: KernelBundle, naive_sum_ns: float) -> float
     per-kernel durations: the naive sum double-counts whenever kernels on
     different HW queues of the same GPU genuinely overlap in wall-clock time
     (real, if usually small, on rocprofv3 serving-workload captures with
-    concurrent queues -- see the rocprof worklog's %GPU denominator note).
+    concurrent queues).
     ``idle_gaps``/``host_idle`` already back their busy-time accounting with
     this same merged union (``_kernel_union_ns``); ``kernels``/``families``
     now use it too instead of a bespoke sum that only agrees with it when
@@ -1448,7 +1447,7 @@ def _print_overlap_note(naive_sum_ns: float, denom_ns: float) -> None:
     """Flag when %GPU's merged-busy denominator diverges materially from the naive sum."""
     overlap_ns = naive_sum_ns - denom_ns
     if overlap_ns > max(1e6, naive_sum_ns * 0.005):
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920023; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             f"Note: {_fmt_ns(overlap_ns)} of the summed kernel time above overlaps across HW "
             f"queues on the same GPU; %GPU below is computed against the merged busy time "
             f"({_fmt_ns(denom_ns)}), not the naive per-kernel sum."
@@ -1462,7 +1461,7 @@ def cmd_kernels(ns: argparse.Namespace) -> None:
     bundle = _get_kernel_bundle(disc, resolved.bounds)
     agg, source = bundle.by_name, bundle.source
     if not agg:
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920024; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "(no kernel data found — no *_kernel_trace.csv or *_kernel_stats.csv under report path)"
         )
         return
@@ -1472,27 +1471,27 @@ def cmd_kernels(ns: argparse.Namespace) -> None:
     denom_ns = _gpu_busy_denominator_ns(bundle, total_ns)
     ranked = sorted(agg.items(), key=lambda kv: -kv[1]["total_ns"])[: ns.top]
 
-    print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201
-    print(f"Kernel data source: {source}")  # noqa: T201
+    print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201  # LW-920025; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"Kernel data source: {source}")  # noqa: T201  # LW-920026; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     header = f"{'Kernel':<44s} {'Family':<28s} {'Calls':>7s} {'Total':>9s} {'Avg':>9s} {'Min':>9s} {'Max':>9s} {'%GPU':>6s}"
-    print(header)  # noqa: T201
-    print("-" * len(header))  # noqa: T201
+    print(header)  # noqa: T201  # LW-920027; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print("-" * len(header))  # noqa: T201  # LW-920028; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     for name, e in ranked:
         fam = _classify_family(name)
         avg = e["total_ns"] / e["calls"] if e["calls"] else 0.0
         pct = e["total_ns"] / denom_ns * 100 if denom_ns else 0.0
         min_ns = e["min_ns"] if e["min_ns"] != float("inf") else 0.0
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920029; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             f"{_truncate(_short_name(name), 44):<44s} {fam:<28s} {e['calls']:>7d} {_fmt_ns(e['total_ns']):>9s} "
             f"{_fmt_ns(avg):>9s} {_fmt_ns(min_ns):>9s} {_fmt_ns(e['max_ns']):>9s} {pct:>5.1f}%"
         )
-    print(f"\nTotal GPU kernel time (all kernels): {_fmt_ns(total_ns)}")  # noqa: T201
-    print(f"Total kernel launches: {total_calls}")  # noqa: T201
+    print(f"\nTotal GPU kernel time (all kernels): {_fmt_ns(total_ns)}")  # noqa: T201  # LW-920030; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"Total kernel launches: {total_calls}")  # noqa: T201  # LW-920031; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     _print_overlap_note(total_ns, denom_ns)
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: families  # noqa: ERA001
+# Subcommand: families  # noqa: ERA001  # LW-920032; this is a section-header comment formatted like a heading, not commented-out code
 # ---------------------------------------------------------------------------
 
 
@@ -1513,7 +1512,7 @@ def _outlier_family_note(ordered: list[tuple[str, dict]]) -> str | None:
     literal %GPU wall-clock share without a targeted follow-up capture.
     """
     avgs = [(fam, e["total_ns"] / e["calls"]) for fam, e in ordered if e["calls"] > 0]
-    if len(avgs) < 2:  # noqa: PLR2004
+    if len(avgs) < 2:  # noqa: PLR2004  # LW-920033; this is a well-known, self-explanatory constant from the file format/tool being parsed
         return None
     avgs.sort(key=lambda kv: -kv[1])
     top_fam, top_avg = avgs[0]
@@ -1539,7 +1538,7 @@ def cmd_families(ns: argparse.Namespace) -> None:
     bundle = _get_kernel_bundle(disc, resolved.bounds)
     agg, source = bundle.by_name, bundle.source
     if not agg:
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920034; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "(no kernel data found — no *_kernel_trace.csv or *_kernel_stats.csv under report path)"
         )
         return
@@ -1560,16 +1559,16 @@ def cmd_families(ns: argparse.Namespace) -> None:
     denom_ns = _gpu_busy_denominator_ns(bundle, total_ns)
     ordered = sorted(fam_totals.items(), key=lambda kv: -kv[1]["total_ns"])
 
-    print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201
-    print(f"Kernel data source: {source}")  # noqa: T201
+    print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201  # LW-920035; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"Kernel data source: {source}")  # noqa: T201  # LW-920036; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     header = (
         f"{'Family':<32s} {'Calls':>8s} {'Total':>10s} {'%GPU':>6s}  {'Top kernel in family':<40s}"
     )
-    print(header)  # noqa: T201
-    print("-" * len(header))  # noqa: T201
+    print(header)  # noqa: T201  # LW-920037; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print("-" * len(header))  # noqa: T201  # LW-920038; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     for fam, e in ordered:
         pct = e["total_ns"] / denom_ns * 100 if denom_ns else 0.0
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920039; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             f"{fam:<32s} {e['calls']:>8d} {_fmt_ns(e['total_ns']):>10s} {pct:>5.1f}%  "
             f"{_truncate(_short_name(e['top_name']), 40):<40s}"
         )
@@ -1585,12 +1584,12 @@ def cmd_families(ns: argparse.Namespace) -> None:
         and _GEMM_ATTN_RE.search(e["top_name"])
     ]
     if flags:
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920040; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "\n*** Finding: GEMM/attention-shaped work is landing in a fallback family "
             "instead of AITER/CK/hipBLASLt ***"
         )
         for fam, top_name, share in flags:
-            print(  # noqa: T201
+            print(  # noqa: T201  # LW-920041; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
                 f"  {fam}: '{_short_name(top_name)}' — {share:.1f}% of GPU time. Check "
                 f"dispatch/tuning config (e.g. AITER_LOG_TUNED_CONFIG=1) instead of accepting "
                 f"the fallback kernel."
@@ -1598,11 +1597,11 @@ def cmd_families(ns: argparse.Namespace) -> None:
 
     outlier_note = _outlier_family_note(ordered)
     if outlier_note:
-        print(outlier_note)  # noqa: T201
+        print(outlier_note)  # noqa: T201  # LW-920042; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: idle_gaps  # noqa: ERA001
+# Subcommand: idle_gaps  # noqa: ERA001  # LW-920043; this is a section-header comment formatted like a heading, not commented-out code
 # ---------------------------------------------------------------------------
 
 _IDLE_GAP_THRESHOLD_NS = 1000.0
@@ -1633,14 +1632,14 @@ def cmd_idle_gaps(ns: argparse.Namespace) -> None:
     disc = discover(ns.report)
     resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
     bundle = _get_kernel_bundle(disc, resolved.bounds)
-    if bundle.count < 2:  # noqa: PLR2004
+    if bundle.count < 2:  # noqa: PLR2004  # LW-920044; this is a well-known, self-explanatory constant from the file format/tool being parsed
         if disc.kernel_stats and not disc.kernel_trace:
-            print(  # noqa: T201
+            print(  # noqa: T201  # LW-920045; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
                 "(idle-gap analysis needs per-event timestamps from *_kernel_trace.csv; "
                 "only aggregate *_kernel_stats.csv was found.)"
             )
         else:
-            print("(fewer than 2 kernel events with timestamps found.)")  # noqa: T201
+            print("(fewer than 2 kernel events with timestamps found.)")  # noqa: T201  # LW-920046; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         return
 
     gaps: list[tuple[tuple[str, str], str, str, float]] = []
@@ -1654,29 +1653,29 @@ def cmd_idle_gaps(ns: argparse.Namespace) -> None:
     total_idle = sum(g[3] for g in gaps)
     window_ns = bundle.window_end - bundle.window_start
 
-    print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201
-    print(f"Capture window: {_fmt_ns(window_ns)}")  # noqa: T201
-    print(f"GPU busy (union per agent/queue): {_fmt_ns(total_busy)}")  # noqa: T201
+    print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201  # LW-920047; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"Capture window: {_fmt_ns(window_ns)}")  # noqa: T201  # LW-920048; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"GPU busy (union per agent/queue): {_fmt_ns(total_busy)}")  # noqa: T201  # LW-920049; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     denom = total_busy + total_idle
     pct_idle = total_idle / denom * 100 if denom else 0.0
-    print(f"GPU idle (intra-key gaps > 1us): {_fmt_ns(total_idle)} ({pct_idle:.1f}%)")  # noqa: T201
-    print(f"Idle gaps found: {len(gaps)}")  # noqa: T201
+    print(f"GPU idle (intra-key gaps > 1us): {_fmt_ns(total_idle)} ({pct_idle:.1f}%)")  # noqa: T201  # LW-920050; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"Idle gaps found: {len(gaps)}")  # noqa: T201  # LW-920051; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
     top = gaps[: ns.top]
     if top:
-        print(f"\nTop {len(top)} gaps:")  # noqa: T201
-        print(f"  {'Agent/Queue':<16s} {'Gap':>10s}  {'After':<32s} -> {'Before':<32s}")  # noqa: T201
-        print("  " + "-" * 92)  # noqa: T201
+        print(f"\nTop {len(top)} gaps:")  # noqa: T201  # LW-920052; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+        print(f"  {'Agent/Queue':<16s} {'Gap':>10s}  {'After':<32s} -> {'Before':<32s}")  # noqa: T201  # LW-920053; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+        print("  " + "-" * 92)  # noqa: T201  # LW-920054; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         for (agent, queue), prev_name, next_name, gap in top:
             key_str = f"{agent}/{queue}"
-            print(  # noqa: T201
+            print(  # noqa: T201  # LW-920055; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
                 f"  {key_str:<16s} {_fmt_ns(gap):>10s}  {_truncate(_short_name(prev_name), 32):<32s} -> "
                 f"{_truncate(_short_name(next_name), 32):<32s}"
             )
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: cpu_overhead  # noqa: ERA001
+# Subcommand: cpu_overhead  # noqa: ERA001  # LW-920056; this is a section-header comment formatted like a heading, not commented-out code
 # ---------------------------------------------------------------------------
 
 _LAUNCH_API_PREFIXES = (
@@ -1701,11 +1700,11 @@ def _is_graph_launch_api(name: str) -> bool:
 
 
 def _print_api_table(ranked: list[tuple[str, dict]]) -> None:
-    print(f"\n{'API':<36s} {'Calls':>8s} {'Total':>10s} {'Avg':>10s}")  # noqa: T201
-    print("-" * 68)  # noqa: T201
+    print(f"\n{'API':<36s} {'Calls':>8s} {'Total':>10s} {'Avg':>10s}")  # noqa: T201  # LW-920057; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print("-" * 68)  # noqa: T201  # LW-920058; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     for name, e in ranked:
         avg = e["total_ns"] / e["calls"] if e["calls"] else 0.0
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920059; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             f"{_truncate(name, 36):<36s} {e['calls']:>8d} {_fmt_ns(e['total_ns']):>10s} {_fmt_ns(avg):>10s}"
         )
 
@@ -1722,7 +1721,7 @@ def _launch_bound_from_correlation(
             matched_gpu.append(sum(durs) / len(durs))
 
     if not matched_cpu:
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920060; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "\n(no matching Correlation_Id between HIP API and kernel trace — "
             "cannot compute a matched launch-bound ratio)"
         )
@@ -1730,41 +1729,41 @@ def _launch_bound_from_correlation(
 
     avg_cpu = sum(matched_cpu) / len(matched_cpu)
     avg_gpu = sum(matched_gpu) / len(matched_gpu)
-    print(f"\nKernel launch overhead ({len(matched_cpu)} matched by Correlation_Id):")  # noqa: T201
-    print(f"  Avg CPU launch: {_fmt_ns(avg_cpu)}")  # noqa: T201
-    print(f"  Avg GPU exec:   {_fmt_ns(avg_gpu)}")  # noqa: T201
+    print(f"\nKernel launch overhead ({len(matched_cpu)} matched by Correlation_Id):")  # noqa: T201  # LW-920061; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"  Avg CPU launch: {_fmt_ns(avg_cpu)}")  # noqa: T201  # LW-920062; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"  Avg GPU exec:   {_fmt_ns(avg_gpu)}")  # noqa: T201  # LW-920063; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     if avg_gpu > 0:
         ratio = avg_cpu / avg_gpu
-        print(f"  CPU/GPU ratio:  {ratio:.2f}x")  # noqa: T201
+        print(f"  CPU/GPU ratio:  {ratio:.2f}x")  # noqa: T201  # LW-920064; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         if ratio > _LAUNCH_BOUND_RATIO_THRESHOLD:
-            print("  *** LAUNCH-BOUND — CPU launch overhead exceeds GPU execution time ***")  # noqa: T201
+            print("  *** LAUNCH-BOUND — CPU launch overhead exceeds GPU execution time ***")  # noqa: T201  # LW-920065; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
 def _cpu_overhead_from_trace(api_bundle: ApiBundle, kernel_bundle: KernelBundle) -> None:
     total_calls = api_bundle.count
     total_ns = sum(e["total_ns"] for e in api_bundle.by_name.values())
-    print(f"Total HIP API calls: {total_calls}")  # noqa: T201
-    print(f"Total CPU time in HIP APIs: {_fmt_ns(total_ns)}")  # noqa: T201
+    print(f"Total HIP API calls: {total_calls}")  # noqa: T201  # LW-920066; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"Total CPU time in HIP APIs: {_fmt_ns(total_ns)}")  # noqa: T201  # LW-920067; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
     _print_api_table(
         sorted(api_bundle.by_name.items(), key=lambda kv: -kv[1]["total_ns"])[:_TOP_API_ROWS]
     )
 
-    print(  # noqa: T201
+    print(  # noqa: T201  # LW-920068; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         f"\nSynchronization stalls: {api_bundle.sync_count} calls, {_fmt_ns(api_bundle.sync_total_ns)}"
     )
 
     launch_calls = api_bundle.direct_launches + api_bundle.graph_launches
     window_ns = api_bundle.window_end - api_bundle.window_start
     rate = len(launch_calls) / (window_ns / _NS_PER_SEC) if window_ns > 0 else 0.0
-    print(  # noqa: T201
+    print(  # noqa: T201  # LW-920069; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         f"\nKernel launch calls: {len(launch_calls)}  ({rate:.1f} launches/sec over the capture window)"
     )
 
     if kernel_bundle.dur_by_corr and launch_calls:
         _launch_bound_from_correlation(launch_calls, kernel_bundle.dur_by_corr)
     elif launch_calls:
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920070; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "\n(no *_kernel_trace.csv found — cannot compute a matched CPU-launch-vs-GPU-exec ratio)"
         )
 
@@ -1772,22 +1771,22 @@ def _cpu_overhead_from_trace(api_bundle: ApiBundle, kernel_bundle: KernelBundle)
 def _cpu_overhead_from_stats(stats: dict[str, dict], disc: DiscoveredReport) -> None:
     total_calls = sum(s["calls"] for s in stats.values())
     total_ns = sum(s["total_ns"] for s in stats.values())
-    print(f"Total HIP API calls: {total_calls}  (aggregated from *_hip_api_stats.csv)")  # noqa: T201
-    print(f"Total CPU time in HIP APIs: {_fmt_ns(total_ns)}")  # noqa: T201
+    print(f"Total HIP API calls: {total_calls}  (aggregated from *_hip_api_stats.csv)")  # noqa: T201  # LW-920071; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"Total CPU time in HIP APIs: {_fmt_ns(total_ns)}")  # noqa: T201  # LW-920072; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     _print_api_table(sorted(stats.items(), key=lambda kv: -kv[1]["total_ns"])[:_TOP_API_ROWS])
 
     launch_ns = sum(s["total_ns"] for n, s in stats.items() if _is_launch_api(n))
     launch_calls = sum(s["calls"] for n, s in stats.items() if _is_launch_api(n))
     kernel_agg, _src = _load_kernels(disc)
     kernel_ns = sum(e["total_ns"] for e in kernel_agg.values())
-    print(f"\nKernel launch calls: {launch_calls}, total CPU time {_fmt_ns(launch_ns)}")  # noqa: T201
+    print(f"\nKernel launch calls: {launch_calls}, total CPU time {_fmt_ns(launch_ns)}")  # noqa: T201  # LW-920073; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     if kernel_ns > 0 and launch_ns > 0:
         ratio = launch_ns / kernel_ns
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920074; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             f"Coarse CPU-launch-time / GPU-kernel-time ratio: {ratio:.2f}x (aggregate, not per-launch matched)"
         )
         if ratio > _LAUNCH_BOUND_RATIO_THRESHOLD:
-            print("*** Possibly launch-bound — coarse launch time exceeds kernel GPU time ***")  # noqa: T201
+            print("*** Possibly launch-bound — coarse launch time exceeds kernel GPU time ***")  # noqa: T201  # LW-920075; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
 def cmd_cpu_overhead(ns: argparse.Namespace) -> None:
@@ -1796,12 +1795,12 @@ def cmd_cpu_overhead(ns: argparse.Namespace) -> None:
     resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
     api_bundle = _get_api_bundle(disc, resolved.bounds)
     if api_bundle.count:
-        print(_window_header(resolved, api_bundle.count, api_bundle.count_total, unit="API calls"))  # noqa: T201
+        print(_window_header(resolved, api_bundle.count, api_bundle.count_total, unit="API calls"))  # noqa: T201  # LW-920076; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         _cpu_overhead_from_trace(api_bundle, _get_kernel_bundle(disc, resolved.bounds))
         return
     stats = _load_api_stats(disc)
     if not stats:
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920077; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "(no HIP API data found — no *_hip_api_trace.csv or *_hip_api_stats.csv under report path)"
         )
         return
@@ -1809,7 +1808,7 @@ def cmd_cpu_overhead(ns: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: memory  # noqa: ERA001
+# Subcommand: memory  # noqa: ERA001  # LW-920078; this is a section-header comment formatted like a heading, not commented-out code
 # ---------------------------------------------------------------------------
 
 
@@ -1819,41 +1818,41 @@ def cmd_memory(ns: argparse.Namespace) -> None:
     resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
     bundle = _get_memcpy_bundle(disc, resolved.bounds)
     if not bundle.count:
-        print("(no memory copy data found — no *_memory_copy_trace.csv under report path)")  # noqa: T201
+        print("(no memory copy data found — no *_memory_copy_trace.csv under report path)")  # noqa: T201  # LW-920079; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         return
 
-    print(_window_header(resolved, bundle.count, bundle.count_total, unit="memory copies"))  # noqa: T201
+    print(_window_header(resolved, bundle.count, bundle.count_total, unit="memory copies"))  # noqa: T201  # LW-920080; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     ordered = sorted(bundle.by_dir.items(), key=lambda kv: -kv[1]["total_ns"])
     if bundle.bytes_available:
-        print(f"{'Direction':<10s} {'Count':>8s} {'Total':>10s} {'Bytes':>16s} {'Bandwidth':>12s}")  # noqa: T201
-        print("-" * 60)  # noqa: T201
+        print(f"{'Direction':<10s} {'Count':>8s} {'Total':>10s} {'Bytes':>16s} {'Bandwidth':>12s}")  # noqa: T201  # LW-920081; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+        print("-" * 60)  # noqa: T201  # LW-920082; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         for d, e in ordered:
             bw_gbps = (
                 (e["bytes"] / _BYTES_PER_GB) / (e["total_ns"] / _NS_PER_SEC)
                 if e["total_ns"] > 0
                 else 0.0
             )
-            print(  # noqa: T201
+            print(  # noqa: T201  # LW-920083; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
                 f"{d:<10s} {e['count']:>8d} {_fmt_ns(e['total_ns']):>10s} {e['bytes']:>16,.0f} {bw_gbps:>10.1f}GB/s"
             )
         total_bytes = sum(e["bytes"] for e in bundle.by_dir.values())
         total_ns = sum(e["total_ns"] for e in bundle.by_dir.values())
-        print(f"\nTotal memory copy: {total_bytes / _BYTES_PER_GB:.2f} GB in {_fmt_ns(total_ns)}")  # noqa: T201
+        print(f"\nTotal memory copy: {total_bytes / _BYTES_PER_GB:.2f} GB in {_fmt_ns(total_ns)}")  # noqa: T201  # LW-920084; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     else:
-        print(f"{'Direction':<10s} {'Count':>8s} {'Total':>10s}")  # noqa: T201
-        print("-" * 34)  # noqa: T201
+        print(f"{'Direction':<10s} {'Count':>8s} {'Total':>10s}")  # noqa: T201  # LW-920085; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+        print("-" * 34)  # noqa: T201  # LW-920086; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         for d, e in ordered:
-            print(f"{d:<10s} {e['count']:>8d} {_fmt_ns(e['total_ns']):>10s}")  # noqa: T201
+            print(f"{d:<10s} {e['count']:>8d} {_fmt_ns(e['total_ns']):>10s}")  # noqa: T201  # LW-920087; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         total_ns = sum(e["total_ns"] for e in bundle.by_dir.values())
-        print(f"\nTotal memory copy time: {_fmt_ns(total_ns)}")  # noqa: T201
-        print(  # noqa: T201
+        print(f"\nTotal memory copy time: {_fmt_ns(total_ns)}")  # noqa: T201  # LW-920088; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+        print(  # noqa: T201  # LW-920089; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "(byte counts not available: this rocprofv3 capture's "
             "*_memory_copy_trace.csv has no Bytes/Size column — showing count and time only)"
         )
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: graphs  # noqa: ERA001
+# Subcommand: graphs  # noqa: ERA001  # LW-920090; this is a section-header comment formatted like a heading, not commented-out code
 # ---------------------------------------------------------------------------
 
 _GRAPH_DEGRADED_KERNELS_PER_LAUNCH = 3.0
@@ -1861,24 +1860,24 @@ _GRAPH_DEGRADED_DIRECT_LAUNCH_FRACTION = 0.5
 
 
 def _report_graph_counts(graph_calls: int, direct_calls: int, total_kernels: int) -> None:
-    print(f"hipGraphLaunch calls: {graph_calls}")  # noqa: T201
-    print(f"Direct launch calls (hipLaunchKernel/hipModuleLaunchKernel/...): {direct_calls}")  # noqa: T201
-    print(f"Total kernels recorded: {total_kernels}")  # noqa: T201
+    print(f"hipGraphLaunch calls: {graph_calls}")  # noqa: T201  # LW-920091; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"Direct launch calls (hipLaunchKernel/hipModuleLaunchKernel/...): {direct_calls}")  # noqa: T201  # LW-920092; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"Total kernels recorded: {total_kernels}")  # noqa: T201  # LW-920093; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     if graph_calls == 0:
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920094; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "\n(No HIP graph launches detected — per-kernel attribution via direct "
             "launch APIs should be reliable.)"
         )
         return
 
     kernels_per_launch = total_kernels / graph_calls
-    print(f"\nKernels per graph launch (coarse): {kernels_per_launch:.1f}")  # noqa: T201
+    print(f"\nKernels per graph launch (coarse): {kernels_per_launch:.1f}")  # noqa: T201  # LW-920095; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     degraded = (
         direct_calls < total_kernels * _GRAPH_DEGRADED_DIRECT_LAUNCH_FRACTION
         or kernels_per_launch > _GRAPH_DEGRADED_KERNELS_PER_LAUNCH
     )
     if degraded:
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920096; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "\n*** Kernel attribution is likely DEGRADED: most kernels execute under "
             "hipGraphLaunch rather than individual launch calls, so per-kernel timing "
             "and family breakdowns above may be missing or misattributed. Recommendation: "
@@ -1895,11 +1894,11 @@ def _report_matched_graph_kernels(
         return
     counts = [len(ks) for ks in matched]
     times = [sum(ks) for ks in matched]
-    print(f"\nGraph launches with matched kernels (by Correlation_Id): {len(matched)}")  # noqa: T201
-    print(  # noqa: T201
+    print(f"\nGraph launches with matched kernels (by Correlation_Id): {len(matched)}")  # noqa: T201  # LW-920097; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(  # noqa: T201  # LW-920098; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         f"  Avg kernels per launch: {sum(counts) / len(counts):.1f}  (min {min(counts)}, max {max(counts)})"
     )
-    print(f"  Avg GPU time per launch: {_fmt_ns(sum(times) / len(times))}")  # noqa: T201
+    print(f"  Avg GPU time per launch: {_fmt_ns(sum(times) / len(times))}")  # noqa: T201  # LW-920099; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
 def cmd_graphs(ns: argparse.Namespace) -> None:
@@ -1910,7 +1909,7 @@ def cmd_graphs(ns: argparse.Namespace) -> None:
     total_kernels = kernel_bundle.count or sum(e["calls"] for e in kernel_bundle.by_name.values())
 
     api_bundle = _get_api_bundle(disc, resolved.bounds)
-    print(_window_header(resolved, kernel_bundle.count, kernel_bundle.count_total))  # noqa: T201
+    print(_window_header(resolved, kernel_bundle.count, kernel_bundle.count_total))  # noqa: T201  # LW-920100; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     if api_bundle.count:
         _report_graph_counts(
             len(api_bundle.graph_launches), len(api_bundle.direct_launches), total_kernels
@@ -1921,7 +1920,7 @@ def cmd_graphs(ns: argparse.Namespace) -> None:
 
     stats = _load_api_stats(disc)
     if not stats:
-        print("(no HIP API data found — cannot detect HIP graph launches)")  # noqa: T201
+        print("(no HIP API data found — cannot detect HIP graph launches)")  # noqa: T201  # LW-920101; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         return
     graph_calls = sum(s["calls"] for n, s in stats.items() if _is_graph_launch_api(n))
     direct_calls = sum(
@@ -1931,7 +1930,7 @@ def cmd_graphs(ns: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: host_idle  # noqa: ERA001
+# Subcommand: host_idle  # noqa: ERA001  # LW-920102; this is a section-header comment formatted like a heading, not commented-out code
 # ---------------------------------------------------------------------------
 
 _HOST_IDLE_BUSY_PCT_THRESHOLD = 5.0
@@ -1957,12 +1956,12 @@ def cmd_host_idle(ns: argparse.Namespace) -> None:
     total_events = sum(b.count for b in bundles)
     if not total_events:
         if kernel_bundle.by_name:
-            print(  # noqa: T201
+            print(  # noqa: T201  # LW-920103; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
                 "(only aggregate stats found — no per-event timestamps to compute a capture "
                 "window; cannot run the host-idle check. Use `kernels`/`families` instead.)"
             )
         else:
-            print("(no timestamped data found at all — nothing to check.)")  # noqa: T201
+            print("(no timestamped data found at all — nothing to check.)")  # noqa: T201  # LW-920104; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         return
 
     starts = [b.window_start for b in bundles if b.count]
@@ -1971,13 +1970,13 @@ def cmd_host_idle(ns: argparse.Namespace) -> None:
     busy_ns = _kernel_union_ns(kernel_bundle)
     busy_pct = busy_ns / window_ns * 100 if window_ns > 0 else 0.0
 
-    print(_window_header(resolved, kernel_bundle.count, kernel_bundle.count_total))  # noqa: T201
-    print(f"Capture window: {_fmt_ns(window_ns)}")  # noqa: T201
-    print(f"GPU kernel activity: {_fmt_ns(busy_ns)} ({busy_pct:.2f}% of window)")  # noqa: T201
-    print(f"Kernels recorded: {kernel_bundle.count}")  # noqa: T201
+    print(_window_header(resolved, kernel_bundle.count, kernel_bundle.count_total))  # noqa: T201  # LW-920105; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"Capture window: {_fmt_ns(window_ns)}")  # noqa: T201  # LW-920106; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"GPU kernel activity: {_fmt_ns(busy_ns)} ({busy_pct:.2f}% of window)")  # noqa: T201  # LW-920107; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print(f"Kernels recorded: {kernel_bundle.count}")  # noqa: T201  # LW-920108; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
     if not kernel_bundle.count or busy_pct < _HOST_IDLE_BUSY_PCT_THRESHOLD:
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920109; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "\n*** VERDICT: trace looks mostly HOST-IDLE — the GPU did little or no work "
             "during the capture window. The capture likely missed the load (started before "
             "or after the workload ran) or the server was idle. Recommendation: re-capture "
@@ -1985,13 +1984,13 @@ def cmd_host_idle(ns: argparse.Namespace) -> None:
             "state. ***"
         )
     else:
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920110; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             f"\nVerdict: GPU active for {busy_pct:.1f}% of the capture window — trace looks valid."
         )
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: query  # noqa: ERA001
+# Subcommand: query  # noqa: ERA001  # LW-920111; this is a section-header comment formatted like a heading, not commented-out code
 # ---------------------------------------------------------------------------
 
 
@@ -2008,7 +2007,7 @@ def cmd_query(ns: argparse.Namespace) -> None:
     """
     disc = discover(ns.report)
     if not disc.db_files:
-        print(  # noqa: T201
+        print(  # noqa: T201  # LW-920112; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "(no rocpd SQLite (.db) file found under report path. `query` only works "
             "against a rocpd SQLite export -- ROCm 7+'s `rocprofv3 ... --output-format "
             "rocpd` -- not CSV or `--output-format json` output; use "
@@ -2020,26 +2019,26 @@ def cmd_query(ns: argparse.Namespace) -> None:
         cur = conn.execute(ns.sql)
         if cur.description:
             headers = [d[0] for d in cur.description]
-            print("\t".join(headers))  # noqa: T201
+            print("\t".join(headers))  # noqa: T201  # LW-920113; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             for row in cur.fetchall():
-                print("\t".join(str(v) for v in row))  # noqa: T201
+                print("\t".join(str(v) for v in row))  # noqa: T201  # LW-920114; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         else:
-            print("(no results)")  # noqa: T201
+            print("(no results)")  # noqa: T201  # LW-920115; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     except sqlite3.OperationalError as exc:
-        print(f"SQL error: {exc}", file=sys.stderr)  # noqa: T201
+        print(f"SQL error: {exc}", file=sys.stderr)  # noqa: T201  # LW-920116; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
         sys.exit(1)
     finally:
         conn.close()
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: summary  # noqa: ERA001
+# Subcommand: summary  # noqa: ERA001  # LW-920117; this is a section-header comment formatted like a heading, not commented-out code
 # ---------------------------------------------------------------------------
 
 _SUMMARY_LINE_CAP = 40
 
 
-def _capped(fn, ns: argparse.Namespace) -> str:  # noqa: ANN001
+def _capped(fn, ns: argparse.Namespace) -> str:  # noqa: ANN001  # LW-920118; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         fn(ns)
@@ -2063,9 +2062,9 @@ def cmd_summary(ns: argparse.Namespace) -> None:
     ns.top = getattr(ns, "top", 15)
     ns.window = getattr(ns, "window", None)
 
-    print("=" * 78)  # noqa: T201
-    print("  ROCPROFV3 TRACE SUMMARY")  # noqa: T201
-    print("=" * 78)  # noqa: T201
+    print("=" * 78)  # noqa: T201  # LW-920119; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print("  ROCPROFV3 TRACE SUMMARY")  # noqa: T201  # LW-920120; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    print("=" * 78)  # noqa: T201  # LW-920121; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
     sections = (
         ("Files", cmd_files),
@@ -2078,8 +2077,8 @@ def cmd_summary(ns: argparse.Namespace) -> None:
         ("HIP Graph Launches", cmd_graphs),
     )
     for title, fn in sections:
-        print(f"\n## {title}\n")  # noqa: T201
-        print(_capped(fn, ns))  # noqa: T201
+        print(f"\n## {title}\n")  # noqa: T201  # LW-920122; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+        print(_capped(fn, ns))  # noqa: T201  # LW-920123; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
 # ---------------------------------------------------------------------------

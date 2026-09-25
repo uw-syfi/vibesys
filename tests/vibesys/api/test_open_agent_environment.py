@@ -23,6 +23,9 @@ from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.api.contracts import EventSink, RunRequest
+    from vs_project.api import Project
+
 
 @dataclass(frozen=True)
 class _EnvironmentRequest:
@@ -50,10 +53,10 @@ def _handoff(
     environment_request: _EnvironmentRequest,
     *,
     sandboxed: bool = False,
-    project: Any = None,  # noqa: ANN401  # Stand-in for vs_project.Project; only .root is used.
+    project: Project | SimpleNamespace | None = None,
 ) -> RunResourceHandoff:
     return RunResourceHandoff(
-        project=project,
+        project=cast("Project", project if project is not None else object()),
         run_id="run-1",
         workspace=tmp_path / "workspace",
         log_dir=tmp_path / "logs",
@@ -79,8 +82,11 @@ def _handoff(
 
 
 def _session_with_handoff(handoff: RunResourceHandoff) -> _LocalRunSession:
-    session = object.__new__(_LocalRunSession)
-    cast("Any", session)._resource_handoff = handoff  # noqa: SLF001
+    session = _LocalRunSession(
+        cast("RunRequest", object()),
+        sink=cast("EventSink", lambda _event: None),
+    )
+    session._handle_resources(handoff)  # noqa: SLF001  # lint-waiver: LW-008501 [SLF001]; simulate the core resource handoff without running an agent loop.
     return session
 
 

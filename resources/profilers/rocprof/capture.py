@@ -65,14 +65,14 @@ for _common_name in ("_common", "profilers_common"):
         if str(_common_candidate) not in sys.path:
             sys.path.insert(0, str(_common_candidate))
         break
-import capture_runtime  # noqa: E402
+import capture_runtime  # noqa: E402  # LW-920124; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
-import analyze_rocprof  # noqa: E402
-import att  # noqa: E402
-import compute  # noqa: E402
-import counters  # noqa: E402
+import analyze_rocprof  # noqa: E402  # LW-920125; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
+import att  # noqa: E402  # LW-920126; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
+import compute  # noqa: E402  # LW-920127; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
+import counters  # noqa: E402  # LW-920128; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 
 _ATT_MIN_ROCPROFV3_VERSION = (7, 1, 0)
 _ATT_DECODER_LIB_NAME = "librocprof-trace-decoder.so"
@@ -112,8 +112,7 @@ _STATUS_SEVERITY: dict[capture_runtime.CaptureStatus, int] = {
 # No profiler-side env var or flag suppresses this: confirmed live on real
 # MI210 hardware (rocprofiler-sdk 1.3.2) against 7 candidate env-var combos
 # plus `rocprofv3 --log-level fatal`, every one producing the identical
-# banner and identical corruption (see
-# `docs/contributing/amd-profiler-worklog.md`). The only real fix is to
+# banner and identical corruption. The only real fix is to
 # never let a profiled `command`/`load_command` compute a value via a
 # forked child in the first place: pick the value (e.g. a free port) in
 # `setup_command` -- which every `profile_*` tool here runs to completion
@@ -151,7 +150,7 @@ def run_cli(fn: Callable[[types.SimpleNamespace], None], **kwargs: object) -> st
 def _run(argv: list[str], *, timeout: float = 10.0) -> tuple[int | None, str]:
     """Run a short-lived command; ``rc`` is ``None`` if it could not be launched at all."""
     try:
-        result = subprocess.run(  # noqa: S603  # tracked: #288
+        result = subprocess.run(  # noqa: S603  # LW-910048; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
             argv, capture_output=True, text=True, timeout=timeout, check=False
         )
     except FileNotFoundError:
@@ -293,19 +292,17 @@ def _probe_rocprofv3_attach() -> tuple[bool, str]:
     ``ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON``. This spawns a
     short-lived helper process with that env set and polls
     ``/proc/<pid>/task/*/comm`` for the thread name, mirroring the exact
-    recipe verified against a real MI210/ROCm 7.2.3 image (see
-    ``docs/contributing/amd-profiler-worklog.md`` and the warm-target
-    experiment notes it references): that image's build never produced the
-    thread regardless of env, so the probe correctly reports unavailable
-    there, and would report available on an image built with default
-    attachment enabled.
+    recipe verified against a real MI210/ROCm 7.2.3 image: that image's
+    build never produced the thread regardless of env, so the probe
+    correctly reports unavailable there, and would report available on an
+    image built with default attachment enabled.
     """
     attach_lib = _find_attach_lib()
     if attach_lib is None:
         return False, f"{_ATTACH_LIB_NAME} not found under $ROCM_PATH/lib or /opt/rocm/lib"
     env = {**os.environ, "ROCP_TOOL_ATTACH": "1", "LD_PRELOAD": attach_lib}
     try:
-        proc = subprocess.Popen(  # tracked: #288
+        proc = subprocess.Popen(
             [sys.executable, "-c", "import time; time.sleep(5)"],
             env=env,
             stdout=subprocess.DEVNULL,
@@ -322,7 +319,7 @@ def _probe_rocprofv3_attach() -> tuple[bool, str]:
     return False, (
         f"{_ATTACH_BG_THREAD_NAME} thread never appeared: this librocprofiler-register build was "
         "not compiled with ROCPROFILER_REGISTER_BUILD_DEFAULT_ATTACHMENT=ON (verified root cause "
-        "on MI210/ROCm 7.2.3; see docs/contributing/amd-profiler-worklog.md)"
+        "on MI210/ROCm 7.2.3)"
     )
 
 
@@ -638,7 +635,7 @@ def profiling_capabilities() -> str:
 # ---------------------------------------------------------------------------
 
 
-def profile_timeline(  # noqa: PLR0913  # tracked: #288
+def profile_timeline(  # noqa: PLR0913  # LW-910049; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     lifecycle: capture_runtime.Lifecycle,
     *,
     hip_api: bool = False,
@@ -678,7 +675,7 @@ def profile_timeline(  # noqa: PLR0913  # tracked: #288
     if target is not None:
         return target_arg_unavailable_message()
     if (collection_delay_s is None) != (collection_duration_s is None):
-        raise ValueError(  # noqa: TRY003  # tracked: #288
+        raise ValueError(  # noqa: TRY003  # LW-910050; this is a boundary error that deliberately embeds the offending value for the operator to act on
             "collection_delay_s and collection_duration_s must both be given, or neither "
             "(rocprofv3's --collection-period needs a start_delay:collection_time:repeat triplet)"
         )
@@ -809,7 +806,7 @@ class _PassRun:
     result: capture_runtime.CaptureResult
 
 
-def _run_counter_pass(  # noqa: PLR0913  # tracked: #288
+def _run_counter_pass(  # noqa: PLR0913  # LW-910051; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     *,
     lifecycle: capture_runtime.Lifecycle,
     out_dir: Path,
@@ -834,7 +831,7 @@ def _run_counter_pass(  # noqa: PLR0913  # tracked: #288
     )
 
 
-def _run_planned_group(  # noqa: PLR0913  # tracked: #288
+def _run_planned_group(  # noqa: PLR0913  # LW-910052; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     *,
     lifecycle: capture_runtime.Lifecycle,
     out_dir: Path,
@@ -931,10 +928,10 @@ def profile_counters(
     if target is not None:
         return target_arg_unavailable_message()
     if not sets:
-        raise ValueError("sets must name at least one counter set (see profiling_capabilities)")  # noqa: TRY003  # tracked: #288
+        raise ValueError("sets must name at least one counter set (see profiling_capabilities)")  # noqa: TRY003  # LW-910053; this is a boundary error that deliberately embeds the offending value for the operator to act on
     arch = _detect_arch()
     if arch is None:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
+        raise ValueError(  # noqa: TRY003  # LW-910054; this is a boundary error that deliberately embeds the offending value for the operator to act on
             "could not detect a GPU architecture (rocminfo missing, or found no gfx agent); "
             "check profiling_capabilities"
         )
@@ -943,7 +940,7 @@ def profile_counters(
     unknown = [s for s in sets if s not in catalogue]
     if unknown:
         known = ", ".join(sorted(catalogue))
-        raise ValueError(f"unknown counter set(s) {unknown} for {family}; known sets: {known}")  # noqa: TRY003  # tracked: #288
+        raise ValueError(f"unknown counter set(s) {unknown} for {family}; known sets: {known}")  # noqa: TRY003  # LW-910055; this is a boundary error that deliberately embeds the offending value for the operator to act on
 
     capture_id, out_dir = capture_runtime.new_capture("counters")
     with capture_runtime.exclusive_capture("counters", capture_id):
@@ -1001,7 +998,7 @@ def profile_counters(
     )
 
 
-def _format_counters_result(  # noqa: PLR0913  # tracked: #288
+def _format_counters_result(  # noqa: PLR0913  # LW-910056; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     *,
     capture_id: str,
     sets: list[str],
@@ -1097,7 +1094,7 @@ def profile_kernel_deep(
     if target is not None:
         return target_arg_unavailable_message()
     if not kernel:
-        raise ValueError("kernel is required (a literal substring of the real kernel name)")  # noqa: TRY003  # tracked: #288
+        raise ValueError("kernel is required (a literal substring of the real kernel name)")  # noqa: TRY003  # LW-910057; this is a boundary error that deliberately embeds the offending value for the operator to act on
     rocprof_bin = compute.find_rocprof_compute_bin()
     python = compute.find_deps_python(rocprof_bin) if rocprof_bin else None
     if not rocprof_bin or not python:
@@ -1181,7 +1178,7 @@ def _find_att_dispatch_dir(out_dir: Path) -> Path | None:
     return matches[0].parent if matches else None
 
 
-def profile_instructions(  # noqa: PLR0913  # tracked: #288
+def profile_instructions(  # noqa: PLR0913  # LW-910058; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     lifecycle: capture_runtime.Lifecycle,
     *,
     kernel: str,
@@ -1212,7 +1209,7 @@ def profile_instructions(  # noqa: PLR0913  # tracked: #288
     if target is not None:
         return target_arg_unavailable_message()
     if not kernel:
-        raise ValueError("kernel is required (a --kernel-include-regex value)")  # noqa: TRY003  # tracked: #288
+        raise ValueError("kernel is required (a --kernel-include-regex value)")  # noqa: TRY003  # LW-910059; this is a boundary error that deliberately embeds the offending value for the operator to act on
     decoder_dir = _find_att_decoder_dir()
     if decoder_dir is None:
         return (
@@ -1291,7 +1288,7 @@ def _format_instructions_result(result: capture_runtime.CaptureResult) -> str:
 # ---------------------------------------------------------------------------
 
 
-def profile_ops(  # noqa: PLR0913  # tracked: #288
+def profile_ops(  # noqa: PLR0913  # LW-910060; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     *,
     command: str | None = None,
     cwd: str | None = None,
@@ -1378,7 +1375,7 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
 # ---------------------------------------------------------------------------
 
 
-def start_target(  # noqa: PLR0913  # tracked: #288
+def start_target(  # noqa: PLR0913  # LW-910061; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     command: str,
     *,
     cwd: str | None = None,

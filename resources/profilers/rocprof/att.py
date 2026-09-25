@@ -36,7 +36,7 @@ a column this toolkit needs, parsing fails with a clear error instead of
 guessing. It prints the top instructions and top source lines by stall
 cycles, plus stall-category totals, and fails with a clear message when
 ``code.json`` is missing (decoder not run, or wrong directory).
-"""  # noqa: EXE001  # tracked: #288
+"""
 
 from __future__ import annotations
 
@@ -185,7 +185,7 @@ def _parse_header(header: object) -> dict[str, int]:
     return _column_indices(columns)
 
 
-def _instruction_from_row(  # tracked: #288
+def _instruction_from_row(
     row: list, indices: dict[str, int] = _DEFAULT_INDICES
 ) -> Instruction | None:
     pc_i = indices["pc_index"]
@@ -286,9 +286,9 @@ def stall_category_totals(instructions: list[Instruction]) -> list[tuple[str, in
 
 
 def _fmt_cycles(n: int) -> str:
-    if n >= 1_000_000:  # noqa: PLR2004  # tracked: #288
+    if n >= 1_000_000:  # noqa: PLR2004  # LW-910024; tracked migration debt from the pre-manifest ratchet scheme
         return f"{n / 1_000_000:.2f}M"
-    if n >= 1_000:  # noqa: PLR2004  # tracked: #288
+    if n >= 1_000:  # noqa: PLR2004  # LW-910025; tracked migration debt from the pre-manifest ratchet scheme
         return f"{n / 1_000:.1f}K"
     return str(n)
 
@@ -303,38 +303,38 @@ def cmd_hotspots(ns: argparse.Namespace) -> None:
     except AttOutputNotFoundError as exc:
         sys.exit(str(exc))
     if not instructions:
-        print("(code.json parsed but no instructions with a nonzero pc_index were found)")  # noqa: T201  # tracked: #288
+        print("(code.json parsed but no instructions with a nonzero pc_index were found)")  # noqa: T201  # LW-910026; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         return
 
     total_stall = sum(i.stall_cycles for i in instructions)
     total_cycles = sum(i.total_cycles for i in instructions)
-    print(f"Instructions: {len(instructions)}  Total cycles: {_fmt_cycles(total_cycles)}")  # noqa: T201  # tracked: #288
+    print(f"Instructions: {len(instructions)}  Total cycles: {_fmt_cycles(total_cycles)}")  # noqa: T201  # LW-910027; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
     stall_frac = 100 * total_stall / total_cycles if total_cycles else 0
-    print(f"Total stall cycles: {_fmt_cycles(total_stall)} ({stall_frac:.1f}% of total cycles)")  # noqa: T201  # tracked: #288
+    print(f"Total stall cycles: {_fmt_cycles(total_stall)} ({stall_frac:.1f}% of total cycles)")  # noqa: T201  # LW-910028; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
 
-    print("\nStall category totals:")  # noqa: T201  # tracked: #288
+    print("\nStall category totals:")  # noqa: T201  # LW-910029; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
     for category, cycles in stall_category_totals(instructions):
         pct = 100 * cycles / total_stall if total_stall else 0
-        print(f"  {category:<14} {_fmt_cycles(cycles):>8}  ({pct:5.1f}%)")  # noqa: T201  # tracked: #288
+        print(f"  {category:<14} {_fmt_cycles(cycles):>8}  ({pct:5.1f}%)")  # noqa: T201  # LW-910030; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
 
-    print(f"\nTop {ns.top} instructions by stall cycles:")  # noqa: T201  # tracked: #288
+    print(f"\nTop {ns.top} instructions by stall cycles:")  # noqa: T201  # LW-910031; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
     ranked = sorted(
         (i for i in instructions if i.stall_cycles > 0), key=lambda i: i.stall_cycles, reverse=True
     )
     for rank, inst in enumerate(ranked[: ns.top], 1):
         pct = 100 * inst.stall_cycles / total_stall if total_stall else 0
-        asm = inst.asm if len(inst.asm) <= 48 else inst.asm[:47] + "…"  # noqa: PLR2004  # tracked: #288
-        print(  # noqa: T201  # tracked: #288
+        asm = inst.asm if len(inst.asm) <= 48 else inst.asm[:47] + "…"  # noqa: PLR2004  # LW-910032; tracked migration debt from the pre-manifest ratchet scheme
+        print(  # noqa: T201  # LW-910033; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
             f"  #{rank:<3} {_fmt_cycles(inst.stall_cycles):>8} ({pct:4.1f}%)  {inst.category:<12}"
             f"  {asm:<48}  {inst.source_loc}"
         )
 
-    print(f"\nTop {ns.top} source lines by aggregated stall cycles:")  # noqa: T201  # tracked: #288
+    print(f"\nTop {ns.top} source lines by aggregated stall cycles:")  # noqa: T201  # LW-910034; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
     for rank, hs in enumerate(aggregate_by_source(instructions)[: ns.top], 1):
         if hs.total_stall_cycles == 0:
             break
         pct = 100 * hs.total_stall_cycles / total_stall if total_stall else 0
-        print(  # noqa: T201  # tracked: #288
+        print(  # noqa: T201  # LW-910035; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
             f"  #{rank:<3} {_fmt_cycles(hs.total_stall_cycles):>8} ({pct:4.1f}%)  "
             f"{hs.dominant_category:<12}  {hs.instruction_count:>4} insn  {hs.source_loc}"
         )
@@ -382,40 +382,40 @@ def cmd_plan(ns: argparse.Namespace) -> None:
 
     full_command = shlex.join(_plan_command_tokens(ns)) + f" {command}"
 
-    print(f"# ATT capture command for {ns.arch}:")  # noqa: T201  # tracked: #288
-    print(  # noqa: T201  # tracked: #288
+    print(f"# ATT capture command for {ns.arch}:")  # noqa: T201  # LW-910036; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
+    print(  # noqa: T201  # LW-910037; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         "# (build/compile the kernel with debug info enabled first -- whatever your toolchain's "
         "flag for embedding DWARF source-to-assembly mapping is, e.g. `hipcc -g` -- or "
         "code.json's source_loc will come back empty):"
     )
-    print(full_command)  # noqa: T201  # tracked: #288
+    print(full_command)  # noqa: T201  # LW-910038; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
     if ns.write:
         Path(ns.script_path).write_text(
             "#!/bin/bash\nset -eux\n" + full_command + "\n", encoding="utf-8"
         )
-        print(f"\n# wrote {ns.script_path}")  # noqa: T201  # tracked: #288
+        print(f"\n# wrote {ns.script_path}")  # noqa: T201  # LW-910039; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
 
-    print("\n# Prerequisites:")  # noqa: T201  # tracked: #288
-    print(  # noqa: T201  # tracked: #288
+    print("\n# Prerequisites:")  # noqa: T201  # LW-910040; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
+    print(  # noqa: T201  # LW-910041; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         f"#  - {ns.arch}: rocprofv3 >= ROCm 7.1 -- 6.x has no --att/--advanced-thread-trace flag "
         "at all. The ATT flags themselves (target CU, buffer size, SE/SIMD masks) are generic "
         "across CDNA gfx9; confirm the decoder release and ROCm build both match this GPU."
     )
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910042; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         "#  - rocprof-trace-decoder shared library: a separate release, not part of any ROCm "
         "module (github.com/ROCm/rocprof-trace-decoder). Extract librocprof-trace-decoder.so "
         "from a release tarball (no build needed) and pass its containing DIRECTORY via "
         "--att-library-path -- verified working; without it, ATT jobs fail immediately with "
         "'rocprof-trace-decoder library path not found', not a partial/undecoded result."
     )
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910043; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         "#  - --att-buffer-size takes a PLAIN DECIMAL INTEGER byte count only -- a unit-suffixed "
         "string ('64MB') fails with `ValueError: invalid literal for int()`. --att-simd-select "
         "and --att-shader-engine-mask accept hex ('0xf') or decimal; both verified."
     )
-    print("#  - att_target_cu keeps output to one CU; raise att_buffer_size if the decoded")  # noqa: T201  # tracked: #288
-    print("#    trace reports truncation.")  # noqa: T201  # tracked: #288
-    print(  # noqa: T201  # tracked: #288
+    print("#  - att_target_cu keeps output to one CU; raise att_buffer_size if the decoded")  # noqa: T201  # LW-910044; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
+    print("#    trace reports truncation.")  # noqa: T201  # LW-910045; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
+    print(  # noqa: T201  # LW-910046; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         f"#  - Output lands under {ns.out_dir}/ in a ui_output_agent_<PID>_dispatch_<N> directory "
         "per matched dispatch that the decoder could resolve (a kernel can match "
         "--kernel-include-regex and still produce no code.json, e.g. degenerate fill kernels); "
@@ -423,7 +423,7 @@ def cmd_plan(ns: argparse.Namespace) -> None:
     )
 
 
-def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
+def main(argv: list[str] | None = None) -> None:  # noqa: D103  # LW-910047; this is a small standalone-script helper whose name and body are self-explanatory
     parser = argparse.ArgumentParser(
         prog="att",
         description="rocprofv3 ATT capture planning and hotspot analysis.",

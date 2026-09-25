@@ -30,7 +30,9 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 
-class LoopContext(Protocol):  # noqa: D101  # tracked: #288
+class LoopContext(Protocol):
+    """Runtime services and state consumed by the loop implementations."""
+
     # -- run identity / configuration -----------------------------------------
     backend: ComputeBackend
     model_name: str
@@ -51,39 +53,61 @@ class LoopContext(Protocol):  # noqa: D101  # tracked: #288
 
     # -- paths ----------------------------------------------------------------
     @property
-    def project_root(self) -> Path: ...  # noqa: D102  # tracked: #288
+    def project_root(self) -> Path:
+        """Root directory of the project being optimized."""
+        ...
 
     @property
-    def log_dir(self) -> Path: ...  # noqa: D102  # tracked: #288
+    def log_dir(self) -> Path:
+        """Directory for logs belonging to the active run."""
+        ...
 
     @property
-    def workspace(self) -> Path: ...  # noqa: D102  # tracked: #288
+    def workspace(self) -> Path:
+        """Mutable candidate workspace directory."""
+        ...
 
     @property
-    def run_log_path(self) -> Path: ...  # noqa: D102  # tracked: #288
+    def run_log_path(self) -> Path:
+        """Path to the active run's append-only log."""
+        ...
 
     @property
-    def skill_source_paths(self) -> list[Path]: ...  # noqa: D102  # tracked: #288
+    def skill_source_paths(self) -> list[Path]:
+        """Directories searched for skills during the run."""
+        ...
 
     # -- agent-facing commands ------------------------------------------------
     @property
-    def objective_location(self) -> str: ...  # noqa: D102  # tracked: #288
+    def objective_location(self) -> str:
+        """Configured location of the run objective."""
+        ...
 
     @property
-    def judge_accuracy_command(self) -> str | None: ...  # noqa: D102  # tracked: #288
+    def judge_accuracy_command(self) -> str | None:
+        """Optional command used to judge accuracy."""
+        ...
 
     @property
-    def judge_benchmark_command(self) -> str | None: ...  # noqa: D102  # tracked: #288
+    def judge_benchmark_command(self) -> str | None:
+        """Optional command used to judge benchmark results."""
+        ...
 
     @property
-    def profiler_benchmark_command(self) -> str | None: ...  # noqa: D102  # tracked: #288
+    def profiler_benchmark_command(self) -> str | None:
+        """Optional command used to benchmark profiler runs."""
+        ...
 
     # -- services -------------------------------------------------------------
-    def lprint(self, text: str) -> None: ...  # noqa: D102  # tracked: #288
+    def lprint(self, text: str) -> None:
+        """Write a line to the run log and configured output sink."""
+        ...
 
-    def switch_log_file(self, label: int | str) -> None: ...  # noqa: D102  # tracked: #288
+    def switch_log_file(self, label: int | str) -> None:
+        """Switch the active run log to a named phase or round."""
+        ...
 
-    def invoke(  # noqa: D102, PLR0913  # tracked: #288
+    def invoke(  # noqa: PLR0913  # lint-waiver: LW-011123 [PLR0913]; LoopContext.invoke is the shared typed invocation protocol implemented by every run context.
         self,
         *,
         kind: str,
@@ -93,34 +117,54 @@ class LoopContext(Protocol):  # noqa: D101  # tracked: #288
         fallback_factory: Callable[[], T],
         round_label: str = "",
         progress: AgentProgress | None = None,
-        **extra: Any,  # noqa: ANN401  # tracked: #288
-    ) -> T: ...
+        **extra: object,
+    ) -> T:
+        """Invoke the configured agent with typed response validation."""
+        ...
 
-    def progress(self, progress: AgentProgress) -> AbstractContextManager[None]: ...  # noqa: D102  # tracked: #288
+    def progress(self, progress: AgentProgress) -> AbstractContextManager[None]:
+        """Expose the active agent progress scope."""
+        ...
 
-    def snapshot_workspace(self, label: str) -> None: ...  # noqa: D102  # tracked: #288
+    def snapshot_workspace(self, label: str) -> None:
+        """Record a named snapshot of the current workspace."""
+        ...
 
-    def trusted_input_changes(self) -> list[str]: ...  # noqa: D102  # tracked: #288
+    def trusted_input_changes(self) -> list[str]:
+        """List changes to trusted inputs since the run baseline."""
+        ...
 
-    def begin_completed_round(  # noqa: D102  # tracked: #288
+    def begin_completed_round(
         self,
         round_number: int,
         *,
         state_transition: StateTransition,
-    ) -> None: ...
+    ) -> None:
+        """Stage a completed round and its matching state transition."""
+        ...
 
-    def persist_completed_round(self) -> None: ...  # noqa: D102  # tracked: #288
+    def persist_completed_round(self) -> None:
+        """Persist the active completed-round record."""
+        ...
 
-    def publish_committed_state(  # noqa: D102
+    def publish_committed_state(
         self,
         namespace: str,
         state: BaseModel,
         *,
         changed_keys: tuple[str, ...] | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Publish state committed by the active round."""
+        ...
 
-    def reselect_gpu(self) -> None: ...  # noqa: D102  # tracked: #288
+    def reselect_gpu(self) -> None:
+        """Refresh the selected GPU before the next operation."""
+        ...
 
-    def wait_for_debug(self, step: str) -> None: ...  # noqa: D102  # tracked: #288
+    def wait_for_debug(self, step: str) -> None:
+        """Wait at a named debugging checkpoint."""
+        ...
 
-    def close(self) -> None: ...  # noqa: D102  # tracked: #288
+    def close(self) -> None:
+        """Release resources owned by the run context."""
+        ...

@@ -149,9 +149,7 @@ Use the guide that matches the surface you are adding:
   [VibeSys skill metadata guide](skill-metadata.md) when routing skills by
   backend or domain.
 - [Extend profilers](extending-profilers.md) for profiler support packages,
-  MCP tools, and profiler prompts. See the
-  [AMD profiler worklog](amd-profiler-worklog.md) for progress and findings
-  from the ROCm profiler work.
+  MCP tools, and profiler prompts.
 - [Update CLI flags and combinations](../cli-flags.md) when changing the user
   facing command contract.
 - [Update feature flags](feature-flags.md) for opt-in

@@ -63,10 +63,10 @@ for _name in ("_common", "profilers_common"):
     if (_candidate / "capture_runtime.py").is_file():
         sys.path.insert(0, str(_candidate))
         break
-import capture_runtime  # noqa: E402
+import capture_runtime  # noqa: E402  # LW-920178; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 
 sys.path.insert(0, str(_HERE))
-import analyze_torch_profile  # noqa: E402
+import analyze_torch_profile  # noqa: E402  # LW-920179; the sys.path setup directly above must run before this import, so it cannot sort to the top of the file
 
 _INJECT_DIR = _HERE / "inject"
 _TRACE_GLOB = "*.pt.trace.json.gz"
@@ -90,7 +90,7 @@ __all__ = ["profile_ops", "start_target"]
 # ---------------------------------------------------------------------------
 
 
-def _build_capture_env(  # noqa: PLR0913  # tracked: #288
+def _build_capture_env(  # noqa: PLR0913  # LW-910107; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     *,
     user_env: dict[str, str] | None,
     out_dir: Path,
@@ -171,7 +171,7 @@ def _target_arm_env(
     return env
 
 
-def start_target(  # noqa: PLR0913  # tracked: #288
+def start_target(  # noqa: PLR0913  # LW-910108; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     command: str,
     *,
     cwd: str | None = None,
@@ -182,7 +182,7 @@ def start_target(  # noqa: PLR0913  # tracked: #288
     stop_signal: str = "SIGINT",
     grace_s: float = 10.0,
     timeout_s: float = 300.0,
-    record_shapes: bool = True,  # tracked: #288
+    record_shapes: bool = True,
 ) -> str:
     """Launch *command* as a warm target armed for repeated torch.profiler signal windows.
 
@@ -200,8 +200,7 @@ def start_target(  # noqa: PLR0913  # tracked: #288
     check): the target is only ever reported ready once both are true.
 
     Overhead of leaving a target armed but idle (no window open) is
-    negligible: measured within run-to-run noise on real MI210 hardware
-    (see ``docs/contributing/amd-profiler-worklog.md``).
+    negligible: measured within run-to-run noise on real MI210 hardware.
     """
     existing_pythonpath = (env or {}).get("PYTHONPATH") or os.environ.get("PYTHONPATH", "")
     return capture_runtime.start_target(
@@ -259,7 +258,7 @@ def wait_for_additional_traces(out_dir: Path, *, grace_s: float) -> None:
     pays the same real, minutes-scale ROCm post-export hang documented in
     ``inject/sitecustomize.py``, on its own schedule, not synchronized with
     the directly-launched process's exit at all. Observed on real ROCm
-    hardware (see the worklog): the worker process's own
+    hardware: the worker process's own
     "profiling started" log line appeared, but by the time this function's
     caller used to call ``discover_traces`` immediately, its trace file did
     not exist yet -- so the primary-trace selection silently fell back to
@@ -296,13 +295,13 @@ def _kernel_count(path: Path) -> int | None:
     directory), not separate architectural layers.
     """
     try:
-        raw = analyze_torch_profile._read_json_maybe_gz(str(path))  # noqa: SLF001
+        raw = analyze_torch_profile._read_json_maybe_gz(str(path))  # noqa: SLF001  # LW-920180; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
     except (OSError, ValueError) as exc:
-        print(f"[profile_ops] could not read {path}: {exc!r}", file=sys.stderr)  # noqa: T201  # tracked: #288
+        print(f"[profile_ops] could not read {path}: {exc!r}", file=sys.stderr)  # noqa: T201  # LW-910109; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         return None
-    if not analyze_torch_profile._is_chrome_trace(raw):  # noqa: SLF001
+    if not analyze_torch_profile._is_chrome_trace(raw):  # noqa: SLF001  # LW-920181; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
         return None
-    index = analyze_torch_profile._index_trace(raw)  # noqa: SLF001
+    index = analyze_torch_profile._index_trace(raw)  # noqa: SLF001  # LW-920182; this reaches a sibling profiler module's underscore-prefixed name directly; these standalone scripts have no public API surface to expose it through
     return len(index.kernels)
 
 
@@ -338,7 +337,7 @@ def _record_traces_in_manifest(out_dir: Path, *, primary: Path | None, traces: l
 # ---------------------------------------------------------------------------
 
 
-def _run_cmd(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
+def _run_cmd(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # LW-910110; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this **kwargs parameter's type is intentionally left loose; annotating it now is separate cleanup work
     """Run an ``analyze_torch_profile.cmd_*`` and capture its stdout.
 
     Mirrors ``server.py``'s ``_capture`` helper: several ``cmd_*`` functions
@@ -409,8 +408,8 @@ def _run_load_command(
     script_path.write_text("#!/usr/bin/env bash\n" + load_command)
     script_path.chmod(script_path.stat().st_mode | 0o111)
     with log_path.open("wb") as handle:
-        proc = subprocess.Popen(  # noqa: S603  # tracked: #288
-            ["bash", str(script_path)],  # noqa: S607  # tracked: #288
+        proc = subprocess.Popen(  # noqa: S603  # LW-910111; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
+            ["bash", str(script_path)],  # noqa: S607  # LW-910112; the executable is resolved from the fixed rocprof/torch toolchain name, not a user-controlled path
             cwd=cwd,
             stdout=handle,
             stderr=subprocess.STDOUT,
@@ -443,7 +442,7 @@ def _run_load_command(
     return proc.returncode, _tail_text(log_path), cancelled
 
 
-def _profile_ops_on_target(  # noqa: PLR0913  # tracked: #288
+def _profile_ops_on_target(  # noqa: PLR0913  # LW-910113; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     target: str,
     *,
     load_command: str,
@@ -523,7 +522,7 @@ def _profile_ops_on_target(  # noqa: PLR0913  # tracked: #288
     return "\n".join(lines)
 
 
-def _dispatch_profile_ops_target(  # noqa: PLR0913  # tracked: #288
+def _dispatch_profile_ops_target(  # noqa: PLR0913  # LW-910114; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     target: str,
     *,
     load_command: str | None,
@@ -555,7 +554,7 @@ def _dispatch_profile_ops_target(  # noqa: PLR0913  # tracked: #288
 # ---------------------------------------------------------------------------
 
 
-def profile_ops(  # noqa: PLR0913  # tracked: #288
+def profile_ops(  # noqa: PLR0913  # LW-910115; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     command: str | None = None,
     cwd: str | None = None,
     env: dict | None = None,
@@ -568,8 +567,8 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
     timeout_s: float = 1800.0,
     delay_s: float = 0.0,
     duration_s: float | None = None,
-    record_shapes: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
-    inject: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
+    record_shapes: bool = True,  # noqa: FBT001, FBT002  # LW-910116; this boolean parameter mirrors an external tool's own boolean flag
+    inject: bool = True,  # noqa: FBT001, FBT002  # LW-910117; this boolean parameter mirrors an external tool's own boolean flag
     target: str | None = None,
     cancel_event: threading.Event | None = None,
 ) -> str:
@@ -747,7 +746,7 @@ def _parse_env_args(pairs: list[str]) -> dict[str, str]:
     env: dict[str, str] = {}
     for pair in pairs:
         if "=" not in pair:
-            raise SystemExit(f"--env expects KEY=VALUE, got {pair!r}")  # noqa: TRY003  # tracked: #288
+            raise SystemExit(f"--env expects KEY=VALUE, got {pair!r}")  # noqa: TRY003  # LW-910118; this is a boundary error that deliberately embeds the offending value for the operator to act on
         key, _, value = pair.partition("=")
         env[key] = value
     return env
@@ -789,7 +788,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    print(  # noqa: T201  # tracked: #288
+    print(  # noqa: T201  # LW-910119; this standalone script reports progress/results on stdout or stderr, its intended output mechanism
         profile_ops(
             command=args.command,
             target=args.target,

@@ -30,7 +30,7 @@ class _Resp(BaseModel):
 
 
 class TestCliBackend:
-    def test_judge_receives_mcp_server_spec(self):  # noqa: ANN201
+    def test_judge_receives_mcp_server_spec(self) -> None:
         inner = FakeAgentClient(
             backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
         )
@@ -64,7 +64,7 @@ class TestCliBackend:
         i_at = spec.args.index("--allowed-types")
         assert spec.args[i_at + 1] == "bug"
 
-    def test_perf_eval_receives_mcp_server_spec_with_all_types(self):  # noqa: ANN201
+    def test_perf_eval_receives_mcp_server_spec_with_all_types(self) -> None:
         inner = FakeAgentClient(
             backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
         )
@@ -100,7 +100,7 @@ class TestCliBackend:
 
 
 class TestPassThrough:
-    def test_text_turn_delegates_to_inner_client(self, tmp_path):  # noqa: ANN001, ANN201
+    def test_text_turn_delegates_to_inner_client(self, tmp_path: Path) -> None:
         inner = FakeAgentClient(
             backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
         )
@@ -131,7 +131,7 @@ class TestPassThrough:
         assert call.reuse_session is None
         assert call.session_key is None
 
-    def test_implementer_passes_through(self):  # noqa: ANN201
+    def test_implementer_passes_through(self) -> None:
         inner = FakeAgentClient(
             backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
         )
@@ -151,7 +151,7 @@ class TestPassThrough:
         assert len(impl_calls) == 1
         assert impl_calls[0].mcp_servers is None
 
-    def test_iteration_kwarg_is_consumed_not_forwarded(self):  # noqa: ANN201
+    def test_iteration_kwarg_is_consumed_not_forwarded(self) -> None:
         """The wrapper consumes ``iteration=`` and must not pass it to the
         inner client, whose public invoke API has no such kwarg.
 
@@ -176,7 +176,7 @@ class TestPassThrough:
 
         assert inner.calls_for("judge")
 
-    def test_extra_kwargs_are_forwarded(self):  # noqa: ANN201
+    def test_extra_kwargs_are_forwarded(self) -> None:
         """Caller-supplied kwargs (workspace, system_prompt, etc.) must
         reach the inner runner unchanged."""
         inner = FakeAgentClient(
@@ -188,7 +188,7 @@ class TestPassThrough:
             response_cls=_Resp,
             kind="judge",
             iteration=1,
-            workspace="/tmp/ws",  # noqa: S108  # tracked: #288
+            workspace=Path("/workspace"),
             system_prompt="sys",
             user_prompt="user",
             round_label="r",
@@ -196,14 +196,14 @@ class TestPassThrough:
         )
 
         call = inner.calls_for("judge")[0]
-        assert call.workspace == "/tmp/ws"  # noqa: S108  # tracked: #288
+        assert call.workspace == Path("/workspace")
         assert call.system_prompt == "sys"
         assert call.user_prompt == "user"
         assert call.round_label == "r"
 
 
 class TestValidation:
-    def test_judge_without_iteration_raises(self):  # noqa: ANN201
+    def test_judge_without_iteration_raises(self) -> None:
         wrapper = PlainLoopAgentClient(
             FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)),
             max_issues_per_perf_eval=3,
@@ -211,7 +211,7 @@ class TestValidation:
         with pytest.raises(ValueError, match="iteration"):
             wrapper.invoke(response_cls=_Resp, kind="judge", round_label="r")
 
-    def test_perf_eval_without_iteration_raises(self):  # noqa: ANN201
+    def test_perf_eval_without_iteration_raises(self) -> None:
         wrapper = PlainLoopAgentClient(
             FakeAgentClient(backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)),
             max_issues_per_perf_eval=3,
@@ -221,7 +221,7 @@ class TestValidation:
 
 
 class TestBackendName:
-    def test_backend_name_proxies_inner(self):  # noqa: ANN201
+    def test_backend_name_proxies_inner(self) -> None:
         wrapper = PlainLoopAgentClient(
             FakeAgentClient(backend_name="cli"), max_issues_per_perf_eval=3
         )
@@ -229,7 +229,7 @@ class TestBackendName:
 
 
 class TestCapabilities:
-    def test_client_without_mcp_cannot_host_tracker_tools(self):  # noqa: ANN201
+    def test_client_without_mcp_cannot_host_tracker_tools(self) -> None:
         wrapper = PlainLoopAgentClient(
             FakeAgentClient(backend_name="stub"), max_issues_per_perf_eval=3
         )
@@ -238,7 +238,7 @@ class TestCapabilities:
 
 
 class TestProviderConversation:
-    def test_conversation_accessors_proxy_inner(self):  # noqa: ANN201
+    def test_conversation_accessors_proxy_inner(self) -> None:
         inner = FakeAgentClient(
             backend_name="cli", capabilities=AgentCapabilities(mcp_servers=True)
         )

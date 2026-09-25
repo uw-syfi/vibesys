@@ -1,8 +1,10 @@
 """Filesystem contract tests for the unified agent-run state store."""
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from tests.support import make_orchestrator_plan
 
 from vibesys.loops.agent.hypotheses import reproject_run_evidence
 from vibesys.loops.agent.model import (
@@ -81,7 +83,7 @@ def _ops_space() -> MetricSpace:
     return MetricSpace(objectives=(Objective(name="ops", direction="max"),))
 
 
-def _project(tmp_path):  # noqa: ANN001, ANN202
+def _project(tmp_path: Path) -> Project:
     project = Project.open(tmp_path)
     project.state.create_project("test")
     run = project.state.new_run_manifest(
@@ -105,16 +107,16 @@ def _project(tmp_path):  # noqa: ANN001, ANN202
 
 
 def _plan(identifier: str) -> OrchestratorPlan:
-    return OrchestratorPlan(
+    return make_orchestrator_plan(
         hypothesis_id=identifier,
         hypothesis=f"claim {identifier}",
         task=f"implement {identifier}",
-        pass_criteria="tests pass",  # noqa: S106
+        criteria="tests pass",
         reasoning="test the claim",
     )
 
 
-def test_store_round_trips_and_prepares_exact_state_transition(tmp_path) -> None:  # noqa: ANN001
+def test_store_round_trips_and_prepares_exact_state_transition(tmp_path: Path) -> None:
     project = _project(tmp_path)
     namespace = project.state.portable_namespace("run-1", "agent")
     store = AgentRunStateStore(namespace)
@@ -132,7 +134,7 @@ def test_store_round_trips_and_prepares_exact_state_transition(tmp_path) -> None
     assert store.load() == state
 
 
-def test_legacy_migration_unifies_ledger_active_and_rounds_without_writing(tmp_path) -> None:  # noqa: ANN001
+def test_legacy_migration_unifies_ledger_active_and_rounds_without_writing(tmp_path: Path) -> None:
     project = _project(tmp_path)
     portable = project.state.portable_namespace("run-1", "agent")
     local = project.state.local_namespace("run-1", "agent")
@@ -218,7 +220,7 @@ def test_legacy_migration_unifies_ledger_active_and_rounds_without_writing(tmp_p
     assert project.state.load_rounds("run-1") == []
 
 
-def test_existing_unified_state_wins_over_legacy_inputs(tmp_path) -> None:  # noqa: ANN001
+def test_existing_unified_state_wins_over_legacy_inputs(tmp_path: Path) -> None:
     project = _project(tmp_path)
     portable = project.state.portable_namespace("run-1", "agent")
     local = project.state.local_namespace("run-1", "agent")
@@ -234,7 +236,7 @@ def test_existing_unified_state_wins_over_legacy_inputs(tmp_path) -> None:  # no
     )
 
 
-def test_unified_state_written_before_a_metric_space_adopts_the_legacy_one(tmp_path) -> None:  # noqa: ANN001
+def test_unified_state_written_before_a_metric_space_adopts_the_legacy_one(tmp_path: Path) -> None:
     """State that declares no space is reprojected in the caller's fallback."""
     project = _project(tmp_path)
     portable = project.state.portable_namespace("run-1", "agent")
@@ -291,7 +293,7 @@ def test_unified_state_written_before_a_metric_space_adopts_the_legacy_one(tmp_p
     assert hypothesis.measurement.direction == "max"
 
 
-def test_stale_legacy_ledger_active_without_checkpoint_is_not_resurrected(tmp_path) -> None:  # noqa: ANN001
+def test_stale_legacy_ledger_active_without_checkpoint_is_not_resurrected(tmp_path: Path) -> None:
     project = _project(tmp_path)
     portable = project.state.portable_namespace("run-1", "agent")
     local = project.state.local_namespace("run-1", "agent")
@@ -329,7 +331,7 @@ def test_stale_legacy_ledger_active_without_checkpoint_is_not_resurrected(tmp_pa
     assert migrated.active_hypothesis is None
 
 
-def test_legacy_migration_normalizes_rounds_without_hypothesis_ids(tmp_path) -> None:  # noqa: ANN001
+def test_legacy_migration_normalizes_rounds_without_hypothesis_ids(tmp_path: Path) -> None:
     project = _project(tmp_path)
     portable = project.state.portable_namespace("run-1", "agent")
     local = project.state.local_namespace("run-1", "agent")
@@ -352,7 +354,7 @@ def test_legacy_migration_normalizes_rounds_without_hypothesis_ids(tmp_path) -> 
     assert migrated.hypotheses[0].rounds[0].hypothesis_id == "legacy-round-1"
 
 
-def test_legacy_migration_replays_strategy_updates_from_active_plan(tmp_path) -> None:  # noqa: ANN001
+def test_legacy_migration_replays_strategy_updates_from_active_plan(tmp_path: Path) -> None:
     project = _project(tmp_path)
     portable = project.state.portable_namespace("run-1", "agent")
     local = project.state.local_namespace("run-1", "agent")

@@ -81,7 +81,38 @@ def _restore_resume_constraints(
     return requested != recorded.operator_constraints
 
 
-def _restore_resume_run_environment(  # noqa: C901
+def _restore_run_environment_selection(
+    args: argparse.Namespace,
+    recorded: RunConfiguration,
+    explicit: frozenset[str],
+) -> bool | None:
+    """Restore the recorded environment selection or report a CLI mismatch."""
+    if not hasattr(args, "docker") or not hasattr(args, "modal"):
+        return None
+    skypilot = bool(getattr(args, "skypilot", False))
+    if "run_environment" in explicit:
+        requested = getattr(args, "run_environment", None)
+    elif skypilot:
+        requested = "skypilot"
+    elif args.modal:
+        requested = "modal"
+    elif args.docker:
+        requested = "docker"
+    else:
+        requested = "local"
+    explicit_environment = {"docker", "modal", "skypilot", "run_environment"} & explicit
+    if explicit_environment:
+        return requested != recorded.run_environment.name
+    args.docker = recorded.run_environment.name == "docker"
+    args.modal = recorded.run_environment.name == "modal"
+    if hasattr(args, "skypilot"):
+        args.skypilot = recorded.run_environment.name == "skypilot"
+    if hasattr(args, "run_environment"):
+        args.run_environment = recorded.run_environment.name
+    return False
+
+
+def _restore_resume_run_environment(
     args: argparse.Namespace,
     recorded: RunConfiguration,
     explicit: frozenset[str],
@@ -95,31 +126,11 @@ def _restore_resume_run_environment(  # noqa: C901
     """
     record = recorded.run_environment
     changed: list[str] = []
-    if not hasattr(args, "docker") or not hasattr(args, "modal"):
+    mismatch = _restore_run_environment_selection(args, recorded, explicit)
+    if mismatch is None:
         return changed
-    skypilot = bool(getattr(args, "skypilot", False))
-    generic = getattr(args, "run_environment", None)
-    if {"docker", "modal", "skypilot", "run_environment"} & explicit:
-        requested = (
-            generic
-            if "run_environment" in explicit
-            else "skypilot"
-            if skypilot
-            else "modal"
-            if args.modal
-            else "docker"
-            if args.docker
-            else "local"
-        )
-        if requested != record.name:
-            changed.append("run_environment")
-    else:
-        args.docker = record.name == "docker"
-        args.modal = record.name == "modal"
-        if hasattr(args, "skypilot"):
-            args.skypilot = record.name == "skypilot"
-        if hasattr(args, "run_environment"):
-            args.run_environment = record.name
+    if mismatch:
+        changed.append("run_environment")
 
     for destination, field in _RUN_ENVIRONMENT_OPTION_CLI_FIELDS.items():
         if not hasattr(args, destination):
@@ -135,10 +146,14 @@ def _restore_resume_run_environment(  # noqa: C901
 
 def _normalized_resume_cli_value(destination: str, value: object) -> object:
     if destination == "backend" and value is not None:
-        assert isinstance(value, ComputeBackend)  # noqa: S101  # argparse contract
+        if not isinstance(value, ComputeBackend):
+            message = f"argparse backend value must be ComputeBackend, got {type(value).__name__}"
+            raise TypeError(message)
         return value.value
     if destination == "profiler":
-        assert isinstance(value, ProfilerKind)  # noqa: S101  # argparse contract
+        if not isinstance(value, ProfilerKind):
+            message = f"argparse profiler value must be ProfilerKind, got {type(value).__name__}"
+            raise TypeError(message)
         return ProfilerKind.NONE.value if value is ProfilerKind.AUTO else value.value
     return value
 
