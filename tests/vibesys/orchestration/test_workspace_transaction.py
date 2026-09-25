@@ -13,6 +13,11 @@ drives a real Git-backed workspace (via ``tests.vibesys.orchestration.harness``)
 through arbitrary content edits, untracked-file additions, and deletions, to
 prove the fake owner's model matches real ``GitTracker.checkout_tree``
 behavior and not just its documented contract.
+
+The ``restore_or_warn`` tests at the bottom (R1) drive the same real
+Git-backed harness to prove a failed checkout is tolerated end to end: no
+exception, a published framework warning, and a later successful checkout
+still restores.
 """
 
 from __future__ import annotations
@@ -25,17 +30,20 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.harness import run_with_context
 
+from vibesys.events import CoreEventType
 from vibesys.orchestration.runtime import (
     WorkspaceHandle,
     WorkspaceRestoreError,
     WorkspaceTransactionKeep,
 )
+from vibesys.render.sink import output_sink
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
+    from vibesys.events import CoreEvent
     from vibesys.orchestration.runtime import RunContext
 
 
@@ -336,3 +344,79 @@ def test_transaction_restore_is_exact_over_real_git(
         assert after == expected
     else:
         assert after == before
+
+
+# ---------------------------------------------------------------------------
+# ``restore_or_warn`` (R1): a failed checkout is tolerated, not fatal.
+# ---------------------------------------------------------------------------
+
+# A well-formed but unreachable SHA: a real ``git restore --source=<sha>``
+# rejects it, so ``checkout_tree`` returns ``False`` and ``restore()`` raises
+# ``WorkspaceRestoreError`` -- an actual failing Git call, not a monkeypatch.
+_UNREACHABLE_REVISION = "f" * 40
+
+
+def test_restore_or_warn_tolerates_a_failed_real_git_checkout(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """R1 regression: a real failed checkout must not abort the run.
+
+    It publishes exactly one ``FRAMEWORK_WARNING`` event and reports failure
+    (``False``) instead of raising ``WorkspaceRestoreError``, so a strategy
+    can retry the same restore on a later round.
+    """
+    tmp_path = tmp_path_factory.mktemp("restore-or-warn-real")
+    runner = FakeAgentClient(backend_name="stub")
+
+    async def body(ctx: RunContext) -> bool:
+        (ctx.workspaces.root.path / "tracked.txt").write_text("hello")
+        await ctx.workspaces.root.snapshot("seed")
+        return await ctx.workspaces.root.restore_or_warn(_UNREACHABLE_REVISION)
+
+    seen: list[CoreEvent] = []
+    unsubscribe = output_sink().subscribe(seen.append)
+    try:
+        restored = run_with_context(tmp_path, runner, body)
+    finally:
+        unsubscribe()
+
+    assert restored is False
+    rollback_warnings = [
+        event
+        for event in seen
+        if event.type == CoreEventType.FRAMEWORK_WARNING and event.data.source_label == "rollback"  # ty: ignore[unresolved-attribute]
+    ]
+    assert len(rollback_warnings) == 1
+
+
+@given(fails=st.lists(st.booleans(), min_size=1, max_size=6))
+@settings(max_examples=20, deadline=None)
+def test_restore_or_warn_eventually_restores_despite_injected_failures(
+    tmp_path_factory: pytest.TempPathFactory,
+    fails: list[bool],
+) -> None:
+    """Property: whatever mix of failing and succeeding checkouts a sequence
+    of rounds injects, ``restore_or_warn`` never raises, and every round that
+    targets a real retained revision restores successfully.
+    """
+    tmp_path = tmp_path_factory.mktemp("restore-or-warn-property")
+    runner = FakeAgentClient(backend_name="stub")
+
+    async def body(ctx: RunContext) -> list[bool]:
+        root = ctx.workspaces.root.path
+        (root / "tracked.txt").write_text("seed")
+        good_revision = await ctx.workspaces.root.snapshot("seed")
+        results = []
+        for should_fail in fails:
+            target = _UNREACHABLE_REVISION if should_fail else good_revision
+            results.append(await ctx.workspaces.root.restore_or_warn(target))
+        return results
+
+    results = run_with_context(tmp_path, runner, body)
+
+    # Never aborts: one boolean result per round, matching whether that
+    # round injected a failure.
+    assert results == [not fail for fail in fails]
+    # Eventually restores: any round targeting the real revision succeeds.
+    if not all(fails):
+        assert True in results

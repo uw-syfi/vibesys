@@ -136,6 +136,43 @@ class _ProgressLike(Protocol):
         ...
 
 
+class _GateExecutorLike(Protocol):
+    """Structurally identical to ``gates.py``'s own ``GateExecutor``.
+
+    Declared again here (rather than imported) for the same reason as
+    ``_CommittedStateProjectorLike``: this module must stay at the base of
+    the graph, below ``gates.py``.
+    """
+
+    def run_accuracy(
+        self,
+        ctx: Any,  # noqa: ANN401
+        *,
+        process_id: str,
+        timeout_seconds: int | None = None,
+        execution_command: str | None = None,
+        round_label: str | None = None,
+    ) -> Any:  # noqa: ANN401
+        """Run the trusted accuracy command for one candidate."""
+        ...
+
+    def run_benchmark(  # noqa: PLR0913
+        self,
+        ctx: Any,  # noqa: ANN401
+        *,
+        result_spec: Any = None,  # noqa: ANN401
+        result_protocol: Any = None,  # noqa: ANN401
+        objectives: Any = (),  # noqa: ANN401
+        process_id: str,
+        output_slug: str,
+        timeout_seconds: int | None = None,
+        execution_base: str | None = None,
+        round_label: str | None = None,
+    ) -> Any:  # noqa: ANN401
+        """Run the trusted benchmark result contract for one candidate."""
+        ...
+
+
 class _CommittedStateProjectorLike(Protocol):
     """Structurally identical to ``state.py``'s own ``_CommittedStateProjector``.
 
@@ -184,6 +221,7 @@ class HostResources(Protocol):
 
     _setup: RunSetup
     _projector: _CommittedStateProjectorLike | None
+    _gate_executor: _GateExecutorLike | None
     _parent_mutation_lock: asyncio.Lock
     _spawn_lock: asyncio.Lock
 

@@ -22,7 +22,8 @@ from typing import Never, cast
 from entrypoints.launcher import bundled_tui
 from vibesys.evaluators import EvaluatorPackageRequirement, resolve_evaluator_package
 from vibesys.input_project import materialize_input_project
-from vibesys.loops.multi.orchestration import MultiProjector
+from vibesys.loops.registry import built_in_orchestrations
+from vibesys.orchestration.contracts import project_run
 from vibesys.orchestration.view import RunStatus
 from vibesys.profilers import ACTIVE_PROFILER_KINDS
 from vibesys.resource_paths import (
@@ -452,8 +453,15 @@ def _verify_project_state(project_root: Path) -> None:
     if len(runs) != 1 or not runs[0].run_id.endswith("-installed-release-smoke"):
         _fail(f"Project smoke did not create exactly one run: {runs}")
     run = runs[0]
-    view = MultiProjector().view(
-        project, run.run_id, status=RunStatus.UNKNOWN, loop="multi-agent"
+    manifest = store.load_run(run.run_id)
+    loop = manifest.orchestration.id
+    registry = built_in_orchestrations()
+    try:
+        registration = registry.resolve(loop)
+    except ValueError:
+        registration = None
+    view = project_run(
+        registration, project, run_id=run.run_id, status=RunStatus.UNKNOWN, loop=loop
     )
     if len(view.rounds) != 1 or view.rounds[0].number != 1:
         _fail("Project smoke did not persist exactly one completed round")

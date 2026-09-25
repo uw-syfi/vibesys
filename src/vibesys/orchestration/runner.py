@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from vibesys.backends.base import ComputeBackendImpl
     from vibesys.orchestration.contracts import OrchestrationProjector, Orchestrator
     from vibesys.orchestration.environment import AgentEnvironment
+    from vibesys.orchestration.gates import GateExecutor
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
     from vs_agent.api import AgentClientProtocol
@@ -26,6 +27,7 @@ async def run_orchestration(  # noqa: PLR0913  # tracked: #288
     projector: OrchestrationProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    gate_executor: GateExecutor | None = None,
 ) -> bool:
     """Open the run host and invoke the selected policy once.
 
@@ -39,8 +41,9 @@ async def run_orchestration(  # noqa: PLR0913  # tracked: #288
     *agent_client_factory* and *backend_factory* are injection seams: a test
     passes a fake in place of the real agent client / compute backend
     construction (`vs_agent.api.build_agent_client`, `vibesys.backends.get`).
-    Both default to the real implementation, so production callers are
-    unaffected.
+    *gate_executor* is the same kind of seam for `ctx.gates`' trusted
+    accuracy/benchmark commands. All three default to the real
+    implementation, so production callers are unaffected.
     """
     async with RunContext.open(
         request,
@@ -50,5 +53,6 @@ async def run_orchestration(  # noqa: PLR0913  # tracked: #288
         projector=projector,
         agent_client_factory=agent_client_factory,
         backend_factory=backend_factory,
+        gate_executor=gate_executor,
     ) as ctx:
         return await orchestrator.run(ctx)

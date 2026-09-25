@@ -33,13 +33,13 @@ from vibesys.roles.single_agent import (
 )
 from vibesys.runtime import ReadOnly, Role
 from vibesys.schemas import SkillResourceSelection, normalize_hypothesis_title
-from vibesys.search.hypothesis.transitions import apply_strategy_updates, pareto_archive_conflict
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
 
 if TYPE_CHECKING:
     from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.loops.single.session import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.search.hypothesis import HypothesisSearch
     from vibesys.search.hypothesis.attempts import AttemptState
     from vibesys.search.hypothesis.plan import OrchestratorPlan
     from vibesys.search.hypothesis.state import HypothesisState
@@ -49,8 +49,10 @@ if TYPE_CHECKING:
 class SingleAgentTurns:
     """One designer and one combined implementer, reviewer, and profiler."""
 
-    def __init__(self, ctx: RunContext, options: AgentOrchestrationOptions) -> None:
-        """Bind the run's public capabilities and strategy options.
+    def __init__(
+        self, ctx: RunContext, options: AgentOrchestrationOptions, search: HypothesisSearch
+    ) -> None:
+        """Bind the run's public capabilities, strategy options, and search policy.
 
         Declares this run's progress-board path once with `ctx.progress`
         (see `vibesys.orchestration.progress`): turns note pure, unwritten
@@ -60,6 +62,7 @@ class SingleAgentTurns:
         """
         self.ctx = ctx
         self.options = options
+        self.search = search
         self.workspace = ctx.workspaces.root
         self.domain = resolve_domain(ctx.request.input_bundle.domain)
         self.modality = options.modality
@@ -146,7 +149,7 @@ class SingleAgentTurns:
             raise InvalidPlanError.self_reference()
         if state.by_id(plan.hypothesis_id) is not None:
             raise InvalidPlanError.reused_id(plan.hypothesis_id)
-        apply_strategy_updates(state.clone(), plan.hypothesis_updates)
+        self.search.validate_updates(state, plan.hypothesis_updates)
 
     def _designer_role(self) -> Role:
         """The orchestrator role, allow-listing this run's roadmap index.
@@ -329,9 +332,9 @@ class SingleAgentTurns:
                 [*plan.recommended_skills, *response.skill_context_updates]
             )
             artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
-        conflict = pareto_archive_conflict(
-            candidate_disposition=response.candidate_disposition,
-            candidate_metrics=dict(response.candidate_metrics),
+        conflict = self.search.pareto_conflict(
+            disposition=response.candidate_disposition,
+            metrics=dict(response.candidate_metrics),
             records=request.records,
             space=state.agent_run_state.metrics,
         )

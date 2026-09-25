@@ -1,17 +1,14 @@
-"""Transition functions with no ``HypothesisSearch`` wrapper.
+"""``HypothesisSearch``'s resume-time and lifecycle-guard behavior.
 
-``adopt_metric_space``/``reproject_run_evidence`` are the two transition
-functions ``loops/{multi,single,profile_multi,profile_single}/session.py``
-call directly (not through ``HypothesisSearch``, which has no method for
-"the run's configured metric space changed") every time a run starts or
-resumes: ``adopt_metric_space(previous or search.initial(), configured_space)``.
-``finish_hypothesis``/``apply_strategy_updates``' active-hypothesis guard are
-smaller cases in the same category: real behavior with no public entry
-point, because the lifecycle ``HypothesisSearch`` exposes never reaches the
-shape they guard against by itself. These have no other public entry point
-in ``search.hypothesis``, so unlike the rest of this package's tests, this
-file imports ``vibesys.search.hypothesis.transitions`` directly rather than
-driving everything through ``HypothesisSearch``.
+``HypothesisSearch.resume``/``finish`` are what
+``loops/{multi,single}/session.py`` call every time a run starts or resumes
+(``search.resume(previous, configured_metric_space)``) and, on the smaller
+guard cases, ``validate_updates``/``delta_reason``. This file drives all of
+that through the ``HypothesisSearch`` facade, not the underlying
+``vibesys.search.hypothesis.transitions`` functions directly; only the
+fixture helpers below (``start_hypothesis``/``append_round``, which build
+test states rather than exercise behavior under test) still call into
+``transitions`` for convenience.
 """
 
 from __future__ import annotations
@@ -19,22 +16,24 @@ from __future__ import annotations
 import pytest
 
 from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
-from vibesys.search.hypothesis import HypothesisResolution, OrchestratorPlan
+from vibesys.search.hypothesis import (
+    HypothesisConfig,
+    HypothesisResolution,
+    HypothesisSearch,
+    OrchestratorPlan,
+)
 from vibesys.search.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
-from vibesys.search.hypothesis.transitions import (
-    adopt_metric_space,
-    append_round,
-    apply_strategy_updates,
-    finish_hypothesis,
-    measurement_delta_reason,
-    start_hypothesis,
-)
+from vibesys.search.hypothesis.transitions import append_round, start_hypothesis
 from vs_loop_state.api import PerfDeltaReason, RoundRecord
 
 _NOISY_OPS = MetricSpace(
     objectives=(Objective(name="total_ops_per_sec", direction="max"),), relative_noise=0.05
 )
+
+
+def _search() -> HypothesisSearch:
+    return HypothesisSearch(HypothesisConfig(max_rounds=3))
 
 
 def _plan(identifier: str) -> OrchestratorPlan:
@@ -112,7 +111,7 @@ def test_resume_reprojection_agrees_with_the_recorded_round_outcome() -> None:
     completed = _within_noise_run()
     live = completed.by_id("H-1")
 
-    reprojected = adopt_metric_space(completed, _NOISY_OPS).by_id("H-1")
+    reprojected = _search().resume(completed, _NOISY_OPS).by_id("H-1")
 
     assert live is not None
     assert reprojected is not None
@@ -135,11 +134,12 @@ def test_adopting_a_metric_space_rewrites_the_stored_space_and_evidence() -> Non
         },
         deep=True,
     )
-    strict_projected = adopt_metric_space(strict_run, strict_run.metrics).by_id("H-1")
+    search = _search()
+    strict_projected = search.resume(strict_run, strict_run.metrics).by_id("H-1")
     assert strict_projected is not None
     assert strict_projected.resolution is HypothesisResolution.PROVEN
 
-    adopted = adopt_metric_space(strict_run, _NOISY_OPS)
+    adopted = search.resume(strict_run, _NOISY_OPS)
     hypothesis = adopted.by_id("H-1")
 
     assert adopted.metrics == _NOISY_OPS
@@ -161,19 +161,20 @@ def test_a_stored_comparison_survives_a_space_whose_tolerance_changed() -> None:
     ]
     strict = MetricSpace(objectives=_NOISY_OPS.objectives)
 
-    resolved = adopt_metric_space(recorded, strict).by_id("H-1")
+    resolved = _search().resume(recorded, strict).by_id("H-1")
 
     assert resolved is not None
     assert resolved.resolution is HypothesisResolution.INCONCLUSIVE
 
 
 def test_finish_hypothesis_clears_the_active_pointer_and_advances_the_revision() -> None:
+    search = _search()
     started = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
-    finished = finish_hypothesis(started)
+    finished = search.finish(started)
 
     assert finished.active_hypothesis_id is None
     assert finished.experiment_revision == started.experiment_revision + 1
-    assert finish_hypothesis(finished) == finished.clone()  # idempotent when nothing is active
+    assert search.finish(finished) == finished.clone()  # idempotent when nothing is active
 
 
 def test_apply_strategy_updates_rejects_abandoning_the_active_hypothesis() -> None:
@@ -190,7 +191,7 @@ def test_apply_strategy_updates_rejects_abandoning_the_active_hypothesis() -> No
     )
 
     with pytest.raises(ValueError, match="cannot abandoned active"):
-        apply_strategy_updates(active, [update])
+        _search().validate_updates(active, [update])
 
 
 def test_measurement_delta_reason_flags_a_self_reported_headline_with_no_measurement() -> None:
@@ -217,9 +218,9 @@ def test_measurement_delta_reason_flags_a_self_reported_headline_with_no_measure
     )
 
     assert hypothesis.measurement is None
-    assert measurement_delta_reason(hypothesis) is PerfDeltaReason.NOT_FRAMEWORK_MEASURED
+    assert HypothesisSearch.delta_reason(hypothesis) is PerfDeltaReason.NOT_FRAMEWORK_MEASURED
 
 
 def test_measurement_delta_reason_is_none_with_no_evidence_either_way() -> None:
     hypothesis = Hypothesis(hypothesis_id="H-1", plan=_plan("H-1"), started_round=1)
-    assert measurement_delta_reason(hypothesis) is None
+    assert HypothesisSearch.delta_reason(hypothesis) is None
