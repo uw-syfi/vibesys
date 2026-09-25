@@ -27,12 +27,7 @@ from vibesys.errors import (
     UnsupportedProfilerError,
 )
 from vibesys.loops.agent_options import AgentOrchestrationOptions
-from vibesys.loops.multi.decisions import (
-    STATIC_GUIDANCE,
-    AttemptRequest,
-    PlainGuidance,
-    PlanRequest,
-)
+from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
 from vibesys.loops.multi.turns import MultiAgentTurns
 from vibesys.profilers import ProfilerKind
 from vibesys.roles.common import Verdict
@@ -53,6 +48,7 @@ from vibesys.search.hypothesis import (
 from vibesys.search.hypothesis.attempts import AttemptState
 from vibesys.search.hypothesis.state import HypothesisState
 from vibesys.search.hypothesis.transitions import CarryOver
+from vibesys.search.profile_focus import FocusView
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -143,7 +139,7 @@ def _plan_request(*, round_number: int = 1, state: HypothesisState | None = None
         profiler_summary=None,
         plateau_warning=None,
         provisional_candidates=0,
-        profile_guidance=PlainGuidance(),
+        profile_guidance=FocusView(),
     )
 
 
@@ -160,7 +156,7 @@ def _request() -> tuple[PlanRequest, AttemptRequest, AttemptState]:
         planned_official_reason="final_round",
         records=[],
         active_hypothesis=hypothesis,
-        engine=STATIC_GUIDANCE,
+        profile_focus=FocusView(),
         last_profile_focus="decode",
     )
     attempt = AttemptState(agent_run_state=started.state, feedback=None, retry=1)

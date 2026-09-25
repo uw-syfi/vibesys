@@ -24,9 +24,9 @@ The sixth role, the implementer's continuation prompt, has no branch in the
 covered directly: two independent ``ctx.agents.turn`` calls with the same
 role and context must render identically.
 
-``profile_multi`` reuses multi's exact role catalog (same templates; see
-``vibesys.loops.profile_multi.turns``), so proving multi's roles here also
-covers profile_multi's turns.
+``profile_multi`` is multi run with ``options.profile_guided`` set (same
+``vibesys.loops.multi.turns``), so proving multi's roles here also covers
+profile_multi's turns.
 """
 
 from __future__ import annotations

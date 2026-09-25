@@ -1,4 +1,4 @@
-"""Profile multi descriptor, projection, and visible round order."""
+"""Profile-guided-multi preset: descriptor, projection, and visible round order."""
 
 from __future__ import annotations
 
@@ -10,15 +10,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from vibesys.errors import InvalidStrategyOptionsError
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
-from vibesys.loops.profile_multi.orchestration import (
-    InvalidStrategyOptionsError,
+from vibesys.loops.multi.orchestration import (
     ProfileGuidedMultiAgentOrchestrator,
     ProfileMultiProjector,
-    load_options,
 )
-from vibesys.loops.profile_multi.session import ProfileMultiSession
+from vibesys.loops.multi.orchestration import load_profile_options as load_options
+from vibesys.loops.multi.session import MultiSession as ProfileMultiSession
 from vibesys.orchestration.view import RunStatus
 from vibesys.search.hypothesis.attempts import AttemptDecision
 from vibesys.search.hypothesis.state import HypothesisState
@@ -78,8 +78,8 @@ def test_projector_uses_profile_multi_namespace_and_ignores_other_commits(
     state = HypothesisState()
     load = MagicMock(return_value=state)
     projected = MagicMock(return_value="view")
-    monkeypatch.setattr("vibesys.loops.profile_multi.orchestration.load_hypothesis_state", load)
-    monkeypatch.setattr("vibesys.loops.profile_multi.orchestration.project_run_view", projected)
+    monkeypatch.setattr("vibesys.loops.multi.orchestration.load_hypothesis_state", load)
+    monkeypatch.setattr("vibesys.loops.multi.orchestration.project_run_view", projected)
     projector = ProfileMultiProjector()
     project = MagicMock()
 

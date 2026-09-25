@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator, EvolveProjector
 from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator, IssueQueueProjector
-from vibesys.loops.multi.orchestration import MultiAgentOrchestrator, MultiProjector
-from vibesys.loops.profile_multi.orchestration import (
+from vibesys.loops.multi.orchestration import (
+    MultiAgentOrchestrator,
+    MultiProjector,
     ProfileGuidedMultiAgentOrchestrator,
     ProfileMultiProjector,
 )

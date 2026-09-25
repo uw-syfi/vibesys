@@ -16,12 +16,8 @@ from vibesys.evaluators.gates import (
 )
 from vibesys.evaluators.validation_recipe import FrameworkValidationResult
 from vibesys.events import GateKind
-from vibesys.loops.multi.decisions import (
-    STATIC_GUIDANCE,
-    AttemptRequest,
-    PlainGuidance,
-    PlanRequest,
-)
+from vibesys.loops.multi.attribution import run_attribution
+from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
 from vibesys.loops.multi.turns import MultiAgentTurns
 from vibesys.loops.multi.validation import (
     _load_validation_recipes,
@@ -61,6 +57,7 @@ from vibesys.search.hypothesis.transitions import (
     terminal_workspace_notice,
     update_active_hypothesis,
 )
+from vibesys.search.profile_focus import FocusView, ProfileFocus, ProfileFocusConfig
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 
@@ -69,9 +66,11 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vibesys.evaluators.input_manifest import ProfileGuidedInput
     from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.orchestration.runtime import RunContext
     from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.search.profile_focus import ProfileFocusState
 
 
 MultiSessionError = StrategySessionError
@@ -169,8 +168,30 @@ class _TerminalPolicy:
         )
 
 
+class _ProfilePolicy:
+    """Component measurement and advancement decisions when profiling is on."""
+
+    def __init__(self, config: ProfileGuidedInput) -> None:
+        """Bind the manifest configuring this run's profile attribution."""
+        self.config = config
+
+    def official_reason(self, reason: str | None, focus: FocusView) -> str | None:
+        """Measure an active component even when the regular cadence defers."""
+        if focus.active_component:
+            return reason or "profile-guided component measurement"
+        return reason
+
+
 class MultiSession:
-    """Own the multi strategy's state, roles, attempts, and checkpoints."""
+    """Own the multi strategy's state, roles, attempts, and checkpoints.
+
+    ``options.profile_guided`` turns profiling on: each round attributes
+    cost to components via ``vibesys.search.profile_focus`` before the
+    designer plans, and the designer/implementer prompts carry that focus.
+    When it is unset, ``self.focus`` is ``None`` and every profile-guidance
+    value collapses to the empty ``FocusView()`` the shared templates
+    already render as nothing.
+    """
 
     def __init__(self, ctx: RunContext, options: AgentOrchestrationOptions) -> None:
         """Bind one host; resource opening occurs in ``open``."""
@@ -188,6 +209,22 @@ class MultiSession:
             )
         )
         self.terminal_policy = _TerminalPolicy(self.search.config)
+        profile_config = options.profile_guided
+        # Preserves the two presets' historical checkpoint-label prefixes
+        # (and their byte-identical golden snapshots) now that one session
+        # class serves both.
+        self._label = "multi" if profile_config is None else "profile_multi"
+        if profile_config is None:
+            self.profile: _ProfilePolicy | None = None
+            self.focus: ProfileFocus | None = None
+        else:
+            self.profile = _ProfilePolicy(profile_config)
+            self.focus = ProfileFocus(
+                ProfileFocusConfig(
+                    plateau_min_rounds=profile_config.min_measured_rounds,
+                    min_relative_improvement=profile_config.min_relative_improvement,
+                )
+            )
         self.framework_benchmark_configured = (
             ctx.request.input_bundle.benchmark_result is not None
             or ctx.request.input_bundle.benchmark_result_protocol is not None
@@ -265,7 +302,7 @@ class MultiSession:
                 sequence=self.round_number,
                 writes={"state.json": state},
                 candidate=False,
-                label="multi: initialize policy state",
+                label=f"{self._label}: initialize policy state",
                 publish=state,
             )
 
@@ -278,6 +315,16 @@ class MultiSession:
     def has_next_round(self) -> bool:
         """Whether the durable cursor remains within the total round budget."""
         return self.round_number <= self.options.max_rounds
+
+    def _focus_state(self) -> ProfileFocusState:
+        assert self.focus is not None  # noqa: S101  # only called when profiling is on
+        return self.state.profile_guidance or self.focus.initial()
+
+    def _current_focus(self) -> FocusView:
+        """Prompt guidance for this round: empty unless profiling is on."""
+        if self.focus is None:
+            return FocusView()
+        return self.focus.focus(self._focus_state())
 
     @asynccontextmanager
     async def round_scope(self) -> AsyncIterator[None]:
@@ -301,8 +348,24 @@ class MultiSession:
         if isinstance(decision, Finished):
             raise MultiSessionError.missing_active()
         if isinstance(decision, NewHypothesis):
-            summary = await self._pre_round_profile()
             context = decision.context
+            if self.focus is not None:
+                assert self.profile is not None  # noqa: S101  # set together in __init__
+                bottlenecks = await run_attribution(
+                    self.ctx, self.profile.config, round_number=number
+                )
+                focus_state = self.focus.observe(
+                    self._focus_state(), round_number=number, bottlenecks=bottlenecks
+                )
+                self.state = self.state.model_copy(update={"profile_guidance": focus_state})
+                await self._commit(
+                    sequence=self.round_number,
+                    writes={"state.json": self.state},
+                    candidate=False,
+                    label=f"profile-guided: prepare round {number}",
+                    publish=self.state,
+                )
+            summary = await self._pre_round_profile()
             plan = await self.turns.plan(
                 PlanRequest(
                     round_number=context.round_number,
@@ -312,7 +375,7 @@ class MultiSession:
                     profiler_summary=summary,
                     plateau_warning=context.plateau_warning,
                     provisional_candidates=context.provisional_candidates,
-                    profile_guidance=PlainGuidance(),
+                    profile_guidance=self._current_focus(),
                 )
             )
             started = self.search.start(
@@ -328,7 +391,7 @@ class MultiSession:
                 sequence=self.round_number,
                 writes={"state.json": self.state},
                 candidate=False,
-                label=f"multi: start hypothesis {plan.hypothesis_id}",
+                label=f"{self._label}: start hypothesis {plan.hypothesis_id}",
                 publish=self.state,
             )
         else:
@@ -352,6 +415,8 @@ class MultiSession:
             requested=plan.request_official_evaluation,
             candidate_ready=True,
         )
+        if self.profile is not None:
+            reason = self.profile.official_reason(reason, self._current_focus())
         await self._apply_rollback(hypothesis)
         request = AttemptRequest(
             round_number=number,
@@ -359,7 +424,7 @@ class MultiSession:
             planned_official_reason=reason,
             records=self.records,
             active_hypothesis=hypothesis,
-            engine=STATIC_GUIDANCE,
+            profile_focus=self._current_focus(),
             last_profile_focus=self.last_profile_focus,
         )
         attempt = AttemptState(
@@ -415,7 +480,7 @@ class MultiSession:
             sequence=self.round_number,
             writes={"state.json": self.state},
             candidate=False,
-            label=f"multi: set hypothesis {hypothesis.hypothesis_id} parent",
+            label=f"{self._label}: set hypothesis {hypothesis.hypothesis_id} parent",
             publish=self.state,
         )
         if failed_child is None:
@@ -449,7 +514,7 @@ class MultiSession:
             sequence=self.round_number,
             writes={"state.json": attempt.agent_run_state},
             candidate=False,
-            label=f"multi: start round {self.round_number} attempt {retry}",
+            label=f"{self._label}: start round {self.round_number} attempt {retry}",
             publish=attempt.agent_run_state,
         )
         await self.ctx.environment.reselect_device()
@@ -554,7 +619,7 @@ class MultiSession:
             sequence=self.round_number,
             writes={"state.json": state},
             candidate=False,
-            label=f"multi: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
+            label=f"{self._label}: checkpoint hypothesis {selected.request.plan.hypothesis_id}",
             publish=state,
         )
 
@@ -805,6 +870,17 @@ class MultiSession:
             terminal_needs_parent_choice=terminal_needs_parent_choice,
             has_implementation=implementation is not None,
         )
+        state = closed.state
+        if self.focus is not None:
+            focus_state = self.focus.record(
+                self._focus_state(),
+                round_number=self.round_number,
+                passed=attempt.passed and record.official_evaluation,
+                relative_improvement=(
+                    record.perf_delta_pct / 100 if record.perf_delta_pct is not None else None
+                ),
+            )
+            state = state.model_copy(update={"profile_guidance": focus_state})
         if closed.exhaustion_feedback is not None:
             self._board_log.append(
                 progress_log.render_exhaustion_note(
@@ -815,10 +891,10 @@ class MultiSession:
             )
         await self._commit(
             sequence=self.round_number,
-            writes={"state.json": closed.state},
-            publish=closed.state,
+            writes={"state.json": state},
+            publish=state,
         )
-        self.state = closed.state
+        self.state = state
         self.carry = closed.carry
         self.round_number += 1
 
@@ -843,14 +919,14 @@ class MultiSession:
             if baseline is None:
                 raise MultiSessionError.missing_baseline()
             await self.workspace.restore(baseline, clean=True)
-            await self.workspace.snapshot("multi: restore trusted input baseline")
+            await self.workspace.snapshot(f"{self._label}: restore trusted input baseline")
             self.ctx.log(f"\nNo evaluated winner was retained. Restored baseline {baseline[:12]}.")
             return True
         if winner.commit is None:
             raise MultiSessionError.missing_winner_commit()
         await self.workspace.retain(f"selected-round-{winner.round_number:04d}", winner.commit)
         await self.workspace.restore(winner.commit, clean=True)
-        await self.workspace.snapshot(f"multi: select round {winner.round_number}")
+        await self.workspace.snapshot(f"{self._label}: select round {winner.round_number}")
         metrics = (
             _format_metric_row(record_candidate_metrics(winner), self.state.metrics.objectives)
             if self.state.metrics.objectives
