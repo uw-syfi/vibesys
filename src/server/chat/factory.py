@@ -13,6 +13,7 @@ from server.chat.manager import (
     ChatThreadHandle,
     TerminalChatResource,
 )
+from server.chat.options import ChatRunSettings
 from server.chat.session import (
     ExperimentChatDependencies,
     ExperimentChatSession,
@@ -20,7 +21,7 @@ from server.chat.session import (
 from server.events import ChatThreadCreatedData
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.api import agent_spec_from_config, output_sink
-from vs_agent.api import AgentSessionKey, SessionScope, build_agent_client
+from vs_agent.api import AgentSessionKey, Driver, SessionScope, agent_catalog, build_agent_client
 from vs_project.api import RunLogger
 from vs_sandbox.api import HostResource, HostResourceAccess
 
@@ -28,12 +29,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from server.chat.options import ChatRunSettings
     from server.controller import RunController
     from server.execution import ExecutionTracker
     from vibesys.api import RunSession
     from vs_agent.api import MCPServerSpec
-    from vs_project.api import Project
 
 
 #: Session-key identifier for the run's default chat, which has no thread ID of
@@ -41,20 +40,6 @@ if TYPE_CHECKING:
 #: the same name the client already shows the default thread under
 #: (``DEFAULT_CHAT_THREAD_ID`` in ``clients/core-state``).
 DEFAULT_CHAT_THREAD = "default"
-
-
-class SelectionResolver(Protocol):
-    """Resolve optional thread choices into a complete agent selection."""
-
-    def __call__(
-        self,
-        *,
-        driver: str | None,
-        provider: str | None,
-        model: str | None,
-    ) -> AgentSelection:
-        """Validate and complete one requested agent selection."""
-        ...
 
 
 @dataclass(frozen=True)
@@ -173,7 +158,7 @@ def build_chat_agent(
     except BaseException as construction_error:
         try:
             resources.close()
-        except BaseException as cleanup_error:  # noqa: BLE001
+        except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-010245 [BLE001]; cleanup must run after cancellation and annotate, not replace, the construction failure.
             construction_error.add_note(
                 "Additional error while cleaning up chat-agent construction: "
                 f"{type(cleanup_error).__name__}: {cleanup_error}"
@@ -184,17 +169,12 @@ def build_chat_agent(
 class ExperimentChatFactory:
     """Build and own chat sessions from an attached core run."""
 
-    def __init__(  # noqa: PLR0913  # Construction wires independent run resources.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-011106 [PLR0913]; These dependencies have separate owners and lifetimes (manager, run controller/tracker/session, attachment, builder, fallback); a wrapper would only hide the composition boundary.
         self,
         *,
         manager: ChatManager,
         controller: RunController,
         executions: ExecutionTracker,
-        project: Project,
-        run_id: str,
-        workspace: Path,
-        defaults: ChatRunSettings,
-        resolve_selection: SelectionResolver,
         session: RunSession,
         attachment: RunAttachment,
         build_agent: ChatAgentBuilder,
@@ -204,11 +184,15 @@ class ExperimentChatFactory:
         self._manager = manager
         self._controller = controller
         self._executions = executions
-        self._project = project
-        self._run_id = run_id
-        self._workspace = workspace
-        self._defaults = defaults
-        self._resolve_selection = resolve_selection
+        self._project = attachment.project
+        self._run_id = attachment.run_id
+        self._workspace = attachment.workspace
+        self._defaults = ChatRunSettings(
+            driver=attachment.agent_defaults.driver,
+            provider=attachment.agent_defaults.provider,
+            model=attachment.agent_defaults.model,
+            role_models=attachment.agent_defaults.role_models,
+        )
         self._session = session
         self._attachment = attachment
         self._build_agent = build_agent
@@ -259,7 +243,7 @@ class ExperimentChatFactory:
         for session in sessions:
             try:
                 session.close()
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010246 [BLE001]; session teardown attempts every owned session even when one is cancelled.
                 first_error = first_error or exc
         if first_error is not None:
             raise first_error
@@ -287,6 +271,36 @@ class ExperimentChatFactory:
             ),
             handler=session.ask,
             close=session.close,
+        )
+
+    def _resolve_selection(
+        self,
+        *,
+        driver: str | None,
+        provider: str | None,
+        model: str | None,
+    ) -> AgentSelection:
+        """Resolve one chat thread's agent choice against the attached run."""
+        if self._attachment.agent_backend != "cli":
+            message = (
+                "experiment chat threads require the CLI agent backend, "
+                f"but this run uses agent backend {self._attachment.agent_backend!r}"
+            )
+            raise ValueError(message)
+        resolved_driver = driver or self._defaults.driver
+        resolved_provider = provider or self._defaults.provider
+        resolved_model = model or self._defaults.model
+        supported = agent_catalog()[Driver(resolved_driver)].providers
+        if resolved_provider not in supported:
+            message = (
+                f"agent driver {resolved_driver!r} does not support provider "
+                f"{resolved_provider!r}; supported providers: {', '.join(supported)}"
+            )
+            raise ValueError(message)
+        return AgentSelection(
+            driver=resolved_driver,
+            provider=resolved_provider,
+            model=resolved_model,
         )
 
     def _build_session(
@@ -345,7 +359,7 @@ class ExperimentChatFactory:
         except BaseException as construction_error:
             try:
                 resources.close()
-            except BaseException as cleanup_error:  # noqa: BLE001
+            except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-010247 [BLE001]; failed construction still closes resources and preserves the original exception.
                 construction_error.add_note(
                     "Additional error while cleaning up chat-session construction: "
                     f"{type(cleanup_error).__name__}: {cleanup_error}"

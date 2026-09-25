@@ -30,10 +30,10 @@ backend).
 
 from __future__ import annotations
 
-import glob
 import os
+import shutil
 import subprocess
-from collections.abc import Callable, Sequence  # noqa: TC003  # tracked: #288
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -46,6 +46,8 @@ from vibesys.constants import ComputeBackend
 from vibesys.profilers import ProfilerKind
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from vs_sandbox.api import HostResource, Sandbox, SandboxLifecycleHooks
 
 # ROCm PyTorch image. Carries the ROCm runtime + a matching torch build.
@@ -82,20 +84,24 @@ def _discover_rocm_devices() -> list[str]:
     host has no AMD GPU, in which case the container starts without an
     accelerator (parity with the Trainium backend's behaviour).
     """
-    if not os.path.exists(_KFD_DEVICE):  # noqa: PTH110  # tracked: #288
+    if not Path(_KFD_DEVICE).exists():
         return []
-    render_nodes = sorted(glob.glob("/dev/dri/render*"))  # noqa: PTH207  # tracked: #288
+    render_nodes = sorted(str(path) for path in Path("/dev/dri").glob("render*"))
     return [_KFD_DEVICE, *render_nodes]
 
 
 def _query_rocm_gpu_count() -> int | None:
     """Return the number of GPUs ``rocm-smi`` reports, or None if unavailable."""
+    rocm_smi = shutil.which("rocm-smi")
+    if rocm_smi is None:
+        return None
     try:
-        result = subprocess.run(  # noqa: PLW1510  # tracked: #288
-            ["rocm-smi", "--showid", "--csv"],  # noqa: S607  # tracked: #288
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010233 [S603]; run the resolved ROCm status utility with fixed read-only arguments.
+            [rocm_smi, "--showid", "--csv"],
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return None
@@ -115,13 +121,14 @@ class RocmBackend:
     name = ComputeBackend.ROCM
     profiler_kind = ProfilerKind.TORCH
 
-    def __init__(  # noqa: D107  # tracked: #288
+    def __init__(
         self,
         log_dir: Path,
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
     ) -> None:
+        """Configure ROCm execution with its log directory and image override."""
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image or _DEFAULT_IMAGE
@@ -145,7 +152,7 @@ class RocmBackend:
 
     # -- ComputeBackendImpl protocol ---------------------------------------
 
-    def make_sandbox(  # noqa: D102, PLR0913  # tracked: #288
+    def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-011113 [PLR0913]; RunEnvironment dispatches this structural ComputeBackendImpl method with shared named sandbox options; changing it would break backend parity.
         self,
         kind: SandboxKind,
         *,
@@ -161,9 +168,10 @@ class RocmBackend:
         auth_files: list[tuple[str, str]] | None = None,
         resources: Sequence[HostResource] = (),
     ) -> Sandbox:
+        """Create a local or ROCm-enabled Docker sandbox."""
         # Deferred: importing DockerSandbox registers process-wide signal and
         # atexit handlers. Registration must stay side-effect free.
-        from vs_sandbox.api import DockerSandbox  # noqa: PLC0415  # tracked: #288
+        docker_sandbox = import_module("vs_sandbox.api").DockerSandbox
 
         bind_mounts = list(bind_mounts or [])
         extra_env = dict(extra_env or {})
@@ -183,7 +191,7 @@ class RocmBackend:
             )
 
         if kind is SandboxKind.DOCKER:
-            return DockerSandbox(
+            return docker_sandbox(
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=None,  # ROCm uses --device, not --gpus
@@ -198,15 +206,19 @@ class RocmBackend:
                 lifecycle_hooks=lifecycle_hooks,
             )
 
-        raise ValueError(f"Unknown sandbox kind: {kind!r}")  # noqa: TRY003  # tracked: #288
+        message = f"Unknown sandbox kind: {kind!r}"
+        raise ValueError(message)
 
-    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:  # noqa: ARG002, D102  # tracked: #288
+    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
+        """Return no monitor until ROCm contention handling is available."""
+        del log_dir
         # rocm-smi can report utilization, but shared-device contention
         # handling isn't wired up yet; skip rather than fake it.
         return None
 
-    def reselect_device(self) -> None:  # noqa: D102  # tracked: #288
-        return None
+    def reselect_device(self) -> None:
+        """Do nothing because ROCm device reselection is not implemented."""
+        return
 
     # -- internal ----------------------------------------------------------
 

@@ -4,9 +4,8 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from io import StringIO
-from pathlib import Path  # noqa: TC003
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel
 
@@ -23,6 +22,9 @@ from vibesys.run.integration import LocalRunIntegration
 from vibesys.runtime import AgentDefinition
 from vs_agent.api import AgentBackend, AgentSpec
 from vs_agent.api.testing import FakeAgentClient
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _Answer(BaseModel):

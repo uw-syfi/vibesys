@@ -1,10 +1,11 @@
 """Tests for the unified hypothesis aggregate and its pure transitions."""
 
 from dataclasses import replace
-from typing import Literal
+from typing import Literal, Required, TypedDict, Unpack
 
 import pytest
 from pydantic import ValidationError
+from tests.support import make_orchestrator_plan
 
 from vibesys.agent_run.hypotheses import (
     ResolutionEvidence,
@@ -37,31 +38,52 @@ from vibesys.schemas import (
 from vs_loop_state.api import PerfProvenance, RoundRecord
 
 
-def _plan(identifier: str, *, updates: list[HypothesisStrategyUpdate] | None = None):  # noqa: ANN202
-    return OrchestratorPlan(
+class _RoundOptions(TypedDict, total=False):
+    hypothesis_id: Required[str]
+    parent_round: int | None
+    parent_commit: str | None
+    outcome: str
+    declared: str | None
+    direction: Literal["max", "min"]
+    retained: bool | None
+    comparison: MetricComparison | None
+    provenance: PerfProvenance | None
+
+
+class _DerivedRoundOptions(TypedDict, total=False):
+    unit: Required[str]
+    metrics: Required[dict[str, float]]
+    parent_round: int | None
+    parent_commit: str | None
+
+
+def _plan(
+    identifier: str, *, updates: list[HypothesisStrategyUpdate] | None = None
+) -> OrchestratorPlan:
+    return make_orchestrator_plan(
         hypothesis_id=identifier,
         hypothesis=f"claim {identifier}",
         hypothesis_updates=updates or [],
         task=f"implement {identifier}",
-        pass_criteria="tests pass",  # noqa: S106
+        criteria="tests pass",
         reasoning="test the claim",
     )
 
 
-def _round(  # noqa: PLR0913
+def _round(
     number: int,
     metric: float | None,
-    *,
-    hypothesis_id: str,
-    parent_round: int | None = None,
-    parent_commit: str | None = None,
-    outcome: str = "proven",
-    declared: str | None = "nominated",
-    direction: Literal["max", "min"] = "max",
-    retained: bool | None = True,
-    comparison: MetricComparison | None = None,
-    provenance: PerfProvenance | None = "framework",
+    **options: Unpack[_RoundOptions],
 ) -> RoundRecord:
+    hypothesis_id = options["hypothesis_id"]
+    parent_round = options.get("parent_round")
+    parent_commit = options.get("parent_commit")
+    outcome = options.get("outcome", "proven")
+    declared = options.get("declared", "nominated")
+    direction = options.get("direction", "max")
+    retained = options.get("retained", True)
+    comparison = options.get("comparison")
+    provenance = options.get("provenance", "framework")
     return RoundRecord(
         round_number=number,
         commit=f"{number:040x}",
@@ -887,14 +909,10 @@ def test_an_unfindable_parent_commit_with_no_round_bound_fails_closed() -> None:
     )
 
 
-def _derived_round(  # noqa: PLR0913
+def _derived_round(
     number: int,
     metric: float,
-    *,
-    unit: str,
-    metrics: dict[str, float],
-    parent_round: int | None = None,
-    parent_commit: str | None = None,
+    **options: Unpack[_DerivedRoundOptions],
 ) -> RoundRecord:
     """A round whose retention the framework must derive rather than read.
 
@@ -906,7 +924,7 @@ def _derived_round(  # noqa: PLR0913
         round_number=number,
         commit=f"{number:040x}",
         perf_metric=metric,
-        perf_unit=unit,
+        perf_unit=options["unit"],
         passed=True,
         reviewed=True,
         hypothesis_id=f"H-{number}",
@@ -914,9 +932,9 @@ def _derived_round(  # noqa: PLR0913
         hypothesis_outcome="proven",
         hypothesis_claim=f"claim H-{number}",
         hypothesis_task=f"implement H-{number}",
-        hypothesis_parent_round=parent_round,
-        hypothesis_parent_commit=parent_commit,
-        metrics=metrics,
+        hypothesis_parent_round=options.get("parent_round"),
+        hypothesis_parent_commit=options.get("parent_commit"),
+        metrics=options["metrics"],
         official_evaluation=True,
         perf_direction="max",
     )

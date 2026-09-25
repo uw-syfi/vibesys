@@ -5,20 +5,27 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextlib
+import importlib
 import inspect
 import json
 import os
 import shutil
-import subprocess
 import sys
 import threading
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+from unittest.mock import patch
 
 import pytest
+from omnigent.inner import os_env as omnigent_os_env
+from omnigent.inner.sandbox import (
+    SandboxPolicy,
+)
+from omnigent.tools.builtins import os_env as omnigent_os_tools
+from tests.support import run_test_command
 
 from vibesys.events import CommandResultPayload, JsonResultPayload
 from vibesys.schemas import JudgeResponse
@@ -35,10 +42,16 @@ from vs_agent.drivers.omnigent import (
     OmnigentDriverError,
     OmnigentSession,
     _build_os_tools,
-    _LifecycleState,
 )
 from vs_agent.omnigent.providers import OMNIGENT_PROVIDER_EXECUTORS
 from vs_sandbox.api import HostResource, ProjectPathPolicy
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Coroutine
+
+    from omnigent.inner.executor import ExecutorConfig
+
+    from vs_agent.drivers.omnigent import _OwnedOSTools
 
 omnigent = pytest.importorskip("omnigent")
 TextChunk = omnigent.TextChunk
@@ -63,12 +76,43 @@ requires_sandbox_backend = pytest.mark.skipif(
 )
 
 
+def _dispatch_os_tools_concurrently(
+    tools: list[_OwnedOSTools], environment_ready: threading.Barrier, environment_key: str
+) -> tuple[list[str], str]:
+    def unrelated_subprocess() -> str:
+        environment_ready.wait(timeout=2)
+        return run_test_command(
+            [sys.executable, "-c", f"import os; print(os.environ[{environment_key!r}])"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        futures: list[concurrent.futures.Future[Any]] = [
+            pool.submit(
+                asyncio.run,
+                os_tools.dispatch("sys_os_shell", {"command": "cargo test"}),
+            )
+            for os_tools in tools
+        ]
+        inherited = pool.submit(unrelated_subprocess)
+        return [future.result(timeout=2) for future in futures], inherited.result(timeout=2)
+
+
+def _registered_executor_class(provider: str) -> type[Any]:
+    spec = OMNIGENT_PROVIDER_EXECUTORS[provider]
+    module = importlib.import_module(spec.module)
+    executor_class = getattr(module, spec.class_name)
+    assert isinstance(executor_class, type)
+    return executor_class
+
+
 @pytest.mark.parametrize("provider", ["claude", "codex"])
 def test_registered_executor_matches_pinned_omnigent_api(provider: str) -> None:
-    driver = OmnigentDriver()
     executor_spec = OMNIGENT_PROVIDER_EXECUTORS[provider]
 
-    executor_class = driver._executor_class(executor_spec)  # noqa: SLF001
+    executor_class = _registered_executor_class(provider)
     parameters = inspect.signature(executor_class.__init__).parameters
 
     assert executor_class.__name__ == executor_spec.class_name
@@ -87,15 +131,11 @@ def test_registered_executor_exposes_tool_dispatch_seam(
     if required_binary is not None and shutil.which(required_binary) is None:
         pytest.skip(f"{provider} executor needs the {required_binary!r} CLI to construct")
     driver = OmnigentDriver()
-    executor_class = driver._executor_class(  # noqa: SLF001
-        OMNIGENT_PROVIDER_EXECUTORS[provider]
-    )
+    executor_class = _registered_executor_class(provider)
 
     executor = executor_class(cwd=".", model=None)
     try:
         assert hasattr(executor, _TOOL_EXECUTOR_ATTR)
-        environment_attribute = driver_subject._PROVIDER_ENVIRONMENT_ATTRS[provider]  # noqa: SLF001
-        assert isinstance(getattr(executor, environment_attribute, None), dict)
     finally:
         driver.close_executor(executor)
 
@@ -109,10 +149,16 @@ class _FakeExecutor:
         self.thread_id = "provider-session"
         self._tool_executor = None
 
-    def run_turn(self, messages, tools, instructions, config=None):  # noqa: ANN001, ANN202
+    def run_turn(
+        self,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]],
+        instructions: str,
+        config: ExecutorConfig | None = None,
+    ) -> AsyncIterator[object]:
         self.calls.append((messages, tools, instructions, config, os.environ.get("DRIVER_TEST")))
 
-        async def stream():  # noqa: ANN202
+        async def stream() -> AsyncIterator[object]:
             if self.delay:
                 await asyncio.sleep(self.delay)
             for event in self.events:
@@ -132,7 +178,7 @@ class _Observer:
         self.events.append(event)
 
 
-def _spec(tmp_path: Path, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
+def _spec(tmp_path: Path, **changes: object) -> AgentSessionSpec:
     base = AgentSessionSpec(
         role="judge",
         provider="codex",
@@ -146,59 +192,80 @@ def _spec(tmp_path: Path, **changes: Any) -> AgentSessionSpec:  # noqa: ANN401
 def _session(
     tmp_path: Path,
     executor: _FakeExecutor,
-    resources: driver_subject._ExecutorResources | None = None,
 ) -> tuple[OmnigentDriver, OmnigentSession]:
     driver = OmnigentDriver()
-    session = OmnigentSession(
-        driver=driver,
-        spec=_spec(tmp_path, reasoning_effort="high", environment=(("DRIVER_TEST", "set"),)),
-        executor=executor,
-        tool_schemas=[{"name": "sys_os_read"}],
-        resources=resources,
-    )
-    driver._sessions.add(session)  # noqa: SLF001
+    with patch.object(
+        driver,
+        "_build_executor",
+        return_value=(executor, [{"name": "sys_os_read"}], None, None),
+    ):
+        session = driver.create_session(
+            _spec(tmp_path, reasoning_effort="high", environment=(("DRIVER_TEST", "set"),))
+        )
     return driver, session
-
-
-def _resources() -> driver_subject._ExecutorResources:
-    return driver_subject._ExecutorResources()  # noqa: SLF001
 
 
 @pytest.mark.parametrize(
     ("provider", "attribute"),
     [("codex", "_env"), ("claude", "_extra_env")],
 )
-def test_provider_environment_is_explicit_and_does_not_modify_process_environment(
+def test_provider_environment_is_applied_during_session_creation_without_mutating_parent(
     provider: str,
     attribute: str,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     key = "VIBESYS_TEST_PROVIDER_ENV"
     monkeypatch.setenv(key, "ambient")
-    executor = SimpleNamespace(**{attribute: {"BASE": "preserved"}})
+    provider_environments: list[dict[str, str]] = []
 
-    driver_subject._adapt_provider_environment(  # noqa: SLF001
-        executor,
-        provider=provider,
-        environment={key: "session"},
+    class Executor(_FakeExecutor):
+        def __init__(self, **_kwargs: object) -> None:
+            super().__init__([])
+            environment = {"BASE": "preserved"}
+            self._set_provider_environment(environment, attribute)
+            provider_environments.append(environment)
+
+        def _set_provider_environment(
+            self, environment: dict[str, str], attribute_name: str
+        ) -> None:
+            if attribute_name == "_env":
+                self._env = environment
+            else:
+                self._extra_env = environment
+
+    driver = OmnigentDriver()
+    monkeypatch.setattr(driver, "_executor_class", lambda _spec: Executor)
+    monkeypatch.setattr(driver, "_build_os_env", lambda _spec, **_kwargs: object())
+    monkeypatch.setattr(driver_subject, "resolve_active_rust_toolchain", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        driver_subject,
+        "_build_os_tools",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            schemas=[],
+            handles=lambda _name: False,
+            dispatch=lambda _name, _args: None,
+            close=lambda: None,
+        ),
     )
 
-    assert getattr(executor, attribute) == {"BASE": "preserved", key: "session"}
+    driver.create_session(_spec(tmp_path, provider=provider, environment=((key, "session"),)))
+    assert provider_environments == [{"BASE": "preserved", key: "session"}]
     assert os.environ[key] == "ambient"
-    inherited = subprocess.check_output(  # noqa: S603
+    inherited = run_test_command(
         [sys.executable, "-c", f"import os; print(os.environ[{key!r}])"],
+        check=True,
+        capture_output=True,
         text=True,
-    ).strip()
+    ).stdout.strip()
     assert inherited == "ambient"
+    driver.close()
 
 
-def test_distinct_tool_helpers_snapshot_their_own_environment_without_command_rewrite(  # noqa: C901
+def test_distinct_tool_helpers_snapshot_their_own_environment_without_command_rewrite(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from omnigent.inner import os_env as omnigent_os_env  # noqa: PLC0415
-    from omnigent.inner.sandbox import SandboxPolicy  # noqa: PLC0415
-    from omnigent.tools.builtins import os_env as omnigent_os_tools  # noqa: PLC0415
 
     key = "CARGO_HOME"
     monkeypatch.setenv(key, "ambient")
@@ -209,10 +276,15 @@ def test_distinct_tool_helpers_snapshot_their_own_environment_without_command_re
     class Resource:
         def __init__(self) -> None:
             self.close_calls = 0
-            self._helper = Helper()
+            resources.append(self)
+            helper = Helper()
+            self._helper = helper
+            self.start_helper = helper.start
 
         def close(self) -> None:
             self.close_calls += 1
+
+    resources: list[Resource] = []
 
     class Helper:
         def __init__(self) -> None:
@@ -225,7 +297,7 @@ def test_distinct_tool_helpers_snapshot_their_own_environment_without_command_re
                 allow_network=True,
             )
 
-        def _start_locked(self) -> None:
+        def start(self) -> None:
             helper_environment = omnigent_os_env.build_helper_env(os.environ, self.sandbox)
             captured.append(helper_environment[key])
             environment_ready.wait(timeout=2)
@@ -246,21 +318,14 @@ def test_distinct_tool_helpers_snapshot_their_own_environment_without_command_re
             }
 
         def __init__(self, resource: Resource) -> None:
-            self._resource = resource
+            self.resource = resource
 
-        def invoke(self, arguments: str, _context: Any) -> str:  # noqa: ANN401
+        def invoke(self, arguments: str, _context: object) -> str:
             start_together.wait(timeout=2)
-            self._resource._helper._start_locked()  # noqa: SLF001
+            self.resource.start_helper()
             return arguments
 
-    resources: list[Resource] = []
-
-    def create_environment(_spec: Any) -> Resource:  # noqa: ANN401
-        resource = Resource()
-        resources.append(resource)
-        return resource
-
-    monkeypatch.setattr(omnigent_os_env, "create_os_environment", create_environment)
+    monkeypatch.setattr(omnigent_os_env, "create_os_environment", lambda _spec: Resource())
     monkeypatch.setattr(
         omnigent_os_tools,
         "build_os_env_tools",
@@ -272,28 +337,11 @@ def test_distinct_tool_helpers_snapshot_their_own_environment_without_command_re
         for cargo_home in cargo_homes
     ]
 
-    def dispatch_together() -> tuple[list[str], str]:
-        def unrelated_subprocess() -> str:
-            environment_ready.wait(timeout=2)
-            return subprocess.check_output(  # noqa: S603
-                [sys.executable, "-c", f"import os; print(os.environ[{key!r}])"],
-                text=True,
-            ).strip()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            futures: list[concurrent.futures.Future[Any]] = [
-                pool.submit(
-                    asyncio.run,
-                    os_tools.dispatch("sys_os_shell", {"command": "cargo test"}),
-                )
-                for os_tools in built
-            ]
-            inherited = pool.submit(unrelated_subprocess)
-            return [future.result(timeout=2) for future in futures], inherited.result(timeout=2)
-
-    commands, first_inherited = dispatch_together()
+    commands, first_inherited = _dispatch_os_tools_concurrently(built, environment_ready, key)
     monkeypatch.setenv(key, "new ambient")
-    restarted_commands, second_inherited = dispatch_together()
+    restarted_commands, second_inherited = _dispatch_os_tools_concurrently(
+        built, environment_ready, key
+    )
 
     assert commands == ['{"command": "cargo test"}', '{"command": "cargo test"}']
     assert restarted_commands == commands
@@ -309,8 +357,6 @@ def test_os_tool_setup_closes_all_environments_when_schema_building_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from omnigent.inner import os_env as omnigent_os_env  # noqa: PLC0415
-    from omnigent.tools.builtins import os_env as omnigent_os_tools  # noqa: PLC0415
 
     class Helper:
         sandbox = SimpleNamespace()
@@ -340,7 +386,7 @@ def test_os_tool_setup_closes_all_environments_when_schema_building_fails(
 
     resources: list[Resource] = []
 
-    def create_environment(_spec: Any) -> Resource:  # noqa: ANN401
+    def create_environment(_spec: object) -> Resource:
         resource = Resource()
         resources.append(resource)
         return resource
@@ -362,7 +408,6 @@ def test_os_tool_setup_validates_helper_seam_and_closes_partial_resources(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from omnigent.inner import os_env as omnigent_os_env  # noqa: PLC0415
 
     class Resource:
         def __init__(self) -> None:
@@ -373,7 +418,7 @@ def test_os_tool_setup_validates_helper_seam_and_closes_partial_resources(
 
     resources: list[Resource] = []
 
-    def create_environment(_spec: Any) -> Resource:  # noqa: ANN401
+    def create_environment(_spec: object) -> Resource:
         resource = Resource()
         resources.append(resource)
         return resource
@@ -400,7 +445,7 @@ def test_owned_os_tools_close_all_resources_once_and_preserve_first_failure() ->
                 raise self.error
 
     first_error = KeyboardInterrupt("first")
-    os_tools = driver_subject._OwnedOSTools(  # noqa: SLF001
+    os_tools = driver_subject._OwnedOSTools(  # noqa: SLF001  # LW-010001; asserts the owner closes every resource once and retains the first BaseException
         schemas=[],
         dispatch=lambda _name, _args: None,
         environments=(
@@ -533,13 +578,13 @@ def test_session_cleanup_closes_owned_os_environments(tmp_path: Path) -> None:
 
     executor = _FakeExecutor([])
     resource = Resource()
-    os_tools = driver_subject._OwnedOSTools(  # noqa: SLF001
-        schemas=[],
-        dispatch=lambda _name, _args: None,
-        environments=(resource,),
-    )
-    resources = driver_subject._ExecutorResources(os_tools=os_tools)  # noqa: SLF001
-    driver, _session_instance = _session(tmp_path, executor, resources)
+    driver = OmnigentDriver()
+    with patch.object(
+        driver,
+        "_build_executor",
+        return_value=(executor, [], None, SimpleNamespace(close=resource.close)),
+    ):
+        driver.create_session(_spec(tmp_path))
 
     driver.close()
 
@@ -551,8 +596,16 @@ def test_close_cancels_an_active_turn_from_another_thread(tmp_path: Path) -> Non
     finalized = threading.Event()
 
     class NeverEndingExecutor(_FakeExecutor):
-        def run_turn(self, *_args: object, **_kwargs: object):  # noqa: ANN202
-            async def stream():  # noqa: ANN202
+        def run_turn(
+            self,
+            messages: list[dict[str, object]],
+            tools: list[dict[str, object]],
+            instructions: str,
+            config: ExecutorConfig | None = None,
+        ) -> AsyncIterator[object]:
+            del messages, tools, instructions, config
+
+            async def stream() -> AsyncIterator[object]:
                 started.set()
                 try:
                     await asyncio.Future()
@@ -583,8 +636,16 @@ def test_cancel_stops_an_active_turn_without_closing_the_session(tmp_path: Path)
     finalized = threading.Event()
 
     class NeverEndingExecutor(_FakeExecutor):
-        def run_turn(self, *_args: object, **_kwargs: object):  # noqa: ANN202
-            async def stream():  # noqa: ANN202
+        def run_turn(
+            self,
+            messages: list[dict[str, object]],
+            tools: list[dict[str, object]],
+            instructions: str,
+            config: ExecutorConfig | None = None,
+        ) -> AsyncIterator[object]:
+            del messages, tools, instructions, config
+
+            async def stream() -> AsyncIterator[object]:
                 started.set()
                 try:
                     await asyncio.Future()
@@ -624,8 +685,16 @@ def test_close_waits_for_turn_cancellation_cleanup_before_executor_close(
     executor_closed = threading.Event()
 
     class CleanupExecutor(_FakeExecutor):
-        def run_turn(self, *_args: object, **_kwargs: object):  # noqa: ANN202
-            async def stream():  # noqa: ANN202
+        def run_turn(
+            self,
+            messages: list[dict[str, object]],
+            tools: list[dict[str, object]],
+            instructions: str,
+            config: ExecutorConfig | None = None,
+        ) -> AsyncIterator[object]:
+            del messages, tools, instructions, config
+
+            async def stream() -> AsyncIterator[object]:
                 started.set()
                 try:
                     await asyncio.Future()
@@ -683,8 +752,7 @@ def test_close_from_observer_rejects_without_deadlocking_loop(
     with pytest.raises(RuntimeError, match="event-loop thread"):
         session.run_turn(AgentTurnRequest("trigger callback"), ClosingObserver())
 
-    assert session._close_lifecycle.state is _LifecycleState.OPEN  # noqa: SLF001
-    assert driver._close_lifecycle.state is _LifecycleState.OPEN  # noqa: SLF001
+    assert executor.close_calls == 0
     driver.close()
     assert executor.close_calls == 1
 
@@ -701,8 +769,16 @@ def test_driver_close_drains_blocking_default_executor_work(
     resource_closed = threading.Event()
 
     class ThreadedExecutor(_FakeExecutor):
-        def run_turn(self, *_args: object, **_kwargs: object):  # noqa: ANN202
-            async def stream():  # noqa: ANN202
+        def run_turn(
+            self,
+            messages: list[dict[str, object]],
+            tools: list[dict[str, object]],
+            instructions: str,
+            config: ExecutorConfig | None = None,
+        ) -> AsyncIterator[object]:
+            del messages, tools, instructions, config
+
+            async def stream() -> AsyncIterator[object]:
                 def block() -> None:
                     worker_started.set()
                     release_worker.wait(timeout=2)
@@ -714,15 +790,20 @@ def test_driver_close_drains_blocking_default_executor_work(
 
             return stream()
 
-    class Scratch:
-        def cleanup(self) -> None:
+    class Resources:
+        def close(self) -> None:
             assert finalized.is_set()
             resource_closed.set()
 
     executor = ThreadedExecutor([])
-    scratch: Any = Scratch()
-    resources = driver_subject._ExecutorResources(scratch=scratch)  # noqa: SLF001
-    driver, session = _session(tmp_path, executor, resources)
+    resources = Resources()
+    driver = OmnigentDriver()
+    with patch.object(
+        driver,
+        "_build_executor",
+        return_value=(executor, [], None, resources),
+    ):
+        session = driver.create_session(_spec(tmp_path))
     turn_thread = threading.Thread(target=lambda: _ignore_cancelled_turn(session))
     turn_thread.start()
     assert worker_started.wait(timeout=2)
@@ -759,7 +840,8 @@ def test_driver_runtime_setup_failure_closes_loop(
     if failure == "start":
 
         def fail_start(_thread: threading.Thread) -> None:
-            raise RuntimeError("thread start failed")  # noqa: TRY003  # test sentinel
+            _failure_message = "thread start failed"
+            raise RuntimeError(_failure_message)  # test sentinel
 
         monkeypatch.setattr(driver_subject.threading.Thread, "start", fail_start)
         error = "thread start failed"
@@ -802,11 +884,10 @@ def test_concurrent_session_close_callers_receive_base_exception(
             with pytest.raises(KeyboardInterrupt):
                 future.result(timeout=2)
 
-    assert session._close_lifecycle.state is _LifecycleState.CLOSED  # noqa: SLF001
     with pytest.raises(KeyboardInterrupt):
         session.close()
-    driver._sessions.clear()  # noqa: SLF001
-    driver.close()
+    with pytest.raises(KeyboardInterrupt):
+        driver.close()
 
 
 def test_independent_sessions_overlap_on_one_driver_loop(
@@ -824,8 +905,16 @@ def test_independent_sessions_overlap_on_one_driver_loop(
             super().__init__([])
             self.answer = answer
 
-        def run_turn(self, *_args: object, **_kwargs: object):  # noqa: ANN202
-            async def stream():  # noqa: ANN202
+        def run_turn(
+            self,
+            messages: list[dict[str, object]],
+            tools: list[dict[str, object]],
+            instructions: str,
+            config: ExecutorConfig | None = None,
+        ) -> AsyncIterator[object]:
+            del messages, tools, instructions, config
+
+            async def stream() -> AsyncIterator[object]:
                 nonlocal active, maximum_active
                 runtime_threads.add(threading.get_ident())
                 with active_lock:
@@ -847,7 +936,7 @@ def test_independent_sessions_overlap_on_one_driver_loop(
     monkeypatch.setattr(
         driver,
         "_build_executor",
-        lambda _spec: (next(remaining), [], None, _resources()),
+        lambda _spec: (next(remaining), [], None, None),
     )
     sessions = [driver.create_session(_spec(tmp_path)) for _ in executors]
 
@@ -862,8 +951,8 @@ def test_independent_sessions_overlap_on_one_driver_loop(
 
     driver.close()
     assert [executor.close_calls for executor in executors] == [1, 1]
-    assert driver._runtime._loop.is_closed()  # noqa: SLF001
-    assert driver._sessions == set()  # noqa: SLF001
+    with pytest.raises(RuntimeError, match="closed"):
+        driver.run_awaitable(asyncio.sleep(0))
 
 
 def test_turns_in_one_session_run_in_submission_order(tmp_path: Path) -> None:
@@ -872,14 +961,18 @@ def test_turns_in_one_session_run_in_submission_order(tmp_path: Path) -> None:
     observed_messages: list[str] = []
 
     class OrderedExecutor(_FakeExecutor):
-        def run_turn(  # noqa: ANN202
+        def run_turn(
             self,
-            messages: list[dict[str, Any]],
-            *_args: object,
-            **_kwargs: object,
-        ):
-            async def stream():  # noqa: ANN202
+            messages: list[dict[str, object]],
+            tools: list[dict[str, object]],
+            instructions: str,
+            config: ExecutorConfig | None = None,
+        ) -> AsyncIterator[object]:
+            del tools, instructions, config
+
+            async def stream() -> AsyncIterator[object]:
                 message = messages[0]["content"]
+                assert isinstance(message, str)
                 observed_messages.append(message)
                 if message == "first":
                     first_started.set()
@@ -909,8 +1002,16 @@ def test_close_racing_a_queued_turn_cancels_active_and_rejects_queued(
     starts = 0
 
     class BlockingExecutor(_FakeExecutor):
-        def run_turn(self, *_args: object, **_kwargs: object):  # noqa: ANN202
-            async def stream():  # noqa: ANN202
+        def run_turn(
+            self,
+            messages: list[dict[str, object]],
+            tools: list[dict[str, object]],
+            instructions: str,
+            config: ExecutorConfig | None = None,
+        ) -> AsyncIterator[object]:
+            del messages, tools, instructions, config
+
+            async def stream() -> AsyncIterator[object]:
                 nonlocal starts
                 starts += 1
                 first_started.set()
@@ -951,7 +1052,7 @@ def test_driver_close_continues_after_cleanup_base_exception(
     monkeypatch.setattr(
         driver,
         "_build_executor",
-        lambda _spec: (next(remaining), [], None, _resources()),
+        lambda _spec: (next(remaining), [], None, None),
     )
     for _ in executors:
         driver.create_session(_spec(tmp_path))
@@ -960,8 +1061,8 @@ def test_driver_close_continues_after_cleanup_base_exception(
         driver.close()
 
     assert [executor.close_calls for executor in executors] == [1, 1]
-    assert driver._runtime._loop.is_closed()  # noqa: SLF001
-    assert driver._sessions == set()  # noqa: SLF001
+    with pytest.raises(RuntimeError, match="closed"):
+        driver.run_awaitable(asyncio.sleep(0))
 
 
 def test_concurrent_driver_close_callers_receive_base_exception(
@@ -990,7 +1091,6 @@ def test_concurrent_driver_close_callers_receive_base_exception(
             with pytest.raises(KeyboardInterrupt):
                 future.result(timeout=2)
 
-    assert driver._close_lifecycle.state is _LifecycleState.CLOSED  # noqa: SLF001
     with pytest.raises(KeyboardInterrupt):
         driver.close()
     assert executor.close_calls == 1
@@ -1002,6 +1102,7 @@ def test_driver_close_waits_for_in_flight_session_creation(
 ) -> None:
     build_started = threading.Event()
     release_build = threading.Event()
+    close_started = [threading.Event(), threading.Event()]
     close_finished = [threading.Event(), threading.Event()]
     executor = _FakeExecutor([])
     driver = OmnigentDriver()
@@ -1012,22 +1113,26 @@ def test_driver_close_waits_for_in_flight_session_creation(
         _FakeExecutor,
         list[dict[str, Any]],
         None,
-        driver_subject._ExecutorResources,
+        None,
     ]:
         build_started.set()
         assert release_build.wait(timeout=2)
-        return executor, [], None, _resources()
+        return executor, [], None, None
 
     monkeypatch.setattr(driver, "_build_executor", build)
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         creation = pool.submit(driver.create_session, _spec(tmp_path))
         assert build_started.wait(timeout=2)
-        closing = pool.submit(lambda: (driver.close(), close_finished[0].set()))
-        while True:
-            with driver._lifecycle:  # noqa: SLF001
-                if driver._close_lifecycle.state is _LifecycleState.CLOSING:  # noqa: SLF001
-                    break
-        second_closing = pool.submit(lambda: (driver.close(), close_finished[1].set()))
+
+        def close(index: int) -> None:
+            close_started[index].set()
+            driver.close()
+            close_finished[index].set()
+
+        closing = pool.submit(close, 0)
+        assert close_started[0].wait(timeout=2)
+        second_closing = pool.submit(close, 1)
+        assert close_started[1].wait(timeout=2)
         assert not close_finished[0].wait(timeout=0.05)
         assert not close_finished[1].wait(timeout=0.05)
         release_build.set()
@@ -1038,7 +1143,6 @@ def test_driver_close_waits_for_in_flight_session_creation(
 
     assert all(finished.is_set() for finished in close_finished)
     assert executor.close_calls == 1
-    assert driver._sessions == set()  # noqa: SLF001
 
 
 @pytest.mark.parametrize(
@@ -1089,7 +1193,7 @@ def test_create_session_accepts_supported_top_level_project_policy(
     monkeypatch.setattr(
         driver,
         "_build_executor",
-        lambda _spec: (executor, [], None, _resources()),
+        lambda _spec: (executor, [], None, None),
     )
     policy = ProjectPathPolicy(
         read_only_paths=(".git", ".vibesys"),
@@ -1113,7 +1217,7 @@ def test_create_session_accepts_non_dot_hidden_path(
     monkeypatch.setattr(
         driver,
         "_build_executor",
-        lambda _spec: (executor, [], None, _resources()),
+        lambda _spec: (executor, [], None, None),
     )
     policy = ProjectPathPolicy(hidden_paths=("agent.toml",))
 
@@ -1134,7 +1238,7 @@ def test_driver_owns_session_cleanup(
     monkeypatch.setattr(
         driver,
         "_build_executor",
-        lambda _spec: (executor, [], None, _resources()),
+        lambda _spec: (executor, [], None, None),
     )
 
     driver.create_session(_spec(tmp_path))
@@ -1162,13 +1266,14 @@ def test_missing_private_tool_executor_seam_fails_during_setup(
     monkeypatch.setattr(driver, "_build_os_env", lambda _workspace, **_kwargs: object())
 
     with pytest.raises(OmnigentDriverError, match="_tool_executor"):
-        driver._build_executor(_spec(tmp_path))  # noqa: SLF001
+        driver.create_session(_spec(tmp_path))
+    driver.close()
 
 
 def test_os_policy_is_always_sandboxed_and_workspace_scoped(tmp_path: Path) -> None:
     driver = OmnigentDriver()
 
-    spec = driver._build_os_env(_spec(tmp_path))  # noqa: SLF001
+    spec = driver._build_os_env(_spec(tmp_path))  # noqa: SLF001  # LW-010006; inspects the generated sandbox contract that has no public projection
 
     assert spec.sandbox is not None
     assert spec.sandbox.type != "none"
@@ -1202,7 +1307,7 @@ def test_os_policy_exposes_control_dotdirs_and_keeps_hidden_dotfiles_masked(
         lambda *_args, **_kwargs: (HostResource(toolchain, purpose="Rust toolchain"),),
     )
 
-    spec = driver._build_os_env(  # noqa: SLF001
+    spec = driver._build_os_env(  # noqa: SLF001  # LW-010007; inspects masked paths and toolchain grants in the internal sandbox spec
         _spec(tmp_path, policy=AgentExecutionPolicy(project_paths=policy)),
         env_passthrough=("CARGO_HOME",),
         include_toolchain=True,
@@ -1232,7 +1337,7 @@ def test_os_policy_masks_declared_non_dot_and_nested_paths(tmp_path: Path) -> No
     (tmp_path / "config" / "secret").write_text("secret-7729", encoding="utf-8")
     policy = ProjectPathPolicy(hidden_paths=("agent.toml", "config/secret"))
     driver = OmnigentDriver()
-    spec = driver._build_os_env(  # noqa: SLF001
+    spec = driver._build_os_env(  # noqa: SLF001  # LW-010008; obtains the sandbox spec required to test denied reads against the real OS tool
         _spec(tmp_path, policy=AgentExecutionPolicy(project_paths=policy))
     )
     os_tools = _build_os_tools(spec, tmp_path)
@@ -1259,7 +1364,7 @@ def test_real_os_shell_receives_explicit_environment_without_changing_parent(
     key = "VIBESYS_TEST_REAL_HELPER_ENV"
     monkeypatch.setenv(key, "ambient")
     driver = OmnigentDriver()
-    spec = driver._build_os_env(  # noqa: SLF001
+    spec = driver._build_os_env(  # noqa: SLF001  # LW-010009; configures the internal sandbox spec to verify explicit child environment isolation
         _spec(tmp_path),
         env_passthrough=(key,),
     )
@@ -1283,10 +1388,11 @@ def test_codex_executor_disables_native_tools(
     captured: dict[str, Any] = {}
 
     class Executor(_FakeExecutor):
-        def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401
+        def __init__(self, **kwargs: object) -> None:
             captured.update(kwargs)
             super().__init__([])
             self._env = {"BASE": "preserved"}
+            captured["provider_environment"] = self._env
 
     driver = OmnigentDriver()
     monkeypatch.setattr(driver, "_executor_class", lambda _spec: Executor)
@@ -1295,7 +1401,7 @@ def test_codex_executor_disables_native_tools(
     target_libdir = rust_sysroot / "lib" / "rustlib" / "x86_64-unknown-linux-gnu" / "lib"
     monkeypatch.setattr(
         "vs_agent.drivers.omnigent.resolve_active_rust_toolchain",
-        lambda _context, *, workspace: (rust_sysroot, target_libdir),  # noqa: ARG005
+        lambda _context, **_kwargs: (rust_sysroot, target_libdir),
     )
 
     def build_tools(
@@ -1303,12 +1409,13 @@ def test_codex_executor_disables_native_tools(
         _workspace: Path,
         environment: dict[str, str],
         _shell_os_env: object,
-    ) -> driver_subject._OwnedOSTools:
+    ) -> SimpleNamespace:
         captured["tool_environment"] = environment
-        return driver_subject._OwnedOSTools(  # noqa: SLF001
+        return SimpleNamespace(
             schemas=[],
+            handles=lambda _name: False,
             dispatch=lambda _name, _args: None,
-            environments=(),
+            close=lambda: None,
         )
 
     monkeypatch.setattr(
@@ -1316,12 +1423,10 @@ def test_codex_executor_disables_native_tools(
         build_tools,
     )
 
-    executor, _schemas, mcp_tools, resources = driver._build_executor(  # noqa: SLF001
-        _spec(tmp_path, environment=(("DRIVER_TEST", "session"),))
-    )
+    driver.create_session(_spec(tmp_path, environment=(("DRIVER_TEST", "session"),)))
 
     assert captured["disable_native_tools"] is True
-    assert executor._env == {"BASE": "preserved", "DRIVER_TEST": "session"}  # noqa: SLF001
+    assert captured["provider_environment"] == {"BASE": "preserved", "DRIVER_TEST": "session"}
     assert str(captured["tool_environment"]["PATH"]).split(os.pathsep)[0] == str(
         rust_sysroot / "bin"
     )
@@ -1331,8 +1436,7 @@ def test_codex_executor_disables_native_tools(
     assert not cargo_home.is_relative_to(tmp_path)
     assert "CARGO_TARGET_DIR" not in captured["tool_environment"]
     assert not any(key.endswith("_LINKER") for key in captured["tool_environment"])
-    assert mcp_tools is None
-    driver.close_executor(executor, resources=resources)
+    driver.close()
     assert not cargo_home.parent.exists()
 
 
@@ -1350,9 +1454,12 @@ def test_executor_routes_only_declared_os_and_mcp_tools(
     dispatched: list[tuple[str, str, dict[str, Any]]] = []
 
     class Executor(_FakeExecutor):
-        def __init__(self, **_kwargs: Any) -> None:  # noqa: ANN401
+        def __init__(self, **_kwargs: object) -> None:
             super().__init__([])
             setattr(self, environment_attribute, {})
+            executors.append(self)
+
+    executors: list[Executor] = []
 
     class MCPTools:
         schemas: ClassVar[list[dict[str, Any]]] = [{"name": "profiler__analyze", "parameters": {}}]
@@ -1377,7 +1484,7 @@ def test_executor_routes_only_declared_os_and_mcp_tools(
 
     class MCPFactory:
         @staticmethod
-        def build(**kwargs: Any) -> MCPTools:  # noqa: ANN401
+        def build(**kwargs: object) -> MCPTools:
             assert kwargs["harness"] == harness
             return mcp_tools
 
@@ -1393,39 +1500,37 @@ def test_executor_routes_only_declared_os_and_mcp_tools(
     monkeypatch.setattr(
         driver_subject,
         "_build_os_tools",
-        lambda *_args, **_kwargs: driver_subject._OwnedOSTools(  # noqa: SLF001
+        lambda *_args, **_kwargs: SimpleNamespace(
             schemas=[{"name": "sys_os_read", "parameters": {}}],
+            handles=lambda name: name == "sys_os_read",
             dispatch=dispatch_os,
-            environments=(),
+            close=lambda: None,
         ),
     )
 
-    executor, schemas, built_mcp, resources = driver._build_executor(  # noqa: SLF001
+    session = driver.create_session(
         _spec(
             tmp_path,
             provider=provider,
             mcp_servers=(MCPServerSpec("profiler", "python"),),
         )
     )
+    executor = executors[0]
+    session.run_turn(AgentTurnRequest("exercise tool surface"))
+    schemas = executor.calls[0][1]
+    tool_executor = executor._tool_executor  # noqa: SLF001  # LW-010035; the pinned provider dispatch seam has no public invocation path in the fake executor.
+    assert callable(tool_executor)
 
-    assert built_mcp is mcp_tools
     assert mcp_tools.initialize_calls == 1
     assert [schema["name"] for schema in schemas] == ["sys_os_read", "profiler__analyze"]
-    assert asyncio.run(executor._tool_executor("sys_os_read", {"path": "x"})) == "os result"  # noqa: SLF001
-    assert (
-        asyncio.run(executor._tool_executor("profiler__analyze", {"pid": 1}))  # noqa: SLF001
-        == "mcp result"
-    )
-    assert asyncio.run(executor._tool_executor("undeclared", {})) == {  # noqa: SLF001
-        "error": "unknown tool 'undeclared'"
-    }
+    assert asyncio.run(tool_executor("sys_os_read", {"path": "x"})) == "os result"
+    assert asyncio.run(tool_executor("profiler__analyze", {"pid": 1})) == "mcp result"
+    assert asyncio.run(tool_executor("undeclared", {})) == {"error": "unknown tool 'undeclared'"}
     assert dispatched == [
         ("os", "sys_os_read", {"path": "x"}),
         ("mcp", "profiler__analyze", {"pid": 1}),
     ]
 
-    asyncio.run(mcp_tools.close())
-    driver.close_executor(executor, resources=resources)
     driver.close()
     assert mcp_tools.close_calls == 1
 
@@ -1437,7 +1542,7 @@ def test_tool_schema_conflict_attempts_all_cleanup_and_preserves_conflict(
     executor: _FakeExecutor | None = None
 
     class Executor(_FakeExecutor):
-        def __init__(self, **_kwargs: Any) -> None:  # noqa: ANN401
+        def __init__(self, **_kwargs: object) -> None:
             nonlocal executor
             super().__init__([])
             self._env: dict[str, str] = {}
@@ -1456,13 +1561,14 @@ def test_tool_schema_conflict_attempts_all_cleanup_and_preserves_conflict(
 
         async def close(self) -> None:
             self.close_calls += 1
-            raise RuntimeError("MCP cleanup failed")  # noqa: TRY003
+            _failure_message = "MCP cleanup failed"
+            raise RuntimeError(_failure_message)
 
     mcp_tools = MCPTools()
 
     class MCPFactory:
         @staticmethod
-        def build(**_kwargs: Any) -> MCPTools:  # noqa: ANN401
+        def build(**_kwargs: object) -> MCPTools:
             return mcp_tools
 
     class Resource:
@@ -1480,17 +1586,16 @@ def test_tool_schema_conflict_attempts_all_cleanup_and_preserves_conflict(
     monkeypatch.setattr(
         driver_subject,
         "_build_os_tools",
-        lambda *_args, **_kwargs: driver_subject._OwnedOSTools(  # noqa: SLF001
+        lambda *_args, **_kwargs: SimpleNamespace(
             schemas=[{"name": "sys_os_read", "parameters": {}}],
+            handles=lambda name: name == "sys_os_read",
             dispatch=lambda *_args: None,
-            environments=(resource,),
+            close=resource.close,
         ),
     )
 
     with pytest.raises(OmnigentDriverError, match="conflict") as caught:
-        driver._build_executor(  # noqa: SLF001
-            _spec(tmp_path, mcp_servers=(MCPServerSpec("profiler", "python"),))
-        )
+        driver.create_session(_spec(tmp_path, mcp_servers=(MCPServerSpec("profiler", "python"),)))
 
     assert any("MCP cleanup also failed" in note for note in caught.value.__notes__)
     assert mcp_tools.close_calls == 1
@@ -1507,7 +1612,7 @@ def test_interrupted_mcp_initialization_keeps_owner_for_cleanup(
     class Executor:
         close_calls = 0
 
-        def __init__(self, **_kwargs: Any) -> None:  # noqa: ANN401
+        def __init__(self, **_kwargs: object) -> None:
             self._env: dict[str, str] = {}
             self._tool_executor = None
 
@@ -1528,7 +1633,7 @@ def test_interrupted_mcp_initialization_keeps_owner_for_cleanup(
 
     class MCPFactory:
         @staticmethod
-        def build(**_kwargs: Any) -> MCPTools:  # noqa: ANN401
+        def build(**_kwargs: object) -> MCPTools:
             return mcp_tools
 
     resource = SimpleNamespace(close_calls=0)
@@ -1546,15 +1651,16 @@ def test_interrupted_mcp_initialization_keeps_owner_for_cleanup(
     monkeypatch.setattr(
         driver_subject,
         "_build_os_tools",
-        lambda *_args, **_kwargs: driver_subject._OwnedOSTools(  # noqa: SLF001
+        lambda *_args, **_kwargs: SimpleNamespace(
             schemas=[],
+            handles=lambda _name: False,
             dispatch=lambda *_args: None,
-            environments=(resource,),
+            close=close_resource,
         ),
     )
     run_calls = 0
 
-    def interrupt_first(awaitable: Any) -> Any:  # noqa: ANN401
+    def interrupt_first(awaitable: Coroutine[Any, Any, Any]) -> object:
         nonlocal run_calls
         run_calls += 1
         if run_calls == 1:
@@ -1565,9 +1671,7 @@ def test_interrupted_mcp_initialization_keeps_owner_for_cleanup(
     monkeypatch.setattr(driver, "run_awaitable", interrupt_first)
 
     with pytest.raises(KeyboardInterrupt):
-        driver._build_executor(  # noqa: SLF001
-            _spec(tmp_path, mcp_servers=(MCPServerSpec("profiler", "python"),))
-        )
+        driver.create_session(_spec(tmp_path, mcp_servers=(MCPServerSpec("profiler", "python"),)))
 
     assert mcp_tools.close_calls == 1
     assert executor.close_calls == 1

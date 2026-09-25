@@ -3,12 +3,19 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
 import tomllib
-from collections.abc import Iterator  # noqa: TC003  # tracked: #288
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+from tests.support import run_test_command
+
+from vibesys.evaluators.input_manifest import (
+    load_input_bundle,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 PRIORITY_QUEUE_INPUTS = {
     "prioqueue-spsc": "spsc",
@@ -53,9 +60,6 @@ def _materialize_priority_queue_input(
     input_name: str,
     workspace: Path,
 ) -> Path:
-    from vibesys.evaluators.input_manifest import (  # noqa: PLC0415  # tracked: #288
-        load_input_bundle,
-    )
 
     input_dir = project_root / "examples" / "data-structures" / input_name
     starter = project_root / "examples" / "starters" / "priority-queue-rs"
@@ -88,7 +92,7 @@ def _function_body(source: str, signature: str, *, until: str | None = None) -> 
 
 
 @pytest.fixture(scope="session")
-def compiled_priority_queue_candidate(tmp_path_factory) -> Path:  # noqa: ANN001  # tracked: #288
+def compiled_priority_queue_candidate(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Build the shared Rust starter once for materialized-input tests."""
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted priority-queue evaluator")
@@ -97,7 +101,7 @@ def compiled_priority_queue_candidate(tmp_path_factory) -> Path:  # noqa: ANN001
     starter = project_root / "examples" / "starters" / "priority-queue-rs"
     build_dir = tmp_path_factory.mktemp("priority-queue-rs-build") / "starter"
     _copy_input_bundle(starter, build_dir)
-    subprocess.run(["make"], cwd=build_dir, check=True)  # noqa: S607  # tracked: #288
+    run_test_command(["make"], cwd=build_dir, check=True)
 
     candidate = build_dir / "priority-queue-candidate.so"
     assert candidate.is_file()
@@ -105,7 +109,7 @@ def compiled_priority_queue_candidate(tmp_path_factory) -> Path:  # noqa: ANN001
 
 
 @pytest.fixture(scope="session")
-def priority_queue_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: ANN001  # tracked: #288
+def priority_queue_native_runner(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     """Build the trusted evaluator runner once and reuse it across subprocesses."""
     if shutil.which("cargo") is None:
         pytest.skip("Rust is required by the trusted priority-queue evaluator")
@@ -113,8 +117,8 @@ def priority_queue_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: A
     project_root = Path(__file__).parents[2]
     source = project_root / "examples" / "evaluators" / "priority-queue" / "native_runner"
     target_dir = tmp_path_factory.mktemp("priority-queue-native-runner") / "target"
-    subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    run_test_command(
+        [
             "cargo",
             "build",
             "--quiet",
@@ -140,7 +144,7 @@ def priority_queue_native_runner(tmp_path_factory) -> Iterator[Path]:  # noqa: A
 
 
 @pytest.fixture(scope="session")
-def built_priority_queue_baselines(tmp_path_factory) -> dict[str, Path]:  # noqa: ANN001  # tracked: #288
+def built_priority_queue_baselines(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     """Build each C baseline once against the evaluator ABI header."""
     if shutil.which("cc") is None:
         pytest.skip("A C compiler is required by the priority-queue baselines")
@@ -158,8 +162,8 @@ def built_priority_queue_baselines(tmp_path_factory) -> dict[str, Path]:  # noqa
             baseline,
             ignore=shutil.ignore_patterns("priority-queue-candidate.so"),
         )
-        subprocess.run(  # noqa: S603  # tracked: #288
-            ["make", "clean", "all", f"ABI_HEADER={abi_header}"],  # noqa: S607  # tracked: #288
+        run_test_command(
+            ["make", "clean", "all", f"ABI_HEADER={abi_header}"],
             cwd=baseline,
             check=True,
         )
@@ -168,7 +172,7 @@ def built_priority_queue_baselines(tmp_path_factory) -> dict[str, Path]:  # noqa
     return built
 
 
-def test_priority_queue_manifests_invoke_go_evaluator_directly():  # noqa: ANN201  # tracked: #288
+def test_priority_queue_manifests_invoke_go_evaluator_directly() -> None:
     root = Path(__file__).parents[2] / "examples" / "data-structures"
 
     for input_name, scenario in PRIORITY_QUEUE_INPUTS.items():
@@ -217,10 +221,7 @@ def test_priority_queue_manifests_invoke_go_evaluator_directly():  # noqa: ANN20
     assert (evaluator / "include" / "vibesys_priority_queue_abi.h").exists()
 
 
-def test_priority_queue_inputs_use_shared_editable_rust_starter():  # noqa: ANN201  # tracked: #288
-    from vibesys.evaluators.input_manifest import (  # noqa: PLC0415  # tracked: #288
-        load_input_bundle,
-    )
+def test_priority_queue_inputs_use_shared_editable_rust_starter() -> None:
 
     project_root = Path(__file__).parents[2]
     root = project_root / "examples" / "data-structures"
@@ -252,12 +253,12 @@ def test_priority_queue_inputs_use_shared_editable_rust_starter():  # noqa: ANN2
 
 @pytest.mark.parametrize(("input_name", "scenario"), PRIORITY_QUEUE_INPUTS.items())
 @pytest.mark.usefixtures("priority_queue_native_runner")
-def test_materialized_rust_starter_passes_accuracy(  # noqa: ANN201  # tracked: #288
-    tmp_path,  # noqa: ANN001  # tracked: #288
-    input_name,  # noqa: ANN001  # tracked: #288
-    scenario,  # noqa: ANN001  # tracked: #288
-    compiled_priority_queue_candidate,  # noqa: ANN001  # tracked: #288
-):
+def test_materialized_rust_starter_passes_accuracy(
+    tmp_path: Path,
+    input_name: str,
+    scenario: str,
+    compiled_priority_queue_candidate: Path,
+) -> None:
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted priority-queue evaluator")
 
@@ -281,7 +282,7 @@ def test_materialized_rust_starter_passes_accuracy(  # noqa: ANN201  # tracked: 
         "--trials",
         "1",
     ]
-    completed = subprocess.run(  # noqa: S603  # tracked: #288
+    completed = run_test_command(
         accuracy,
         cwd=workspace,
         check=True,
@@ -292,7 +293,7 @@ def test_materialized_rust_starter_passes_accuracy(  # noqa: ANN201  # tracked: 
 
 
 @pytest.mark.usefixtures("priority_queue_native_runner")
-def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path: Path) -> None:
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted priority-queue evaluator")
 
@@ -304,7 +305,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # 
         workspace,
     )
     assert (workspace / "_evaluator" / "priority-queue" / "DESIGN.md").is_file()
-    subprocess.run(["make"], cwd=workspace, check=True)  # noqa: S607  # tracked: #288
+    run_test_command(["make"], cwd=workspace, check=True)
     manifest = tomllib.loads((input_dir / "vibesys.input.toml").read_text())
 
     accuracy = [
@@ -316,7 +317,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # 
         "--trials",
         "1",
     ]
-    subprocess.run(accuracy, cwd=workspace, check=True)  # noqa: S603  # tracked: #288
+    run_test_command(accuracy, cwd=workspace, check=True)
 
     output = workspace / "results.json"
     benchmark = [
@@ -330,7 +331,7 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # 
         "--output-json",
         str(output),
     ]
-    subprocess.run(benchmark, cwd=workspace, check=True)  # noqa: S603  # tracked: #288
+    run_test_command(benchmark, cwd=workspace, check=True)
     results = json.loads(output.read_text())
     assert [result["scenario"] for result in results] == ["spsc"]
     assert all(result["repetitions"] == 3 for result in results)
@@ -338,29 +339,29 @@ def test_materialized_manifest_commands_run_go_evaluator_directly(tmp_path):  # 
 
 
 @pytest.mark.usefixtures("priority_queue_native_runner")
-def test_priority_queue_evaluator_rejects_adversarial_histories():  # noqa: ANN201  # tracked: #288
+def test_priority_queue_evaluator_rejects_adversarial_histories() -> None:
     if shutil.which("go") is None or shutil.which("cargo") is None:
         pytest.skip("Go and Rust are required by the trusted priority-queue evaluator")
 
     evaluator = Path(__file__).parents[2] / "examples" / "evaluators" / "priority-queue"
-    subprocess.run(["go", "test", "./..."], cwd=evaluator, check=True)  # noqa: S607  # tracked: #288
+    run_test_command(["go", "test", "./..."], cwd=evaluator, check=True)
 
 
 @pytest.mark.parametrize("scenario", list(PRIORITY_QUEUE_INPUTS.values()))
 @pytest.mark.parametrize("baseline_name", list(PRIORITY_QUEUE_BASELINES))
 @pytest.mark.usefixtures("priority_queue_native_runner")
-def test_c_baselines_build_and_pass_accuracy(  # noqa: ANN201  # tracked: #288
-    baseline_name,  # noqa: ANN001  # tracked: #288
-    scenario,  # noqa: ANN001  # tracked: #288
-    built_priority_queue_baselines,  # noqa: ANN001  # tracked: #288
-):
+def test_c_baselines_build_and_pass_accuracy(
+    baseline_name: str,
+    scenario: str,
+    built_priority_queue_baselines: dict[str, Path],
+) -> None:
     if shutil.which("go") is None or shutil.which("cc") is None:
         pytest.skip("Go and a C compiler are required by the priority-queue baselines")
 
     evaluator = Path(__file__).parents[2] / "examples" / "evaluators" / "priority-queue"
     baseline = built_priority_queue_baselines[baseline_name]
-    completed = subprocess.run(  # noqa: S603  # tracked: #288
-        [  # noqa: S607  # tracked: #288
+    completed = run_test_command(
+        [
             "go",
             "-C",
             str(evaluator),
@@ -387,7 +388,7 @@ def test_c_baselines_build_and_pass_accuracy(  # noqa: ANN201  # tracked: #288
     assert f"PASS - {scenario} {PRIORITY_QUEUE_CONTRACTS[scenario]}" in completed.stdout
 
 
-def test_prioqueue_locked_heap_baseline_copies_payloads_under_the_lock():  # noqa: ANN201  # tracked: #288
+def test_prioqueue_locked_heap_baseline_copies_payloads_under_the_lock() -> None:
     project_root = Path(__file__).parents[2]
     baseline = project_root / "examples" / "baselines" / "prioqueue-locked-heap"
     source = _normalized_source(baseline / "locked_heap.c")
@@ -407,7 +408,7 @@ def test_prioqueue_locked_heap_baseline_copies_payloads_under_the_lock():  # noq
         assert region.index("memcpy(") < region.rindex("pthread_mutex_unlock")
 
 
-def test_prioqueue_sharded_heap_baseline_rechecks_priority_before_commit():  # noqa: ANN201  # tracked: #288
+def test_prioqueue_sharded_heap_baseline_rechecks_priority_before_commit() -> None:
     project_root = Path(__file__).parents[2]
     baseline = project_root / "examples" / "baselines" / "prioqueue-sharded-heap"
     dequeue = _function_body(

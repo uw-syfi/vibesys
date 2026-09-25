@@ -10,7 +10,7 @@ their run environment resolves the agent image it needs to run from.
 from __future__ import annotations
 
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 
@@ -36,44 +36,45 @@ _DIGEST = f"{DEFAULT_AGENT_IMAGE_REGISTRY}@sha256:" + "d" * 64
 _REPO_DIGESTS = f'["vibesys-agent-build@sha256:{"c" * 64}", "{_DIGEST}"]'
 
 
+class _RegistryRunnerOptions(TypedDict, total=False):
+    tag_returncode: int
+    push_returncode: int
+    push_stderr: str
+    inspect_stdout: str
+    inspect_returncode: int
+    manifest_returncode: int
+    unverifiable_references: frozenset[str]
+    cached_repo_digests: str | None
+    raise_on: dict[str, Exception] | None
+
+
 class _FakeRegistryRunner:
     """Programmable fake for the docker tag/push/inspect/manifest sequence."""
 
-    def __init__(  # noqa: PLR0913
-        self,
-        *,
-        tag_returncode: int = 0,
-        push_returncode: int = 0,
-        push_stderr: str = "",
-        inspect_stdout: str = _REPO_DIGESTS,
-        inspect_returncode: int = 0,
-        manifest_returncode: int = 0,
-        unverifiable_references: frozenset[str] = frozenset(),
-        cached_repo_digests: str | None = None,
-        raise_on: dict[str, Exception] | None = None,
-    ) -> None:
-        self.tag_returncode = tag_returncode
-        self.push_returncode = push_returncode
-        self.push_stderr = push_stderr
-        self.inspect_stdout = inspect_stdout
-        self.inspect_returncode = inspect_returncode
-        self.manifest_returncode = manifest_returncode
+    def __init__(self, **options: Unpack[_RegistryRunnerOptions]) -> None:
+        self.tag_returncode = options.get("tag_returncode", 0)
+        self.push_returncode = options.get("push_returncode", 0)
+        self.push_stderr = options.get("push_stderr", "")
+        self.inspect_stdout = options.get("inspect_stdout", _REPO_DIGESTS)
+        self.inspect_returncode = options.get("inspect_returncode", 0)
+        self.manifest_returncode = options.get("manifest_returncode", 0)
         # References `docker manifest inspect` should report as absent even
         # though `manifest_returncode` is otherwise 0: lets a test make one
         # specific (usually stale) digest fail verification while a freshly
         # pushed one still succeeds.
-        self.unverifiable_references = unverifiable_references
-        self.cached_repo_digests = cached_repo_digests
-        self.raise_on = raise_on or {}
+        self.unverifiable_references = options.get("unverifiable_references", frozenset())
+        self.cached_repo_digests = options.get("cached_repo_digests")
+        self.raise_on = options.get("raise_on") or {}
         self.calls: list[tuple[str, ...]] = []
 
     def run(
         self,
         argv: Sequence[str],
         *,
-        cwd: Path,  # noqa: ARG002
-        timeout: float,  # noqa: ARG002
+        cwd: Path,
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
+        del cwd, timeout
         normalized = tuple(argv)
         self.calls.append(normalized)
         for marker, exc in self.raise_on.items():
@@ -102,7 +103,8 @@ class _FakeRegistryRunner:
             return subprocess.CompletedProcess(
                 normalized, self.inspect_returncode, self.inspect_stdout, ""
             )
-        raise AssertionError(f"unexpected command: {normalized}")  # noqa: TRY003
+        _failure_message = f"unexpected command: {normalized}"
+        raise AssertionError(_failure_message)
 
 
 class TestPushAgentImage:

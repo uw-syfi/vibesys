@@ -7,12 +7,28 @@ defines has to mean the same thing for ``tests/``, ``libs/*/tests``, and
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import settings
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+# Hypothesis's per-example deadline is a wall-clock dependence, so it is off in
+# every profile. `ci` is derandomized so a run's examples are a pure function of
+# the code: a newly found counterexample cannot fail an unrelated PR. `explore`
+# is the randomized, larger run for finding new bugs; select it by hand with
+# `HYPOTHESIS_PROFILE=explore`.
+# Every profile states `derandomize` explicitly: an unset option resolves from
+# whichever profile is loaded, so `explore` would otherwise inherit `ci`'s.
+settings.register_profile("dev", deadline=None, derandomize=False)
+settings.register_profile("ci", deadline=None, derandomize=True, print_blob=True)
+settings.register_profile(
+    "explore", deadline=None, derandomize=False, max_examples=500, print_blob=True
+)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE") or ("ci" if os.environ.get("CI") else "dev"))
 
 #: xdist scheduling group for tests that cannot run beside one another.
 _SERIAL_GROUP = "serial"

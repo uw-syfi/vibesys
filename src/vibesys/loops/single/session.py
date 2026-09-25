@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shlex
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.agent_run import issue_board
@@ -41,6 +41,7 @@ from vibesys.events import (
     EventStatus,
     ExperimentsChangedData,
     RoundFinishedData,
+    RunConfiguredData,
 )
 from vibesys.loops.single.hypothesis import HypothesisEngine
 from vibesys.loops.single.turns import SingleAgentTurns
@@ -178,9 +179,11 @@ class SingleSession:
         ctx = self.ctx
         turns = self.turns
         output_sink().run_configured(
-            run_log_path=str(ctx.environment.run_log_path),
-            project_root=str(ctx.request.project_root),
-            objective=turns.objective,
+            RunConfiguredData(
+                run_log_path=str(ctx.environment.run_log_path),
+                project_root=str(ctx.request.project_root),
+                objective=turns.objective,
+            )
         )
         issue_board.ensure_progress_file(turns.progress_path)
         issue_board.ensure_roadmap_file(turns.roadmap_path)
@@ -507,11 +510,15 @@ class SingleSession:
                 self.turns.progress_path,
                 number,
                 retry,
-                command=command or "(not configured)",
-                passed=True,
-                output=(
-                    "Reused the prior framework-owned PASS for this exact candidate commit; "
-                    "a later gate, not accuracy, caused the retry."
+                result=AccuracyGateResult(
+                    command=command,
+                    passed=True,
+                    output=(
+                        "Reused the prior framework-owned PASS for this exact candidate commit; "
+                        "a later gate, not accuracy, caused the retry."
+                    ),
+                    feedback=None,
+                    executed=False,
                 ),
             )
             return await self.ctx.evaluator.reuse_accuracy(label=f"round-{number}")
@@ -535,9 +542,7 @@ class SingleSession:
             self.turns.progress_path,
             number,
             retry,
-            command=result.command or "(not configured)",
-            passed=result.passed,
-            output=result.output[-GATE_RECORD_TAIL_CHARS:],
+            result=replace(result, output=result.output[-GATE_RECORD_TAIL_CHARS:]),
         )
         await self.workspace.snapshot(f"round-{number}-retry-{retry}-framework-accuracy")
         return result
@@ -563,11 +568,8 @@ class SingleSession:
             self.turns.progress_path,
             number,
             retry,
-            command=result.command or "(not configured)",
-            passed=result.passed,
+            result=replace(result, output=result.output[-GATE_RECORD_TAIL_CHARS:]),
             metric_name=result.outcome.metric_name or (spec.metric if spec else None),
-            metric_value=result.outcome.metric_value,
-            output=result.output[-GATE_RECORD_TAIL_CHARS:],
         )
         await self.workspace.snapshot(f"round-{number}-retry-{retry}-framework-benchmark")
         return result

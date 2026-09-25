@@ -119,6 +119,7 @@ Use this repository's template headings exactly:
 
 - `Problem`: Lead with intent. Explain the maintainer or user pain, why the change is needed, what context led to it, and any issue links. This is the highest-priority section of the PR body.
 - `Solution`: Describe the high-level design, important boundaries, tradeoffs, and what reviewers should inspect.
+- `Design`: Use this subsection under `Solution` to answer the `software-design` checkpoint: owning module, public interface added or changed, direction of data and dependencies, new coupling or `tach.toml` edges, and known drift left untouched or filed as an issue. Write `n/a: <reason>` for a question that does not apply.
 - `Architecture`: Use this subsection under `Solution` to describe the ownership model and major components involved in the solution. For nontrivial control flow or cross-boundary changes, include a Mermaid diagram or equivalent sketch that shows how the pieces interact.
 - `Verification`: Summarize automated tests, manual checks, benchmarks, or why a check was not run.
 - `Correctness properties`: List invariants, contracts, expected behaviors, and compatibility constraints preserved or introduced.

@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
+import sys
 
 import pytest
+from tests.support import run_test_command
 
 from vibesys.sandbox.images import agent_image
 
@@ -66,16 +67,16 @@ def test_cpu_agent_image_runs_every_shipped_cli_as_the_agent_user() -> None:
         timeout=_BUILD_TIMEOUT_S,
     )
 
-    result = subprocess.run(  # noqa: S603
-        ("docker", "run", "--rm", image_id, "bash", "-lc", _CHECK_SCRIPT),  # noqa: S607
+    result = run_test_command(
+        ("docker", "run", "--rm", image_id, "bash", "-lc", _CHECK_SCRIPT),
         capture_output=True,
         check=False,
         text=True,
         timeout=_RUN_TIMEOUT_S,
     )
 
-    print(result.stdout)  # noqa: T201  # -s surfaces this for a human reading the e2e run
-    print(result.stderr)  # noqa: T201
+    sys.stdout.write(result.stdout + "\n")
+    sys.stderr.write(result.stderr + "\n")
     assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
     output_lines = [line for line in result.stdout.splitlines() if line.strip()]
     assert output_lines[0] == "1000", output_lines

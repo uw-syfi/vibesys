@@ -3,15 +3,18 @@
 The Python packages follow one inward dependency direction:
 
 ```text
-entrypoints -> server -> vibesys
+entrypoints -> server   -> vibesys.api
+entrypoints -> headless -> vibesys.api
 ```
 
-`vibesys` is the headless optimization library. It owns run execution and the
-durable core event journal, and does not import serving or process-entrypoint
-code. `server` imports the core in-process, projects core events into its wire
-journal, and owns frontend-specific facilities such as experiment chat.
-`entrypoints` composes either a local headless integration or the server
-runtime. Tach enforces this direction in CI.
+`vibesys` is the optimization library. It owns run execution and the durable
+core event journal, and does not import serving or process-entrypoint code.
+`server` and `headless` are peers over the `vibesys.api` facade; neither imports
+the other. `server` projects core events into its wire journal and owns
+frontend-specific facilities such as experiment chat. `headless` runs and renders a
+run without the server. `entrypoints` composes either the headless integration
+or the server runtime. Tach enforces this direction in CI; see
+[architecture.md](architecture.md) for the generated graph.
 
 The TypeScript frontend has four packages with one allowed dependency direction:
 
