@@ -2,6 +2,12 @@
 
 The fixtures are review artifacts: intentional prompt changes should update the
 plain Markdown snapshots so reviewers can inspect exactly what each role sees.
+
+Renders through ``render_template`` with evolve's own template directory,
+the same resolution ``ctx.agents.turn`` uses for a role whose
+``template`` starts with ``"loops/evolve/"`` (see
+``_split_template`` in ``vibesys.orchestration.agents``): evolve's own
+folder first, falling back to ``prompts/shared/``.
 """
 
 from __future__ import annotations
@@ -17,12 +23,17 @@ from vibesys.constants import DomainName
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
-from vibesys.loops.evolve.loop import _render
 from vibesys.profilers import ProfilerKind, profiler_definition
+from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.search.population.models import Individual
 
+_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "evolve"
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "prompt_snapshots"
 _ROLES = ("mutator", "judge", "profiler")
+
+
+def _render(name: str, **kwargs: object) -> str:
+    return render_template(name, template_dir=_TEMPLATE_DIR, **kwargs)
 
 
 @dataclass(frozen=True)

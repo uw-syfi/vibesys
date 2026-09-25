@@ -30,6 +30,8 @@ def _role_search_names() -> dict[int, str]:
         roles.single_agent,
         roles.perf_eval,
         roles.mutator,
+        roles.candidate_judge,
+        roles.evolve_profiler,
     ):
         for name, value in vars(family).items():
             if name.startswith("_") or not _IDENTIFIER.match(name):
