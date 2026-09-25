@@ -120,9 +120,7 @@ If a remote profiling command fails (entrypoint missing, function errors, JSON e
 will FAIL and `gemm_shapes`/`roofline` have no shapes to extract.
 
 Fill `command`/`env` from the candidate's declared startup contract, and
-where the candidate is a known serving engine, check that engine's file
-under `serving-systems/references/engines/` (start from the index at
-`serving-systems/references/tooling/profiling-serving-engines.md`) before
+check the engine-specific profiling notes in your skills, if any, before
 assuming a profiler contract: some engines expose an environment-variable
 plus HTTP-endpoint contract, others a Python keyword argument to their own
 in-process API, and this has changed across releases of the same engine, so

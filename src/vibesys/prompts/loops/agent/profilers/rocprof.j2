@@ -65,17 +65,15 @@ Every `profile_*` capture tool shares the same lifecycle arguments
 (`command`, `env`, `cwd`, `ready_command`, `load_command`, `stop_signal`,
 `grace_s`, `timeout_s`), plus arguments scoped to what it captures (counter
 sets, target kernel regex, target CU, ...). **What goes into those
-arguments is engine-specific, not a ROCm concern**: see
-`serving-systems/references/tooling/profiling-serving-engines.md` for the
-index of what each argument is for, and the linked per-engine file (under
-`serving-systems/references/engines/`) for the engine actually in play:
-single-process launch settings, graceful-shutdown behavior, and any
-torch.profiler contract differences. This template covers only the
-ROCm-specific mechanics below.
+arguments is engine-specific, not a ROCm concern**: check the
+engine-specific profiling notes in your skills, if any, for what each
+argument is for on the engine actually in play: single-process launch
+settings, graceful-shutdown behavior, and any torch.profiler contract
+differences. This template covers only the ROCm-specific mechanics below.
 
 ## `{{ profiler_mcp_name }}` MCP tools OR shell
 
-If the `{{ profiler_mcp_name }}` MCP server is attached to this round, call its tools directly (argument names shown). Without it, run the equivalent `rocprofv3`/`rocprof-compute` command yourself (see `serving-systems/references/platforms/rocm/profiler.md` for exact flags) and shell out to the matching drill-down subcommand on `python {{ profiler_support_name }}/<module>.py` against its output.
+If the `{{ profiler_mcp_name }}` MCP server is attached to this round, call its tools directly (argument names shown). Without it, run the equivalent `rocprofv3`/`rocprof-compute` command yourself (see the ROCm profiling notes in your skills, if any, for exact flags) and shell out to the matching drill-down subcommand on `python {{ profiler_support_name }}/<module>.py` against its output.
 
 ### System trace: `profile_timeline` + drill-downs (`analyze_rocprof.py`)
 
@@ -225,7 +223,7 @@ actually happened to a call whose response you lost.
 
 1. Read the objective, candidate contract, manifest, build/startup commands, and benchmark `--help` output to understand which implementation and process the workload exercises{% if benchmark_command is defined and benchmark_command %}: `{{ benchmark_command }} --help`{% endif %}. Do not assume a filename, language, or launcher.
 2. Stop any stale candidate processes from previous attempts.
-3. Fill `command`/`env`/`ready_command`/`load_command`/`setup_command`/`stop_signal`/`grace_s` from the candidate's declared startup contract and, where the candidate is a known serving engine, that engine's file under `serving-systems/references/engines/` (start from the index at `serving-systems/references/tooling/profiling-serving-engines.md`). `command`/`ready_command`/`load_command`/`setup_command` may be multi-line shell text (heredocs, embedded quotes, a multi-line `python3 -c "..."`): each is written to its own script file before being run, so nothing between here and the shell that executes it re-tokenizes it. **Avoid `$(...)` command substitution for a value the launch command needs (e.g. picking a free port)** inside `command`/`ready_command`/`load_command`: the profiling tool is injected into every process in that launched tree, including a small helper spawned just for that substitution, and a diagnostic line that helper's injected tool prints to its own stdout lands inside the captured value and corrupts it (seen for real: a port helper's `$(...)` output picked up an unrelated diagnostic line and the resulting `--port <corrupted>` argument made the real target reject its own arguments; confirmed on real MI210 hardware that no profiler-side env var or flag suppresses this). The safe pattern: compute the value in `setup_command` -- it runs to completion *before* `command`, entirely outside the profiler -- with a plain redirect, then have `command` read it back with the `read` builtin: `setup_command` does `python3 -c "..." > /tmp/port`, `command` does `read -r PORT < /tmp/port`, never `$(cat /tmp/port)` or any other `$(...)` form, which reintroduces the same injection risk one step later since `cat` is itself a forked process running inside `command`'s tree. A nonzero `setup_command` exit stops the capture immediately (no target ever started) rather than letting a corrupted value reach the target. **Prefer a single-process, non-serving `command`** that exits on its own once the workload finishes over wrapping a long-running server: `rocprofv3` only flushes its trace buffers on a clean process exit, so a server that gets killed instead of exiting cleanly can silently lose the trace even though the run otherwise looked fine. If a server capture is unavoidable, set `stop_signal` to a graceful signal (never a hard kill of the process tree) and give `grace_s` a generous value: the post-exit flush to disk can itself take minutes and scales with how much was traced, not with how long the run took.
+3. Fill `command`/`env`/`ready_command`/`load_command`/`setup_command`/`stop_signal`/`grace_s` from the candidate's declared startup contract, checking the engine-specific profiling notes in your skills, if any, for the engine actually in play. `command`/`ready_command`/`load_command`/`setup_command` may be multi-line shell text (heredocs, embedded quotes, a multi-line `python3 -c "..."`): each is written to its own script file before being run, so nothing between here and the shell that executes it re-tokenizes it. **Avoid `$(...)` command substitution for a value the launch command needs (e.g. picking a free port)** inside `command`/`ready_command`/`load_command`: the profiling tool is injected into every process in that launched tree, including a small helper spawned just for that substitution, and a diagnostic line that helper's injected tool prints to its own stdout lands inside the captured value and corrupts it (seen for real: a port helper's `$(...)` output picked up an unrelated diagnostic line and the resulting `--port <corrupted>` argument made the real target reject its own arguments; confirmed on real MI210 hardware that no profiler-side env var or flag suppresses this). The safe pattern: compute the value in `setup_command` -- it runs to completion *before* `command`, entirely outside the profiler -- with a plain redirect, then have `command` read it back with the `read` builtin: `setup_command` does `python3 -c "..." > /tmp/port`, `command` does `read -r PORT < /tmp/port`, never `$(cat /tmp/port)` or any other `$(...)` form, which reintroduces the same injection risk one step later since `cat` is itself a forked process running inside `command`'s tree. A nonzero `setup_command` exit stops the capture immediately (no target ever started) rather than letting a corrupted value reach the target. **Prefer a single-process, non-serving `command`** that exits on its own once the workload finishes over wrapping a long-running server: `rocprofv3` only flushes its trace buffers on a clean process exit, so a server that gets killed instead of exiting cleanly can silently lose the trace even though the run otherwise looked fine. If a server capture is unavoidable, set `stop_signal` to a graceful signal (never a hard kill of the process tree) and give `grace_s` a generous value: the post-exit flush to disk can itself take minutes and scales with how much was traced, not with how long the run took.
 4. Pre-warm under load before the traced window starts (CRITICAL on ROCm: first-time AITER/Triton JIT resolution and any `TunableOp`/AITER online tuning take minutes and must not land inside the captured window). This is also where HIP-graph capture happens for graph-mode serving; keep it outside the traced window so the trace holds only steady-state replay kernels, not one-time capture kernels. Use `load_command` for a separate untraced warmup phase if the tool supports one, or bake a warmup step into `command` itself.
 5. Identify the process that actually issues HIP kernels before scoping the capture. A serving engine's request-handling worker commonly runs in a process separate from its API server/driver; a driver-only capture shows near-zero GPU activity by construction: that is "wrong process," not "the GPU is idle." For tensor-parallel serving, capture each worker independently.
 6. Keep the traced window representative and request CSV-only output where the tool exposes that choice: a multi-minute full trace is unreadable, and JSON output duplicates every CSV's content inside one blob and can reach GB scale at serving-workload row counts for zero extra information. Request the extra HIP-runtime-trace kind only when `cpu_overhead`/`graphs`/launch-bound analysis is actually needed: it traces one HIP runtime API call per kernel launch/memcpy/event, so on a batched-decode workload it typically runs 2-4x the size of the kernel trace it's paired with.
@@ -243,16 +241,14 @@ and call the result graph-era throughput.
 
 ## ROCm knowledge
 
-`serving-systems/references/platforms/rocm/profiler.md` has the full
-altitude/tool map, capture mechanics, and the pitfalls list this template
-summarizes. See also, in the same directory: `measurement-protocol.md`
-(warmup, repeats, clock locking, the paired-A/B discipline), `counter-triage.md`
-(turning a counter capture into a bottleneck verdict), `roofline.md` (per-arch
-peaks and ridges), and `aiter-engagement.md` (proving which kernel library
-actually ran, for the "present but slower" fallback finding). For what to
-put in a capture tool's `command`/`env`/`ready_command`/`stop_signal` for a
-specific serving engine, see
-`serving-systems/references/tooling/profiling-serving-engines.md`.
+Check the ROCm and engine-specific profiling notes in your skills, if any,
+for the full altitude/tool map, capture mechanics, the pitfalls list this
+template summarizes, the measurement discipline (warmup, repeats, clock
+locking, the paired-A/B discipline), turning a counter capture into a
+bottleneck verdict, per-arch peaks and ridges, proving which kernel library
+actually ran (for the "present but slower" fallback finding), and what to
+put in a capture tool's `command`/`env`/`ready_command`/`stop_signal` for
+the engine actually in play.
 
 {% include "profilers/_observer_effect.j2" %}
 
