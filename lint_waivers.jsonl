@@ -530,8 +530,6 @@
 {"id": "LW-910126", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["ANN001"]}
 {"id": "LW-910127", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["ANN001"]}
 {"id": "LW-910128", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["SLF001"]}
-{"id": "LW-910129", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["SLF001"]}
-{"id": "LW-910130", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["SLF001"]}
 {"id": "LW-910131", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["ANN202"]}
 {"id": "LW-910132", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["BLE001"]}
 {"id": "LW-910133", "path": "resources/profilers/torch/inject/sitecustomize.py", "rules": ["ANN001"]}
@@ -711,7 +709,6 @@
 {"id": "LW-910307", "path": "tests/vibesys/loops/test_rocprof_counters.py", "rules": ["ANN201"]}
 {"id": "LW-910308", "path": "tests/vibesys/loops/test_rocprof_counters.py", "rules": ["ANN201"]}
 {"id": "LW-910309", "path": "tests/vibesys/loops/test_torch_capture_ops.py", "rules": ["PLR0913"]}
-{"id": "LW-910310", "path": "tests/vibesys/loops/test_torch_inject.py", "rules": ["TRY003"]}
 {"id": "LW-910311", "path": "tests/vibesys/loops/test_torch_inject.py", "rules": ["TRY003"]}
 {"id": "LW-910312", "path": "tests/vibesys/loops/test_torch_profile_analyzer.py", "rules": ["ANN202"]}
 {"id": "LW-910313", "path": "tests/vibesys/loops/test_torch_profile_analyzer.py", "rules": ["ANN201"]}
@@ -1190,3 +1187,5 @@
 {"id": "LW-920402", "path": "tests/vibesys/loops/test_torch_profile_analyzer.py", "rules": ["ANN001"]}
 {"id": "LW-920403", "path": "tests/vibesys/loops/test_torch_profile_analyzer.py", "rules": ["ANN001"]}
 {"id": "LW-920404", "path": "tests/vibesys/loops/test_torch_profile_analyzer.py", "rules": ["ANN001"]}
+{"id": "LW-920405", "path": "tests/vibesys/loops/test_torch_inject_state_machine.py", "rules": ["SLF001"]}
+{"id": "LW-920406", "path": "tests/vibesys/loops/test_torch_inject_state_machine.py", "rules": ["SLF001"]}

@@ -168,7 +168,9 @@ def test_two_consecutive_windows_produce_two_traces_and_target_stays_up(  # noqa
     assert not _is_alive(pid)
 
 
-def test_target_load_runs_only_after_recording_started(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001
+def test_target_load_runs_only_after_recording_started(
+    capture_ops: ModuleType, tmp_path: Path
+) -> None:
     """Regression test: the load must not start before the window is recording.
 
     Pre-fix, ``profile_ops(target=...)`` sent SIGUSR1 and started the load
@@ -193,7 +195,7 @@ def test_target_load_runs_only_after_recording_started(capture_ops, tmp_path: Pa
     assert events.index("profile.start") < events.index("load.begin")
 
 
-def test_gpu_less_target_is_reported_unavailable(capture_ops, tmp_path: Path) -> None:  # noqa: ANN001
+def test_gpu_less_target_is_reported_unavailable(capture_ops: ModuleType, tmp_path: Path) -> None:
     """start_target returns once the target reports it can never take a window."""
     fake_torch = write_fake_torch(tmp_path / "fake_torch")
     command, env = _target_command(fake_torch)

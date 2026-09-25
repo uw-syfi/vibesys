@@ -35,7 +35,7 @@ def _fake_torch() -> tuple[types.ModuleType, types.ModuleType, list[str]]:
         CPU = "cpu"
         CUDA = "cuda"
 
-    class profile:  # noqa: N801  (mirrors torch.profiler.profile)
+    class _Profile:
         def __init__(self, **_kwargs: object) -> None:
             pass
 
@@ -49,7 +49,7 @@ def _fake_torch() -> tuple[types.ModuleType, types.ModuleType, list[str]]:
         def export_chrome_trace(self, path: str) -> None:
             Path(path).write_text(json.dumps({"traceEvents": [{"ph": "X"}]}))
 
-    vars(profiler).update(ProfilerActivity=ProfilerActivity, profile=profile)
+    vars(profiler).update(ProfilerActivity=ProfilerActivity, profile=_Profile)
     torch = types.ModuleType("torch")
     vars(torch).update(profiler=profiler, cuda=types.SimpleNamespace(synchronize=lambda: None))
     return torch, profiler, active
@@ -84,7 +84,7 @@ class _Harness:
     def __init__(self, inject_module: types.ModuleType, root: Path) -> None:
         self.root = root
         self.control = root / "control"
-        self.capture = inject_module._Capture(  # noqa: SLF001
+        self.capture = inject_module._Capture(  # noqa: SLF001  # LW-920405; the standalone injected script's state machine class is private by design
             out_dir=root / "default", record_shapes=False, control_dir=self.control
         )
         self.model = _Model()
@@ -142,7 +142,8 @@ def test_capture_matches_reference_model(inject_module: types.ModuleType, ops: l
             getattr(harness, op)()
             running = harness.model.running
             assert len(active) == (1 if running else 0)
-            assert harness.capture._phase == ("running" if running else "idle")  # noqa: SLF001
+            phase = harness.capture._phase  # noqa: SLF001  # LW-920406; the reference model must check the private capture phase directly
+            assert phase == ("running" if running else "idle")
 
         root, model = harness.root, harness.model
         assert len(list(root.glob("w*/window.started"))) == model.windows
