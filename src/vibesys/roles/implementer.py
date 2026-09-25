@@ -6,12 +6,88 @@ one combined role; see :mod:`vibesys.roles.single_agent` for those.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vibesys.roles.common import SkillResourceSelection
 from vibesys.runtime import Keyed, Reuse, Role, Writes
+from vibesys.skills import ResolvedSkillSelection
 from vs_agent.api import SessionScope
+from vs_issue_board.api import Issue
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
+
+
+class ImplementerContext(BaseModel):
+    """Context for multi's main-task implementer role.
+
+    The active plan's own fields (task, hypothesis, activation evidence, ...)
+    are not free variables of ``implementer_prompt.j2``: the implementer reads
+    them from ``plan_artifact_location`` via tools, not from the prompt text.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    reference_path: str
+    modality: str | None
+    interface: str
+    domain_implementer: str
+    objective_location: str
+    plan_artifact_location: str
+    progress_location: str
+    pareto_archive_location: str
+    validation_location: str
+    validation_recipe_contract_location: str
+    retry: int
+    feedback: str | None
+    framework_revert_applied: bool
+    framework_revert_round: int | None
+    framework_revert_commit: str | None
+    gate_revalidation_pending: bool
+    gate_approved_perf_metric: float | None
+    gate_approved_perf_unit: str | None
+    gate_approved_evaluation_artifact: str | None
+    runtime_notes: str
+    framework_benchmark_enabled: bool
+    official_evaluation_due: bool
+    official_evaluation_reason: str | None
+    recommended_skills: list[ResolvedSkillSelection]
+    prior_attempt_artifact_locations: tuple[str, ...]
+    active_component: str | None = None
+
+
+class ImplementerContinuationContext(BaseModel):
+    """Context for multi's continuation-step implementer role."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hypothesis_id: str
+    objective_location: str
+    plan_artifact_location: str
+    progress_location: str
+    pareto_archive_location: str
+    validation_location: str
+    validation_recipe_contract_location: str
+    runtime_notes: str
+    prior_attempt_artifact_locations: tuple[str, ...]
+    retry: int
+    continuation_step: str
+    feedback: str | None
+    recommended_skills: list[ResolvedSkillSelection]
+    framework_revert_applied: bool
+    framework_revert_round: int | None
+    framework_revert_commit: str | None
+    gate_revalidation_pending: bool
+    gate_approved_evaluation_artifact: str | None
+    current_round_location: str | None = None
+
+
+class IssueImplementerContext(BaseModel):
+    """Context for issue_queue's implementer role (its ``system.j2``)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    reference_path: str
+    runtime_notes: str
+    issue: Issue
 
 
 class ImplementerResponse(BaseModel):
@@ -142,6 +218,7 @@ MULTI_IMPLEMENTER = Role(
     template="loops/multi/implementer_prompt.j2",
     reply=ImplementerResponse,
     fallback=_fallback_implementer,
+    context=ImplementerContext,
     timeout_fallback=_timeout_fallback_implementer,
     access=Writes(),
     session=Keyed(scope=SessionScope.HYPOTHESIS),
@@ -155,6 +232,7 @@ MULTI_IMPLEMENTER_CONTINUATION = Role(
     template="loops/multi/implementer_continuation_prompt.j2",
     reply=ImplementerResponse,
     fallback=_fallback_implementer,
+    context=ImplementerContinuationContext,
     timeout_fallback=_timeout_fallback_implementer,
     access=Writes(),
     session=Keyed(scope=SessionScope.HYPOTHESIS),
@@ -168,6 +246,7 @@ ISSUE_IMPLEMENTER = Role(
     template="loops/issue_queue/implementer/system.j2",
     reply=IssueImplementerResponse,
     fallback=_fallback_issue_implementer,
+    context=IssueImplementerContext,
     access=Writes(),
     session=Reuse(),
 )

@@ -155,13 +155,13 @@ def test_roles_open_close_and_plan_context(tmp_path: Path) -> None:
 
     plan_request, _, _ = _request()
     context = turns._plan_context(plan_request)
-    assert context["objective"] == "Improve throughput"
+    assert context.objective_location == "OBJECTIVE.md"
     planned = asyncio.run(turns.plan(plan_request))
     assert planned.hypothesis_id == "h1"
     assert (tmp_path / "progress-artifacts" / "plans" / "round-0001.json").is_file()
     call = turns.ctx.agents.turn.await_args
     assert call.kwargs["label"] == "round-1-plan"
-    assert isinstance(call.kwargs["context"]["objective"], str)
+    assert isinstance(call.kwargs["context"].objective_location, str)
     assert isinstance(call.args[0].access, ReadOnly)
 
     asyncio.run(turns.close())

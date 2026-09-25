@@ -44,6 +44,10 @@ class _Reply(BaseModel):
     text: str = "ok"
 
 
+class _TestContext(BaseModel):
+    subject: str
+
+
 class _SkillReply(BaseModel):
     text: str = "ok"
     recommended_skills: list[SkillResourceSelection] = []
@@ -77,6 +81,7 @@ def _role(  # noqa: PLR0913  # test helper mirroring every Role field
         template="loops/testrole/prompt.j2",
         reply=reply,
         fallback=fallback,
+        context=_TestContext,
         access=access if access is not None else Writes(),
         session=session if session is not None else Fresh(),
         paid=paid,

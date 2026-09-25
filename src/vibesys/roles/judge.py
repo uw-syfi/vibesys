@@ -7,10 +7,57 @@ real ID with ``reply.model_copy(update={"issue_id": issue.id})``.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.roles.common import SkillResourceSelection, Verdict
 from vibesys.runtime import Fresh, ReadOnly, Reuse, Role, Writes
+from vs_issue_board.api import Issue
+
+
+class JudgeContext(BaseModel):
+    """Context for multi's hypothesis-judge role.
+
+    Like ``ImplementerContext``, the judge reads the implementer's reported
+    evidence from ``implementer_artifact_location`` via tools; only the
+    fields the template actually references belong here (not the raw
+    ``ImplementerResponse``/plan fields turns.py has on hand).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    domain_judge: str
+    framework_benchmark_enabled: bool
+    framework_revert_applied: bool
+    framework_revert_round: int | None
+    framework_revert_commit: str | None
+    gate_approved_evaluation_artifact: str | None
+    gate_approved_perf_metric: float | None
+    gate_approved_perf_unit: str | None
+    gate_revalidation_pending: bool
+    implementer_artifact_location: str
+    interface: str
+    modality: str | None
+    objective_location: str
+    official_evaluation_due: bool
+    official_evaluation_reason: str | None
+    pareto_archive_conflict: str | None
+    pareto_archive_location: str
+    plan_artifact_location: str
+    progress_location: str
+    retry: int
+    runtime_notes: str
+    validation_location: str
+    validation_recipe_contract_location: str
+
+
+class IssueJudgeContext(BaseModel):
+    """Context for issue_queue's judge role (its ``system.j2``)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    accuracy_command: str | None
+    benchmark_command: str | None
+    issue: Issue
 
 
 class JudgeResponse(BaseModel):
@@ -79,6 +126,7 @@ MULTI_JUDGE = Role(
     template="loops/multi/judge_prompt.j2",
     reply=JudgeResponse,
     fallback=_fallback_hypothesis_judge,
+    context=JudgeContext,
     access=ReadOnly(),
     session=Fresh(),
     filter_skills=True,
@@ -90,6 +138,7 @@ ISSUE_JUDGE = Role(
     template="loops/issue_queue/judge/system.j2",
     reply=IssueJudgeResponse,
     fallback=_fallback_issue_judge,
+    context=IssueJudgeContext,
     access=Writes(),  # the judge files new issues via its MCP tool grant
     session=Reuse(),
 )

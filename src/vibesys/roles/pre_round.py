@@ -5,9 +5,23 @@ Used by ``multi`` only today.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.runtime import Fresh, ReadOnly, Role
+
+
+class PreRoundContext(BaseModel):
+    """Context for the multi strategy's pre-round profiling decision."""
+
+    model_config = ConfigDict(frozen=True)
+
+    objective_location: str
+    regression_info: str | None
+    exhaustion_info: str | None
+    progress_location: str
+    profiler_kind: str
+    profile_execution: str
+    has_history: bool
 
 
 class PreRoundDecision(BaseModel):
@@ -34,6 +48,7 @@ MULTI_PRE_ROUND_DECISION = Role(
     template="loops/multi/orchestrator_pre_round_prompt.j2",
     reply=PreRoundDecision,
     fallback=_fallback_pre_round_decision,
+    context=PreRoundContext,
     access=ReadOnly(),
     session=Fresh(),
     message=(

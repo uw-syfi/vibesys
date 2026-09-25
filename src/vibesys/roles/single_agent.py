@@ -8,12 +8,40 @@ context ``single`` doesn't have, so it gets its own role (different prompt
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vibesys.roles.common import SkillResourceSelection, Verdict
 from vibesys.runtime import Keyed, Role, Writes
 from vs_agent.api import SessionScope
 from vs_loop_state.api import CandidateDisposition
+
+
+class SingleAgentRoundContext(BaseModel):
+    """Shared context for the single-agent combined role.
+
+    ``single`` and ``profile_single`` each declare their own ``Role``
+    (different template files), but both templates read the exact same
+    free-variable set, so one context model serves both.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    accuracy_command: str | None
+    benchmark_command: str | None
+    domain_profiler: str
+    domain_single_agent: str
+    feedback: str | None
+    interface: str
+    objective_location: str
+    official_evaluation_due: bool
+    official_evaluation_reason: str | None
+    pareto_archive_location: str
+    plan_artifact_location: str
+    profiler_kind: str
+    profiler_support_name: str | None
+    progress_location: str
+    runtime_notes: str
+    validation_location: str
 
 
 class SingleAgentRoundResponse(BaseModel):
@@ -116,6 +144,7 @@ SINGLE_COMBINED = Role(
     template="loops/single/single_agent_round_prompt.j2",
     reply=SingleAgentRoundResponse,
     fallback=_fallback_combined,
+    context=SingleAgentRoundContext,
     timeout_fallback=_timeout_fallback_combined,
     access=Writes(),
     session=Keyed(scope=SessionScope.HYPOTHESIS),
@@ -132,6 +161,7 @@ PROFILE_SINGLE_COMBINED = Role(
     template="loops/profile_single/single_agent_round_prompt.j2",
     reply=SingleAgentRoundResponse,
     fallback=_fallback_combined,
+    context=SingleAgentRoundContext,
     timeout_fallback=_timeout_fallback_combined,
     access=Writes(),
     session=Keyed(scope=SessionScope.HYPOTHESIS),

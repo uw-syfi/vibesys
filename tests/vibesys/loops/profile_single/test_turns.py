@@ -120,15 +120,13 @@ def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path
     combined_context = turns._combined_context(  # noqa: SLF001
         AttemptRequest(1, plan, "profile-guided component measurement", [], hypothesis, "decode"),
         AttemptState(agent_run_state=engine.state, feedback=None, retry=1),
-        [],
     )
 
     assert turns.template_dir.name == "profile_single"
-    assert designer_context["objective_location"] == "OBJECTIVE.md"
-    assert designer_context["runtime_notes"] == "Run locally"
-    assert combined_context["objective_location"] == "OBJECTIVE.md"
-    assert combined_context["official_evaluation_reason"] == "profile-guided component measurement"
-    assert combined_context["task"] == "Batch decode requests"
+    assert designer_context.objective_location == "OBJECTIVE.md"
+    assert designer_context.runtime_notes == "Run locally"
+    assert combined_context.objective_location == "OBJECTIVE.md"
+    assert combined_context.official_evaluation_reason == "profile-guided component measurement"
     assert (tmp_path / "progress-artifacts" / "plans" / "round-0001.json").exists()
 
 

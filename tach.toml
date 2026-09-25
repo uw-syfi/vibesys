@@ -204,7 +204,7 @@ depends_on = ["vibesys.agent_run"]
 # execution, sequencing, or state transitions -- those stay in
 # vibesys.orchestration.runtime (ctx.agents.turn) and loops/.
 path = "vibesys.roles"
-depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state"]
+depends_on = ["vibesys", "vibesys.runtime", "vs_agent", "vibesys.evaluators", "vs_loop_state", "vs_issue_board"]
 
 [[modules]]
 path = "vibesys.loops"
@@ -216,7 +216,7 @@ depends_on = ["vs_agent", "vs_loop_state", "vibesys.orchestration.runtime", "vib
 
 [[modules]]
 path = "vibesys.loops.multi"
-depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles"]
+depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.orchestration.runtime", "vibesys", "vs_loop_state", "vibesys.runtime", "vibesys.agent_run", "vibesys.domains", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.roles", "vibesys.prompts"]
 
 [[modules]]
 path = "vibesys.loops.profile_single"
@@ -224,7 +224,7 @@ depends_on = ["vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context
 
 [[modules]]
 path = "vibesys.loops.profile_multi"
-depends_on = [ "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent", "vibesys.roles"]
+depends_on = [ "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent", "vibesys.roles", "vibesys.prompts"]
 
 [[modules]]
 path = "vibesys.loops.issue_queue"
@@ -268,7 +268,7 @@ depends_on = [ "vibesys.evaluators"]
 
 [[modules]]
 path = "vibesys.prompts"
-depends_on = ["vibesys", "vs_prompts"]
+depends_on = ["vibesys", "vs_prompts", "vibesys.evaluators"]
 
 [[modules]]
 path = "vibesys._model_config"

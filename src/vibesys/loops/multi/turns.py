@@ -2,11 +2,11 @@
 
 Every role turn (orchestrator pre-round decision and plan, profiler,
 implementer, judge) runs through ``ctx.agents.turn`` with the roles declared
-across roles/designer.py, pre_round.py, profiler.py, implementer.py, and judge.py. This module builds each turn's prompt context
-(the ``**kwargs`` a template needs) and the strategy-only logic that cannot
-live in a generic host verb: the designer's plan-ID validation retry (state
-dependent, not a pure reply check) and composing the profiler's per-round
-campaign-context addendum.
+across roles/designer.py, pre_round.py, profiler.py, implementer.py, and
+judge.py. This module builds each turn's typed prompt context and the
+strategy-only logic that cannot live in a generic host verb: the designer's
+plan-ID validation retry (state dependent, not a pure reply check) and
+composing the profiler's per-round campaign-context addendum.
 """
 
 from __future__ import annotations
@@ -36,33 +36,34 @@ from vibesys.profilers import (
 from vibesys.profilers import (
     mcp_spec as profiler_mcp_spec,
 )
+from vibesys.prompts.contexts import domain_context, implementer_focus_kwargs, plan_focus_kwargs
 from vibesys.roles.common import Verdict
-from vibesys.roles.designer import MULTI_ORCHESTRATOR_PLAN
+from vibesys.roles.designer import MULTI_ORCHESTRATOR_PLAN, PlanContext
 from vibesys.roles.implementer import (
     MULTI_IMPLEMENTER,
     MULTI_IMPLEMENTER_CONTINUATION,
+    ImplementerContext,
+    ImplementerContinuationContext,
     ImplementerResponse,
 )
-from vibesys.roles.judge import MULTI_JUDGE, JudgeResponse
-from vibesys.roles.pre_round import MULTI_PRE_ROUND_DECISION, PreRoundDecision
-from vibesys.roles.profiler import MULTI_PROFILERS, ProfilerSummary
+from vibesys.roles.judge import MULTI_JUDGE, JudgeContext, JudgeResponse
+from vibesys.roles.pre_round import MULTI_PRE_ROUND_DECISION, PreRoundContext, PreRoundDecision
+from vibesys.roles.profiler import MULTI_PROFILERS, ProfilerContext, ProfilerSummary
 from vibesys.runtime import ReadOnly
 from vibesys.schemas import (
     OrchestratorPlan,
-    SkillResourceSelection,
     normalize_hypothesis_title,
 )
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from vibesys.agent_run.attempts import AttemptState
     from vibesys.agent_run.evidence import CarryOver
     from vibesys.agent_run.options import AgentOrchestrationOptions
     from vibesys.agent_run.state import AgentRunState
     from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
+    from vibesys.schemas import SkillResourceSelection
     from vibesys.skills import ResolvedSkillSelection
 
 # The implementer's fallback texts are the sentinel that identifies a
@@ -119,46 +120,41 @@ class MultiAgentTurns:
 
     def _domain_context(self) -> dict[str, object]:
         view = self.ctx.environment.view
-        return {
-            "modality": self.modality,
-            "interface": self.options.interface,
-            "reference_path": self.ctx.environment.reference_path,
-            "benchmark_command": view.paths.benchmark_command,
-            "accuracy_command": view.paths.accuracy_command,
-            "runtime_notes": view.prompt_notes,
-            "profile_execution": view.profile_execution,
-            "workspace_sources": self.ctx.environment.workspace_sources,
-        }
+        return domain_context(
+            modality=self.modality,
+            interface=self.options.interface,
+            reference_path=self.ctx.environment.reference_path,
+            benchmark_command=view.paths.benchmark_command,
+            accuracy_command=view.paths.accuracy_command,
+            runtime_notes=view.prompt_notes,
+            profile_execution=view.profile_execution,
+            workspace_sources=self.ctx.environment.workspace_sources,
+        ).model_dump()
 
-    def _plan_context(self, request: PlanRequest) -> dict[str, object]:
+    def _plan_context(self, request: PlanRequest) -> PlanContext:
         view = self.ctx.environment.view
         domain_orchestrator = render_domain_section(
             self.domain, DomainRole.ORCHESTRATOR, **self._domain_context()
         )
-        return {
-            "objective": self.objective,
-            "objective_location": view.paths.objective,
-            "profiler_summary": request.profiler_summary,
-            "regression_info": request.carry.regression_info,
-            "exhaustion_info": request.carry.exhaustion_info,
-            "progress_location": self.progress_location,
-            "roadmap_location": self.roadmap_location,
-            "pareto_archive_location": self.pareto_location,
-            "plateau_warning": request.plateau_warning,
-            "domain_orchestrator": domain_orchestrator,
-            "runtime_notes": view.prompt_notes,
-            "profile_execution": view.profile_execution,
-            "framework_benchmark_enabled": (
-                self.ctx.request.input_bundle.benchmark_result is not None
-                or self.ctx.request.input_bundle.benchmark_result_protocol is not None
-            ),
-            "official_eval_every": self.options.official_eval_every,
-            "provisional_candidates": request.provisional_candidates,
-            "official_eval_cadence_due": (
+        return PlanContext(
+            objective_location=view.paths.objective,
+            profiler_summary=request.profiler_summary,
+            regression_info=request.carry.regression_info,
+            exhaustion_info=request.carry.exhaustion_info,
+            progress_location=self.progress_location,
+            roadmap_location=self.roadmap_location,
+            pareto_archive_location=self.pareto_location,
+            plateau_warning=request.plateau_warning,
+            domain_orchestrator=domain_orchestrator,
+            runtime_notes=view.prompt_notes,
+            framework_benchmark_enabled=self._framework_benchmark_configured(),
+            official_eval_every=self.options.official_eval_every,
+            provisional_candidates=request.provisional_candidates,
+            official_eval_cadence_due=(
                 request.provisional_candidates + 1 >= self.options.official_eval_every
             ),
-            **request.profile_guidance.plan_prompt_context(),
-        }
+            **plan_focus_kwargs(request.profile_guidance.plan_prompt_context()),
+        )
 
     def _validate_plan(self, plan: OrchestratorPlan, state: AgentRunState) -> None:
         updates = [item.hypothesis_id for item in plan.hypothesis_updates]
@@ -243,16 +239,15 @@ class MultiAgentTurns:
     ) -> PreRoundDecision:
         """Ask the orchestrator whether a specialist profile is useful."""
         view = self.ctx.environment.view
-        context = {
-            "objective": self.objective,
-            "objective_location": view.paths.objective,
-            "regression_info": carry.regression_info,
-            "exhaustion_info": carry.exhaustion_info,
-            "progress_location": self.progress_location,
-            "profiler_kind": self.ctx.environment.profiler_kind.value,
-            "profile_execution": view.profile_execution,
-            "has_history": has_history,
-        }
+        context = PreRoundContext(
+            objective_location=view.paths.objective,
+            regression_info=carry.regression_info,
+            exhaustion_info=carry.exhaustion_info,
+            progress_location=self.progress_location,
+            profiler_kind=self.ctx.environment.profiler_kind.value,
+            profile_execution=view.profile_execution,
+            has_history=has_history,
+        )
         decision = cast(
             "PreRoundDecision",
             await self.ctx.agents.turn(
@@ -308,20 +303,20 @@ Write bounded durable profile evidence only below
             issue_board.profiler_artifact_root(self.progress_path, round_number),
             self.workspace.path,
         ).rstrip("/")
-        context = {
-            "profile_focus": focus,
-            "benchmark_command": view.paths.benchmark_command,
-            "modality": self.modality,
-            "domain_profiler": render_domain_section(
+        context = ProfilerContext(
+            profile_focus=focus,
+            benchmark_command=view.paths.benchmark_command,
+            modality=self.modality,
+            domain_profiler=render_domain_section(
                 self.domain, DomainRole.PROFILER, **self._domain_context()
             ),
-            "runtime_notes": view.prompt_notes,
-            "profile_execution": view.profile_execution,
-            "objective": self.objective,
-            "profiler_support_name": definition.support_name,
-            "profiler_mcp_name": definition.mcp_name,
-            "profiler_campaign_context": self._profiler_campaign_context(artifact),
-        }
+            runtime_notes=view.prompt_notes,
+            profile_execution=view.profile_execution,
+            objective=self.objective,
+            profiler_support_name=definition.support_name,
+            profiler_mcp_name=definition.mcp_name,
+            profiler_campaign_context=self._profiler_campaign_context(artifact),
+        )
         role = replace(MULTI_PROFILERS[kind], access=ReadOnly(allow=(artifact,)))
         spec = profiler_mcp_spec(self.ctx.environment.profiler_kind)
         try:
@@ -345,70 +340,6 @@ Write bounded durable profile evidence only below
             return None
         issue_board.append_profiler_summary(self.progress_path, round_number, summary)
         return summary
-
-    def _implementer_context(
-        self, request: AttemptRequest, state: AttemptState
-    ) -> dict[str, object]:
-        plan = request.plan
-        hypothesis = request.active_hypothesis
-        view = self.ctx.environment.view
-        artifact = issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
-        prior = tuple(
-            issue_board.display_path(path, self.workspace.path)
-            for path in issue_board.implementer_artifact_paths(
-                self.progress_path, request.round_number
-            )
-        )
-
-        def location(path: Path) -> str:
-            return issue_board.display_path(path, self.workspace.path)
-
-        return {
-            "reference_path": self.ctx.environment.reference_path,
-            "modality": self.modality,
-            "interface": self.options.interface,
-            "domain_implementer": render_domain_section(
-                self.domain, DomainRole.IMPLEMENTER, **self._domain_context()
-            ),
-            "task": plan.task,
-            "pass_criteria": plan.pass_criteria,
-            "objective": self.objective,
-            "objective_location": view.paths.objective,
-            "plan_artifact_location": location(artifact),
-            "hypothesis_id": plan.hypothesis_id,
-            "hypothesis": plan.hypothesis,
-            "activation_evidence": plan.activation_evidence,
-            "falsification_criteria": plan.falsification_criteria,
-            "expected_effect": plan.expected_effect,
-            "minimum_acceptance_criteria": plan.minimum_acceptance_criteria,
-            "invariants": plan.invariants,
-            "progress_location": self.progress_location,
-            "pareto_archive_location": self.pareto_location,
-            "validation_location": location(
-                issue_board.validation_artifact_root(self.progress_path)
-            ),
-            "validation_recipe_contract_location": location(
-                issue_board.validation_recipe_schema_path(self.progress_path)
-            ),
-            "retry": state.retry,
-            "feedback": state.feedback,
-            "continuation_step": hypothesis.next_step,
-            "framework_revert_applied": hypothesis.revert_applied,
-            "framework_revert_round": hypothesis.parent_round,
-            "framework_revert_commit": hypothesis.revert_commit,
-            "gate_revalidation_pending": hypothesis.gate_revalidation_pending,
-            "gate_approved_perf_metric": hypothesis.gate_approved_perf_metric,
-            "gate_approved_perf_unit": hypothesis.gate_approved_perf_unit,
-            "gate_approved_evaluation_artifact": hypothesis.gate_approved_evaluation_artifact,
-            "runtime_notes": view.prompt_notes,
-            "profile_execution": view.profile_execution,
-            "framework_benchmark_enabled": self._framework_benchmark_configured(),
-            "official_evaluation_due": request.planned_official_reason is not None,
-            "official_evaluation_reason": request.planned_official_reason,
-            "recommended_skills": self._resolved_skills(plan.recommended_skills),
-            "prior_attempt_artifact_locations": prior,
-            **request.engine.controller.guidance.implementer_prompt_context(),
-        }
 
     def _framework_benchmark_configured(self) -> bool:
         bundle = self.ctx.request.input_bundle
@@ -434,16 +365,104 @@ Write bounded durable profile evidence only below
             return []
         return resolved
 
+    def _implementer_context(
+        self, request: AttemptRequest, state: AttemptState
+    ) -> ImplementerContext:
+        plan = request.plan
+        hypothesis = request.active_hypothesis
+        view = self.ctx.environment.view
+        artifact = issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
+        prior = tuple(
+            issue_board.display_path(path, self.workspace.path)
+            for path in issue_board.implementer_artifact_paths(
+                self.progress_path, request.round_number
+            )
+        )
+        profile_extra = request.engine.controller.guidance.implementer_prompt_context()
+        return ImplementerContext(
+            reference_path=self.ctx.environment.reference_path,
+            modality=self.modality,
+            interface=self.options.interface,
+            domain_implementer=render_domain_section(
+                self.domain, DomainRole.IMPLEMENTER, **self._domain_context()
+            ),
+            objective_location=view.paths.objective,
+            plan_artifact_location=issue_board.display_path(artifact, self.workspace.path),
+            progress_location=self.progress_location,
+            pareto_archive_location=self.pareto_location,
+            validation_location=issue_board.display_path(
+                issue_board.validation_artifact_root(self.progress_path), self.workspace.path
+            ),
+            validation_recipe_contract_location=issue_board.display_path(
+                issue_board.validation_recipe_schema_path(self.progress_path), self.workspace.path
+            ),
+            retry=state.retry,
+            feedback=state.feedback,
+            framework_revert_applied=hypothesis.revert_applied,
+            framework_revert_round=hypothesis.parent_round,
+            framework_revert_commit=hypothesis.revert_commit,
+            gate_revalidation_pending=hypothesis.gate_revalidation_pending,
+            gate_approved_perf_metric=hypothesis.gate_approved_perf_metric,
+            gate_approved_perf_unit=hypothesis.gate_approved_perf_unit,
+            gate_approved_evaluation_artifact=hypothesis.gate_approved_evaluation_artifact,
+            runtime_notes=view.prompt_notes,
+            framework_benchmark_enabled=self._framework_benchmark_configured(),
+            official_evaluation_due=request.planned_official_reason is not None,
+            official_evaluation_reason=request.planned_official_reason,
+            recommended_skills=self._resolved_skills(plan.recommended_skills),
+            prior_attempt_artifact_locations=prior,
+            **implementer_focus_kwargs(profile_extra),
+        )
+
+    def _implementer_continuation_context(
+        self, request: AttemptRequest, state: AttemptState
+    ) -> ImplementerContinuationContext:
+        plan = request.plan
+        hypothesis = request.active_hypothesis
+        view = self.ctx.environment.view
+        artifact = issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
+        prior = tuple(
+            issue_board.display_path(path, self.workspace.path)
+            for path in issue_board.implementer_artifact_paths(
+                self.progress_path, request.round_number
+            )
+        )
+        return ImplementerContinuationContext(
+            hypothesis_id=plan.hypothesis_id,
+            objective_location=view.paths.objective,
+            plan_artifact_location=issue_board.display_path(artifact, self.workspace.path),
+            progress_location=self.progress_location,
+            pareto_archive_location=self.pareto_location,
+            validation_location=issue_board.display_path(
+                issue_board.validation_artifact_root(self.progress_path), self.workspace.path
+            ),
+            validation_recipe_contract_location=issue_board.display_path(
+                issue_board.validation_recipe_schema_path(self.progress_path), self.workspace.path
+            ),
+            runtime_notes=view.prompt_notes,
+            prior_attempt_artifact_locations=prior,
+            retry=state.retry,
+            continuation_step=cast("str", hypothesis.next_step),
+            feedback=state.feedback,
+            recommended_skills=self._resolved_skills(plan.recommended_skills),
+            framework_revert_applied=hypothesis.revert_applied,
+            framework_revert_round=hypothesis.parent_round,
+            framework_revert_commit=hypothesis.revert_commit,
+            gate_revalidation_pending=hypothesis.gate_revalidation_pending,
+            gate_approved_evaluation_artifact=hypothesis.gate_approved_evaluation_artifact,
+        )
+
     async def implement(
         self, request: AttemptRequest, state: AttemptState
     ) -> tuple[ImplementerResponse, bool]:
         """Prepare the prompt, then mark and invoke one paid implementer turn."""
         plan = request.plan
-        context = self._implementer_context(request, state)
-        role = (
-            MULTI_IMPLEMENTER_CONTINUATION
-            if request.active_hypothesis.next_step
-            else MULTI_IMPLEMENTER
+        continuing = bool(request.active_hypothesis.next_step)
+        role = MULTI_IMPLEMENTER_CONTINUATION if continuing else MULTI_IMPLEMENTER
+        context: ImplementerContext | ImplementerContinuationContext = (
+            self._implementer_continuation_context(request, state)
+            if continuing
+            else self._implementer_context(request, state)
         )
         label = f"round-{request.round_number}-retry-{state.retry}-implementer"
 
@@ -486,71 +505,44 @@ Write bounded durable profile evidence only below
         hypothesis = request.active_hypothesis
         view = self.ctx.environment.view
 
-        def location(path: Path) -> str:
-            return issue_board.display_path(path, self.workspace.path)
-
         plan_artifact = issue_board.write_plan_artifact(
             self.progress_path, request.round_number, plan
         )
         evidence = issue_board.write_implementer_artifact(
             self.progress_path, request.round_number, state.retry, implementation
         )
-        domain_context = self._domain_context()
-        domain_context["accuracy_command"] = None
-        domain_context["benchmark_command"] = None
-        context = {
-            "accuracy_command": view.paths.accuracy_command,
-            "benchmark_command": view.paths.benchmark_command,
-            "pass_criteria": plan.pass_criteria,
-            "modality": self.modality,
-            "interface": self.options.interface,
-            "domain_judge": render_domain_section(self.domain, DomainRole.JUDGE, **domain_context),
-            "retry": state.retry,
-            "runtime_notes": view.prompt_notes,
-            "profile_execution": view.profile_execution,
-            "objective": self.objective,
-            "objective_location": view.paths.objective,
-            "plan_artifact_location": location(plan_artifact),
-            "implementer_artifact_location": location(evidence),
-            "hypothesis_id": plan.hypothesis_id,
-            "hypothesis": plan.hypothesis,
-            "activation_evidence": plan.activation_evidence,
-            "falsification_criteria": plan.falsification_criteria,
-            "expected_effect": plan.expected_effect,
-            "minimum_acceptance_criteria": plan.minimum_acceptance_criteria,
-            "invariants": plan.invariants,
-            "implementer_outcome": implementation.hypothesis_outcome.value,
-            "implementer_evidence": implementation.evidence,
-            "implementer_perf_metric": implementation.perf_metric,
-            "implementer_perf_unit": implementation.perf_unit,
-            "implementer_metrics": implementation.metrics,
-            "implementer_evaluation_artifact": implementation.evaluation_artifact,
-            "candidate_disposition": implementation.candidate_disposition.value,
-            "candidate_metrics": implementation.candidate_metrics,
-            "candidate_evaluation_artifact": implementation.candidate_evaluation_artifact,
-            "candidate_operating_point": implementation.candidate_operating_point,
-            "candidate_retention_reason": implementation.candidate_retention_reason,
-            "gate_revalidation_pending": hypothesis.gate_revalidation_pending,
-            "gate_approved_perf_metric": hypothesis.gate_approved_perf_metric,
-            "gate_approved_perf_unit": hypothesis.gate_approved_perf_unit,
-            "gate_approved_metrics": hypothesis.gate_approved_metrics,
-            "gate_approved_evaluation_artifact": hypothesis.gate_approved_evaluation_artifact,
-            "progress_location": self.progress_location,
-            "pareto_archive_location": self.pareto_location,
-            "validation_location": location(
-                issue_board.validation_artifact_root(self.progress_path)
+        domain_ctx = self._domain_context()
+        domain_ctx["accuracy_command"] = None
+        domain_ctx["benchmark_command"] = None
+        context = JudgeContext(
+            domain_judge=render_domain_section(self.domain, DomainRole.JUDGE, **domain_ctx),
+            framework_benchmark_enabled=self._framework_benchmark_configured(),
+            framework_revert_applied=hypothesis.revert_applied,
+            framework_revert_round=hypothesis.parent_round,
+            framework_revert_commit=hypothesis.revert_commit,
+            gate_approved_evaluation_artifact=hypothesis.gate_approved_evaluation_artifact,
+            gate_approved_perf_metric=hypothesis.gate_approved_perf_metric,
+            gate_approved_perf_unit=hypothesis.gate_approved_perf_unit,
+            gate_revalidation_pending=hypothesis.gate_revalidation_pending,
+            implementer_artifact_location=issue_board.display_path(evidence, self.workspace.path),
+            interface=self.options.interface,
+            modality=self.modality,
+            objective_location=view.paths.objective,
+            official_evaluation_due=request.planned_official_reason is not None,
+            official_evaluation_reason=request.planned_official_reason,
+            pareto_archive_conflict=conflict,
+            pareto_archive_location=self.pareto_location,
+            plan_artifact_location=issue_board.display_path(plan_artifact, self.workspace.path),
+            progress_location=self.progress_location,
+            retry=state.retry,
+            runtime_notes=view.prompt_notes,
+            validation_location=issue_board.display_path(
+                issue_board.validation_artifact_root(self.progress_path), self.workspace.path
             ),
-            "validation_recipe_contract_location": location(
-                issue_board.validation_recipe_schema_path(self.progress_path)
+            validation_recipe_contract_location=issue_board.display_path(
+                issue_board.validation_recipe_schema_path(self.progress_path), self.workspace.path
             ),
-            "framework_revert_applied": hypothesis.revert_applied,
-            "framework_revert_round": hypothesis.parent_round,
-            "framework_revert_commit": hypothesis.revert_commit,
-            "framework_benchmark_enabled": self._framework_benchmark_configured(),
-            "official_evaluation_due": request.planned_official_reason is not None,
-            "official_evaluation_reason": request.planned_official_reason,
-            "pareto_archive_conflict": conflict,
-        }
+        )
         response = cast(
             "JudgeResponse",
             await self.ctx.agents.turn(

@@ -13,13 +13,37 @@ sits below both, so both can depend on it without a layering inversion.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.profilers import PROFILER_DEFINITIONS, ProfilerKind
 from vibesys.runtime import Fresh, ReadOnly, Role
 
-__all__ = ["ALL_ROLES", "MULTI_PROFILERS", "ProfilerResponse", "ProfilerSummary"]
+__all__ = ["ALL_ROLES", "MULTI_PROFILERS", "ProfilerContext", "ProfilerResponse", "ProfilerSummary"]
+
+
+class ProfilerContext(BaseModel):
+    """Shared context for every profiler-kind role.
+
+    One model serves all of ``MULTI_PROFILERS`` (a per-kind template each):
+    templates that don't reference a given field (e.g. ``macos_cpu.j2``
+    dropping ``modality``) mark that omission deliberate with a
+    ``vs-prompts:unused`` comment rather than getting their own narrower
+    model -- see ``prompts/shared/profilers/*.j2``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    profile_focus: str
+    benchmark_command: str | None
+    modality: str | None
+    domain_profiler: str
+    runtime_notes: str
+    profile_execution: str
+    objective: str | None
+    profiler_support_name: str
+    profiler_mcp_name: str
+    profiler_campaign_context: str
 
 
 class ProfilerResponse(BaseModel):
@@ -67,6 +91,7 @@ def _profiler_role(kind: ProfilerKind) -> Role:
         template=f"loops/multi/profilers/{kind.value}.j2",
         reply=ProfilerSummary,
         fallback=_fallback_profiler_summary,
+        context=ProfilerContext,
         access=ReadOnly(),  # allow-list (bounded evidence dir) resolved per call by the caller
         session=Fresh(),
         message="Profile the server and return exactly one JSON object matching the schema above.",
