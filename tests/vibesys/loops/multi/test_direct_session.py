@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed, JudgeSkipped
@@ -25,7 +27,7 @@ from vibesys.loops.multi.session import (
     MultiSessionError,
     _TerminalPolicy,
 )
-from vibesys.orchestration.runtime import GateRunResult
+from vibesys.orchestration.runtime import GateRunResult, WorkspaceRestoreError
 from vibesys.schemas import (
     HypothesisOutcome,
     ImplementerResponse,
@@ -34,7 +36,7 @@ from vibesys.schemas import (
     ValidationRecipeArtifact,
     Verdict,
 )
-from vs_loop_state.api import RoundHistory
+from vs_loop_state.api import RoundHistory, RoundRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -366,3 +368,90 @@ def test_completed_reviewed_round_checkpoints_record_before_advancing(tmp_path: 
     commit = session.ctx.state.commit.await_args
     assert commit.kwargs["sequence"] == 1
     assert commit.kwargs["writes"]["state.json"].rounds == session.records
+
+
+def _rollback_selection(tmp_path: Path, *, parent_round: int, started_round: int) -> RoundSelection:
+    del tmp_path
+    plan = _plan().model_copy(update={"revert_to_round": parent_round})
+    engine = HypothesisEngine.create(AgentRunState()).start(
+        plan,
+        started_round=started_round,
+        parent_round=parent_round,
+        parent_commit="c" * 40,
+    )
+    hypothesis = engine.state.active_hypothesis
+    assert hypothesis is not None
+    return RoundSelection(engine, engine.state, hypothesis, plan, None)
+
+
+def test_apply_rollback_warns_and_retries_on_checkout_failure(tmp_path: Path) -> None:
+    """R1 regression: a rollback checkout failure must warn, not abort the run.
+
+    Before this fix, ``workspace.restore`` (``_Workspaces.adopt`` in
+    ``orchestration/runtime.py``) raised a bare ``RuntimeError`` on a failed
+    ``git checkout``, which propagated out of ``_apply_rollback`` and crashed
+    the run. Base behavior was to warn and retry the rollback on a later
+    round, leaving ``hypothesis.revert_applied`` false until it succeeds.
+    """
+    session = cast("Any", _session(tmp_path))
+    session.records = [
+        RoundRecord(round_number=1, commit="c" * 40, perf_metric=None, perf_unit=None, passed=True)
+    ]
+    session.history = RoundHistory(records=[])
+    session.round_number = 2
+    selection = _rollback_selection(tmp_path, parent_round=1, started_round=2)
+    session.workspace.restore = AsyncMock(side_effect=WorkspaceRestoreError("c" * 40))
+
+    asyncio.run(session._apply_rollback(selection))
+
+    assert selection.hypothesis.revert_applied is False
+    session.ctx.warning.assert_called_once()
+    session.ctx.state.commit.assert_not_awaited()
+
+
+@given(
+    parent_round=st.integers(min_value=1, max_value=20),
+    fails=st.lists(st.booleans(), min_size=1, max_size=10),
+)
+@settings(max_examples=25, deadline=None)
+def test_apply_rollback_eventually_applies_once_checkout_succeeds(
+    parent_round: int, fails: list[bool], tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Property: whatever pattern of checkout failures precedes it, a later successful
+    checkout applies the rollback exactly once, and the run never raises meanwhile.
+    """
+    tmp_path = tmp_path_factory.mktemp("rollback")
+    session = cast("Any", _session(tmp_path))
+    session.records = [
+        RoundRecord(
+            round_number=parent_round,
+            commit="c" * 40,
+            perf_metric=None,
+            perf_unit=None,
+            passed=True,
+        )
+    ]
+    session.history = RoundHistory(records=[])
+    selection = _rollback_selection(
+        tmp_path, parent_round=parent_round, started_round=parent_round + 1
+    )
+
+    for round_number, should_fail in enumerate(fails, start=parent_round + 1):
+        session.round_number = round_number
+        if should_fail:
+            session.workspace.restore = AsyncMock(side_effect=WorkspaceRestoreError("c" * 40))
+        else:
+            session.workspace.restore = AsyncMock(return_value=None)
+        asyncio.run(session._apply_rollback(selection))
+        if should_fail:
+            assert selection.hypothesis.revert_applied is False
+        else:
+            assert selection.hypothesis.revert_applied is True
+        if selection.hypothesis.revert_applied:
+            break
+
+    # Once applied, a further call is a no-op (idempotent; state is consistent).
+    session.workspace.restore = AsyncMock(side_effect=WorkspaceRestoreError("c" * 40))
+    asyncio.run(session._apply_rollback(selection))
+    if any(not f for f in fails):
+        assert selection.hypothesis.revert_applied is True

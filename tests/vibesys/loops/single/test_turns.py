@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import subprocess
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vibesys.agent_run.attempts import AttemptState
 from vibesys.agent_run.evidence import CarryOver
@@ -163,6 +167,84 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     assert worker.turn_structured.await_args.kwargs["label"] == "round-1-retry-1-single-agent"
     workspace.snapshot.assert_awaited_once_with("round-1-retry-1-single-agent")
     assert "Implemented batching" in (tmp_path / "progress.md").read_text()
+
+
+@pytest.mark.asyncio
+async def test_combined_turn_falls_back_on_worker_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out worker turn must not abort the round (regression for the single-agent gap).
+
+    ``multi``'s implementer turn already catches ``subprocess.TimeoutExpired`` and
+    substitutes a FAIL response; before this fix, ``single``'s combined turn let the
+    exception propagate and crash the round instead.
+    """
+    plan = _plan("h1")
+    engine = HypothesisEngine.create(AgentRunState()).start(plan, started_round=1)
+    hypothesis = engine.state.active_hypothesis
+    assert hypothesis is not None
+    turns = SingleAgentTurns.__new__(SingleAgentTurns)
+    log: list[str] = []
+    worker = SimpleNamespace(
+        turn_structured=AsyncMock(side_effect=subprocess.TimeoutExpired(cmd="agent", timeout=30.0))
+    )
+    workspace = SimpleNamespace(snapshot=AsyncMock(return_value="revision"))
+    monkeypatch.setattr(turns, "worker", worker, raising=False)
+    monkeypatch.setattr(turns, "workspace", workspace, raising=False)
+    monkeypatch.setattr(turns, "ctx", SimpleNamespace(log=log.append), raising=False)
+    monkeypatch.setattr(turns, "progress_path", tmp_path / "progress.md", raising=False)
+    monkeypatch.setattr(turns, "_skills", lambda selections: (selections, []))
+    monkeypatch.setattr(turns, "_combined_prompt", lambda *_args: "combined prompt")
+    request = AttemptRequest(1, plan, None, [], hypothesis, "decode")
+    attempt = AttemptState(agent_run_state=engine.state, feedback=None, retry=1)
+
+    response = await turns.combined(request, attempt)
+
+    assert response.verdict is Verdict.FAIL
+    assert "stopped the agent" in response.self_review
+    assert any("timed out" in message for message in log)
+    workspace.snapshot.assert_awaited_once_with("round-1-retry-1-single-agent")
+
+
+@given(
+    timeout=st.floats(min_value=0.1, max_value=3600.0), retry=st.integers(min_value=1, max_value=50)
+)
+@settings(max_examples=25, deadline=None)
+def test_combined_turn_survives_any_timeout_duration_and_retry(
+    timeout: float, retry: int, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Property: whatever the timeout or retry count, the round always produces a FAIL response.
+
+    Generalizes the single-agent timeout regression above: no combination of
+    ``subprocess.TimeoutExpired(timeout=...)`` and retry number should ever propagate
+    an exception out of ``combined`` instead of a structured fallback reply.
+    """
+    tmp_path = tmp_path_factory.mktemp("single-timeout")
+    plan = _plan("h1")
+    engine = HypothesisEngine.create(AgentRunState()).start(plan, started_round=1)
+    hypothesis = engine.state.active_hypothesis
+    assert hypothesis is not None
+    turns = cast("Any", SingleAgentTurns.__new__(SingleAgentTurns))
+    worker = SimpleNamespace(
+        turn_structured=AsyncMock(
+            side_effect=subprocess.TimeoutExpired(cmd="agent", timeout=timeout)
+        )
+    )
+    workspace = SimpleNamespace(snapshot=AsyncMock(return_value="revision"))
+    turns.worker = worker
+    turns.workspace = workspace
+    turns.ctx = SimpleNamespace(log=lambda _message: None)
+    turns.progress_path = tmp_path / "progress.md"
+    turns._skills = lambda selections: (selections, [])  # noqa: SLF001
+    turns._combined_prompt = lambda *_args: "combined prompt"  # noqa: SLF001
+    request = AttemptRequest(1, plan, None, [], hypothesis, "decode")
+    attempt = AttemptState(agent_run_state=engine.state, feedback=None, retry=retry)
+
+    response = asyncio.run(turns.combined(request, attempt))
+
+    assert response.verdict is Verdict.FAIL
+    assert response.self_review
 
 
 def test_validation_rejects_reused_id() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from typing import TYPE_CHECKING
 
 from vibesys import constants
@@ -342,25 +343,43 @@ class SingleAgentTurns:
         plan = request.plan
         plan.recommended_skills, resolved = self._skills(plan.recommended_skills)
         prompt = self._combined_prompt(request, state, resolved)
-        response = await self.worker.turn_structured(
-            "Carry out the orchestrator's task above end-to-end "
-            "(implement, self-judge, profile) and return only the JSON object.",
-            system_prompt=prompt,
-            response_cls=SingleAgentRoundResponse,
-            fallback_factory=lambda: SingleAgentRoundResponse(
-                summary="Single-agent produced no structured response.",
+        try:
+            response = await self.worker.turn_structured(
+                "Carry out the orchestrator's task above end-to-end "
+                "(implement, self-judge, profile) and return only the JSON object.",
+                system_prompt=prompt,
+                response_cls=SingleAgentRoundResponse,
+                fallback_factory=lambda: SingleAgentRoundResponse(
+                    summary="Single-agent produced no structured response.",
+                    expected_behavior="unknown",
+                    self_review="No structured response received.",
+                    feedback="No structured response received.",
+                    verdict=Verdict.FAIL,
+                    bottlenecks="",
+                    suggestions="",
+                    profile_analysis="",
+                ),
+                label=f"round-{request.round_number}-retry-{state.retry}-single-agent",
+                reuse_session=True,
+                session_key=AgentSessionKey(SessionScope.HYPOTHESIS, plan.hypothesis_id),
+            )
+        except subprocess.TimeoutExpired as error:
+            response = SingleAgentRoundResponse(
+                summary="Single-agent invocation timed out.",
                 expected_behavior="unknown",
-                self_review="No structured response received.",
-                feedback="No structured response received.",
+                self_review=(
+                    f"The framework stopped the agent after {error.timeout:g} seconds "
+                    "without a structured response."
+                ),
+                feedback="Inspect retained evidence and return a schema-valid response on retry.",
                 verdict=Verdict.FAIL,
                 bottlenecks="",
                 suggestions="",
                 profile_analysis="",
-            ),
-            label=f"round-{request.round_number}-retry-{state.retry}-single-agent",
-            reuse_session=True,
-            session_key=AgentSessionKey(SessionScope.HYPOTHESIS, plan.hypothesis_id),
-        )
+            )
+            self.ctx.log(
+                f"[single-agent] attempt {state.retry} timed out after {error.timeout:g} seconds"
+            )
         response.skill_context_updates, _ = self._skills(response.skill_context_updates)
         if response.skill_context_updates:
             plan.recommended_skills, _ = self._skills(

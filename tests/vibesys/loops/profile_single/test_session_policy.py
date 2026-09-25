@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vibesys.agent_run import issue_board
 from vibesys.agent_run.attempts import AttemptDecision, AttemptState, JudgeReviewed
@@ -24,7 +27,7 @@ from vibesys.loops.profile_single.session import (
     ProfileSingleSessionError,
     RoundSelection,
 )
-from vibesys.orchestration.runtime import GateRunResult
+from vibesys.orchestration.runtime import GateRunResult, WorkspaceRestoreError
 from vibesys.schemas import OrchestratorPlan, SingleAgentRoundResponse, Verdict
 from vs_loop_state.api import RoundRecord
 
@@ -416,3 +419,82 @@ def test_retry_cursor_and_official_command_keep_policy_boundaries(
     session.options = session.options.model_copy(update={"max_retries_per_round": 0})
     with pytest.raises(ProfileSingleSessionError, match="exhausting"):
         session.remaining_attempts(selected)
+
+
+def _rollback_session(*, parent_round: int, started_round: int) -> tuple[Any, RoundSelection]:
+    plan = _plan().model_copy(update={"revert_to_round": parent_round})
+    engine = HypothesisEngine.create(
+        AgentRunState(), config=ProfileGuidedInput(command=("true",))
+    ).start(plan, started_round=started_round, parent_round=parent_round, parent_commit="c" * 40)
+    hypothesis = engine.state.active_hypothesis
+    assert hypothesis is not None
+    session = cast("Any", ProfileSingleSession.__new__(ProfileSingleSession))
+    session.engine = engine
+    session.state = engine.state
+    session.records = [
+        RoundRecord(
+            round_number=parent_round,
+            commit="c" * 40,
+            perf_metric=None,
+            perf_unit=None,
+            passed=True,
+        )
+    ]
+    session.history = SimpleNamespace(
+        resolve_rollback_commit=lambda target, _outcomes: (target.commit, None)
+    )
+    return session, RoundSelection(engine.state, hypothesis, plan, None)
+
+
+def test_apply_rollback_warns_and_retries_on_checkout_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R1 regression: a rollback checkout failure must warn, not abort the run."""
+    session, selection = _rollback_session(parent_round=1, started_round=2)
+    session.round_number = 2
+    warnings: list[str] = []
+    monkeypatch.setattr(session, "ctx", SimpleNamespace(warning=warnings.append), raising=False)
+    monkeypatch.setattr(session, "_memory_paths", lambda: (), raising=False)
+    monkeypatch.setattr(
+        session,
+        "workspace",
+        SimpleNamespace(
+            restore=AsyncMock(side_effect=WorkspaceRestoreError("c" * 40)), path=tmp_path
+        ),
+        raising=False,
+    )
+
+    asyncio.run(session._apply_rollback(selection))  # noqa: SLF001
+
+    assert selection.hypothesis.revert_applied is False
+    assert warnings
+
+
+@given(fails=st.lists(st.booleans(), min_size=1, max_size=8))
+@settings(max_examples=25, deadline=None)
+def test_apply_rollback_eventually_applies_once_checkout_succeeds(
+    fails: list[bool], tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Property: rollback is applied exactly once checkout succeeds, run never aborts."""
+    tmp_path = tmp_path_factory.mktemp("profile-single-rollback")
+    session, selection = _rollback_session(parent_round=1, started_round=2)
+    session.ctx = SimpleNamespace(warning=lambda _message: None, log=lambda _message: None)
+    session._memory_paths = lambda: ()  # noqa: SLF001
+
+    async def commit(**_kwargs: object) -> None:
+        return None
+
+    session.ctx.state = SimpleNamespace(commit=commit)
+
+    for round_number, should_fail in enumerate(fails, start=2):
+        session.round_number = round_number
+        if should_fail:
+            session.workspace = SimpleNamespace(
+                restore=AsyncMock(side_effect=WorkspaceRestoreError("c" * 40)), path=tmp_path
+            )
+        else:
+            session.workspace = SimpleNamespace(restore=AsyncMock(return_value=None), path=tmp_path)
+        asyncio.run(session._apply_rollback(selection))  # noqa: SLF001
+        assert selection.hypothesis.revert_applied == (not should_fail)
+        if selection.hypothesis.revert_applied:
+            break

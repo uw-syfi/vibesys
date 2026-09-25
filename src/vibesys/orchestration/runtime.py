@@ -165,6 +165,20 @@ class _AgentRegistrationError(ValueError):
         super().__init__(f"agent ID {agent_id!r} must be nonempty and unique")
 
 
+class WorkspaceRestoreError(RuntimeError):
+    """A workspace checkout to a retained revision failed.
+
+    Callers that need a hard failure (e.g. role-isolation revert) let this
+    propagate. Callers that tolerate a transient checkout failure (e.g.
+    hypothesis rollback, R1) catch it, warn, and retry on a later round
+    instead of aborting the run.
+    """
+
+    def __init__(self, revision: str) -> None:
+        """Name the revision that could not be checked out."""
+        super().__init__(f"could not restore candidate revision {revision!r}")
+
+
 class _UnsupportedAgentExecutionPolicyError(ValueError):
     def __init__(self) -> None:
         super().__init__(
@@ -1208,7 +1222,7 @@ class _Workspaces:
                 preserve_paths=preserve_paths,
             )
         if not adopted:
-            raise RuntimeError(f"could not adopt candidate revision {revision!r}")  # noqa: TRY003
+            raise WorkspaceRestoreError(revision)
 
     async def _restore(
         self,
@@ -1232,7 +1246,7 @@ class _Workspaces:
                 preserve_paths=preserve_paths,
             )
             if not restored:
-                raise RuntimeError(f"could not restore candidate revision {revision!r}")  # noqa: TRY003
+                raise WorkspaceRestoreError(revision)
             scope.revision = revision
 
     async def _retain(self, name: str, revision: str) -> str:

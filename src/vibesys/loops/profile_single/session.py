@@ -32,6 +32,7 @@ from vibesys.agent_run.state import AgentRunState
 from vibesys.loops.profile_single.attribution import run_attribution
 from vibesys.loops.profile_single.hypothesis import HypothesisEngine, ProfileGuidanceOutcome
 from vibesys.loops.profile_single.turns import ProfileSingleTurns
+from vibesys.orchestration.runtime import WorkspaceRestoreError
 from vibesys.schemas import ProfilerSummary, Verdict
 from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
@@ -377,7 +378,14 @@ class ProfileSingleSession:
         if rollback is None:
             raise ProfileSingleSessionError.missing_rollback()
         memory = self._memory_paths()
-        await self.workspace.restore(rollback, clean=True, preserve_paths=memory)
+        try:
+            await self.workspace.restore(rollback, clean=True, preserve_paths=memory)
+        except WorkspaceRestoreError:
+            self.ctx.warning(
+                f"could not check out rollback revision {rollback[:8]} for round "
+                f"{parent_round}; will retry the rollback next round"
+            )
+            return
         hypothesis.revert_applied = True
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback
