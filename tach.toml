@@ -229,7 +229,7 @@ depends_on = ["vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context
 
 [[modules]]
 path = "vibesys.loops.profile_multi"
-depends_on = [ "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent", "vibesys.roles", "vibesys.prompts"]
+depends_on = [ "vibesys.domains", "vibesys.context", "vibesys", "vs_project", "vs_loop_state", "vibesys.evaluators", "vibesys.agent_run", "vibesys.orchestration.view", "vibesys.orchestration.runtime", "vibesys.runtime", "vs_agent", "vibesys.roles", "vibesys.prompts", "vibesys.search.hypothesis", "vibesys.search.profile_focus"]
 
 [[modules]]
 path = "vibesys.loops.issue_queue"
