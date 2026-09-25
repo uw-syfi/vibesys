@@ -40,6 +40,7 @@ from vibesys.schemas import (
     HypothesisOutcome,
 )
 from vibesys.search.hypothesis import (
+    CarryOver,
     HypothesisConfig,
     HypothesisSearch,
     HypothesisStrategyUpdate,
@@ -47,7 +48,6 @@ from vibesys.search.hypothesis import (
 )
 from vibesys.search.hypothesis.attempts import AttemptState
 from vibesys.search.hypothesis.state import HypothesisState
-from vibesys.search.hypothesis.transitions import CarryOver
 from vibesys.search.profile_focus import FocusView
 
 if TYPE_CHECKING:
@@ -121,7 +121,7 @@ def _turns(tmp_path: Path) -> MultiAgentTurns:
             progress=SimpleNamespace(note=lambda _block: None, declare=lambda _path: None),
         ),
     )
-    turns = MultiAgentTurns(ctx, _options())
+    turns = MultiAgentTurns(ctx, _options(), _search())
     memory.ensure_progress_file(turns.progress_path)
     memory.ensure_roadmap_file(turns.roadmap_path)
     return turns

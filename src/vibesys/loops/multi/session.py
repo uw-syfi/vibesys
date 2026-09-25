@@ -45,20 +45,8 @@ from vibesys.search.hypothesis.attempts import (
 from vibesys.search.hypothesis.record import RecordInput, build_round_record
 from vibesys.search.hypothesis.results import Continue, Finished, NewHypothesis
 from vibesys.search.hypothesis.state import HypothesisState
-from vibesys.search.hypothesis.transitions import (
-    FAILED_HYPOTHESIS_OUTCOMES,
-    CarryOver,
-    _format_metric_row,
-    adopt_metric_space,
-    pareto_archive_summary,
-    provisional_candidates_since_official,
-    record_candidate_metrics,
-    terminal_workspace_notice,
-    update_active_hypothesis,
-)
 from vibesys.search.profile_focus import FocusView, ProfileFocus, ProfileFocusConfig
 from vs_agent.api import RoundProgress
-from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping
@@ -197,7 +185,6 @@ class MultiSession:
         self.ctx = ctx
         self.options = options
         self.workspace = ctx.workspaces.root
-        self.turns = MultiAgentTurns(ctx, options)
         self.search = HypothesisSearch(
             HypothesisConfig(
                 max_rounds=options.max_rounds,
@@ -206,6 +193,7 @@ class MultiSession:
                 max_retries_per_round=options.max_retries_per_round,
             )
         )
+        self.turns = MultiAgentTurns(ctx, options, self.search)
         self.terminal_policy = _TerminalPolicy(self.search.config)
         profile_config = options.profile_guided
         # Preserves the two presets' historical checkpoint-label prefixes
@@ -275,9 +263,9 @@ class MultiSession:
         memory.ensure_roadmap_file(turns.roadmap_path)
         artifacts.write_validation_recipe_schema(turns.progress_path)
         previous = await ctx.state.load(HypothesisState)
-        state = adopt_metric_space(previous or self.search.initial(), self.options.metric_space)
+        state = self.search.resume(previous, self.options.metric_space)
         self.state = state
-        self.carry = CarryOver(regression_info=terminal_workspace_notice(self.records))
+        self.carry = self.search.initial_carry(self.records)
         self.round_number = len(self.records) + 1
         self.last_profile_focus = "general latency hotspots on /v1/completions"
         if previous != state:
@@ -315,7 +303,8 @@ class MultiSession:
         number = self.round_number
         self.ctx.switch_log(f"round{number:03d}")
         memory.write_pareto_archive(
-            self.turns.progress_path, pareto_archive_summary(self.records, self.state.metrics)
+            self.turns.progress_path,
+            self.search.archive_summary(self.records, space=self.state.metrics),
         )
         progress = RoundProgress(number, self.options.max_rounds)
         self.ctx.log(f"\n{'=' * 60}\n  {progress.label()}\n{'=' * 60}\n")
@@ -440,9 +429,7 @@ class MultiSession:
         if target is None or not target.commit:
             self.ctx.log(f"cannot revert: no commit recorded for round {parent_round}")
             return
-        rollback, failed_child = RoundHistory(records=self.records).resolve_rollback_commit(
-            target, FAILED_HYPOTHESIS_OUTCOMES
-        )
+        rollback, failed_child = self.search.resolve_rollback(target, self.records)
         if rollback is None:
             raise MultiSessionError.missing_rollback()
         async with self.workspace.transaction() as tx:
@@ -455,7 +442,7 @@ class MultiSession:
         hypothesis.revert_applied = True
         hypothesis.revert_commit = rollback
         hypothesis.parent_commit = rollback
-        self.state = update_active_hypothesis(self.state, hypothesis)
+        self.state = self.search.update_active(self.state, hypothesis)
         await self._commit(
             sequence=self.round_number,
             writes={"state.json": self.state},
@@ -591,7 +578,7 @@ class MultiSession:
         return AttemptDecision.OFFICIAL
 
     async def _checkpoint_hypothesis(self, selected: MultiRound) -> None:
-        state = update_active_hypothesis(
+        state = self.search.update_active(
             selected.attempt.agent_run_state, selected.request.active_hypothesis
         )
         selected.attempt.agent_run_state = state
@@ -754,7 +741,7 @@ class MultiSession:
                 run=run,
                 reason=reason,
                 official_eval_every=self.options.official_eval_every,
-                provisional_candidates=provisional_candidates_since_official(self.records),
+                provisional_candidates=self.search.provisional_since_official(self.records),
             )
         )
 
@@ -880,7 +867,8 @@ class MultiSession:
         """Restore the best trusted candidate or the trusted input baseline."""
         self.ctx.log(f"Reached max_rounds={self.options.max_rounds}. Stopping.")
         memory.write_pareto_archive(
-            self.turns.progress_path, pareto_archive_summary(self.records, self.state.metrics)
+            self.turns.progress_path,
+            self.search.archive_summary(self.records, space=self.state.metrics),
         )
         if self.state.metrics.objectives:
             frontier = self.search.frontier(self.records, space=self.state.metrics)
@@ -888,7 +876,7 @@ class MultiSession:
             for record in frontier:
                 self.ctx.log(
                     f"  round {record.round_number}: "
-                    f"{_format_metric_row(record_candidate_metrics(record), self.state.metrics.objectives)} "
+                    f"{self.search.format_metric_row(record, space=self.state.metrics)} "
                     f"(commit {(record.commit or 'n/a')[:12]})"
                 )
         winner = self.search.best(self.records, space=self.state.metrics)
@@ -906,7 +894,7 @@ class MultiSession:
         await self.workspace.restore(winner.commit, clean=True)
         await self.workspace.snapshot(f"{self._label}: select round {winner.round_number}")
         metrics = (
-            _format_metric_row(record_candidate_metrics(winner), self.state.metrics.objectives)
+            self.search.format_metric_row(winner, space=self.state.metrics)
             if self.state.metrics.objectives
             else f"{winner.perf_metric:.6g} {winner.perf_unit or ''}"
         )

@@ -336,6 +336,7 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
         profile_guidance=FocusView(),
     )
     turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
+    turns.search = _search()
     progress = _fake_progress()
     turns.progress_path = tmp_path / "progress.md"
     turns.roadmap_location = "roadmap.md"
@@ -517,6 +518,7 @@ def test_multi_official_gate_failure_persists_revalidation_for_exact_commit() ->
     selected = SimpleNamespace(request=request, attempt=attempt)
     session = cast("Any", MultiSession.__new__(MultiSession))
     session._label = "multi"
+    session.search = _search()
     session.workspace = SimpleNamespace(revision="a" * 40)
     session.turns = SimpleNamespace(worker=SimpleNamespace(backend_name="cli"), progress_path=None)
     session.state = attempt.agent_run_state

@@ -21,7 +21,7 @@ from vibesys.schemas import (
     PerfDeltaReason,
     derive_hypothesis_title,
 )
-from vibesys.search.hypothesis.transitions import measurement_delta_reason
+from vibesys.search.hypothesis import HypothesisSearch
 from vs_loop_state.api import HypothesisResolution
 
 if TYPE_CHECKING:
@@ -242,7 +242,7 @@ def _hypothesis_view(hypothesis: Hypothesis, *, active_id: str | None) -> Hypoth
         perf_baseline_commit=(
             _text(measurement.baseline_commit) if measurement is not None else None
         ),
-        perf_delta_reason=measurement_delta_reason(hypothesis),
+        perf_delta_reason=HypothesisSearch.delta_reason(hypothesis),
         kept=hypothesis.candidate_retained,
         strategy_disposition=hypothesis.strategy.value,
         strategy_reason=hypothesis.strategy_reason,

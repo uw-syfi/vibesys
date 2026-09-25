@@ -36,9 +36,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vibesys.evaluators.metrics import MetricSpace
-    from vibesys.schemas import CandidateDisposition, HypothesisOutcome
+    from vibesys.schemas import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
     from vibesys.search.hypothesis.config import HypothesisConfig
-    from vibesys.search.hypothesis.plan import OrchestratorPlan
+    from vibesys.search.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
     from vibesys.search.hypothesis.state import Hypothesis, RoundRecord
 
 __all__ = ["HypothesisSearch"]
@@ -53,6 +53,23 @@ class HypothesisSearch:
     def initial(self) -> HypothesisState:
         """Return the empty starting state for a new run."""
         return HypothesisState()
+
+    def resume(self, state: HypothesisState | None, metric_space: MetricSpace) -> HypothesisState:
+        """Recover a run's durable state, reprojecting it onto *metric_space*.
+
+        ``state`` is the last committed checkpoint, or ``None`` for a fresh
+        run. Reprojection is a no-op when the metric space is unchanged, so
+        calling this unconditionally on every open is safe and idempotent.
+        """
+        return transitions.adopt_metric_space(state or self.initial(), metric_space)
+
+    def initial_carry(self, records: Sequence[RoundRecord]) -> CarryOver:
+        """Return the resumed carry-over, seeded from any pending workspace notice."""
+        return CarryOver(regression_info=transitions.terminal_workspace_notice(records))
+
+    def finish(self, state: HypothesisState) -> HypothesisState:
+        """Clear the active hypothesis pointer without changing the hypothesis itself."""
+        return transitions.finish_hypothesis(state)
 
     def next_round(
         self,
@@ -252,6 +269,52 @@ class HypothesisSearch:
             records=records,
             space=space,
         )
+
+    def validate_updates(
+        self, state: HypothesisState, updates: Sequence[HypothesisStrategyUpdate]
+    ) -> None:
+        """Reject a designer's parked/abandoned updates the state can't accept.
+
+        Raises ``ValueError`` for a duplicate, unknown, active, or
+        incomplete-hypothesis update; otherwise returns.
+        """
+        transitions.apply_strategy_updates(state.clone(), updates)
+
+    def resolve_rollback(
+        self, target: RoundRecord, records: Sequence[RoundRecord]
+    ) -> tuple[str | None, int | None]:
+        """Resolve the Git revision (and any failed child round) for a rollback to *target*."""
+        return RoundHistory(records=list(records)).resolve_rollback_commit(
+            target, FAILED_HYPOTHESIS_OUTCOMES
+        )
+
+    def update_active(self, state: HypothesisState, hypothesis: Hypothesis) -> HypothesisState:
+        """Replace the active hypothesis with an updated checkpoint."""
+        return transitions.update_active_hypothesis(state, hypothesis)
+
+    def provisional_since_official(self, records: Sequence[RoundRecord]) -> int:
+        """Count provisional candidates recorded since the last official evaluation."""
+        return transitions.provisional_candidates_since_official(records)
+
+    def archive_summary(self, records: Sequence[RoundRecord], *, space: MetricSpace) -> str:
+        """Render the Pareto archive's current summary for the progress board."""
+        return transitions.pareto_archive_summary(records, space)
+
+    def format_metric_row(self, record: RoundRecord, *, space: MetricSpace) -> str:
+        """Render one round record's candidate metrics against *space*'s objectives."""
+        return transitions._format_metric_row(  # noqa: SLF001  # same package
+            transitions.record_candidate_metrics(record), space.objectives
+        )
+
+    @staticmethod
+    def delta_reason(hypothesis: Hypothesis) -> PerfDeltaReason | None:
+        """Why *hypothesis*'s headline number carries no causal delta.
+
+        A plain function of one hypothesis (no run configuration), exposed
+        as a static method so read-only projectors (no bound search policy)
+        can call it without constructing one.
+        """
+        return transitions.measurement_delta_reason(hypothesis)
 
 
 def _next_active(  # noqa: PLR0913

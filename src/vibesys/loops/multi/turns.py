@@ -55,7 +55,6 @@ from vibesys.roles.pre_round import MULTI_PRE_ROUND_DECISION, PreRoundContext, P
 from vibesys.roles.profiler import MULTI_PROFILERS, ProfilerContext, ProfilerSummary
 from vibesys.runtime import ReadOnly
 from vibesys.schemas import normalize_hypothesis_title
-from vibesys.search.hypothesis.transitions import apply_strategy_updates
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
 
 if TYPE_CHECKING:
@@ -63,10 +62,10 @@ if TYPE_CHECKING:
     from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
     from vibesys.orchestration.runtime import RunContext
     from vibesys.schemas import SkillResourceSelection
+    from vibesys.search.hypothesis import CarryOver, HypothesisSearch
     from vibesys.search.hypothesis.attempts import AttemptState
     from vibesys.search.hypothesis.plan import OrchestratorPlan
     from vibesys.search.hypothesis.state import HypothesisState
-    from vibesys.search.hypothesis.transitions import CarryOver
     from vibesys.skills import ResolvedSkillSelection
 
 # The implementer's fallback texts are the sentinel that identifies a
@@ -82,8 +81,10 @@ _SYNTHESIZED_IMPLEMENTER_SUMMARIES = frozenset(
 class MultiAgentTurns:
     """Independent designer, profiler, implementer, and judge roles."""
 
-    def __init__(self, ctx: RunContext, options: AgentOrchestrationOptions) -> None:
-        """Bind the run's public capabilities and strategy options.
+    def __init__(
+        self, ctx: RunContext, options: AgentOrchestrationOptions, search: HypothesisSearch
+    ) -> None:
+        """Bind the run's public capabilities, strategy options, and search policy.
 
         Declares this run's progress-board path once with `ctx.progress`
         (see `vibesys.orchestration.progress`): turns note pure, unwritten
@@ -93,6 +94,7 @@ class MultiAgentTurns:
         """
         self.ctx = ctx
         self.options = options
+        self.search = search
         self.workspace = ctx.workspaces.root
         self.domain = resolve_domain(ctx.request.input_bundle.domain)
         self.modality = options.modality
@@ -175,7 +177,7 @@ class MultiAgentTurns:
             raise InvalidPlanError.self_reference()
         if state.by_id(plan.hypothesis_id) is not None:
             raise InvalidPlanError.reused_id(plan.hypothesis_id)
-        apply_strategy_updates(state.clone(), plan.hypothesis_updates)
+        self.search.validate_updates(state, plan.hypothesis_updates)
 
     async def plan(self, request: PlanRequest) -> OrchestratorPlan:
         """Ask for a new plan, with one correction for invalid lifecycle edits.
