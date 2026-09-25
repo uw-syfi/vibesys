@@ -1,12 +1,18 @@
 """``WorkspaceHandle.transaction()`` commit/restore semantics.
 
-Exercised against a fake ``_Workspaces``-shaped owner (only ``_snapshot`` and
-``_restore`` are called by ``WorkspaceHandle``), so these tests do not need a
-real Git-backed run. The fake owner models a workspace as a small in-memory
-``dict`` tree and mirrors ``GitTracker.checkout_tree``'s ``preserve_paths``
-contract: a restore reverts every path to the target snapshot's content
-except paths named in ``preserve_paths``, which keep whatever the tree holds
-right before the restore.
+Most tests below run against a fake ``_Workspaces``-shaped owner (only
+``_snapshot`` and ``_restore`` are called by ``WorkspaceHandle``), so they
+don't need a real Git-backed run. The fake owner models a workspace as a
+small in-memory ``dict`` tree and mirrors ``GitTracker.checkout_tree``'s
+``preserve_paths`` contract: a restore reverts every path to the target
+snapshot's content except paths named in ``preserve_paths``, which keep
+whatever the tree holds right before the restore.
+
+The final property test (``test_transaction_restore_is_exact_over_real_git``)
+drives a real Git-backed workspace (via ``tests.vibesys.orchestration.harness``)
+through arbitrary content edits, untracked-file additions, and deletions, to
+prove the fake owner's model matches real ``GitTracker.checkout_tree``
+behavior and not just its documented contract.
 """
 
 from __future__ import annotations
@@ -17,15 +23,20 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.vibesys.orchestration.harness import run_with_context
 
 from vibesys.orchestration.runtime import (
     WorkspaceHandle,
     WorkspaceRestoreError,
     WorkspaceTransactionKeep,
 )
+from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
+
+    from vibesys.orchestration.runtime import RunContext
 
 
 class _FakeOwner:
@@ -240,3 +251,88 @@ def test_transaction_outcome_matches_commit_or_snapshot(
             else:
                 expected.pop(path, None)
         assert owner.tree == expected
+
+
+# ---------------------------------------------------------------------------
+# Real-git property test: content edits, untracked additions, deletions.
+# ---------------------------------------------------------------------------
+
+_REAL_FILES = ("tracked_a.txt", "tracked_b.txt", "nested/tracked_c.txt")
+
+_real_edit = st.one_of(
+    st.text(
+        alphabet=st.characters(min_codepoint=97, max_codepoint=122), min_size=1, max_size=6
+    ).map(lambda text: ("write", text)),
+    st.just(("delete",)),
+)
+_real_edits_strategy = st.dictionaries(st.sampled_from(_REAL_FILES), _real_edit, max_size=3)
+_real_baseline_strategy = st.dictionaries(
+    st.sampled_from(_REAL_FILES),
+    st.text(alphabet=st.characters(min_codepoint=97, max_codepoint=122), min_size=1, max_size=6),
+    max_size=3,
+)
+
+
+def _read_tracked_files(root: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for name in _REAL_FILES:
+        path = root / name
+        if path.exists():
+            result[name] = path.read_text()
+    return result
+
+
+def _apply_real_edits(root: Path, edits: Mapping[str, tuple[str, ...]]) -> None:
+    for name, op in edits.items():
+        path = root / name
+        if op[0] == "write":
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(op[1])
+        else:
+            path.unlink(missing_ok=True)
+
+
+@given(
+    baseline=_real_baseline_strategy,
+    edits=_real_edits_strategy,
+    commit=st.booleans(),
+)
+@settings(max_examples=12, deadline=None)
+def test_transaction_restore_is_exact_over_real_git(
+    tmp_path_factory: pytest.TempPathFactory,
+    baseline: dict[str, str],
+    edits: dict[str, tuple[str, ...]],
+    commit: bool,  # noqa: FBT001  # a hypothesis-generated scenario parameter
+) -> None:
+    """Content edits, brand-new (untracked) files, and deletions all revert
+    exactly on an uncommitted transaction exit, over a real Git-backed
+    workspace: not just the in-memory model the tests above check.
+    """
+    tmp_path = tmp_path_factory.mktemp("real-git-tx")
+    runner = FakeAgentClient(backend_name="stub")
+
+    async def body(ctx: RunContext) -> tuple[dict[str, str], dict[str, str]]:
+        root = ctx.workspaces.root.path
+        _apply_real_edits(root, {name: ("write", text) for name, text in baseline.items()})
+        await ctx.workspaces.root.snapshot("seed-baseline")
+        before = _read_tracked_files(root)
+
+        async with ctx.workspaces.root.transaction() as tx:
+            _apply_real_edits(root, edits)
+            if commit:
+                tx.commit()
+
+        return before, _read_tracked_files(root)
+
+    before, after = run_with_context(tmp_path, runner, body)
+
+    if commit:
+        expected = dict(before)
+        for name, op in edits.items():
+            if op[0] == "write":
+                expected[name] = op[1]
+            else:
+                expected.pop(name, None)
+        assert after == expected
+    else:
+        assert after == before
