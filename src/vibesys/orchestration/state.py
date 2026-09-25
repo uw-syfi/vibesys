@@ -181,14 +181,16 @@ class _RunState:
         sequence themselves. Strategies whose read projection carries no
         rounds or revision (evolve, issue_queue) see no events derived here.
 
-        `board`/`progress_path` are the framework log's one write point: a
-        strategy hands the host whatever pre-rendered blocks became
-        available since its last commit (see `vibesys.orchestration.
-        progress_log`), and the host writes them here, after the checkpoint
-        durably lands and before this call returns -- always before the next
-        turn, which is the only ordering the board needs. Resume never
-        depends on this file: it is a derived, regenerable narration of
-        state that is already durable by the time this writes it.
+        The framework log's one write point is flushed here, after the
+        checkpoint durably lands and before this call returns -- always
+        before the next turn, which is the only ordering the board needs.
+        Resume never depends on this file: it is a derived, regenerable
+        narration of state that is already durable by the time this writes
+        it. A strategy notes pending blocks via `ctx.progress.note` (see
+        `vibesys.orchestration.progress`) after declaring its path once with
+        `ctx.progress.declare`; `board`/`progress_path` are a deprecated
+        explicit alternative, kept only for strategies not yet converted.
+        # TODO(remove after multi conversion): drop `board`/`progress_path`.
         """
         async with self._host._parent_mutation_lock:
             before = await self._previous_view()
@@ -204,10 +206,27 @@ class _RunState:
         self._last_view = after
         self._last_view_loaded = True
         _emit_commit_events(self._host.events, before, after)
-        if board and progress_path is not None:
+        self._flush_progress(board, progress_path)
+        return revision
+
+    def _flush_progress(self, board: Sequence[str], progress_path: Path | None) -> None:
+        """Write pending framework-log blocks in order.
+
+        `progress_path` given explicitly selects the deprecated path: write
+        exactly `board` there (matching the old strategy-owned-buffer
+        behavior). Otherwise drain the host-owned `ctx.progress` buffer.
+        # TODO(remove after multi conversion): drop the explicit-path branch.
+        """
+        if progress_path is not None:
             for block in board:
                 progress_log.write(progress_path, block)
-        return revision
+            return
+        progress = self._host.progress
+        path = progress.path
+        if path is None:
+            return
+        for block in progress.drain():
+            progress_log.write(path, block)
 
     async def _previous_view(self) -> RunView | None:
         """Return the last published view, resolving it from disk once."""

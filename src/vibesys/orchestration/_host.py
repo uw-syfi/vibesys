@@ -123,6 +123,19 @@ class _EvaluatorLike(Protocol):
         ...
 
 
+class _ProgressLike(Protocol):
+    """What ``state.py``/``gates.py`` need from ``ctx.progress``."""
+
+    @property
+    def path(self) -> Path | None:
+        """Return this run's declared progress-board path, or ``None`` if undeclared."""
+        ...
+
+    def drain(self) -> list[str]:
+        """Take and clear the pending framework-log blocks, in order."""
+        ...
+
+
 class _CommittedStateProjectorLike(Protocol):
     """Structurally identical to ``state.py``'s own ``_CommittedStateProjector``.
 
@@ -162,6 +175,11 @@ class HostResources(Protocol):
     @property
     def gates(self) -> _EvaluatorLike:
         """Return this run's trusted-gate capability."""
+        ...
+
+    @property
+    def progress(self) -> _ProgressLike:
+        """Return this run's progress-board buffer/declaration capability."""
         ...
 
     _setup: RunSetup
