@@ -191,7 +191,7 @@ class _Evaluator:
             )
 
     @staticmethod
-    def _write_accuracy_gate(
+    def _write_accuracy_gate(  # noqa: PLR0913  # mirrors render_framework_accuracy_gate's own field count
         progress_path: Path | None,
         round_number: int,
         retry: int,
@@ -224,6 +224,7 @@ class _Evaluator:
         commit: str | None,
         objectives: Sequence[Objective],
         progress_path: Path | None,
+        board: Sequence[str] = (),
         reuse_accuracy: bool = False,
         agent_backend_name: str | None = None,
     ) -> GateRunResult:
@@ -236,7 +237,17 @@ class _Evaluator:
         strategy. A stub `agent_backend_name` (tests, fast local runs) skips
         both gates and reports a pass with no feedback and an empty outcome,
         matching every strategy's prior hand-rolled check.
+
+        `board` is the strategy's pending framework-log buffer (see
+        `vibesys.orchestration.state._RunState.commit`'s own `board`
+        parameter): this call is often the next write to `progress_path`
+        after those blocks became available, so this flushes them first, in
+        order, before this gate's own outcome -- keeping the file's section
+        order the same as when every write happened synchronously.
         """
+        if board and progress_path is not None:
+            for block in board:
+                progress_log.write(progress_path, block)
         if agent_backend_name == "stub":
             return GateRunResult(
                 feedback=None, benchmark=FrameworkBenchmarkOutcome(), accuracy_passed=False

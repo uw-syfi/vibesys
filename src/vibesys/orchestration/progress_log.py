@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from vibesys.roles.judge import JudgeResponse
     from vibesys.roles.pre_round import PreRoundDecision
     from vibesys.roles.single_agent import SingleAgentRoundResponse
-    from vibesys.schemas import OrchestratorPlan
+    from vibesys.search.hypothesis import OrchestratorPlan
 
 #: Every block this module renders starts with this heading shape; the round
 #: number is recovered from it rather than threaded separately through the
@@ -226,7 +226,7 @@ def render_single_agent_round(  # noqa: D103  # tracked: #288
     )
 
 
-def render_framework_accuracy_gate(  # noqa: D103, PLR0913  # tracked: #288
+def render_framework_accuracy_gate(  # noqa: D103  # tracked: #288
     round_number: int,
     retry: int,
     *,

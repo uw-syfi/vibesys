@@ -580,7 +580,5 @@ Write bounded durable profile evidence only below
                 verdict=response.verdict.value, feedback=response.feedback, attempt=state.retry
             ),
         )
-        self._board.append(
-            progress_log.render_judge(request.round_number, state.retry, response)
-        )
+        self._board.append(progress_log.render_judge(request.round_number, state.retry, response))
         return response

@@ -275,7 +275,9 @@ def test_gates_run_property_records_correspond_1to1_with_outcomes(
                     ),
                 )
             )
-            before_accuracy = len(_accuracy_verdicts(progress.read_text())) if progress.exists() else 0
+            before_accuracy = (
+                len(_accuracy_verdicts(progress.read_text())) if progress.exists() else 0
+            )
             before_benchmark = (
                 len(_benchmark_verdicts(progress.read_text())) if progress.exists() else 0
             )

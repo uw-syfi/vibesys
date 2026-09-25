@@ -390,7 +390,7 @@ depends_on = ["vibesys", "vibesys.orchestration.view", "vs_project", "vibesys.or
 # depending on orchestration, which would cycle (agent_run already depends
 # on orchestration.view/orchestration).
 path = "vibesys.orchestration.progress_log"
-depends_on = ["vibesys", "vibesys.roles", "vibesys.evaluators"]
+depends_on = ["vibesys", "vibesys.roles", "vibesys.evaluators", "vibesys.search.hypothesis"]
 
 [[modules]]
 path = "vibesys.orchestration.gates"

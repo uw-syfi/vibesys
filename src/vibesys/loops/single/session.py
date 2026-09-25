@@ -38,7 +38,9 @@ from vs_agent.api import RoundProgress
 from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
+
+    from pydantic import BaseModel
 
     from vibesys.loops.agent_options import AgentOrchestrationOptions
     from vibesys.orchestration.runtime import RunContext
@@ -167,16 +169,42 @@ class SingleSession:
             raise
         return session
 
-    async def _commit(self, **kwargs: object) -> str:
+    def _drain_board(self) -> list[str]:
+        """Take and clear the pending framework-log buffer.
+
+        Used both by `_commit` (flushed with the next checkpoint) and by
+        the official-gates call site (flushed ahead of that gate's own
+        synchronous write, so the file's section order matches when every
+        write happened synchronously).
+        """
+        board = list(self._board_log)
+        self._board_log.clear()
+        return board
+
+    async def _commit(
+        self,
+        *,
+        sequence: int,
+        writes: Mapping[str, BaseModel],
+        publish: BaseModel | None = None,
+        candidate: bool = True,
+        label: str | None = None,
+    ) -> str:
         """Delegate to `ctx.state.commit`, draining any buffered board entries.
 
         The host writes them to `progress.md` as part of this checkpoint,
         which is always before the next turn; see
         `vibesys.orchestration.state._RunState.commit`.
         """
-        board, self._board_log = self._board_log, []
-        return await self.ctx.state.commit(  # type: ignore[no-any-return]
-            board=board, progress_path=self.turns.progress_path, **kwargs
+        board = self._drain_board()
+        return await self.ctx.state.commit(
+            sequence=sequence,
+            writes=writes,
+            board=board,
+            progress_path=self.turns.progress_path,
+            publish=publish,
+            candidate=candidate,
+            label=label,
         )
 
     async def _initialize(self) -> None:
@@ -449,6 +477,7 @@ class SingleSession:
         )
         result = await self.ctx.gates.run(
             round_number=self.round_number,
+            board=self._drain_board(),
             retry=attempt.retry,
             commit=commit,
             objectives=self.state.metrics.objectives,

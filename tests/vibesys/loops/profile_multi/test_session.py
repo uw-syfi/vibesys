@@ -15,13 +15,6 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vibesys.agent_run import issue_board
-from vibesys.search.hypothesis.attempts import (
-    AttemptDecision,
-    AttemptState,
-    JudgeReviewed,
-    JudgeSkipped,
-)
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.input_manifest import ProfileGuidedInput
 from vibesys.evaluators.validation_recipe import ValidationRecipeArtifact
@@ -33,7 +26,6 @@ from vibesys.loops.profile_multi.session import (
     _ProfilePolicy,
     _TerminalPolicy,
 )
-from vibesys.orchestration import progress_log
 from vibesys.orchestration.runtime import GateRunResult, WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse

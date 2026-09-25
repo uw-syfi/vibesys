@@ -130,6 +130,7 @@ async def test_plan_reprompts_reused_hypothesis_and_records_corrected_plan(
 ) -> None:
     state = start_hypothesis(HypothesisState(), _plan("used"), started_round=1)
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
+    turns._board = []
     log: list[str] = []
     agent_turn = AsyncMock(side_effect=[_plan("used"), _plan("new")])
     monkeypatch.setattr(
@@ -164,6 +165,7 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     hypothesis = state.active_hypothesis
     assert hypothesis is not None
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
+    turns._board = []
     agent_turn = AsyncMock(return_value=_response())
     monkeypatch.setattr(
         turns, "ctx", SimpleNamespace(agents=SimpleNamespace(turn=agent_turn)), raising=False
@@ -184,7 +186,7 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     assert call.kwargs["context"] == {"combined": "context"}
     assert call.kwargs["session_key"] == "h1"
     assert call.kwargs["label"] == "round-1-retry-1-single-agent"
-    assert "Implemented batching" in (tmp_path / "progress.md").read_text()
+    assert any("Implemented batching" in block for block in turns._board)
 
     # `before_paid` (run by `ctx.agents.turn` right before its pre-turn
     # snapshot, so it is git-committed before the paid call starts) writes
@@ -200,6 +202,7 @@ def test_validation_rejects_reused_id() -> None:
     plan = _plan("used")
     state = start_hypothesis(HypothesisState(), plan, started_round=1)
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
+    turns._board = []
 
     with pytest.raises(InvalidPlanError, match="already used"):
         turns._validate_plan(_plan("used"), state)  # noqa: SLF001

@@ -22,7 +22,6 @@ from vibesys.evaluators.validation_recipe import (
     FrameworkValidationResult,  # tracked: #288
     ValidationRecipeArtifact,
 )
-from vibesys.roles.implementer import ImplementerResponse  # noqa: TC001  # tracked: #288
 from vibesys.search.hypothesis import OrchestratorPlan  # noqa: TC001  # tracked: #288
 from vibesys.search.hypothesis.attempts import ImplementerReply  # noqa: TC001  # tracked: #288
 

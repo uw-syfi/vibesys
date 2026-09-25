@@ -16,13 +16,13 @@ from vibesys.errors import (
     UnsupportedProfilerError,
 )
 from vibesys.events import FrameworkSource
+from vibesys.orchestration import progress_log
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
     profiler_definition,
     require_profiler_kind,
 )
-from vibesys.orchestration import progress_log
 from vibesys.prompts import PROMPTS_DIR
 from vibesys.prompts.contexts import domain_context, plan_focus_kwargs
 from vibesys.roles.common import Verdict
