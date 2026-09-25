@@ -6,10 +6,10 @@ population persistence) against a scripted :class:`FakeAgentClient`, the
 same pattern ``tests/vibesys/golden/harness.py`` generalizes across every
 strategy. The three seams patched here (CUDA sandbox factory,
 ``build_agent_client``, ``PROJECT_ROOT``) are the same ones that harness
-uses; evolve additionally routes its trusted framework accuracy gate through
-``_run_framework_accuracy_gate`` rather than ``vibesys.orchestration.gates
-.run_accuracy_gate``, so callers that need to script it pass ``accuracy_gate``
-instead of a ``FakeComputeBackend``-level fake.
+uses; ``ctx.gates`` (evolve's trusted accuracy/benchmark commands) is
+injected through ``run_orchestration``'s ``gate_executor`` seam instead, so
+callers that need to script it pass a pre-built
+:class:`~vibesys.api.testing.FakeGateExecutor`.
 
 ``_FakeRunContext`` is a narrow, non-agent capability fake for the handful
 of evolve helpers (candidate-runtime naming, deployment teardown, candidate
@@ -28,6 +28,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from vibesys.api.testing import FakeGateExecutor
 from vibesys.config import Config, as_config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, DomainName
 from vibesys.evaluators.input_manifest import load_input_bundle
@@ -284,22 +285,21 @@ def _invoke_loop(
     ref_file: str,
     runner: FakeAgentClient,
     *,
-    accuracy_gate: MagicMock | None = None,
-    _accuracy_gate_feedbacks: list[str | None] | None = None,
+    gate_executor: FakeGateExecutor | None = None,
     **kwargs: Unpack[_EvolveLoopKwargs],
 ) -> bool:
     """Drive the registered ``evolve`` strategy end to end.
 
-    ``accuracy_gate`` patches in for the real framework accuracy gate
-    (``vibesys.loops.evolve.loop._run_framework_accuracy_gate``); it is never
-    read off the agent client. Pass a pre-built ``MagicMock`` when the caller
-    needs to inspect its calls afterward; otherwise one is built here from
-    ``_accuracy_gate_feedbacks`` (or accepts everything by default).
+    ``gate_executor`` is the same ``ctx.gates`` injection seam
+    ``run_orchestration`` accepts for every strategy
+    (``vibesys.orchestration.gates.GateExecutor``); it is never read off the
+    agent client. Pass a pre-built, pre-scripted
+    :class:`~vibesys.api.testing.FakeGateExecutor` when the caller needs to
+    script outcomes or inspect its recorded calls afterward; otherwise one is
+    built here, which accepts every accuracy/benchmark check by default.
     """
-    if accuracy_gate is None:
-        accuracy_gate = MagicMock(return_value=None)
-        if _accuracy_gate_feedbacks is not None:
-            accuracy_gate.side_effect = list(_accuracy_gate_feedbacks)
+    if gate_executor is None:
+        gate_executor = FakeGateExecutor()
     defaults: _EvolveLoopKwargs = {
         "config": Config.model_validate({"model": {"name": "claude-sonnet-4-6"}}),
         "exp_name": "test-evolve",
@@ -398,7 +398,12 @@ def _invoke_loop(
     async def execute() -> bool:
         integration = LocalRunIntegration()
         try:
-            return await run_orchestration(request, integration, EvolveOrchestrator(descriptor))
+            return await run_orchestration(
+                request,
+                integration,
+                EvolveOrchestrator(descriptor),
+                gate_executor=gate_executor,
+            )
         finally:
             integration.close()
 
@@ -409,10 +414,6 @@ def _invoke_loop(
             side_effect=lambda **_kwargs: _SharedFakeClient(runner),
         ),
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
-        patch(
-            "vibesys.loops.evolve.loop._run_framework_accuracy_gate",
-            AsyncMock(side_effect=accuracy_gate),
-        ),
     ):
         return asyncio.run(execute())
 
@@ -422,8 +423,7 @@ def _invoke_bootstrap(
     ref_file: str,
     runner: FakeAgentClient,
     *,
-    accuracy_gate: MagicMock | None = None,
-    _accuracy_gate_feedbacks: list[str | None] | None = None,
+    gate_executor: FakeGateExecutor | None = None,
     **kwargs: Unpack[_EvolveLoopKwargs],
 ) -> bool:
     """Exercise bootstrap through a valid one-generation run contract."""
@@ -437,8 +437,7 @@ def _invoke_bootstrap(
             tmp_path,
             ref_file,
             runner,
-            accuracy_gate=accuracy_gate,
-            _accuracy_gate_feedbacks=_accuracy_gate_feedbacks,
+            gate_executor=gate_executor,
             **overrides,
         )
 

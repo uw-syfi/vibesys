@@ -14,20 +14,17 @@ writes is a validated population/metric-space/cursor triple under
 
 This module does NOT use ``tests/vibesys/golden/harness.run_scripted``. That
 harness hardcodes ``profiler_kind=ProfilerKind.NONE`` (fine for multi, which
-never profiles in its golden scenarios) and unconditionally runs the real
-mocked-sandbox accuracy gate for every candidate -- evolve calls that gate on
-every bootstrap attempt and every child regardless of backend, so both of
-those harness defaults break evolve's bootstrap seed (it never profiles, and
-the mocked sandbox makes the accuracy gate raise). Neither is exposed as a
+never profiles in its golden scenarios), and evolve calls the framework
+accuracy gate on every bootstrap attempt and every child regardless of
+backend. Neither ``profiler_kind`` nor the gate outcome is exposed as a
 ``run_scripted`` parameter, and editing ``harness.py`` is out of scope, so
 ``_run_evolve`` below is a small local adaptation of the same pattern (mirrors
 ``harness.run_scripted`` and ``test_evolutionary_loop.py``'s ``_invoke_loop``)
-that sets ``profiler_kind=ProfilerKind.AUTO`` and leaves the framework
-accuracy gate to each scenario to patch explicitly, the same way
-``test_evolutionary_loop.py`` patches
-``vibesys.loops.evolve.loop._run_framework_accuracy_gate`` directly (evolve
-does not route through ``run_accuracy_gate`` the way multi's gate scenario
-does, so multi's patch target does not apply here).
+that sets ``profiler_kind=ProfilerKind.AUTO`` and injects a
+:class:`~vibesys.api.testing.FakeGateExecutor` through
+``run_orchestration``'s ``gate_executor`` seam, the same seam
+``test_evolutionary_loop.py`` scripts, in place of the mocked CUDA sandbox
+that multi's gate scenario drives its accuracy command through.
 
 Three scenarios cover the main round path:
 
@@ -50,7 +47,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from tests.vibesys.golden.harness import ScriptedRun, write_minimal_input_bundle
@@ -62,7 +59,9 @@ from tests.vibesys.golden.helpers import (
     read_events,
 )
 
+from vibesys.api.testing import FakeGateExecutor
 from vibesys.config import Config, as_config
+from vibesys.evaluators.gates import AccuracyGateResult
 from vibesys.evaluators.input_manifest import load_input_bundle
 from vibesys.evaluators.metrics import MetricSpace
 from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
@@ -169,7 +168,7 @@ def _run_evolve(
     *,
     descriptor,  # noqa: ANN001  # tracked: #288
     runner: FakeAgentClient,
-    accuracy_gate: AsyncMock | None = None,
+    gate_executor: FakeGateExecutor | None = None,
 ) -> ScriptedRun:
     """Run ``EvolveOrchestrator`` end-to-end with a scripted agent client.
 
@@ -177,9 +176,9 @@ def _run_evolve(
     module docstring for why): same seams patched (CUDA sandbox factory,
     ``build_agent_client``, ``PROJECT_ROOT``), plus
     ``profiler_kind=ProfilerKind.AUTO`` (evolve's fitness signal) and an
-    explicit, scenario-supplied patch of evolve's own framework accuracy-gate
-    call site, since every bootstrap attempt and every child unconditionally
-    goes through it.
+    explicit, scenario-supplied ``gate_executor`` for the trusted accuracy
+    gate every bootstrap attempt and every child unconditionally goes
+    through.
     """
     input_dir = write_minimal_input_bundle(tmp_path, domain="llm-serving")
     bundle = load_input_bundle(input_dir)
@@ -195,14 +194,20 @@ def _run_evolve(
         profiler_kind=ProfilerKind.AUTO,
     )
 
+    executor = gate_executor or FakeGateExecutor()
+
     async def execute() -> bool:
         integration = LocalRunIntegration()
         try:
-            return await run_orchestration(request, integration, EvolveOrchestrator(descriptor))
+            return await run_orchestration(
+                request,
+                integration,
+                EvolveOrchestrator(descriptor),
+                gate_executor=executor,
+            )
         finally:
             integration.close()
 
-    gate_patch = accuracy_gate or AsyncMock(return_value=None)
     with (
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
         patch(
@@ -210,7 +215,6 @@ def _run_evolve(
             side_effect=lambda **_kwargs: _SharedFakeClient(runner),
         ),
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
-        patch("vibesys.loops.evolve.loop._run_framework_accuracy_gate", gate_patch),
     ):
         result = asyncio.run(execute())
 
@@ -289,10 +293,16 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
     runner.enqueue("profiler", _profiler(10.0))
 
     rejection = "Framework accuracy gate failed.\nbenchmark endpoint diverged from the reference"
-    accuracy_gate = AsyncMock(side_effect=[None, rejection])
+    gate_executor = FakeGateExecutor()
+    gate_executor.script_accuracy(
+        AccuracyGateResult(command=None, passed=True, output="", feedback=None, executed=True),
+        AccuracyGateResult(
+            command=None, passed=False, output=rejection, feedback=rejection, executed=True
+        ),
+    )
 
     descriptor = descriptor_from_options(_options())
-    run = _run_evolve(tmp_path, descriptor=descriptor, runner=runner, accuracy_gate=accuracy_gate)
+    run = _run_evolve(tmp_path, descriptor=descriptor, runner=runner, gate_executor=gate_executor)
 
     assert run.result is True
     _assert_prompt_calls(runner, scenario="gate", workspace=tmp_path.parent)

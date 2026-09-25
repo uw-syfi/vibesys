@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from tests.support.run_execution import run_execution_record
 from tests.vibesys.loops.evolve._support import (
@@ -36,9 +36,11 @@ from tests.vibesys.loops.evolve._support import (
     ref_file,  # noqa: F401  # tracked: #288  # pytest fixture
 )
 
+from vibesys.api.testing import FakeGateExecutor
 from vibesys.constants import DomainName
 from vibesys.domains.registry import resolve_domain
 from vibesys.evaluators.gates import (
+    AccuracyGateResult,
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
     framework_command_timeout,
@@ -125,12 +127,18 @@ def test_bootstrap_repairs_after_framework_accuracy_failure(tmp_path, ref_file):
     failure = "Framework accuracy gate failed.\nstatus endpoint diverged"
     runner = FakeAgentClient()
     runner.on_invoke(_mutator_writes_callback(runner))
-    accuracy_gate = MagicMock(side_effect=[failure, None])
+    gate_executor = FakeGateExecutor()
+    gate_executor.script_accuracy(
+        AccuracyGateResult(
+            command=None, passed=False, output=failure, feedback=failure, executed=True
+        ),
+        AccuracyGateResult(command=None, passed=True, output="", feedback=None, executed=True),
+    )
     result = _invoke_bootstrap(
         tmp_path,
         ref_file,
         runner,
-        accuracy_gate=accuracy_gate,
+        gate_executor=gate_executor,
         accuracy_timeout_seconds=37,
         bootstrap_max_attempts=2,
     )
@@ -138,8 +146,8 @@ def test_bootstrap_repairs_after_framework_accuracy_failure(tmp_path, ref_file):
     assert result is True
     assert len(runner.calls_for("judge")) == 2
     assert len(runner.calls_for("profiler")) == 1
-    assert accuracy_gate.call_count == 2
-    assert [call.kwargs["timeout_seconds"] for call in accuracy_gate.call_args_list] == [37, 37]
+    assert len(gate_executor.accuracy_calls) == 2
+    assert [call.timeout_seconds for call in gate_executor.accuracy_calls] == [37, 37]
 
     failed, seed = _load_population(tmp_path)
     assert failed.passed is False
@@ -334,19 +342,20 @@ def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path, ref_file):  # 
     report, records every candidate's fitness."""
 
     runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(2))
-    gate = MagicMock(side_effect=[_passing_gate_result(42.5), _passing_gate_result(43.75)])
-    with patch("vibesys.orchestration.gates.run_benchmark_gate", gate):
-        result = _invoke_loop(
-            tmp_path,
-            ref_file,
-            runner,
-            max_generations=1,
-            children_per_generation=1,
-            benchmark_result=BenchmarkResult(json_argument="--json", metric="total_ops_per_sec"),
-        )
+    gate_executor = FakeGateExecutor()
+    gate_executor.script_benchmark(_passing_gate_result(42.5), _passing_gate_result(43.75))
+    result = _invoke_loop(
+        tmp_path,
+        ref_file,
+        runner,
+        gate_executor=gate_executor,
+        max_generations=1,
+        children_per_generation=1,
+        benchmark_result=BenchmarkResult(json_argument="--json", metric="total_ops_per_sec"),
+    )
 
     assert result is True
-    assert gate.call_count == 2
+    assert len(gate_executor.benchmark_calls) == 2
     pop = _load_population(tmp_path)
     assert [item.perf_metric for item in pop] == [42.5, 43.75]
     # The scalar contract declares a metric name, not a unit; the recorded
@@ -366,14 +375,16 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(tmp_pat
             feedback="Framework benchmark failed.\nbenchmark exploded"
         ),
     )
-    with patch("vibesys.orchestration.gates.run_benchmark_gate", MagicMock(return_value=failing)):
-        result = _invoke_bootstrap(
-            tmp_path,
-            ref_file,
-            FakeAgentClient(),
-            benchmark_result=BenchmarkResult(json_argument="--json", metric="total_ops_per_sec"),
-            bootstrap_max_attempts=1,
-        )
+    gate_executor = FakeGateExecutor()
+    gate_executor.script_benchmark(failing)
+    result = _invoke_bootstrap(
+        tmp_path,
+        ref_file,
+        FakeAgentClient(),
+        gate_executor=gate_executor,
+        benchmark_result=BenchmarkResult(json_argument="--json", metric="total_ops_per_sec"),
+        bootstrap_max_attempts=1,
+    )
 
     assert result is False
     pop = _load_population(tmp_path)
@@ -403,18 +414,19 @@ def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(tmp_path
         _profiler_metrics(80.0, {"total_ops_per_sec": 80.0, "p99_latency_ns": 800.0}),
     ]
     runner = FakeAgentClient().enqueue("profiler", *profiler_responses)
-    gate = MagicMock(side_effect=[_passing_gate_result(42.5), _passing_gate_result(43.75)])
-    with patch("vibesys.orchestration.gates.run_benchmark_gate", gate):
-        result = _invoke_loop(
-            tmp_path,
-            ref_file,
-            runner,
-            max_generations=1,
-            children_per_generation=1,
-            space=space,
-            frontier_bias=1.0,
-            benchmark_result=BenchmarkResult(json_argument="--json", metric="total_ops_per_sec"),
-        )
+    gate_executor = FakeGateExecutor()
+    gate_executor.script_benchmark(_passing_gate_result(42.5), _passing_gate_result(43.75))
+    result = _invoke_loop(
+        tmp_path,
+        ref_file,
+        runner,
+        gate_executor=gate_executor,
+        max_generations=1,
+        children_per_generation=1,
+        space=space,
+        frontier_bias=1.0,
+        benchmark_result=BenchmarkResult(json_argument="--json", metric="total_ops_per_sec"),
+    )
 
     assert result is True
     pop = _load_population(tmp_path)
@@ -425,11 +437,15 @@ def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(tmp_path
 
 
 def test_protocol_contract_records_the_evaluator_declared_unit(tmp_path, ref_file):  # noqa: ANN001, ANN201, F811  # tracked: #288
-    gate = MagicMock(return_value=_passing_gate_result(42.5, unit="ops/s"))
-    with patch("vibesys.orchestration.gates.run_benchmark_gate", gate):
-        result = _invoke_bootstrap(
-            tmp_path, ref_file, FakeAgentClient(), benchmark_result_protocol=2
-        )
+    gate_executor = FakeGateExecutor()
+    gate_executor.script_benchmark(_passing_gate_result(42.5, unit="ops/s"))
+    result = _invoke_bootstrap(
+        tmp_path,
+        ref_file,
+        FakeAgentClient(),
+        gate_executor=gate_executor,
+        benchmark_result_protocol=2,
+    )
 
     assert result is True
     seed = _load_population(tmp_path)[0]
