@@ -10,6 +10,7 @@ from vibesys.schemas import HypothesisOutcome
 from vibesys.search.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
 from vibesys.search.hypothesis.attempts import AttemptState
 from vibesys.search.hypothesis.transitions import CarryOver
+from vibesys.search.profile_focus import ProfileBottleneck, ProfileFocus, ProfileFocusConfig
 from vs_loop_state.api import RoundRecord
 
 
@@ -108,3 +109,39 @@ def test_completed_round_controls_lease_and_designer_handoff(  # noqa: PLR0913
         assert closed.carry.regression_info != "stale"
     elif active and not reviewed:
         assert closed.carry.regression_info is None
+
+
+def test_completed_round_advances_profile_focus_cursor() -> None:
+    """When profiling is on, session.commit_round also advances ``ProfileFocus``.
+
+    ``search.hypothesis.close_round`` and ``search.profile_focus.record`` are
+    independent; ``session.commit_round`` composes both from one
+    ``RoundRecord``, mirrored here directly against the pure policy.
+    """
+    focus = ProfileFocus(ProfileFocusConfig(plateau_min_rounds=1, min_relative_improvement=0.02))
+    state = focus.observe(
+        focus.initial(),
+        round_number=1,
+        bottlenecks=(ProfileBottleneck(name="decode", cost=10.0, share=0.5),),
+    )
+    assert state.active_component == "decode"
+    record = RoundRecord(
+        round_number=1,
+        hypothesis_id="h1",
+        commit="b" * 40,
+        perf_metric=42.0,
+        perf_unit="throughput",
+        passed=True,
+        reviewed=True,
+        official_evaluation=True,
+        perf_delta_pct=1.0,
+    )
+    advanced = focus.record(
+        state,
+        round_number=1,
+        passed=True and record.official_evaluation,
+        relative_improvement=(
+            record.perf_delta_pct / 100 if record.perf_delta_pct is not None else None
+        ),
+    )
+    assert advanced.active_component is None

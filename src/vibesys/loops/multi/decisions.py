@@ -1,10 +1,15 @@
 """Prompt-shaping carriers the multi strategy passes to its turns.
 
 Hypothesis scheduling (when to start, continue, or retire a claim, and when
-review or an official evaluation is due) now lives in
-``vibesys.search.hypothesis`` and is driven directly by ``session.py``. This
-module keeps only what ``turns.py`` renders prompts from: the small request
-objects, and the no-op guidance chain multi has always rendered through.
+review or an official evaluation is due) lives in
+``vibesys.search.hypothesis``, and profile-focus component selection (when
+``options.profile`` turns profiling on) in ``vibesys.search.profile_focus``,
+both driven directly by ``session.py``. This module keeps only what
+``turns.py`` renders prompts from: the small request objects. When profiling
+is off, ``session.py`` passes ``FocusView()``, whose default fields render
+nothing (see the ``is defined and ...`` guards in the shared templates), so
+a plain multi run and a profile-guided one share one ``profile_guidance``
+type instead of a separate no-op guidance carrier.
 """
 
 from __future__ import annotations
@@ -17,44 +22,8 @@ if TYPE_CHECKING:
     from vibesys.search.hypothesis.plan import OrchestratorPlan
     from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
     from vibesys.search.hypothesis.transitions import CarryOver
+    from vibesys.search.profile_focus import FocusView
     from vs_loop_state.api import RoundRecord
-
-
-@dataclass(frozen=True)
-class PlainGuidance:
-    """Prompt context for a strategy without component attribution."""
-
-    def plan_prompt_context(self) -> dict[str, object]:
-        """Render no profile constraints for a designer."""
-        return {}
-
-    def implementer_prompt_context(self) -> dict[str, object]:
-        """Render no profile constraints for an implementer."""
-        return {}
-
-
-@dataclass(frozen=True)
-class _StaticGuidance:
-    """Fixed stand-in for the old mutable hypothesis engine's guidance chain.
-
-    ``turns.py`` renders ``request.engine.controller.guidance...``. Multi no
-    longer carries a stateful engine (``session.py`` holds one
-    ``HypothesisState`` value instead), so every request shares this single
-    handle exposing the same no-op guidance the engine always returned.
-    """
-
-    @property
-    def controller(self) -> _StaticGuidance:
-        """Expose prompt guidance through the existing engine vocabulary."""
-        return self
-
-    @property
-    def guidance(self) -> PlainGuidance:
-        """Return empty component guidance."""
-        return PlainGuidance()
-
-
-STATIC_GUIDANCE = _StaticGuidance()
 
 
 @dataclass(frozen=True)
@@ -68,7 +37,7 @@ class PlanRequest:
     profiler_summary: ProfilerSummary | None
     plateau_warning: str | None
     provisional_candidates: int
-    profile_guidance: PlainGuidance
+    profile_guidance: FocusView
 
 
 @dataclass(frozen=True)
@@ -80,5 +49,5 @@ class AttemptRequest:
     planned_official_reason: str | None
     records: list[RoundRecord]
     active_hypothesis: Hypothesis
-    engine: _StaticGuidance
+    profile_focus: FocusView
     last_profile_focus: str
