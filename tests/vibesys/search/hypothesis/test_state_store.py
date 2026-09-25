@@ -1,7 +1,7 @@
 """Filesystem contract for the single agent policy state slot."""
 
-from vibesys.agent_run.state import AgentRunState, AgentRunStateStore, Hypothesis
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.hypothesis.state import Hypothesis, HypothesisState, HypothesisStateStore
 from vs_project.api import (
     OrchestrationDescriptor,
     Project,
@@ -48,9 +48,9 @@ def _plan(identifier: str) -> OrchestratorPlan:
 def test_store_round_trips_and_prepares_exact_state_transition(tmp_path) -> None:  # noqa: ANN001
     project = _project(tmp_path)
     namespace = project.state.portable_namespace("run-1", "agent")
-    store = AgentRunStateStore(namespace)
-    slot = namespace.slot("state.json", AgentRunState)
-    state = AgentRunState(
+    store = HypothesisStateStore(namespace)
+    slot = namespace.slot("state.json", HypothesisState)
+    state = HypothesisState(
         active_hypothesis_id="H-1",
         hypotheses=[Hypothesis(hypothesis_id="H-1", plan=_plan("H-1"), started_round=1)],
     )

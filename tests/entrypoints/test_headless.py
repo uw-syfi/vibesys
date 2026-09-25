@@ -30,18 +30,18 @@ from entrypoints.cli import (
     run_environment_spec_from_args,
 )
 from entrypoints.headless import main
-from vibesys.agent_run.options import (
-    AgentOrchestrationOptions,
-)
-from vibesys.agent_run.options import (
-    descriptor_from_options as agent_descriptor,
-)
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.input_manifest import ProfileGuidedInput, load_input_bundle
 from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import CoreEventType
+from vibesys.loops.agent_options import (
+    AgentOrchestrationOptions,
+)
+from vibesys.loops.agent_options import (
+    descriptor_from_options as agent_descriptor,
+)
 from vibesys.loops.evolve.orchestration import EvolveOptions
 from vibesys.loops.evolve.orchestration import descriptor_from_options as evolve_descriptor
 from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options

@@ -13,12 +13,12 @@ from typing import Any, cast
 
 import pytest
 
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.constants import DomainName
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
 from vibesys.errors import ConfigurationError
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
 from vibesys.loops.multi.turns import MultiAgentTurns
 from vibesys.profilers import ProfilerDefinition, ProfilerKind

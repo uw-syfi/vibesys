@@ -22,16 +22,10 @@ _SEARCH = _SRC / "search"
 
 _FORBIDDEN_PACKAGES = ("vibesys.orchestration", "vibesys.loops", "vibesys.roles", "vibesys.prompts")
 
-# Slated to dissolve: search/hypothesis and search/profile_focus re-export
-# pydantic state schemas (and one carry-over type) from vibesys.agent_run
-# until the rewiring phase deletes that package and moves the schemas into
-# search/ proper. Byte-identical JSON depends on these staying re-exports,
-# not copies, until then.
-_ALLOWED_AGENT_RUN_REEXPORTS = {
-    "search/hypothesis/state.py",
-    "search/hypothesis/transitions.py",
-    "search/profile_focus/state.py",
-}
+# vibesys.agent_run dissolved into search/hypothesis, roles/, and loops/
+# (except issue_board.py, a different lane's progress-board module). No
+# search/ module re-exports from it any more.
+_ALLOWED_AGENT_RUN_REEXPORTS: set[str] = set()
 
 _FORBIDDEN_CLOCK_OR_IO_MODULES = ("os", "subprocess", "pathlib", "random", "time", "datetime")
 

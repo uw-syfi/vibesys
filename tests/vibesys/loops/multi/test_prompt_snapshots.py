@@ -24,7 +24,7 @@ from vibesys.roles.implementer import ImplementerResponse
 from vibesys.roles.judge import JudgeResponse
 from vibesys.roles.pre_round import PreRoundDecision
 from vibesys.roles.single_agent import SingleAgentRoundResponse
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.cli_common import build_schema_hint
 
 _ROOT = Path(__file__).resolve().parents[4]

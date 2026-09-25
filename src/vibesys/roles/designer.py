@@ -1,9 +1,9 @@
 """Plan-role family: the round-planning "designer" role for each strategy.
 
-Every plan role shares the same reply type (``OrchestratorPlan``, still in
-``vibesys.schemas`` pending its move to ``search/hypothesis``) and the same
-fallback content, but renders from its own strategy's template, so each gets
-its own ``Role`` value (different prompt => different role).
+Every plan role shares the same reply type (``OrchestratorPlan``, the search
+plan type from ``vibesys.search.hypothesis``) and the same fallback content,
+but renders from its own strategy's template, so each gets its own ``Role``
+value (different prompt => different role).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.runtime import Fresh, ReadOnly, Role
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
 
 
 class PlanContext(BaseModel):

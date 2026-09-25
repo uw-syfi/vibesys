@@ -4,22 +4,21 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from vibesys.agent_run.attempts import (
-    AttemptState,
-    JudgeReviewed,
-    PerformanceProjection,
-)
-from vibesys.agent_run.record import RecordInput, build_round_record
-from vibesys.agent_run.state import AgentRunState, Hypothesis
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.metrics import MetricSpace, Objective
-from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
-    OrchestratorPlan,
 )
+from vibesys.search.hypothesis import OrchestratorPlan
+from vibesys.search.hypothesis.attempts import (
+    AttemptState,
+    JudgeReviewed,
+    PerformanceProjection,
+)
+from vibesys.search.hypothesis.record import RecordInput, build_round_record
+from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
 from vs_loop_state.api import RoundRecord
 
 
@@ -38,7 +37,7 @@ def _record_input() -> RecordInput:
         parent_commit="parent-commit",
     )
     space = MetricSpace(objectives=(Objective("throughput", "max"),))
-    state = AgentRunState(metrics=space, hypotheses=[hypothesis])
+    state = HypothesisState(metrics=space, hypotheses=[hypothesis])
     parent = RoundRecord(
         round_number=1,
         commit="parent-commit",
@@ -60,7 +59,7 @@ def _record_input() -> RecordInput:
             candidate_metrics={"throughput": 12.0},
             candidate_evaluation_artifact="profile.json",
         ),
-        judge=JudgeReviewed(Verdict.PASS),
+        judge=JudgeReviewed("pass"),
         passed=True,
         official_reason="final_round",
         framework_benchmark=FrameworkBenchmarkOutcome(
@@ -135,7 +134,7 @@ def test_gate_retry_carries_approved_candidate_when_agent_omits_it() -> None:
 def test_failed_review_does_not_retain_agent_candidate() -> None:
     data = _record_input()
     data.attempt.passed = False
-    data.attempt.judge = JudgeReviewed(Verdict.FAIL)
+    data.attempt.judge = JudgeReviewed("fail")
     record = build_round_record(data)
 
     assert record.judge_verdict == "fail"

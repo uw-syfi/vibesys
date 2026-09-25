@@ -38,8 +38,8 @@ from unittest.mock import patch
 from tests.vibesys.golden.harness import run_scripted
 from tests.vibesys.orchestration.harness import run_with_context
 
-from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.evaluators.metrics import MetricSpace
+from vibesys.loops.agent_options import AgentOrchestrationOptions, descriptor_from_options
 from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
 from vibesys.profilers import ProfilerKind
 from vibesys.prompts.renderer import render_template as _real_render_template
@@ -53,7 +53,7 @@ from vibesys.roles.implementer import (
 from vibesys.roles.judge import MULTI_JUDGE, JudgeResponse
 from vibesys.roles.pre_round import MULTI_PRE_ROUND_DECISION, PreRoundDecision
 from vibesys.roles.profiler import MULTI_PROFILERS, ProfilerSummary
-from vibesys.schemas import OrchestratorPlan
+from vibesys.search.hypothesis import OrchestratorPlan
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:

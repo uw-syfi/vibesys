@@ -6,10 +6,9 @@ being duplicated or owned by one family's module.
 
 Deviation from the design brief: ``SkillResourceSelection``'s canonical
 definition stays in ``vibesys.schemas`` (re-exported here), not defined here,
-because ``OrchestratorPlan.recommended_skills`` (staying in ``schemas.py``,
-destined for the layering-pure ``search/hypothesis``) also needs it, and
-``search`` must never depend on ``vibesys.roles``. See ``schemas.py``'s
-module docstring.
+because ``vibesys.search.hypothesis.plan.OrchestratorPlan.recommended_skills``
+also needs it, and ``search`` must never depend on ``vibesys.roles``. See
+``schemas.py``'s module docstring.
 """
 
 from __future__ import annotations

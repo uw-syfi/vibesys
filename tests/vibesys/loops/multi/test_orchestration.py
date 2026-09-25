@@ -7,16 +7,16 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from vibesys.agent_run.options import (
+from vibesys.api.agent import is_agent_run_manifest
+from vibesys.errors import ConfigurationError
+from vibesys.evaluators.metrics import MetricSpace, Objective
+from vibesys.loops.agent_options import (
     AgentOrchestrationOptions,
     UnsupportedAgentOrchestrationError,
     compare_resume_descriptors,
     descriptor_from_options,
     options_from_descriptor,
 )
-from vibesys.api.agent import is_agent_run_manifest
-from vibesys.errors import ConfigurationError
-from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.multi.orchestration import MultiAgentOrchestrator
 from vibesys.loops.single.orchestration import SingleAgentOrchestrator
 from vs_project.api import (

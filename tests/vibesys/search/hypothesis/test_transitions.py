@@ -6,7 +6,19 @@ from typing import Literal
 import pytest
 from pydantic import ValidationError
 
-from vibesys.agent_run.hypotheses import (
+from vibesys.evaluators.metrics import Measurement, MetricComparison, MetricSpace, Objective
+from vibesys.schemas import (
+    HypothesisOutcome,
+    PerfDeltaReason,
+)
+from vibesys.search.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
+from vibesys.search.hypothesis.state import (
+    Hypothesis,
+    HypothesisResolution,
+    HypothesisState,
+    HypothesisStrategy,
+)
+from vibesys.search.hypothesis.transitions import (
     ResolutionEvidence,
     adopt_metric_space,
     append_round,
@@ -20,19 +32,6 @@ from vibesys.agent_run.hypotheses import (
     scalar_candidate_retained,
     start_hypothesis,
     update_active_hypothesis,
-)
-from vibesys.agent_run.state import (
-    AgentRunState,
-    Hypothesis,
-    HypothesisResolution,
-    HypothesisStrategy,
-)
-from vibesys.evaluators.metrics import Measurement, MetricComparison, MetricSpace, Objective
-from vibesys.schemas import (
-    HypothesisOutcome,
-    HypothesisStrategyUpdate,
-    OrchestratorPlan,
-    PerfDeltaReason,
 )
 from vs_loop_state.api import PerfProvenance, RoundRecord
 
@@ -109,7 +108,7 @@ def _legacy_evidence_round(
 
 
 def test_hypothesis_owns_all_of_its_rounds_and_active_is_only_a_pointer() -> None:
-    initial = AgentRunState()
+    initial = HypothesisState()
     started = start_hypothesis(initial, _plan("H-1"), started_round=1)
     continued = append_round(
         started,
@@ -134,7 +133,7 @@ def test_hypothesis_owns_all_of_its_rounds_and_active_is_only_a_pointer() -> Non
 
 
 def test_projection_revision_advances_only_for_visible_lifecycle_changes() -> None:
-    initial = AgentRunState()
+    initial = HypothesisState()
     started = start_hypothesis(initial, _plan("H-1"), started_round=1)
     assert started.experiment_revision == 1
     assert started.hypotheses[0].last_experiment_revision == 1
@@ -159,7 +158,7 @@ def test_projection_revision_advances_only_for_visible_lifecycle_changes() -> No
 
 
 def test_legacy_projection_revisions_default_to_zero() -> None:
-    state = AgentRunState.model_validate(
+    state = HypothesisState.model_validate(
         {
             "hypotheses": [
                 {
@@ -176,7 +175,7 @@ def test_legacy_projection_revisions_default_to_zero() -> None:
 
 
 def test_operational_restart_fields_live_on_the_same_hypothesis() -> None:
-    state = start_hypothesis(AgentRunState(), _plan("H-1"), started_round=1)
+    state = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
     active = state.active_hypothesis
     assert active is not None
     active = active.clone()
@@ -196,7 +195,7 @@ def test_operational_restart_fields_live_on_the_same_hypothesis() -> None:
 
 
 def test_aggregate_accessors_do_not_expose_owned_mutable_hypotheses() -> None:
-    state = start_hypothesis(AgentRunState(), _plan("H-1"), started_round=1)
+    state = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
 
     by_id = state.by_id("H-1")
     active = state.active_hypothesis
@@ -209,7 +208,7 @@ def test_aggregate_accessors_do_not_expose_owned_mutable_hypotheses() -> None:
 
 
 def test_plan_strategy_updates_and_start_are_one_pure_transition() -> None:
-    first = start_hypothesis(AgentRunState(), _plan("old"), started_round=1)
+    first = start_hypothesis(HypothesisState(), _plan("old"), started_round=1)
     completed = append_round(
         first,
         _round(1, 100.0, hypothesis_id="old"),
@@ -239,7 +238,7 @@ def test_plan_strategy_updates_and_start_are_one_pure_transition() -> None:
 
 
 def test_strategy_updates_reject_unknown_active_and_incomplete_hypotheses() -> None:
-    active = start_hypothesis(AgentRunState(), _plan("active"), started_round=1)
+    active = start_hypothesis(HypothesisState(), _plan("active"), started_round=1)
     abandon_active = HypothesisStrategyUpdate(
         hypothesis_id="active",
         disposition="abandoned",
@@ -259,16 +258,16 @@ def test_strategy_updates_reject_unknown_active_and_incomplete_hypotheses() -> N
         reason="no evidence",
     )
     with pytest.raises(ValueError, match="unknown hypothesis"):
-        apply_strategy_updates(AgentRunState(), [unknown])
+        apply_strategy_updates(HypothesisState(), [unknown])
 
 
 def test_aggregate_rejects_duplicate_ids_rounds_and_dangling_active_pointer() -> None:
     first = Hypothesis(hypothesis_id="H-1", plan=_plan("H-1"), started_round=1)
     with pytest.raises(ValidationError, match="hypothesis IDs must be unique"):
-        AgentRunState(hypotheses=[first, first.clone()])
+        HypothesisState(hypotheses=[first, first.clone()])
 
     with pytest.raises(ValidationError, match="active_hypothesis_id"):
-        AgentRunState(active_hypothesis_id="missing")
+        HypothesisState(active_hypothesis_id="missing")
 
     one = first.clone()
     one.rounds = [_round(1, None, hypothesis_id="H-1")]
@@ -279,11 +278,11 @@ def test_aggregate_rejects_duplicate_ids_rounds_and_dangling_active_pointer() ->
         rounds=[_round(1, None, hypothesis_id="H-2")],
     )
     with pytest.raises(ValidationError, match="globally unique"):
-        AgentRunState(hypotheses=[one, two])
+        HypothesisState(hypotheses=[one, two])
 
 
 def test_queue_rs_regression_is_disproven_and_not_retained() -> None:
-    parent = start_hypothesis(AgentRunState(), _plan("m2"), started_round=2)
+    parent = start_hypothesis(HypothesisState(), _plan("m2"), started_round=2)
     parent = append_round(
         parent,
         _round(2, 104_257_741.0, hypothesis_id="m2"),
@@ -355,7 +354,7 @@ def test_reprojection_uses_the_stored_space_for_resolution_and_retention(
 ) -> None:
     baseline = _legacy_evidence_round(1, 100.0)
     regression = _legacy_evidence_round(2, 90.0, parent_round=1)
-    state = AgentRunState(
+    state = HypothesisState(
         metrics=MetricSpace(objectives=(Objective(name="ops", direction=direction),)),
         hypotheses=[
             Hypothesis(
@@ -500,9 +499,9 @@ _NOISY_OPS = MetricSpace(
 )
 
 
-def _within_noise_run() -> AgentRunState:
+def _within_noise_run() -> HypothesisState:
     """Two official rounds one percent apart, in a five percent metric space."""
-    state = AgentRunState(metrics=_NOISY_OPS)
+    state = HypothesisState(metrics=_NOISY_OPS)
     baseline = append_round(
         start_hypothesis(state, _plan("H-base"), started_round=1),
         _round(1, 100.0, hypothesis_id="H-base"),
@@ -602,7 +601,7 @@ def test_adopting_a_metric_space_rewrites_the_stored_space_and_evidence() -> Non
 
 
 def test_state_written_before_the_metric_space_loads_as_the_empty_strict_space() -> None:
-    legacy = AgentRunState.model_validate({"schema_version": 1, "hypotheses": []})
+    legacy = HypothesisState.model_validate({"schema_version": 1, "hypotheses": []})
 
     assert legacy.metrics == MetricSpace()
 
@@ -638,23 +637,23 @@ def test_a_stored_comparison_survives_a_space_whose_tolerance_changed() -> None:
     assert re_derived.resolution is HypothesisResolution.PROVEN
 
 
-def _strip_stored_comparisons(state: AgentRunState) -> AgentRunState:
+def _strip_stored_comparisons(state: HypothesisState) -> HypothesisState:
     """Return *state* as a run written before comparisons were persisted."""
     payload = state.model_dump()
     for hypothesis in payload["hypotheses"]:
         for record in hypothesis["rounds"]:
             record["perf_comparison"] = None
-    return AgentRunState.model_validate(payload)
+    return HypothesisState.model_validate(payload)
 
 
-def _implementer_reported_run() -> AgentRunState:
+def _implementer_reported_run() -> HypothesisState:
     """Two official rounds whose numbers the implementer reported itself.
 
     Shaped so a trusted reading would resolve the second hypothesis: 100 then
     200 on a maximize axis, an unmissable improvement. The only thing standing
     between it and ``PROVEN`` is that the framework measured neither number.
     """
-    state = AgentRunState(
+    state = HypothesisState(
         metrics=MetricSpace(objectives=(Objective(name="total_ops_per_sec", direction="max"),))
     )
     baseline = append_round(
@@ -687,7 +686,7 @@ def _implementer_reported_run() -> AgentRunState:
 def test_delta_reason_separates_a_first_reading_from_a_failed_lookup() -> None:
     """Round one, a fail-closed lookup, and a resolved baseline stay apart."""
     first = _round(1, 100.0, hypothesis_id="H-1")
-    state = start_hypothesis(AgentRunState(), _plan("H-1"), started_round=1)
+    state = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
     state = append_round(state, first, keep_active=False)
     # The parent commit matches no trusted official round and no parent round
     # bounds the fallback: the exact shape `metric_baseline` fails closed on.
@@ -737,7 +736,7 @@ def test_a_self_reported_headline_reads_as_not_framework_measured() -> None:
 
 def test_a_legacy_absolute_reading_carries_no_delta_reason() -> None:
     """A record predating provenance keeps reading as a deliberate absolute."""
-    state = start_hypothesis(AgentRunState(), _plan("H-1"), started_round=1)
+    state = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
     state = append_round(state, _legacy_evidence_round(1, 100.0), keep_active=False)
 
     hypothesis = state.by_id("H-1")
@@ -824,7 +823,7 @@ def test_provisional_parent_baseline_now_resolves_via_fallback() -> None:
         parent_commit=provisional.commit,
     )
 
-    state = start_hypothesis(AgentRunState(), _plan("H-1"), started_round=1)
+    state = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
     state = append_round(state, official, keep_active=False)
     state = start_hypothesis(state, _plan("H-2"), started_round=2)
     state = append_round(state, provisional, keep_active=False)
@@ -944,7 +943,7 @@ def test_retention_sees_the_same_history_the_baseline_does() -> None:
         parent_commit=renamed.commit,
     )
 
-    state = start_hypothesis(AgentRunState(), _plan("H-1"), started_round=1)
+    state = start_hypothesis(HypothesisState(), _plan("H-1"), started_round=1)
     state = append_round(state, renamed, keep_active=False)
     state = start_hypothesis(
         state,

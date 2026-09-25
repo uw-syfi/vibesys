@@ -1,31 +1,29 @@
-"""Build one agent round record from final attempt and trusted gate evidence."""
+"""Build one hypothesis round record from final attempt and trusted gate evidence."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from vibesys.agent_run.attempts import recorded_judge_verdict
-from vibesys.agent_run.evidence import (
-    _pareto_archive_dominators,
-    _provisional_candidate_retained,
-)
-from vibesys.agent_run.hypotheses import (
+from vibesys.evaluators.metrics import Measurement
+from vibesys.schemas import CandidateDisposition, HypothesisOutcome
+from vibesys.search.hypothesis.attempts import recorded_judge_verdict
+from vibesys.search.hypothesis.transitions import (
     ResolutionEvidence,
     metric_baseline,
+    pareto_archive_dominators,
+    provisional_candidate_retained,
     record_metric_value,
     resolve_hypothesis_outcome,
     scalar_candidate_retained,
     trusted_perf_provenance,
 )
-from vibesys.evaluators.metrics import Measurement
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome
 from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
-    from vibesys.agent_run.attempts import AttemptState, PerformanceProjection
-    from vibesys.agent_run.state import AgentRunState, Hypothesis
-    from vibesys.schemas import OrchestratorPlan
+    from vibesys.search.hypothesis.attempts import AttemptState, PerformanceProjection
+    from vibesys.search.hypothesis.plan import OrchestratorPlan
+    from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
     from vs_loop_state.api import MetricComparison
 
 
@@ -33,7 +31,7 @@ if TYPE_CHECKING:
 class RecordInput:
     """Authoritative final-attempt facts for one completed round."""
 
-    state: AgentRunState
+    state: HypothesisState
     records: list[RoundRecord]
     round_number: int
     hypothesis: Hypothesis
@@ -180,7 +178,7 @@ def _candidate_retained(
     reviewed: bool,
 ) -> bool | None:
     if not reviewed:
-        return _provisional_candidate_retained(CandidateDisposition(candidate.disposition))
+        return provisional_candidate_retained(CandidateDisposition(candidate.disposition))
     if not data.attempt.passed:
         return False
     if (
@@ -189,7 +187,7 @@ def _candidate_retained(
         and data.state.metrics.objectives
         and measurement.accepted_metrics
     ):
-        return not _pareto_archive_dominators(
+        return not pareto_archive_dominators(
             measurement.accepted_metrics, data.records, data.state.metrics
         )
     if official and measurement.trusted:
@@ -215,7 +213,7 @@ def _candidate_retained(
             else None
         )
         return scalar_candidate_retained(data.state.metrics.compare_to_best(reading, prior))
-    return _provisional_candidate_retained(CandidateDisposition(candidate.disposition))
+    return provisional_candidate_retained(CandidateDisposition(candidate.disposition))
 
 
 def build_round_record(data: RecordInput) -> RoundRecord:

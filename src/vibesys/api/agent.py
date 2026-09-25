@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.agent_run.issue_board import framework_memory_paths
-from vibesys.agent_run.options import options_from_descriptor
-from vibesys.agent_run.readmodel import (
+from vibesys.loops.agent_options import options_from_descriptor
+from vibesys.loops.hypothesis_readmodel import (
     AgentRunProjection,
     HypothesisRoundView,
     HypothesisView,

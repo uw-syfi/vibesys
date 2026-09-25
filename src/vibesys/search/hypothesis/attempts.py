@@ -1,19 +1,59 @@
-"""Typed attempt and review facts shared by agent-run record builders."""
+"""Typed attempt and review facts shared by the hypothesis round-record builder."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Literal, Protocol, assert_never
 
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
-from vibesys.roles.common import Verdict
 
 if TYPE_CHECKING:
-    from vibesys.agent_run.state import AgentRunState
-    from vibesys.roles.implementer import ImplementerResponse
-    from vibesys.roles.single_agent import SingleAgentRoundResponse
+    from vibesys.schemas import CandidateDisposition, HypothesisOutcome
+    from vibesys.search.hypothesis.state import HypothesisState
     from vs_loop_state.api import JudgeVerdict, PerfProvenance
+
+
+class CandidateReply(Protocol):
+    """The candidate-checkpoint fields shared by both attempt reply shapes.
+
+    Structural, not nominal: search must never import ``vibesys.roles``
+    (roles depends on search, not the reverse), so this describes the shared
+    shape of ``roles.implementer.ImplementerResponse`` and
+    ``roles.single_agent.SingleAgentRoundResponse`` without importing either.
+    """
+
+    candidate_disposition: CandidateDisposition
+    candidate_metrics: dict[str, float]
+    candidate_evaluation_artifact: str | None
+    candidate_operating_point: str
+    candidate_retention_reason: str
+
+    def model_dump(self, *, mode: str = "python") -> dict[str, object]:
+        """Serialize the reply, matching ``pydantic.BaseModel.model_dump``."""
+        ...
+
+
+class ImplementerReply(CandidateReply, Protocol):
+    """The ``roles.implementer.ImplementerResponse`` fields attempt policies read."""
+
+    hypothesis_outcome: HypothesisOutcome
+    next_step: str
+    perf_metric: float | None
+    perf_unit: str | None
+    metrics: dict[str, float]
+    evaluation_artifact: str | None
+    validation_recipe_artifact: str | None
+
+
+class SingleAgentReply(CandidateReply, Protocol):
+    """The ``roles.single_agent.SingleAgentRoundResponse`` fields attempt policies read."""
+
+    perf_metric: float | None
+    perf_unit: str | None
+    profile_analysis: str
+    bottlenecks: str
+    suggestions: str
 
 
 class JudgeSkipReason(StrEnum):
@@ -26,9 +66,16 @@ class JudgeSkipReason(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class JudgeReviewed:
-    """An independent judge audited this attempt and returned a verdict."""
+    """An independent judge audited this attempt and returned a verdict.
 
-    verdict: Verdict
+    ``verdict`` carries the persisted pass/fail vocabulary
+    (``vs_loop_state.JudgeVerdict``, minus its ``"deferred"`` member), not
+    ``vibesys.roles.common.Verdict``: search must never import roles. A
+    caller in ``loops/`` translates a role reply's ``Verdict`` to this string
+    at the turn boundary.
+    """
+
+    verdict: Literal["pass", "fail"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,13 +103,7 @@ def recorded_judge_verdict(outcome: JudgeOutcome) -> JudgeVerdict:
     """Persist a skipped review as deferred, never as a prior verdict."""
     match outcome:
         case JudgeReviewed(verdict=verdict):
-            match verdict:
-                case Verdict.PASS:
-                    return "pass"
-                case Verdict.FAIL:
-                    return "fail"
-                case _:
-                    assert_never(verdict)
+            return verdict
         case JudgeSkipped():
             return "deferred"
         case _:
@@ -81,10 +122,10 @@ class AttemptDecision(StrEnum):
 class AttemptState:
     """Mutable facts that survive retries within one framework round."""
 
-    agent_run_state: AgentRunState
+    agent_run_state: HypothesisState
     feedback: str | None
-    implementation: ImplementerResponse | None = None
-    single_agent_response: SingleAgentRoundResponse | None = None
+    implementation: ImplementerReply | None = None
+    single_agent_response: SingleAgentReply | None = None
     judge: JudgeOutcome = field(default_factory=lambda: JudgeSkipped(JudgeSkipReason.NOT_REACHED))
     passed: bool = False
     review_started: bool = False
@@ -107,4 +148,4 @@ class PerformanceProjection:
     profile_skipped: bool
     accepted_metrics: dict[str, float]
     accepted_evaluation_artifact: str | None
-    next_single_response: SingleAgentRoundResponse | None
+    next_single_response: SingleAgentReply | None
