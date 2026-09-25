@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 
+import pytest
 from tests.vibesys.golden.harness import (
     _fake_backend_factory,
     _SharedFakeClient,
@@ -36,6 +37,7 @@ from vibesys.roles.implementer import IssueImplementerResponse
 from vibesys.roles.judge import IssueJudgeResponse
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.schemas import PerfTrend
+from vs_issue_board.api import IssueBoard, IssueType
 from vs_project.api import Project
 
 if TYPE_CHECKING:
@@ -44,7 +46,7 @@ if TYPE_CHECKING:
 
     from vibesys.roles.common import Verdict
     from vs_agent.api import AgentClientProtocol
-    from vs_agent.api.testing import FakeAgentClient
+    from vs_agent.api.testing import FakeAgentClient, FakeInvocation
     from vs_project.api import OrchestrationDescriptor
 
 
@@ -68,6 +70,58 @@ def issue_queue_options(**overrides: object) -> IssueQueueOptions:
     return IssueQueueOptions.model_validate(values)
 
 
+def _build_request(
+    tmp_path: Path,
+    descriptor: OrchestrationDescriptor,
+    config: Config,
+    *,
+    exp_name: str,
+    resume_from: PlainRun | None,
+) -> RunRequest:
+    if resume_from is None:
+        input_dir = write_minimal_input_bundle(tmp_path)
+        bundle = load_input_bundle(input_dir)
+        return RunRequest(
+            project_root=bundle.root,
+            orchestration=descriptor,
+            config=config,
+            input_bundle=bundle,
+            objective=bundle.objective,
+            exp_name=exp_name,
+            runs_dir=tmp_path / "exp_env",
+        )
+    bundle = load_input_bundle(resume_from.project_dir)
+    return RunRequest(
+        project_root=bundle.root,
+        orchestration=descriptor,
+        config=config,
+        input_bundle=bundle,
+        objective=bundle.objective,
+        exp_name=resume_from.project_dir.name,
+        runs_dir=tmp_path / "exp_env",
+        resume=ResumeRef(run_id=resume_from.run_id),
+    )
+
+
+async def _execute(
+    request: RunRequest, descriptor: OrchestrationDescriptor, runner: object
+) -> bool:
+    integration = LocalRunIntegration()
+    try:
+        return await run_orchestration(
+            request,
+            integration,
+            IssueQueueOrchestrator(descriptor),
+            agent_client_factory=cast(
+                "Callable[..., AgentClientProtocol]",
+                lambda **_kwargs: _SharedFakeClient(cast("FakeAgentClient", runner)),
+            ),
+            backend_factory=_fake_backend_factory,
+        )
+    finally:
+        integration.close()
+
+
 def run_plain(
     tmp_path: Path,
     runner: FakeAgentClient,
@@ -86,53 +140,79 @@ def run_plain(
     """
     descriptor = descriptor or descriptor_from_options(issue_queue_options())
     config = as_config(Config.model_validate({"model": {"name": "claude-golden-test"}}))
-    if resume_from is None:
-        input_dir = write_minimal_input_bundle(tmp_path)
-        bundle = load_input_bundle(input_dir)
-        request = RunRequest(
-            project_root=bundle.root,
-            orchestration=descriptor,
-            config=config,
-            input_bundle=bundle,
-            objective=bundle.objective,
-            exp_name=exp_name,
-            runs_dir=tmp_path / "exp_env",
-        )
-    else:
-        bundle = load_input_bundle(resume_from.project_dir)
-        request = RunRequest(
-            project_root=bundle.root,
-            orchestration=descriptor,
-            config=config,
-            input_bundle=bundle,
-            objective=bundle.objective,
-            exp_name=resume_from.project_dir.name,
-            runs_dir=tmp_path / "exp_env",
-            resume=ResumeRef(run_id=resume_from.run_id),
-        )
-
-    async def execute() -> bool:
-        integration = LocalRunIntegration()
-        try:
-            return await run_orchestration(
-                request,
-                integration,
-                IssueQueueOrchestrator(descriptor),
-                agent_client_factory=cast(
-                    "Callable[..., AgentClientProtocol]",
-                    lambda **_kwargs: _SharedFakeClient(runner),
-                ),
-                backend_factory=_fake_backend_factory,
-            )
-        finally:
-            integration.close()
+    request = _build_request(
+        tmp_path, descriptor, config, exp_name=exp_name, resume_from=resume_from
+    )
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        result = asyncio.run(execute())
+        result = asyncio.run(_execute(request, descriptor, runner))
 
     project_dir = resume_from.project_dir if resume_from else _sole_project_dir(tmp_path)
     run_id = _sole_run_id(project_dir)
     return PlainRun(result=result, project_dir=project_dir, run_id=run_id)
+
+
+def run_plain_expect_crash(
+    tmp_path: Path,
+    runner: FakeAgentClient,
+    error: type[BaseException],
+    *,
+    descriptor: OrchestrationDescriptor | None = None,
+    exp_name: str = "plain-test",
+) -> PlainRun:
+    """Run once, expecting ``error`` mid-flight (via ``runner.fail(...)``).
+
+    Simulates a killed process without ``unittest.mock.patch``: the crash is
+    injected through ``FakeAgentClient.fail``'s real seam, exactly like a
+    real agent-turn failure would surface. Returns a ``PlainRun`` (``result``
+    is meaningless) pointing at the project/run the crash left on disk, for a
+    follow-up ``run_plain(..., resume_from=...)`` call.
+    """
+    descriptor = descriptor or descriptor_from_options(issue_queue_options())
+    config = as_config(Config.model_validate({"model": {"name": "claude-golden-test"}}))
+    request = _build_request(tmp_path, descriptor, config, exp_name=exp_name, resume_from=None)
+
+    with (
+        patch("vibesys.context.PROJECT_ROOT", tmp_path),
+        pytest.raises(error),
+    ):
+        asyncio.run(_execute(request, descriptor, runner))
+
+    project_dir = _sole_project_dir(tmp_path)
+    run_id = _sole_run_id(project_dir)
+    return PlainRun(result=False, project_dir=project_dir, run_id=run_id)
+
+
+def perf_eval_files_issue_callback(
+    fake: FakeAgentClient, *, issue_type: IssueType = IssueType.BUG, times: int = 1
+) -> Callable[[FakeInvocation], None]:
+    """Simulate ``times`` perf_eval turns filing an issue through the real
+    board tool, then go quiet so the board can drain.
+
+    The fake client never invokes MCP tools, so a scripted
+    ``new_issue_ids`` value never lands on the board (see
+    ``tests/vibesys/golden/test_issue_queue_golden.py``'s ``perf_eval``
+    docstring). Registered with ``FakeAgentClient.on_invoke``, this creates
+    the issue directly against the run's real, on-disk ``IssueBoard`` on the
+    first ``times`` ``perf_eval`` turns, the same effect a live issue-board
+    MCP call would have.
+    """
+
+    def _file(call: FakeInvocation) -> None:
+        if call.kind != "perf_eval":
+            return
+        if len(fake.calls_for("perf_eval")) > times:
+            return
+        board = IssueBoard(call.workspace / "issues.json")
+        board.create(
+            type=issue_type,
+            title="Filed by perf_eval",
+            description="Improve the candidate",
+            created_by="perf_eval",
+            iteration=len(fake.calls_for("perf_eval")),
+        )
+
+    return _file
 
 
 def _sole_project_dir(tmp_path: Path) -> Path:
