@@ -816,6 +816,9 @@ class TestTorchMcpServer:
         names = asyncio.run(_list_tool_names(server))
         assert names == {
             "profile_ops",
+            "start_target",
+            "stop_target",
+            "targets",
             "tables",
             "kernels",
             "operators",
@@ -1280,6 +1283,9 @@ class TestRocprofMcpServer:
             "profile_kernel_deep",
             "profile_instructions",
             "profile_ops",
+            "start_target",
+            "stop_target",
+            "targets",
             # capture store: list / summarize / diff
             "captures",
             "summary",
