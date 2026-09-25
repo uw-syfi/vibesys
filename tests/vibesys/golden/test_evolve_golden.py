@@ -299,6 +299,70 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
     )
 
 
+def test_openevolve_selector_scenario_golden(tmp_path: Path) -> None:
+    """Bootstrap passes first try; the generation-1 child is bred using the
+    OpenEvolve selector (``search_policy="openevolve"``) instead of the
+    default VibeSys softmax/Pareto selector.
+    """
+    runner = FakeAgentClient()
+    runner.on_invoke(_mutator_writes_callback(runner))
+    runner.enqueue("implementer", _implementer("bootstrap seed"), _implementer("gen-1 child"))
+    runner.enqueue("judge", _judge(Verdict.PASS), _judge(Verdict.PASS))
+    runner.enqueue("profiler", _profiler(10.0), _profiler(11.0))
+
+    descriptor = descriptor_from_options(_options(search_policy="openevolve"))
+    run = _run_evolve(tmp_path, descriptor=descriptor, runner=runner)
+
+    assert run.result is True
+    _assert_prompt_calls(runner, scenario="openevolve_selector", workspace=tmp_path.parent)
+    _assert_population_files(
+        run.workspace, scenario="openevolve_selector", workspace=tmp_path.parent
+    )
+    assert_events_snapshot(
+        _STRATEGY, "openevolve_selector", read_events(run.events_path, workspace=tmp_path.parent)
+    )
+
+
+def test_multi_generation_failed_child_scenario_golden(tmp_path: Path) -> None:
+    """Bootstrap passes; the generation-1 child is judged FAIL (no commit,
+    excluded from selection); the generation-2 child is bred off the
+    generation-0 seed again and passes. Covers >=2 generations with a failed
+    child in between, exercising resume-relevant population bookkeeping the
+    single-generation scenarios above don't reach.
+    """
+    runner = FakeAgentClient()
+    runner.on_invoke(_mutator_writes_callback(runner))
+    runner.enqueue(
+        "implementer",
+        _implementer("bootstrap seed"),
+        _implementer("gen-1 child: broken"),
+        _implementer("gen-2 child: repaired"),
+    )
+    runner.enqueue(
+        "judge",
+        _judge(Verdict.PASS),
+        _judge(Verdict.FAIL, feedback="regressed accuracy under load"),
+        _judge(Verdict.PASS),
+    )
+    runner.enqueue("profiler", _profiler(10.0), _profiler(12.0))
+
+    descriptor = descriptor_from_options(_options(max_generations=2))
+    run = _run_evolve(tmp_path, descriptor=descriptor, runner=runner)
+
+    assert run.result is True
+    _assert_prompt_calls(
+        runner, scenario="multi_generation_failed_child", workspace=tmp_path.parent
+    )
+    _assert_population_files(
+        run.workspace, scenario="multi_generation_failed_child", workspace=tmp_path.parent
+    )
+    assert_events_snapshot(
+        _STRATEGY,
+        "multi_generation_failed_child",
+        read_events(run.events_path, workspace=tmp_path.parent),
+    )
+
+
 def _assert_prompt_calls(runner: FakeAgentClient, *, scenario: str, workspace: Path) -> None:
     for index, call in enumerate(runner.calls, start=1):
         role = f"{call.kind}-{index:02d}-{call.round_label}"
