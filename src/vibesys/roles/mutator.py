@@ -1,14 +1,15 @@
-"""Mutator role family: evolve's LLM-as-mutation-operator reply schema.
+"""Mutator role family: evolve's LLM-as-mutation-operator.
 
-Evolve has not yet been migrated onto ``ctx.agents.turn`` (see the phase
-report), so this module holds only the reply schema today; its turn
-sequencing still lives in ``loops/evolve/``. No ``Role`` value exists here
-until that migration lands.
+Evolve reuses the ``implementer`` agent kind for the mutation operator (same
+backend/model config lookup as every other strategy's implementer), so
+``CANDIDATE_MUTATOR.id == "implementer"``.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+
+from vibesys.runtime import Reuse, Role, Writes
 
 
 class MutatorResponse(BaseModel):
@@ -30,4 +31,25 @@ class MutatorResponse(BaseModel):
     )
 
 
-ALL_ROLES: tuple = ()
+def _fallback_mutator() -> MutatorResponse:
+    return MutatorResponse(
+        summary="Mutator produced no structured response.",
+        hypothesis="unknown",
+        expected_behavior="unknown",
+    )
+
+
+CANDIDATE_MUTATOR = Role(
+    id="implementer",
+    template="loops/evolve/mutator_prompt.j2",
+    reply=MutatorResponse,
+    fallback=_fallback_mutator,
+    access=Writes(),
+    session=Reuse(),
+    message=(
+        "Edit the workspace to produce an offspring of the parent. "
+        "Then return one JSON object matching the schema above."
+    ),
+)
+
+ALL_ROLES = (CANDIDATE_MUTATOR,)
