@@ -1,16 +1,23 @@
-"""Plain orchestration decisions against a real issue board and fake turns."""
+"""``IssueQueueOrchestrator``'s drain/round control flow against a real
+``IssueBoard`` and a scripted ``IssueQueueRun`` stand-in.
+
+Injected through ``IssueQueueOrchestrator.run``'s ``run_factory`` seam
+(``src/vibesys/loops/issue_queue/entrypoint.py``) instead of
+``unittest.mock.patch``: the full agent-turn / workspace / checkpoint
+machinery ``IssueQueueRun.open`` wires up is exercised end to end in
+``test_plain_loop.py`` and the golden suite. This module isolates the
+control-flow edge cases that are expensive to reach that way: mid-round
+issues filed by perf_eval, round-budget exhaustion preserving a still-open
+issue, and resuming mid-judge without repeating the implementer.
+"""
 
 from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Literal, cast
-from unittest.mock import AsyncMock, patch
 
-from vibesys.evaluators.perf_reply import (
-    IssuePerfEvalResponse,
-    PerfMetrics,
-)
+from vibesys.evaluators.perf_reply import IssuePerfEvalResponse, PerfMetrics
 from vibesys.loops.issue_queue.entrypoint import IssueQueueOrchestrator
 from vibesys.loops.issue_queue.orchestration import IssueQueueOptions, descriptor_from_options
 from vibesys.roles.common import Verdict
@@ -24,21 +31,26 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    from vibesys.loops.issue_queue.loop import IssueQueueRun
     from vibesys.orchestration.runtime import RunContext
     from vs_issue_board.api import Issue
 
 PlainPhase = Literal["implementer", "judge", "perf_eval"]
 
 
-class _Context:
-    def __init__(self) -> None:
-        self.control = self
-
+class _Control:
     async def boundary(self) -> None:
         return
 
 
-class _PlainRun:
+class _Host:
+    def __init__(self) -> None:
+        self.control = _Control()
+
+
+class _FakeIssueQueueRun:
+    """Duck-types ``IssueQueueRun``'s interface with scripted role turns."""
+
     def __init__(
         self,
         path: Path,
@@ -48,7 +60,7 @@ class _PlainRun:
         state: PlainLoopCursor | None = None,
         resuming: bool = False,
     ) -> None:
-        self.host = _Context()
+        self.host = _Host()
         self.board = IssueBoard(path / "issues.json")
         self.turns = self
         self.state = state or PlainLoopCursor()
@@ -144,22 +156,23 @@ class _PlainRun:
         )
 
 
-def _run_policy(run: _PlainRun, *, max_rounds: int, max_attempts: int = 3) -> bool:
+def _run_policy(run: _FakeIssueQueueRun, *, max_rounds: int, max_attempts: int = 3) -> bool:
     options = IssueQueueOptions(
         max_rounds=max_rounds,
         max_attempts_per_issue=max_attempts,
         max_issues_per_perf_eval=3,
     )
     policy = IssueQueueOrchestrator(descriptor_from_options(options))
-    with patch(
-        "vibesys.loops.issue_queue.entrypoint.IssueQueueRun.open",
-        new=AsyncMock(return_value=run),
-    ):
-        return asyncio.run(policy.run(cast("RunContext", run.host)))
+
+    async def run_factory(ctx: RunContext, opts: IssueQueueOptions) -> IssueQueueRun:
+        del ctx, opts
+        return cast("IssueQueueRun", run)
+
+    return asyncio.run(policy.run(cast("RunContext", run.host), run_factory=run_factory))
 
 
 def test_policy_runs_issue_handoffs_and_stops_after_clean_perf_eval(tmp_path: Path) -> None:
-    run = _PlainRun(tmp_path, [Verdict.PASS], [[]])
+    run = _FakeIssueQueueRun(tmp_path, [Verdict.PASS], [[]])
     assert _run_policy(run, max_rounds=2)
     assert run.calls[:4] == ["bootstrap", "round:1/2", "implement:1", "snapshot:1"]
     assert "judge:1" in run.calls
@@ -171,7 +184,7 @@ def test_policy_runs_issue_handoffs_and_stops_after_clean_perf_eval(tmp_path: Pa
 
 
 def test_policy_retries_failed_issue_then_blocks_without_perf_eval(tmp_path: Path) -> None:
-    run = _PlainRun(tmp_path, [Verdict.FAIL, Verdict.FAIL], [])
+    run = _FakeIssueQueueRun(tmp_path, [Verdict.FAIL, Verdict.FAIL], [])
     assert not _run_policy(run, max_rounds=1, max_attempts=2)
     assert run.calls.count("implement:1") == 2
     assert run.calls.count("judge:1") == 2
@@ -184,7 +197,7 @@ def test_policy_retries_failed_issue_then_blocks_without_perf_eval(tmp_path: Pat
 
 def test_policy_resumes_at_judge_without_repeating_implementation(tmp_path: Path) -> None:
     state = PlainLoopCursor(bootstrap_done=True, phase="judge", current_issue_id=1)
-    run = _PlainRun(tmp_path, [Verdict.PASS], [[]], state=state, resuming=True)
+    run = _FakeIssueQueueRun(tmp_path, [Verdict.PASS], [[]], state=state, resuming=True)
     issue = run.board.create(
         type=IssueType.FEATURE,
         title="Issue 1",
@@ -201,7 +214,7 @@ def test_policy_resumes_at_judge_without_repeating_implementation(tmp_path: Path
 
 
 def test_policy_runs_next_round_for_perf_filed_issue(tmp_path: Path) -> None:
-    run = _PlainRun(tmp_path, [Verdict.PASS, Verdict.PASS], [[2], []])
+    run = _FakeIssueQueueRun(tmp_path, [Verdict.PASS, Verdict.PASS], [[2], []])
     assert _run_policy(run, max_rounds=2)
     assert run.calls.index("perf:1") < run.calls.index("implement:2")
     assert run.calls.count("perf:2") == 1
@@ -211,7 +224,7 @@ def test_policy_runs_next_round_for_perf_filed_issue(tmp_path: Path) -> None:
 
 
 def test_policy_preserves_filed_issue_when_round_budget_expires(tmp_path: Path) -> None:
-    run = _PlainRun(tmp_path, [Verdict.PASS], [[2]])
+    run = _FakeIssueQueueRun(tmp_path, [Verdict.PASS], [[2]])
     assert not _run_policy(run, max_rounds=1)
     issue = run.board.get(2)
     assert issue is not None

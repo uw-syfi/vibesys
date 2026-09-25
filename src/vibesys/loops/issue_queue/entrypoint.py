@@ -14,8 +14,11 @@ from vs_issue_board.api import Issue, IssueStatus
 from vs_loop_state.api import PlainLoopCursor, PlainPerformanceSnapshot
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from pydantic import BaseModel
 
+    from vibesys.loops.issue_queue.orchestration import IssueQueueOptions
     from vibesys.orchestration.runtime import RunContext
     from vs_issue_board.api import IssueBoard
     from vs_project.api import OrchestrationDescriptor, Project
@@ -50,9 +53,20 @@ class IssueQueueOrchestrator:
             ),
         )
 
-    async def run(self, ctx: RunContext) -> bool:
-        """Run one total round budget through the shared host."""
-        run = await IssueQueueRun.open(ctx, self.options)
+    async def run(
+        self,
+        ctx: RunContext,
+        *,
+        run_factory: Callable[[RunContext, IssueQueueOptions], Awaitable[IssueQueueRun]]
+        | None = None,
+    ) -> bool:
+        """Run one total round budget through the shared host.
+
+        ``run_factory`` defaults to ``IssueQueueRun.open``; tests inject a
+        fake bound to a real ``IssueBoard`` to exercise the drain/round
+        control flow without a real agent client or workspace.
+        """
+        run = await (run_factory or IssueQueueRun.open)(ctx, self.options)
         await run.bootstrap()
         await run.prepare_resume()
         round_idx, next_phase, pending_issue_id = resume_point(run.state, run.board)
