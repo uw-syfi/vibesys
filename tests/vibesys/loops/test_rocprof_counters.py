@@ -34,7 +34,9 @@ from resources.profilers.rocprof.counters import (
     MFMA_BUSY_FRACTION_COMPUTE_BOUND,
     MFMA_CANDIDATE_KEYS,
     MFMA_ISSUE_RATE_COMPUTE_BOUND,
+    PACKED_PASS_REJECTION_RE,
     PEAK_SPECS,
+    PER_BLOCK_COUNTER_LIMIT,
     SIMDS_PER_CU,
     AgentInfo,
     CounterRow,
@@ -43,6 +45,7 @@ from resources.profilers.rocprof.counters import (
     KernelAgg,
     MfmaPeakContext,
     _aggregate_by_kernel,
+    _block_counts,
     _classify_mfma_compute_bound,
     _discover,
     _duration_from_counter_rows,
@@ -60,8 +63,13 @@ from resources.profilers.rocprof.counters import (
     cmd_plan,
     cmd_report,
     cmd_triage,
+    counter_block,
+    dedupe_preserve_order,
     derive_metrics,
+    looks_like_packed_pass_rejection,
     normalize_arch,
+    pass_counters,
+    plan_passes,
     resource_occupancy,
 )
 from tests.vibesys.loops.rocprof_strategies import (
@@ -1381,3 +1389,153 @@ def test_plan_never_emits_more_than_four_counters_and_stays_in_the_arch_catalogu
     for counters in passes:
         assert 1 <= len(counters) <= 4
         assert all(c in known_counters for c in counters)
+
+
+# ---------------------------------------------------------------------------
+# plan_passes / pass_counters: packing multiple counter sets into one
+# rocprofv3 --pmc pass (profile_counters cost reduction)
+# ---------------------------------------------------------------------------
+
+
+def test_counter_block_reads_the_amd_block_prefix():  # noqa: ANN201  # tracked: #288
+    assert counter_block("SQ_INSTS_MFMA") == "SQ"
+    assert counter_block("TCC_EA_RDREQ_sum") == "TCC"
+    assert counter_block("GRBM_COUNT") == "GRBM"
+
+
+def test_plan_passes_packs_the_two_real_mi210_validated_combos():  # noqa: ANN201  # tracked: #288
+    """Regression: real MI210 validation packed mfma+hbm and mfma+l2 into one pass each.
+
+    Fails on the pre-packing code, which always emitted one singleton group
+    per requested set regardless of hardware-block fit (verified by
+    temporarily reverting counters.py/capture.py to the pre-packing revision
+    and re-running this test, per the repo's regression-test policy).
+    """
+    catalogue = COUNTER_SETS["gfx90a"]
+
+    assert plan_passes(catalogue, ["mfma", "hbm"]) == [["mfma", "hbm"]]
+    assert plan_passes(catalogue, ["mfma", "l2"]) == [["mfma", "l2"]]
+
+
+def test_plan_passes_keeps_an_unvalidated_combo_separate():  # noqa: ANN201  # tracked: #288
+    """l2+hbm was not validated together on real hardware and shouldn't pack.
+
+    l2 (TCC:2, TCP:1) + hbm (TCC:4, TCP:1) would need TCC:6, over
+    PER_BLOCK_COUNTER_LIMIT -- the model correctly keeps them apart even
+    though nothing here special-cases "l2"/"hbm" by name.
+    """
+    catalogue = COUNTER_SETS["gfx90a"]
+
+    groups = plan_passes(catalogue, ["l2", "hbm"])
+
+    assert groups == [["l2"], ["hbm"]]
+
+
+def test_plan_passes_preserves_request_order_within_and_across_groups():  # noqa: ANN201  # tracked: #288
+    catalogue = COUNTER_SETS["gfx90a"]
+
+    groups = plan_passes(catalogue, ["occupancy", "mfma", "hbm", "valu"])
+
+    # occupancy (SQ:1, GRBM:2), mfma (SQ:2, GRBM:2), and hbm (TCC:3, TCP:1)
+    # combine to SQ:3/GRBM:4/TCC:3/TCP:1, every block still at or under
+    # PER_BLOCK_COUNTER_LIMIT, so all three greedily pack into one group;
+    # valu (SQ:1, GRBM:2) would push GRBM to 6 and gets its own group.
+    # Request order is preserved both within a group and across groups.
+    assert groups == [["occupancy", "mfma", "hbm"], ["valu"]]
+
+
+def test_plan_passes_never_splits_a_single_set():  # noqa: ANN201  # tracked: #288
+    catalogue = COUNTER_SETS["gfx90a"]
+    for set_name in catalogue:
+        groups = plan_passes(catalogue, [set_name])
+        assert groups == [[set_name]]
+
+
+@given(arch=arch_name, data=st.data())
+@FEWER
+def test_plan_passes_never_exceeds_the_per_block_limit(arch: str, data: st.DataObject):  # noqa: ANN201  # tracked: #288
+    """Property: every packed group's combined per-block counter count stays in budget.
+
+    Holds for any subset/order of the arch's own counter-set catalogue, not
+    just the two combos real hardware happened to validate.
+    """
+    catalogue = COUNTER_SETS[arch]
+    set_names = data.draw(
+        st.lists(
+            st.sampled_from(sorted(catalogue)), min_size=1, max_size=len(catalogue), unique=True
+        )
+    )
+
+    groups = plan_passes(catalogue, set_names)
+
+    # Every requested set appears exactly once across all groups.
+    assert sorted(name for group in groups for name in group) == sorted(set_names)
+    for group in groups:
+        combined: dict[str, int] = {}
+        for set_name in group:
+            for block, n in _block_counts(catalogue[set_name]).items():
+                combined[block] = combined.get(block, 0) + n
+        assert all(n <= PER_BLOCK_COUNTER_LIMIT for n in combined.values())
+
+
+def test_pass_counters_dedupes_and_unions_a_packed_group():  # noqa: ANN201  # tracked: #288
+    catalogue = COUNTER_SETS["gfx90a"]
+
+    result = pass_counters(catalogue, ["mfma", "hbm"])
+
+    assert result == dedupe_preserve_order(
+        [*catalogue["mfma"].counters, *catalogue["hbm"].counters]
+    )
+    # No counter is requested twice even if it happened to appear in both
+    # sets (none do in gfx90a's catalogue today, but the dedupe must hold
+    # generally, not just for today's specific counter names).
+    assert len(result) == len(set(result))
+
+
+def test_dedupe_preserve_order_keeps_first_occurrence():  # noqa: ANN201  # tracked: #288
+    assert dedupe_preserve_order(["a", "b", "a", "c", "b"]) == ["a", "b", "c"]
+
+
+# ---------------------------------------------------------------------------
+# looks_like_packed_pass_rejection: recognizing rocprofv3's own refusal text
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "log_tail",
+    [
+        "error: requested counters do not fit in a single pass",
+        "counters require multiple passes for this device",
+        "insufficient hardware counter slots for this collection",
+        "the requested set exceeds the counter limit for block TCC",
+    ],
+)
+def test_looks_like_packed_pass_rejection_matches_known_phrasings(log_tail: str):  # noqa: ANN201  # tracked: #288
+    assert looks_like_packed_pass_rejection(status_ok=False, log_tail=log_tail) is True
+
+
+def test_looks_like_packed_pass_rejection_false_when_pass_actually_succeeded():  # noqa: ANN201  # tracked: #288
+    # Matching text in an otherwise-clean pass's log (e.g. incidental
+    # workload output) must never trigger a fallback: only a pass that
+    # actually failed can be a packing rejection.
+    assert (
+        looks_like_packed_pass_rejection(
+            status_ok=True, log_tail="counters do not fit your use case, just kidding"
+        )
+        is False
+    )
+
+
+def test_looks_like_packed_pass_rejection_false_for_an_unrelated_failure():  # noqa: ANN201  # tracked: #288
+    assert (
+        looks_like_packed_pass_rejection(status_ok=False, log_tail="command not found: rocprofv3")
+        is False
+    )
+
+
+@given(text=st.text())
+@FAST
+def test_packed_pass_rejection_regex_never_raises(text: str):  # noqa: ANN201  # tracked: #288
+    # Pure robustness: arbitrary log text must never crash the classifier.
+    looks_like_packed_pass_rejection(status_ok=False, log_tail=text)
+    assert PACKED_PASS_REJECTION_RE.pattern  # sanity: the pattern itself compiled
