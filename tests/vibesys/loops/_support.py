@@ -36,7 +36,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from vibesys.backends.base import ComputeBackendImpl
     from vibesys.orchestration.contracts import Orchestrator
+    from vibesys.orchestration.gates import GateExecutor
     from vs_agent.api import AgentClientProtocol
     from vs_agent.api.testing import FakeAgentClient
     from vs_project.api import OrchestrationDescriptor
@@ -84,11 +86,14 @@ def _build_request(
     )
 
 
-async def _execute(
+async def _execute(  # noqa: PLR0913  # tracked: #288
     request: RunRequest,
     orchestrator_factory: type[Orchestrator],
     descriptor: OrchestrationDescriptor,
     runner: object,
+    *,
+    backend_factory: Callable[..., ComputeBackendImpl] | None,
+    gate_executor: GateExecutor | None,
 ) -> bool:
     integration = LocalRunIntegration()
     try:
@@ -100,7 +105,8 @@ async def _execute(
                 "Callable[..., AgentClientProtocol]",
                 lambda **_kwargs: _SharedFakeClient(cast("FakeAgentClient", runner)),
             ),
-            backend_factory=_fake_backend_factory,
+            backend_factory=backend_factory or _fake_backend_factory,
+            gate_executor=gate_executor,
         )
     finally:
         integration.close()
@@ -114,13 +120,19 @@ def run_agent_loop(  # noqa: PLR0913  # tracked: #288
     *,
     exp_name: str = "agent-test",
     resume_from: AgentRun | None = None,
+    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    gate_executor: GateExecutor | None = None,
 ) -> AgentRun:
     """Run (or resume) a multi/single orchestrator once with a scripted client.
 
     A fresh call (``resume_from=None``) provisions a new project under
     ``tmp_path / "exp_env"``. Pass a prior call's ``AgentRun`` as
     ``resume_from`` to resume that same on-disk project, exercising
-    resume-after-crash behavior.
+    resume-after-crash behavior. ``backend_factory``/``gate_executor``
+    default to the golden harness's ``FakeComputeBackend`` seam and the real
+    gate executor; pass either to script a compute-backend-owned command
+    (e.g. profile-guided attribution) or the accuracy/benchmark gates
+    without ``unittest.mock.patch``.
     """
     config = as_config(Config.model_validate({"model": {"name": "claude-golden-test"}}))
     request = _build_request(
@@ -128,7 +140,16 @@ def run_agent_loop(  # noqa: PLR0913  # tracked: #288
     )
 
     with patch("vibesys.context.PROJECT_ROOT", tmp_path):
-        result = asyncio.run(_execute(request, orchestrator_factory, descriptor, runner))
+        result = asyncio.run(
+            _execute(
+                request,
+                orchestrator_factory,
+                descriptor,
+                runner,
+                backend_factory=backend_factory,
+                gate_executor=gate_executor,
+            )
+        )
 
     project_dir = resume_from.project_dir if resume_from else _sole_project_dir(tmp_path)
     run_id = _sole_run_id(project_dir)
@@ -159,7 +180,16 @@ def run_agent_loop_expect_crash(  # noqa: PLR0913  # tracked: #288
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
         pytest.raises(error),
     ):
-        asyncio.run(_execute(request, orchestrator_factory, descriptor, runner))
+        asyncio.run(
+            _execute(
+                request,
+                orchestrator_factory,
+                descriptor,
+                runner,
+                backend_factory=None,
+                gate_executor=None,
+            )
+        )
 
     project_dir = _sole_project_dir(tmp_path)
     run_id = _sole_run_id(project_dir)
