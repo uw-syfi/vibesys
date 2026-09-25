@@ -9,8 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.loops.evolve.search_policy import OpenEvolveSearchConfig
 from vibesys.orchestration import OrchestrationResumeDecision
+from vibesys.search.population.models import OpenEvolveSelectorConfig
 from vs_project.api import OrchestrationDescriptor
 
 PortableText = Annotated[str, Field(min_length=1, max_length=256)]
@@ -52,8 +52,8 @@ def resolve_openevolve_options(
             "openevolve_migration_interval": None,
             "openevolve_migration_rate": None,
         }
-    defaults = OpenEvolveSearchConfig()
-    config = OpenEvolveSearchConfig(
+    defaults = OpenEvolveSelectorConfig()
+    config = OpenEvolveSelectorConfig(
         population_size=population_size or defaults.population_size,
         archive_size=archive_size or defaults.archive_size,
         num_islands=num_islands or defaults.num_islands,

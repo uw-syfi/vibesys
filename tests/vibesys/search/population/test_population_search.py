@@ -155,6 +155,108 @@ def test_crash_after_admit_but_before_checkpoint_state_is_immutable() -> None:
 
 
 # ---------------------------------------------------------------------------
+# failure_lessons / wip_seed: used by evolve's bootstrap to steer cold starts
+# ---------------------------------------------------------------------------
+
+
+def test_failure_lessons_empty_before_any_failure() -> None:
+    search = PopulationSearch(PopulationConfig(seed=1))
+    state = search.initial()
+    assert search.failure_lessons(state) == []
+
+
+def _failed_outcome(feedback: str) -> CandidateOutcome:
+    return CandidateOutcome(
+        passed=False, parent_id=None, commit=None, perf_metric=None, summary="s", feedback=feedback
+    )
+
+
+def test_failure_lessons_most_recent_first_deduplicated_and_truncated() -> None:
+    search = PopulationSearch(PopulationConfig(seed=1))
+    state = search.initial()
+    _, state = search.admit(state, _failed_outcome("first failure"))
+    _, state = search.admit(state, _failed_outcome("First Failure"))
+    _, state = search.admit(state, _failed_outcome("x" * 900))
+
+    lessons = search.failure_lessons(state, limit=3, max_chars=700)
+
+    # The near-duplicate ("First Failure" vs "first failure", normalized on a
+    # lowercased prefix) collapses to a single lesson, and the most recent
+    # failure (the long one, truncated) sorts first.
+    assert len(lessons) == 2
+    assert lessons[0].endswith("…")
+    assert len(lessons[0]) <= 700 + len(" …")
+    assert lessons[1] == "First Failure"
+
+
+def test_failure_lessons_ignores_passed_individuals_and_blank_feedback() -> None:
+    search = PopulationSearch(PopulationConfig(seed=1))
+    state = search.initial()
+    _, state = search.admit(state, _outcome(passed=True, perf_metric=1.0))
+    _, state = search.admit(state, _failed_outcome("   "))
+    assert search.failure_lessons(state) == []
+
+
+def test_failure_lessons_respects_limit() -> None:
+    search = PopulationSearch(PopulationConfig(seed=1))
+    state = search.initial()
+    for i in range(5):
+        _, state = search.admit(state, _failed_outcome(f"failure {i}"))
+    lessons = search.failure_lessons(state, limit=2)
+    assert lessons == ["failure 4", "failure 3"]
+
+
+def test_wip_seed_none_when_no_snapshotted_cold_start_failure() -> None:
+    search = PopulationSearch(PopulationConfig(seed=1))
+    state = search.initial()
+    assert search.wip_seed(state) is None
+    # A failed child of a parent (not a cold start) doesn't count.
+    _, state = search.admit(
+        state,
+        CandidateOutcome(passed=True, parent_id=None, commit="c0", perf_metric=1.0, summary="s"),
+    )
+    _, state = search.admit(
+        state,
+        CandidateOutcome(
+            passed=False, parent_id=1, commit=None, perf_metric=None, summary="s", feedback="f"
+        ),
+    )
+    assert search.wip_seed(state) is None
+
+
+def _wip_outcome(commit: str | None, feedback: str) -> CandidateOutcome:
+    return CandidateOutcome(
+        passed=False,
+        parent_id=None,
+        commit=commit,
+        perf_metric=None,
+        summary="s",
+        feedback=feedback,
+    )
+
+
+def test_wip_seed_returns_most_recent_failed_snapshotted_cold_start() -> None:
+    search = PopulationSearch(PopulationConfig(seed=1))
+    state = search.initial()
+    # Failed cold start with no commit: not a usable WIP seed.
+    _, state = search.admit(state, _wip_outcome(None, "f0"))
+    assert search.wip_seed(state) is None
+
+    # Failed cold start with a snapshotted commit: usable.
+    _, state = search.admit(state, _wip_outcome("wip-1", "f1"))
+    seed = search.wip_seed(state)
+    assert seed is not None
+    assert seed.commit == "wip-1"
+
+    # A later, more recent failed cold start with its own commit supersedes
+    # the earlier one as the WIP seed.
+    _, state = search.admit(state, _wip_outcome("wip-2", "f2"))
+    seed = search.wip_seed(state)
+    assert seed is not None
+    assert seed.commit == "wip-2"
+
+
+# ---------------------------------------------------------------------------
 # Hypothesis property tests
 # ---------------------------------------------------------------------------
 
