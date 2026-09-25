@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    import threading
     from collections.abc import Callable, Iterable
 
 _HERE = Path(__file__).resolve().parent
@@ -94,34 +95,33 @@ _STATUS_SEVERITY: dict[capture_runtime.CaptureStatus, int] = {
     capture_runtime.CaptureStatus.TARGET_FAILED: 3,
     capture_runtime.CaptureStatus.TIMED_OUT: 4,
     capture_runtime.CaptureStatus.KILLED_AFTER_GRACE: 5,
+    capture_runtime.CaptureStatus.CANCELLED: 6,
 }
 
-# rocprofv3 injects itself into every process in the launched tree, not only
-# the top-level target: a real capture observed this corrupt a value a
-# `command`/`load_command` picked up via `$(...)` command substitution (e.g.
-# a port number), because the small helper subprocess spawned just to
-# compute that value inherited rocprofv3's tool library too, and the library
-# printed a one-time diagnostic line ("Streaming Performance Monitor (SPM) is
-# not supported on gfx90a devices") to that subprocess's stdout the moment
-# it loaded -- landing inside the command-substitution result together with
-# the real value. These are candidate env vars for quieting rocprofv3's own
-# diagnostic output (best-effort, not confirmed against a live rocprofv3:
-# no GPU/ROCm is available in this dev sandbox); setting them is harmless if
-# rocprofv3 doesn't recognize a given name, and `Lifecycle.env` always wins
-# over these (see `_quiet_rocprofv3_lifecycle`) so a caller can override.
-# This is a mitigation for the injection side of the incident; the
-# `profiling-serving-engines.md` skill doc also tells agents to avoid
-# `$(...)` for values the launch needs in the first place, which is the more
-# robust fix since it doesn't depend on knowing the right env var name.
-_ROCPROFV3_QUIET_ENV: dict[str, str] = {
-    "ROCPROFILER_LOG_LEVEL": "fatal",
-    "ROCPROF_LOG_LEVEL": "fatal",
-}
-
-
-def _quiet_rocprofv3_lifecycle(lifecycle: capture_runtime.Lifecycle) -> capture_runtime.Lifecycle:
-    """Merge best-effort rocprofv3-quieting env into ``lifecycle``, caller wins on conflict."""
-    return dataclasses.replace(lifecycle, env={**_ROCPROFV3_QUIET_ENV, **lifecycle.env})
+# rocprofv3 injects itself (LD_PRELOAD) into every process in the launched
+# tree, not only the top-level target: a real capture observed this corrupt
+# a value a `command`/`load_command` picked up via `$(...)` command
+# substitution (e.g. a port number), because the small helper subprocess
+# spawned just to compute that value inherited rocprofv3's tool library too,
+# and the library printed a one-time diagnostic line ("Streaming Performance
+# Monitor (SPM) is not supported on gfx90a devices") to that subprocess's
+# stdout the moment it loaded -- landing inside the command-substitution
+# result together with the real value.
+#
+# No profiler-side env var or flag suppresses this: confirmed live on real
+# MI210 hardware (rocprofiler-sdk 1.3.2) against 7 candidate env-var combos
+# plus `rocprofv3 --log-level fatal`, every one producing the identical
+# banner and identical corruption (see
+# `docs/contributing/amd-profiler-worklog.md`). The only real fix is to
+# never let a profiled `command`/`load_command` compute a value via a
+# forked child in the first place: pick the value (e.g. a free port) in
+# `setup_command` -- which every `profile_*` tool here runs to completion
+# *before* the profiler ever starts, so nothing it spawns is ever injected
+# into -- write it to a file there, then have `command` read that file back
+# with the `read` builtin (`read -r VAR < file`, never `$(...)`, including
+# `$(cat file)`, which just spawns another profiled child that gets injected
+# into the same way). The `profiling-serving-engines.md` skill doc has the
+# full pattern.
 
 
 def run_cli(fn: Callable[[types.SimpleNamespace], None], **kwargs: object) -> str:
@@ -516,13 +516,14 @@ def profiling_capabilities() -> str:
 # ---------------------------------------------------------------------------
 
 
-def profile_timeline(
+def profile_timeline(  # noqa: PLR0913  # tracked: #288
     lifecycle: capture_runtime.Lifecycle,
     *,
     hip_api: bool = False,
     kernel_include: str | None = None,
     collection_delay_s: float | None = None,
     collection_duration_s: float | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """Capture a whole-run rocprofv3 system trace: host/device timeline.
 
@@ -538,14 +539,20 @@ def profile_timeline(
     ``window='all'``. Next: ``kernels``, ``families``, ``idle_gaps``,
     ``cpu_overhead``, ``memory``, ``graphs``, ``host_idle``, ``summary``, or
     ``compare`` against another timeline capture.
+
+    Serialized against every other GPU-using capture in this process via
+    ``capture_runtime.exclusive_capture``: raises ``CaptureBusyError`` (not
+    caught here -- the MCP boundary formats it) if another capture is
+    already running. ``cancel_event``, when given, is forwarded to
+    ``capture_runtime.run_capture`` so a caller can stop this capture from
+    another thread (see ``resources/profilers/_common/mcp_async.py``).
     """
     if (collection_delay_s is None) != (collection_duration_s is None):
         raise ValueError(  # noqa: TRY003  # tracked: #288
             "collection_delay_s and collection_duration_s must both be given, or neither "
             "(rocprofv3's --collection-period needs a start_delay:collection_time:repeat triplet)"
         )
-    lifecycle = _quiet_rocprofv3_lifecycle(lifecycle)
-    _capture_id, out_dir = capture_runtime.new_capture("timeline")
+    capture_id, out_dir = capture_runtime.new_capture("timeline")
     prefix = ["rocprofv3", "--kernel-trace"]
     if hip_api:
         prefix.append("--hip-runtime-trace")
@@ -556,13 +563,15 @@ def profile_timeline(
         prefix += ["--collection-period", f"{collection_delay_s:g}:{collection_duration_s:g}:1"]
     prefix += ["-d", str(out_dir), "--"]
 
-    result = capture_runtime.run_capture(
-        prefix,
-        lifecycle,
-        kind="timeline",
-        out_dir=out_dir,
-        meta={"hip_api": hip_api, "kernel_include": kernel_include},
-    )
+    with capture_runtime.exclusive_capture("timeline", capture_id):
+        result = capture_runtime.run_capture(
+            prefix,
+            lifecycle,
+            kind="timeline",
+            out_dir=out_dir,
+            meta={"hip_api": hip_api, "kernel_include": kernel_include},
+            cancel_event=cancel_event,
+        )
     return _format_timeline_result(result)
 
 
@@ -651,7 +660,8 @@ def _format_timeline_result(result: capture_runtime.CaptureResult) -> str:
 
 
 # ---------------------------------------------------------------------------
-# profile_counters: one rocprofv3 --pmc pass per requested counter set
+# profile_counters: pack requested counter sets into as few rocprofv3 --pmc
+# passes as possible, falling back to one pass per set on rejection
 # ---------------------------------------------------------------------------
 
 
@@ -661,22 +671,127 @@ def _worst_status(
     return max(statuses, key=lambda status: _STATUS_SEVERITY[status])
 
 
+@dataclasses.dataclass(frozen=True)
+class _PassRun:
+    """One executed rocprofv3 --pmc invocation: the set(s) it covered and its outcome."""
+
+    group: list[str]
+    result: capture_runtime.CaptureResult
+
+
+def _run_counter_pass(  # noqa: PLR0913  # tracked: #288
+    *,
+    lifecycle: capture_runtime.Lifecycle,
+    out_dir: Path,
+    group: list[str],
+    catalogue: dict[str, counters.CounterSet],
+    kernel: str | None,
+    arch: str,
+    cancel_event: threading.Event | None,
+) -> capture_runtime.CaptureResult:
+    pmc_counters = counters.pass_counters(catalogue, group)
+    prefix = ["rocprofv3", "--pmc", *pmc_counters, "--output-format", "csv"]
+    if kernel:
+        prefix += ["--kernel-include-regex", kernel]
+    prefix += ["-d", str(out_dir), "--"]
+    return capture_runtime.run_capture(
+        prefix,
+        lifecycle,
+        kind="counters_pass",
+        out_dir=out_dir,
+        meta={"sets": group, "arch": arch},
+        cancel_event=cancel_event,
+    )
+
+
+def _run_planned_group(  # noqa: PLR0913  # tracked: #288
+    *,
+    lifecycle: capture_runtime.Lifecycle,
+    out_dir: Path,
+    group: list[str],
+    catalogue: dict[str, counters.CounterSet],
+    kernel: str | None,
+    arch: str,
+    cancel_event: threading.Event | None,
+) -> list[_PassRun]:
+    """Run one planned pass group, falling back to one pass per set if rocprofv3 rejects it.
+
+    A singleton group (one set) is just run directly -- there is nothing to
+    fall back from. A multi-set group that fails with log text matching
+    ``counters.looks_like_packed_pass_rejection`` is re-run as one pass per
+    set instead of being reported as a single failed packed pass; any other
+    failure (a real target/workload failure, not a packing rejection) is
+    reported as-is with no retry, since re-running it split would not fix it
+    and would only double the cost. A pass that ends CANCELLED (client
+    aborted the tool call) is never retried either, for the same reason.
+    """
+    sub_dir = out_dir / "+".join(group)
+    result = _run_counter_pass(
+        lifecycle=lifecycle,
+        out_dir=sub_dir,
+        group=group,
+        catalogue=catalogue,
+        kernel=kernel,
+        arch=arch,
+        cancel_event=cancel_event,
+    )
+    if (
+        len(group) == 1
+        or result.status is capture_runtime.CaptureStatus.CANCELLED
+        or not counters.looks_like_packed_pass_rejection(
+            status_ok=result.status is capture_runtime.CaptureStatus.OK,
+            log_tail=result.target_log_tail,
+        )
+    ):
+        return [_PassRun(group=group, result=result)]
+
+    return [
+        _PassRun(
+            group=[set_name],
+            result=_run_counter_pass(
+                lifecycle=lifecycle,
+                out_dir=out_dir / set_name,
+                group=[set_name],
+                catalogue=catalogue,
+                kernel=kernel,
+                arch=arch,
+                cancel_event=cancel_event,
+            ),
+        )
+        for set_name in group
+    ]
+
+
 def profile_counters(
     lifecycle: capture_runtime.Lifecycle,
     *,
     sets: list[str],
     kernel: str | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """Capture PMC hardware counters for one or more named counter sets.
 
-    Runs one rocprofv3 --pmc pass PER requested set -- the profiled workload
-    is re-run in full once per set, since <=4 counters per hardware pass is
-    a hard rocprofv3/CDNA constraint (see ``counters.py``). Requires a
-    detectable GPU architecture (see ``profiling_capabilities``); target one
+    Packs the requested sets into as few rocprofv3 --pmc passes as a
+    conservative per-hardware-block model allows (see
+    ``counters.plan_passes``): real MI210 validation packed mfma+hbm and
+    mfma+l2 into one pass each. **Each pass, not each requested set, re-runs
+    the profiled workload in full** -- the returned text and this capture's
+    manifest report how many passes were planned vs. actually run. A pass
+    rocprofv3 rejects (log text naming a counters-don't-fit failure) falls
+    back automatically to one pass per set in that group, raising the run
+    count above the plan for that capture only. Requires a detectable GPU
+    architecture (see ``profiling_capabilities``); target one
     already-identified hot kernel via ``kernel``, not a whole run. After
     every pass completes, runs ``counter_triage`` automatically. Next:
     ``counter_report``, ``counter_triage``, or ``compare`` against another
     counters capture.
+
+    Serialized against every other GPU-using capture in this process via
+    ``capture_runtime.exclusive_capture``: raises ``CaptureBusyError`` (not
+    caught here -- the MCP boundary formats it) if another capture is
+    already running. ``cancel_event``, when given, stops the in-flight pass
+    and skips any not-yet-started passes rather than continuing to run the
+    plan out (see ``resources/profilers/_common/mcp_async.py``).
     """
     if not sets:
         raise ValueError("sets must name at least one counter set (see profiling_capabilities)")  # noqa: TRY003  # tracked: #288
@@ -693,28 +808,34 @@ def profile_counters(
         known = ", ".join(sorted(catalogue))
         raise ValueError(f"unknown counter set(s) {unknown} for {family}; known sets: {known}")  # noqa: TRY003  # tracked: #288
 
-    lifecycle = _quiet_rocprofv3_lifecycle(lifecycle)
     capture_id, out_dir = capture_runtime.new_capture("counters")
-    pass_results: list[capture_runtime.CaptureResult] = []
-    set_dirs: dict[str, Path] = {}
-    for set_name in sets:
-        cset = catalogue[set_name]
-        sub_dir = out_dir / set_name
-        prefix = ["rocprofv3", "--pmc", *cset.counters, "--output-format", "csv"]
-        if kernel:
-            prefix += ["--kernel-include-regex", kernel]
-        prefix += ["-d", str(sub_dir), "--"]
-        result = capture_runtime.run_capture(
-            prefix,
-            lifecycle,
-            kind="counters_pass",
-            out_dir=sub_dir,
-            meta={"set": set_name, "arch": family},
-        )
-        pass_results.append(result)
-        set_dirs[set_name] = sub_dir
+    with capture_runtime.exclusive_capture("counters", capture_id):
+        planned_groups = counters.plan_passes(catalogue, sets)
+        pass_runs: list[_PassRun] = []
+        set_dirs: dict[str, Path] = {}
+        for group in planned_groups:
+            if cancel_event is not None and cancel_event.is_set():
+                break
+            for pass_run in _run_planned_group(
+                lifecycle=lifecycle,
+                out_dir=out_dir,
+                group=group,
+                catalogue=catalogue,
+                kernel=kernel,
+                arch=family,
+                cancel_event=cancel_event,
+            ):
+                pass_runs.append(pass_run)
+                for set_name in pass_run.group:
+                    set_dirs[set_name] = pass_run.result.out_dir
 
-    overall_status = _worst_status(r.status for r in pass_results)
+    overall_status = (
+        _worst_status(run.result.status for run in pass_runs)
+        if pass_runs
+        else capture_runtime.CaptureStatus.CANCELLED
+    )
+    passes_planned = len(planned_groups)
+    passes_run = len(pass_runs)
     capture_runtime.write_manifest(
         out_dir,
         {
@@ -725,17 +846,21 @@ def profile_counters(
             "kernel": kernel,
             "sets": sets,
             "set_dirs": {name: str(path) for name, path in set_dirs.items()},
+            "passes_planned": passes_planned,
+            "passes_run": passes_run,
         },
     )
     return _format_counters_result(
         capture_id=capture_id,
         sets=sets,
-        pass_results=pass_results,
+        pass_runs=pass_runs,
         overall_status=overall_status,
         set_dirs=set_dirs,
         arch=family,
         kernel=kernel,
         out_dir=out_dir,
+        passes_planned=passes_planned,
+        passes_run=passes_run,
     )
 
 
@@ -743,38 +868,44 @@ def _format_counters_result(  # noqa: PLR0913  # tracked: #288
     *,
     capture_id: str,
     sets: list[str],
-    pass_results: list[capture_runtime.CaptureResult],
+    pass_runs: list[_PassRun],
     overall_status: capture_runtime.CaptureStatus,
     set_dirs: dict[str, Path],
     arch: str,
     kernel: str | None,
     out_dir: Path,
+    passes_planned: int,
+    passes_run: int,
 ) -> str:
+    fallback_note = (
+        " (a rejected packed pass fell back to more passes)" if passes_run > passes_planned else ""
+    )
     lines = [
         f"capture {capture_id} (counters): {overall_status.value}  "
-        f"({len(sets)} pass(es), one per set)"
+        f"({passes_run} pass(es) run, {passes_planned} planned, {len(sets)} set(s) requested)"
+        f"{fallback_note}"
     ]
-    for set_name, result in zip(sets, pass_results, strict=True):
-        lines.append(
-            f"  pass {set_name}: {result.status.value} "
-            f"({result.timings.get('duration_s', 0.0):.2f}s)"
-        )
+    lines.extend(
+        f"  pass {'+'.join(run.group)}: {run.result.status.value} "
+        f"({run.result.timings.get('duration_s', 0.0):.2f}s)"
+        for run in pass_runs
+    )
     if overall_status is not capture_runtime.CaptureStatus.OK:
         lines.append(f"\nAt least one pass did not complete cleanly; see each pass under {out_dir}")
         return "\n".join(lines)
+    dirs = counters.dedupe_preserve_order(str(d) for d in set_dirs.values())
     lines.append("")
     lines.append(
         run_cli(
             counters.cmd_triage,
-            dirs=[str(d) for d in set_dirs.values()],
+            dirs=dirs,
             arch=arch,
             kernel=kernel,
             top=15,
         )
     )
     lines.append(
-        f"\nNext: counter_report(dirs={[str(d) for d in set_dirs.values()]}), or compare(a, b) "
-        "against another counters capture."
+        f"\nNext: counter_report(dirs={dirs}), or compare(a, b) against another counters capture."
     )
     return "\n".join(lines)
 
@@ -800,6 +931,7 @@ def profile_kernel_deep(
     *,
     kernel: str,
     dispatch: int | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """Capture full Speed-of-Light + roofline for one targeted kernel (rocprof-compute).
 
@@ -813,6 +945,13 @@ def profile_kernel_deep(
     pointing at ``profiling_capabilities`` instead of attempting a capture.
     Next: ``compute_analyze``, or ``compare`` against another kernel_deep
     capture.
+
+    Serialized against every other GPU-using capture in this process via
+    ``capture_runtime.exclusive_capture``: raises ``CaptureBusyError`` (not
+    caught here -- the MCP boundary formats it) if another capture is
+    already running. ``cancel_event``, when given, is forwarded to
+    ``capture_runtime.run_capture`` so a caller can stop this capture from
+    another thread (see ``resources/profilers/_common/mcp_async.py``).
     """
     if not kernel:
         raise ValueError("kernel is required (a literal substring of the real kernel name)")  # noqa: TRY003  # tracked: #288
@@ -841,13 +980,15 @@ def profile_kernel_deep(
         prefix += ["--dispatch", str(dispatch)]
     prefix.append("--")
 
-    result = capture_runtime.run_capture(
-        prefix,
-        lifecycle,
-        kind="kernel_deep",
-        out_dir=out_dir,
-        meta={"kernel": kernel, "dispatch": dispatch, "workload_dir": str(workload_dir)},
-    )
+    with capture_runtime.exclusive_capture("kernel_deep", capture_id):
+        result = capture_runtime.run_capture(
+            prefix,
+            lifecycle,
+            kind="kernel_deep",
+            out_dir=out_dir,
+            meta={"kernel": kernel, "dispatch": dispatch, "workload_dir": str(workload_dir)},
+            cancel_event=cancel_event,
+        )
     return _format_kernel_deep_result(
         result, kernel=kernel, dispatch=dispatch, workload_dir=workload_dir
     )
@@ -903,6 +1044,7 @@ def profile_instructions(
     kernel: str,
     target_cu: int = att.DEFAULT_TARGET_CU,
     buffer_bytes: int = att.DEFAULT_BUFFER_SIZE,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """Capture per-instruction stalls inside one kernel, one compute unit (ATT).
 
@@ -912,6 +1054,13 @@ def profile_instructions(
     costs the most overhead of any capture tool here -- only reach for it
     after counters already point at a specific stall class. Next:
     ``att_hotspots``, or ``compare`` against another instructions capture.
+
+    Serialized against every other GPU-using capture in this process via
+    ``capture_runtime.exclusive_capture``: raises ``CaptureBusyError`` (not
+    caught here -- the MCP boundary formats it) if another capture is
+    already running. ``cancel_event``, when given, is forwarded to
+    ``capture_runtime.run_capture`` so a caller can stop this capture from
+    another thread (see ``resources/profilers/_common/mcp_async.py``).
     """
     if not kernel:
         raise ValueError("kernel is required (a --kernel-include-regex value)")  # noqa: TRY003  # tracked: #288
@@ -931,8 +1080,7 @@ def profile_instructions(
         needed = ".".join(map(str, _ATT_MIN_ROCPROFV3_VERSION))
         return f"error: rocprofv3 {found} does not support --att (needs >= {needed}); see profiling_capabilities."
 
-    lifecycle = _quiet_rocprofv3_lifecycle(lifecycle)
-    _capture_id, out_dir = capture_runtime.new_capture("instructions")
+    capture_id, out_dir = capture_runtime.new_capture("instructions")
     prefix = [
         "rocprofv3",
         "--att",
@@ -955,13 +1103,15 @@ def profile_instructions(
         "json",
         "--",
     ]
-    result = capture_runtime.run_capture(
-        prefix,
-        lifecycle,
-        kind="instructions",
-        out_dir=out_dir,
-        meta={"kernel": kernel, "target_cu": target_cu, "buffer_bytes": buffer_bytes},
-    )
+    with capture_runtime.exclusive_capture("instructions", capture_id):
+        result = capture_runtime.run_capture(
+            prefix,
+            lifecycle,
+            kind="instructions",
+            out_dir=out_dir,
+            meta={"kernel": kernel, "target_cu": target_cu, "buffer_bytes": buffer_bytes},
+            cancel_event=cancel_event,
+        )
     return _format_instructions_result(result)
 
 
@@ -1006,6 +1156,8 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
     delay_s: float = 0.0,
     duration_s: float | None = None,
     record_shapes: bool = True,
+    setup_command: str | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """Capture a torch.profiler trace of an offline script or microbenchmark.
 
@@ -1042,6 +1194,8 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
             delay_s=delay_s,
             duration_s=duration_s,
             record_shapes=record_shapes,
+            setup_command=setup_command,
+            cancel_event=cancel_event,
         )
     except TypeError as exc:
         return f"error: torch capture_ops.profile_ops() signature mismatch: {exc}"
