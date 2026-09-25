@@ -1,14 +1,18 @@
 """OpenEvolve selector: upstream MAP-Elites/island database, held as data.
 
 Every call reconstructs OpenEvolve's ``ProgramDatabase`` from
-``OpenEvolveSelectorState.files`` (a snapshot of the directory tree
-``ProgramDatabase.save``/``load`` use, held as in-memory text rather than on
-disk), mutates it exactly as the upstream algorithm does, then serializes it
-back to ``files`` wholesale. There is no directory on disk this module owns:
-the temporary directory used to call the upstream save/load functions is
-created and discarded within one function call, and ``files`` always holds
-the *complete current* database rather than a growing history of snapshots.
-This keeps state size bounded by the database's own size limits
+``OpenEvolveSelectorState.files`` (the same relative-path -> JSON-text shape
+``ProgramDatabase.save``/``load`` write to a directory, held as in-memory
+text instead), mutates it exactly as the upstream algorithm does, then
+serializes it back to ``files`` wholesale. ``_load_files``/``_dump_files``
+below reimplement ``save``/``load`` field-for-field, reusing the same
+serialization helpers (``Program.to_dict``/``from_dict``,
+``_serialize_feature_stats``/``_deserialize_feature_stats``,
+``_reconstruct_islands``) upstream's own disk path calls, so the transform is
+identical -- only the "directory" (a dict) never touches a filesystem. There
+is no directory on disk this module owns, and ``files`` always holds the
+*complete current* database rather than a growing history of snapshots. This
+keeps state size bounded by the database's own size limits
 (``population_size``/``archive_size``), not by how many times ``admit`` has
 been called over a run's lifetime.
 
@@ -22,10 +26,8 @@ from __future__ import annotations
 import hashlib
 import json
 import random
-import tempfile
 import uuid
 from contextlib import contextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from openevolve.config import DatabaseConfig
@@ -84,26 +86,77 @@ def _build_database(config: OpenEvolveSelectorConfig, seed: int | None) -> Progr
 
 
 def _load_files(database: ProgramDatabase, files: dict[str, str]) -> None:
+    """Restore ``database`` in place from ``files``, mirroring ``ProgramDatabase.load``.
+
+    Field-for-field equivalent of the upstream disk path: metadata.json's
+    keys are assigned exactly as ``load`` assigns them, each programs/*.json
+    is parsed with the same ``Program.from_dict``, and island bookkeeping is
+    reconstructed with the same ``_reconstruct_islands`` call -- nothing here
+    reads a path or opens a file.
+    """
     if not files:
         return
-    with tempfile.TemporaryDirectory() as raw_dir:
-        directory = Path(raw_dir)
-        for relative, content in files.items():
-            path = directory / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content)
-        database.load(str(directory))
+    saved_islands: list[list[str]] = []
+    metadata_text = files.get("metadata.json")
+    if metadata_text is not None:
+        metadata = json.loads(metadata_text)
+        database.island_feature_maps = metadata.get(
+            "island_feature_maps", [{} for _ in range(database.config.num_islands)]
+        )
+        saved_islands = metadata.get("islands", [])
+        database.archive = set(metadata.get("archive", []))
+        database.best_program_id = metadata.get("best_program_id")
+        database.island_best_programs = metadata.get(
+            "island_best_programs", [None] * len(saved_islands)
+        )
+        database.last_iteration = metadata.get("last_iteration", 0)
+        database.current_island = metadata.get("current_island", 0)
+        database.island_generations = metadata.get("island_generations", [0] * len(saved_islands))
+        database.last_migration_generation = metadata.get("last_migration_generation", 0)
+        database.feature_stats = database._deserialize_feature_stats(  # noqa: SLF001
+            metadata.get("feature_stats", {})
+        )
+    for relative, content in files.items():
+        if relative == "metadata.json":
+            continue
+        program = Program.from_dict(json.loads(content))
+        database.programs[program.id] = program
+    database._reconstruct_islands(saved_islands)  # noqa: SLF001
+    if len(database.island_generations) != len(database.islands):
+        database.island_generations = [0] * len(database.islands)
+    if len(database.island_best_programs) != len(database.islands):
+        database.island_best_programs = [None] * len(database.islands)
 
 
 def _dump_files(database: ProgramDatabase, *, iteration: int) -> dict[str, str]:
-    with tempfile.TemporaryDirectory() as raw_dir:
-        directory = Path(raw_dir)
-        database.save(str(directory), iteration=iteration)
-        return {
-            str(path.relative_to(directory)): path.read_text()
-            for path in directory.rglob("*")
-            if path.is_file()
+    """Serialize ``database`` to ``files``, mirroring ``ProgramDatabase.save``.
+
+    Same field set ``save`` writes (one programs/<id>.json per program, plus
+    metadata.json), built from the same ``Program.to_dict``/
+    ``_serialize_feature_stats`` calls ``save`` makes -- nothing here creates
+    a directory or opens a file. ``save``'s artifact-directory cleanup is
+    disk-only housekeeping with no in-memory counterpart (this selector never
+    writes ``Program.artifact_dir``), so it has no equivalent here.
+    """
+    files: dict[str, str] = {
+        f"programs/{program.id}.json": json.dumps(program.to_dict())
+        for program in database.programs.values()
+    }
+    files["metadata.json"] = json.dumps(
+        {
+            "island_feature_maps": database.island_feature_maps,
+            "islands": [list(island) for island in database.islands],
+            "archive": list(database.archive),
+            "best_program_id": database.best_program_id,
+            "island_best_programs": database.island_best_programs,
+            "last_iteration": iteration or database.last_iteration,
+            "current_island": database.current_island,
+            "island_generations": database.island_generations,
+            "last_migration_generation": database.last_migration_generation,
+            "feature_stats": database._serialize_feature_stats(),  # noqa: SLF001
         }
+    )
+    return files
 
 
 @contextmanager
