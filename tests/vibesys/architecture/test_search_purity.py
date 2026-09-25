@@ -28,9 +28,9 @@ _SEARCH = _SRC / "search"
 
 _FORBIDDEN_PACKAGES = ("vibesys.orchestration", "vibesys.loops", "vibesys.roles", "vibesys.prompts")
 
-# vibesys.agent_run dissolved into search/hypothesis, roles/, and loops/
-# (except issue_board.py, a different lane's progress-board module). No
-# search/ module re-exports from it any more.
+# vibesys.agent_run has fully dissolved into search/hypothesis, roles/,
+# loops/, and vibesys.orchestration.{memory,artifacts}. No search/ module
+# re-exports from it any more.
 _ALLOWED_AGENT_RUN_REEXPORTS: set[str] = set()
 
 _FORBIDDEN_CLOCK_OR_IO_MODULES = ("os", "subprocess", "pathlib", "time", "datetime")

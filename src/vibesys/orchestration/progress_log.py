@@ -1,10 +1,10 @@
 """The progress board's framework log: plan, verdict, gates, exhaustion.
 
 This is job (2) of the progress board (see
-``vibesys.agent_run.issue_board``'s module docstring for the other two
-jobs): the framework's own narration of what it decided and observed each
-round, distinct from role handoffs (job 1) and declared agent memory
-(job 3).
+:mod:`vibesys.orchestration.memory` and :mod:`vibesys.orchestration.artifacts`
+for the other two jobs): the framework's own narration of what it decided and
+observed each round, distinct from role handoffs (job 1, ``artifacts.py``)
+and declared agent memory (job 3, ``memory.py``).
 
 Every ``render_*`` function here is pure: it takes the same typed data a role
 turn or gate already produced and returns the exact Markdown block the board
@@ -13,8 +13,9 @@ rendered block into a file mutation, reusing the replace-by-heading merge the
 board has always used so a resumed round replaces its own stable heading
 instead of duplicating it.
 
-This module lives under ``vibesys.orchestration`` (not ``agent_run``) so the
-host itself -- ``orchestration.state``'s ``ctx.state.commit`` and
+This module lives under ``vibesys.orchestration`` (its own logic, not the
+dissolved ``agent_run``) so the host itself -- ``orchestration.state``'s
+``ctx.state.commit`` and
 ``orchestration.gates``'s ``ctx.gates.run`` -- can call :func:`write`
 directly. Framework-log entries only need to exist before the next agent
 turn reads them; which workspace snapshot happens to record their git diff
@@ -316,10 +317,11 @@ def write(progress_path: Path, block: str) -> None:
     instead of appending a duplicate. Distinct attempts retain distinct
     headings and therefore remain separate audit entries.
 
-    Self-contained (does not import ``vibesys.agent_run.issue_board``, which
-    itself depends on this package): ensures the progress document exists
-    the same way ``issue_board.ensure_progress_file`` does, in the ``.md``
-    or directory layout the caller already resolved.
+    Self-contained (does not import ``vibesys.orchestration.memory``, which
+    itself would depend on this module for its own writes): ensures the
+    progress document exists the same way
+    ``memory.ensure_progress_file`` does, in the ``.md`` or directory
+    layout the caller already resolved.
     """
     round_number = _round_number(block)
     if progress_path.suffix == ".md":

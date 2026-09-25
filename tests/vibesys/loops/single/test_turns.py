@@ -26,11 +26,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from vibesys.agent_run import issue_board
 from vibesys.constants import DomainName
 from vibesys.loops.agent_options import AgentOrchestrationOptions
 from vibesys.loops.single.session import STATIC_GUIDANCE, AttemptRequest, PlanRequest
 from vibesys.loops.single.turns import InvalidPlanError, SingleAgentTurns
+from vibesys.orchestration import artifacts
 from vibesys.profilers import ProfilerKind
 from vibesys.roles.common import Verdict
 from vibesys.roles.single_agent import SINGLE_COMBINED, SingleAgentRoundResponse
@@ -233,9 +233,9 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     # the same implementer-start marker `begin_attempt` used to write
     # directly; see the shared design brief, item 3.
     before_paid = call.kwargs["before_paid"]
-    assert issue_board.next_implementer_attempt(tmp_path / "progress.md", 1) == 1
+    assert artifacts.next_implementer_attempt(tmp_path / "progress.md", 1) == 1
     await before_paid()
-    assert issue_board.next_implementer_attempt(tmp_path / "progress.md", 1) == 2
+    assert artifacts.next_implementer_attempt(tmp_path / "progress.md", 1) == 2
 
 
 def test_validation_rejects_reused_id() -> None:

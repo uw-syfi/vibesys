@@ -244,7 +244,7 @@ def test_attempt_preflight_and_unparseable_implementation(
     session = cast("Any", _session(tmp_path))
     selected = _selected()
     monkeypatch.setattr(
-        "vibesys.loops.multi.session.issue_board.next_implementer_attempt",
+        "vibesys.loops.multi.session.artifacts.next_implementer_attempt",
         lambda _path, _round: 2,
     )
     assert list(session.remaining_attempts(selected)) == [2]
@@ -260,7 +260,7 @@ def test_attempt_preflight_and_unparseable_implementation(
     assert selected.attempt.implementation == response
 
     monkeypatch.setattr(
-        "vibesys.loops.multi.session.issue_board.next_implementer_attempt",
+        "vibesys.loops.multi.session.artifacts.next_implementer_attempt",
         lambda _path, _round: 3,
     )
     with pytest.raises(MultiSessionError, match="exhausting"):

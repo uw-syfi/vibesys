@@ -11,7 +11,6 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock
 
-from vibesys.agent_run import issue_board
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.validation_recipe import (
     ValidationRecipe,
@@ -21,6 +20,7 @@ from vibesys.loops.multi.decisions import AttemptRequest, PlanRequest
 from vibesys.loops.multi.session import MultiSession
 from vibesys.loops.multi.turns import MultiAgentTurns
 from vibesys.loops.single.session import SingleSession
+from vibesys.orchestration import artifacts, memory
 from vibesys.orchestration.runtime import GateRunResult
 from vibesys.roles.common import Verdict
 from vibesys.roles.implementer import ImplementerResponse
@@ -340,7 +340,7 @@ def test_multi_designer_corrects_reused_hypothesis_id_before_persisting(
     turns.progress_path = tmp_path / "progress.md"
     turns.roadmap_location = "roadmap.md"
     turns._plan_context = lambda _request: {}
-    issue_board.ensure_progress_file(turns.progress_path)
+    memory.ensure_progress_file(turns.progress_path)
     calls: list[str] = []
     plans = iter(
         [
@@ -398,13 +398,13 @@ def test_multi_implementer_marks_paid_turn_before_invocation(tmp_path: Path) -> 
     ) -> ImplementerResponse:
         assert before_paid is not None
         await before_paid()
-        assert issue_board.next_implementer_attempt(tmp_path / "progress.md", 1) == 2
+        assert artifacts.next_implementer_attempt(tmp_path / "progress.md", 1) == 2
         calls.append("paid-turn")
         return ImplementerResponse(summary="cache added", expected_behavior="faster")
 
     turns = cast("Any", MultiAgentTurns.__new__(MultiAgentTurns))
     turns.progress_path = tmp_path / "progress.md"
-    issue_board.ensure_progress_file(turns.progress_path)
+    memory.ensure_progress_file(turns.progress_path)
     turns.ctx = SimpleNamespace(agents=SimpleNamespace(turn=agents_turn), progress=_fake_progress())
     turns.worker = SimpleNamespace()
     turns._implementer_context = lambda *_args: {}
@@ -459,7 +459,7 @@ def test_multi_local_validation_restores_mutated_candidate(tmp_path: Path) -> No
         ValidationRecipeArtifact(recipes=[recipe]).model_dump_json()
     )
     progress_path = tmp_path / "progress.md"
-    issue_board.ensure_progress_file(progress_path)
+    memory.ensure_progress_file(progress_path)
     calls: list[str] = []
 
     async def snapshot(label: str) -> str:

@@ -15,11 +15,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.agent_run import issue_board
 from vibesys.errors import StrategySessionError
 from vibesys.loops.single.attribution import run_attribution
 from vibesys.loops.single.turns import SingleAgentTurns
-from vibesys.orchestration import progress_log
+from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.orchestration.runtime import WorkspaceRestoreError
 from vibesys.roles.common import Verdict
 from vibesys.roles.profiler import ProfilerSummary
@@ -242,9 +241,9 @@ class SingleSession:
             project_root=str(ctx.request.project_root),
             objective=turns.objective,
         )
-        issue_board.ensure_progress_file(turns.progress_path)
-        issue_board.ensure_roadmap_file(turns.roadmap_path)
-        issue_board.write_validation_recipe_schema(turns.progress_path)
+        memory.ensure_progress_file(turns.progress_path)
+        memory.ensure_roadmap_file(turns.roadmap_path)
+        artifacts.write_validation_recipe_schema(turns.progress_path)
         previous = await ctx.state.load(HypothesisState)
         state = adopt_metric_space(previous or self.search.initial(), self.options.metric_space)
         self.state = state
@@ -276,7 +275,7 @@ class SingleSession:
         """Attribute one round's turns and release progress on all exits."""
         number = self.round_number
         self.ctx.switch_log(f"round{number:03d}")
-        issue_board.write_pareto_archive(
+        memory.write_pareto_archive(
             self.turns.progress_path, pareto_archive_summary(self.records, self.state.metrics)
         )
         progress = RoundProgress(number, self.options.max_rounds)
@@ -448,7 +447,7 @@ class SingleSession:
 
     def remaining_attempts(self, selected: SingleRound) -> range:
         """Resume after the last durable paid attempt marker."""
-        first = issue_board.next_implementer_attempt(
+        first = artifacts.next_implementer_attempt(
             self.turns.progress_path, selected.request.round_number
         )
         limit = self.options.max_retries_per_round
@@ -641,7 +640,7 @@ class SingleSession:
     async def finish(self) -> bool:
         """Restore the best trusted candidate or the trusted input baseline."""
         self.ctx.log(f"Reached max_rounds={self.options.max_rounds}. Stopping.")
-        issue_board.write_pareto_archive(
+        memory.write_pareto_archive(
             self.turns.progress_path, pareto_archive_summary(self.records, self.state.metrics)
         )
         if self.state.metrics.objectives:

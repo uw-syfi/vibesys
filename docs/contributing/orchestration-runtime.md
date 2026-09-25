@@ -162,14 +162,13 @@ tool descriptor (`vs_agent.expose_as_tools`, a `StdioServerDescriptor`) into
 the concrete `MCPServerSpec` a driver launches: the one place that
 construction happens, so no strategy hand-builds an `MCPServerSpec`.
 
-## In progress
-
-Two items from the same design effort are landing in other lanes and are
-not yet reflected in the code this doc describes: splitting the progress
-board (today `agent_run/issue_board.py`, still called from several
-`loops/*/turns.py` modules) into typed handoff data, a pure framework-log
-renderer, and declared memory; and dissolving `agent_run/` once that split
-and the role/search moves land.
+The former progress board (`agent_run/issue_board.py`) has split into three
+host-owned modules, `loops/` no longer calls it directly: declared agent
+memory (`orchestration/memory.py`: roadmap, progress log, Pareto archive),
+typed turn artifacts (`orchestration/artifacts.py`: plan, implementer
+evidence, validation ledger, profiler root), and the framework log
+(`orchestration/progress_log.py`, already split out earlier). `agent_run/`
+has dissolved entirely.
 
 ## Adding a strategy
 

@@ -6,7 +6,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from vibesys import constants
-from vibesys.agent_run import issue_board
 from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_section
@@ -16,7 +15,7 @@ from vibesys.errors import (
     UnsupportedProfilerError,
 )
 from vibesys.events import FrameworkSource
-from vibesys.orchestration import progress_log
+from vibesys.orchestration import artifacts, memory, progress_log
 from vibesys.profilers import (
     ProfilerDefinition,
     ProfilerKind,
@@ -24,7 +23,7 @@ from vibesys.profilers import (
     require_profiler_kind,
 )
 from vibesys.prompts import PROMPTS_DIR
-from vibesys.prompts.contexts import domain_context, plan_focus_kwargs
+from vibesys.prompts.contexts import display_path, domain_context, plan_focus_kwargs
 from vibesys.roles.common import Verdict
 from vibesys.roles.designer import SINGLE_ORCHESTRATOR_PLAN, PlanContext
 from vibesys.roles.single_agent import (
@@ -67,14 +66,14 @@ class SingleAgentTurns:
         if self.modality is None and self.domain.name is constants.DomainName.LLM_SERVING:
             self.modality = "text_generation"
         self.objective = ctx.request.objective or ctx.request.input_bundle.objective
-        self.roadmap_path, self.progress_path = issue_board.resolve_paths(
+        self.roadmap_path, self.progress_path = memory.resolve_paths(
             self.workspace.path, options.memory_layout
         )
         ctx.progress.declare(self.progress_path)
-        self.progress_location = issue_board.display_path(self.progress_path, self.workspace.path)
-        self.roadmap_location = issue_board.display_path(self.roadmap_path, self.workspace.path)
-        self.pareto_location = issue_board.display_path(
-            issue_board.pareto_archive_path(self.progress_path), self.workspace.path
+        self.progress_location = display_path(self.progress_path, self.workspace.path)
+        self.roadmap_location = display_path(self.roadmap_path, self.workspace.path)
+        self.pareto_location = display_path(
+            memory.pareto_archive_path(self.progress_path), self.workspace.path
         )
         self.template_dir = PROMPTS_DIR / "loops" / "single"
 
@@ -213,7 +212,7 @@ class SingleAgentTurns:
                 )
                 continue
             plan.recommended_skills, _ = self._skills(plan.recommended_skills)
-            issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
+            artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
             self.ctx.progress.note(
                 progress_log.render_orchestrator_plan(request.round_number, plan)
             )
@@ -273,7 +272,7 @@ class SingleAgentTurns:
         view = self.ctx.environment.view
         plan = request.plan
         profiler = self._profiler()
-        plan_artifact = issue_board.write_plan_artifact(
+        plan_artifact = artifacts.write_plan_artifact(
             self.progress_path, request.round_number, plan
         )
         domain_ctx = self._domain_context()
@@ -284,11 +283,11 @@ class SingleAgentTurns:
             domain_profiler=render_domain_section(self.domain, DomainRole.PROFILER, **domain_ctx),
             interface=self.options.interface,
             objective_location=view.paths.objective,
-            plan_artifact_location=issue_board.display_path(plan_artifact, self.workspace.path),
+            plan_artifact_location=display_path(plan_artifact, self.workspace.path),
             progress_location=self.progress_location,
             pareto_archive_location=self.pareto_location,
-            validation_location=issue_board.display_path(
-                issue_board.validation_artifact_root(self.progress_path), self.workspace.path
+            validation_location=display_path(
+                artifacts.validation_artifact_root(self.progress_path), self.workspace.path
             ),
             feedback=state.feedback,
             profiler_kind=self.ctx.environment.profiler_kind.value,
@@ -309,7 +308,7 @@ class SingleAgentTurns:
         context = self._combined_context(request, state)
 
         async def mark_paid() -> None:
-            issue_board.write_implementer_start_marker(
+            artifacts.write_implementer_start_marker(
                 self.progress_path, request.round_number, state.retry
             )
 
@@ -329,7 +328,7 @@ class SingleAgentTurns:
             plan.recommended_skills, _ = self._skills(
                 [*plan.recommended_skills, *response.skill_context_updates]
             )
-            issue_board.write_plan_artifact(self.progress_path, request.round_number, plan)
+            artifacts.write_plan_artifact(self.progress_path, request.round_number, plan)
         conflict = pareto_archive_conflict(
             candidate_disposition=response.candidate_disposition,
             candidate_metrics=dict(response.candidate_metrics),

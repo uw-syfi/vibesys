@@ -23,6 +23,19 @@ from vibesys.evaluators.input_manifest import WorkspaceSource
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
+
+
+def display_path(path: Path, workspace: Path) -> str:
+    """Return an agent-facing workspace-relative location for *path*.
+
+    Every strategy that names a memory or turn-artifact location in a
+    prompt goes through this one helper, so the agent-visible format (a
+    trailing slash for directories) stays uniform without each strategy
+    reimplementing it.
+    """
+    location = path.relative_to(workspace).as_posix()
+    return f"{location}/" if path.is_dir() else location
 
 
 class DomainSectionContext(BaseModel):
