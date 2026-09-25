@@ -17,6 +17,9 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -31,6 +34,8 @@ from vibesys.context import RunSetup
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
     from vibesys.orchestration.runtime import RunContext
 
@@ -131,6 +136,92 @@ def test_transaction_restore_preserves_declared_memory(tmp_path: Path) -> None:
     registry = OrchestrationRegistry()
     registry.register("memory-preserving", _TransactionPolicy)
     session = create_session(_request(project_root), sink=_discard_event, registry=registry)
+    session.start()
+    result = asyncio.run(session.await_result())
+    assert result.succeeded
+
+
+# ---------------------------------------------------------------------------
+# Property test: declared memory survives any rollback style/content.
+# ---------------------------------------------------------------------------
+
+_ascii_text = st.text(
+    alphabet=st.characters(min_codepoint=97, max_codepoint=122), min_size=1, max_size=8
+)
+
+
+class _RollbackPolicy:
+    """Parametrized rollback shape: plain ``restore()`` or a transaction,
+    with arbitrary round-2 content for both the declared-memory file and a
+    plain candidate file.
+    """
+
+    def __init__(self, descriptor: OrchestrationDescriptor) -> None:
+        assert descriptor.id == "memory-preserving"
+        options = descriptor.options
+        self.style = str(options["style"])
+        self.round2_code = str(options["round2_code"])
+        self.round2_memory = str(options["round2_memory"])
+        self.setup = RunSetup(memory_paths=("progress.md",))
+
+    async def run(self, ctx: RunContext) -> bool:
+        root = ctx.workspaces.root
+        (root.path / "code.py").write_text("VALUE = 1\n")
+        (root.path / "progress.md").write_text("round 1: baseline\n")
+        baseline = await root.snapshot("baseline")
+
+        if self.style == "restore":
+            (root.path / "code.py").write_text(self.round2_code)
+            (root.path / "progress.md").write_text(self.round2_memory)
+            await root.snapshot("round-2")
+            await root.restore(baseline, clean=True)
+        else:
+            async with root.transaction() as tx:
+                (root.path / "code.py").write_text(self.round2_code)
+                (root.path / "progress.md").write_text(self.round2_memory)
+                del tx  # not committed: exit restores, but keeps declared memory
+
+        assert (root.path / "code.py").read_text() == "VALUE = 1\n"
+        assert (root.path / "progress.md").read_text() == self.round2_memory
+        return True
+
+
+@given(
+    style=st.sampled_from(["restore", "transaction"]),
+    round2_code=_ascii_text,
+    round2_memory=_ascii_text,
+)
+@settings(max_examples=6, deadline=None)
+def test_declared_memory_survives_any_rollback(
+    tmp_path_factory: pytest.TempPathFactory,
+    style: str,
+    round2_code: str,
+    round2_memory: str,
+) -> None:
+    """Declared memory (``progress.md``) always survives a rollback, whatever
+    the round-2 content and whichever rollback shape (bare restore or an
+    uncommitted transaction) a strategy uses.
+    """
+    tmp_path = tmp_path_factory.mktemp("declared-memory-property")
+    project_root = tmp_path / "project"
+    _write_project(project_root)
+    registry = OrchestrationRegistry()
+    registry.register("memory-preserving", _RollbackPolicy)
+    request = _request(project_root)
+    request = request.model_copy(
+        update={
+            "orchestration": OrchestrationDescriptor(
+                id="memory-preserving",
+                config_version=1,
+                options={
+                    "style": style,
+                    "round2_code": round2_code,
+                    "round2_memory": round2_memory,
+                },
+            )
+        }
+    )
+    session = create_session(request, sink=_discard_event, registry=registry)
     session.start()
     result = asyncio.run(session.await_result())
     assert result.succeeded

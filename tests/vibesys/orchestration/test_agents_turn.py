@@ -2,10 +2,13 @@
 
 Exercises the mechanics ``Role`` declares against a synthetic fixture
 template (rendering, isolation revert/raise, timeout fallback, correction
-retries + exhaustion, skill filtering, session-key reuse), plus a Hypothesis
-property test over random behavior sequences. A separate differential test
-(``test_agents_turn_differential.py``) proves ``ctx.agents.turn`` renders the
-exact same prompt text today's strategy ``turns.py`` wrappers do.
+retries + exhaustion, skill filtering, session policies, post-turn snapshot
+gating), plus a Hypothesis property test over random behavior sequences.
+Every strategy's real role prompts are covered by ``tests/vibesys/golden/``,
+which snapshots the exact rendered text a scripted end-to-end run sends;
+there is no separate hand-rolled rendering path left in ``turns.py`` to
+differential-test against ``ctx.agents.turn`` (every strategy already
+renders exclusively through it).
 """
 
 from __future__ import annotations
@@ -25,12 +28,13 @@ from vibesys.runtime import (
     Fresh,
     Keyed,
     ReadOnly,
+    Reuse,
     Role,
     RoleIsolationError,
     Writes,
 )
 from vibesys.schemas import SkillResourceSelection
-from vs_agent.api import SessionScope
+from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 
 if TYPE_CHECKING:
@@ -69,7 +73,7 @@ def _role(  # noqa: PLR0913  # test helper mirroring every Role field
     reply: type[BaseModel] = _Reply,
     fallback: Callable[[], BaseModel] = _fallback,
     access: ReadOnly | Writes | None = None,
-    session: Fresh | Keyed | None = None,
+    session: Fresh | Keyed | Reuse | None = None,
     paid: bool = False,
     check: Callable[[BaseModel], str | None] | None = None,
     max_corrections: int = 0,
@@ -453,6 +457,158 @@ def test_session_key_reused_across_calls(tmp_path: Path) -> None:
     calls = runner.calls_for("testrole")
     assert calls[0].session_key == calls[1].session_key
     assert calls[0].reuse_session is True
+
+
+def test_fresh_session_never_reuses(tmp_path: Path) -> None:
+    """``Fresh`` always passes ``reuse_session=False`` and no session key."""
+    runner = FakeAgentClient(backend_name="stub")
+    runner.enqueue("testrole", _Reply(), _Reply())
+
+    async def body(ctx: RunContext) -> None:
+        agent = await _spawn(ctx)
+        try:
+            role = _role(session=Fresh())
+            await ctx.agents.turn(role, agent=agent, context={"subject": "x"}, label="f1")
+            await ctx.agents.turn(role, agent=agent, context={"subject": "x"}, label="f2")
+        finally:
+            await agent.close()
+
+    _with_fixture_prompts_dir(tmp_path, lambda: run_with_context(tmp_path, runner, body))
+    calls = runner.calls_for("testrole")
+    assert calls[0].reuse_session is False
+    assert calls[1].reuse_session is False
+    # No explicit key is passed; the client falls back to its own per-role
+    # default key, which does not enable reuse without reuse_session=True.
+    assert calls[0].session_key == AgentSessionKey(SessionScope.ROLE, "testrole")
+    assert calls[1].session_key == AgentSessionKey(SessionScope.ROLE, "testrole")
+
+
+def test_reuse_session_defers_to_agent_client_default(tmp_path: Path) -> None:
+    """``Reuse`` passes ``reuse_session=None`` and no explicit session key,
+    letting the client apply its own per-role default session.
+    """
+    runner = FakeAgentClient(backend_name="stub")
+    runner.enqueue("testrole", _Reply(), _Reply())
+
+    async def body(ctx: RunContext) -> None:
+        agent = await _spawn(ctx)
+        try:
+            role = _role(session=Reuse())
+            await ctx.agents.turn(role, agent=agent, context={"subject": "x"}, label="r1")
+            await ctx.agents.turn(role, agent=agent, context={"subject": "x"}, label="r2")
+        finally:
+            await agent.close()
+
+    _with_fixture_prompts_dir(tmp_path, lambda: run_with_context(tmp_path, runner, body))
+    calls = runner.calls_for("testrole")
+    assert calls[0].reuse_session is None
+    assert calls[1].reuse_session is None
+    assert calls[0].session_key == AgentSessionKey(SessionScope.ROLE, "testrole")
+
+
+def test_post_turn_snapshot_skipped_for_readonly_with_no_changes(tmp_path: Path) -> None:
+    """A ``ReadOnly`` role that makes no edits triggers only the pre-turn
+    snapshot; the post-turn snapshot is skipped (nothing to record).
+    """
+    runner = FakeAgentClient(backend_name="stub")
+    runner.enqueue("testrole", _Reply())
+    calls: list[str] = []
+
+    async def body(ctx: RunContext) -> None:
+        agent = await _spawn(ctx)
+        workspace = ctx.workspaces.root
+        original_snapshot = workspace.snapshot
+
+        async def _tracked_snapshot(label: str) -> str:
+            calls.append(label)
+            return await original_snapshot(label)
+
+        with patch.object(workspace, "snapshot", _tracked_snapshot):
+            try:
+                await ctx.agents.turn(
+                    _role(access=ReadOnly()),
+                    agent=agent,
+                    context={"subject": "x"},
+                    label="no-op",
+                )
+            finally:
+                await agent.close()
+
+    _with_fixture_prompts_dir(tmp_path, lambda: run_with_context(tmp_path, runner, body))
+    assert calls == ["no-op-input"]
+
+
+def test_post_turn_snapshot_always_runs_for_writes(tmp_path: Path) -> None:
+    """A ``Writes`` role always snapshots after the turn, even with no edits:
+    a later round or gate may need to check out this revision regardless.
+    """
+    runner = FakeAgentClient(backend_name="stub")
+    runner.enqueue("testrole", _Reply())
+    calls: list[str] = []
+
+    async def body(ctx: RunContext) -> None:
+        agent = await _spawn(ctx)
+        workspace = ctx.workspaces.root
+        original_snapshot = workspace.snapshot
+
+        async def _tracked_snapshot(label: str) -> str:
+            calls.append(label)
+            return await original_snapshot(label)
+
+        with patch.object(workspace, "snapshot", _tracked_snapshot):
+            try:
+                await ctx.agents.turn(
+                    _role(access=Writes()),
+                    agent=agent,
+                    context={"subject": "x"},
+                    label="write-no-op",
+                )
+            finally:
+                await agent.close()
+
+    _with_fixture_prompts_dir(tmp_path, lambda: run_with_context(tmp_path, runner, body))
+    assert calls == ["write-no-op-input", "write-no-op"]
+
+
+def test_post_turn_snapshot_runs_when_readonly_role_has_pending_changes(tmp_path: Path) -> None:
+    """A ``ReadOnly`` role with edits allowed under ``access.allow`` still
+    snapshots after the turn: the allowed change is real and must be
+    recorded.
+    """
+    runner = FakeAgentClient(backend_name="stub")
+    calls: list[str] = []
+
+    async def body(ctx: RunContext) -> None:
+        workspace_path = ctx.workspaces.root.path
+        (workspace_path / "allowed.txt").write_text("v1\n")
+        await ctx.workspaces.root.snapshot("seed-allowed")
+
+        def _edit_allowed(_invocation: object) -> _Reply:
+            (workspace_path / "allowed.txt").write_text("v2\n")
+            return _Reply()
+
+        runner.enqueue("testrole", _edit_allowed)
+        agent = await _spawn(ctx)
+        workspace = ctx.workspaces.root
+        original_snapshot = workspace.snapshot
+
+        async def _tracked_snapshot(label: str) -> str:
+            calls.append(label)
+            return await original_snapshot(label)
+
+        with patch.object(workspace, "snapshot", _tracked_snapshot):
+            try:
+                await ctx.agents.turn(
+                    _role(access=ReadOnly(allow=("allowed.txt",))),
+                    agent=agent,
+                    context={"subject": "x"},
+                    label="allowed-edit",
+                )
+            finally:
+                await agent.close()
+
+    _with_fixture_prompts_dir(tmp_path, lambda: run_with_context(tmp_path, runner, body))
+    assert calls == ["allowed-edit-input", "allowed-edit"]
 
 
 # --------------------------------------------------------------------------
