@@ -647,7 +647,7 @@ def _project_run(
 def test_service_reads_only_authoritative_agent_state(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
     portable = project.state.portable_namespace(run_id, "single")
-    AgentRunStateStore(portable).save(
+    portable.slot("state.json", AgentRunState).save(
         AgentRunState(
             active_hypothesis_id="H-02",
             hypotheses=[
@@ -669,7 +669,7 @@ def test_service_projects_committed_live_state_without_reloading_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    store = AgentRunStateStore(project.state.portable_namespace(run_id, "single"))
+    store = project.state.portable_namespace(run_id, "single").slot("state.json", AgentRunState)
     initial = AgentRunState(
         experiment_revision=1,
         hypotheses=[
@@ -722,7 +722,7 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project, run_id = _project_run(tmp_path / "project")
-    store = AgentRunStateStore(project.state.portable_namespace(run_id, "single"))
+    store = project.state.portable_namespace(run_id, "single").slot("state.json", AgentRunState)
     initial = AgentRunState(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=1)],
@@ -776,7 +776,9 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-first", 1, last_experiment_revision=1)],
     )
-    AgentRunStateStore(first_project.state.portable_namespace(run_id, "single")).save(first_state)
+    first_project.state.portable_namespace(run_id, "single").slot("state.json", AgentRunState).save(
+        first_state
+    )
     parts = build_server_parts(
         first_project.state.log_directory(run_id),
         project=first_project,
@@ -790,7 +792,9 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-second", 1, last_experiment_revision=1)],
     )
-    AgentRunStateStore(second_project.state.portable_namespace(run_id, "single")).save(second_state)
+    second_project.state.portable_namespace(run_id, "single").slot(
+        "state.json", AgentRunState
+    ).save(second_state)
     parts.attach(
         second_project.state.log_directory(run_id),
         project=second_project,
@@ -834,7 +838,7 @@ def test_committed_state_is_projected_synchronously_before_later_mutation(tmp_pa
 def test_service_reads_performance_from_authoritative_agent_state(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project")
     portable = project.state.portable_namespace(run_id, "single")
-    AgentRunStateStore(portable).save(
+    portable.slot("state.json", AgentRunState).save(
         AgentRunState(
             hypotheses=[
                 _hypothesis(
@@ -921,7 +925,7 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
             ],
         )
     )
-    AgentRunStateStore(portable).save(state)
+    portable.slot("state.json", AgentRunState).save(state)
     parts = build_server_parts(project.state.log_directory(run_id), project=project, run_id=run_id)
     entries = parts.api.execute(ExperimentQuery()).experiments
 

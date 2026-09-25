@@ -85,10 +85,11 @@ class _AccuracyTimeoutMismatchError(ValueError):
         super().__init__("evolve accuracy timeout differs from the run manifest")
 
 
-# Evolve owns its role prompts, modality fragments, and profiler prompts.
-# Domain role files are rendered separately and injected into the templates.
+# Evolve owns its role prompts; modality fragments and profiler prompts are
+# shared with the other strategies under prompts/shared/. Domain role files
+# are rendered separately and injected into the templates.
 _jinja_env = Environment(  # noqa: S701  # lint-waiver: LW-010209 [S701]; these are plain-text agent prompts, and HTML escaping would alter their instructions.
-    loader=FileSystemLoader(str(_TEMPLATE_DIR)),
+    loader=FileSystemLoader([str(_TEMPLATE_DIR), str(PROMPTS_DIR / "shared")]),
     keep_trailing_newline=True,
     trim_blocks=True,
     lstrip_blocks=True,

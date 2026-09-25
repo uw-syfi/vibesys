@@ -18,7 +18,7 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 
 from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
-from vibesys.agent_run.state import AgentRunState, AgentRunStateStore, Hypothesis, HypothesisReview
+from vibesys.agent_run.state import AgentRunState, Hypothesis, HypothesisReview
 from vibesys.api import RunStatus, RunView
 from vibesys.api.chat_tools_server import build_parser, build_tools
 from vibesys.api.store import RunStore, open_run_store
@@ -112,7 +112,7 @@ def _hypothesis() -> Hypothesis:
 
 def _seed_agent_state(project: Project, run_id: str) -> None:
     portable = project.state.portable_namespace(run_id, "multi")
-    AgentRunStateStore(portable).save(
+    portable.slot("state.json", AgentRunState).save(
         AgentRunState(hypotheses=[_hypothesis()], active_hypothesis_id="H-01")
     )
 

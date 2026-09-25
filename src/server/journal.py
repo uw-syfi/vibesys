@@ -82,7 +82,7 @@ EventListener = Callable[[RunEvent], None]
 HeaderFilter = Callable[[EventHeader], bool]
 
 
-class EventJournal:
+class WireJournal:
     """Own event serialization, replay compatibility, and failure identity."""
 
     def __init__(self, condition: threading.Condition) -> None:

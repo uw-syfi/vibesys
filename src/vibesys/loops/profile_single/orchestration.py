@@ -16,6 +16,7 @@ from vibesys.agent_run.options import (
 from vibesys.agent_run.readmodel import project_run_view
 from vibesys.agent_run.state import AgentRunState, load_agent_run_state
 from vibesys.context import RunSetup, RunStartHints
+from vibesys.errors import InvalidStrategyOptionsError
 from vibesys.loops.profile_single.session import ProfileSingleSession
 from vibesys.orchestration.view import RunStatus, RunView
 
@@ -28,25 +29,17 @@ if TYPE_CHECKING:
 ORCHESTRATION_ID = "profile-guided-single-agent"
 
 
-class InvalidStrategyOptionsError(ValueError):
-    """An option is incompatible with this strategy."""
-
-    def __init__(self, field: str, value: object) -> None:
-        """Name the incompatible strategy option and its value."""
-        super().__init__(f"{ORCHESTRATION_ID}: invalid {field} option {value!r}")
-
-
 def load_options(descriptor: OrchestrationDescriptor) -> AgentOrchestrationOptions:
     """Validate this strategy's identity and policy-specific settings."""
     if descriptor.id != ORCHESTRATION_ID:
         raise UnsupportedAgentOrchestrationError(descriptor.id, descriptor.config_version)
     options = options_from_descriptor(descriptor)
     if options.profile_guided is None:
-        raise InvalidStrategyOptionsError("profile_guided", None)
+        raise InvalidStrategyOptionsError(ORCHESTRATION_ID, "profile_guided", None)
     if options.interface not in {"inprocess", "service"}:
-        raise InvalidStrategyOptionsError("interface", options.interface)
+        raise InvalidStrategyOptionsError(ORCHESTRATION_ID, "interface", options.interface)
     if options.memory_layout not in issue_board.MEMORY_LAYOUTS:
-        raise InvalidStrategyOptionsError("memory_layout", options.memory_layout)
+        raise InvalidStrategyOptionsError(ORCHESTRATION_ID, "memory_layout", options.memory_layout)
     return options
 
 

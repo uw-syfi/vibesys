@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from server.execution import ExecutionHandle, ExecutionTracker
-    from server.journal import EventJournal
+    from server.journal import WireJournal
     from vs_project.api import Project, StateSnapshot
 
 
@@ -38,7 +38,7 @@ class RunController:
     def __init__(
         self,
         condition: threading.Condition,
-        journal: EventJournal,
+        journal: WireJournal,
         executions: ExecutionTracker,
     ) -> None:
         """Initialize control state over the shared server condition."""
