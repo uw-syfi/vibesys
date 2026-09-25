@@ -1,0 +1,14 @@
+## Execution boundary
+
+{% if interface == "service" %}
+The accuracy checker and benchmark communicate with a running candidate service
+over its network interface. The input bundle defines the required protocol,
+endpoints, startup behavior, and artifacts.
+{% else %}
+Evaluator-owned code invokes the candidate directly inside an evaluator process.
+The input bundle defines the callable API or ABI, artifacts, ownership rules,
+and lifecycle requirements.
+{% endif %}
+
+Do not infer a language, framework, or toolchain from this process boundary.
+Follow the selected domain guidance and the input-owned candidate contract.

@@ -419,7 +419,7 @@ The main checks for this design are:
 - Rust formatting and Clippy for the `queue-rs` example repository;
 - `tests/examples/test_queue_evaluator.py` for manifest, package resolution, build,
   correctness, benchmark, and adversarial-history integration;
-- `tests/loops/agent/test_orchestrate.py` for framework accuracy and benchmark
+- `tests/vibesys/loops/test_gates.py` for framework accuracy and benchmark
   gate behavior.
 
 Changes to the ABI, worker protocol, trust model, scoring path, or isolation

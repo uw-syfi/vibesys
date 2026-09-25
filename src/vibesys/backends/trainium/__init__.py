@@ -93,7 +93,7 @@ class TrainiumBackend:
         self._lprint = log or print
         self.image = image or _DEFAULT_IMAGE
         # No per-device selection; kept for protocol parity (read by
-        # _RunContext for logging/pinning).
+        # run resources for logging/pinning).
         self.selected_device = None
         self._devices = _discover_neuron_devices()
         if self._devices:

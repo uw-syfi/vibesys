@@ -7,105 +7,53 @@ import pytest
 from vibesys.run import RoundTransactionError
 
 _CASES: list[tuple[str, tuple[object, ...], str]] = [
-    ("already_completed", (3,), "Round 3 transaction has already completed"),
+    ("already_completed", (3,), "Checkpoint 3 has already completed"),
     (
-        "different_project_root",
+        "participants_disagree",
         (),
-        "Round transaction project and Git tracker must use the same project root",
+        "Checkpoint project, Git tracker, and run must agree",
     ),
     (
-        "run_id_mismatch",
-        ("a", "b"),
-        "Round transaction run 'a' does not match Git tracker run 'b'",
-    ),
-    ("invalid_round_number", (0,), "Round number must be positive, got 0"),
-    (
-        "unfinished_transaction",
+        "no_declared_slots",
         (),
-        "An unfinished round transaction already exists; recover it before starting another",
+        "Checkpoint requires at least one declared typed slot",
     ),
-    ("already_active", (), "a completed-round transaction is already active"),
+    ("invalid_sequence", (0,), "Checkpoint sequence must be positive, got 0"),
     (
-        "begin_required",
+        "unfinished_checkpoint",
         (),
-        "begin_completed_round must precede project round persistence",
+        "An unfinished checkpoint already exists; recover it first",
     ),
-    ("missing_head", (), "Round transactions require an initialized Git HEAD"),
-    (
-        "history_moved",
-        ("recover", "abc123"),
-        "Cannot recover round transaction after Git history moved away "
-        "from its starting commit abc123",
-    ),
-    ("journal_round_mismatch", (2, 3), "Journal is for round 2, not round 3"),
-    (
-        "agent_state_conflict",
-        (),
-        "Committed agent state differs from the transaction journal",
-    ),
-    (
-        "agent_state_snapshot_not_exact",
-        (),
-        "Git snapshot did not commit the exact agent state",
-    ),
-    (
-        "completed_round_snapshot_not_exact",
-        (),
-        "Git snapshot did not commit the exact completed-round metadata",
-    ),
-    ("inaccessible_head", (), "Git snapshot completed without an accessible HEAD"),
-    (
-        "round_payload_number_mismatch",
-        (2, 3),
-        "Round transaction journal payload is for round 2, not round 3",
-    ),
-    (
-        "round_metadata_conflict",
-        (),
-        "Committed round metadata differs from the transaction journal",
-    ),
-    ("journal_missing", (), "Round transaction journal does not exist"),
-    ("invalid_journal", ("bad",), "Invalid round transaction journal: bad"),
-    (
-        "journal_run_mismatch",
-        ("a", "b"),
-        "Round transaction journal belongs to run 'a', not 'b'",
-    ),
-    (
-        "payload_digest_mismatch",
-        ("payload",),
-        "Round transaction journal payload digest does not match",
-    ),
-    (
-        "invalid_active_transition",
-        ("bad",),
-        "Invalid active-state transition in round transaction journal: bad",
-    ),
-    (
-        "invalid_agent_state_transition",
-        ("bad",),
-        "Invalid agent-state transition in round transaction journal: bad",
-    ),
+    ("empty_writes", (), "Checkpoint writes must not be empty"),
+    ("missing_head", (), "Checkpoint requires an initialized Git HEAD"),
     (
         "staged_index_changes",
         (),
-        "Cannot begin round transaction while the Git index contains staged changes",
+        "Cannot checkpoint candidate while the Git index has staged changes",
+    ),
+    ("journal_sequence_mismatch", (3,), "Checkpoint journal is not for sequence 3"),
+    ("undeclared_slot", ("cursor",), "Undeclared checkpoint slot 'cursor'"),
+    ("invalid_journal", (ValueError("bad"),), "Invalid checkpoint journal: bad"),
+    ("journal_run_mismatch", ("a",), "Checkpoint journal belongs to run 'a'"),
+    ("journal_digest_mismatch", (), "Checkpoint journal digest does not match"),
+    ("journal_duplicate_slot", ("cursor",), "Checkpoint journal duplicates slot 'cursor'"),
+    (
+        "journal_undeclared_slot",
+        ("cursor",),
+        "Checkpoint journal names undeclared slot 'cursor'",
     ),
     (
-        "invalid_transition",
-        ("bad",),
-        "Invalid round transaction agent-state transition: bad",
+        "history_moved",
+        ("abc123",),
+        "Git history moved away from checkpoint starting commit abc123",
     ),
     (
-        "invalid_round_payload",
-        ("src", "bad"),
-        "Invalid completed-round payload in transaction journal src: bad",
+        "committed_state_conflict",
+        (),
+        "Committed state differs from the checkpoint journal",
     ),
-    (
-        "round_payload_not_object",
-        ("src",),
-        "Invalid completed-round payload in transaction journal src: payload must be a JSON object",
-    ),
+    ("snapshot_not_exact", (), "Git snapshot did not commit exact checkpoint state"),
+    ("inaccessible_head", (), "Checkpoint completed without an accessible HEAD"),
 ]
 
 

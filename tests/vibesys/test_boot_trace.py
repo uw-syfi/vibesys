@@ -4,7 +4,7 @@
 exists (``main.py``'s dispatch preamble, ``context.py``'s assembly) and
 buffers their lines until a consumer drains them into the run log. See
 ``tests/vibesys/test_context.py`` for the integration test that exercises the drain
-through a real ``create_run_context`` call.
+through a real ``open_run_resources`` call.
 """
 
 import pytest

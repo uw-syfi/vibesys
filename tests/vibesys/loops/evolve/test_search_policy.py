@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING, TypedDict
 
 import pytest
 
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.evolve.population import Individual, Population
 from vibesys.loops.evolve.search_policy import (
     OpenEvolveSearchConfig,
     OpenEvolveSearchPolicy,
     SearchSelectionParameters,
 )
-from vibesys.loops.metrics import MetricSpace, Objective
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator

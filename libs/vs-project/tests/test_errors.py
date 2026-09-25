@@ -7,7 +7,6 @@ import pytest
 from vs_project.errors import (
     ProjectError,
     ProjectStateError,
-    RunSchemaMigrationRequiredError,
     StateModelNotFoundError,
 )
 
@@ -214,22 +213,39 @@ _CASES: list[tuple[str, tuple[object, ...], str]] = [
         "Duplicate completed-round number 2: /proj/x and /proj/y",
     ),
     (
-        "invalid_portable_round",
-        ("Round", "workspace"),
-        "Round workspace must be a portable project-relative path",
+        "state_file_read_failed",
+        (_P, _ERR),
+        "Could not read VibeSys state file /proj/x: boom",
     ),
-    ("non_finite_round_metrics", ("Round",), "Round metrics must be finite numbers"),
+    (
+        "state_file_write_failed",
+        (_P, _ERR),
+        "Could not write VibeSys state file /proj/x: boom",
+    ),
+    ("state_entry_not_directory", (_P,), "VibeSys state path is not a directory: /proj/x"),
+    (
+        "state_directory_list_failed",
+        (_P, _ERR),
+        "Could not list VibeSys state directory /proj/x: boom",
+    ),
+    ("state_entry_symlink", (_P,), "VibeSys state must not contain symlinks: /proj/x"),
+    (
+        "unsupported_run_schema",
+        (_P, 1, 4),
+        "Run metadata at /proj/x records unsupported run schema version 1; "
+        "this VibeSys requires version 4",
+    ),
+    (
+        "orchestration_identity_change",
+        ("r1",),
+        "Run 'r1' cannot change orchestration id or config version",
+    ),
     ("invalid_round_number", (0,), "Round number must be positive, got 0"),
     ("project_root_not_directory", (_P,), "Project root is not a directory: /proj/x"),
     (
         "unexpected_completed_round_entry",
         (_P,),
         "Unexpected completed-round entry: /proj/x",
-    ),
-    (
-        "round_serialization_failed",
-        (5,),
-        "Could not serialize completed-round metadata for round 5",
     ),
     ("state_serialization_failed", (), "Could not serialize VibeSys state model"),
     ("json_serialization_failed", ("thing",), "Could not serialize thing"),
@@ -286,18 +302,3 @@ def test_state_model_not_found_names_missing_path() -> None:
 
     assert isinstance(error, ProjectStateError)
     assert str(error) == "VibeSys state model does not exist: /proj/x"
-
-
-def test_run_schema_migration_error_carries_structured_context() -> None:
-    error = RunSchemaMigrationRequiredError.older_schema(
-        path=_P,
-        run_id="r1",
-        recorded_version=1,
-        required_version=3,
-        missing_contract="the device lease",
-    )
-
-    assert (error.path, error.run_id, error.recorded_version) == (_P, "r1", 1)
-    message = str(error)
-    assert "run schema version 1" in message
-    assert "requires version 3, which records the device lease" in message

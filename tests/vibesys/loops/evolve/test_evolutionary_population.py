@@ -1,6 +1,6 @@
 """Unit tests for vibesys.loops.evolve.population.
 
-Pure-logic tests — no agent runner, no _RunContext, no GPU. The
+Pure-logic tests: no agent runner, run context, or GPU. The
 ``Population`` and ``Individual`` classes are intentionally free of
 runtime imports so this file runs in isolation.
 """
@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, TypeVar, cast
 import pytest
 from pydantic import TypeAdapter
 
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.evolve.population import Individual, Population
-from vibesys.loops.metrics import MetricSpace, Objective
 
 if TYPE_CHECKING:
     import random

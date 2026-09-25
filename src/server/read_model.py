@@ -137,7 +137,7 @@ class RunInspector:
 
     def round_detail(self, number: int) -> str:
         """Return persisted history excerpts matching one round number."""
-        pattern = re.compile(rf"(?i)(round|iter(?:ation)?)\D*{number}\b")
+        pattern = re.compile(rf"(?i)\b(?:round(?:_number|_idx)?|iter(?:ation)?)\b\D*{number}\b")
         chunks = []
         for document in self._history_documents():
             lines = document.text.splitlines()

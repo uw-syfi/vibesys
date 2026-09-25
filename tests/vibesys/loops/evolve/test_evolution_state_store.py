@@ -3,11 +3,13 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from tests.support.run_execution import run_execution_record
+
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.loops.evolve.population import Individual, Population
 from vibesys.loops.evolve.state import EvolutionStateStore
-from vibesys.loops.metrics import MetricSpace, Objective
 from vibesys.run import RunState, RunStateNamespace
-from vs_project.api import EvolveRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 
 
 def _store(tmp_path: Path) -> EvolutionStateStore:
@@ -19,21 +21,9 @@ def _store(tmp_path: Path) -> EvolutionStateStore:
         branch="vibesys/run-1",
         vibesys_version="test",
         trusted_input_baseline="a" * 40,
-        configuration=EvolveRunConfiguration(
-            outer_loop="evolve",
-            run_environment=RunEnvironmentRecord(name="local"),
-            agent_backend="stub",
-            compute_backend="cpu",
-            max_generations=1,
-            children_per_generation=1,
-            k_top_inspirations=1,
-            k_random_inspirations=1,
-            selection_temperature=0.5,
-            frontier_bias=0.7,
-            bootstrap_max_attempts=1,
-            keep_deployments=False,
-            max_parallelism=1,
-        ),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(id="evolve", config_version=1, options={}),
     )
     project.state.create_run(run)
     state = RunState(

@@ -6,22 +6,22 @@ import subprocess
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 import pytest
-from tests.server.support import build_server_parts
+from tests.server.support import agent_descriptor, build_server_parts
 from tests.support import run_test_command
+from tests.support.run_execution import run_execution_record
 
 import server.api.service as service_module
 from server.api.design import _PATCH_CHAR_LIMIT, DesignLog
 from server.api.protocol import DesignPatchQuery, DesignQuery
 from server.api.workspace_git import WorkspacePatchReader
-from vibesys.api._readmodel import project_run_view
+from vibesys.agent_run.readmodel import project_run_view
+from vibesys.agent_run.state import AgentRunState, AgentRunStateStore, Hypothesis
 from vibesys.api.contracts import RunStatus
-from vibesys.loops.agent.model import AgentRunState, Hypothesis
-from vibesys.loops.agent.state import AgentRunStateStore
 from vibesys.run.git_events import NullGitTrackerEvents
 from vibesys.run.git_tracker import GitTracker
 from vibesys.schemas import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
-from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -102,6 +102,7 @@ def _view(state: AgentRunState, *, run_id: str = "run-1") -> RunView:
         run_id=run_id,
         status=RunStatus.ACTIVE,
         experiment_revision=state.experiment_revision,
+        loop="single-agent",
     )
 
 
@@ -603,23 +604,6 @@ def test_design_patch_degrades_when_the_file_list_is_unreadable(tmp_path: Path) 
     assert attempted == []
 
 
-def _configuration() -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        outer_loop="agent",
-        inner_loop="single-agent",
-        interface="inprocess",
-        agent_backend="stub",
-        compute_backend="cpu",
-        profiler="none",
-        max_rounds=3,
-        max_retries_per_round=1,
-        judge_every=1,
-        official_eval_every=1,
-        memory_layout="files",
-        run_environment=RunEnvironmentRecord(name="local"),
-    )
-
-
 def _project_run(project: Path, *, trusted_input_baseline: str) -> tuple[Project, str]:
     vibesys_project = Project.open(project)
     vibesys_project.state.create_project("queue")
@@ -628,7 +612,9 @@ def _project_run(project: Path, *, trusted_input_baseline: str) -> tuple[Project
         run_id="queue-run",
         branch="vibesys/queue-run",
         vibesys_version="0.2.0-test",
-        configuration=_configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=agent_descriptor(),
         trusted_input_baseline=trusted_input_baseline,
     )
     vibesys_project.state.create_run(manifest)
@@ -643,7 +629,7 @@ def test_service_builds_design_from_workspace_history(tmp_path: Path) -> None:
     first = _commit_all(workspace, "round 1")
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
-    portable = project.state.portable_namespace(run_id, "agent")
+    portable = project.state.portable_namespace(run_id, "single")
     AgentRunStateStore(portable).save(
         AgentRunState(
             hypotheses=[
@@ -675,7 +661,7 @@ def test_service_serves_patches_for_published_design_ranges(tmp_path: Path) -> N
     first = _commit_all(workspace, "round 1")
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
-    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(
+    AgentRunStateStore(project.state.portable_namespace(run_id, "single")).save(
         AgentRunState(
             hypotheses=[
                 _hypothesis("H-01", 1, rounds=[_round(1, hypothesis_id="H-01", commit=first)])
@@ -717,7 +703,7 @@ def test_service_reuses_one_design_projection_per_run(
     first = _commit_all(workspace, "round 1")
 
     project, run_id = _project_run(workspace, trusted_input_baseline=baseline)
-    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(
+    AgentRunStateStore(project.state.portable_namespace(run_id, "single")).save(
         AgentRunState(
             hypotheses=[
                 _hypothesis("H-01", 1, rounds=[_round(1, hypothesis_id="H-01", commit=first)])

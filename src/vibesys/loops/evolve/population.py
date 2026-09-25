@@ -28,7 +28,7 @@ layer.
 
 Every question of the form "is this candidate better?" -- dominance, frontier
 membership, and the scalar champion -- is answered by the run's
-:class:`~vibesys.loops.metrics.MetricSpace`, so the task's declared measurement
+:class:`~vibesys.evaluators.metrics.MetricSpace`, so the task's declared measurement
 tolerance applies to selection. Parent sampling deliberately does not: the
 softmax over normalized fitness ranks the whole archive rather than comparing
 two candidates, and squashing near-ties there would flatten the very gradient
@@ -41,7 +41,7 @@ import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from vibesys.loops.metrics import Measurement, MetricSpace, Objective
+from vibesys.evaluators.metrics import Measurement, MetricSpace, Objective
 
 _SCORE_SPAN_EPSILON = 1e-12
 

@@ -17,14 +17,15 @@ from uuid import UUID
 import pytest
 from mcp.server.fastmcp import FastMCP
 
+from vibesys.agent_run.options import AgentOrchestrationOptions, descriptor_from_options
+from vibesys.agent_run.state import AgentRunState, AgentRunStateStore, Hypothesis, HypothesisReview
+from vibesys.api import RunStatus, RunView
 from vibesys.api.chat_tools_server import build_parser, build_tools
-from vibesys.api.store import open_run_store
-from vibesys.loops.agent.model import AgentRunState, Hypothesis, HypothesisReview
-from vibesys.loops.agent.state import AgentRunStateStore
+from vibesys.api.store import RunStore, open_run_store
 from vibesys.schemas import OrchestratorPlan
 from vs_agent.api import register_tool
 from vs_loop_state.api import RoundRecord
-from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import Project, RunEnvironmentRecord, RunExecutionRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,30 +36,15 @@ NOW = datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC)
 UNIQUE = UUID("12345678-1234-5678-1234-567812345678")
 
 
-def _configuration() -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        model="gpt-5",
-        outer_loop="agent",
-        run_environment=RunEnvironmentRecord(name="local"),
-        inner_loop="multi-agent",
+def _configuration() -> AgentOrchestrationOptions:
+    return AgentOrchestrationOptions(
         interface="inprocess",
-        agent_backend="cli",
-        agent_driver="agentshim",
-        cli_provider="codex",
-        cli_timeout=1800,
-        compute_backend="cpu",
-        profiler="linux-cpu",
         max_rounds=10,
         max_retries_per_round=3,
         judge_every=3,
         official_eval_every=3,
         memory_layout="files",
         modality="text_generation",
-        default_reasoning_effort="high",
-        outer_model="gpt-5.6-sol",
-        outer_reasoning_effort="xhigh",
-        inner_model="gpt-5.6-luna",
-        inner_reasoning_effort="medium",
         operator_constraints=("Do not change the ABI",),
     )
 
@@ -71,7 +57,23 @@ def _project_with_run(tmp_path: Path) -> tuple[Project, str]:
         "Queue SPSC",
         branch="vibesys/queue",
         vibesys_version="0.2.0",
-        configuration=_configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=RunExecutionRecord(
+            model="gpt-5",
+            agent_backend="cli",
+            agent_driver="agentshim",
+            cli_provider="codex",
+            cli_timeout=1800,
+            compute_backend="cpu",
+            requested_profiler="linux-cpu",
+            resolved_profiler="linux-cpu",
+            default_reasoning_effort="high",
+            outer_model="gpt-5.6-sol",
+            outer_reasoning_effort="xhigh",
+            inner_model="gpt-5.6-luna",
+            inner_reasoning_effort="medium",
+        ),
+        orchestration=descriptor_from_options(_configuration(), orchestration_id="multi-agent"),
         trusted_input_baseline="a" * 40,
         now=NOW,
         unique=UNIQUE,
@@ -109,7 +111,7 @@ def _hypothesis() -> Hypothesis:
 
 
 def _seed_agent_state(project: Project, run_id: str) -> None:
-    portable = project.state.portable_namespace(run_id, "agent")
+    portable = project.state.portable_namespace(run_id, "multi")
     AgentRunStateStore(portable).save(
         AgentRunState(hypotheses=[_hypothesis()], active_hypothesis_id="H-01")
     )
@@ -186,6 +188,31 @@ class TestToolRegistration:
 
 
 class TestEndToEnd:
+    def test_non_agent_projection_has_neutral_run_tools(self, tmp_path: Path) -> None:
+        project, run_id = _project_with_run(tmp_path)
+
+        class CustomStore:
+            def get_run(self, requested: str) -> RunView:
+                assert requested == run_id
+                return RunView(
+                    run_id=run_id,
+                    loop="team-search",
+                    status=RunStatus.UNKNOWN,
+                    projection={"kind": "team-search", "workers": 3},
+                )
+
+        tools = build_tools(cast("RunStore", CustomStore()), project, run_id)
+        server = _server(tools)
+
+        summary = asyncio.run(_call(server, "run_summary"))
+        assert summary == f"run_id: {run_id}\nloop: team-search\nstatus: unknown"
+        assert asyncio.run(_call(server, "list_hypotheses")) == "(no hypotheses)"
+        assert asyncio.run(_call(server, "list_rounds")) == "(no rounds)"
+        assert (
+            asyncio.run(_call(server, "get_hypothesis", hypothesis_id="H-01"))
+            == "(no hypothesis 'H-01'; see list_hypotheses)"
+        )
+
     def test_run_summary_reports_top_level_status(self, tmp_path: Path) -> None:
         tools, run_id = _tools(tmp_path)
         server = _server(tools)
@@ -193,7 +220,7 @@ class TestEndToEnd:
         out = asyncio.run(_call(server, "run_summary"))
 
         assert f"run_id: {run_id}" in out
-        assert "loop: agent" in out
+        assert "loop: multi-agent" in out
         assert "active_hypothesis_id: H-01" in out
         assert "hypothesis_count: 1" in out
         assert "round_count: 1" in out
@@ -242,7 +269,7 @@ class TestEndToEnd:
         out = asyncio.run(_call(server, "list_state_files"))
 
         assert "run.json" in out
-        assert "agent/state.json" in out
+        assert "multi/state.json" in out
 
     def test_read_state_file_returns_the_run_manifest_contents(self, tmp_path: Path) -> None:
         tools, run_id = _tools(tmp_path)

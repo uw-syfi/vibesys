@@ -17,7 +17,7 @@ The loop is picked by ``--outer-loop {agent, profile-guided, plain, evolve}``:
 
 The module is split into submodules by concern (``args`` for argparse wiring,
 ``config``/``inputs``/``remote``/``resume`` for the per-command preamble,
-``loops`` for the per-loop request builders and runners). This package's
+``loops`` for the request builder and runner). This package's
 top level owns dispatch and re-exports the names those submodules and the
 mode entries share.
 """
@@ -44,11 +44,7 @@ from entrypoints.cli.config import (
     _prepare_stub_agent_smoke_defaults,
     load_config_and_skills,
 )
-from entrypoints.cli.constants import (
-    _MIGRATE_RUN_ENVIRONMENT_COMMAND,
-    _MODALITIES,
-    _OUTER_LOOPS,
-)
+from entrypoints.cli.constants import _MODALITIES, _OUTER_LOOPS
 from entrypoints.cli.environment import run_environment_spec_from_args
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
 from entrypoints.cli.inputs import (
@@ -58,16 +54,11 @@ from entrypoints.cli.inputs import (
     _validate_target_inputs,
 )
 from entrypoints.cli.loops import (
-    _build_agent_request,
-    _build_evolve_request,
-    _build_plain_request,
+    _build_run_request,
     _load_metric_space_toml,
     _normalize_runs_dir,
     _resolve_openevolve_options,
-    _run_agent,
-    _run_evolve,
-    _run_migrate_run_environment,
-    _run_plain,
+    _run_request,
     _validate_evolve,
     _validate_plain,
 )
@@ -106,7 +97,6 @@ __all__ = [
     "_prepare_experiment_repository",
     "_render_configuration_error",
     "_resolve_openevolve_options",
-    "_run_migrate_run_environment",
     "_run_validate",
     "_validate_agent",
     "_validate_target_inputs",
@@ -134,41 +124,27 @@ class CliInvocation:
 
 @dataclass(frozen=True)
 class _LoopCommand:
-    """Typed dispatch record for one ``--outer-loop`` kind."""
+    """Parser and validation for one CLI outer-loop selection."""
 
     build_parser: Callable[[], argparse.ArgumentParser]
     validate: Callable[[argparse.Namespace], None]
-    run: Callable[[argparse.Namespace], None]
 
 
 _LOOP_COMMANDS: dict[str, _LoopCommand] = {
-    "agent": _LoopCommand(_build_agent_parser, _validate_agent, _run_agent),
-    "profile-guided": _LoopCommand(_build_agent_parser, _validate_agent, _run_agent),
-    "plain": _LoopCommand(_build_plain_parser, _validate_plain, _run_plain),
-    "evolve": _LoopCommand(_build_evolve_parser, _validate_evolve, _run_evolve),
-}
-
-# Mirrors `_LOOP_COMMANDS`: one request builder per `--outer-loop` kind, so
-# `build_run_request` can run a command's side-effectful preamble and produce
-# its `RunRequest` without also running the loop (`_LoopCommand.run` does
-# both). The server uses this to own its `create_session` call directly
-# instead of going through `dispatch`.
-_LOOP_REQUEST_BUILDERS: dict[str, Callable[[argparse.Namespace], RunRequest]] = {
-    "agent": _build_agent_request,
-    "profile-guided": _build_agent_request,
-    "plain": _build_plain_request,
-    "evolve": _build_evolve_request,
+    "agent": _LoopCommand(_build_agent_parser, _validate_agent),
+    "profile-guided": _LoopCommand(_build_agent_parser, _validate_agent),
+    "plain": _LoopCommand(_build_plain_parser, _validate_plain),
+    "evolve": _LoopCommand(_build_evolve_parser, _validate_evolve),
 }
 
 
 def build_run_request(invocation: CliInvocation) -> RunRequest:
     """Build the ``RunRequest`` for one already-parsed CLI invocation.
 
-    Runs the same side-effectful preamble (config/skills loading, experiment
-    repository prep, the task Docker image build, metric-space loading) that
-    the matching ``_run_*`` would run inline, without starting the run.
+    Runs the shared config, skills, repository, environment, and descriptor
+    preamble without starting the run.
     """
-    return _LOOP_REQUEST_BUILDERS[invocation.loop_kind](invocation.args)
+    return _build_run_request(invocation.args)
 
 
 def _explicit_cli_dests(
@@ -205,31 +181,13 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
 
 
 def dispatch(argv: list[str]) -> None:
-    """Parse and run one headless VibeSys invocation.
-
-    Lifecycle events (``RUN_STARTED``/``RUN_FINISHED``/``RUN_FAILED``) are no
-    longer emitted here: the selected command's preamble (``_run_agent`` and
-    friends) builds a ``RunRequest`` and runs it through
-    ``vibesys.api.create_session``, which owns that emission (see
-    ``_execute_run_request``) along with the `LocalRunIntegration` each run
-    uses internally.
-    """
+    """Parse and run one headless VibeSys invocation."""
     if argv and argv[0] == "validate":
         _run_validate(argv[1:])
         return
-    if argv and argv[0] == _MIGRATE_RUN_ENVIRONMENT_COMMAND:
-        _run_migrate_run_environment(argv[1:])
-        return
-
-    # Dispatch's own share of boot; the selected command's preamble
-    # (``_run_agent``) and then ``context.py`` continue the trace. These
-    # lines stay buffered until run-context assembly drains them.
-    with boot_trace.span("dispatch"):
-        with boot_trace.span("parse_cli_invocation"):
-            invocation = parse_cli_invocation(argv)
-        loop_kind, args = invocation.loop_kind, invocation.args
-        runner = _LOOP_COMMANDS[loop_kind].run
-    runner(args)
+    with boot_trace.span("dispatch"), boot_trace.span("parse_cli_invocation"):
+        invocation = parse_cli_invocation(argv)
+    _run_request(invocation.args)
 
 
 def _option_from_argv(argv: list[str], option: str) -> str | None:

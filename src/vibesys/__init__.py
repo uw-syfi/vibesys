@@ -1,4 +1,4 @@
-"""VibeSys outer-loop drivers and supporting runtime.
+"""VibeSys core and orchestration runtime.
 
 This package's ``__init__.py`` is intentionally empty so that submodules
 with lightweight import footprints (notably ``vs_issue_board.mcp``,
@@ -9,5 +9,5 @@ dependencies via package-level re-exports.
 Import what you need by full module path, e.g.::
 
     from vs_agent.api import build_agent_client
-    from vibesys.loops.agent.loop import run_agent_loop
+    from vibesys.api import create_session
 """

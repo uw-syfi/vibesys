@@ -760,10 +760,6 @@ class GitTracker:
         self._install_project_excludes()
         self._require_private_inputs_absent_from_history()
         if existing:
-            legacy_branch = f"vibesys/{self.run_id}"
-            if not self._branch_exists(branch) and self._branch_exists(legacy_branch):
-                self._project_branch = legacy_branch
-                branch = legacy_branch
             self._resume_user_project(branch, trusted_input_baseline)
             return
 

@@ -62,7 +62,7 @@ class LocalBackend:
         self._lprint = log or print
         self.image = image
         # No accelerator to pick — kept for protocol parity with other backends
-        # (e.g. _RunContext reads ``selected_device``).
+        # (e.g. run resources read ``selected_device``).
         self.selected_device = None
 
     # -- ComputeBackendImpl protocol -----------------------------------------

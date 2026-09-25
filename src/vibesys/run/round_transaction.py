@@ -1,14 +1,12 @@
-"""Recoverable transaction for one completed agent optimization round.
+"""Recoverable checkpoint for a policy's portable state namespace.
 
-The agent loop owns one portable ``agent/state.json`` document. A v4 write-
-ahead log (WAL) records the exact typed transition for that document before
-candidate or framework state is committed. Completing or recovering the
-transaction applies that transition and commits it atomically with candidate
-edits.
+A v4 write-ahead log records exact typed state transitions and other namespace
+files before candidate or framework state is committed. Completing or
+recovering the checkpoint applies those bytes and commits the namespace with
+candidate edits when requested.
 
-Version 3 journals from older VibeSys releases remain recoverable. Their
-completed-round payload and machine-local ``active.json`` transition are
-handled only at this compatibility boundary.
+Only version 4 journals are accepted. Older journals need an older VibeSys
+release to recover them.
 """
 
 # These boundary errors deliberately name the relevant path or transaction.
@@ -18,7 +16,6 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-import json
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal, Self
@@ -27,16 +24,15 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    RootModel,
-    ValidationError,
     field_validator,
 )
 
 from vibesys.run.git_tracker import FrameworkSnapshotStatus
-from vs_loop_state.api import RoundRecord, parse_round_record
-from vs_project.api import ProjectStateError, StateSlot, StateTransition
+from vs_project.api import ProjectStateError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from vibesys.run.git_tracker import GitTracker
     from vs_project.api import Project
 
@@ -49,142 +45,99 @@ class RoundTransactionError(RuntimeError):
     """Raised when a completed-round transaction cannot proceed safely."""
 
     @classmethod
-    def already_completed(cls, round_number: int) -> Self:
+    def already_completed(cls, sequence: int) -> Self:
         """Describe a transaction handle completed more than once."""
-        return cls(f"Round {round_number} transaction has already completed")
+        return cls(f"Checkpoint {sequence} has already completed")
 
     @classmethod
-    def different_project_root(cls) -> Self:
-        """Describe project and Git boundaries rooted in different directories."""
-        return cls("Round transaction project and Git tracker must use the same project root")
+    def participants_disagree(cls) -> Self:
+        """Describe project, Git tracker, and run identities that do not match."""
+        return cls("Checkpoint project, Git tracker, and run must agree")
 
     @classmethod
-    def run_id_mismatch(cls, run_id: str, git_run_id: str) -> Self:
-        """Describe a tracker bound to another run."""
-        return cls(
-            f"Round transaction run {run_id!r} does not match Git tracker run {git_run_id!r}"
-        )
+    def no_declared_slots(cls) -> Self:
+        """Describe a coordinator created without typed slots."""
+        return cls("Checkpoint requires at least one declared typed slot")
 
     @classmethod
-    def invalid_round_number(cls, round_number: int) -> Self:
-        """Describe a transaction requested for a non-positive round."""
-        return cls(f"Round number must be positive, got {round_number}")
+    def invalid_sequence(cls, sequence: int) -> Self:
+        """Describe a checkpoint requested for a non-positive sequence."""
+        return cls(f"Checkpoint sequence must be positive, got {sequence}")
 
     @classmethod
-    def unfinished_transaction(cls) -> Self:
-        """Describe an existing transaction that must be recovered first."""
-        return cls(
-            "An unfinished round transaction already exists; recover it before starting another"
-        )
+    def unfinished_checkpoint(cls) -> Self:
+        """Describe an existing checkpoint that must be recovered first."""
+        return cls("An unfinished checkpoint already exists; recover it first")
 
     @classmethod
-    def already_active(cls) -> Self:
-        """Describe a context that already owns an active round transaction."""
-        return cls("a completed-round transaction is already active")
-
-    @classmethod
-    def begin_required(cls) -> Self:
-        """Describe persistence attempted without beginning its transaction."""
-        return cls("begin_completed_round must precede project round persistence")
+    def empty_writes(cls) -> Self:
+        """Describe a checkpoint requested without any writes."""
+        return cls("Checkpoint writes must not be empty")
 
     @classmethod
     def missing_head(cls) -> Self:
         """Describe a repository without an accessible HEAD commit."""
-        return cls("Round transactions require an initialized Git HEAD")
+        return cls("Checkpoint requires an initialized Git HEAD")
 
     @classmethod
-    def history_moved(cls, action: str, pre_commit: str) -> Self:
-        """Describe history that no longer contains the transaction's base."""
-        return cls(
-            f"Cannot {action} round transaction after Git history moved away from its starting commit {pre_commit}"
-        )
+    def staged_index_changes(cls) -> Self:
+        """Describe staged user changes that make a candidate checkpoint unsafe."""
+        return cls("Cannot checkpoint candidate while the Git index has staged changes")
 
     @classmethod
-    def journal_round_mismatch(cls, actual: int, expected: int) -> Self:
-        """Describe a journal belonging to another round."""
-        return cls(f"Journal is for round {actual}, not round {expected}")
+    def journal_sequence_mismatch(cls, sequence: int) -> Self:
+        """Describe a journal that belongs to another sequence."""
+        return cls(f"Checkpoint journal is not for sequence {sequence}")
 
     @classmethod
-    def agent_state_conflict(cls) -> Self:
-        """Describe agent state that differs from the durable transaction."""
-        return cls("Committed agent state differs from the transaction journal")
+    def undeclared_slot(cls, name: str) -> Self:
+        """Describe a write to a slot the coordinator does not declare."""
+        return cls(f"Undeclared checkpoint slot {name!r}")
 
     @classmethod
-    def agent_state_snapshot_not_exact(cls) -> Self:
-        """Describe a Git snapshot that did not commit the agent state."""
-        return cls("Git snapshot did not commit the exact agent state")
+    def invalid_journal(cls, error: Exception) -> Self:
+        """Describe a journal that could not be loaded as valid state."""
+        return cls(f"Invalid checkpoint journal: {error}")
 
     @classmethod
-    def completed_round_snapshot_not_exact(cls) -> Self:
-        """Describe a Git snapshot that did not commit completed-round metadata."""
-        return cls("Git snapshot did not commit the exact completed-round metadata")
+    def journal_run_mismatch(cls, run_id: str) -> Self:
+        """Describe a journal belonging to another run."""
+        return cls(f"Checkpoint journal belongs to run {run_id!r}")
+
+    @classmethod
+    def journal_digest_mismatch(cls) -> Self:
+        """Describe a journal whose payload digest does not match."""
+        return cls("Checkpoint journal digest does not match")
+
+    @classmethod
+    def journal_duplicate_slot(cls, name: str) -> Self:
+        """Describe a journal that lists one slot as both transition and file."""
+        return cls(f"Checkpoint journal duplicates slot {name!r}")
+
+    @classmethod
+    def journal_undeclared_slot(cls, name: str) -> Self:
+        """Describe a journal naming a slot the coordinator does not declare."""
+        return cls(f"Checkpoint journal names undeclared slot {name!r}")
+
+    @classmethod
+    def history_moved(cls, pre_commit: str) -> Self:
+        """Describe history that no longer contains the checkpoint's base."""
+        return cls(f"Git history moved away from checkpoint starting commit {pre_commit}")
+
+    @classmethod
+    def committed_state_conflict(cls) -> Self:
+        """Describe committed state that differs from the journal."""
+        return cls("Committed state differs from the checkpoint journal")
+
+    @classmethod
+    def snapshot_not_exact(cls) -> Self:
+        """Describe a Git snapshot that did not commit the exact state."""
+        return cls("Git snapshot did not commit exact checkpoint state")
 
     @classmethod
     def inaccessible_head(cls) -> Self:
         """Describe a snapshot operation that left no accessible HEAD."""
-        return cls("Git snapshot completed without an accessible HEAD")
-
-    @classmethod
-    def round_payload_number_mismatch(cls, actual: int, expected: int) -> Self:
-        """Describe legacy round metadata that names another round."""
-        return cls(f"Round transaction journal payload is for round {actual}, not round {expected}")
-
-    @classmethod
-    def round_metadata_conflict(cls) -> Self:
-        """Describe committed round metadata that differs from the journal."""
-        return cls("Committed round metadata differs from the transaction journal")
-
-    @classmethod
-    def journal_missing(cls) -> Self:
-        """Describe a transaction journal that is required but absent."""
-        return cls("Round transaction journal does not exist")
-
-    @classmethod
-    def invalid_journal(cls, details: str) -> Self:
-        """Describe a journal that could not be loaded as valid state."""
-        return cls(f"Invalid round transaction journal: {details}")
-
-    @classmethod
-    def journal_run_mismatch(cls, actual: str, expected: str) -> Self:
-        """Describe a journal belonging to another run."""
-        return cls(f"Round transaction journal belongs to run {actual!r}, not {expected!r}")
-
-    @classmethod
-    def payload_digest_mismatch(cls, payload: str) -> Self:
-        """Describe a journal payload whose digest does not match."""
-        return cls(f"Round transaction journal {payload} digest does not match")
-
-    @classmethod
-    def invalid_active_transition(cls, details: str) -> Self:
-        """Describe an invalid legacy active-state transition."""
-        return cls(f"Invalid active-state transition in round transaction journal: {details}")
-
-    @classmethod
-    def invalid_agent_state_transition(cls, details: str) -> Self:
-        """Describe an invalid portable agent-state transition."""
-        return cls(f"Invalid agent-state transition in round transaction journal: {details}")
-
-    @classmethod
-    def staged_index_changes(cls) -> Self:
-        """Describe staged user changes that make the transaction unsafe."""
-        return cls("Cannot begin round transaction while the Git index contains staged changes")
-
-    @classmethod
-    def invalid_transition(cls, details: str) -> Self:
-        """Describe a transition that cannot be applied to agent state."""
-        return cls(f"Invalid round transaction agent-state transition: {details}")
-
-    @classmethod
-    def invalid_round_payload(cls, source: str, details: str) -> Self:
-        """Describe malformed completed-round data from a journal source."""
-        return cls(f"Invalid completed-round payload in transaction journal {source}: {details}")
-
-    @classmethod
-    def round_payload_not_object(cls, source: str) -> Self:
-        """Describe a completed-round JSON payload with the wrong root shape."""
-        return cls(
-            f"Invalid completed-round payload in transaction journal {source}: payload must be a JSON object"
-        )
+        return cls("Checkpoint completed without an accessible HEAD")
 
 
 class RoundRecoveryOutcome(StrEnum):
@@ -212,67 +165,32 @@ class _StrictJournal(BaseModel):
         return value
 
 
-class _V3RoundJournal(_StrictJournal):
-    """Compatibility schema for the former split round/active transaction."""
-
-    schema_version: Literal[3]
-    active_transition_base64: str
-    round_payload_base64: str
-    round_payload_sha256: Annotated[str, Field(pattern=_SHA256_PATTERN)]
-
-    @field_validator("active_transition_base64", "round_payload_base64")
-    @classmethod
-    def _validate_base64(cls, value: str) -> str:
-        _decode_base64(value)
-        return value
-
-    def active_transition(self, slot: StateSlot[BaseModel]) -> StateTransition:
-        """Decode the legacy local active-state transition through its slot."""
-        return slot.deserialize_transition(_decode_base64(self.active_transition_base64))
-
-    def round_payload(self) -> bytes:
-        """Return the exact legacy portable completed-round payload."""
-        return _decode_base64(self.round_payload_base64)
-
-
-class _V4RoundJournal(_StrictJournal):
-    """Exact transition for the canonical portable agent run state."""
+class _MultiSlotJournal(_StrictJournal):
+    """Exact typed replacements for one portable policy namespace."""
 
     schema_version: Literal[4]
-    state_transition_base64: str
-    state_transition_sha256: Annotated[str, Field(pattern=_SHA256_PATTERN)]
+    transitions_base64: dict[str, str]
+    namespace_files_base64: dict[str, str]
+    transitions_sha256: Annotated[str, Field(pattern=_SHA256_PATTERN)]
+    candidate: bool = True
+    label: str | None = None
 
-    @field_validator("state_transition_base64")
+    @field_validator("transitions_base64")
     @classmethod
-    def _validate_base64(cls, value: str) -> str:
-        _decode_base64(value)
+    def _validate_transitions(cls, value: dict[str, str]) -> dict[str, str]:
+        if not value:
+            message = "checkpoint must contain at least one state transition"
+            raise ValueError(message)
+        for payload in value.values():
+            _decode_base64(payload)
         return value
 
-    def state_transition(self, slot: StateSlot[BaseModel]) -> StateTransition:
-        """Decode the portable state transition through its typed slot."""
-        return slot.deserialize_transition(_decode_base64(self.state_transition_base64))
-
-    def transition_payload(self) -> bytes:
-        """Return the serialized typed transition bytes."""
-        return _decode_base64(self.state_transition_base64)
-
-
-_Journal = Annotated[
-    _V3RoundJournal | _V4RoundJournal,
-    Field(discriminator="schema_version"),
-]
-
-
-class _RoundJournal(RootModel[_Journal]):
-    """Discriminated persisted journal envelope."""
-
-    model_config = ConfigDict(frozen=True, strict=True)
-
-
-class _LegacyActiveState(BaseModel):
-    """Lossless compatibility model for removed v3 active checkpoints."""
-
-    model_config = ConfigDict(extra="allow", frozen=True, strict=True)
+    @field_validator("namespace_files_base64")
+    @classmethod
+    def _validate_namespace_files(cls, value: dict[str, str]) -> dict[str, str]:
+        for payload in value.values():
+            _decode_base64(payload)
+        return value
 
 
 @dataclass(frozen=True)
@@ -282,32 +200,32 @@ class CompletedRound:
     checkpoint: str
 
 
-class RoundTransaction:
-    """A prepared round transition obtained from ``coordinator.begin``."""
+class MultiSlotRoundTransaction:
+    """Prepared replacement of several typed files in one policy namespace."""
 
-    def __init__(self, coordinator: RoundTransactionCoordinator, round_number: int) -> None:
-        """Bind this handle to one coordinator and round number."""
+    def __init__(self, coordinator: MultiSlotRoundTransactionCoordinator, sequence: int) -> None:
+        """Bind the transaction to one coordinator and sequence."""
         self._coordinator = coordinator
-        self.round_number = round_number
+        self.sequence = sequence
         self._closed = False
 
     def complete(self) -> CompletedRound:
-        """Apply and commit the prepared state transition."""
+        """Apply and commit the prepared replacements exactly once."""
         if self._closed:
-            raise RoundTransactionError.already_completed(self.round_number)
+            raise RoundTransactionError.already_completed(self.sequence)
         # lint-waiver: LW-007067 [SLF001]; the transaction handle uses its coordinator's private commit seam
-        result = self._coordinator._complete(self.round_number)  # noqa: SLF001
+        result = self._coordinator._complete(self.sequence)  # noqa: SLF001
         self._closed = True
         return result
 
 
-class RoundTransactionCoordinator:
-    """Coordinate crash-safe agent-state and candidate Git commits.
+class MultiSlotRoundTransactionCoordinator:
+    """Journal typed writes before committing their namespace with candidate edits.
 
-    ``begin(round_number, state_transition=...)`` durably journals an exact
-    typed transition for portable ``agent/state.json``. ``complete()`` applies
-    and commits that transition with the candidate worktree. ``recover()`` is
-    idempotent and rolls any journaled transition forward.
+    Policy-owned schemas are supplied at run setup so recovery can validate every
+    journaled document before replay. Interim writes to the portable namespace
+    remain outside this completed-round transaction, for policies that keep a
+    recoverable paid-work cursor between checkpoints.
     """
 
     def __init__(
@@ -316,210 +234,194 @@ class RoundTransactionCoordinator:
         git: GitTracker,
         run_id: str,
         *,
-        agent_state_model_type: type[BaseModel],
+        namespace: str,
+        models: Mapping[str, type[BaseModel]],
     ) -> None:
-        """Validate and bind the project, Git tracker, and run identity."""
-        project_root = project.root.resolve()
-        if git.root.resolve() != project_root:
-            raise RoundTransactionError.different_project_root()
-        if git.run_id != run_id:
-            raise RoundTransactionError.run_id_mismatch(run_id, git.run_id)
-
+        """Validate the run identity and bind its declared typed slots."""
+        if project.root.resolve() != git.root.resolve() or git.run_id != run_id:
+            raise RoundTransactionError.participants_disagree()
+        if not models:
+            raise RoundTransactionError.no_declared_slots()
         project.state.load_run(run_id)
-        self._project = project
         self._git = git
         self.run_id = run_id
-        self._agent_state_slot: StateSlot[BaseModel] = project.state.portable_namespace(
-            run_id,
-            "agent",
-        ).slot("state.json", agent_state_model_type)
-        self._legacy_active_slot: StateSlot[BaseModel] = project.state.local_namespace(
-            run_id,
-            "agent",
-        ).slot("active.json", _LegacyActiveState)
+        self.namespace = project.state.portable_namespace(run_id, namespace)
+        self._slots = {name: self.namespace.slot(name, model) for name, model in models.items()}
         self._journal_slot = project.state.local_namespace(run_id, "transaction").slot(
-            "round.json",
-            _RoundJournal,
+            "checkpoint.json", _MultiSlotJournal
         )
 
     def begin(
         self,
-        round_number: int,
+        sequence: int,
         *,
-        state_transition: StateTransition,
-    ) -> RoundTransaction:
-        """Durably prepare an exact agent-state transition."""
-        if round_number < 1:
-            raise RoundTransactionError.invalid_round_number(round_number)
-        if self._load_optional_journal() is not None:
-            raise RoundTransactionError.unfinished_transaction()
-
+        writes: Mapping[str, BaseModel],
+        candidate: bool = True,
+        label: str | None = None,
+    ) -> MultiSlotRoundTransaction:
+        """Validate all requested writes, then durably journal their transitions."""
+        if sequence < 1:
+            raise RoundTransactionError.invalid_sequence(sequence)
+        if self._load_journal() is not None:
+            raise RoundTransactionError.unfinished_checkpoint()
+        if not writes:
+            raise RoundTransactionError.empty_writes()
         pre_commit = self._git.current_sha()
         if pre_commit is None:
             raise RoundTransactionError.missing_head()
-        self._require_clean_index()
-        self._validate_state_transition(state_transition)
-
-        transition_payload = self._agent_state_slot.serialize_transition(state_transition)
-        journal = _V4RoundJournal(
+        if candidate:
+            staged = self._git.run(["git", "diff", "--cached", "--quiet"], check=False)
+            if staged.returncode != 0:
+                raise RoundTransactionError.staged_index_changes()
+        payloads = self._serialize_writes(writes)
+        namespace_files = {
+            item.relative_path.as_posix(): item.contents
+            for item in self.namespace.snapshot().files
+            if item.relative_path.as_posix() not in writes
+        }
+        journal = _MultiSlotJournal(
             schema_version=_JOURNAL_SCHEMA_VERSION,
             run_id=self.run_id,
-            round_number=round_number,
+            round_number=sequence,
             pre_commit=pre_commit,
-            state_transition_base64=base64.b64encode(transition_payload).decode("ascii"),
-            state_transition_sha256=_sha256(transition_payload),
+            transitions_base64={
+                name: base64.b64encode(payload).decode("ascii")
+                for name, payload in payloads.items()
+            },
+            namespace_files_base64={
+                name: base64.b64encode(payload).decode("ascii")
+                for name, payload in namespace_files.items()
+            },
+            transitions_sha256=self._payload_digest(
+                payloads, namespace_files, candidate=candidate, label=label
+            ),
+            candidate=candidate,
+            label=label,
         )
-        self._journal_slot.save(_RoundJournal(root=journal))
-        return RoundTransaction(self, round_number)
+        self._journal_slot.save(journal)
+        return MultiSlotRoundTransaction(self, sequence)
 
     def recover(self) -> RoundRecoveryOutcome:
-        """Commit any journaled transition and restore its working-tree state."""
-        journal = self._load_optional_journal()
+        """Replay a journaled checkpoint after an interrupted process."""
+        journal = self._load_journal()
         if journal is None:
             return RoundRecoveryOutcome.NO_TRANSACTION
-
-        if not self._pre_commit_is_ancestor(journal.pre_commit):
-            raise RoundTransactionError.history_moved("recover", journal.pre_commit)
-        self._commit_prepared(journal)
-        self._clear_journal()
+        self._commit(journal)
+        self._journal_slot.save(None)
         return RoundRecoveryOutcome.COMMITTED
 
-    def _complete(self, round_number: int) -> CompletedRound:
+    def _complete(self, sequence: int) -> CompletedRound:
         journal = self._load_journal()
-        if journal.round_number != round_number:
-            raise RoundTransactionError.journal_round_mismatch(journal.round_number, round_number)
-        if not self._pre_commit_is_ancestor(journal.pre_commit):
-            raise RoundTransactionError.history_moved("complete", journal.pre_commit)
-
-        completed = self._commit_prepared(journal)
-        self._clear_journal()
-        return completed
-
-    def _commit_prepared(self, journal: _Journal) -> CompletedRound:
-        if isinstance(journal, _V3RoundJournal):
-            return self._commit_legacy_round(journal)
-        return self._commit_agent_state(journal)
-
-    def _commit_agent_state(self, journal: _V4RoundJournal) -> CompletedRound:
-        transition = journal.state_transition(self._agent_state_slot)
-        self._validate_state_transition(transition)
-        snapshot = self._agent_state_slot.snapshot_transition(transition)
-        status = self._git.framework_snapshot_status(snapshot)
-        current_sha = self._git.current_sha()
-
-        if status is FrameworkSnapshotStatus.EXACT:
-            self._agent_state_slot.apply(transition)
-        elif current_sha == journal.pre_commit:
-            self._agent_state_slot.apply(transition)
-            self._git.snapshot_with_framework_metadata(
-                f"vibesys(round {journal.round_number}): record result",
-                snapshot,
-            )
-        else:
-            raise RoundTransactionError.agent_state_conflict()
-
-        if self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
-            raise RoundTransactionError.agent_state_snapshot_not_exact()
-        checkpoint = self._git.current_sha()
-        if checkpoint is None:
-            raise RoundTransactionError.inaccessible_head()
-        return CompletedRound(checkpoint=checkpoint)
-
-    def _commit_legacy_round(self, journal: _V3RoundJournal) -> CompletedRound:
-        """Roll a v3 journal forward without importing its removed domain model."""
-        round_payload = journal.round_payload()
-        record = _parse_round_payload(round_payload, source="round transaction journal")
-        if record.round_number != journal.round_number:
-            raise RoundTransactionError.round_payload_number_mismatch(
-                record.round_number, journal.round_number
-            )
-        expected_snapshot = self._project.state.prepare_completed_round_snapshot(
-            self.run_id,
-            record,
-        )
-        status = self._git.framework_snapshot_status(expected_snapshot)
-        if status is FrameworkSnapshotStatus.DIFFERENT:
-            raise RoundTransactionError.round_metadata_conflict()
-        if status is FrameworkSnapshotStatus.EXACT:
-            snapshot = self._project.state.restore_completed_round(self.run_id, record)
-        else:
-            snapshot = self._project.state.save_round(self.run_id, record)
-            self._git.snapshot_with_framework_metadata(
-                f"vibesys(round {journal.round_number}): record result",
-                snapshot,
-            )
-        if self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
-            raise RoundTransactionError.completed_round_snapshot_not_exact()
-        self._legacy_active_slot.apply(journal.active_transition(self._legacy_active_slot))
-        checkpoint = self._git.current_sha()
-        if checkpoint is None:
-            raise RoundTransactionError.inaccessible_head()
-        return CompletedRound(checkpoint=checkpoint)
-
-    def _load_journal(self) -> _Journal:
-        journal = self._load_optional_journal()
-        if journal is None:
-            raise RoundTransactionError.journal_missing()
-        return journal
-
-    def _load_optional_journal(self) -> _Journal | None:
-        """Load and validate the WAL while preserving the coordinator error API."""
-        try:
-            envelope = self._journal_slot.load_optional()
-        except ProjectStateError as exc:
-            raise RoundTransactionError.invalid_journal(str(exc)) from exc
-        if envelope is None:
-            return None
-        journal = envelope.root
-        if journal.run_id != self.run_id:
-            raise RoundTransactionError.journal_run_mismatch(journal.run_id, self.run_id)
-        if isinstance(journal, _V3RoundJournal):
-            self._validate_v3_journal(journal)
-        else:
-            self._validate_v4_journal(journal)
-        return journal
-
-    def _validate_v3_journal(self, journal: _V3RoundJournal) -> None:
-        if _sha256(journal.round_payload()) != journal.round_payload_sha256:
-            raise RoundTransactionError.payload_digest_mismatch("payload")
-        _parse_round_payload(journal.round_payload(), source="round transaction journal")
-        try:
-            self._legacy_active_slot.validate_transition(
-                journal.active_transition(self._legacy_active_slot)
-            )
-        except (TypeError, ValueError, ProjectStateError) as exc:
-            raise RoundTransactionError.invalid_active_transition(str(exc)) from exc
-
-    def _validate_v4_journal(self, journal: _V4RoundJournal) -> None:
-        payload = journal.transition_payload()
-        if _sha256(payload) != journal.state_transition_sha256:
-            raise RoundTransactionError.payload_digest_mismatch("state-transition")
-        try:
-            self._validate_state_transition(journal.state_transition(self._agent_state_slot))
-        except (TypeError, ValueError, ProjectStateError, RoundTransactionError) as exc:
-            raise RoundTransactionError.invalid_agent_state_transition(str(exc)) from exc
-
-    def _pre_commit_is_ancestor(self, pre_commit: str) -> bool:
-        result = self._git.run(
-            ["git", "merge-base", "--is-ancestor", pre_commit, "HEAD"],
-            check=False,
-        )
-        return result.returncode == 0
-
-    def _require_clean_index(self) -> None:
-        result = self._git.run(["git", "diff", "--cached", "--quiet"], check=False)
-        if result.returncode != 0:
-            raise RoundTransactionError.staged_index_changes()
-
-    def _validate_state_transition(self, transition: StateTransition) -> None:
-        try:
-            self._agent_state_slot.validate_transition(transition)
-            self._agent_state_slot.snapshot_transition(transition)
-        except ProjectStateError as exc:
-            raise RoundTransactionError.invalid_transition(str(exc)) from exc
-
-    def _clear_journal(self) -> None:
+        if journal is None or journal.round_number != sequence:
+            raise RoundTransactionError.journal_sequence_mismatch(sequence)
+        result = self._commit(journal)
         self._journal_slot.save(None)
+        return result
+
+    def _serialize_writes(self, writes: Mapping[str, BaseModel]) -> dict[str, bytes]:
+        payloads: dict[str, bytes] = {}
+        for name, value in sorted(writes.items()):
+            slot = self._slots.get(name)
+            if slot is None:
+                raise RoundTransactionError.undeclared_slot(name)
+            transition = slot.transition(value)
+            payloads[name] = slot.serialize_transition(transition)
+        return payloads
+
+    def _load_journal(self) -> _MultiSlotJournal | None:
+        try:
+            journal = self._journal_slot.load_optional()
+        except ProjectStateError as exc:
+            raise RoundTransactionError.invalid_journal(exc) from exc
+        if journal is None:
+            return None
+        if journal.run_id != self.run_id:
+            raise RoundTransactionError.journal_run_mismatch(journal.run_id)
+        payloads = {
+            name: _decode_base64(payload) for name, payload in journal.transitions_base64.items()
+        }
+        namespace_files = {
+            name: _decode_base64(payload)
+            for name, payload in journal.namespace_files_base64.items()
+        }
+        if (
+            self._payload_digest(
+                payloads,
+                namespace_files,
+                candidate=journal.candidate,
+                label=journal.label,
+            )
+            != journal.transitions_sha256
+        ):
+            raise RoundTransactionError.journal_digest_mismatch()
+        for name, payload in namespace_files.items():
+            if name in payloads:
+                raise RoundTransactionError.journal_duplicate_slot(name)
+            self.namespace.snapshot_bytes(name, payload)
+        for name, payload in payloads.items():
+            slot = self._slots.get(name)
+            if slot is None:
+                raise RoundTransactionError.journal_undeclared_slot(name)
+            slot.deserialize_transition(payload)
+        return journal
+
+    def _commit(self, journal: _MultiSlotJournal) -> CompletedRound:
+        ancestor = self._git.run(
+            ["git", "merge-base", "--is-ancestor", journal.pre_commit, "HEAD"], check=False
+        )
+        if ancestor.returncode != 0:
+            raise RoundTransactionError.history_moved(journal.pre_commit)
+        self._apply_journal(journal)
+        snapshot = self.namespace.snapshot()
+        if self._git.current_sha() == journal.pre_commit:
+            label = journal.label or f"vibesys(round {journal.round_number}): record result"
+            if journal.candidate:
+                self._git.snapshot_with_framework_metadata(label, snapshot)
+            else:
+                self._git.snapshot_framework_state(label, snapshot)
+        elif self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
+            raise RoundTransactionError.committed_state_conflict()
+        if self._git.framework_snapshot_status(snapshot) is not FrameworkSnapshotStatus.EXACT:
+            raise RoundTransactionError.snapshot_not_exact()
+        revision = self._git.current_sha()
+        if revision is None:
+            raise RoundTransactionError.inaccessible_head()
+        return CompletedRound(checkpoint=revision)
+
+    def _apply_journal(self, journal: _MultiSlotJournal) -> None:
+        """Restore exact namespace bytes before creating or checking the commit."""
+        expected = set(journal.namespace_files_base64) | set(journal.transitions_base64)
+        for item in self.namespace.snapshot().files:
+            name = item.relative_path.as_posix()
+            if name not in expected:
+                self.namespace.delete(name)
+        for name, payload in journal.namespace_files_base64.items():
+            self.namespace.write_bytes(name, _decode_base64(payload))
+        for name, payload in journal.transitions_base64.items():
+            slot = self._slots[name]
+            slot.apply(slot.deserialize_transition(_decode_base64(payload)))
+
+    @staticmethod
+    def _payload_digest(
+        payloads: Mapping[str, bytes],
+        namespace_files: Mapping[str, bytes],
+        *,
+        candidate: bool,
+        label: str | None,
+    ) -> str:
+        digest = hashlib.sha256()
+        digest.update(b"candidate\0" if candidate else b"state-only\0")
+        digest.update((label or "").encode("utf-8"))
+        digest.update(b"\0")
+        for kind, files in ((b"transition", payloads), (b"namespace", namespace_files)):
+            for name, payload in sorted(files.items()):
+                digest.update(kind)
+                digest.update(b"\0")
+                digest.update(name.encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(payload)
+                digest.update(b"\0")
+        return digest.hexdigest()
 
 
 def _decode_base64(value: str) -> bytes:
@@ -528,20 +430,3 @@ def _decode_base64(value: str) -> bytes:
     except (binascii.Error, ValueError) as exc:
         message = "must contain canonical base64-encoded bytes"
         raise ValueError(message) from exc
-
-
-def _sha256(contents: bytes) -> str:
-    return hashlib.sha256(contents).hexdigest()
-
-
-def _parse_round_payload(contents: bytes, *, source: str) -> RoundRecord:
-    try:
-        payload = json.loads(contents)
-    except (TypeError, ValueError) as exc:
-        raise RoundTransactionError.invalid_round_payload(source, str(exc)) from exc
-    if not isinstance(payload, dict):
-        raise RoundTransactionError.round_payload_not_object(source)
-    try:
-        return parse_round_record(payload)
-    except (TypeError, ValueError, ValidationError) as exc:
-        raise RoundTransactionError.invalid_round_payload(source, str(exc)) from exc

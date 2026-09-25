@@ -355,18 +355,8 @@ SkyPilot profile selection, profiles-file path, and executable are machine-local
 launch policy. Supply them again on resume when they are not available from the
 current CLI/config file.
 
-Run schema version 1 has no recorded environment. Version 2 has no portable
-compute-resource request. VibeSys refuses to load either rather than infer
-missing execution metadata. Stamp the environment the run was launched with,
-or confirm the environment already present in a version 2 recording, once:
-
-```bash
-vibesys migrate-run-environment --project . --run <run-id> --run-environment modal
-```
-
-The command accepts the same `--docker-image`, `--modal-gpu`,
-`--modal-model-volume`, and `--modal-app` options as a run, with the same
-defaults, and is one-way.
+Only v4 descriptor-backed runs can be resumed. Earlier run schemas are not
+supported by this CLI.
 
 ## Profiler
 

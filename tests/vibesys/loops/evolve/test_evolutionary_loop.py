@@ -1,112 +1,87 @@
 """Integration tests for the evolutionary search loop.
 
 Mocks the agent runner so the LLM-driven mutator/judge/profiler return
-scripted responses. The real ``_RunContext`` is built on a tmp_path
+scripted responses. The public run context is built on a tmp_path
 workspace (so git tracking, snapshots, and population persistence are
 exercised end-to-end), but the model + sandbox + agent-runner factories
-are patched out, the same pattern as ``tests/vibesys/loops/agent/test_orchestrate.py``.
+are patched out, the same pattern as ``tests/vibesys/loops/multi/test_orchestrate.py``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-import random
 import shlex
-import threading
-import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING, Literal, Protocol, TypedDict, Unpack, cast
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.support.run_execution import run_execution_record
 
-from vibesys.api.contracts import LoopKind, ResumeRef, RunRequest
-from vibesys.config import Config
-from vibesys.constants import ComputeBackend, DomainName
-from vibesys.context import create_run_context
-from vibesys.domains.llm_serving.hooks import LLMServingEnvironmentHooks
+from vibesys.config import Config, as_config
+from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend, DomainName
 from vibesys.domains.registry import resolve_domain
+from vibesys.evaluators.gates import (
+    BenchmarkGateResult,
+    FrameworkBenchmarkOutcome,
+    framework_command_timeout,
+)
 from vibesys.evaluators.input_manifest import BenchmarkResult, load_input_bundle
+from vibesys.evaluators.metrics import MetricSpace, Objective
 from vibesys.events import FrameworkWarningData
-from vibesys.loops.evolve import loop as evolve_loop
+from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
 from vibesys.loops.evolve.loop import (
     _candidate_code,
     _candidate_runtime_notes,
-    _CandidateOutcome,
     _evaluate_in_subcontext,
-    _EvolutionSearchSession,
     _initialize_search_policy,
     _latest_wip_seed,
-    _plan_candidate,
     _recent_failure_lessons,
-    _run_framework_benchmark_gate,
-    _run_generation_parallel,
     _teardown_candidate_deployment,
-    run_evolve_loop,
 )
+from vibesys.loops.evolve.orchestration import EvolveOptions, descriptor_from_options
 from vibesys.loops.evolve.population import (
     Individual,
     Population,
 )
+from vibesys.loops.evolve.run import EvolveRun
 from vibesys.loops.evolve.search_policy import (
     OpenEvolveSearchConfig,
     OpenEvolveSearchPolicy,
-    SearchSelection,
-    SearchSelectionParameters,
-    VibeSysSearchPolicy,
 )
 from vibesys.loops.evolve.state import EvolutionStateStore
-from vibesys.loops.gates import (
-    BenchmarkContract,
-    BenchmarkGateResult,
-    FrameworkBenchmarkOutcome,
-)
-from vibesys.loops.metrics import MetricSpace, Objective
+from vibesys.orchestration.request import ResumeRef, RunRequest
+from vibesys.orchestration.runner import run_orchestration
 from vibesys.profilers import ProfilerKind
 from vibesys.render.sink import output_sink
-from vibesys.run import EventJournal, GitTracker, LoopContext, RunState, RunStateNamespace
+from vibesys.run import EventJournal, GitTracker, RunState, RunStateNamespace
 from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.sandbox.run_environment import (
-    CandidateRuntime,
-    RunEnvironment,
-    RunEnvironmentSpec,
-    RunEnvironmentView,
-)
+from vibesys.run.integration import LocalRunIntegration
+from vibesys.sandbox.run_environment import CandidateRuntime, RunEnvironmentSpec
 from vibesys.schemas import JudgeResponse, ProfilerSummary, Verdict
-from vs_agent.api import CandidateProgress, RoundProgress
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
-from vs_project.api import EvolveRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import (
+    OrchestrationDescriptor,
+    OrchestrationRunManifest,
+    Project,
+    RunEnvironmentRecord,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vibesys.evaluators.input_manifest import WorkspaceSource
     from vibesys.loops.evolve.search_policy import SearchPolicyName
-
-from vibesys.run import RepositoryVisibility
-
-
-class _FakeLoopContextOptions(TypedDict, total=False):
-    git: GitTracker
-    state: RunState
-    run_environment: RunEnvironment | SimpleNamespace
-    run_environment_view: RunEnvironmentView | SimpleNamespace
-    events: EventJournal
-    log: Callable[[str], None]
-
+    from vibesys.orchestration.runtime import RunContext
+    from vibesys.run import RepositoryVisibility
 
 _LLM_SERVING_DOMAIN = resolve_domain(DomainName.LLM_SERVING)
 
 
-def _deterministic_rng() -> random.Random:
-    # Candidate-selection tests need repeatable pseudo-random choices, not
-    # cryptographic unpredictability.
-    return random.Random(0)  # noqa: S311  # lint-waiver: LW-010050 [S311]; a fixed seed makes stochastic selection cases reproducible, and the generator never handles security-sensitive values.
-
-
 class _EvolveLoopKwargs(TypedDict, total=False):
-    """The keyword arguments ``run_evolve_loop`` accepts.
+    """Overrides accepted by the canonical evolve request fixture.
 
     ``_invoke_loop`` merges shared defaults with per-test overrides before
     splatting them into the loop, so the merged mapping needs a per-key type
@@ -157,53 +132,96 @@ class _EvolveLoopKwargs(TypedDict, total=False):
     repo_visibility: RepositoryVisibility
 
 
-class _EvolveRequestOptions(TypedDict, total=False):
-    """Evolve settings needed by direct phase-helper tests."""
-
-    max_parallelism: int
-    children_per_generation: int
-    k_top_inspirations: int
-    k_random_inspirations: int
-    selection_temperature: float
-    frontier_bias: float
-    seed: int | None
-    search_policy: str | None
-    openevolve_config: OpenEvolveSearchConfig | None
-
-
 def _discard_log(_message: str) -> None:
     """Drop log output emitted by a helper under test."""
 
 
-class _FakeLoopContext(LoopContext):
-    """A ``LoopContext`` exposing only the members a helper under test reads.
+class _CandidateEnvironment(Protocol):
+    def candidate_runtime(
+        self, view: object, generation: int, child_idx: int
+    ) -> CandidateRuntime: ...
 
-    Subclassing the protocol keeps the fake assignable to the declared
-    parameter type. Members a test does not wire up stay unset, so a helper
-    that reaches past what the test set up fails loudly.
-    """
+    def teardown_deployment(self, name: str, *, log: Callable[[str], None]) -> object: ...
 
-    def __init__(self, **options: Unpack[_FakeLoopContextOptions]) -> None:
+
+class _FakeRunContextOptions(TypedDict, total=False):
+    git: GitTracker
+    state: RunState
+    run_environment: _CandidateEnvironment
+    run_environment_view: object
+    events: EventJournal
+    log: Callable[[str], None]
+
+
+class _FakeRunContext:
+    """A small host-capability fake for evolve's focused helper assertions."""
+
+    def __init__(self, **options: Unpack[_FakeRunContextOptions]) -> None:
         git = options.get("git")
         state = options.get("state")
         run_environment = options.get("run_environment")
         run_environment_view = options.get("run_environment_view")
         events = options.get("events")
+        log = options.get("log", _discard_log)
         if events is not None:
             self.events = events
         if git is not None:
             self.git = git
+            self.workspaces = SimpleNamespace(
+                root=SimpleNamespace(candidate_patch=AsyncMock(side_effect=git.candidate_patch))
+            )
         if state is not None:
             self.state = state
         if run_environment is not None:
             self.run_environment = run_environment
         if run_environment_view is not None:
             self.run_environment_view = run_environment_view
-        self._log = options.get("log", _discard_log)
+        if run_environment is not None:
+            active_environment = run_environment
 
-    def lprint(self, text: str) -> None:
+            def candidate_runtime(
+                generation: int, child_idx: int, *, scope: object | None = None
+            ) -> CandidateRuntime:
+                assert scope is None
+                return active_environment.candidate_runtime(
+                    self.run_environment_view, generation, child_idx
+                )
+
+            self.environment = SimpleNamespace(
+                candidate_runtime=candidate_runtime,
+                teardown_deployment=AsyncMock(
+                    side_effect=lambda name: active_environment.teardown_deployment(name, log=log)
+                ),
+            )
+        self._log = log
+        self.judge_accuracy_command: str | None = None
+        self.judge_benchmark_command: str | None = None
+        self.judge_backend = MagicMock()
+
+    def log(self, text: str) -> None:
         """Record a log line the same way the real context would emit it."""
         self._log(text)
+
+    def trusted_input_changes(self) -> list[str]:
+        return []
+
+
+def _as_run_context(fake: _FakeRunContext) -> RunContext:
+    """Type the focused capability fake as the host accepted by evolve helpers."""
+    return cast("RunContext", fake)
+
+
+class _SharedFakeClient:
+    """Give each spawned handle independent close ownership over one script."""
+
+    def __init__(self, scripted: FakeAgentClient) -> None:
+        self._scripted = scripted
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._scripted, name)
+
+    def close(self) -> None:
+        """The scripted client remains available to other role handles."""
 
 
 # ---------------------------------------------------------------------------
@@ -319,100 +337,106 @@ def _invoke_loop(
         "space": MetricSpace(),
     }
     defaults.update(kwargs)
+    config = as_config(defaults["config"])
     bundle = load_input_bundle(Path(defaults["input_path"]))
-    agent = bundle.manifest.agent.model_copy(
-        update={"domain": defaults.get("domain", bundle.domain)}
-    )
-    accuracy = bundle.manifest.accuracy.model_copy(
-        update={"timeout_seconds": defaults.get("accuracy_timeout_seconds")}
-    )
-    benchmark = bundle.manifest.benchmark.model_copy(
-        update={
-            "result": defaults.get("benchmark_result"),
-            "result_protocol": defaults.get("benchmark_result_protocol"),
-            "timeout_seconds": defaults.get("benchmark_timeout_seconds"),
-        }
-    )
+    accuracy_command = tuple(shlex.split(defaults["accuracy_command"]))
+    benchmark_command = tuple(shlex.split(defaults["benchmark_command"]))
     manifest = bundle.manifest.model_copy(
-        update={"agent": agent, "accuracy": accuracy, "benchmark": benchmark}
+        update={
+            "agent": bundle.manifest.agent.model_copy(
+                update={"domain": defaults.get("domain", bundle.domain)}
+            ),
+            "accuracy": bundle.manifest.accuracy.model_copy(
+                update={
+                    "command": accuracy_command,
+                    "timeout_seconds": defaults.get("accuracy_timeout_seconds"),
+                }
+            ),
+            "benchmark": bundle.manifest.benchmark.model_copy(
+                update={
+                    "command": benchmark_command,
+                    "timeout_seconds": defaults.get("benchmark_timeout_seconds"),
+                    "result": defaults.get("benchmark_result"),
+                    "result_protocol": defaults.get("benchmark_result_protocol"),
+                }
+            ),
+        }
     )
     bundle = bundle.model_copy(
         update={
             "manifest": manifest,
-            "resolved_accuracy_command": tuple(shlex.split(defaults["accuracy_command"])),
-            "resolved_benchmark_command": tuple(shlex.split(defaults["benchmark_command"])),
-            "workspace_sources": defaults.get("workspace_sources", bundle.workspace_sources),
-            "evaluator_path": defaults.get("evaluator_path", bundle.evaluator_path),
-            "evaluator_package_root": defaults.get(
-                "evaluator_package_root", bundle.evaluator_package_root
-            ),
+            "resolved_accuracy_command": accuracy_command,
+            "resolved_benchmark_command": benchmark_command,
         }
     )
-    exp_name = defaults["exp_name"]
-    request = RunRequest(
-        project_root=bundle.root,
-        loop=LoopKind.EVOLVE,
-        config=defaults["config"],
-        input_bundle=bundle,
-        objective=defaults["objective"],
-        resume=ResumeRef(run_id=exp_name) if defaults.get("existing", False) else None,
-        exp_name=None if defaults.get("existing", False) else exp_name,
-        runs_dir=defaults["runs_dir"],
-        space=defaults.get("space", MetricSpace()),
-        max_generations=defaults.get("max_generations", 8),
-        children_per_generation=defaults.get("children_per_generation", 2),
+    backend = defaults.get("backend", DEFAULT_COMPUTE_BACKEND)
+    profiler = defaults.get("profiler_kind", ProfilerKind.AUTO)
+    openevolve = defaults.get("openevolve_config")
+    modality = defaults.get("modality")
+    if modality is None and bundle.domain is DomainName.LLM_SERVING:
+        modality = "text_generation"
+    options = EvolveOptions(
+        modality=modality,
+        max_generations=defaults["max_generations"],
+        children_per_generation=defaults["children_per_generation"],
         k_top_inspirations=defaults.get("k_top_inspirations", 2),
         k_random_inspirations=defaults.get("k_random_inspirations", 2),
         selection_temperature=defaults.get("selection_temperature", 0.5),
-        seed=defaults.get("seed"),
-        debug=defaults.get("debug", False),
-        profiler_kind=defaults.get("profiler_kind", ProfilerKind.HEADROOM),
-        skills_dirs=defaults.get("skills_dirs"),
-        run_environment=defaults.get("run_environment"),
-        agent_backend=defaults.get("agent_backend"),
-        cli_provider=defaults.get("cli_provider"),
-        backend=defaults.get("backend", ComputeBackend.CPU),
-        modality=defaults.get("modality"),
+        seed=defaults["seed"],
+        search_policy=cast(
+            'Literal["vibesys", "openevolve"] | None',
+            str(defaults["search_policy"]) if defaults.get("search_policy") is not None else None,
+        ),
+        openevolve_population_size=openevolve.population_size if openevolve else None,
+        openevolve_archive_size=openevolve.archive_size if openevolve else None,
+        openevolve_num_islands=openevolve.num_islands if openevolve else None,
+        openevolve_migration_interval=openevolve.migration_interval if openevolve else None,
+        openevolve_migration_rate=openevolve.migration_rate if openevolve else None,
         frontier_bias=defaults.get("frontier_bias", 0.7),
         bootstrap_max_attempts=defaults.get("bootstrap_max_attempts", 5),
         keep_deployments=defaults.get("keep_deployments", False),
         max_parallelism=defaults.get("max_parallelism", 1),
-        search_policy=defaults.get("search_policy"),
-        openevolve_config=defaults.get("openevolve_config"),
-        remote_repo=defaults.get("remote_repo"),
-        repo_visibility=defaults.get("repo_visibility", RepositoryVisibility.PRIVATE),
+        metric_space=defaults["space"],
     )
+    descriptor = descriptor_from_options(options)
+    request = RunRequest(
+        project_root=bundle.root,
+        orchestration=descriptor,
+        config=config,
+        input_bundle=bundle,
+        objective=defaults["objective"],
+        exp_name=defaults["exp_name"],
+        runs_dir=defaults["runs_dir"],
+        resume=ResumeRef(run_id=defaults["exp_name"]) if defaults.get("existing") else None,
+        debug=defaults.get("debug", False),
+        profiler_kind=profiler,
+        skills_dirs=defaults.get("skills_dirs"),
+        run_environment=defaults.get("run_environment"),
+        agent_backend=defaults.get("agent_backend"),
+        cli_provider=defaults.get("cli_provider"),
+        backend=backend,
+    )
+
+    async def execute() -> bool:
+        integration = LocalRunIntegration()
+        try:
+            return await run_orchestration(request, integration, EvolveOrchestrator(descriptor))
+        finally:
+            integration.close()
+
     with (
         patch("vibesys.backends.cuda.make_local_shell_sandbox"),
-        patch("vibesys.context.build_agent_client", return_value=runner),
+        patch(
+            "vibesys.orchestration.runtime.build_agent_client",
+            side_effect=lambda **_kwargs: _SharedFakeClient(runner),
+        ),
         patch("vibesys.context.PROJECT_ROOT", tmp_path),
         patch(
             "vibesys.loops.evolve.loop._run_framework_accuracy_gate",
-            accuracy_gate,
+            AsyncMock(side_effect=accuracy_gate),
         ),
     ):
-        if "pass_criteria" in defaults:
-            return run_evolve_loop(request, pass_criteria=defaults["pass_criteria"])
-        return run_evolve_loop(request)
-
-
-def _test_request(
-    input_path: str,
-    *,
-    config: Config,
-    objective: str,
-    options: _EvolveRequestOptions | None = None,
-) -> RunRequest:
-    """Build the public request DTO for tests of internal evolve phases."""
-    bundle = load_input_bundle(Path(input_path))
-    return RunRequest(
-        project_root=bundle.root,
-        loop=LoopKind.EVOLVE,
-        config=config,
-        input_bundle=bundle,
-        objective=objective,
-        **(options or {}),
-    )
+        return asyncio.run(execute())
 
 
 def _invoke_bootstrap(
@@ -427,7 +451,7 @@ def _invoke_bootstrap(
     """Exercise bootstrap through a valid one-generation run contract."""
     overrides: _EvolveLoopKwargs = {"max_generations": 1}
     overrides.update(kwargs)
-    with patch("vibesys.loops.evolve.loop._run_generation_serial"):
+    with patch("vibesys.loops.evolve.run.EvolveRun._sample_candidate", return_value=None):
         return _invoke_loop(
             tmp_path,
             ref_file,
@@ -449,22 +473,8 @@ def _project_dir(tmp_path: Path) -> Path:
     return projects[0]
 
 
-def _evolution_configuration() -> EvolveRunConfiguration:
-    return EvolveRunConfiguration(
-        outer_loop="evolve",
-        run_environment=RunEnvironmentRecord(name="local"),
-        agent_backend="stub",
-        compute_backend="cpu",
-        max_generations=1,
-        children_per_generation=1,
-        k_top_inspirations=1,
-        k_random_inspirations=1,
-        selection_temperature=0.5,
-        frontier_bias=0.7,
-        bootstrap_max_attempts=1,
-        keep_deployments=False,
-        max_parallelism=1,
-    )
+def _evolution_descriptor() -> OrchestrationDescriptor:
+    return OrchestrationDescriptor(id="evolve", config_version=1, options={})
 
 
 def _evolution_state_store(project_root: Path) -> EvolutionStateStore:
@@ -675,10 +685,13 @@ def test_evolve_with_preexisting_passing_seed_skips_bootstrap(
     exp_envs = list((tmp_path / "exp_env").iterdir())
     assert len(exp_envs) == 1
     exp_name = exp_envs[0].name
+    recorded = Project.open(exp_envs[0]).state.load_run(exp_name)
+    assert isinstance(recorded, OrchestrationRunManifest)
+    assert recorded.orchestration.id == "evolve"
 
-    # Second run resumes that exp dir; bootstrap must NOT be called, and a
-    # gen-1 child must be appended off the seed.
-    with patch("vibesys.loops.evolve.loop._bootstrap_seed") as spy:
+    # Second run increases the total budget; bootstrap must not be called,
+    # and a gen-2 child must be appended off the seed.
+    with patch("vibesys.loops.evolve.run._bootstrap_seed") as spy:
         result = _invoke_loop(
             tmp_path,
             ref_file,
@@ -686,18 +699,22 @@ def test_evolve_with_preexisting_passing_seed_skips_bootstrap(
             exp_name=exp_name,
             input_path=str(exp_envs[0]),
             existing=True,
-            max_generations=1,
+            max_generations=2,
             children_per_generation=1,
         )
         spy.assert_not_called()
     assert result is True
+    resumed = Project.open(exp_envs[0]).state.load_run(exp_name)
+    assert isinstance(resumed, OrchestrationRunManifest)
+    assert resumed.orchestration.options["max_generations"] == 2
 
     pop = _load_population(tmp_path)
-    assert len(pop) == 2  # gen-0 seed + one gen-1 child (same exp dir, resumed)
+    assert len(pop) == 2  # gen-0 seed + one gen-2 child (same exp dir, resumed)
     seed, child = pop.all
     assert seed.generation == 0
     assert seed.parent_id is None
     assert child.parent_id == seed.id
+    assert child.generation == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1051,7 +1068,9 @@ def test_candidate_code_is_multi_file_but_excludes_framework_state(tmp_path: Pat
             run_id="test-evolve",
             branch=tracker.project_branch,
             vibesys_version="test",
-            configuration=_evolution_configuration(),
+            run_environment=RunEnvironmentRecord(name="local"),
+            execution=run_execution_record(),
+            orchestration=_evolution_descriptor(),
             trusted_input_baseline=tracker.trusted_input_baseline,
         )
     )
@@ -1069,69 +1088,26 @@ def test_candidate_code_is_multi_file_but_excludes_framework_state(tmp_path: Pat
     commit = tracker.current_sha()
 
     assert commit is not None
-    code = _candidate_code(_FakeLoopContext(git=tracker), commit)
+    code = asyncio.run(_candidate_code(_as_run_context(_FakeRunContext(git=tracker)), commit))
     assert "src/lib.rs" in code
     assert "src/ffi.rs" in code
     assert "population.json" not in code
 
 
-def test_search_policy_initialization_failure_closes_context(tmp_path: Path) -> None:
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir()
-    ctx = MagicMock(
-        run_log_path=log_dir / "run.log",
-        exp_dir=tmp_path,
-        log_dir=log_dir,
-    )
-
-    (tmp_path / "OBJECTIVE.md").write_text("objective")
-    (tmp_path / "vibesys.input.toml").write_text(
-        "version = 1\n\n"
-        '[agent]\ndomain = "generic"\n\n'
-        '[accuracy]\ncommand = ["true"]\n\n'
-        '[benchmark]\ncommand = ["true"]\n'
-    )
-    ref_file = tmp_path / "reference.py"
-    ref_file.write_text("# reference\n")
-    with (
-        patch.object(evolve_loop, "create_run_context", return_value=ctx),
-        patch.object(
-            evolve_loop,
-            "OpenEvolveSearchPolicy",
-            side_effect=ValueError("incompatible saved topology"),
-        ),
-    ):
-        result = _invoke_loop(
-            tmp_path,
-            str(ref_file),
-            FakeAgentClient(),
-            config=Config.model_validate({"model": {"name": "test-model"}}),
-            exp_name="test",
-            objective="objective",
-            runs_dir=tmp_path / "exp_env",
-            domain=DomainName.GENERIC,
-            space=MetricSpace(),
-            search_policy="openevolve",
-        )
-
-    assert result is False
-    ctx.close.assert_called_once_with()
-
-
-def test_programmatic_openevolve_config_infers_policy(tmp_path: Path, ref_file: str) -> None:
+def test_programmatic_openevolve_config_infers_policy(tmp_path: Path) -> None:
     ctx, state_store = _stateful_context(tmp_path)
     config = OpenEvolveSearchConfig(num_islands=1)
 
-    name, policy = _initialize_search_policy(
-        ctx,
-        Population(),
-        state_store,
-        _test_request(
-            str(Path(ref_file).parent),
-            config=Config.model_validate({"model": {"name": "m"}}),
-            objective="obj",
-            options={"seed": 1, "openevolve_config": config},
-        ),
+    name, policy = asyncio.run(
+        _initialize_search_policy(
+            _as_run_context(ctx),
+            Population(),
+            state_store,
+            requested=None,
+            seed=1,
+            config=config,
+            space=MetricSpace(),
+        )
     )
 
     assert name.value == "openevolve"
@@ -1139,22 +1115,20 @@ def test_programmatic_openevolve_config_infers_policy(tmp_path: Path, ref_file: 
     assert policy.config == config
 
 
-def test_programmatic_openevolve_config_rejects_vibesys_policy(
-    tmp_path: Path, ref_file: str
-) -> None:
+def test_programmatic_openevolve_config_rejects_vibesys_policy(tmp_path: Path) -> None:
     ctx, state_store = _stateful_context(tmp_path)
 
     with pytest.raises(ValueError, match="requires the OpenEvolve search policy"):
-        _initialize_search_policy(
-            ctx,
-            Population(),
-            state_store,
-            _test_request(
-                str(Path(ref_file).parent),
-                config=Config.model_validate({"model": {"name": "m"}}),
-                objective="obj",
-                options={"search_policy": "vibesys", "openevolve_config": OpenEvolveSearchConfig()},
-            ),
+        asyncio.run(
+            _initialize_search_policy(
+                _as_run_context(ctx),
+                Population(),
+                state_store,
+                requested="vibesys",
+                seed=1,
+                config=OpenEvolveSearchConfig(),
+                space=MetricSpace(),
+            )
         )
 
 
@@ -1221,34 +1195,34 @@ def test_latest_wip_seed_none_when_no_snapshotted_failure() -> None:
 
 def test_candidate_runtime_notes_delegates_deployment_naming_to_environment() -> None:
     base = "run-20260720-abcd1234-llama3"
-    ctx = _FakeLoopContext(
+    ctx = _FakeRunContext(
         run_environment_view=SimpleNamespace(
             deployment_namespace=base,
             prompt_notes=f"Deploy to Modal app {base}; endpoint {base}-web.",
         ),
-        run_environment=SimpleNamespace(
+        run_environment=MagicMock(
             candidate_runtime=lambda _view, generation, child_idx: CandidateRuntime(
                 prompt_notes="provider-owned candidate instructions",
                 deployment_name=f"candidate-{generation}-{child_idx}",
             )
         ),
     )
-    notes, app = _candidate_runtime_notes(ctx, generation=3, child_idx=2)
+    notes, app = _candidate_runtime_notes(_as_run_context(ctx), generation=3, child_idx=2)
     assert app == "candidate-3-2"
     assert notes == "provider-owned candidate instructions"
 
 
 def test_candidate_runtime_notes_noop_without_named_deployment() -> None:
     notes_in = "Local run; no named deployment."
-    ctx = _FakeLoopContext(
+    ctx = _FakeRunContext(
         run_environment_view=SimpleNamespace(deployment_namespace=None, prompt_notes=notes_in),
-        run_environment=SimpleNamespace(
+        run_environment=MagicMock(
             candidate_runtime=lambda view, _generation, _child_idx: CandidateRuntime(
                 prompt_notes=view.prompt_notes
             )
         ),
     )
-    notes, app = _candidate_runtime_notes(ctx, generation=1, child_idx=1)
+    notes, app = _candidate_runtime_notes(_as_run_context(ctx), generation=1, child_idx=1)
     assert app is None
     assert notes == notes_in
 
@@ -1262,21 +1236,23 @@ def test_teardown_candidate_deployment_delegates_to_run_environment() -> None:
     """The loop stays backend-agnostic: it hands the deployment name to the run
     environment, which decides how to release it."""
     run_env = MagicMock()
-    ctx = _FakeLoopContext(run_environment=run_env)
+    ctx = _FakeRunContext(run_environment=run_env)
 
-    _teardown_candidate_deployment(ctx, "vibesys-run-g1c2", keep=False)
+    asyncio.run(
+        _teardown_candidate_deployment(_as_run_context(ctx), "vibesys-run-g1c2", keep=False)
+    )
 
-    run_env.teardown_deployment.assert_called_once_with("vibesys-run-g1c2", log=ctx.lprint)
+    assert run_env.teardown_deployment.call_args.args[0] == "vibesys-run-g1c2"
 
 
 def test_teardown_candidate_deployment_noop_when_kept_or_absent() -> None:
     run_env = MagicMock()
-    ctx = _FakeLoopContext(run_environment=run_env)
+    ctx = _FakeRunContext(run_environment=run_env)
 
     # Opt-out: keep the app for post-hoc inspection.
-    _teardown_candidate_deployment(ctx, "vibesys-run-g1c2", keep=True)
+    asyncio.run(_teardown_candidate_deployment(_as_run_context(ctx), "vibesys-run-g1c2", keep=True))
     # No per-candidate deployment (non-Modal env).
-    _teardown_candidate_deployment(ctx, None, keep=False)
+    asyncio.run(_teardown_candidate_deployment(_as_run_context(ctx), None, keep=False))
 
     run_env.teardown_deployment.assert_not_called()
 
@@ -1286,24 +1262,10 @@ def test_teardown_candidate_deployment_noop_when_kept_or_absent() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _passing_seed(commit: str = "seedsha", perf: float = 1.0) -> Individual:
-    return Individual(
-        id=1,
-        generation=0,
-        parent_id=None,
-        commit=commit,
-        perf_metric=perf,
-        perf_unit="tok/s",
-        metrics={"aggregate_throughput": perf},
-        passed=True,
-        summary="seed",
-    )
-
-
 def _stateful_context(
     tmp_path: Path,
     log: Callable[[str], None] | None = None,
-) -> tuple[_FakeLoopContext, EvolutionStateStore]:
+) -> tuple[_FakeRunContext, EvolutionStateStore]:
     project = Project.open(tmp_path)
     project.state.create_project("test")
     run = project.state.new_run_manifest(
@@ -1312,180 +1274,15 @@ def _stateful_context(
         branch="vibesys/run-1",
         vibesys_version="test",
         trusted_input_baseline="a" * 40,
-        configuration=_evolution_configuration(),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=_evolution_descriptor(),
     )
     project.state.create_run(run)
     git = MagicMock(history_root=project.root, run_id=run.run_id)
     state = RunState(project, git, run.run_id)
-    ctx = _FakeLoopContext(git=git, state=state, log=log if log is not None else _discard_log)
+    ctx = _FakeRunContext(git=git, state=state, log=log if log is not None else _discard_log)
     return ctx, EvolutionStateStore(state.portable(RunStateNamespace.EVOLVE))
-
-
-def test_plan_candidate_falls_back_to_latest_passer_then_none(tmp_path: Path) -> None:
-    ctx, state_store = _stateful_context(tmp_path)
-    rng = _deterministic_rng()
-
-    # No passers at all → None (candidate skipped).
-    empty = Population([])
-    assert (
-        _plan_candidate(
-            ctx,
-            empty,
-            state_store,
-            SearchSelectionParameters(
-                rng=rng,
-                k_top_inspirations=1,
-                k_random_inspirations=1,
-                selection_temperature=0.5,
-                space=MetricSpace(),
-                frontier_bias=0.7,
-            ),
-        )
-        is None
-    )
-
-    # A passer exists → returned as parent.
-    pop = Population([_passing_seed()])
-    plan = _plan_candidate(
-        ctx,
-        pop,
-        state_store,
-        SearchSelectionParameters(
-            rng=rng,
-            k_top_inspirations=1,
-            k_random_inspirations=1,
-            selection_temperature=0.5,
-            space=MetricSpace(),
-            frontier_bias=0.7,
-        ),
-    )
-    assert plan is not None
-    assert plan.parent.id == 1
-
-
-def test_run_generation_parallel_bounds_concurrency_and_records_all(
-    tmp_path: Path, ref_file: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    criteria = "crit"
-    """Candidates run concurrently up to the cap; every result is recorded once,
-    in child order, on the orchestrator thread (population never races)."""
-    population = Population([_passing_seed()])
-    logs: list[str] = []
-    ctx, state_store = _stateful_context(tmp_path, logs.append)
-
-    live = 0
-    peak = 0
-    lock = threading.Lock()
-
-    def fake_eval(
-        _parent_ctx: LoopContext,
-        *,
-        progress: CandidateProgress,
-        selection: SearchSelection,
-        **_kw: object,
-    ) -> _CandidateOutcome:
-        assert progress.round_number == 1
-        child_idx = progress.candidate_number
-        nonlocal live, peak
-        with lock:
-            live += 1
-            peak = max(peak, live)
-        time.sleep(0.05)
-        with lock:
-            live -= 1
-        return _CandidateOutcome(
-            passed=True,
-            parent_id=selection.parent.id,
-            inspiration_ids=[i.id for i in selection.inspirations],
-            summary=f"cand-{child_idx}",
-            feedback="",
-            commit=f"child-{child_idx}",
-            perf_metric=float(child_idx),
-            perf_unit="tok/s",
-            metrics={"aggregate_throughput": float(child_idx)},
-        )
-
-    monkeypatch.setattr(evolve_loop, "_evaluate_in_subcontext", fake_eval)
-
-    _run_generation_parallel(
-        ctx,
-        progress=RoundProgress(1, 1),
-        search=_EvolutionSearchSession(
-            request=_test_request(
-                str(Path(ref_file).parent),
-                config=Config.model_validate({"model": {"name": "m"}}),
-                objective="obj",
-                options={"max_parallelism": 2, "children_per_generation": 5},
-            ),
-            pass_criteria=criteria,
-            population=population,
-            rng=_deterministic_rng(),
-            search_policy=VibeSysSearchPolicy(),
-        ),
-    )
-
-    # Cap respected, never exceeded.
-    assert peak <= 2
-    # All 5 children recorded (ids 2..6) plus the seed.
-    assert len(population) == 6
-    recorded = [i for i in population.all if i.generation == 1]
-    assert len(recorded) == 5
-    assert {i.commit for i in recorded} == {f"child-{c}" for c in range(1, 6)}
-    assert state_store.load_population().all == population.all
-
-
-def test_run_generation_parallel_skips_parent_without_commit(
-    tmp_path: Path, ref_file: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    criteria = "crit"
-    """A parent with no commit can't be isolated into a worktree → skipped, not
-    dispatched."""
-    seed = _passing_seed()
-    seed.commit = None  # passer but nothing to branch from
-    # ``passed`` requires a commit, so this seed won't be selectable; give the
-    # planner a stub that returns it anyway to exercise the guard.
-    population = Population([_passing_seed(), seed])
-    ctx, _state_store = _stateful_context(tmp_path)
-
-    monkeypatch.setattr(
-        evolve_loop,
-        "_plan_candidate",
-        lambda *_a, **_k: SearchSelection(parent=seed, inspirations=[]),
-    )
-    called = False
-
-    def fake_eval(*_args: object, **_kwargs: object) -> _CandidateOutcome:
-        nonlocal called
-        called = True
-        return _CandidateOutcome(
-            passed=True,
-            parent_id=seed.id,
-            inspiration_ids=[],
-            summary="s",
-            feedback="",
-        )
-
-    monkeypatch.setattr(evolve_loop, "_evaluate_in_subcontext", fake_eval)
-
-    _run_generation_parallel(
-        ctx,
-        progress=RoundProgress(1, 1),
-        search=_EvolutionSearchSession(
-            request=_test_request(
-                str(Path(ref_file).parent),
-                config=Config.model_validate({"model": {"name": "m"}}),
-                objective="obj",
-                options={"max_parallelism": 2, "children_per_generation": 2},
-            ),
-            pass_criteria=criteria,
-            population=population,
-            rng=_deterministic_rng(),
-            search_policy=VibeSysSearchPolicy(),
-        ),
-    )
-
-    assert called is False  # commit-less parent never dispatched
-    assert all(i.generation == 0 for i in population.all)  # nothing recorded
 
 
 # ---------------------------------------------------------------------------
@@ -1493,31 +1290,32 @@ def test_run_generation_parallel_skips_parent_without_commit(
 # ---------------------------------------------------------------------------
 
 
-def test_evaluate_in_subcontext_skips_parent_without_commit(ref_file: str) -> None:
-    criteria = "crit"
+def test_evaluate_in_subcontext_skips_parent_without_commit() -> None:
     """A parent with no commit can't seed a worktree — folded into a failed
     outcome without ever building a sub-context."""
-    parent_ctx = _FakeLoopContext(log=lambda _line: None)
+    criteria = "crit"
+    parent_ctx = _FakeRunContext(log=lambda _line: None)
     parentless = Individual(id=3, generation=1, parent_id=1, commit=None, passed=True, summary="x")
 
     seen = []
     unsubscribe = output_sink().subscribe(seen.append)
     try:
-        outcome = _evaluate_in_subcontext(
-            parent_ctx,
-            search=_EvolutionSearchSession(
-                request=_test_request(
-                    str(Path(ref_file).parent),
-                    config=Config.model_validate({"model": {"name": "m"}}),
-                    objective="obj",
-                ),
+        outcome = asyncio.run(
+            _evaluate_in_subcontext(
+                _as_run_context(parent_ctx),
+                generation=2,
+                child_idx=1,
+                parent=parentless,
+                inspirations=[],
+                objective="obj",
+                space=MetricSpace(),
+                modality="text_generation",
+                domain_definition=_LLM_SERVING_DOMAIN,
                 pass_criteria=criteria,
-                population=Population([]),
-                rng=_deterministic_rng(),
-                search_policy=VibeSysSearchPolicy(),
-            ),
-            progress=CandidateProgress(2, 3, 1, 1),
-            selection=SearchSelection(parent=parentless, inspirations=[]),
+                keep_deployments=False,
+                policy_parent_id=None,
+                target_island=None,
+            )
         )
     finally:
         unsubscribe()
@@ -1529,103 +1327,14 @@ def test_evaluate_in_subcontext_skips_parent_without_commit(ref_file: str) -> No
     assert any("no parent commit" in summary for summary in warnings)
 
 
-def test_evaluate_in_subcontext_builds_worktree_and_evaluates(
-    tmp_path: Path, ref_file: str
-) -> None:
-    """End-to-end: a real parent context spawns an isolated candidate sub-context
-    (git worktree at the parent commit + its own logger/agent-runner), evaluates
-    it, and the offspring commit lands in the parent's shared object store."""
-    criteria = "be faster"
-    runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(1))
-    runner.on_invoke(_mutator_writes_callback(runner))
-    with (
-        patch("vibesys.backends.cuda.make_local_shell_sandbox"),
-        patch("vibesys.context.build_agent_client", return_value=runner),
-        patch("vibesys.context.PROJECT_ROOT", tmp_path),
-        patch("vibesys.loops.evolve.loop._run_framework_accuracy_gate", return_value=None),
-        create_run_context(
-            config=Config.model_validate({"model": {"name": "claude-sonnet-4-6"}}),
-            exp_name="test-parallel-subctx",
-            runs_dir=tmp_path / "exp_env",
-            input_path=str(Path(ref_file).parent),
-            accuracy_command="uv run python accuracy_checker/checker.py",
-            benchmark_command="uv run python benchmark/benchmark.py",
-            skills_dirs=[],
-            run_environment=RunEnvironmentSpec("local"),
-            environment_hooks=LLMServingEnvironmentHooks(),
-            project_configuration=EvolveRunConfiguration(
-                outer_loop="evolve",
-                run_environment=RunEnvironmentRecord(name="local"),
-                agent_backend="cli",
-                compute_backend="cuda",
-                max_generations=1,
-                children_per_generation=1,
-                k_top_inspirations=1,
-                k_random_inspirations=1,
-                selection_temperature=0.5,
-                frontier_bias=0.7,
-                bootstrap_max_attempts=1,
-                keep_deployments=False,
-                max_parallelism=1,
-            ),
-        ) as parent,
-    ):
-        base_commit = parent.git.current_sha()
-        assert base_commit is not None
-        parent_ind = Individual(
-            id=1,
-            generation=0,
-            parent_id=None,
-            commit=base_commit,
-            perf_metric=1.0,
-            perf_unit="tok/s",
-            passed=True,
-            summary="seed",
-        )
-
-        outcome = _evaluate_in_subcontext(
-            parent,
-            search=_EvolutionSearchSession(
-                request=_test_request(
-                    str(Path(ref_file).parent),
-                    config=Config.model_validate({"model": {"name": "claude-sonnet-4-6"}}),
-                    objective="Maximize tok/s throughput.",
-                ),
-                pass_criteria=criteria,
-                population=Population([]),
-                rng=_deterministic_rng(),
-                search_policy=VibeSysSearchPolicy(),
-            ),
-            progress=CandidateProgress(1, 1, 1, 1),
-            selection=SearchSelection(parent=parent_ind, inspirations=[]),
-        )
-
-        assert outcome.passed is True
-        assert outcome.parent_id == 1
-        assert outcome.perf_metric == 10.0
-        assert outcome.commit
-        assert outcome.commit != base_commit
-        # The offspring commit is reachable from the parent repo — the worktree
-        # shared its object store, so the candidate joins the one lineage.
-        assert (
-            parent.git.run(["git", "cat-file", "-e", outcome.commit], check=False).returncode == 0
-        )
-        # The candidate's worktree is torn down when its sub-context closes.
-        cand_ws = parent.project.state.candidate_worktree_directory(parent.run_id, "g1c1")
-        assert not cand_ws.exists()
-        retained = f"refs/vibesys/{parent.run_id}/candidates/g1c1"
-        resolved = parent.git.run(["git", "rev-parse", retained])
-        assert resolved.stdout.decode().strip() == outcome.commit
-
-
 def test_max_parallelism_ignored_without_environment_capability(
     tmp_path: Path, ref_file: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An environment without isolated evaluation support stays serial."""
     called = {"parallel": False}
     monkeypatch.setattr(
-        evolve_loop,
-        "_run_generation_parallel",
+        EvolveRun,
+        "_evaluate_parallel_pool",
         lambda *_a, **_k: called.update(parallel=True),
     )
     runner = FakeAgentClient().enqueue(
@@ -1675,7 +1384,6 @@ def _passing_gate_result(
     unit: str | None = None,
     row: dict[str, float] | None = None,
 ) -> BenchmarkGateResult:
-
     return BenchmarkGateResult(
         command="trusted-benchmark --json /tmp/result.json",
         output="ok",
@@ -1694,51 +1402,20 @@ def test_benchmark_gate_extends_timeout_by_environment_setup_allowance() -> None
     """Environment-owned deployment/readiness time must not eat the benchmark
     command's declared budget: the evolve gate forwards setup + contract, the
     same setup-aware policy the agent path uses."""
-
-    ctx = _FakeLoopContext(
+    ctx = _FakeRunContext(
         run_environment_view=SimpleNamespace(framework_setup_timeout_seconds=90),
         events=MagicMock(),
     )
-    contract = BenchmarkContract(
-        result_spec=BenchmarkResult(json_argument="--json", metric="total_ops_per_sec"),
-        timeout_seconds=120,
-    )
-    gate = MagicMock(return_value=_passing_gate_result(1.0))
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
-        _run_framework_benchmark_gate(
-            ctx,
-            generation=0,
-            child_idx=0,
-            contract=contract,
-            space=MetricSpace(),
-        )
-
-    # 120 (contract budget) + 90 (environment setup allowance), not the bare 120.
-    assert gate.call_args.kwargs["contract"].timeout_seconds == 210
+    assert framework_command_timeout(ctx, 120) == 210
 
 
 def test_benchmark_gate_timeout_unchanged_without_setup_allowance() -> None:
     """With no setup allowance the forwarded budget is exactly the contract's."""
-
-    ctx = _FakeLoopContext(
+    ctx = _FakeRunContext(
         run_environment_view=SimpleNamespace(framework_setup_timeout_seconds=0),
         events=MagicMock(),
     )
-    contract = BenchmarkContract(
-        result_spec=BenchmarkResult(json_argument="--json", metric="total_ops_per_sec"),
-        timeout_seconds=120,
-    )
-    gate = MagicMock(return_value=_passing_gate_result(1.0))
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
-        _run_framework_benchmark_gate(
-            ctx,
-            generation=0,
-            child_idx=0,
-            contract=contract,
-            space=MetricSpace(),
-        )
-
-    assert gate.call_args.kwargs["contract"].timeout_seconds == 120
+    assert framework_command_timeout(ctx, 120) == 120
 
 
 def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path: Path, ref_file: str) -> None:
@@ -1747,7 +1424,7 @@ def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path: Path, ref_file
 
     runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(2))
     gate = MagicMock(side_effect=[_passing_gate_result(42.5), _passing_gate_result(43.75)])
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
         result = _invoke_loop(
             tmp_path,
             ref_file,
@@ -1773,7 +1450,6 @@ def test_benchmark_contract_owns_seed_and_child_fitness(tmp_path: Path, ref_file
 def test_benchmark_contract_failure_fails_the_candidate_before_profiling(
     tmp_path: Path, ref_file: str
 ) -> None:
-
     runner = FakeAgentClient()
     failing = BenchmarkGateResult(
         command="trusted-benchmark --json /tmp/result.json",
@@ -1783,7 +1459,7 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(
             feedback="Framework benchmark failed.\nbenchmark exploded"
         ),
     )
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", MagicMock(return_value=failing)):
+    with patch("vibesys.orchestration.runtime.run_benchmark_gate", MagicMock(return_value=failing)):
         result = _invoke_bootstrap(
             tmp_path,
             ref_file,
@@ -1804,7 +1480,7 @@ def test_benchmark_contract_failure_fails_the_candidate_before_profiling(
 def test_no_benchmark_contract_keeps_profiler_fitness(tmp_path: Path, ref_file: str) -> None:
     runner = FakeAgentClient().enqueue("profiler", *_default_profiler_responses(1))
     gate = MagicMock()
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
         result = _invoke_bootstrap(tmp_path, ref_file, runner)
 
     assert result is True
@@ -1853,7 +1529,7 @@ def test_scalar_contract_keeps_the_profilers_other_axes_on_the_frontier(
     ]
     runner = FakeAgentClient().enqueue("profiler", *profiler_responses)
     gate = MagicMock(side_effect=[_passing_gate_result(42.5), _passing_gate_result(43.75)])
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
         result = _invoke_loop(
             tmp_path,
             ref_file,
@@ -1883,7 +1559,7 @@ def test_protocol_contract_records_the_evaluator_declared_unit(
     """The recorded unit is the evaluator's declaration when it supplies one."""
     runner = FakeAgentClient()
     gate = MagicMock(return_value=_passing_gate_result(42.5, unit="ops/s"))
-    with patch("vibesys.loops.evolve.loop.run_benchmark_gate", gate):
+    with patch("vibesys.orchestration.runtime.run_benchmark_gate", gate):
         result = _invoke_bootstrap(
             tmp_path,
             ref_file,
@@ -1902,17 +1578,7 @@ def test_evolve_accuracy_gate_extends_timeout_by_environment_setup_allowance() -
     does; otherwise a Modal/SkyPilot deployment eats the accuracy command's
     declared budget and the candidate fails on a timeout it was never given
     the time to avoid."""
-    ctx = _FakeLoopContext(
+    ctx = _FakeRunContext(
         run_environment_view=SimpleNamespace(framework_setup_timeout_seconds=90),
     )
-    gate = MagicMock(return_value=SimpleNamespace(feedback=None))
-    with patch("vibesys.loops.evolve.loop.run_accuracy_gate", gate):
-        # lint-waiver: LW-010046 [SLF001]; this regression verifies the loop's private accuracy-gate adapter adds environment setup allowance before calling the shared gate.
-        evolve_loop._run_framework_accuracy_gate(  # noqa: SLF001
-            ctx,
-            generation=0,
-            child_idx=0,
-            timeout_seconds=120,
-        )
-
-    assert gate.call_args.kwargs["timeout_seconds"] == 210
+    assert framework_command_timeout(ctx, 120) == 210

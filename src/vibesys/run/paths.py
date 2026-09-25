@@ -1,4 +1,4 @@
-"""Frozen value objects for per-run paths and agent-facing commands."""
+"""Frozen value objects for per-run paths."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,17 +21,3 @@ class RunPaths:
     def workspace(self) -> Path:
         """Return the project root, which is also the only agent workspace."""
         return self.project_root
-
-
-@dataclass(frozen=True)
-class RunCommands:
-    """Evaluator commands and helper paths as agents should see them.
-
-    Snapshot of ``RunEnvironmentView.paths`` taken once the run-environment
-    session is open; the view's paths are fixed for the session lifetime.
-    """
-
-    judge_accuracy_command: str | None
-    judge_benchmark_command: str | None
-    profiler_support_agent_path: str | None
-    profiler_benchmark_command: str | None

@@ -2,12 +2,9 @@
 
 Layering:
 
-    loop -> _RunContext -> RunEnvironment -> ComputeBackendImpl.make_sandbox -> Sandbox
+    policy -> RunContext -> RunEnvironment -> ComputeBackendImpl.make_sandbox -> Sandbox
 
-``_RunContext`` owns the experiment lifecycle: workspace/log setup, reference
-and helper file materialization, model construction, git snapshots, GPU
-monitoring, and agent runner wiring.  It asks this module for a run-environment
-session once the workspace is ready.
+``RunContext`` prepares run resources before opening this session.
 
 ``RunEnvironment`` owns run-level execution policy for a location such as local,
 Docker, or Modal.  It decides path exposure, bind mounts, execution constraints,
@@ -178,9 +175,11 @@ class RunEnvironmentView:
     prompt_notes: str = ""
     isolated: bool = False
     cli_sandboxed: bool = False
+    # Agent clients borrow the run-owned sandbox and bridge.
+    share_agent_session: bool = False
     host_device_reselect: bool = True
     # Coarse environment label for diagnostics and adapter selection:
-    # ``"local"`` | ``"docker"`` | ``"modal"``.
+    # ``"local"`` | ``"docker"`` | ``"modal"`` | ``"skypilot"``.
     env_kind: str = "local"
     # Where a profiler must execute to observe the production hot path. Prompt
     # templates branch on this capability rather than on a concrete provider.
@@ -812,6 +811,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                 ),
                 isolated=True,
                 cli_sandboxed=True,
+                share_agent_session=True,
                 host_device_reselect=False,
                 env_kind="skypilot",
                 profile_execution="remote",

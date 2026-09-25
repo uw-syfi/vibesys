@@ -4,17 +4,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.server.support import build_server_parts
+from tests.server.support import agent_descriptor, build_server_parts
+from tests.support.run_execution import run_execution_record
 
 from server.api.performance import build_performance_context, summarize_objective
 from server.api.protocol import PerformanceQuery
-from vibesys.api._readmodel import project_run_view
+from vibesys.agent_run.hypotheses import reproject_run_evidence
+from vibesys.agent_run.readmodel import project_run_view
+from vibesys.agent_run.state import (
+    AgentRunState,
+    AgentRunStateStore,
+    Hypothesis,
+    HypothesisMeasurement,
+)
 from vibesys.api.contracts import RunStatus
-from vibesys.loops.agent.model import AgentRunState, Hypothesis, HypothesisMeasurement
-from vibesys.loops.agent.state import AgentRunStateStore
+from vibesys.evaluators.metrics import MetricSpace
 from vibesys.schemas import OrchestratorPlan
 from vs_loop_state.api import RoundRecord
-from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,21 +56,15 @@ def _measurement(round_number: int, **overrides: object) -> HypothesisMeasuremen
     return HypothesisMeasurement.model_validate(fields)
 
 
-def _configuration(objectives: tuple[str, ...]) -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        outer_loop="agent",
-        inner_loop="single-agent",
-        interface="inprocess",
-        agent_backend="stub",
-        compute_backend="cpu",
-        profiler="none",
-        max_rounds=3,
-        max_retries_per_round=1,
-        judge_every=1,
-        official_eval_every=1,
-        memory_layout="files",
-        run_environment=RunEnvironmentRecord(name="local"),
-        objectives=objectives,
+def _configuration(objectives: tuple[str, ...]) -> MetricSpace:
+    return MetricSpace.model_validate(
+        {
+            "objectives": [
+                {"name": name, "direction": direction}
+                for objective in objectives
+                for name, _, direction in (objective.partition(":"),)
+            ]
+        }
     )
 
 
@@ -77,7 +78,9 @@ def _project_run(project: Path, objectives: tuple[str, ...]) -> tuple[Project, s
         run_id="queue-run",
         branch="vibesys/queue-run",
         vibesys_version="0.2.0-test",
-        configuration=_configuration(objectives),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=agent_descriptor(metric_space=_configuration(objectives)),
         trusted_input_baseline="0" * 40,
     )
     vibesys_project.state.create_run(manifest)
@@ -91,6 +94,7 @@ def _view(state: AgentRunState) -> RunView:
         run_id="run-1",
         status=RunStatus.ACTIVE,
         experiment_revision=state.experiment_revision,
+        loop="single-agent",
     )
 
 
@@ -109,7 +113,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         "# Objective\n\nMaximize queue throughput measured by the mpmc benchmark.\n\nMore detail.\n",
         encoding="utf-8",
     )
-    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(
+    state = reproject_run_evidence(
         AgentRunState(
             hypotheses=[
                 _hypothesis(
@@ -134,6 +138,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         )
     )
 
+    AgentRunStateStore(project.state.portable_namespace(run_id, "single")).save(state)
     response = _service(project, run_id).execute(PerformanceQuery())
 
     context = response.performance_context
@@ -151,7 +156,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
 
 def test_service_names_the_objective_before_the_first_measurement(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project", ("total_ops_per_sec:max",))
-    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(AgentRunState())
+    AgentRunStateStore(project.state.portable_namespace(run_id, "single")).save(AgentRunState())
 
     response = _service(project, run_id).execute(PerformanceQuery())
 

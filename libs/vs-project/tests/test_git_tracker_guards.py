@@ -9,11 +9,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.run_execution import run_execution_record
 
 from vs_project.api import (
     GitTracker,
     NullGitTrackerEvents,
-    PlainRunConfiguration,
+    OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
 )
@@ -71,15 +72,9 @@ def _project(root: Path, tracker: GitTracker) -> Project:
             branch=tracker.project_branch,
             vibesys_version="test",
             trusted_input_baseline=tracker.trusted_input_baseline,
-            configuration=PlainRunConfiguration(
-                outer_loop="plain",
-                run_environment=RunEnvironmentRecord(name="local"),
-                agent_backend="stub",
-                compute_backend="cpu",
-                max_rounds=2,
-                max_attempts_per_issue=1,
-                max_issues_per_perf_eval=1,
-            ),
+            run_environment=RunEnvironmentRecord(name="local"),
+            execution=run_execution_record(),
+            orchestration=OrchestrationDescriptor(id="guard", config_version=1, options={}),
         )
     )
     tracker.snapshot_with_framework_metadata(

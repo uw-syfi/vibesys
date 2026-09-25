@@ -862,7 +862,7 @@ function applyRunLifecycle(state: CoreState, event: RunEvent): CoreState {
   const data = event.data;
   if (event.type === 'run_started') {
     state.status = 'running';
-    if (data?.kind === 'run_started') state.maxRounds = data.max_rounds;
+    if (data?.kind === 'run_started') state.maxRounds = data.max_rounds ?? null;
   }
   if (event.type === 'configuration_failed') return terminate(state, 'failed');
   if (event.type === 'run_finished') return terminate(state, 'completed');

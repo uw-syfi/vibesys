@@ -21,7 +21,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
 
 from server.api.protocol import DesignFileChange, DesignPatch, DesignRound
-from vibesys.api import framework_memory_paths
+from vibesys.api.agent import AgentRunProjection, agent_projection, framework_memory_paths
 from vs_project.api import is_project_state_path
 
 if TYPE_CHECKING:
@@ -104,14 +104,17 @@ class DesignLog:
         baseline, the commit the run branched from, and anchors hypotheses that
         recorded no parent of their own.
 
-        ``state`` is the `vibesys.api.RunView` for the attached run: its
-        `HypothesisView.rounds`/`RunView.rounds` carry the same
+        ``state`` is the `vibesys.api.RunView` for the attached run: its agent
+        projection's `HypothesisView.rounds`/`rounds` carry the same
         `round_number`/`commit`/`parent_commit` facts this projection used to
         read off the core `AgentRunState` directly.
         """
-        chronological = _chronological_bases(state, baseline)
+        projection = agent_projection(state)
+        if projection is None:
+            return []
+        chronological = _chronological_bases(projection, baseline)
         entries: list[DesignRound] = []
-        for hypothesis in state.hypotheses:
+        for hypothesis in projection.hypotheses:
             previous = _commit(hypothesis.parent_commit)
             for record in hypothesis.rounds:
                 base = previous if previous is not None else chronological.get(record.round_number)
@@ -226,7 +229,7 @@ def _framework_prefixes(workspace: Path) -> tuple[str, ...]:
     )
 
 
-def _chronological_bases(state: RunView, baseline: str) -> dict[int, str]:
+def _chronological_bases(state: AgentRunProjection, baseline: str) -> dict[int, str]:
     """Map each round to the newest checkpoint recorded before it.
 
     This is the fallback base for hypotheses without a recorded parent

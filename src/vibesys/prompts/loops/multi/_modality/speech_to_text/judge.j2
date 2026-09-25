@@ -1,0 +1,10 @@
+## Modality: speech-to-text (ASR)
+
+{% if interface == "inprocess" %}
+**Accuracy-checker interface** (always required): the input-declared entry
+module must expose an importable `VibeServeModel` compatibility class with
+`from_pretrained(model_dir, device, dtype)` and `transcribe(audio_path)`. The
+production server may use a different language or runtime behind that adapter.
+
+{% endif %}
+**API contract**: verify whichever endpoints and response shapes the orchestrator's `pass_criteria` for this round specifies. Do NOT flag "missing" endpoints that the orchestrator did not scope in. When you need contract details for a scoped endpoint, consult `serving-systems/tooling/openai-api/SKILL.md`.

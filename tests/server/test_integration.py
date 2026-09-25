@@ -7,7 +7,8 @@ import uuid
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.server.support import ServerParts, build_server_parts
+from tests.server.support import ServerParts, agent_descriptor, build_server_parts
+from tests.support.run_execution import run_execution_record
 
 from server.api.protocol import ChatQuery, ChatThreadCreateQuery
 from server.chat.factory import ChatAgentResources
@@ -46,7 +47,7 @@ from vibesys.render import output_sink
 from vibesys.run.integration import RunResourceHandoff
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_agent.api.testing import FakeAgentClient
-from vs_project.api import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vs_project.api import Project, RunEnvironmentRecord
 from vs_sandbox.api import ProjectPathPolicy
 
 if TYPE_CHECKING:
@@ -67,20 +68,9 @@ def _project_run(root: Path) -> tuple[Project, str]:
         run_id="queue-run",
         branch="vibesys/queue-run",
         vibesys_version="0.2.0-test",
-        configuration=AgentRunConfiguration(
-            outer_loop="agent",
-            run_environment=RunEnvironmentRecord(name="local"),
-            inner_loop="single-agent",
-            interface="inprocess",
-            agent_backend="cli",
-            compute_backend="cpu",
-            profiler="none",
-            max_rounds=3,
-            max_retries_per_round=1,
-            judge_every=1,
-            official_eval_every=1,
-            memory_layout="files",
-        ),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=agent_descriptor(),
         trusted_input_baseline="0" * 40,
     )
     project.state.create_run(manifest)
@@ -351,7 +341,7 @@ def test_track_started_does_not_double_track_a_repeated_start_event(
     """`ExecutionTracker.track_started` is idempotent for a repeated start event.
 
     Core now mints the execution id and emits `AGENT_EXECUTION_STARTED`
-    itself, at the entry to `_RunContext.invoke`; `project_event` projects it
+    itself, at the entry to an agent turn; `project_event` projects it
     onto both the wire journal and `ExecutionTracker`. Redelivering the same
     start event (e.g. from an at-least-once subscriber) must not double-track
     the execution or double-emit the wire event.
@@ -502,22 +492,14 @@ def test_close_is_idempotent_and_stops_event_projection(tmp_path: Path) -> None:
     assert not any(event.type is EventType.AGENT_OUTPUT_CHUNK for event in parts.journal.read())
 
 
-def test_run_started_expected_roles_round_trip_through_the_wire_bridge() -> None:
-    """The core payload bridges to the wire model with and without the field."""
+def test_run_started_identity_round_trip_through_the_wire_bridge() -> None:
+    """The core run identity and input reach the wire model."""
 
     advertised = CoreRunStartedData(
         outer_loop="plain",
         input="objective",
-        max_rounds=3,
-        expected_roles=("implementer", "judge", "perf_eval"),
     )
     wire = _EVENT_DATA_ADAPTER.validate_python(advertised.model_dump(mode="python"))
     assert isinstance(wire, RunStartedData)
-    assert wire.expected_roles == ("implementer", "judge", "perf_eval")
-
-    # A recording that predates the field must still validate, as empty.
-    legacy = _EVENT_DATA_ADAPTER.validate_python(
-        {"kind": "run_started", "outer_loop": "plain", "input": "objective", "max_rounds": 3}
-    )
-    assert isinstance(legacy, RunStartedData)
-    assert legacy.expected_roles == ()
+    assert wire.outer_loop == "plain"
+    assert wire.input == "objective"
