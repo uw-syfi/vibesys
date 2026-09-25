@@ -38,6 +38,10 @@ import sys
 import time
 import types
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import threading
 
 _HERE = Path(__file__).resolve().parent
 
@@ -249,12 +253,14 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
     ready_command: str | None = None,
     ready_timeout_s: float = 600.0,
     load_command: str | None = None,
+    setup_command: str | None = None,
     stop_signal: str = "SIGINT",
     grace_s: float = 120.0,
     timeout_s: float = 1800.0,
     delay_s: float = 0.0,
     duration_s: float | None = None,
     record_shapes: bool = True,  # noqa: FBT001, FBT002  # tracked: #288
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """Run *command* under the in-process torch.profiler injection.
 
@@ -263,11 +269,15 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
     the primary trace (most GPU kernel events) across every process the
     capture produced and runs ``certify`` plus a compact summary against it.
 
-    ``load_command``/``ready_command``/``stop_signal``/``grace_s``/
-    ``timeout_s`` have the same meaning as every other ``capture_runtime``
-    lifecycle: omit ``load_command`` for a bounded script that exits on its
-    own; set it (with ``ready_command``) to drive a server under load, then
-    stop it with ``stop_signal`` (default ``SIGINT``) once the load finishes.
+    ``load_command``/``ready_command``/``setup_command``/``stop_signal``/
+    ``grace_s``/``timeout_s`` have the same meaning as every other
+    ``capture_runtime`` lifecycle: omit ``load_command`` for a bounded
+    script that exits on its own; set it (with ``ready_command``) to drive
+    a server under load, then stop it with ``stop_signal`` (default
+    ``SIGINT``) once the load finishes. ``setup_command`` runs to
+    completion before ``command``, outside the injected profiling env
+    entirely; use it for anything (e.g. picking a free port) whose own
+    output or child processes must not run under it.
 
     A multi-process ``command`` (e.g. a server that forks/spawns worker
     processes) only has *one* process directly awaited by
@@ -298,8 +308,15 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
     capture's op/kernel tables can still include one-time setup work. Left
     for a follow-up: TODO slice ``_analyze_primary`` by ``load_window`` the
     way ``analyze_rocprof.py``'s timeline subcommands do.
+
+    Serialized against every other GPU-using capture in this process via
+    ``capture_runtime.exclusive_capture``: raises ``CaptureBusyError`` (not
+    caught here -- the MCP boundary formats it) if another capture is
+    already running. ``cancel_event``, when given, is forwarded to
+    ``capture_runtime.run_capture`` so a caller can stop this capture from
+    another thread (see ``resources/profilers/_common/mcp_async.py``).
     """
-    _capture_id, out_dir = capture_runtime.new_capture("ops")
+    capture_id, out_dir = capture_runtime.new_capture("ops")
     lifecycle = capture_runtime.Lifecycle(
         command=command,
         cwd=cwd,
@@ -313,17 +330,20 @@ def profile_ops(  # noqa: PLR0913  # tracked: #288
         ready_command=ready_command,
         ready_timeout_s=ready_timeout_s,
         load_command=load_command,
+        setup_command=setup_command,
         stop_signal=stop_signal,
         grace_s=grace_s,
         timeout_s=timeout_s,
     )
-    result = capture_runtime.run_capture(
-        [],
-        lifecycle,
-        kind="ops",
-        out_dir=out_dir,
-        meta={"delay_s": delay_s, "duration_s": duration_s, "record_shapes": record_shapes},
-    )
+    with capture_runtime.exclusive_capture("ops", capture_id):
+        result = capture_runtime.run_capture(
+            [],
+            lifecycle,
+            kind="ops",
+            out_dir=out_dir,
+            meta={"delay_s": delay_s, "duration_s": duration_s, "record_shapes": record_shapes},
+            cancel_event=cancel_event,
+        )
 
     lines = [capture_runtime.format_result(result)]
 
