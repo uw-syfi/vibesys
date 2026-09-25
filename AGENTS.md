@@ -1,8 +1,48 @@
 # Agent Instructions
 
-Read [`docs/contributing/coding-best-practices.md`](docs/contributing/coding-best-practices.md) before
-editing code in this repository. It documents the repo-specific expectations
-for what good code looks like.
+# Always follow
+
+These rules apply to every code change. The full reference, with rationale and
+lint-waiver mechanics, is
+[`docs/contributing/coding-best-practices.md`](docs/contributing/coding-best-practices.md).
+
+Architecture:
+
+- Core behavior lives in `src/vibesys/` and is reached through `vibesys.api`.
+  `src/headless/` and `src/server/` are peers over that facade; neither imports
+  the other. Import each `libs/` package through its `<package>.api` only.
+- Data flows one way: inputs go through core to typed outputs or events that
+  consumers interpret. Core never imports adapters, renderers, or the CLI, and
+  never branches on a concrete sandbox or backend name outside the wiring code.
+- Backends emit semantic event data. Formatting, colors, and layout belong to
+  frontends.
+- A new cross-module import needs its `tach.toml` edge in the same PR. Never add
+  an upward edge or a cycle; prefer removing edges.
+- Open the `.vibesys` layout through `vs-project`'s `Project`; do not rebuild
+  paths.
+
+Data and validation:
+
+- Use Pydantic models for external contracts and `StrEnum` or `Literal` for
+  closed sets. No raw strings where an enum or registry exists.
+- Store one source of truth per fact. Do not add a field that another field
+  determines.
+- Reject unknown config, metadata, and routing keys. Validate early with errors
+  that name the offending key or path.
+- No implicit fallback for agent-visible contracts unless documented and tested.
+- Keep one authoritative definition of each cross-process contract and generate
+  downstream types from it.
+
+Testing and checks:
+
+- Before writing, changing, or reviewing any test, use the `testing` skill
+  (`.agents/skills/testing/`), in every language. Tests exercise public APIs
+  only, use Fakes instead of patching or mocks, favor property-based tests, and
+  are never flaky (no reliance on timeouts, sleeps, or wall-clock time).
+- A bug fix needs a regression test that fails at the merge base and passes at
+  the head.
+- Run `./scripts/check_format.sh`, `./scripts/check_lint.sh`, and the narrowest
+  relevant `uv run pytest` target before handing work back.
 
 When preparing a pull request, use the repository PR template at
 [`.github/pull_request_template.md`](.github/pull_request_template.md). Fill in

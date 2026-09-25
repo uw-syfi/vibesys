@@ -107,6 +107,9 @@ markers = [
     # skipped unless its opt-in environment variable is set, so no addopts
     # deselection is needed; the marker exists to select or exclude them.
     "e2e: drives an installed agent CLI for real; opt in with VIBESYS_E2E_AGENTS=1",
+    # A Fake-vs-real contract suite run against the real implementation. Each
+    # such test is skipped unless its opt-in environment variable is set.
+    "real_contract: runs a Fake-vs-real contract suite against the real implementation (real DB, subprocess, or service); opt in with VIBESYS_REAL_CONTRACTS=1",
 ]
 
 [tool.coverage.run]
@@ -177,6 +180,21 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 # Sandbox run environment: setup, execution, and teardown across strategies.
 # Semantic command-argument translation now lives in its own module.
 "src/vibesys/sandbox/run_environment.py" = 2150
+
+[tool.vibesys.test_isolation]
+# Shrink-only ratchet for test isolation, enforced by
+# `scripts/check_test_isolation.py`. Tests should exercise public APIs and use
+# in-memory Fakes instead of monkeypatch or mock, and should never use sleeps
+# as synchronization. Existing violations are recorded per (file, rule) in the
+# baseline; counts may only go down.
+#
+# Glob patterns of directories scanned for `*.py`. They mirror
+# `[tool.pytest.ini_options] testpaths`. `__pycache__` and `fixtures`
+# directories are skipped.
+roots = ["tests", "libs/*/tests", "sdk/*/tests"]
+
+# Repo-relative JSONL baseline, one {"path", "rule", "count"} entry per line.
+baseline = "tests/quality/isolation_baseline.jsonl"
 
 [tool.ruff]
 line-length = 100
