@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -38,6 +39,7 @@ for _common_name in ("_common", "profilers_common"):
             sys.path.insert(0, str(_common_candidate))
         break
 import capture_runtime  # noqa: E402
+import mcp_async  # noqa: E402
 
 # Import the analysis + capture modules by path so this file is usable both
 # from inside the workspace (``rocprof_profiler/server.py``) and as a
@@ -75,7 +77,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
     # -- profile_*: capture tools, one per altitude ----------------------
 
     @mcp.tool()
-    def profile_timeline(  # noqa: PLR0913  # tracked: #288
+    async def profile_timeline(  # noqa: PLR0913  # tracked: #288
         command: str,
         *,
         cwd: str | None = None,
@@ -83,6 +85,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         ready_command: str | None = None,
         ready_timeout_s: float = 60.0,
         load_command: str | None = None,
+        setup_command: str | None = None,
         stop_signal: str = "SIGINT",
         grace_s: float = 10.0,
         timeout_s: float = 300.0,
@@ -96,7 +99,12 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         Runs the target through the shared capture lifecycle (start, wait
         for ``ready_command`` if given, run ``load_command`` if given, stop
         with ``stop_signal`` after ``grace_s``), then automatically checks
-        validity (``host_idle``) and prints a summary. Args:
+        validity (``host_idle``) and prints a summary. Runs off the main
+        event loop, so other tool calls (e.g. ``captures()``) stay
+        responsive while this is in flight; a client that cancels the call
+        stops the capture rather than leaving it running unsupervised. If
+        another GPU-using capture is already running in this server
+        process, returns "busy: ..." immediately instead of queuing. Args:
 
             command: Command run via ``bash -lc`` (offline script, or a
                 server when ``load_command`` is also given).
@@ -107,11 +115,24 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             ready_timeout_s: Max seconds to wait for ready_command.
             load_command: Run once ready_command succeeds; command is
                 stopped via stop_signal once this returns.
+            setup_command: Runs to completion BEFORE command, outside the
+                profiler entirely (rocprofv3 injects itself into every
+                child of a profiled command, so a value command needs --
+                e.g. a free port -- must be picked here, not via `$(...)`
+                inside command/load_command, which would print rocprofv3's
+                own banner into the captured value). Write the value to a
+                file here, then have command read it back with the shell's
+                `read` builtin (`read -r PORT < /tmp/port`), never
+                `$(...)`/`$(cat ...)`. A nonzero exit here stops the
+                capture immediately (status setup_failed) with no target
+                ever started.
             stop_signal: Signal name to stop command with (default SIGINT).
             grace_s: Seconds to wait after stop_signal before escalating
                 (rocprofv3 only flushes traces on a clean exit; size this
                 generously for a large capture).
-            timeout_s: Hard wall-clock budget for the whole capture.
+            timeout_s: Hard wall-clock budget for the whole capture. Set
+                your MCP client's own tool-call timeout above this value:
+                a capture commonly runs 10-25 minutes.
             hip_api: Also collect --hip-runtime-trace (needed for
                 cpu_overhead/graphs; 2-4x the kernel-trace volume).
             kernel_include: Optional --kernel-include-regex filter.
@@ -127,13 +148,17 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             ready_command=ready_command,
             ready_timeout_s=ready_timeout_s,
             load_command=load_command,
+            setup_command=setup_command,
             stop_signal=stop_signal,
             grace_s=grace_s,
             timeout_s=timeout_s,
         )
+        cancel_event = threading.Event()
         try:
-            return capture.profile_timeline(
+            return await mcp_async.run_cancellable(
+                capture.profile_timeline,
                 lifecycle,
+                cancel_event=cancel_event,
                 hip_api=hip_api,
                 kernel_include=kernel_include,
                 collection_delay_s=collection_delay_s,
@@ -141,9 +166,11 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             )
         except ValueError as exc:
             return f"error: {exc}"
+        except capture_runtime.CaptureBusyError as exc:
+            return capture_runtime.format_busy(exc.active)
 
     @mcp.tool()
-    def profile_counters(  # noqa: PLR0913  # tracked: #288
+    async def profile_counters(  # noqa: PLR0913  # tracked: #288
         command: str,
         *,
         cwd: str | None = None,
@@ -151,6 +178,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         ready_command: str | None = None,
         ready_timeout_s: float = 60.0,
         load_command: str | None = None,
+        setup_command: str | None = None,
         stop_signal: str = "SIGINT",
         grace_s: float = 10.0,
         timeout_s: float = 300.0,
@@ -159,14 +187,19 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
     ) -> str:
         """Capture PMC hardware counters: which hardware ceiling one hot kernel is against.
 
-        Runs ONE rocprofv3 --pmc pass PER requested set -- the profiled
-        workload is re-run in full once per set (<=4 counters per pass is a
-        hard rocprofv3/CDNA constraint). Requires a detectable GPU
-        architecture (see profiling_capabilities). Target one
-        already-identified hot kernel via `kernel`; this is not a whole-run
-        tool. Args:
+        Packs the requested sets into as few rocprofv3 --pmc passes as a
+        conservative per-hardware-block model allows -- real MI210
+        validation packed mfma+hbm and mfma+l2 into one pass each. **Each
+        pass, not each requested set, re-runs the profiled workload in
+        full**; the returned text reports how many passes were planned vs.
+        actually run. Requires a detectable GPU architecture (see
+        profiling_capabilities). Target one already-identified hot kernel
+        via `kernel`; this is not a whole-run tool. Runs off the main event
+        loop and honors client cancellation the same way profile_timeline
+        does; returns "busy: ..." immediately if another capture is already
+        running in this server process. Args:
 
-            command, cwd, env, ready_command, ready_timeout_s, load_command,
+            command, cwd, env, ready_command, ready_timeout_s, load_command, setup_command,
                 stop_signal, grace_s, timeout_s: same as profile_timeline.
             sets: Counter-set names from the catalogue for the detected
                 architecture (see profiling_capabilities), e.g.
@@ -180,17 +213,27 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             ready_command=ready_command,
             ready_timeout_s=ready_timeout_s,
             load_command=load_command,
+            setup_command=setup_command,
             stop_signal=stop_signal,
             grace_s=grace_s,
             timeout_s=timeout_s,
         )
+        cancel_event = threading.Event()
         try:
-            return capture.profile_counters(lifecycle, sets=sets, kernel=kernel)
+            return await mcp_async.run_cancellable(
+                capture.profile_counters,
+                lifecycle,
+                cancel_event=cancel_event,
+                sets=sets,
+                kernel=kernel,
+            )
         except ValueError as exc:
             return f"error: {exc}"
+        except capture_runtime.CaptureBusyError as exc:
+            return capture_runtime.format_busy(exc.active)
 
     @mcp.tool()
-    def profile_kernel_deep(  # noqa: PLR0913  # tracked: #288
+    async def profile_kernel_deep(  # noqa: PLR0913  # tracked: #288
         command: str,
         *,
         cwd: str | None = None,
@@ -198,6 +241,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         ready_command: str | None = None,
         ready_timeout_s: float = 60.0,
         load_command: str | None = None,
+        setup_command: str | None = None,
         stop_signal: str = "SIGINT",
         grace_s: float = 10.0,
         timeout_s: float = 300.0,
@@ -209,9 +253,11 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         Costs one full counter-collection sweep (minutes, not seconds). If
         rocprof-compute isn't usable on this host, returns a clear error
         instead of attempting a capture -- check profiling_capabilities
-        first. Args:
+        first. Runs off the main event loop and honors client cancellation
+        the same way profile_timeline does; returns "busy: ..." immediately
+        if another capture is already running in this server process. Args:
 
-            command, cwd, env, ready_command, ready_timeout_s, load_command,
+            command, cwd, env, ready_command, ready_timeout_s, load_command, setup_command,
                 stop_signal, grace_s, timeout_s: same as profile_timeline.
             kernel: A literal substring of the real kernel name (torch GEMMs
                 dispatch as Tensile kernels like 'Cijk_Ailk_Bljk_...', not
@@ -226,17 +272,27 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             ready_command=ready_command,
             ready_timeout_s=ready_timeout_s,
             load_command=load_command,
+            setup_command=setup_command,
             stop_signal=stop_signal,
             grace_s=grace_s,
             timeout_s=timeout_s,
         )
+        cancel_event = threading.Event()
         try:
-            return capture.profile_kernel_deep(lifecycle, kernel=kernel, dispatch=dispatch)
+            return await mcp_async.run_cancellable(
+                capture.profile_kernel_deep,
+                lifecycle,
+                cancel_event=cancel_event,
+                kernel=kernel,
+                dispatch=dispatch,
+            )
         except ValueError as exc:
             return f"error: {exc}"
+        except capture_runtime.CaptureBusyError as exc:
+            return capture_runtime.format_busy(exc.active)
 
     @mcp.tool()
-    def profile_instructions(  # noqa: PLR0913  # tracked: #288
+    async def profile_instructions(  # noqa: PLR0913  # tracked: #288
         command: str,
         *,
         cwd: str | None = None,
@@ -244,6 +300,7 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         ready_command: str | None = None,
         ready_timeout_s: float = 60.0,
         load_command: str | None = None,
+        setup_command: str | None = None,
         stop_signal: str = "SIGINT",
         grace_s: float = 10.0,
         timeout_s: float = 300.0,
@@ -256,9 +313,12 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
         Requires rocprofv3 >= 7.1 and the separate rocprof-trace-decoder
         library (see profiling_capabilities); costs the most overhead of
         any capture tool here -- only reach for it after counters already
-        point at a specific stall class. Args:
+        point at a specific stall class. Runs off the main event loop and
+        honors client cancellation the same way profile_timeline does;
+        returns "busy: ..." immediately if another capture is already
+        running in this server process. Args:
 
-            command, cwd, env, ready_command, ready_timeout_s, load_command,
+            command, cwd, env, ready_command, ready_timeout_s, load_command, setup_command,
                 stop_signal, grace_s, timeout_s: same as profile_timeline.
             kernel: --kernel-include-regex value selecting the kernel to trace.
             target_cu: Which compute unit to trace (keeps output small).
@@ -272,25 +332,35 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             ready_command=ready_command,
             ready_timeout_s=ready_timeout_s,
             load_command=load_command,
+            setup_command=setup_command,
             stop_signal=stop_signal,
             grace_s=grace_s,
             timeout_s=timeout_s,
         )
+        cancel_event = threading.Event()
         try:
-            return capture.profile_instructions(
-                lifecycle, kernel=kernel, target_cu=target_cu, buffer_bytes=buffer_bytes
+            return await mcp_async.run_cancellable(
+                capture.profile_instructions,
+                lifecycle,
+                cancel_event=cancel_event,
+                kernel=kernel,
+                target_cu=target_cu,
+                buffer_bytes=buffer_bytes,
             )
         except ValueError as exc:
             return f"error: {exc}"
+        except capture_runtime.CaptureBusyError as exc:
+            return capture_runtime.format_busy(exc.active)
 
     @mcp.tool()
-    def profile_ops(  # noqa: PLR0913  # tracked: #288
+    async def profile_ops(  # noqa: PLR0913  # tracked: #288
         command: str,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         ready_command: str | None = None,
         ready_timeout_s: float = 600.0,
         load_command: str | None = None,
+        setup_command: str | None = None,
         stop_signal: str = "SIGINT",
         grace_s: float = 120.0,
         timeout_s: float = 1800.0,
@@ -302,9 +372,11 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
 
         Delegates to the torch plugin's capture_ops.profile_ops, staged
         alongside rocprof; returns a clear error if that plugin isn't
-        staged. Args:
+        staged. Runs off the main event loop and honors client cancellation
+        the same way profile_timeline does; returns "busy: ..." immediately
+        if another capture is already running in this server process. Args:
 
-            command, cwd, env, ready_command, ready_timeout_s, load_command,
+            command, cwd, env, ready_command, ready_timeout_s, load_command, setup_command,
                 stop_signal, grace_s, timeout_s: same as profile_timeline
                 (grace/timeout are more generous here: the in-process trace
                 write can itself take a while).
@@ -314,20 +386,27 @@ def build_server() -> FastMCP:  # noqa: C901, PLR0915  # tracked: #288
             record_shapes: Capture per-op input shapes (needed for
                 gemm_shapes/roofline and for certify to pass).
         """
-        return capture.profile_ops(
-            command=command,
-            cwd=cwd,
-            env=env,
-            ready_command=ready_command,
-            ready_timeout_s=ready_timeout_s,
-            load_command=load_command,
-            stop_signal=stop_signal,
-            grace_s=grace_s,
-            timeout_s=timeout_s,
-            delay_s=delay_s,
-            duration_s=duration_s,
-            record_shapes=record_shapes,
-        )
+        cancel_event = threading.Event()
+        try:
+            return await mcp_async.run_cancellable(
+                capture.profile_ops,
+                cancel_event=cancel_event,
+                command=command,
+                cwd=cwd,
+                env=env,
+                ready_command=ready_command,
+                ready_timeout_s=ready_timeout_s,
+                load_command=load_command,
+                setup_command=setup_command,
+                stop_signal=stop_signal,
+                grace_s=grace_s,
+                timeout_s=timeout_s,
+                delay_s=delay_s,
+                duration_s=duration_s,
+                record_shapes=record_shapes,
+            )
+        except capture_runtime.CaptureBusyError as exc:
+            return capture_runtime.format_busy(exc.active)
 
     # -- capture store: list / summarize / diff --------------------------
 
