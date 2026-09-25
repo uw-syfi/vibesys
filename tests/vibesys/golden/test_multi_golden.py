@@ -263,6 +263,58 @@ def test_profile_scenario_golden(tmp_path: Path) -> None:
     )
 
 
+def test_rollback_scenario_golden(tmp_path: Path) -> None:
+    """Round 2's plan sets ``revert_to_round=1``: the designer requests a
+    hypothesis rollback, and round 2 runs against the restored round-1 tree.
+
+    Exercises PR 942 review bug R1 (rollback-checkout failure must warn and
+    retry, never abort the run).
+    """
+    runner = FakeAgentClient(backend_name="stub")
+    runner.enqueue(
+        "orchestrator",
+        PreRoundDecision(
+            need_profile=False, profile_focus="", reasoning="scripted: skip profiling"
+        ),
+        _plan(),
+        PreRoundDecision(
+            need_profile=False, profile_focus="", reasoning="scripted: skip profiling"
+        ),
+        OrchestratorPlan(
+            hypothesis_id="H-02",
+            hypothesis="reverting to the round-1 baseline before decode batching",
+            task="batch the decode step from the round-1 baseline",
+            pass_criteria="throughput improves without regressing accuracy",  # noqa: S106  # tracked: #288
+            reasoning="scripted golden fixture: roll back then retry",
+            revert_to_round=1,
+        ),
+    )
+    runner.enqueue(
+        "implementer",
+        _implementer("round 1: batched the prefill step"),
+        _implementer("round 2: batched the decode step after rollback"),
+    )
+    runner.enqueue("judge", _judge(Verdict.PASS), _judge(Verdict.PASS))
+
+    descriptor = descriptor_from_options(
+        _options(max_rounds=2), orchestration_id="multi-agent"
+    )
+    run = run_scripted(
+        tmp_path,
+        orchestration_id="multi-agent",
+        descriptor=descriptor,
+        orchestrator_factory=MultiAgentOrchestrator,
+        runner=runner,
+    )
+
+    assert run.result is True
+    _assert_prompt_calls(runner, scenario="rollback", workspace=tmp_path.parent)
+    _assert_board_files(run.workspace, scenario="rollback", workspace=tmp_path.parent)
+    assert_events_snapshot(
+        _STRATEGY, "rollback", read_events(run.events_path, workspace=tmp_path.parent)
+    )
+
+
 def _assert_prompt_calls(runner: FakeAgentClient, *, scenario: str, workspace: Path) -> None:
     for call in runner.calls:
         role = f"{call.kind}-{call.round_label}"

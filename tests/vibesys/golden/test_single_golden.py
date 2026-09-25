@@ -27,6 +27,7 @@ Three scenarios cover the main round path without every branch:
 
 from __future__ import annotations
 
+import subprocess
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -205,6 +206,34 @@ def test_gate_scenario_golden(tmp_path: Path) -> None:
     _assert_board_files(run.workspace, scenario="gate", workspace=tmp_path.parent)
     assert_events_snapshot(
         _STRATEGY, "gate", read_events(run.events_path, workspace=tmp_path.parent)
+    )
+
+
+def test_timeout_scenario_golden(tmp_path: Path) -> None:
+    """The combined turn times out: post-fix behavior at HEAD synthesizes a
+    FAIL ``SingleAgentRoundResponse`` (``single/turns.py`` catches
+    ``subprocess.TimeoutExpired``) instead of propagating the exception.
+    """
+    runner = FakeAgentClient(backend_name="stub")
+    runner.enqueue("orchestrator", _plan())
+    runner.fail("implementer", subprocess.TimeoutExpired(cmd="agent", timeout=30.0), times=1)
+
+    descriptor = descriptor_from_options(
+        _options(max_retries_per_round=1), orchestration_id=_ORCHESTRATION_ID
+    )
+    run = run_scripted(
+        tmp_path,
+        orchestration_id=_ORCHESTRATION_ID,
+        descriptor=descriptor,
+        orchestrator_factory=SingleAgentOrchestrator,
+        runner=runner,
+    )
+
+    assert run.result is True  # the run completes; no hypothesis is retained
+    _assert_prompt_calls(runner, scenario="timeout", workspace=tmp_path.parent)
+    _assert_board_files(run.workspace, scenario="timeout", workspace=tmp_path.parent)
+    assert_events_snapshot(
+        _STRATEGY, "timeout", read_events(run.events_path, workspace=tmp_path.parent)
     )
 
 
