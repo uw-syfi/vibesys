@@ -34,7 +34,7 @@ from vibesys.events import (
     PhaseData,
     json_value,
 )
-from vibesys.prompts import PROMPTS_DIR, render_template
+from vibesys.prompts import PROMPTS_DIR, Prompt, render_template
 from vibesys.run.run_control import splice_steering
 from vibesys.runtime import (
     AgentDefinition,
@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from contextlib import ExitStack
     from typing import TextIO
 
+    from vibesys.constants import ComputeBackend
     from vibesys.context import _RunResources
     from vibesys.orchestration.workspaces import WorkspaceHandle
     from vs_agent.api import (
@@ -450,6 +451,7 @@ class _Agents:
         mcp_servers: list[MCPServerSpec] | None = None,
         correction_message: Callable[[BaseModel, str], str] | None = None,
         before_paid: Callable[[], Awaitable[None]] | None = None,
+        backend: ComputeBackend | None = None,
     ) -> BaseModel:
         """Run one role turn: render, isolate, retry, time out, all in one place.
 
@@ -469,14 +471,22 @@ class _Agents:
         marker) tied to ``role.paid``; it runs right before the pre-turn
         snapshot so a crash after the hook still resumes from a committed
         tree, matching today's paid-marker snapshot.
+
+        ``backend``, when given, renders ``role.template`` through
+        :class:`~vibesys.prompts.Prompt` instead of plain ``render_template``,
+        auto-injecting that backend's compute fragments (``device_dtype``,
+        etc.) as extra template kwargs -- the same fragment-aware path
+        ``issue_queue`` renders its system prompts through today. Every other
+        role renders through plain ``render_template`` unchanged.
         """
         host = self._host
         workspace = host.workspaces.root
         template_dir, template_name = _split_template(role.template)
-        prompt = render_template(
-            template_name,
-            template_dir=template_dir,
-            **_context_kwargs(context),
+        context_kwargs = _context_kwargs(context)
+        prompt = (
+            Prompt(template_dir, backend).render(template_name, **context_kwargs)
+            if backend is not None
+            else render_template(template_name, template_dir=template_dir, **context_kwargs)
         )
         user_message = role.message if message is None else message
         reuse_session = isinstance(role.session, Keyed)

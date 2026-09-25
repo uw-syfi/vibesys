@@ -238,6 +238,21 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-plan",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
       "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
@@ -284,6 +299,21 @@
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-retry-1-paid-marker",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-retry-1-single-agent-input",
       "source": "git_tracking"
     },
     "round_label": null,
@@ -412,7 +442,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": "<SHA>",
+      "commit": null,
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-retry-1-single-agent",
@@ -469,6 +499,21 @@
     "type": "workspace_snapshot"
   },
   {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "round-1-retry-2-single-agent-input",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
     "agent_kind": "implementer",
     "data": {
       "activity": {
@@ -589,7 +634,7 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
-      "commit": "<SHA>",
+      "commit": null,
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "round-1-retry-2-single-agent",

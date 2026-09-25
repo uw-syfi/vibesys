@@ -105,6 +105,21 @@
     "type": "workspace_snapshot"
   },
   {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "impl issue #1 att1-input",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
     "agent_kind": "implementer",
     "data": {
       "activity": {
@@ -205,6 +220,21 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "impl issue #1 att1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
       "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
@@ -224,6 +254,21 @@
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "judge issue #1 att1-input",
       "source": "git_tracking"
     },
     "round_label": null,
@@ -325,6 +370,21 @@
     "status": "completed",
     "text": "",
     "type": "phase_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "judge issue #1 att1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
   },
   {
     "agent_kind": null,
@@ -372,6 +432,21 @@
     "type": "workspace_snapshot"
   },
   {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "impl issue #1 att2-input",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
     "agent_kind": "implementer",
     "data": {
       "activity": {
@@ -472,6 +547,21 @@
     "agent_kind": null,
     "data": {
       "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "impl issue #1 att2",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
       "commit": "<SHA>",
       "excluded_paths": [],
       "kind": "workspace_snapshot",
@@ -491,6 +581,21 @@
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "judge issue #1 att2-input",
       "source": "git_tracking"
     },
     "round_label": null,
@@ -600,6 +705,21 @@
       "commit": null,
       "excluded_paths": [],
       "kind": "workspace_snapshot",
+      "label": "judge issue #1 att2",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
       "label": "iter-1-judge-1-att2",
       "source": "git_tracking"
     },
@@ -631,6 +751,21 @@
       "excluded_paths": [],
       "kind": "workspace_snapshot",
       "label": "vibesys(round 1): record result",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "perf_eval iter 1-input",
       "source": "git_tracking"
     },
     "round_label": null,
@@ -740,6 +875,21 @@
     "status": "completed",
     "text": "",
     "type": "phase_finished"
+  },
+  {
+    "agent_kind": null,
+    "data": {
+      "baseline": null,
+      "commit": null,
+      "excluded_paths": [],
+      "kind": "workspace_snapshot",
+      "label": "perf_eval iter 1",
+      "source": "git_tracking"
+    },
+    "round_label": null,
+    "status": null,
+    "text": "",
+    "type": "workspace_snapshot"
   },
   {
     "agent_kind": null,

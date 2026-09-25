@@ -1,16 +1,24 @@
-"""Single strategy plan correction and combined role handoff."""
+"""Single strategy plan correction and combined role handoff.
+
+``turns.py`` renders through ``ctx.agents.turn`` (see
+``vibesys.orchestration.agents``), which owns the turn mechanics
+(rendering, isolation, timeout->fallback, correction retries) generically
+for every strategy; those mechanics have their own tests in
+``tests/vibesys/orchestration/test_agents_turn.py`` (including the
+timeout->fallback regression and its Hypothesis property test). These tests
+cover only what's specific to ``single``: the context dict each role
+renders from, the state-dependent plan-ID retry that wraps
+``ctx.agents.turn`` (not expressible as ``Role.check``), and the board
+writes around each turn.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import subprocess
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
 
 from vibesys.agent_run.attempts import AttemptState
 from vibesys.agent_run.evidence import CarryOver
@@ -21,6 +29,7 @@ from vibesys.loops.single.hypothesis import HypothesisEngine
 from vibesys.loops.single.session import AttemptRequest, PlanRequest
 from vibesys.loops.single.turns import InvalidPlanError, SingleAgentTurns
 from vibesys.profilers import ProfilerKind
+from vibesys.roles.single import SINGLE_COMBINED
 from vibesys.schemas import OrchestratorPlan, SingleAgentRoundResponse, Verdict
 
 if TYPE_CHECKING:
@@ -62,6 +71,7 @@ def _configured_turns(tmp_path: Path) -> SingleAgentTurns:
         profile_execution="local",
     )
     context = SimpleNamespace(
+        agents=SimpleNamespace(turn=AsyncMock()),
         workspaces=SimpleNamespace(root=SimpleNamespace(path=tmp_path)),
         request=SimpleNamespace(
             objective="Reduce decode latency",
@@ -98,19 +108,19 @@ def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path
     assert hypothesis is not None
     plan_request = PlanRequest(1, engine.state, [], CarryOver(), None, None, 1, engine.guidance)
 
-    designer_prompt = turns._plan_prompt(plan_request)  # noqa: SLF001
-    combined_prompt = turns._combined_prompt(  # noqa: SLF001
+    designer_context = turns._plan_context(plan_request)  # noqa: SLF001
+    combined_context = turns._combined_context(  # noqa: SLF001
         AttemptRequest(1, plan, "cadence", [], hypothesis, "decode"),
         AttemptState(agent_run_state=engine.state, feedback=None, retry=1),
         [],
     )
 
     assert turns.template_dir.name == "single"
-    assert "OBJECTIVE.md" in designer_prompt
-    assert "Run locally" in designer_prompt
-    assert "OBJECTIVE.md" in combined_prompt
-    assert "cadence" in combined_prompt
-    assert "Batch decode requests" not in combined_prompt
+    assert designer_context["objective_location"] == "OBJECTIVE.md"
+    assert designer_context["runtime_notes"] == "Run locally"
+    assert combined_context["objective_location"] == "OBJECTIVE.md"
+    assert combined_context["official_evaluation_reason"] == "cadence"
+    assert combined_context["task"] == "Batch decode requests"
     assert (tmp_path / "progress-artifacts" / "plans" / "round-0001.json").exists()
 
 
@@ -123,19 +133,25 @@ async def test_plan_reprompts_reused_hypothesis_and_records_corrected_plan(
     state = prior.state
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
     log: list[str] = []
-    monkeypatch.setattr(turns, "ctx", SimpleNamespace(log=log.append), raising=False)
+    agent_turn = AsyncMock(side_effect=[_plan("used"), _plan("new")])
+    monkeypatch.setattr(
+        turns,
+        "ctx",
+        SimpleNamespace(log=log.append, agents=SimpleNamespace(turn=agent_turn)),
+        raising=False,
+    )
+    monkeypatch.setattr(turns, "designer", SimpleNamespace(), raising=False)
     monkeypatch.setattr(turns, "progress_path", tmp_path / "progress.md", raising=False)
-    monkeypatch.setattr(turns, "_plan_prompt", lambda _request: "plan prompt")
-    designer = AsyncMock(side_effect=[_plan("used"), _plan("new")])
-    monkeypatch.setattr(turns, "_designer_turn", designer)
+    monkeypatch.setattr(turns, "roadmap_location", "progress-artifacts/roadmap", raising=False)
+    monkeypatch.setattr(turns, "_plan_context", lambda _request: {"plan": "context"})
     monkeypatch.setattr(turns, "_skills", lambda selections: (selections, []))
     request = PlanRequest(2, state, state.rounds, CarryOver(), None, None, 0, prior.guidance)
 
     plan = await turns.plan(request)
 
     assert plan.hypothesis_id == "new"
-    assert designer.await_count == 2
-    assert "previous plan was rejected" in designer.await_args_list[1].args[1]
+    assert agent_turn.await_count == 2
+    assert "previous plan was rejected" in agent_turn.await_args_list[1].kwargs["message"]
     assert "rejected" in log[0]
     assert (tmp_path / "progress-artifacts" / "plans" / "round-0002.json").exists()
 
@@ -150,101 +166,27 @@ async def test_combined_turn_records_response_and_uses_hypothesis_session(
     hypothesis = engine.state.active_hypothesis
     assert hypothesis is not None
     turns = SingleAgentTurns.__new__(SingleAgentTurns)
-    worker = SimpleNamespace(turn_structured=AsyncMock(return_value=_response()))
-    workspace = SimpleNamespace(snapshot=AsyncMock(return_value="revision"))
-    monkeypatch.setattr(turns, "worker", worker, raising=False)
-    monkeypatch.setattr(turns, "workspace", workspace, raising=False)
+    agent_turn = AsyncMock(return_value=_response())
+    monkeypatch.setattr(
+        turns, "ctx", SimpleNamespace(agents=SimpleNamespace(turn=agent_turn)), raising=False
+    )
+    monkeypatch.setattr(turns, "worker", SimpleNamespace(), raising=False)
     monkeypatch.setattr(turns, "progress_path", tmp_path / "progress.md", raising=False)
     monkeypatch.setattr(turns, "_skills", lambda selections: (selections, []))
-    monkeypatch.setattr(turns, "_combined_prompt", lambda *_args: "combined prompt")
+    monkeypatch.setattr(turns, "_combined_context", lambda *_args: {"combined": "context"})
     request = AttemptRequest(1, plan, None, [], hypothesis, "decode")
     attempt = AttemptState(agent_run_state=engine.state, feedback=None, retry=1)
 
     response = await turns.combined(request, attempt)
 
     assert response.verdict is Verdict.PASS
-    assert worker.turn_structured.await_args.kwargs["system_prompt"] == "combined prompt"
-    assert worker.turn_structured.await_args.kwargs["label"] == "round-1-retry-1-single-agent"
-    workspace.snapshot.assert_awaited_once_with("round-1-retry-1-single-agent")
+    call = agent_turn.await_args
+    assert call is not None
+    assert call.args[0] is SINGLE_COMBINED
+    assert call.kwargs["context"] == {"combined": "context"}
+    assert call.kwargs["session_key"] == "h1"
+    assert call.kwargs["label"] == "round-1-retry-1-single-agent"
     assert "Implemented batching" in (tmp_path / "progress.md").read_text()
-
-
-@pytest.mark.asyncio
-async def test_combined_turn_falls_back_on_worker_timeout(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A timed-out worker turn must not abort the round (regression for the single-agent gap).
-
-    ``multi``'s implementer turn already catches ``subprocess.TimeoutExpired`` and
-    substitutes a FAIL response; before this fix, ``single``'s combined turn let the
-    exception propagate and crash the round instead.
-    """
-    plan = _plan("h1")
-    engine = HypothesisEngine.create(AgentRunState()).start(plan, started_round=1)
-    hypothesis = engine.state.active_hypothesis
-    assert hypothesis is not None
-    turns = SingleAgentTurns.__new__(SingleAgentTurns)
-    log: list[str] = []
-    worker = SimpleNamespace(
-        turn_structured=AsyncMock(side_effect=subprocess.TimeoutExpired(cmd="agent", timeout=30.0))
-    )
-    workspace = SimpleNamespace(snapshot=AsyncMock(return_value="revision"))
-    monkeypatch.setattr(turns, "worker", worker, raising=False)
-    monkeypatch.setattr(turns, "workspace", workspace, raising=False)
-    monkeypatch.setattr(turns, "ctx", SimpleNamespace(log=log.append), raising=False)
-    monkeypatch.setattr(turns, "progress_path", tmp_path / "progress.md", raising=False)
-    monkeypatch.setattr(turns, "_skills", lambda selections: (selections, []))
-    monkeypatch.setattr(turns, "_combined_prompt", lambda *_args: "combined prompt")
-    request = AttemptRequest(1, plan, None, [], hypothesis, "decode")
-    attempt = AttemptState(agent_run_state=engine.state, feedback=None, retry=1)
-
-    response = await turns.combined(request, attempt)
-
-    assert response.verdict is Verdict.FAIL
-    assert "stopped the agent" in response.self_review
-    assert any("timed out" in message for message in log)
-    workspace.snapshot.assert_awaited_once_with("round-1-retry-1-single-agent")
-
-
-@given(
-    timeout=st.floats(min_value=0.1, max_value=3600.0), retry=st.integers(min_value=1, max_value=50)
-)
-@settings(max_examples=25, deadline=None)
-def test_combined_turn_survives_any_timeout_duration_and_retry(
-    timeout: float, retry: int, tmp_path_factory: pytest.TempPathFactory
-) -> None:
-    """Property: whatever the timeout or retry count, the round always produces a FAIL response.
-
-    Generalizes the single-agent timeout regression above: no combination of
-    ``subprocess.TimeoutExpired(timeout=...)`` and retry number should ever propagate
-    an exception out of ``combined`` instead of a structured fallback reply.
-    """
-    tmp_path = tmp_path_factory.mktemp("single-timeout")
-    plan = _plan("h1")
-    engine = HypothesisEngine.create(AgentRunState()).start(plan, started_round=1)
-    hypothesis = engine.state.active_hypothesis
-    assert hypothesis is not None
-    turns = cast("Any", SingleAgentTurns.__new__(SingleAgentTurns))
-    worker = SimpleNamespace(
-        turn_structured=AsyncMock(
-            side_effect=subprocess.TimeoutExpired(cmd="agent", timeout=timeout)
-        )
-    )
-    workspace = SimpleNamespace(snapshot=AsyncMock(return_value="revision"))
-    turns.worker = worker
-    turns.workspace = workspace
-    turns.ctx = SimpleNamespace(log=lambda _message: None)
-    turns.progress_path = tmp_path / "progress.md"
-    turns._skills = lambda selections: (selections, [])  # noqa: SLF001
-    turns._combined_prompt = lambda *_args: "combined prompt"  # noqa: SLF001
-    request = AttemptRequest(1, plan, None, [], hypothesis, "decode")
-    attempt = AttemptState(agent_run_state=engine.state, feedback=None, retry=retry)
-
-    response = asyncio.run(turns.combined(request, attempt))
-
-    assert response.verdict is Verdict.FAIL
-    assert response.self_review
 
 
 def test_validation_rejects_reused_id() -> None:

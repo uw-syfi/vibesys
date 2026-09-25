@@ -1,11 +1,10 @@
-"""Role catalog for the ``single`` strategy.
+"""Role catalog for the ``profile_single`` strategy.
 
-One designer and one combined implementer/reviewer/profiler.
-
-``single``'s designer-plan template and reply type are byte-identical to
-``multi``'s in content, but ``single`` renders from its own
-``prompts/loops/single/`` folder (a different template file), so it gets its
-own role: "different prompts => different roles" (no multi-mode roles).
+One designer and one combined implementer/reviewer/profiler, same shape as
+``single``'s roles. ``profile_single`` renders from its own
+``prompts/loops/profile_single/`` folder (its templates add the component
+guidance/attribution context ``single`` doesn't have), so it gets its own
+roles: "different prompts => different roles" (no multi-mode roles).
 """
 
 from __future__ import annotations
@@ -31,22 +30,11 @@ def _fallback_plan() -> OrchestratorPlan:
 
 
 def _fallback_combined() -> SingleAgentRoundResponse:
-    """Used for both a structured-parse failure and a timed-out turn.
-
-    ``ctx.agents.turn`` calls a role's ``fallback`` with no arguments (see
-    ``vibesys.runtime.Role``), so this can't embed the actual elapsed time
-    the a6e361c1 timeout fix's hand-rolled message did; the golden timeout
-    snapshot normalizes any ``<digits> seconds`` substring to ``<DURATION>``
-    regardless of the actual value, so a fixed placeholder duration keeps
-    that snapshot's rendered text identical.
-    """
     return SingleAgentRoundResponse(
-        summary="Single-agent invocation timed out.",
+        summary="Single-agent produced no structured response.",
         expected_behavior="unknown",
-        self_review=(
-            "The framework stopped the agent after 0 seconds without a structured response."
-        ),
-        feedback="Inspect retained evidence and return a schema-valid response on retry.",
+        self_review="No structured response received, or the turn timed out.",
+        feedback="No structured response received.",
         verdict=Verdict.FAIL,
         bottlenecks="",
         suggestions="",
@@ -55,9 +43,9 @@ def _fallback_combined() -> SingleAgentRoundResponse:
     )
 
 
-SINGLE_ORCHESTRATOR_PLAN = Role(
+PROFILE_SINGLE_ORCHESTRATOR_PLAN = Role(
     id="orchestrator",
-    template="loops/single/orchestrator_plan_prompt.j2",
+    template="loops/profile_single/orchestrator_plan_prompt.j2",
     reply=OrchestratorPlan,
     fallback=_fallback_plan,
     access=ReadOnly(),  # allow-list (roadmap index) resolved per call by the caller
@@ -65,9 +53,9 @@ SINGLE_ORCHESTRATOR_PLAN = Role(
     message="Produce this round's plan. Return only the JSON object.",
 )
 
-SINGLE_COMBINED = Role(
+PROFILE_SINGLE_COMBINED = Role(
     id="implementer",
-    template="loops/single/single_agent_round_prompt.j2",
+    template="loops/profile_single/single_agent_round_prompt.j2",
     reply=SingleAgentRoundResponse,
     fallback=_fallback_combined,
     access=Writes(),
@@ -80,4 +68,4 @@ SINGLE_COMBINED = Role(
     ),
 )
 
-ALL_ROLES = (SINGLE_ORCHESTRATOR_PLAN, SINGLE_COMBINED)
+ALL_ROLES = (PROFILE_SINGLE_ORCHESTRATOR_PLAN, PROFILE_SINGLE_COMBINED)

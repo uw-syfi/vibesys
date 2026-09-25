@@ -212,7 +212,7 @@ depends_on = []
 
 [[modules]]
 path = "vibesys.loops.single"
-depends_on = ["vs_agent", "vibesys.evaluators", "vibesys.render", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.agent_run", "vibesys.prompts", "vs_project"]
+depends_on = ["vs_agent", "vibesys.evaluators", "vibesys.render", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.context", "vibesys.orchestration.view", "vibesys.domains", "vibesys", "vibesys.agent_run", "vibesys.prompts", "vs_project", "vibesys.runtime", "vibesys.roles"]
 
 [[modules]]
 path = "vibesys.loops.multi"
@@ -220,7 +220,7 @@ depends_on = ["vs_project", "vibesys.context", "vs_agent", "vibesys.render", "vi
 
 [[modules]]
 path = "vibesys.loops.profile_single"
-depends_on = ["vs_loop_state", "vibesys.orchestration.runtime", "vibesys.render", "vibesys.context", "vibesys", "vibesys.prompts", "vs_project", "vibesys.agent_run", "vibesys.domains", "vs_agent", "vibesys.evaluators", "vibesys.orchestration.view"]
+depends_on = ["vs_loop_state", "vibesys.orchestration.runtime", "vibesys.render", "vibesys.context", "vibesys", "vibesys.prompts", "vs_project", "vibesys.agent_run", "vibesys.domains", "vs_agent", "vibesys.evaluators", "vibesys.orchestration.view", "vibesys.runtime", "vibesys.roles"]
 
 [[modules]]
 path = "vibesys.loops.profile_multi"
@@ -228,7 +228,7 @@ depends_on = ["vibesys.render", "vibesys.domains", "vibesys.context", "vibesys",
 
 [[modules]]
 path = "vibesys.loops.issue_queue"
-depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.render", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.orchestration.tools", "vs_agent"]
+depends_on = ["vs_issue_board", "vibesys", "vibesys.context", "vibesys.orchestration.view", "vibesys.runtime", "vs_project", "vibesys.render", "vibesys.prompts", "vibesys.orchestration", "vs_loop_state", "vibesys.orchestration.runtime", "vibesys.orchestration.tools", "vs_agent", "vibesys.roles"]
 
 [[modules]]
 path = "vibesys.loops.evolve"
