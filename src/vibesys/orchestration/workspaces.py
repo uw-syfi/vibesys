@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from vibesys.context import WorkspaceResourceSpec, create_workspace_resources
 from vibesys.runtime import WorkspaceScope
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.context import _RunResources
+    from vibesys.orchestration._host import HostResources
 
 
 class WorkspaceRestoreError(RuntimeError):
@@ -169,13 +170,7 @@ class WorkspaceHandle:
 class _Workspaces:
     """Own isolated worktrees and parent adoption for one run."""
 
-    def __init__(self, host: Any) -> None:  # noqa: ANN401
-        # `host` is a `vibesys.orchestration.runtime.RunContext`, typed `Any`
-        # here (rather than imported under `TYPE_CHECKING`) because that
-        # module imports this one for real to construct `_Workspaces`; a
-        # back-reference, even type-checking-only, would be a tach module
-        # cycle (tach freezes `TYPE_CHECKING` imports too:
-        # `ignore_type_checking_imports = false`).
+    def __init__(self, host: HostResources) -> None:
         self._host = host
         self._scopes: dict[str, WorkspaceScope] = {}
         self._scoped_resources: dict[str, _RunResources] = {}

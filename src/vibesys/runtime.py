@@ -122,6 +122,19 @@ class Fresh:
 
 
 @dataclass(frozen=True, slots=True)
+class Reuse:
+    """Let the agent client pick its own default session.
+
+    Passes ``reuse_session=None`` and no ``session_key`` to
+    ``AgentHandle.turn_structured``, which reuses one conversation per agent
+    role (``AgentSessionKey(SessionScope.ROLE, kind)``) rather than a
+    caller-scoped key. This is the client's own default when a caller passes
+    neither argument; ``Fresh``/``Keyed`` cannot express it because they
+    always pass an explicit ``reuse_session`` bool.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class Keyed:
     """Reuse one session across turns that share a caller-derived key.
 
@@ -153,7 +166,7 @@ class Role:
     reply: type[BaseModel]
     fallback: Callable[[], BaseModel]
     access: ReadOnly | Writes = field(default_factory=Writes)
-    session: Fresh | Keyed = field(default_factory=Fresh)
+    session: Fresh | Keyed | Reuse = field(default_factory=Fresh)
     paid: bool = False
     check: Callable[[BaseModel], str | None] | None = None
     max_corrections: int = 0

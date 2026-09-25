@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
@@ -42,6 +42,7 @@ from vibesys.runtime import (
     CorrectionExhaustedError,
     Keyed,
     ReadOnly,
+    Reuse,
     Role,
     RoleIsolationError,
     WorkspaceScope,
@@ -58,6 +59,7 @@ if TYPE_CHECKING:
 
     from vibesys.constants import ComputeBackend
     from vibesys.context import _RunResources
+    from vibesys.orchestration._host import HostResources
     from vibesys.orchestration.workspaces import WorkspaceHandle
     from vs_agent.api import (
         AgentCapabilities,
@@ -104,18 +106,12 @@ def _context_kwargs(context: Mapping[str, object] | BaseModel) -> dict[str, obje
     return dict(context)
 
 
-def _filter_reply_skills(host: Any, reply: T) -> T:  # noqa: ANN401
+def _filter_reply_skills(host: HostResources, reply: T) -> T:
     """Resolve every ``list[SkillResourceSelection]`` field on ``reply``.
 
     Mirrors the ``_skills`` helper every strategy's ``turns.py`` hand-rolls
     today: unknown skills and unsafe/missing resources are dropped (with a
     warning) rather than failing the turn.
-
-    ``host`` is a ``vibesys.orchestration.runtime.RunContext``, typed ``Any``
-    here (rather than imported under ``TYPE_CHECKING``) because that module
-    imports this one for real to construct ``_Agents``; a back-reference,
-    even type-checking-only, would be a tach module cycle (tach freezes
-    ``TYPE_CHECKING`` imports too: ``ignore_type_checking_imports = false``).
     """
     updates: dict[str, list[SkillResourceSelection]] = {}
     for name, field_info in type(reply).model_fields.items():
@@ -408,9 +404,7 @@ class _LocalAgentHandle:
 class _Agents:
     """Agent creation and per-turn progress for one run."""
 
-    def __init__(self, host: Any) -> None:  # noqa: ANN401
-        # See `_filter_reply_skills` above: `host` is `RunContext`, typed `Any`
-        # to avoid a tach module cycle with `vibesys.orchestration.runtime`.
+    def __init__(self, host: HostResources) -> None:
         self._host = host
 
     def default_definition(self, role_id: str, *, model: str | None = None) -> AgentDefinition:
@@ -490,7 +484,7 @@ class _Agents:
             else render_template(template_name, template_dir=template_dir, **context_kwargs)
         )
         user_message = role.message if message is None else message
-        reuse_session = isinstance(role.session, Keyed)
+        reuse_session = None if isinstance(role.session, Reuse) else isinstance(role.session, Keyed)
         resolved_session_key = (
             AgentSessionKey(role.session.scope, session_key or role.id)
             if isinstance(role.session, Keyed)

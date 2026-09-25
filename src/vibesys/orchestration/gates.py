@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import shlex
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vibesys.evaluators.gates import (
     GATE_RECORD_TAIL_CHARS,
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
     from vibesys.context import _RunResources
     from vibesys.evaluators.metrics import Objective
+    from vibesys.orchestration._host import HostResources
     from vibesys.orchestration.workspaces import WorkspaceHandle
     from vibesys.run.event_journal import EventJournal
     from vibesys.run.git_tracker import GitTracker
@@ -126,13 +127,7 @@ class GateRunResult:
 class _Evaluator:
     """Trusted checks and measurements in the parent run workspace."""
 
-    def __init__(self, host: Any) -> None:  # noqa: ANN401
-        # `host` is a `vibesys.orchestration.runtime.RunContext`, typed `Any`
-        # here (rather than imported under `TYPE_CHECKING`) because that
-        # module imports this one for real to construct `_Evaluator`; a
-        # back-reference, even type-checking-only, would be a tach module
-        # cycle (tach freezes `TYPE_CHECKING` imports too:
-        # `ignore_type_checking_imports = false`).
+    def __init__(self, host: HostResources) -> None:
         self._host = host
         self._locks: dict[str, asyncio.Lock] = {}
 

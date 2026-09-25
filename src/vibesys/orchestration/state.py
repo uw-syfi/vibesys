@@ -9,7 +9,7 @@ Split from ``runtime.py`` by capability; see that module's docstring.
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, NotRequired, Protocol, TypedDict, TypeVar, Unpack
+from typing import TYPE_CHECKING, NotRequired, Protocol, TypedDict, TypeVar, Unpack
 
 from pydantic import BaseModel
 
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.events import CoreEventData
+    from vibesys.orchestration._host import HostResources
     from vibesys.orchestration.view import RoundSummary, RunView
     from vs_project.api import StateNamespace, StateSlot
 
@@ -74,9 +75,7 @@ class _EventSink(Protocol):
 class _TypedRunStateSlot[T: BaseModel]:
     """Read one declared typed file from the policy's portable namespace."""
 
-    def __init__(self, host: Any, slot: StateSlot[T]) -> None:  # noqa: ANN401
-        # `host` is a `vibesys.orchestration.runtime.RunContext`; see
-        # `_RunState.__init__` below for why it is typed `Any` here.
+    def __init__(self, host: HostResources, slot: StateSlot[T]) -> None:
         self._host = host
         self._slot = slot
 
@@ -88,13 +87,7 @@ class _TypedRunStateSlot[T: BaseModel]:
 class _RunState:
     """Policy-bound portable state and machine-local staging paths."""
 
-    def __init__(self, host: Any) -> None:  # noqa: ANN401
-        # `host` is a `vibesys.orchestration.runtime.RunContext`, typed `Any`
-        # here (rather than imported under `TYPE_CHECKING`) because that
-        # module imports this one for real to construct `_RunState`; a
-        # back-reference, even type-checking-only, would be a tach module
-        # cycle (tach freezes `TYPE_CHECKING` imports too:
-        # `ignore_type_checking_imports = false`).
+    def __init__(self, host: HostResources) -> None:
         self._host = host
         # Cache of the last published `RunView`, used by `commit` to derive
         # round/experiment events from a before/after diff without re-reading

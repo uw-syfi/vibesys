@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vibesys.sandbox.model_requests import ModelRequestError
 from vibesys.sandbox.model_requests import reconcile_model_requests as stage_model_requests
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from vibesys.config import Config
     from vibesys.context import _RunResources
     from vibesys.evaluators.input_manifest import WorkspaceSource
+    from vibesys.orchestration._host import HostResources
     from vibesys.orchestration.workspaces import WorkspaceHandle
     from vibesys.profilers import ProfilerKind
     from vibesys.runtime import WorkspaceScope
@@ -106,13 +107,7 @@ class AgentEnvironment(Protocol):
 class _Environment:
     """Generic execution facts and candidate deployment lifecycle."""
 
-    def __init__(self, host: Any) -> None:  # noqa: ANN401
-        # `host` is a `vibesys.orchestration.runtime.RunContext`, typed `Any`
-        # here (rather than imported under `TYPE_CHECKING`) because that
-        # module imports this one for real to construct `_Environment`; a
-        # back-reference, even type-checking-only, would be a tach module
-        # cycle (tach freezes `TYPE_CHECKING` imports too:
-        # `ignore_type_checking_imports = false`).
+    def __init__(self, host: HostResources) -> None:
         self._host = host
 
     @property

@@ -163,7 +163,7 @@ depends_on = []
 
 [[modules]]
 path = "vibesys.orchestration.environment"
-depends_on = ["vibesys", "vs_agent", "vs_sandbox", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.sandbox", "vibesys.orchestration.workspaces"]
+depends_on = ["vibesys", "vs_agent", "vs_sandbox", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.sandbox", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.tools"
@@ -367,19 +367,19 @@ depends_on = ["vibesys", "vs_agent", "vibesys.context", "vibesys.evaluators", "v
 
 [[modules]]
 path = "vibesys.orchestration.agents"
-depends_on = ["vibesys", "vibesys.context", "vibesys.prompts", "vibesys.run", "vibesys.runtime", "vs_agent", "vibesys.orchestration.workspaces"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.prompts", "vibesys.run", "vibesys.runtime", "vs_agent", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.workspaces"
-depends_on = ["vibesys.context", "vibesys.runtime"]
+depends_on = ["vibesys.context", "vibesys.runtime", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.state"
-depends_on = ["vibesys", "vibesys.orchestration.view", "vs_project"]
+depends_on = ["vibesys", "vibesys.orchestration.view", "vs_project", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.gates"
-depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_sandbox", "vibesys.orchestration.workspaces"]
+depends_on = ["vibesys", "vibesys.context", "vibesys.evaluators", "vibesys.runtime", "vibesys.run", "vibesys.sandbox", "vs_sandbox", "vibesys.orchestration.workspaces", "vibesys.orchestration._host"]
 
 [[modules]]
 path = "vibesys.orchestration.control"
@@ -388,6 +388,14 @@ depends_on = ["vibesys.run"]
 [[modules]]
 path = "vibesys.orchestration._common"
 depends_on = ["vibesys.orchestration.request"]
+
+[[modules]]
+# Structural `HostResources` Protocol the capability modules type `host` with
+# instead of `Any`. Stays at the base of the `vibesys.orchestration.*` graph:
+# it must never depend on (and is never depended on by anything that would
+# create a cycle back through) agents/workspaces/gates/state/environment.
+path = "vibesys.orchestration._host"
+depends_on = ["vibesys", "vibesys.context", "vibesys.orchestration.request", "vibesys.orchestration.view", "vibesys.run", "vibesys.runtime", "vibesys.sandbox"]
 
 [[modules]]
 path = "vibesys.loops.registry"

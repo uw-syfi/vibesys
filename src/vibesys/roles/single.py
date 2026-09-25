@@ -31,20 +31,28 @@ def _fallback_plan() -> OrchestratorPlan:
 
 
 def _fallback_combined() -> SingleAgentRoundResponse:
-    """Used for both a structured-parse failure and a timed-out turn.
+    """Used when the structured reply could not be parsed."""
+    return SingleAgentRoundResponse(
+        summary="Single-agent produced no structured response.",
+        expected_behavior="unknown",
+        self_review="No structured response received.",
+        feedback="No structured response received.",
+        verdict=Verdict.FAIL,
+        bottlenecks="",
+        suggestions="",
+        profile_analysis="",
+        candidate_disposition=CandidateDisposition.UNASSESSED,
+    )
 
-    ``ctx.agents.turn`` calls a role's ``fallback`` with no arguments (see
-    ``vibesys.runtime.Role``), so this can't embed the actual elapsed time
-    the a6e361c1 timeout fix's hand-rolled message did; the golden timeout
-    snapshot normalizes any ``<digits> seconds`` substring to ``<DURATION>``
-    regardless of the actual value, so a fixed placeholder duration keeps
-    that snapshot's rendered text identical.
-    """
+
+def _timeout_fallback_combined(timeout: float) -> SingleAgentRoundResponse:
+    """Used when the turn hit ``subprocess.TimeoutExpired`` (a6e361c1 text)."""
     return SingleAgentRoundResponse(
         summary="Single-agent invocation timed out.",
         expected_behavior="unknown",
         self_review=(
-            "The framework stopped the agent after 0 seconds without a structured response."
+            f"The framework stopped the agent after {timeout:g} seconds "
+            "without a structured response."
         ),
         feedback="Inspect retained evidence and return a schema-valid response on retry.",
         verdict=Verdict.FAIL,
@@ -70,6 +78,7 @@ SINGLE_COMBINED = Role(
     template="loops/single/single_agent_round_prompt.j2",
     reply=SingleAgentRoundResponse,
     fallback=_fallback_combined,
+    timeout_fallback=_timeout_fallback_combined,
     access=Writes(),
     session=Keyed(scope=SessionScope.HYPOTHESIS),
     paid=True,

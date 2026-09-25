@@ -30,11 +30,30 @@ def _fallback_plan() -> OrchestratorPlan:
 
 
 def _fallback_combined() -> SingleAgentRoundResponse:
+    """Used when the structured reply could not be parsed."""
     return SingleAgentRoundResponse(
         summary="Single-agent produced no structured response.",
         expected_behavior="unknown",
-        self_review="No structured response received, or the turn timed out.",
+        self_review="No structured response received.",
         feedback="No structured response received.",
+        verdict=Verdict.FAIL,
+        bottlenecks="",
+        suggestions="",
+        profile_analysis="",
+        candidate_disposition=CandidateDisposition.UNASSESSED,
+    )
+
+
+def _timeout_fallback_combined(timeout: float) -> SingleAgentRoundResponse:
+    """Used when the turn hit ``subprocess.TimeoutExpired`` (a6e361c1 text)."""
+    return SingleAgentRoundResponse(
+        summary="Single-agent invocation timed out.",
+        expected_behavior="unknown",
+        self_review=(
+            f"The framework stopped the agent after {timeout:g} seconds "
+            "without a structured response."
+        ),
+        feedback="Inspect retained evidence and return a schema-valid response on retry.",
         verdict=Verdict.FAIL,
         bottlenecks="",
         suggestions="",
@@ -58,6 +77,7 @@ PROFILE_SINGLE_COMBINED = Role(
     template="loops/profile_single/single_agent_round_prompt.j2",
     reply=SingleAgentRoundResponse,
     fallback=_fallback_combined,
+    timeout_fallback=_timeout_fallback_combined,
     access=Writes(),
     session=Keyed(scope=SessionScope.HYPOTHESIS),
     paid=True,

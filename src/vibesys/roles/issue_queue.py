@@ -18,7 +18,7 @@ restores the real ID with ``reply.model_copy(update={"issue_id": issue.id})``.
 
 from __future__ import annotations
 
-from vibesys.runtime import Fresh, Role, Writes
+from vibesys.runtime import Reuse, Role, Writes
 from vibesys.schemas import (
     IssueImplementerResponse,
     IssueJudgeResponse,
@@ -65,7 +65,7 @@ ISSUE_IMPLEMENTER = Role(
     reply=IssueImplementerResponse,
     fallback=_fallback_implementer,
     access=Writes(),
-    session=Fresh(),
+    session=Reuse(),
 )
 
 ISSUE_JUDGE = Role(
@@ -74,7 +74,7 @@ ISSUE_JUDGE = Role(
     reply=IssueJudgeResponse,
     fallback=_fallback_judge,
     access=Writes(),  # the judge files new issues via its MCP tool grant
-    session=Fresh(),
+    session=Reuse(),
 )
 
 ISSUE_PERF_EVAL = Role(
@@ -83,7 +83,7 @@ ISSUE_PERF_EVAL = Role(
     reply=IssuePerfEvalResponse,
     fallback=_fallback_perf_eval,
     access=Writes(),
-    session=Fresh(),
+    session=Reuse(),
 )
 
 ALL_ROLES = (ISSUE_IMPLEMENTER, ISSUE_JUDGE, ISSUE_PERF_EVAL)
