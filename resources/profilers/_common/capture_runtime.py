@@ -56,7 +56,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 __all__ = [
     "ActiveCapture",
@@ -65,18 +65,26 @@ __all__ = [
     "CaptureStatus",
     "CaptureSummary",
     "Lifecycle",
+    "TargetInfo",
     "acquire_capture_slot",
     "active_capture",
     "exclusive_capture",
     "format_busy",
     "format_result",
+    "format_targets",
+    "get_target",
     "list_captures",
+    "list_targets",
     "load_manifest",
     "new_capture",
     "profiles_root",
     "release_capture_slot",
     "resolve",
     "run_capture",
+    "signal_target",
+    "start_target",
+    "stop_all_targets",
+    "stop_target",
     "write_manifest",
 ]
 
@@ -85,6 +93,7 @@ _SETUP_LOG_NAME = "setup.log"
 _TARGET_LOG_NAME = "target.log"
 _LOAD_LOG_NAME = "load.log"
 _ESCALATION_WAIT_S = 2.0
+_TARGET_COMMAND_HEAD_MAX_CHARS = 60
 
 # Every blocking process-wait below polls in chunks of this size (instead of
 # one blocking wait() call for the whole remaining budget) so an optional
@@ -896,6 +905,262 @@ def _escalate(proc: subprocess.Popen[bytes]) -> None:
     _kill_tree(pid, descendants, signal.SIGKILL)
     _reap(proc, _ESCALATION_WAIT_S)
     _wait_for_others_death(descendants, _ESCALATION_WAIT_S)
+
+
+# -- warm targets: launch once, profile repeatedly, stop when done -------------
+#
+# A "target" is a process this server process launches and keeps running
+# indefinitely (unlike a capture's target, which run_capture starts, loads,
+# and stops within one bounded call). It exists for profiling mechanisms
+# that can take more than one measurement window against the same
+# already-running process instead of needing a fresh process per capture
+# (see docs/contributing/amd-profiler-worklog.md and the warm-target
+# experiment notes it references: on a ROCm build without rocprofiler-sdk
+# default-attachment support, rocprofv3 --attach cannot reuse a target at
+# all, but the torch plugin's own signal-window injection can, once armed
+# for repeated windows). This module only owns generic process lifecycle
+# (launch, ready-wait, stop/escalate, registry); which env vars "arm" a
+# target for a specific profiling mechanism is entirely up to the caller
+# (see resources/profilers/torch/capture_ops.py's start_target wrapper).
+
+_TARGETS_LOCK = threading.Lock()
+
+
+@dataclass
+class _LiveTarget:
+    target_id: str
+    command: str
+    cwd: str | None
+    out_dir: Path
+    started_at: float
+    stop_signal: str
+    grace_s: float
+    proc: subprocess.Popen[bytes]
+    ready_achieved: bool | None
+
+
+_targets: dict[str, _LiveTarget] = {}
+
+
+@dataclass(frozen=True)
+class TargetInfo:
+    """A snapshot of one live (or just-stopped) target, safe to hand to a caller."""
+
+    target_id: str
+    command: str
+    pid: int
+    out_dir: Path
+    started_at: float
+    ready_achieved: bool | None
+    alive: bool
+
+
+def start_target(  # noqa: PLR0913  # tracked: #288
+    command: str,
+    *,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+    setup_command: str | None = None,
+    ready_command: str | Callable[[Path], str] | None = None,
+    ready_timeout_s: float = 60.0,
+    ready_interval_s: float = 1.0,
+    stop_signal: str = "SIGINT",
+    grace_s: float = 10.0,
+    timeout_s: float = 300.0,
+    arm: dict[str, str] | Callable[[Path], dict[str, str]] | None = None,
+) -> str:
+    """Launch *command* as a warm target and keep it running until ``stop_target``.
+
+    Unlike ``run_capture``, this never stops the target itself: it starts
+    it (optionally after ``setup_command`` runs to completion, unprofiled,
+    exactly like a capture's setup phase), optionally waits for
+    ``ready_command`` to succeed, registers it in this process's target
+    registry, and returns its ``target_id``. The target keeps running,
+    process-group-owned by this server process, until ``stop_target`` is
+    called or this process exits (see ``stop_all_targets``).
+
+    *arm* supplies the env additions that make the target profileable by
+    whatever mechanism the caller has in mind (this module has no opinion):
+    either a plain ``dict[str, str]`` merged over *env*, or a callable
+    invoked with the target's own allocated output directory once known
+    (needed when the arming env references a path under it, e.g. a
+    control-file directory -- see ``capture_ops.start_target``). *arm*
+    always wins over *env* on key conflicts. *ready_command* accepts the
+    same callable form, for the same reason (e.g. checking for a marker
+    file under the target's own output directory that a profiling
+    mechanism writes once it is actually ready to receive signals/requests
+    -- see ``capture_ops.start_target``'s default).
+
+    ``timeout_s`` bounds ``setup_command`` plus the ready-wait only (there
+    is no "overall" timeout for a target that is meant to keep running).
+    Raises ``RuntimeError`` if ``setup_command`` fails, or the target never
+    becomes ready, in which case nothing is left running (the target is
+    escalated/stopped before raising) and nothing is registered.
+    """
+    target_id, out_dir = new_capture("target")
+    arm_env = arm(out_dir) if callable(arm) else dict(arm or {})
+    effective_env = {**(env or {}), **arm_env}
+    resolved_ready_command = ready_command(out_dir) if callable(ready_command) else ready_command
+    lifecycle = Lifecycle(
+        command=command,
+        cwd=cwd,
+        env=effective_env,
+        ready_command=resolved_ready_command,
+        ready_timeout_s=ready_timeout_s,
+        ready_interval_s=ready_interval_s,
+        load_command=None,
+        stop_signal=stop_signal,
+        grace_s=grace_s,
+        timeout_s=max(timeout_s, 0.01),
+        setup_command=setup_command,
+    )
+    start = time.monotonic()
+
+    if setup_command is not None:
+        setup_script = _write_script(out_dir, _SETUP_SCRIPT_NAME, setup_command)
+        setup_rc, setup_tail, setup_timed_out, _cancelled = _run_setup(
+            lifecycle, _remaining(start, lifecycle.timeout_s), out_dir, setup_script, None
+        )
+        if setup_timed_out or setup_rc != 0:
+            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+                f"target setup_command failed for {target_id} "
+                f"(rc={setup_rc}, timed_out={setup_timed_out}): {setup_tail[-500:]}"
+            )
+
+    # A warm target's whole point is to receive non-terminating signals
+    # (e.g. the torch injection's SIGUSR1/SIGUSR2 window triggers, relayed
+    # via signal_target's process-group broadcast) while staying alive
+    # between them. Bash's *default* disposition for SIGUSR1/SIGUSR2 is to
+    # terminate the process; without this trap, the wrapping shell -- not
+    # just the profiled process -- would die on the very first such signal,
+    # even though the profiled child handles it and survives (orphaned,
+    # with no wrapper left for stop_target/signal_target to resolve a pgid
+    # from). Ignoring them at the shell level lets a descendant that
+    # installs its own real handler (signal.signal() always overrides an
+    # inherited disposition) still react normally, while bash itself never
+    # dies from a signal it was never meant to be a target of.
+    target_script = _write_script(
+        out_dir, _TARGET_SCRIPT_NAME, f"trap '' SIGUSR1 SIGUSR2\n{command}"
+    )
+    target_log_path = out_dir / _TARGET_LOG_NAME
+    proc = _start_process(lifecycle, [], target_log_path, target_script)
+
+    ready_achieved: bool | None = None
+    if resolved_ready_command is not None:
+        ready_script = _write_script(out_dir, _READY_SCRIPT_NAME, resolved_ready_command)
+        ready_achieved, exited_early = _poll_ready(proc, lifecycle, start, ready_script, None)
+        if exited_early or not ready_achieved:
+            _escalate(proc)
+            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+                f"target {target_id} failed to become ready within ready_timeout_s="
+                f"{ready_timeout_s}: {_tail(target_log_path)[-500:]}"
+            )
+
+    with _TARGETS_LOCK:
+        _targets[target_id] = _LiveTarget(
+            target_id=target_id,
+            command=command,
+            cwd=cwd,
+            out_dir=out_dir,
+            started_at=time.time(),
+            stop_signal=stop_signal,
+            grace_s=grace_s,
+            proc=proc,
+            ready_achieved=ready_achieved,
+        )
+    return target_id
+
+
+def _target_info(target: _LiveTarget) -> TargetInfo:
+    return TargetInfo(
+        target_id=target.target_id,
+        command=target.command,
+        pid=target.proc.pid,
+        out_dir=target.out_dir,
+        started_at=target.started_at,
+        ready_achieved=target.ready_achieved,
+        alive=target.proc.poll() is None,
+    )
+
+
+def get_target(target_id: str) -> TargetInfo:
+    """The current state of one registered target. Raises ``KeyError`` if unknown."""
+    with _TARGETS_LOCK:
+        target = _targets.get(target_id)
+    if target is None:
+        raise KeyError(f"unknown target: {target_id!r}")  # noqa: TRY003  # tracked: #288
+    return _target_info(target)
+
+
+def list_targets() -> list[TargetInfo]:
+    """Every target currently registered in this process (running or not yet reaped)."""
+    with _TARGETS_LOCK:
+        snapshot = list(_targets.values())
+    return [_target_info(target) for target in snapshot]
+
+
+def signal_target(target_id: str, sig_name: str) -> None:
+    """Send *sig_name* (e.g. ``"SIGUSR1"``) to a target's whole process group.
+
+    Raises ``KeyError`` if *target_id* is not a currently registered target.
+    """
+    with _TARGETS_LOCK:
+        target = _targets.get(target_id)
+    if target is None:
+        raise KeyError(f"unknown target: {target_id!r}")  # noqa: TRY003  # tracked: #288
+    _send_stop_signal(target.proc.pid, sig_name)
+
+
+def _stop_and_wait_grace_target(target: _LiveTarget) -> None:
+    if target.proc.poll() is None:
+        _send_stop_signal(target.proc.pid, target.stop_signal)
+        if not _reap(target.proc, max(target.grace_s, 0.0)):
+            _escalate(target.proc)
+            return
+    _reap(target.proc, _ESCALATION_WAIT_S)
+
+
+def stop_target(target_id: str) -> None:
+    """Stop a warm target: ``stop_signal`` -> wait ``grace_s`` -> escalate.
+
+    Always leaves no process running for this target, mirroring
+    ``run_capture``'s cleanup guarantee. Raises ``KeyError`` if *target_id*
+    is not a currently registered target (including one already stopped).
+    """
+    with _TARGETS_LOCK:
+        target = _targets.pop(target_id, None)
+    if target is None:
+        raise KeyError(f"unknown or already-stopped target: {target_id!r}")  # noqa: TRY003  # tracked: #288
+    _stop_and_wait_grace_target(target)
+
+
+def stop_all_targets() -> None:
+    """Stop every target registered in this process. Idempotent; safe at shutdown.
+
+    Intended to be registered with ``atexit`` by each profiler ``server.py``
+    so a warm target is never left running past the MCP server process's
+    own lifetime.
+    """
+    with _TARGETS_LOCK:
+        targets = list(_targets.values())
+        _targets.clear()
+    for target in targets:
+        _stop_and_wait_grace_target(target)
+
+
+def format_targets(infos: list[TargetInfo]) -> str:
+    """A prompt-sized table of ``list_targets()``'s output."""
+    if not infos:
+        return f"(no targets running in this server process; store: {profiles_root()})"
+    lines = [f"{'target_id':<32} {'pid':<8} {'alive':<6} command"]
+    for info in infos:
+        command = (
+            info.command
+            if len(info.command) <= _TARGET_COMMAND_HEAD_MAX_CHARS
+            else info.command[: _TARGET_COMMAND_HEAD_MAX_CHARS - 1] + "..."
+        )
+        lines.append(f"{info.target_id:<32} {info.pid:<8} {info.alive!s:<6} {command}")
+    return "\n".join(lines)
 
 
 # -- manifest -------------------------------------------------------------------
