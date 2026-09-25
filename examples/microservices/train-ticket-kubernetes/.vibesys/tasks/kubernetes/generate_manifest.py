@@ -1,7 +1,5 @@
 """Generate the minimal Train Ticket Kubernetes topology."""
 
-# ruff: noqa: INP001
-
 from __future__ import annotations
 
 from pathlib import Path

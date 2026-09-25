@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 from build_release_wheel import (
@@ -14,6 +15,18 @@ from build_release_wheel import (
     ReleaseBuildError,
     build_release_wheel,
 )
+from tests.support import run_test_command
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+
+class _RunnerOptions(TypedDict, total=False):
+    check: bool
+    capture_output: bool
+    text: bool
+    env: Mapping[str, str] | None
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,7 +47,7 @@ def test_build_release_wheel_preserves_the_public_positional_interface() -> None
 
 def test_build_script_can_be_invoked_by_file_path(tmp_path: Path) -> None:
     """The documented ``python scripts/...`` entry point must import its helpers."""
-    result = subprocess.run(  # noqa: S603
+    result = run_test_command(
         [sys.executable, str(PROJECT_ROOT / "packaging/build_release_wheel.py"), "--help"],
         cwd=tmp_path,
         check=False,
@@ -98,24 +111,28 @@ def _fake_deployment(destination: Path) -> None:
         (native / "index.js").write_text("// native\n")
 
 
-def test_build_release_wheel_assembles_payload_without_mutating_node_modules(tmp_path):  # noqa: ANN001, ANN201
+def test_build_release_wheel_assembles_payload_without_mutating_node_modules(
+    tmp_path: Path,
+) -> None:
     repo, bun = _make_repo(tmp_path / "repo")
     sentinel = repo / "clients" / "node_modules" / "sentinel"
     sentinel.parent.mkdir()
     sentinel.write_text("untouched\n")
     output = tmp_path / "dist"
-    calls: list[tuple[list[str], Path, dict[str, str] | None]] = []
+    calls: list[tuple[list[str], Path, Mapping[str, str] | None]] = []
     payload_snapshot: dict[str, object] = {}
 
-    def runner(command, *, cwd, check, **kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001
+    def runner(
+        command: Sequence[str], *, cwd: Path, **options: Unpack[_RunnerOptions]
+    ) -> subprocess.CompletedProcess[str]:
         argv = [str(part) for part in command]
-        env = kwargs.get("env")
-        calls.append((argv, Path(cwd), env))
+        calls.append((argv, cwd, options.get("env")))
         if argv == [str(bun), "--version"]:
             return subprocess.CompletedProcess(argv, 0, stdout="1.3.9\n", stderr="")
         if "deploy" in argv:
             _fake_deployment(Path(argv[-1]))
         if argv[:3] == ["uv", "build", "--wheel"]:
+            env = options.get("env")
             assert env is not None
             payload = Path(env["VIBESYS_TUI_BUNDLE"])
             payload_snapshot["manifest"] = json.loads((payload / "manifest.json").read_text())
@@ -184,7 +201,9 @@ def test_build_release_wheel_resolves_caller_relative_paths(
     relative_output = Path("release")
     calls: list[tuple[list[str], Path]] = []
 
-    def runner(command, *, cwd, check, **_kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001
+    def runner(
+        command: Sequence[str], *, cwd: Path, **_options: Unpack[_RunnerOptions]
+    ) -> subprocess.CompletedProcess[str]:
         argv = [str(part) for part in command]
         command_cwd = Path(cwd)
         calls.append((argv, command_cwd))
@@ -224,10 +243,13 @@ def test_build_release_wheel_resolves_caller_relative_paths(
     assert build_command[-1] == str(expected_output)
 
 
-def test_build_release_wheel_rejects_the_wrong_bun_version(tmp_path):  # noqa: ANN001, ANN201
+def test_build_release_wheel_rejects_the_wrong_bun_version(tmp_path: Path) -> None:
     repo, bun = _make_repo(tmp_path / "repo")
 
-    def runner(command, *, cwd, check, **_kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001
+    def runner(
+        command: Sequence[str], *, cwd: Path, **_options: Unpack[_RunnerOptions]
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd
         return subprocess.CompletedProcess(command, 0, stdout="1.3.8\n", stderr="")
 
     with pytest.raises(ReleaseBuildError, match=r"Bun 1\.3\.9"):
@@ -244,7 +266,7 @@ def test_build_release_wheel_rejects_the_wrong_bun_version(tmp_path):  # noqa: A
         )
 
 
-def test_build_release_wheel_rejects_preexisting_wheels(tmp_path):  # noqa: ANN001, ANN201
+def test_build_release_wheel_rejects_preexisting_wheels(tmp_path: Path) -> None:
     repo, bun = _make_repo(tmp_path / "repo")
     output = tmp_path / "dist"
     output.mkdir()
@@ -263,11 +285,14 @@ def test_build_release_wheel_rejects_preexisting_wheels(tmp_path):  # noqa: ANN0
         )
 
 
-def test_build_release_wheel_rejects_a_universal_wheel_tag(tmp_path):  # noqa: ANN001, ANN201
+def test_build_release_wheel_rejects_a_universal_wheel_tag(tmp_path: Path) -> None:
     repo, bun = _make_repo(tmp_path / "repo")
     output = tmp_path / "dist"
 
-    def runner(command, *, cwd, check, **_kwargs):  # noqa: ANN001, ANN003, ANN202, ARG001
+    def runner(
+        command: Sequence[str], *, cwd: Path, **_options: Unpack[_RunnerOptions]
+    ) -> subprocess.CompletedProcess[str]:
+        del cwd
         argv = [str(part) for part in command]
         if argv == [str(bun), "--version"]:
             return subprocess.CompletedProcess(argv, 0, stdout="1.3.9\n", stderr="")

@@ -17,12 +17,12 @@ from __future__ import annotations
 import posixpath
 import re
 import shutil
-import subprocess
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support import run_test_command
 from tests.support.example_registry import (
     REGISTRY_RELATIVE,
     REPO_ROOT,
@@ -311,8 +311,8 @@ _EXAMPLE_LITERAL = re.compile(r"(?<![\w/.-])examples/[\w.@+*/-]+")
 
 
 def _tracked_files() -> list[str]:
-    result = subprocess.run(  # noqa: S603
-        ["git", "ls-files", "--", *_SCANNED],  # noqa: S607
+    result = run_test_command(
+        ["git", "ls-files", "--", *_SCANNED],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

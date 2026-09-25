@@ -7,7 +7,7 @@ from dataclasses import replace
 from vibesys.evaluators.gates import FrameworkBenchmarkOutcome
 from vibesys.evaluators.metrics import MetricSpace, Objective
 
-# TODO(stack PR 06): import ImplementerResponse from vibesys.roles.implementer once it exists.  # noqa: FIX002  # tracked: #288
+# TODO(stack PR 06): import ImplementerResponse from vibesys.roles.implementer once it exists.  # noqa: FIX002, TD003  # LW-040061 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
 from vibesys.schemas import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -28,7 +28,7 @@ def _record_input() -> RecordInput:
     plan = OrchestratorPlan(
         hypothesis_id="cache",
         task="cache responses",
-        pass_criteria="behavior remains correct",  # noqa: S106
+        pass_criteria="behavior remains correct",  # noqa: S106  # LW-040062 [S106]; the argument is a fixture literal, not a credential.
         reasoning="reduce repeated work",
     )
     hypothesis = Hypothesis(
@@ -152,7 +152,7 @@ def test_failed_review_does_not_retain_agent_candidate() -> None:
 # ``vibesys.search.hypothesis.transitions`` import needed.
 
 
-def _official(number: int, metric: float, *, unit: str = "throughput", provenance="framework"):  # noqa: ANN001, ANN202
+def _official(number: int, metric: float, *, unit: str = "throughput", provenance="framework"):  # noqa: ANN001, ANN202  # LW-040063 [ANN001, ANN202]; this scripted double mirrors a production signature whose parameters are not annotated here. The helper is private to this test module and its return type is the local closure type.
     return RoundRecord(
         round_number=number,
         commit=f"parent-commit-{number}",

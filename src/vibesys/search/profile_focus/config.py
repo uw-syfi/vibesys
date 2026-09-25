@@ -15,6 +15,8 @@ class ProfileFocusConfig:
     def __post_init__(self) -> None:
         """Reject configuration that cannot express a valid schedule."""
         if self.plateau_min_rounds < 1:
-            raise ValueError("plateau_min_rounds must be positive")  # noqa: TRY003
+            message = "plateau_min_rounds must be positive"
+            raise ValueError(message)
         if self.min_relative_improvement < 0:
-            raise ValueError("min_relative_improvement must be non-negative")  # noqa: TRY003
+            message = "min_relative_improvement must be non-negative"
+            raise ValueError(message)

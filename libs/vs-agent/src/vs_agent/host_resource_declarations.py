@@ -13,7 +13,6 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterable, Mapping  # noqa: TC003  # tracked: #288
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,6 +26,8 @@ from vs_sandbox.api import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
     from agentshim import ProviderProfile
 
 ALLOW_ENV = "VIBESYS_AGENT_SANDBOX_ALLOW"
@@ -115,7 +116,7 @@ def resolve_active_rust_toolchain(
         return None
 
     def rustc_print(name: str) -> str:
-        result = subprocess.run(  # noqa: S603
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007108 [S603]; compiler path is resolved from the environment and invoked with fixed query arguments without a shell.
             [rustc, "--print", name],
             check=True,
             capture_output=True,
@@ -280,7 +281,7 @@ def _provider_state(ctx: HostResourceContext) -> Iterable[HostResource]:
 #: workloads bind-mount capture directories from here, and Docker resolves a
 #: bind source in the daemon's namespace rather than the agent's, so the path
 #: only works when it names the same directory inside and outside confinement.
-TASK_SCRATCH_ROOT = Path("/tmp")  # noqa: S108  # tracked: #288
+TASK_SCRATCH_ROOT = Path("/tmp")  # noqa: S108  # lint-waiver: LW-010108 [S108]; container workloads require this shared host scratch path in both mount namespaces.
 
 
 def task_scratch_dir(task_name: str) -> Path:
@@ -303,7 +304,7 @@ def container_runtime_resources(env: Mapping[str, str] | None = None) -> tuple[H
     confined to a container instead.
     """
     env = env if env is not None else os.environ
-    paths = [Path("/var/run/docker.sock")]  # tracked: #288
+    paths = [Path("/var/run/docker.sock")]
     host = env.get("DOCKER_HOST", "")
     if host.startswith("unix://"):
         paths.append(Path(host.removeprefix("unix://")))
@@ -314,7 +315,7 @@ def container_runtime_resources(env: Mapping[str, str] | None = None) -> tuple[H
     )
 
 
-def task_agent_host_resources(  # noqa: PLR0913
+def task_agent_host_resources(  # noqa: PLR0913  # lint-waiver: LW-011101 [PLR0913]; preserve the public keyword options that independently declare task agent host resource access.
     *,
     container_topology: bool,
     cli_sandboxed: bool,

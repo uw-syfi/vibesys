@@ -102,8 +102,9 @@ class ProfileGuidanceOutcome:
     def from_round(
         cls,
         round_number: int,
-        passed: bool,  # noqa: FBT001
-        official: bool,  # noqa: FBT001
+        *,
+        passed: bool,
+        official: bool,
         delta_pct: float | None,
     ) -> ProfileGuidanceOutcome:
         """Normalize one completed round for profile policy advancement."""
@@ -124,9 +125,11 @@ class ProfileGuidedHypothesisController:
     def __post_init__(self) -> None:
         """Validate policy configuration independently of input manifests."""
         if self.plateau_min_rounds < 1:
-            raise ValueError("plateau_min_rounds must be positive")  # noqa: TRY003
+            message = "plateau_min_rounds must be positive"
+            raise ValueError(message)
         if self.min_relative_improvement < 0:
-            raise ValueError("min_relative_improvement must be non-negative")  # noqa: TRY003
+            _exception_message = "min_relative_improvement must be non-negative"
+            raise ValueError(_exception_message)
 
     @classmethod
     def create(

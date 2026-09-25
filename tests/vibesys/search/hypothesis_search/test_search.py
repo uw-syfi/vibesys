@@ -22,11 +22,11 @@ from hypothesis import strategies as st
 
 from vibesys.evaluators.metrics import MetricComparison, MetricSpace, Objective
 
-# TODO(stack PR 07): import from vibesys.loops.multi.session once it takes a  # noqa: FIX002  # tracked: #288
+# TODO(stack PR 07): import from vibesys.loops.multi.session once it takes a  # noqa: FIX002, TD003  # LW-040071 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
 # HypothesisConfig; at BASE, _TerminalPolicy() still takes no arguments.
 from vibesys.loops.multi.session import _TerminalPolicy
 
-# TODO(stack PR 06): import from vibesys.roles.implementer once it exists.  # noqa: FIX002  # tracked: #288
+# TODO(stack PR 06): import from vibesys.roles.implementer once it exists.  # noqa: FIX002, TD003  # LW-040072 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
 from vibesys.schemas import CandidateDisposition, HypothesisOutcome, ImplementerResponse
 from vibesys.search.hypothesis import (
     CarryOver,
@@ -63,7 +63,7 @@ def _plan(
         hypothesis=f"claim {identifier}",
         hypothesis_updates=updates or [],
         task=f"implement {identifier}",
-        pass_criteria="tests pass",  # noqa: S106
+        pass_criteria="tests pass",  # noqa: S106  # LW-040073 [S106]; the argument is a fixture literal, not a credential.
         reasoning="test the claim",
         revert_to_round=revert_to_round,
     )
@@ -72,7 +72,7 @@ def _plan(
 _UNSET_COMMIT: str | None = "__unset__"
 
 
-def _round(  # noqa: PLR0913
+def _round(  # noqa: PLR0913  # LW-040074 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     number: int,
     metric: float | None = None,
     *,
@@ -129,7 +129,7 @@ def _closing_kwargs(*, passed: bool, reviewed: bool = True) -> dict:
     }
 
 
-def _run_round(  # noqa: PLR0913
+def _run_round(  # noqa: PLR0913  # LW-040075 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     search: HypothesisSearch,
     state: HypothesisState,
     records: list[RoundRecord],
@@ -348,7 +348,7 @@ def test_review_due_at_cadence_final_round_or_fresh_claim(
     max_rounds: int,
     judge_every: int,
     outcome: HypothesisOutcome,
-    candidate_evidence_fresh: bool,  # noqa: FBT001
+    candidate_evidence_fresh: bool,  # noqa: FBT001  # LW-040076 [FBT001]; the boolean is a flag in a parametrized test case, not a public call signature.
 ) -> None:
     search = HypothesisSearch(HypothesisConfig(max_rounds=max_rounds, judge_every=judge_every))
     due = search.review_due(
@@ -396,12 +396,12 @@ def test_review_due_override_skips_a_bounded_already_reviewed_continuation() -> 
     candidate_ready=st.booleans(),
     provisional=st.integers(min_value=0, max_value=5),
 )
-def test_official_due_matches_expected_cadence(  # noqa: PLR0913
+def test_official_due_matches_expected_cadence(  # noqa: PLR0913  # LW-040077 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
     round_number: int,
     max_rounds: int,
     official_eval_every: int,
-    requested: bool,  # noqa: FBT001
-    candidate_ready: bool,  # noqa: FBT001
+    requested: bool,  # noqa: FBT001  # LW-040078 [FBT001]; the boolean is a flag in a parametrized test case, not a public call signature.
+    candidate_ready: bool,  # noqa: FBT001  # LW-040079 [FBT001]; the boolean is a flag in a parametrized test case, not a public call signature.
     provisional: int,
 ) -> None:
     records = [

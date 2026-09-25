@@ -240,7 +240,8 @@ def _render_prompt(domain: DomainName, role: str, context: dict[str, object]) ->
             provisional_candidates=context.get("provisional_candidates", 0),
             official_eval_cadence_due=context.get("official_eval_cadence_due", False),
         )
-    raise AssertionError(f"unknown prompt role: {role}")  # noqa: TRY003  # tracked: #288
+    _failure_message = f"unknown prompt role: {role}"
+    raise AssertionError(_failure_message)
 
 
 def _snapshot_path(domain: str, case_name: str, role: str) -> Path:
@@ -266,14 +267,14 @@ def _assert_matches_snapshot(domain: str, case_name: str, role: str, rendered: s
     pytest.fail(f"Rendered prompt changed: {snapshot}\n{diff}")
 
 
-@pytest.mark.parametrize("case_name,context", _CONTEXTS.items())  # noqa: PT006  # tracked: #288
+@pytest.mark.parametrize(("case_name", "context"), _CONTEXTS.items())
 @pytest.mark.parametrize("role", _ROLES)
-def test_llm_serving_prompt_snapshot(case_name: str, context: dict[str, object], role: str):  # noqa: ANN201  # tracked: #288
+def test_llm_serving_prompt_snapshot(case_name: str, context: dict[str, object], role: str) -> None:
     rendered = _render_prompt(DomainName.LLM_SERVING, role, context)
     _assert_matches_snapshot(DomainName.LLM_SERVING.value, case_name, role, rendered)
 
 
-def test_multi_agent_prompts_use_paths_without_embedding_durable_content():  # noqa: ANN201  # tracked: #288
+def test_multi_agent_prompts_use_paths_without_embedding_durable_content() -> None:
     context = _CONTEXTS["full"]
     prompts = {role: _render_prompt(DomainName.LLM_SERVING, role, context) for role in _ROLES}
     forbidden = (
@@ -304,7 +305,7 @@ def test_multi_agent_prompts_use_paths_without_embedding_durable_content():  # n
     assert "production startup must select the retained arm" in prompts["orchestrator"]
 
 
-def test_llm_serving_prompts_preserve_irreducible_contracts():  # noqa: ANN201  # tracked: #288
+def test_llm_serving_prompts_preserve_irreducible_contracts() -> None:
     context = _CONTEXTS["full"]
     prompts = {
         role: " ".join(_render_prompt(DomainName.LLM_SERVING, role, context).split())
@@ -344,7 +345,7 @@ def test_llm_serving_prompts_preserve_irreducible_contracts():  # noqa: ANN201  
     assert "same scope/owner" in prompts["single_agent"]
 
 
-def test_seeded_llm_serving_prompts_require_adaptation_without_fixed_filename():  # noqa: ANN201  # tracked: #288
+def test_seeded_llm_serving_prompts_require_adaptation_without_fixed_filename() -> None:
     prompts = {
         role: _render_prompt(DomainName.LLM_SERVING, role, _CONTEXTS["seeded"])
         for role in ("implementer", "judge", "orchestrator", "single_agent")
@@ -359,7 +360,7 @@ def test_seeded_llm_serving_prompts_require_adaptation_without_fixed_filename():
     assert "Inspect and adapt" in prompts["single_agent"]
 
 
-def test_implementer_continuation_is_delta_only_and_fresh_session_safe():  # noqa: ANN201  # tracked: #288
+def test_implementer_continuation_is_delta_only_and_fresh_session_safe() -> None:
     context = _CONTEXTS["full"]
     rendered = _render_prompt(DomainName.LLM_SERVING, "implementer_continuation", context)
 
@@ -375,7 +376,7 @@ def test_implementer_continuation_is_delta_only_and_fresh_session_safe():  # noq
     assert "empty `next_step`" in rendered
 
 
-def test_multi_agent_roles_do_not_let_continuations_mint_paid_authority():  # noqa: ANN201  # tracked: #288
+def test_multi_agent_roles_do_not_let_continuations_mint_paid_authority() -> None:
     context = _CONTEXTS["full"]
     prompts = {
         role: " ".join(_render_prompt(DomainName.LLM_SERVING, role, context).split())
@@ -393,7 +394,7 @@ def test_multi_agent_roles_do_not_let_continuations_mint_paid_authority():  # no
     assert "checkpoint plus validation-input hashes" in prompts["implementer_continuation"]
 
 
-def test_implementer_continuation_formats_materialized_parent_identity():  # noqa: ANN201  # tracked: #288
+def test_implementer_continuation_formats_materialized_parent_identity() -> None:
     context = _CONTEXTS["full"] | {
         "framework_revert_applied": True,
         "framework_revert_round": 95,
@@ -406,7 +407,7 @@ def test_implementer_continuation_formats_materialized_parent_identity():  # noq
     assert "parentfrom" not in rendered
 
 
-def test_implementer_retry_references_prior_evidence_and_cumulative_budget():  # noqa: ANN201  # tracked: #288
+def test_implementer_retry_references_prior_evidence_and_cumulative_budget() -> None:
     context = _CONTEXTS["full"] | {
         "retry": 2,
         "prior_attempt_artifact_locations": (
@@ -425,7 +426,7 @@ def test_implementer_retry_references_prior_evidence_and_cumulative_budget():  #
     assert "remains consumed" in rendered
 
 
-def test_judge_references_framework_evidence_without_embedding_implementer_prose():  # noqa: ANN201  # tracked: #288
+def test_judge_references_framework_evidence_without_embedding_implementer_prose() -> None:
     context = _CONTEXTS["full"] | {"retry": 2}
     rendered = _render_prompt(DomainName.LLM_SERVING, "judge", context)
 
@@ -436,7 +437,7 @@ def test_judge_references_framework_evidence_without_embedding_implementer_prose
     assert "do not repeat unrelated expensive suites" in rendered.lower()
 
 
-def test_orchestrator_routes_profile_and_failure_details_through_progress():  # noqa: ANN201  # tracked: #288
+def test_orchestrator_routes_profile_and_failure_details_through_progress() -> None:
     context = _CONTEXTS["full"]
     sentinels = {
         "regression": "REGRESSION_DETAIL_MUST_NOT_BE_EMBEDDED",
@@ -471,7 +472,7 @@ def test_orchestrator_routes_profile_and_failure_details_through_progress():  # 
     assert "defer trajectory/roofline refresh until" in rendered.lower()
 
 
-def test_orchestrator_keeps_profiler_advice_non_blocking_without_fresh_capture():  # noqa: ANN201  # tracked: #288
+def test_orchestrator_keeps_profiler_advice_non_blocking_without_fresh_capture() -> None:
     rendered = _render_prompt(
         DomainName.LLM_SERVING,
         "orchestrator",
@@ -484,7 +485,7 @@ def test_orchestrator_keeps_profiler_advice_non_blocking_without_fresh_capture()
     assert "pareto gain, or diagnostic value cannot excuse a violation" in rendered.lower()
 
 
-def test_pre_round_prompt_is_path_only_and_skips_future_rollback_target():  # noqa: ANN201  # tracked: #288
+def test_pre_round_prompt_is_path_only_and_skips_future_rollback_target() -> None:
     rendered = render_template(
         "orchestrator_pre_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -506,7 +507,7 @@ def test_pre_round_prompt_is_path_only_and_skips_future_rollback_target():  # no
     assert "Do not request a different profiler" in rendered
 
 
-def test_pre_round_prompt_disables_none_profiler_without_fake_capture_path():  # noqa: ANN201  # tracked: #288
+def test_pre_round_prompt_disables_none_profiler_without_fake_capture_path() -> None:
     rendered = render_template(
         "orchestrator_pre_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -524,7 +525,7 @@ def test_pre_round_prompt_disables_none_profiler_without_fake_capture_path():  #
     assert "`remote` capture path" not in rendered
 
 
-def test_official_evaluation_due_changes_agent_measurement_contract():  # noqa: ANN201  # tracked: #288
+def test_official_evaluation_due_changes_agent_measurement_contract() -> None:
     context = _CONTEXTS["full"] | {
         "official_evaluation_due": True,
         "official_evaluation_reason": "cadence",
@@ -540,7 +541,7 @@ def test_official_evaluation_due_changes_agent_measurement_contract():  # noqa: 
     assert "fresh canonical artifact" in judge
 
 
-def test_minimal_llm_serving_prompt_omits_optional_checker_paths():  # noqa: ANN201  # tracked: #288
+def test_minimal_llm_serving_prompt_omits_optional_checker_paths() -> None:
     context = _CONTEXTS["minimal"]
     judge = _render_prompt(DomainName.LLM_SERVING, "judge", context)
     single_agent = _render_prompt(DomainName.LLM_SERVING, "single_agent", context)
@@ -551,7 +552,7 @@ def test_minimal_llm_serving_prompt_omits_optional_checker_paths():  # noqa: ANN
     assert "/workspace/acc_checker/checker.py" not in single_agent
 
 
-def test_generic_prompts_do_not_receive_llm_serving_domain_content():  # noqa: ANN201  # tracked: #288
+def test_generic_prompts_do_not_receive_llm_serving_domain_content() -> None:
     context = _CONTEXTS["full"]
     prompts = {role: _render_prompt(DomainName.GENERIC, role, context) for role in _ROLES}
 
@@ -590,7 +591,7 @@ _FALLBACK_PROMPT_BYTE_BUDGETS = {
 
 
 @pytest.mark.parametrize("role", _ROLES)
-def test_realistic_llm_serving_native_prompt_byte_budgets(role: str):  # noqa: ANN201  # tracked: #288
+def test_realistic_llm_serving_native_prompt_byte_budgets(role: str) -> None:
     rendered = _render_prompt(DomainName.LLM_SERVING, role, _CONTEXTS["full"])
     complete = rendered + "\n\nReturn only the JSON object."
 
@@ -598,7 +599,7 @@ def test_realistic_llm_serving_native_prompt_byte_budgets(role: str):  # noqa: A
 
 
 @pytest.mark.parametrize("role", _ROLES)
-def test_realistic_llm_serving_fallback_prompt_byte_budgets(role: str):  # noqa: ANN201  # tracked: #288
+def test_realistic_llm_serving_fallback_prompt_byte_budgets(role: str) -> None:
     rendered = _render_prompt(DomainName.LLM_SERVING, role, _CONTEXTS["full"])
     complete = (
         rendered + "\n\nReturn only the JSON object." + build_schema_hint(_RESPONSE_TYPES[role])
@@ -607,7 +608,7 @@ def test_realistic_llm_serving_fallback_prompt_byte_budgets(role: str):  # noqa:
     assert len(complete.encode("utf-8")) <= _FALLBACK_PROMPT_BYTE_BUDGETS[role]
 
 
-def test_pre_round_prompt_byte_budgets():  # noqa: ANN201  # tracked: #288
+def test_pre_round_prompt_byte_budgets() -> None:
     rendered = render_template(
         "orchestrator_pre_round_prompt.j2",
         template_dir=_TEMPLATE_DIR,
@@ -625,7 +626,7 @@ def test_pre_round_prompt_byte_budgets():  # noqa: ANN201  # tracked: #288
     assert len(fallback.encode("utf-8")) <= 4_000
 
 
-def test_pre_round_prompt_byte_budgets_on_a_cold_start():  # noqa: ANN201  # tracked: #288
+def test_pre_round_prompt_byte_budgets_on_a_cold_start() -> None:
     """Round 1's extra guidance stays bounded too.
 
     It renders once per campaign rather than once per round, so it earns a
@@ -649,7 +650,7 @@ def test_pre_round_prompt_byte_budgets_on_a_cold_start():  # noqa: ANN201  # tra
     assert len(fallback.encode("utf-8")) <= 4_900
 
 
-def test_pre_round_prompt_defaults_to_the_campaign_history_reading():  # noqa: ANN201  # tracked: #288
+def test_pre_round_prompt_defaults_to_the_campaign_history_reading() -> None:
     """Omitting ``has_history`` must not silently render round 1's text."""
     rendered = render_template(
         "orchestrator_pre_round_prompt.j2",
@@ -669,7 +670,7 @@ def test_pre_round_prompt_defaults_to_the_campaign_history_reading():  # noqa: A
     assert "you may run\none cheap check" not in rendered
 
 
-def test_pre_round_prompt_lets_a_cold_start_establish_that_it_runs():  # noqa: ANN201  # tracked: #288
+def test_pre_round_prompt_lets_a_cold_start_establish_that_it_runs() -> None:
     """Round 1 has no prior result, so it is allowed one check of its own."""
     rendered = render_template(
         "orchestrator_pre_round_prompt.j2",

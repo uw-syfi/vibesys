@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,9 @@ from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecor
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vibesys.run.round_transaction import MultiSlotRoundTransaction
+    from vs_project.api import StateSlot
 
 _RUN_ID = "transaction-test"
 
@@ -65,7 +69,7 @@ def _project(tmp_path: Path) -> tuple[Project, GitTracker, MultiSlotRoundTransac
     return project, tracker, _coordinator(project, tracker)
 
 
-def _state_slot(project: Project):  # noqa: ANN202
+def _state_slot(project: Project) -> StateSlot[_AgentState]:
     return project.state.portable_namespace(_RUN_ID, "agent").slot("state.json", _AgentState)
 
 
@@ -134,10 +138,10 @@ def test_recovery_rolls_prepared_state_and_candidate_forward(tmp_path: Path) -> 
 def test_recovery_restores_an_already_committed_state_file(tmp_path: Path) -> None:
     project, tracker, coordinator = _project(tmp_path)
     transaction = coordinator.begin(1, writes={"state.json": _state(active=None, rounds=(1,))})
-    journal = coordinator._journal_slot.load_optional()  # noqa: SLF001
-    assert journal is not None
+    journal_path = _journal_path(project)
+    journal = journal_path.read_text(encoding="utf-8")
     transaction.complete()
-    coordinator._journal_slot.save(journal)  # noqa: SLF001
+    journal_path.write_text(journal, encoding="utf-8")
     _state_slot(project).save(_AgentState(active_hypothesis_id="corrupt"))
     committed_head = tracker.current_sha()
 
@@ -174,7 +178,8 @@ def test_snapshot_failure_remains_recoverable(
     original_snapshot = tracker.snapshot_with_framework_metadata
 
     def fail_snapshot(_label: str, _snapshot: object) -> None:
-        raise RuntimeError("simulated process failure")  # noqa: TRY003
+        _failure_message = "simulated process failure"
+        raise RuntimeError(_failure_message)
 
     monkeypatch.setattr(tracker, "snapshot_with_framework_metadata", fail_snapshot)
     with pytest.raises(RuntimeError, match="simulated process failure"):
@@ -224,3 +229,129 @@ def test_coordinator_requires_matching_run_tracker(tmp_path: Path) -> None:
         _coordinator(project, wrong_run)
 
     assert tracker.current_sha() is not None
+
+
+_MISSING_SHA = "a" * 40
+
+
+def _journal_path(project: Project) -> Path:
+    directory = project.state.local_namespace(_RUN_ID, "transaction").external_directory()
+    return directory / "checkpoint.json"
+
+
+def _edit_journal(project: Project, **changes: object) -> None:
+    path = _journal_path(project)
+    journal = json.loads(path.read_text(encoding="utf-8"))
+    journal.update(changes)
+    path.write_text(json.dumps(journal), encoding="utf-8")
+
+
+def _begin_one(
+    project: Project, coordinator: MultiSlotRoundTransactionCoordinator
+) -> MultiSlotRoundTransaction:
+    del project
+    return coordinator.begin(1, writes={"state.json": _state(active="h", rounds=(1,))})
+
+
+def test_begin_rejects_non_positive_sequence(tmp_path: Path) -> None:
+    _project_data, _tracker, coordinator = _project(tmp_path)
+
+    with pytest.raises(RoundTransactionError, match="sequence must be positive, got 0"):
+        coordinator.begin(0, writes={"state.json": _state(active=None, rounds=())})
+
+    assert coordinator.recover() is RoundRecoveryOutcome.NO_TRANSACTION
+
+
+def test_begin_refuses_while_a_transaction_is_unfinished(tmp_path: Path) -> None:
+    project, _tracker, coordinator = _project(tmp_path)
+    _begin_one(project, coordinator)
+
+    with pytest.raises(RoundTransactionError, match="unfinished checkpoint"):
+        _begin_one(project, coordinator)
+
+
+def test_begin_rejects_empty_writes(tmp_path: Path) -> None:
+    _project_data, _tracker, coordinator = _project(tmp_path)
+
+    with pytest.raises(RoundTransactionError, match="writes must not be empty"):
+        coordinator.begin(1, writes={})
+
+    assert coordinator.recover() is RoundRecoveryOutcome.NO_TRANSACTION
+
+
+def test_recover_refuses_when_history_moved_away_from_pre_commit(tmp_path: Path) -> None:
+    project, _tracker, coordinator = _project(tmp_path)
+    _begin_one(project, coordinator)
+    _edit_journal(project, pre_commit=_MISSING_SHA)
+
+    with pytest.raises(RoundTransactionError, match=f"Git history moved away .* {_MISSING_SHA}"):
+        coordinator.recover()
+
+    assert _load_state(project) is None
+
+
+def test_complete_refuses_when_history_moved_away_from_pre_commit(tmp_path: Path) -> None:
+    project, _tracker, coordinator = _project(tmp_path)
+    transaction = _begin_one(project, coordinator)
+    _edit_journal(project, pre_commit=_MISSING_SHA)
+
+    with pytest.raises(RoundTransactionError, match="Git history moved away"):
+        transaction.complete()
+
+    assert _load_state(project) is None
+
+
+def test_complete_rejects_journal_for_another_sequence(tmp_path: Path) -> None:
+    project, _tracker, coordinator = _project(tmp_path)
+    transaction = _begin_one(project, coordinator)
+    _edit_journal(project, round_number=2)
+
+    with pytest.raises(RoundTransactionError, match="journal is not for sequence 1"):
+        transaction.complete()
+
+
+def test_complete_requires_a_journal(tmp_path: Path) -> None:
+    project, _tracker, coordinator = _project(tmp_path)
+    transaction = _begin_one(project, coordinator)
+    _journal_path(project).unlink()
+
+    with pytest.raises(RoundTransactionError, match="journal is not for sequence 1"):
+        transaction.complete()
+
+
+def test_journal_from_another_run_is_rejected(tmp_path: Path) -> None:
+    project, _tracker, coordinator = _project(tmp_path)
+    _begin_one(project, coordinator)
+    _edit_journal(project, run_id="other-run")
+
+    with pytest.raises(RoundTransactionError, match="belongs to run 'other-run'"):
+        coordinator.recover()
+
+
+def test_journal_with_empty_run_id_is_invalid(tmp_path: Path) -> None:
+    project, _tracker, coordinator = _project(tmp_path)
+    _begin_one(project, coordinator)
+    _edit_journal(project, run_id="")
+
+    with pytest.raises(RoundTransactionError, match="Invalid checkpoint journal"):
+        coordinator.recover()
+
+
+def test_journal_rejects_non_base64_transition(tmp_path: Path) -> None:
+    project, _tracker, coordinator = _project(tmp_path)
+    _begin_one(project, coordinator)
+    _edit_journal(project, transitions_base64={"state.json": "not*base64!"})
+
+    with pytest.raises(RoundTransactionError, match="Invalid checkpoint journal"):
+        coordinator.recover()
+
+
+def test_journal_rejects_transition_digest_mismatch(tmp_path: Path) -> None:
+    project, _tracker, coordinator = _project(tmp_path)
+    _begin_one(project, coordinator)
+    _edit_journal(project, transitions_sha256="0" * 64)
+
+    with pytest.raises(RoundTransactionError, match="digest does not match"):
+        coordinator.recover()
+
+    assert _load_state(project) is None

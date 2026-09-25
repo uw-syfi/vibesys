@@ -30,7 +30,7 @@ def _bottleneck_tuple(names: list[str]) -> tuple[ProfileBottleneck, ...]:
 
 
 @st.composite
-def _round_of_attribution(draw):  # noqa: ANN001, ANN202
+def _round_of_attribution(draw):  # noqa: ANN001, ANN202  # LW-040084 [ANN001, ANN202]; this scripted double mirrors a production signature whose parameters are not annotated here. The helper is private to this test module and its return type is the local closure type.
     names = draw(st.lists(_NAMES, min_size=1, max_size=4, unique=True))
     return _bottleneck_tuple(names)
 
@@ -55,7 +55,7 @@ def _sorted_bottleneck_tuple(names: list[str]) -> tuple[ProfileBottleneck, ...]:
 
 
 @st.composite
-def _sorted_round_of_attribution(draw):  # noqa: ANN001, ANN202
+def _sorted_round_of_attribution(draw):  # noqa: ANN001, ANN202  # LW-040085 [ANN001, ANN202]; this scripted double mirrors a production signature whose parameters are not annotated here. The helper is private to this test module and its return type is the local closure type.
     names = draw(st.lists(_NAMES, min_size=0, max_size=4, unique=True))
     return _sorted_bottleneck_tuple(names)
 

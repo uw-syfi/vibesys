@@ -1,7 +1,5 @@
 """Native Omnigent MCP integration for one VibeSys agent session."""
 
-# ruff: noqa: TRY003
-
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from vs_agent.contracts import MCPServerSpec
@@ -18,6 +16,29 @@ if TYPE_CHECKING:
 
 class OmnigentMCPError(RuntimeError):
     """Omnigent could not initialize the requested MCP tool surface."""
+
+    @classmethod
+    def dependency_unavailable(cls, error: ImportError) -> OmnigentMCPError:
+        """Describe a missing pinned MCP API and how to restore it."""
+        return cls(
+            f"Omnigent MCP support is not importable ({type(error).__name__}: {error}). "
+            "Reinstall dependencies with `uv sync` (omnigent is a base dependency)."
+        )
+
+    @classmethod
+    def duplicate_server_names(cls, names: list[str]) -> OmnigentMCPError:
+        """Describe duplicate configured MCP server names."""
+        return cls(f"MCP server names must be unique: {names}")
+
+    @classmethod
+    def invalid_configuration(cls, details: str) -> OmnigentMCPError:
+        """Describe a redacted native MCP configuration validation failure."""
+        return cls(f"Invalid Omnigent MCP configuration: {details}")
+
+    @classmethod
+    def connection_failed(cls, details: str) -> OmnigentMCPError:
+        """Describe redacted failures to connect configured MCP servers."""
+        return cls(f"Omnigent could not connect MCP servers: {details}")
 
 
 @dataclass(frozen=True)
@@ -29,21 +50,28 @@ class _NativeMCPAPI:
     validate: Callable[[Any], Any]
 
 
+def _raise_connection_failures(
+    failures: Mapping[str, object], servers: tuple[MCPServerSpec, ...]
+) -> None:
+    """Raise a redacted error when any configured MCP server failed."""
+    details = "; ".join(f"{name}: {error}" for name, error in sorted(failures.items()))
+    raise OmnigentMCPError.connection_failed(_redact_environment_values(details, servers))
+
+
 def _native_mcp_api() -> _NativeMCPAPI:
     """Load the pinned Omnigent MCP API only when the extra is selected."""
     try:
-        from omnigent.runner.mcp_manager import RunnerMcpManager  # noqa: PLC0415
-        from omnigent.spec import (  # noqa: PLC0415
+        from omnigent.runner.mcp_manager import (  # noqa: PLC0415  # lint-waiver: LW-010130 [PLC0415]; Keep RunnerMcpManager lazy in _native_mcp_api so unused providers and import cycles stay unloaded.
+            RunnerMcpManager,
+        )
+        from omnigent.spec import (  # noqa: PLC0415  # lint-waiver: LW-010131 [PLC0415]; Keep this dependency lazy in _native_mcp_api so unused providers and import cycles stay unloaded.
             AgentSpec,
             ExecutorSpec,
             MCPServerConfig,
             validate,
         )
     except ImportError as exc:
-        raise OmnigentMCPError(
-            f"Omnigent MCP support is not importable ({type(exc).__name__}: {exc}). "
-            "Reinstall dependencies with `uv sync` (omnigent is a base dependency)."
-        ) from exc
+        raise OmnigentMCPError.dependency_unavailable(exc) from exc
     return _NativeMCPAPI(
         agent_spec=AgentSpec,
         executor_spec=ExecutorSpec,
@@ -61,7 +89,7 @@ def _translate_servers(
     names = [server.name for server in servers]
     duplicate_names = sorted({name for name in names if names.count(name) > 1})
     if duplicate_names:
-        raise OmnigentMCPError(f"MCP server names must be unique: {duplicate_names}")
+        raise OmnigentMCPError.duplicate_server_names(duplicate_names)
 
     return [
         server_config(
@@ -122,9 +150,8 @@ class OmnigentMCPTools:
         validation = native.validate(agent_spec)
         if not validation.valid:
             details = "; ".join(f"{error.path}: {error.message}" for error in validation.errors)
-            raise OmnigentMCPError(
-                "Invalid Omnigent MCP configuration: "
-                f"{_redact_environment_values(details, servers)}"
+            raise OmnigentMCPError.invalid_configuration(
+                _redact_environment_values(details, servers)
             )
 
         manager = native.manager(stdio_cwd=workspace)
@@ -160,26 +187,22 @@ class OmnigentMCPTools:
     async def initialize(self) -> None:
         """Connect servers and discover their namespaced native schemas."""
         if self._initialized:
-            raise RuntimeError("Omnigent MCP tools are already initialized")
+            message = "Omnigent MCP tools are already initialized"
+            raise RuntimeError(message)
         if self._closed:
-            raise RuntimeError("Omnigent MCP tools are closed")
+            message = "Omnigent MCP tools are closed"
+            raise RuntimeError(message)
         try:
             result = await self._manager.schemas_for(self._agent_spec)
             if result.failures:
-                details = "; ".join(
-                    f"{name}: {error}" for name, error in sorted(result.failures.items())
-                )
-                raise OmnigentMCPError(  # noqa: TRY301
-                    "Omnigent could not connect MCP servers: "
-                    f"{_redact_environment_values(details, self._servers)}"
-                )
+                _raise_connection_failures(result.failures, self._servers)
             self.schemas = list(result.schemas)
             self._tool_names = frozenset(result.tool_names)
             self._initialized = True
         except BaseException as error:
             try:
                 await self.close()
-            except BaseException as cleanup_error:  # noqa: BLE001
+            except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-010132 [BLE001]; OmnigentMCPTools.initialize must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
                 error.add_note(f"Omnigent MCP cleanup also failed: {cleanup_error}")
             raise
 
@@ -190,11 +213,14 @@ class OmnigentMCPTools:
     async def dispatch(self, name: str, arguments: dict[str, Any]) -> str:
         """Invoke one namespaced MCP tool through Omnigent's native manager."""
         if self._closed:
-            raise RuntimeError("Omnigent MCP tools are closed")
+            message = "Omnigent MCP tools are closed"
+            raise RuntimeError(message)
         if not self._initialized:
-            raise RuntimeError("Omnigent MCP tools are not initialized")
+            message = "Omnigent MCP tools are not initialized"
+            raise RuntimeError(message)
         if name not in self._tool_names:
-            raise RuntimeError(f"Omnigent MCP tools do not contain {name!r}")
+            message = f"Omnigent MCP tools do not contain {name!r}"
+            raise RuntimeError(message)
         return await self._manager.call_tool(
             self._agent_spec,
             name,

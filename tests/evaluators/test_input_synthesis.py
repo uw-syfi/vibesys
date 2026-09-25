@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from entrypoints import (
+    cli,
+)
 from vibesys.constants import DomainName
 from vibesys.errors import ConfigurationError
 from vibesys.evaluators.input_manifest import load_input_bundle
@@ -17,6 +20,7 @@ from vibesys.evaluators.input_synthesis import (
 )
 
 if TYPE_CHECKING:
+    from argparse import Namespace
     from pathlib import Path
 
 _BASE_SPEC = SynthesizedInputSpec(
@@ -31,7 +35,7 @@ def _minimal_spec(**overrides: object) -> SynthesizedInputSpec:
     return dataclasses.replace(_BASE_SPEC, **overrides)
 
 
-def test_synthesize_minimal_bundle_round_trips(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_synthesize_minimal_bundle_round_trips(tmp_path: Path) -> None:
     root = synthesize_input_bundle(_minimal_spec(), tmp_path / "bundle")
 
     bundle = load_input_bundle(root)
@@ -44,7 +48,7 @@ def test_synthesize_minimal_bundle_round_trips(tmp_path):  # noqa: ANN001, ANN20
     assert bundle.benchmark_result is None
 
 
-def test_synthesize_populates_optional_fields(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_synthesize_populates_optional_fields(tmp_path: Path) -> None:
     reference = tmp_path / "ref"
     reference.mkdir()
     (reference / "golden.txt").write_text("42\n")
@@ -70,7 +74,7 @@ def test_synthesize_populates_optional_fields(tmp_path):  # noqa: ANN001, ANN201
     assert (bundle.reference_path / "golden.txt").read_text() == "42\n"
 
 
-def test_synthesize_copies_evaluator_dir_contents_into_root(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_synthesize_copies_evaluator_dir_contents_into_root(tmp_path: Path) -> None:
     evaluator = tmp_path / "eval"
     (evaluator / "pkg").mkdir(parents=True)
     (evaluator / "checker.py").write_text("print('ok')\n")
@@ -84,7 +88,7 @@ def test_synthesize_copies_evaluator_dir_contents_into_root(tmp_path):  # noqa: 
     load_input_bundle(root)
 
 
-def test_synthesize_rejects_evaluator_dir_reserved_name_collision(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_synthesize_rejects_evaluator_dir_reserved_name_collision(tmp_path: Path) -> None:
     evaluator = tmp_path / "eval"
     (evaluator / "reference").mkdir(parents=True)
 
@@ -92,12 +96,12 @@ def test_synthesize_rejects_evaluator_dir_reserved_name_collision(tmp_path):  # 
         synthesize_input_bundle(_minimal_spec(evaluator_dir=evaluator), tmp_path / "bundle")
 
 
-def test_synthesize_requires_both_benchmark_result_fields(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_synthesize_requires_both_benchmark_result_fields(tmp_path: Path) -> None:
     with pytest.raises(InputSynthesisError, match="both --input-benchmark-metric"):
         synthesize_input_bundle(_minimal_spec(benchmark_metric="latency_ms"), tmp_path / "bundle")
 
 
-def test_synthesize_refuses_existing_destination(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_synthesize_refuses_existing_destination(tmp_path: Path) -> None:
     dest = tmp_path / "bundle"
     dest.mkdir()
 
@@ -105,12 +109,12 @@ def test_synthesize_refuses_existing_destination(tmp_path):  # noqa: ANN001, ANN
         synthesize_input_bundle(_minimal_spec(), dest)
 
 
-def test_synthesize_rejects_missing_source_dir(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_synthesize_rejects_missing_source_dir(tmp_path: Path) -> None:
     with pytest.raises(InputSynthesisError, match="--input-reference path does not exist"):
         synthesize_input_bundle(_minimal_spec(reference_dir=tmp_path / "nope"), tmp_path / "bundle")
 
 
-def test_synthesize_escapes_special_characters_in_commands(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_synthesize_escapes_special_characters_in_commands(tmp_path: Path) -> None:
     spec = _minimal_spec(
         objective='Handle "quotes" and\nnewlines.',
         accuracy_command=("python", "-c", 'print("hi")'),
@@ -127,14 +131,12 @@ def test_synthesize_escapes_special_characters_in_commands(tmp_path):  # noqa: A
 # ---------------------------------------------------------------------------
 
 
-def _agent_args(argv: list[str]):  # noqa: ANN202  # tracked: #288
-    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
+def _agent_args(argv: list[str]) -> Namespace:
+    """Parse through the public CLI path so these tests cover validation wiring."""
+    return cli.parse_cli_invocation(argv).args
 
-    return cli._build_agent_parser().parse_args(argv)  # noqa: SLF001  # tracked: #288
 
-
-def test_standalone_flags_synthesize_bundle(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
+def test_standalone_flags_synthesize_bundle(tmp_path: Path) -> None:
 
     args = _agent_args(
         [
@@ -152,10 +154,6 @@ def test_standalone_flags_synthesize_bundle(tmp_path):  # noqa: ANN001, ANN201  
         ]
     )
 
-    args.runs_dir = args.runs_dir.resolve()
-
-    cli._validate_target_inputs(args)  # noqa: SLF001  # tracked: #288
-
     assert args.exp_name.startswith("llm-serving-")
     assert args.input == tmp_path / "selected-runs" / "_inputs" / args.exp_name
     assert args.input_bundle.domain == DomainName.LLM_SERVING
@@ -171,7 +169,6 @@ def test_standalone_flags_reject_unsafe_fresh_experiment_name(
     monkeypatch: pytest.MonkeyPatch,
     unsafe_name: str,
 ) -> None:
-    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
 
     monkeypatch.setattr(cli.sys, "prefix", str(tmp_path / ".venv"))
     runs_dir = tmp_path / "selected-runs"
@@ -203,8 +200,7 @@ def test_standalone_flags_reject_unsafe_fresh_experiment_name(
     assert not (tmp_path / "outside").exists()
 
 
-def test_objective_file_is_read(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
+def test_objective_file_is_read(tmp_path: Path) -> None:
 
     objective_file = tmp_path / "OBJ.md"
     objective_file.write_text("From a file.\n")
@@ -223,18 +219,21 @@ def test_objective_file_is_read(tmp_path):  # noqa: ANN001, ANN201  # tracked: #
         ]
     )
 
-    cli._validate_target_inputs(args)  # noqa: SLF001  # tracked: #288
-
     assert args.input_bundle.objective == "From a file.\n"
 
 
-def test_input_conflicts_with_standalone_flags(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    args = _agent_args(["--input", str(tmp_path), "--input-domain", "generic"])
-
-    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
-
+def test_input_conflicts_with_standalone_flags(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="cannot be combined"):
-        cli._validate_target_inputs(args)  # noqa: SLF001  # tracked: #288
+        _agent_args(
+            [
+                "--input",
+                str(tmp_path),
+                "--input-domain",
+                "generic",
+                "--runs-dir",
+                str(tmp_path / "runs"),
+            ]
+        )
 
 
 def test_removed_hidden_evaluator_flag_is_rejected() -> None:
@@ -256,43 +255,44 @@ def test_missing_current_project_and_standalone_flags_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    args = _agent_args([])
-
-    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
-
     with pytest.raises(ConfigurationError, match="Current directory is not a VibeSys project"):
-        cli._validate_target_inputs(args)  # noqa: SLF001  # tracked: #288
+        _agent_args([])
 
 
-def test_incomplete_standalone_flags_error():  # noqa: ANN201  # tracked: #288
+def test_incomplete_standalone_flags_error(tmp_path: Path) -> None:
+
     # Objective + domain but no evaluator commands.
-    args = _agent_args(["--input-objective", "x", "--input-domain", "generic"])
-
-    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
-
     with pytest.raises(ConfigurationError, match="standalone input requires"):
-        cli._validate_target_inputs(args)  # noqa: SLF001  # tracked: #288
+        _agent_args(
+            [
+                "--input-objective",
+                "x",
+                "--input-domain",
+                "generic",
+                "--runs-dir",
+                str(tmp_path / "runs"),
+            ]
+        )
 
 
-def test_both_objective_forms_rejected(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
-    from entrypoints import cli  # noqa: PLC0415  # tracked: #288
+def test_both_objective_forms_rejected(tmp_path: Path) -> None:
 
     objective_file = tmp_path / "OBJ.md"
     objective_file.write_text("file\n")
-    args = _agent_args(
-        [
-            "--input-objective",
-            "inline",
-            "--input-objective-file",
-            str(objective_file),
-            "--input-domain",
-            "generic",
-            "--input-accuracy-command",
-            "checker",
-            "--input-benchmark-command",
-            "bench",
-        ]
-    )
-
     with pytest.raises(ConfigurationError, match="only one of --input-objective"):
-        cli._validate_target_inputs(args)  # noqa: SLF001  # tracked: #288
+        _agent_args(
+            [
+                "--input-objective",
+                "inline",
+                "--input-objective-file",
+                str(objective_file),
+                "--input-domain",
+                "generic",
+                "--input-accuracy-command",
+                "checker",
+                "--input-benchmark-command",
+                "bench",
+                "--runs-dir",
+                str(tmp_path / "runs"),
+            ]
+        )

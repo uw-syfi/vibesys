@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import ast
 import shutil
-import subprocess
 import sys
 import tomllib
 from pathlib import Path
 
 import pytest
+from tests.support import run_test_command
 
 
 def _task_root() -> Path:
@@ -161,7 +161,7 @@ def test_open_verus_mpmc_rejects_fixed_file_changes(tmp_path: Path, relative_pat
 
     fixed_file = candidate / relative_path
     fixed_file.write_bytes(fixed_file.read_bytes() + b"\n")
-    completed = subprocess.run(  # noqa: S603 - executes a copied repository script
+    completed = run_test_command(  # executes a copied repository script
         [sys.executable, str(task / "runner.py"), "check"],
         capture_output=True,
         check=False,
@@ -184,7 +184,7 @@ def test_open_verus_mpmc_rejects_files_outside_candidate(
     unexpected.parent.mkdir(parents=True, exist_ok=True)
     unexpected.write_text("fn main() {}\n", encoding="utf-8")
 
-    completed = subprocess.run(  # noqa: S603 - executes a copied repository script
+    completed = run_test_command(  # executes a copied repository script
         [sys.executable, str(task / "runner.py"), "check"],
         cwd=project,
         capture_output=True,
@@ -215,7 +215,7 @@ def test_open_verus_mpmc_rejects_candidate_source_tricks(
     project, task, candidate = _copy_verus_task(tmp_path)
     (candidate / "src" / "candidate" / "trick.rs").write_text(source, encoding="utf-8")
 
-    completed = subprocess.run(  # noqa: S603 - executes a copied repository script
+    completed = run_test_command(  # executes a copied repository script
         [sys.executable, str(task / "runner.py"), "check"],
         cwd=project,
         capture_output=True,
@@ -232,7 +232,7 @@ def test_open_verus_mpmc_rejects_candidate_symlink(tmp_path: Path) -> None:
     link = candidate / "src" / "candidate" / "linked.rs"
     link.symlink_to(candidate / "src" / "api.rs")
 
-    completed = subprocess.run(  # noqa: S603 - executes a copied repository script
+    completed = run_test_command(  # executes a copied repository script
         [sys.executable, str(task / "runner.py"), "check"],
         cwd=project,
         capture_output=True,

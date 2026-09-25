@@ -33,7 +33,7 @@ class SocketPathTooLongError(OSError):
     callers that already treat a failed bind as an ``OSError`` keep working.
     """
 
-    def __init__(self, path: Path, limit: int):  # noqa: ANN204  # tracked: #288
+    def __init__(self, path: Path, limit: int) -> None:
         encoded = len(str(path).encode())
         super().__init__(
             errno.ENAMETOOLONG,

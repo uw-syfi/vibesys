@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
+from tests.support import run_test_command
 
 
-def test_queue_abi_header_supports_cpp_linkage(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_queue_abi_header_supports_cpp_linkage(tmp_path: Path) -> None:
     compiler = shutil.which("c++")
     if compiler is None:
         pytest.skip("a C++ compiler is required to check the queue ABI header")
@@ -19,7 +19,7 @@ def test_queue_abi_header_supports_cpp_linkage(tmp_path):  # noqa: ANN001, ANN20
         '#include "vibesys_queue_abi.h"\n'
         'extern "C" uint32_t vsq_abi_version() { return VSQ_ABI_VERSION; }\n'
     )
-    subprocess.run(  # noqa: S603  # tracked: #288
+    run_test_command(
         [
             compiler,
             "-std=c++17",

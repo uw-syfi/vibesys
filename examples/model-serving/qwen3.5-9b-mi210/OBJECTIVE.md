@@ -75,8 +75,25 @@ metric" for the secondary metrics.
 ## Correctness
 
 `accuracy_checker/` gates the candidate against HF transformers greedy output
-and teacher-forced logprobs. Throughput counts only if that gate passes; do
-not trade correctness for throughput, and do not retune its thresholds.
+and teacher-forced logprobs. It includes a cache-resume check: each gate
+prompt's continuation is also generated as chained rounds, so a server with
+prefix caching must resume correctly from the previous round's cached KV and
+GDN state (see `accuracy_checker/README.md` "Cache-resume check").
+Throughput counts only if the gate passes; do not trade correctness for
+throughput, and do not retune its thresholds.
+
+Numerics: weights and activations stay bf16. Weights, KV cache, and GDN
+recurrent state are never quantized or stored below bf16 (e.g. no int8/fp8).
+Outputs may differ from the reference only at rounding level, as judged by
+the accuracy checker.
+
+## No tuning to benchmark content
+
+Optimizations must not depend on the benchmark corpus's token distribution or
+on the trace's specific sessions, for example restricting a speculative-decoding
+draft vocabulary to the corpus's frequent tokens. Each optimization must be
+justified for general traffic of this workload shape (multi-turn sessions with
+growing shared prefixes, at these prompt and output lengths).
 
 ## Held-out evaluation (anti-overfitting safeguard)
 

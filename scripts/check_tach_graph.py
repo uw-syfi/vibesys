@@ -15,12 +15,14 @@ Mermaid output is used; never `tach show --web`, which uploads the graph.
 Usage:
     uv run python scripts/check_tach_graph.py           # same as --check
     uv run python scripts/check_tach_graph.py --check   # fail if block is stale
-    uv run python scripts/check_tach_graph.py --write   # regenerate the block
+    uv run python scripts/check_tach_graph.py --write   # regenerate the block.
 """
 
 from __future__ import annotations
 
 import argparse
+import errno
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -37,8 +39,12 @@ EXIT_TOOL_ERROR = 2
 
 def tach_edges() -> list[tuple[str, str]]:
     """Return the sorted `(src, dst)` edges from `tach show --mermaid`."""
-    result = subprocess.run(
-        ["uv", "run", "tach", "show", "--mermaid", "-o", "-"],  # noqa: S607
+    uv = shutil.which("uv")
+    if uv is None:
+        raise FileNotFoundError(errno.ENOENT, "uv executable was not found on PATH", "uv")
+    # lint-waiver: LW-008044 [S603]; The resolved uv executable receives fixed local Tach arguments without a shell.
+    result = subprocess.run(  # noqa: S603
+        [uv, "run", "tach", "show", "--mermaid", "-o", "-"],
         capture_output=True,
         text=True,
         check=True,

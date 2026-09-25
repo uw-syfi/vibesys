@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from server.chat.manager import ChatAnswer
 from server.chat.prompts import (
     experiment_chat_continuation_prompt,
     experiment_chat_system_prompt,
 )
+from server.execution import AgentExecutionRequest
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 class ChatAgentClient(Protocol):
     """Minimal text invocation interface required by an experiment chat."""
 
-    def invoke_text(self, **kwargs: Any) -> str:  # noqa: ANN401  # Mirrors agent clients.
+    def invoke_text(self, **kwargs: object) -> str:
         """Invoke the agent with the driver-specific keyword contract."""
         ...
 
@@ -150,14 +151,16 @@ class ExperimentChatSession:
         """Run one chat turn, reusing this thread's provider conversation."""
         system_prompt = self._continuation_prompt if resumed else self._system_prompt
         execution = self._controller.start_agent_execution(
-            "chat",
-            "experiment-chat",
-            question,
-            system_prompt,
-            participates_in_run_control=False,
-            driver=self._driver,
-            provider=self._provider,
-            model=self._model,
+            AgentExecutionRequest(
+                kind="chat",
+                round_label="experiment-chat",
+                user_prompt=question,
+                system_prompt=system_prompt,
+                participates_in_run_control=False,
+                driver=self._driver,
+                provider=self._provider,
+                model=self._model,
+            ),
         )
         answer: str | None = None
         error: BaseException | None = None
@@ -181,12 +184,14 @@ class ExperimentChatSession:
                     session_key=self._session_key,
                     mcp_servers=list(self._mcp_servers),
                 )
+            except Exception as exc:
+                error = exc
+                message = f"Chat agent failed: {type(exc).__name__}: {exc}"
+                raise RuntimeError(  # Normalize agent errors.
+                    message
+                ) from exc
             except BaseException as exc:
                 error = exc
-                if isinstance(exc, Exception):
-                    raise RuntimeError(  # noqa: TRY003, TRY004  # Normalize agent errors.
-                        f"Chat agent failed: {type(exc).__name__}: {exc}"
-                    ) from exc
                 raise
             finally:
                 self._controller.after_agent(
@@ -196,7 +201,9 @@ class ExperimentChatSession:
                     error=error,
                     execution_id=execution.execution_id,
                 )
-        assert answer is not None  # noqa: S101
+        if answer is None:
+            message = "chat agent completed without an answer"
+            raise RuntimeError(message)
         return ChatAnswer(text=answer, invocation_id=execution.execution_id)
 
     def close(self) -> None:
