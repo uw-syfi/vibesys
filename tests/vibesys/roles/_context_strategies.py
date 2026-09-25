@@ -57,7 +57,6 @@ _CONTEXT_OVERRIDES: dict[type[BaseModel], dict[str, st.SearchStrategy]] = {
     IssueImplementerContext: {"issue": _ISSUE},
     IssueJudgeContext: {"issue": _ISSUE},
     MutatorContext: {
-        "parent": st.none() | _INDIVIDUAL,
         "inspirations": st.lists(_INDIVIDUAL, max_size=2),
     },
 }
@@ -68,26 +67,37 @@ _REPLY_OVERRIDES: dict[type[BaseModel], dict[str, st.SearchStrategy]] = {
 }
 
 
-# ``MutatorContext`` itself has no ``model_validator`` enforcing this, but
-# ``mutator_prompt.j2`` (its ``{% else %}`` branch of ``{% if is_cold_start
-# %}``) reads ``parent.id`` unconditionally whenever ``is_cold_start`` is
-# False, so ``is_cold_start=False, parent=None`` is a type-valid
-# ``MutatorContext`` the template cannot render (``UndefinedError:
-# 'None' has no attribute 'id'``). Filtered out here so this contract test
-# covers the states real callers actually produce; see the module-level
-# report for this repository's actual owners rather than "fixed" silently.
-def _mutator_context_is_renderable(context: BaseModel) -> bool:
-    assert isinstance(context, MutatorContext)
-    return context.is_cold_start or context.parent is not None
+def _mutator_context_strategy() -> st.SearchStrategy[MutatorContext]:
+    """Custom strategy for MutatorContext that respects the constraint
+    that parent is required unless is_cold_start is True.
+    """
+    # Two paths: cold_start=True (parent optional) or cold_start=False (parent required)
+    is_cold_start_true = True
+    is_cold_start_false = False
+    cold_start_strategy = st.builds(
+        MutatorContext,
+        is_cold_start=st.just(is_cold_start_true),
+        parent=st.none(),
+        inspirations=st.lists(_INDIVIDUAL, max_size=2),
+        modality=st.none(),
+    )
+    non_cold_start_strategy = st.builds(
+        MutatorContext,
+        is_cold_start=st.just(is_cold_start_false),
+        parent=_INDIVIDUAL,
+        inspirations=st.lists(_INDIVIDUAL, max_size=2),
+        modality=st.none(),
+    )
+    return st.one_of(cold_start_strategy, non_cold_start_strategy)
 
 
-_CONTEXT_VALIDITY: dict[type[BaseModel], Callable[[BaseModel], bool]] = {
-    MutatorContext: _mutator_context_is_renderable,
-}
+_CONTEXT_VALIDITY: dict[type[BaseModel], Callable[[BaseModel], bool]] = {}
 
 
 def context_strategy(model: type[BaseModel]) -> st.SearchStrategy[BaseModel]:
     """A hypothesis strategy of valid instances of a ``Role.context`` model."""
+    if model is MutatorContext:
+        return _mutator_context_strategy()
     overrides = dict(_CONTEXT_OVERRIDES.get(model, {}))
     if "modality" in model.model_fields:
         overrides.setdefault("modality", st.none())
