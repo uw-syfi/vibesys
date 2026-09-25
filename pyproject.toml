@@ -194,7 +194,7 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 roots = ["tests", "libs/*/tests", "sdk/*/tests"]
 
 # Repo-relative JSONL baseline, one {"path", "rule", "count"} entry per line.
-baseline = "test_isolation_baseline.jsonl"
+baseline = "tests/quality/isolation_baseline.jsonl"
 
 [tool.ruff]
 line-length = 100

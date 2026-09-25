@@ -42,7 +42,7 @@ Configuration lives in `pyproject.toml` under `[tool.vibesys.test_isolation]`:
                  `__pycache__` and `fixtures` directories are skipped.
     baseline  -- repo-relative JSONL path, one `{"path", "rule", "count"}`
                  entry per line (optional, default
-                 `test_isolation_baseline.jsonl`).
+                 `tests/quality/isolation_baseline.jsonl`).
 
 Conditions that fail:
 
@@ -78,7 +78,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
 DEFAULT_PYPROJECT = Path("pyproject.toml")
-DEFAULT_BASELINE = "test_isolation_baseline.jsonl"
+DEFAULT_BASELINE = "tests/quality/isolation_baseline.jsonl"
 SKIPPED_DIR_NAMES = frozenset({"fixtures", "__pycache__"})
 
 RULE_PATCH = "patch"
@@ -562,7 +562,7 @@ def report(scan: Scan, comparison: Comparison) -> int:
     sections: list[tuple[str, list[str]]] = [
         ("Test isolation sites over their baseline:", comparison.failures),
         ("Empty exemptions:", empty),
-        ("Stale test_isolation_baseline.jsonl entries; delete them (--write):", comparison.stale),
+        ("Stale isolation baseline entries; delete them (--write):", comparison.stale),
     ]
     printed = False
     for title, lines in sections:

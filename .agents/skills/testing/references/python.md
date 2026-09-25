@@ -62,5 +62,5 @@ uv run pytest path/to/test.py -n auto --no-cov -q  # parallel
 `scripts/check_test_isolation.py` counts patching, mocking, sleeps
 (`time.sleep`, `asyncio.sleep` other than `asyncio.sleep(0)`), and
 non-`api` imports of a library inside its own tests. The baseline is
-`test_isolation_baseline.jsonl`. CI runs with `-n auto --dist loadgroup`; the
+`tests/quality/isolation_baseline.jsonl`. CI runs with `-n auto --dist loadgroup`; the
 `serial` marker is a last resort for a host-wide resource.
