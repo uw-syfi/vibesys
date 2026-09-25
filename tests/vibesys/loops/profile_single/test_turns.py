@@ -10,6 +10,8 @@ from, the state-dependent plan-ID retry that wraps ``ctx.agents.turn`` (not
 expressible as ``Role.check``), and the board writes around each turn.
 """
 
+# ruff: noqa: SLF001  # Fixtures construct turns via __new__ and poke the board buffer.
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -110,8 +112,8 @@ def test_prompts_render_own_strategy_root_and_official_planning_context(tmp_path
     assert hypothesis is not None
     plan_request = PlanRequest(1, state, [], CarryOver(), None, None, 1, FocusView())
 
-    designer_context = turns._plan_context(plan_request)  # noqa: SLF001
-    combined_context = turns._combined_context(  # noqa: SLF001
+    designer_context = turns._plan_context(plan_request)
+    combined_context = turns._combined_context(
         AttemptRequest(1, plan, "profile-guided component measurement", [], hypothesis, "decode"),
         AttemptState(agent_run_state=state, feedback=None, retry=1),
     )
@@ -206,4 +208,4 @@ def test_validation_rejects_reused_id() -> None:
     turns._board = []
 
     with pytest.raises(InvalidPlanError, match="already used"):
-        turns._validate_plan(_plan("used"), state)  # noqa: SLF001
+        turns._validate_plan(_plan("used"), state)
