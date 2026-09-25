@@ -40,9 +40,12 @@ _FORBIDDEN_CLOCK_OR_IO_MODULES = ("os", "subprocess", "pathlib", "time", "dateti
 # place search/ may call these directly: it swaps the global singleton's
 # state for an explicit, state-derived ``random.Random`` around a call into
 # upstream code that only knows the global RNG, then restores the process's
-# own state in a ``finally``. Every other module-level ``random.<name>()``
-# call reads or mutates state resume can't see, so it stays forbidden.
-_ALLOWED_GLOBAL_RANDOM_CALLS = {"getstate", "setstate"}
+# own state in a ``finally``. ``getrandbits`` is included because that same
+# function also stands in for upstream's ``uuid.uuid4()`` (OS entropy, not
+# seeded) so every id upstream mints is a deterministic function of the same
+# swapped-in state. Every other module-level ``random.<name>()`` call reads
+# or mutates state resume can't see, so it stays forbidden.
+_ALLOWED_GLOBAL_RANDOM_CALLS = {"getstate", "setstate", "getrandbits"}
 
 
 def _module_level_import_nodes(path: Path) -> list[tuple[ast.stmt, str]]:

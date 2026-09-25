@@ -161,12 +161,33 @@ def _dump_files(database: ProgramDatabase, *, iteration: int) -> dict[str, str]:
 
 @contextmanager
 def _upstream_random(rng: random.Random) -> Generator[None, None, None]:
-    """Isolate OpenEvolve's module-global RNG behind our own state."""
+    """Isolate OpenEvolve's module-global RNG (and its id generation) behind our own state.
+
+    Upstream mints program ids for migrants and island-reinit copies with
+    ``uuid.uuid4()``, which draws from OS entropy rather than the seeded
+    ``random`` module. ``_canonicalize_new_programs`` replaces those ids with
+    stable, content-derived ones once a call finishes, but *within* a call
+    upstream sorts/iterates program sets keyed by the raw, not-yet-canonical
+    ids (``_SortedIterationSet`` orders by string value, and
+    ``migrate_programs`` sorts island members before picking migrants) --
+    whenever two programs tie on fitness, that ordering, and so which one
+    wins the tie, would otherwise depend on the OS-random id text rather
+    than anything seeded. Routing ``uuid.uuid4`` through the same restored
+    ``rng`` stream makes every id upstream mints a deterministic function of
+    ``state.rng_state``, closing that gap.
+    """
     process_state = random.getstate()
     random.setstate(rng.getstate())
+    original_uuid4 = uuid.uuid4
+
+    def _deterministic_uuid4() -> uuid.UUID:
+        return uuid.UUID(int=random.getrandbits(128), version=4)
+
+    uuid.uuid4 = _deterministic_uuid4  # ty: ignore[invalid-assignment]
     try:
         yield
     finally:
+        uuid.uuid4 = original_uuid4
         rng.setstate(random.getstate())
         random.setstate(process_state)
 
