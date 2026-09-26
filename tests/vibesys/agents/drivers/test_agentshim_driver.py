@@ -469,8 +469,13 @@ def test_the_host_sandbox_wraps_the_provider_launch(
     provider: str,
 ) -> None:
     monkeypatch.setattr(subject, "build_host_sandbox", lambda *_a, **_k: _FakeHostSandbox())
+    binary = tmp_path / agentshim.get_provider(provider).profile.binary
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    binary.chmod(0o755)
     driver, fake = _driver(provider, scripted_turn(provider, text="ok"))
-    session = driver.create_session(_spec(tmp_path, provider=provider))
+    session = driver.create_session(
+        _spec(tmp_path, provider=provider, environment=(("PATH", str(tmp_path)),))
+    )
 
     session.run_turn(AgentTurnRequest(message="Do it"))
 
