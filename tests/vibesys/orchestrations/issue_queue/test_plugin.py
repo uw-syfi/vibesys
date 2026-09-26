@@ -80,9 +80,14 @@ def _performance(**changes: object) -> dict[str, object]:
 
 
 class _Script:
-    def __init__(self, *replies: object) -> None:
+    def __init__(
+        self,
+        *replies: object,
+        effect: Callable[[AgentRole, int], None] | None = None,
+    ) -> None:
         self.replies = deque(replies)
         self.calls: list[tuple[str, tuple[str, ...], str, type[BaseModel] | None]] = []
+        self.effect = effect
 
     def respond(
         self,
@@ -92,6 +97,8 @@ class _Script:
         response: type[BaseModel] | None,
     ) -> object:
         self.calls.append((role.id, history, message, response))
+        if self.effect is not None:
+            self.effect(role, len(self.calls))
         reply = self.replies.popleft()
         if isinstance(reply, BaseException):
             raise reply
@@ -106,20 +113,7 @@ def _run(
     prepare: Callable[[FakeRunHost], Awaitable[None]] | None = None,
 ) -> tuple[RunStatus, FakeRunHost]:
     async def scenario() -> tuple[RunStatus, FakeRunHost]:
-        host = FakeRunHost(
-            PLUGIN,
-            project_root=path,
-            facts=RunFacts(
-                domain_id="llm-serving",
-                objective="Build a correct and fast inference service.",
-                reference_location="reference/model.py",
-                accuracy_command="uv run check-accuracy",
-                benchmark_command="uv run benchmark",
-                accuracy_configured=True,
-                benchmark_configured=True,
-            ),
-            responder=script.respond,
-        )
+        host = _fake_host(path, script)
         if prepare is not None:
             await prepare(host)
         try:
@@ -129,6 +123,23 @@ def _run(
             await host.close()
 
     return asyncio.run(scenario())
+
+
+def _fake_host(path: Path, script: _Script) -> FakeRunHost:
+    return FakeRunHost(
+        PLUGIN,
+        project_root=path,
+        facts=RunFacts(
+            domain_id="llm-serving",
+            objective="Build a correct and fast inference service.",
+            reference_location="reference/model.py",
+            accuracy_command="uv run check-accuracy",
+            benchmark_command="uv run benchmark",
+            accuracy_configured=True,
+            benchmark_configured=True,
+        ),
+        responder=script.respond,
+    )
 
 
 def test_plugin_declares_fixed_roles_and_strict_policy_options() -> None:
@@ -257,6 +268,51 @@ def test_resume_at_judge_does_not_repeat_implementer_turn(tmp_path: Path) -> Non
     assert [call[0] for call in script.calls] == ["judge", "perf_eval"]
 
 
+def test_resume_ignores_stale_closed_issue_and_drains_open_work(tmp_path: Path) -> None:
+    board = IssueBoard(tmp_path / "issues.json")
+    stale = board.create(
+        type=IssueType.BUG,
+        title="Already closed",
+        description="done",
+        created_by="judge",
+        iteration=1,
+    )
+    board.update_status(stale.id, IssueStatus.CLOSED, actor="judge", iteration=1)
+    active = board.create(
+        type=IssueType.BUG,
+        title="Still open",
+        description="fix this",
+        created_by="judge",
+        iteration=1,
+    )
+
+    async def prepare(host: FakeRunHost) -> None:
+        await host.state.commit(
+            IssueQueueState(
+                round_idx=0,
+                phase="judge",
+                current_issue_id=stale.id,
+                bootstrap_done=True,
+            ),
+            workspace=host.workspaces.root,
+            label="stale cursor",
+        )
+
+    script = _Script(_implementation(), _review(passed=True), _performance())
+
+    status, _host = _run(tmp_path, script, prepare=prepare)
+
+    assert status is RunStatus.SUCCEEDED
+    assert [call[0] for call in script.calls] == ["implementer", "judge", "perf_eval"]
+    reloaded = IssueBoard(tmp_path / "issues.json")
+    stale_after = reloaded.get(stale.id)
+    active_after = reloaded.get(active.id)
+    assert stale_after is not None
+    assert active_after is not None
+    assert stale_after.attempts == 0
+    assert active_after.status is IssueStatus.CLOSED
+
+
 def test_completed_performance_record_is_not_repeated_on_resume(tmp_path: Path) -> None:
     board = IssueBoard(tmp_path / "issues.json")
     issue = board.create(
@@ -294,6 +350,234 @@ def test_completed_performance_record_is_not_repeated_on_resume(tmp_path: Path) 
     assert status is RunStatus.SUCCEEDED
     assert script.calls == []
     assert all(session.history == () for session in host.agents.sessions)
+
+
+def test_bootstrap_is_idempotent_across_repeated_plugin_invocation(tmp_path: Path) -> None:
+    script = _Script(
+        _implementation(),
+        _review(passed=True),
+        _performance(),
+        _performance(),
+    )
+
+    async def scenario() -> tuple[RunStatus, RunStatus, FakeRunHost]:
+        host = _fake_host(tmp_path, script)
+        try:
+            first = await PLUGIN.orchestrate(host, _options(max_rounds=1))
+            second = await PLUGIN.orchestrate(host, _options(max_rounds=2))
+            return first, second, host
+        finally:
+            await host.close()
+
+    first, second, host = asyncio.run(scenario())
+
+    assert (first, second) == (RunStatus.SUCCEEDED, RunStatus.SUCCEEDED)
+    assert [call[0] for call in script.calls] == [
+        "implementer",
+        "judge",
+        "perf_eval",
+        "perf_eval",
+    ]
+    issues = IssueBoard(tmp_path / "issues.json").list()
+    assert len(issues) == 1
+    assert issues[0].created_by == "loop:bootstrap"
+    assert len([event for event in issues[0].history if event.action == "create"]) == 1
+    state = asyncio.run(host.state.load(IssueQueueState))
+    assert state is not None
+    assert [record.iteration for record in state.performance] == [1, 2]
+
+
+def test_blocked_issue_reopens_after_total_round_budget_increases(tmp_path: Path) -> None:
+    board = IssueBoard(tmp_path / "issues.json")
+    issue = board.create(
+        type=IssueType.BUG,
+        title="Retry after more budget",
+        description="Fix the candidate.",
+        created_by="perf_eval",
+        iteration=1,
+    )
+    board.update_status(
+        issue.id,
+        IssueStatus.BLOCKED,
+        actor="loop",
+        iteration=1,
+        note="budget exhausted",
+    )
+    script = _Script(_implementation(), _review(passed=True), _performance())
+
+    async def scenario() -> tuple[RunStatus, RunStatus, FakeRunHost]:
+        host = _fake_host(tmp_path, script)
+        await host.state.commit(
+            IssueQueueState(
+                round_idx=1,
+                phase="implementer",
+                bootstrap_done=True,
+            ),
+            workspace=host.workspaces.root,
+            label="budget exhausted",
+        )
+        try:
+            unchanged = await PLUGIN.orchestrate(host, _options(max_rounds=1))
+            increased = await PLUGIN.orchestrate(host, _options(max_rounds=2))
+            return unchanged, increased, host
+        finally:
+            await host.close()
+
+    unchanged, increased, _host = asyncio.run(scenario())
+
+    assert unchanged is RunStatus.FAILED
+    assert increased is RunStatus.SUCCEEDED
+    resumed = IssueBoard(tmp_path / "issues.json").get(issue.id)
+    assert resumed is not None
+    assert resumed.status is IssueStatus.CLOSED
+    assert resumed.attempts == 1
+    assert "blocked->open" in [event.action for event in resumed.history]
+    assert [call[0] for call in script.calls] == ["implementer", "judge", "perf_eval"]
+
+
+def test_performance_follow_on_issue_is_processed_in_next_round(tmp_path: Path) -> None:
+    perf_turns = 0
+
+    def file_follow_on(role: AgentRole, _call_number: int) -> None:
+        nonlocal perf_turns
+        if role.id != "perf_eval":
+            return
+        perf_turns += 1
+        if perf_turns == 1:
+            IssueBoard(tmp_path / "issues.json").create(
+                type=IssueType.PERF,
+                title="Batch decode requests",
+                description="Reduce launch overhead.",
+                created_by="perf_eval",
+                iteration=1,
+            )
+
+    script = _Script(
+        _implementation(),
+        _review(passed=True),
+        _performance(new_issue_ids=(2,)),
+        _implementation(issue_id=2),
+        _review(passed=True, issue_id=2),
+        _performance(),
+        effect=file_follow_on,
+    )
+
+    status, _host = _run(tmp_path, script, options=_options(max_rounds=2))
+
+    assert status is RunStatus.SUCCEEDED
+    assert [call[0] for call in script.calls] == [
+        "implementer",
+        "judge",
+        "perf_eval",
+        "implementer",
+        "judge",
+        "perf_eval",
+    ]
+    follow_on = IssueBoard(tmp_path / "issues.json").get(2)
+    assert follow_on is not None
+    assert follow_on.status is IssueStatus.CLOSED
+    assert follow_on.attempts == 1
+
+
+def test_performance_follow_on_issue_survives_round_budget_expiry(tmp_path: Path) -> None:
+    def file_follow_on(role: AgentRole, _call_number: int) -> None:
+        if role.id == "perf_eval":
+            IssueBoard(tmp_path / "issues.json").create(
+                type=IssueType.PERF,
+                title="Batch decode requests",
+                description="Reduce launch overhead.",
+                created_by="perf_eval",
+                iteration=1,
+            )
+
+    script = _Script(
+        _implementation(),
+        _review(passed=True),
+        _performance(new_issue_ids=(2,)),
+        effect=file_follow_on,
+    )
+
+    status, host = _run(tmp_path, script, options=_options(max_rounds=1))
+
+    assert status is RunStatus.FAILED
+    follow_on = IssueBoard(tmp_path / "issues.json").get(2)
+    assert follow_on is not None
+    assert follow_on.status is IssueStatus.OPEN
+    state = asyncio.run(host.state.load(IssueQueueState))
+    assert state is not None
+    assert (state.round_idx, state.phase) == (1, "implementer")
+
+
+def test_retry_trajectory_matches_golden_policy_snapshot(tmp_path: Path) -> None:
+    script = _Script(
+        _implementation(summary="First attempt."),
+        _review(passed=False),
+        _implementation(summary="Added the missing health route."),
+        _review(passed=True),
+        _performance(),
+    )
+
+    status, host = _run(tmp_path, script, options=_options(max_rounds=1))
+
+    state = asyncio.run(host.state.load(IssueQueueState))
+    assert state is not None
+    board = IssueBoard(tmp_path / "issues.json")
+    snapshot = {
+        "status": status.value,
+        "calls": [
+            {
+                "role": role,
+                "prior_messages": len(history),
+                "response": response.__name__ if response is not None else None,
+            }
+            for role, history, _message, response in script.calls
+        ],
+        "state": state.model_dump(mode="json"),
+        "commits": [
+            {
+                "label": commit.label,
+                "round_idx": commit.value.round_idx,
+                "phase": commit.value.phase,
+                "current_issue_id": commit.value.current_issue_id,
+                "performance_records": len(commit.value.performance),
+            }
+            for commit in host.state.commits
+            if isinstance(commit.value, IssueQueueState)
+        ],
+        "issues": [
+            {
+                "id": item.id,
+                "type": item.type.value,
+                "title": item.title,
+                "status": item.status.value,
+                "attempts": item.attempts,
+                "created_by": item.created_by,
+                "history": [
+                    {
+                        "actor": event.actor,
+                        "action": event.action,
+                        "iteration": event.iteration,
+                        "note": event.note,
+                        "summary": (event.payload or {}).get("summary"),
+                        "verdict": (event.payload or {}).get("verdict"),
+                    }
+                    for event in item.history
+                ],
+            }
+            for item in board.list()
+        ],
+        "logs": list(host.logs),
+        "progress_headings": [
+            line.removeprefix("## ")
+            for line in (tmp_path / "progress.md").read_text(encoding="utf-8").splitlines()
+            if line.startswith("## ")
+        ],
+        "tool_policy": json.loads(
+            (tmp_path / ".vibesys" / "issue-tool-policy.json").read_text(encoding="utf-8")
+        ),
+    }
+    expected = Path(__file__).with_name("fixtures") / "retry_trajectory.json"
+    assert snapshot == json.loads(expected.read_text(encoding="utf-8"))
 
 
 def test_paid_turn_failure_leaves_resumable_cursor_and_closes_sessions(tmp_path: Path) -> None:
