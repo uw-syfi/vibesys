@@ -242,11 +242,14 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.orchestration.gates
     vibesys.orchestration.runtime --> vibesys.orchestration.progress
     vibesys.orchestration.runtime --> vibesys.orchestration.request
+    vibesys.orchestration.runtime --> vibesys.orchestration.skills
     vibesys.orchestration.runtime --> vibesys.orchestration.state
     vibesys.orchestration.runtime --> vibesys.orchestration.workspaces
     vibesys.orchestration.runtime --> vibesys.render
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
+    vibesys.orchestration.skills --> vibesys
+    vibesys.orchestration.skills --> vibesys.orchestration._host
     vibesys.orchestration.state --> vibesys
     vibesys.orchestration.state --> vibesys.orchestration._host
     vibesys.orchestration.state --> vibesys.orchestration.progress_log
@@ -520,6 +523,7 @@ graph TD
     vibesys.orchestration._host --> vibesys.run
     vibesys.orchestration._host --> vibesys.runtime
     vibesys.orchestration._host --> vibesys.sandbox
+    vibesys.orchestration._host --> vs_runtime
     vibesys.orchestration.agents --> vibesys
     vibesys.orchestration.agents --> vibesys.context
     vibesys.orchestration.agents --> vibesys.orchestration._host
@@ -586,6 +590,7 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.orchestration.gates
     vibesys.orchestration.runtime --> vibesys.orchestration.progress
     vibesys.orchestration.runtime --> vibesys.orchestration.request
+    vibesys.orchestration.runtime --> vibesys.orchestration.skills
     vibesys.orchestration.runtime --> vibesys.orchestration.state
     vibesys.orchestration.runtime --> vibesys.orchestration.workspaces
     vibesys.orchestration.runtime --> vibesys.render
@@ -593,6 +598,9 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.runtime
     vibesys.orchestration.runtime --> vs_agent
     vibesys.orchestration.runtime --> vs_runtime
+    vibesys.orchestration.skills --> vibesys
+    vibesys.orchestration.skills --> vibesys.orchestration._host
+    vibesys.orchestration.skills --> vs_runtime
     vibesys.orchestration.state --> vibesys
     vibesys.orchestration.state --> vibesys.orchestration._host
     vibesys.orchestration.state --> vibesys.orchestration.progress_log

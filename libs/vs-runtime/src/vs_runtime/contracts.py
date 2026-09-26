@@ -265,6 +265,53 @@ class Commands(Protocol):
         ...
 
 
+class SkillResourceRequest(BaseModel):
+    """Policy-neutral request to resolve resources from one installed skill."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    name: str = Field(min_length=1)
+    resource_paths: tuple[str, ...] = ()
+    purpose: str = Field(min_length=1)
+
+
+class ResolvedSkillResources(BaseModel):
+    """Agent-visible paths resolved for one installed skill request."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    name: str = Field(min_length=1)
+    router_path: str = Field(min_length=1)
+    resource_paths: tuple[str, ...] = ()
+    purpose: str = Field(min_length=1)
+
+
+class SkillResolution(BaseModel):
+    """Resolved skill resources and non-fatal selection diagnostics."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    resolved: tuple[ResolvedSkillResources, ...] = ()
+    diagnostics: tuple[str, ...] = ()
+
+
+class SkillCatalogError(RuntimeContractError):
+    """The installed skill catalog could not be read or validated."""
+
+
+class Skills(Protocol):
+    """Run-owned resolution of policy-selected installed skill resources."""
+
+    async def resolve(self, requests: tuple[SkillResourceRequest, ...]) -> SkillResolution:
+        """Resolve valid requests, preserving partial success and diagnostics.
+
+        Raises :class:`SkillCatalogError` when the installed catalog cannot be
+        built. Invalid individual skill names or resources are instead omitted
+        from ``resolved`` and described in ``diagnostics``.
+        """
+        ...
+
+
 class State(Protocol):
     """Typed opaque policy-state durability bound to one plugin declaration."""
 
@@ -438,6 +485,11 @@ class RunHost(Protocol):
     @property
     def commands(self) -> Commands:
         """Return sandboxed argv execution for policy-selected commands."""
+        ...
+
+    @property
+    def skills(self) -> Skills:
+        """Return run-owned resolution for installed skill resources."""
         ...
 
     def log(self, message: str) -> None:

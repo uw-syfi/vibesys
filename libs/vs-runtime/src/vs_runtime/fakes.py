@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TypeAlias, TypeVar, overload
 
 from pydantic import BaseModel
@@ -19,9 +19,13 @@ from vs_runtime.contracts import (
     BenchmarkObjective,
     CommandResult,
     OrchestrationPlugin,
+    ResolvedSkillResources,
     RunFacts,
     RuntimeContractError,
     SessionClosedError,
+    SkillCatalogError,
+    SkillResolution,
+    SkillResourceRequest,
     StateModelError,
     UnknownAgentRoleError,
     Workspace,
@@ -236,6 +240,107 @@ class FakeCommands:
         if self.results:
             return self.results.pop(0)
         return CommandResult(output="", exit_code=0)
+
+
+@dataclass(slots=True)
+class FakeSkills:
+    """In-memory skill catalog with the production resolver's observable rules."""
+
+    installed_resources: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    catalog_error: str | None = None
+
+    async def resolve(self, requests: tuple[SkillResourceRequest, ...]) -> SkillResolution:
+        """Resolve requests against installed names and their available files."""
+        if not requests:
+            return SkillResolution()
+        if self.catalog_error is not None:
+            raise SkillCatalogError(self.catalog_error)
+        if not self.installed_resources:
+            return SkillResolution(diagnostics=("no skill sources are installed",))
+
+        return _resolve_fake_skills(requests, self.installed_resources)
+
+
+def _resolve_fake_skills(
+    requests: tuple[SkillResourceRequest, ...], installed: dict[str, tuple[str, ...]]
+) -> SkillResolution:
+    """Mirror production name merging and partial resource validation in memory."""
+    merged: dict[str, tuple[str, list[str]]] = {}
+    diagnostics: list[str] = []
+    for index, request in enumerate(requests, start=1):
+        name = request.name.strip()
+        if name not in installed:
+            diagnostics.append(f"selection #{index}: unknown installed skill {name!r}")
+            continue
+        if name not in merged:
+            merged[name] = (request.purpose.strip(), [])
+        purpose, resources = merged[name]
+        diagnostics.extend(
+            _resolve_fake_resources(
+                request.resource_paths,
+                name=name,
+                selection_index=index,
+                available=set(installed[name]),
+                resources=resources,
+            )
+        )
+        merged[name] = purpose, resources
+
+    return SkillResolution(
+        resolved=tuple(
+            ResolvedSkillResources(
+                name=name,
+                router_path=f"{name}/SKILL.md",
+                resource_paths=tuple(f"{name}/{path}" for path in resources),
+                purpose=purpose,
+            )
+            for name, (purpose, resources) in merged.items()
+        ),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def _resolve_fake_resources(
+    paths: tuple[str, ...],
+    *,
+    name: str,
+    selection_index: int,
+    available: set[str],
+    resources: list[str],
+) -> list[str]:
+    """Validate one request's paths using the catalog's in-memory file set."""
+    diagnostics: list[str] = []
+    for raw_path in paths:
+        resource = raw_path.strip()
+        path = PurePosixPath(resource)
+        if (
+            not resource
+            or "\\" in resource
+            or path.is_absolute()
+            or not path.parts
+            or ".." in path.parts
+        ):
+            diagnostics.append(
+                f"selection #{selection_index} skill {name!r} resource {raw_path!r}: "
+                "resource path must be relative and stay within the skill"
+            )
+            continue
+        if any(part in {".git", "repos", "__pycache__"} for part in path.parts):
+            diagnostics.append(
+                f"selection #{selection_index} skill {name!r} resource {raw_path!r}: "
+                "resource path is excluded from agent skill materialization"
+            )
+            continue
+        resource = path.as_posix()
+        if resource not in available:
+            diagnostics.append(
+                f"selection #{selection_index} skill {name!r} resource {raw_path!r}: "
+                "resource file does not exist"
+            )
+            continue
+        if resource != "SKILL.md" and resource not in resources:
+            resources.append(resource)
+    return diagnostics
 
 
 class FakeWorkspace:
@@ -524,6 +629,7 @@ class FakeRunHost:
         self._state = FakeState(plugin.state, self._workspaces.root)
         self._control = FakeControl()
         self._commands = FakeCommands()
+        self._skills = FakeSkills()
         self._logs: list[str] = []
         self._closed = False
 
@@ -566,6 +672,11 @@ class FakeRunHost:
     def commands(self) -> FakeCommands:
         """Return deterministic sandboxed command execution."""
         return self._commands
+
+    @property
+    def skills(self) -> FakeSkills:
+        """Return deterministic installed-skill resolution."""
+        return self._skills
 
     @property
     def logs(self) -> tuple[str, ...]:

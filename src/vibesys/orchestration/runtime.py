@@ -55,6 +55,7 @@ from vibesys.orchestration.gates import (
     _Evaluator,
 )
 from vibesys.orchestration.progress import _Progress
+from vibesys.orchestration.skills import _Skills
 from vibesys.orchestration.state import _RunState
 from vibesys.orchestration.workspaces import (
     WorkspaceHandle,
@@ -219,6 +220,7 @@ class RunContext:
         self._close_task: asyncio.Task[None] | None = None
         self.control = _RunControl(integration, debug=request.debug)
         self.commands = _Commands(self)
+        self.skills = _Skills(self)
         self.state = _RunState(
             self,
             plugin.state if plugin is not None else None,

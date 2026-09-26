@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from vibesys.run.event_journal import EventJournal
     from vibesys.runtime import AgentDefinition, AgentHandle, WorkspaceScope
     from vibesys.sandbox.run_environment import RunEnvironmentView
+    from vs_runtime.api import Skills
 
 
 class _LocalAgentHandleLike(Protocol):
@@ -230,6 +231,11 @@ class HostResources(Protocol):
     @property
     def progress(self) -> _ProgressLike:
         """Return this run's progress-board buffer/declaration capability."""
+        ...
+
+    @property
+    def skills(self) -> Skills:
+        """Return run-owned installed-skill resolution."""
         ...
 
     _setup: RunSetup

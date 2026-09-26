@@ -24,6 +24,8 @@ from vs_runtime.api import (
     RunHost,
     RunStatus,
     SessionClosedError,
+    SkillCatalogError,
+    SkillResourceRequest,
     StateModelError,
     UnknownAgentRoleError,
     WorkspaceAccess,
@@ -371,6 +373,73 @@ def test_fake_evaluation_rejects_duplicate_objective_names() -> None:
                 objectives=(objective, objective),
             )
         assert host.evaluation.benchmark_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_fake_skills_resolve_partial_selections_and_merge_in_order() -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(_role()))
+        host.skills.installed_resources = {
+            "profiling": ("SKILL.md", "guide.md", "references/metrics.md"),
+        }
+        result = await host.skills.resolve(
+            (
+                SkillResourceRequest(
+                    name="profiling",
+                    resource_paths=(
+                        "SKILL.md",
+                        "guide.md",
+                        "guide.md",
+                        "missing.md",
+                        "../outside.md",
+                    ),
+                    purpose="inspect the profiler",
+                ),
+                SkillResourceRequest(
+                    name="unknown",
+                    purpose="not installed",
+                ),
+                SkillResourceRequest(
+                    name="profiling",
+                    resource_paths=("references/metrics.md",),
+                    purpose="later duplicate purpose is ignored",
+                ),
+            )
+        )
+
+        assert len(result.resolved) == 1
+        resolved = result.resolved[0]
+        assert resolved.name == "profiling"
+        assert resolved.router_path == "profiling/SKILL.md"
+        assert resolved.resource_paths == (
+            "profiling/guide.md",
+            "profiling/references/metrics.md",
+        )
+        assert resolved.purpose == "inspect the profiler"
+        assert len(result.diagnostics) == 3
+        assert "resource file does not exist" in result.diagnostics[0]
+        assert "must be relative" in result.diagnostics[1]
+        assert "unknown installed skill" in result.diagnostics[2]
+
+    asyncio.run(scenario())
+
+
+def test_fake_skills_no_catalog_and_catalog_errors_are_distinct() -> None:
+    async def scenario() -> None:
+        request = SkillResourceRequest(name="profiling", purpose="inspect profiling")
+        host = FakeRunHost(_plugin(_role()))
+        absent = await host.skills.resolve((request,))
+        assert absent.resolved == ()
+        assert absent.diagnostics == ("no skill sources are installed",)
+
+        host.skills.catalog_error = "invalid catalog"
+        no_requests = await host.skills.resolve(())
+        assert no_requests.resolved == ()
+        assert no_requests.diagnostics == ()
+
+        with pytest.raises(SkillCatalogError, match="invalid catalog"):
+            await host.skills.resolve((request,))
 
     asyncio.run(scenario())
 

@@ -61,11 +61,13 @@ def test_host_resources_declares_a_nonempty_surface() -> None:
     members = _declared_members(HostResources)
 
     assert members == {
+        "run_id",
         "request",
         "workspaces",
         "environment",
         "gates",
         "progress",
+        "skills",
         "_setup",
         "_projector",
         "_gate_executor",
