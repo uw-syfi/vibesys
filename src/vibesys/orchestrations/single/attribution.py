@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
-import tempfile
-import uuid
 from typing import TYPE_CHECKING
 
 from vibesys.search.profile_focus import ProfileAttributionError, parse_attribution
@@ -32,24 +29,20 @@ class _AttributionCommandError(ProfileAttributionError):
             f"with exit code {code}; check its output above"
         )
 
-    @classmethod
-    def unreadable_result(cls, code: int | None) -> _AttributionCommandError:
-        return cls(
-            f"profile-guided attribution result artifact could not be read (exit code {code})"
-        )
 
-
-async def _run_command(
+async def _capture_output(
     host: RunHost,
     argv: tuple[str, ...],
     *,
     workspace: Workspace,
-    timeout_seconds: int | None = None,
+    output_argument: str,
+    timeout_seconds: int,
 ) -> CommandResult:
     try:
-        return await host.commands.run(
+        return await host.commands.capture_output(
             argv,
             workspace=workspace,
+            output_argument=output_argument,
             timeout_seconds=timeout_seconds,
         )
     except Exception as error:
@@ -61,38 +54,23 @@ async def run_attribution(
     config: ProfileGuidedInput,
     *,
     workspace: Workspace,
-    round_number: int,
 ) -> tuple[ProfileBottleneck, ...]:
     """Run the configured profiler and validate profile result protocol v1.
 
-    The runtime accepts argv only. The policy therefore performs execution,
-    artifact readback, and cleanup as three explicit sandboxed commands instead
-    of embedding shell composition in the runtime contract.
+    The runtime owns the temporary output artifact, including readback and
+    cleanup. The plugin owns only the command selection and result protocol.
     """
-    output_path = (
-        f"{tempfile.gettempdir()}/vibesys-attribution-{round_number}-{uuid.uuid4().hex[:12]}.json"
-    )
     host.log(f"[profile-guidance] running attribution: {' '.join(config.command)}")
-    try:
-        result = await _run_command(
-            host,
-            (*config.command, "--vs-output", output_path),
-            workspace=workspace,
-            timeout_seconds=config.timeout_seconds,
-        )
-        if result.exit_code != 0:
-            raise _AttributionCommandError.exit_code(result.exit_code)
-        artifact = await _run_command(
-            host,
-            ("cat", output_path),
-            workspace=workspace,
-        )
-        if artifact.exit_code != 0:
-            raise _AttributionCommandError.unreadable_result(artifact.exit_code)
-    finally:
-        with contextlib.suppress(Exception):
-            await host.commands.run(("rm", "-f", output_path), workspace=workspace)
-    framed = f"{_BEGIN}\n{artifact.output}\n{_END}"
+    result = await _capture_output(
+        host,
+        config.command,
+        workspace=workspace,
+        output_argument="--vs-output",
+        timeout_seconds=config.timeout_seconds,
+    )
+    if result.exit_code != 0:
+        raise _AttributionCommandError.exit_code(result.exit_code)
+    framed = f"{_BEGIN}\n{result.output}\n{_END}"
     return parse_attribution(framed)
 
 

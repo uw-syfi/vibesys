@@ -615,7 +615,6 @@ class _SingleRun:
             self.host,
             profile,
             workspace=self.workspace,
-            round_number=self.round_number,
         )
         focused = self.profile_focus.observe(
             self._require_focus_state(),

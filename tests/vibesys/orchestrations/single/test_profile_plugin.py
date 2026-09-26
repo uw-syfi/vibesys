@@ -117,9 +117,7 @@ def _attribution_payload(*, cost: float) -> str:
 def _script_attribution(host: FakeRunHost, *costs: float) -> None:
     for cost in costs:
         host.commands.script(
-            CommandResult(output="profiler diagnostics", exit_code=0),
             CommandResult(output=_attribution_payload(cost=cost), exit_code=0),
-            CommandResult(output="", exit_code=0),
         )
 
 
@@ -195,12 +193,11 @@ def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cad
     assert [sample["round"] for sample in component["attribution_history"]] == [1, 2]
     assert component["improvement_history"] == []
 
-    first_run, first_read, first_cleanup = host.commands.calls[:3]
-    assert first_run.argv[:2] == ("python", "attribute.py")
-    assert first_run.argv[-2] == "--vs-output"
+    assert len(host.commands.calls) == 2
+    first_run = host.commands.calls[0]
+    assert first_run.argv == ("python", "attribute.py")
+    assert first_run.output_argument == "--vs-output"
     assert first_run.timeout_seconds == 73
-    assert first_read.argv == ("cat", first_run.argv[-1])
-    assert first_cleanup.argv == ("rm", "-f", first_run.argv[-1])
     assert [
         commit.label for commit in host.state.commits if commit.label and "prepare" in commit.label
     ] == [
@@ -209,7 +206,7 @@ def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cad
     ]
 
 
-def test_profile_command_failure_is_typed_and_cleanup_still_runs(tmp_path: Path) -> None:
+def test_profile_command_failure_is_typed(tmp_path: Path) -> None:
     async def scenario() -> FakeRunHost:
         host = FakeRunHost(PROFILE_GUIDED_PLUGIN, project_root=tmp_path)
         host.commands.script(CommandResult(output="profiler failed", exit_code=2))
@@ -222,6 +219,5 @@ def test_profile_command_failure_is_typed_and_cleanup_still_runs(tmp_path: Path)
 
     host = asyncio.run(scenario())
 
-    assert len(host.commands.calls) == 2
-    output_path = host.commands.calls[0].argv[-1]
-    assert host.commands.calls[1].argv == ("rm", "-f", output_path)
+    assert len(host.commands.calls) == 1
+    assert host.commands.calls[0].output_argument == "--vs-output"
