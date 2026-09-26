@@ -468,7 +468,11 @@ def test_the_host_sandbox_wraps_the_provider_launch(
     tmp_path: Path,
     provider: str,
 ) -> None:
-    monkeypatch.setattr(subject, "build_host_sandbox", lambda *_a, **_k: _FakeHostSandbox())
+    monkeypatch.setattr(
+        subject,
+        "build_host_sandbox",
+        lambda *_a, **_k: _FakeHostSandbox(path=str(tmp_path)),
+    )
     binary = tmp_path / agentshim.get_provider(provider).profile.binary
     binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     binary.chmod(0o755)
