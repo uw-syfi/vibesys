@@ -38,6 +38,14 @@ In GitHub Actions, `plan --github-event` reads `GITHUB_EVENT_NAME` and
 `GITHUB_EVENT_PATH` and rejects malformed or unsupported events before
 publishing outputs.
 
+For CI plans, repoctl reads the policy and discovered components from both
+the comparison base and head revisions. Added paths use head ownership,
+deleted paths use base ownership, and modified or renamed paths can select
+both historical and current jobs. The plan's runnable components and package
+collections come from the head policy, so removed package values are not sent
+to current check jobs. A base job is included only if the head policy still
+defines that job.
+
 ## Architecture boundary
 
 The repoctl core must remain language agnostic. It must not branch on language
@@ -46,6 +54,11 @@ behind `discovery.Adapter`; check validation and planning belong behind
 `execution.Planner`. Register implementations only in the composition files:
 `discovery_adapters.go` and `test_planners.go`. The architecture test checks
 this boundary.
+
+Git revision comparison, worktree status, and snapshot lifecycle live in the
+private `internal/gitrepo` package. Command execution is shared through
+`internal/command`; repository planning consumes Git changes without owning
+Git subprocess details.
 
 ## Extension contracts
 

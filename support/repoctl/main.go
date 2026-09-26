@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"repoctl/execution"
+	"repoctl/internal/gitrepo"
 )
 
 func rootPath(configPath string) (string, error) {
@@ -117,6 +118,54 @@ func writeOutputs(path string, p plan) error {
 	}
 	return nil
 }
+
+func planAtRevisions(root, configPath string, headGraph graph, base, head, event string) (plan, error) {
+	comparison, err := gitrepo.Compare(root, base, head, event)
+	if err != nil {
+		return plan{}, err
+	}
+	baseGraph := graph{}
+	if strings.Trim(comparison.BaseRevision, "0") != "" {
+		var cleanup func()
+		baseGraph, cleanup, err = policyGraphAtRevision(root, configPath, comparison.BaseRevision)
+		if err != nil {
+			return plan{}, err
+		}
+		defer cleanup()
+	}
+	return selectChangedRecords(baseGraph, headGraph, comparison.Changes)
+}
+
+func policyGraphAtRevision(root, configPath, revision string) (graph, func(), error) {
+	snapshotRoot, cleanup, err := gitrepo.Snapshot(root, revision)
+	if err != nil {
+		return graph{}, nil, err
+	}
+	snapshotConfig, err := snapshotConfigPath(root, snapshotRoot, configPath)
+	if err != nil {
+		cleanup()
+		return graph{}, nil, err
+	}
+	g, err := readPolicy(snapshotRoot, snapshotConfig)
+	if err != nil {
+		cleanup()
+		return graph{}, nil, fmt.Errorf("revision %s policy: %w", revision, err)
+	}
+	return g, cleanup, nil
+}
+
+func snapshotConfigPath(root, snapshotRoot, configPath string) (string, error) {
+	configAbs := configPath
+	if !filepath.IsAbs(configAbs) {
+		configAbs = filepath.Join(root, configAbs)
+	}
+	rel, err := filepath.Rel(root, configAbs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("configuration %q is outside repository root", configPath)
+	}
+	return filepath.Join(snapshotRoot, rel), nil
+}
+
 func cli(args []string) error {
 	configPath := ".repoctl"
 	filtered := make([]string, 0, len(args))
@@ -181,18 +230,25 @@ func cli(args []string) error {
 		if fs.NArg() != 0 {
 			return fmt.Errorf("unexpected test arguments")
 		}
-		paths, err := changedPaths(root, *base, *head, *event)
+		p, err := planAtRevisions(root, configPath, g, *base, *head, *event)
 		if err != nil {
 			return err
 		}
-		localPaths, err := worktreePaths(root)
+		localChanges, err := gitrepo.WorktreeChanges(root)
 		if err != nil {
 			return err
 		}
-		paths = appendUniquePaths(paths, localPaths)
-		p, err := g.selectPaths(paths)
-		if err != nil {
-			return err
+		if len(localChanges) > 0 {
+			localBase, cleanup, err := policyGraphAtRevision(root, configPath, *head)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+			localPlan, err := selectChangedRecords(localBase, g, localChanges)
+			if err != nil {
+				return err
+			}
+			p = mergePlans(p, localPlan)
 		}
 		if err := emit(p, false); err != nil {
 			return err
@@ -212,7 +268,7 @@ func cli(args []string) error {
 		if len(args) != 1 {
 			return fmt.Errorf("validate takes no arguments")
 		}
-		paths, err := trackedPaths(root)
+		paths, err := gitrepo.TrackedPaths(root)
 		if err != nil {
 			return err
 		}
@@ -274,11 +330,7 @@ func cli(args []string) error {
 				return err
 			}
 		}
-		paths, err := changedPaths(root, *base, *head, *event)
-		if err != nil {
-			return err
-		}
-		p, err := g.selectPaths(paths)
+		p, err := planAtRevisions(root, configPath, g, *base, *head, *event)
 		if err != nil {
 			return err
 		}

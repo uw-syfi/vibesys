@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"repoctl/internal/gitrepo"
 )
 
 func fixtureRepo(t *testing.T) string {
@@ -325,7 +327,7 @@ func TestInitialPushAndRenamePaths(t *testing.T) {
 	initGitRepo(t, root)
 	writeFixtureFile(t, root, "old/name.txt", "initial\n")
 	initial := commitFixture(t, root, "initial")
-	paths, err := changedPaths(root, strings.Repeat("0", 40), initial, "push")
+	paths, err := gitrepo.ChangedPaths(root, strings.Repeat("0", 40), initial, "push")
 	if err != nil || !reflect.DeepEqual(paths, []string{"old/name.txt"}) {
 		t.Fatalf("initial push paths = %v, err = %v", paths, err)
 	}
@@ -337,7 +339,7 @@ func TestInitialPushAndRenamePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	renamed := commitFixture(t, root, "rename")
-	paths, err = changedPaths(root, initial, renamed, "push")
+	paths, err = gitrepo.ChangedPaths(root, initial, renamed, "push")
 	if err != nil {
 		t.Fatalf("rename diff: %v", err)
 	}
@@ -360,7 +362,7 @@ func TestPullRequestUsesMergeBaseAndPushUsesExactEndpoints(t *testing.T) {
 	writeFixtureFile(t, root, "base-only.txt", "base update\n")
 	baseUpdate := commitFixture(t, root, "base update")
 
-	pullRequestPaths, err := changedPaths(root, baseUpdate, feature, "pull_request")
+	pullRequestPaths, err := gitrepo.ChangedPaths(root, baseUpdate, feature, "pull_request")
 	if err != nil {
 		t.Fatalf("pull request diff: %v", err)
 	}
@@ -368,7 +370,7 @@ func TestPullRequestUsesMergeBaseAndPushUsesExactEndpoints(t *testing.T) {
 		t.Fatalf("pull request paths = %v", pullRequestPaths)
 	}
 
-	pushPaths, err := changedPaths(root, baseUpdate, feature, "push")
+	pushPaths, err := gitrepo.ChangedPaths(root, baseUpdate, feature, "push")
 	if err != nil {
 		t.Fatalf("push diff: %v", err)
 	}
