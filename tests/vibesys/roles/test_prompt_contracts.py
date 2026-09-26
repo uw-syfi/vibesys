@@ -88,20 +88,6 @@ def test_every_role_declares_a_context_model() -> None:
         assert role.context is not None, f"{role.id}: {role.template} has no context model"
 
 
-# TODO(stack PR 08): remove. At this commit, `loops/evolve/profilers/*.j2`  # noqa: FIX002, TD003  # LW-040148 [FIX002, TD003]; the placeholder marks work owned by a later change and has no issue yet.
-# does not exist yet as its own files (they land with the evolve strategy
-# migration); the `CandidateProfilerContext` role's template resolves
-# through the shared/ fallback root instead, to `shared/profilers/*.j2`,
-# which does not read this field yet. `loops/multi/profilers/*.j2` wrappers
-# landed with the multi migration (stack PR 07), so `ProfilerContext` is no
-# longer exempt. PR 08 adds the analogous `loops/evolve/profilers/<kind>.j2`
-# wrapper that includes the shared fragment and reads its Pareto-objectives
-# addendum field.
-_EXPECTED_EXTRA_FIELDS_BEFORE_STRATEGY_MIGRATION = {
-    "CandidateProfilerContext": frozenset({"pareto_objectives_addendum"}),
-}
-
-
 def test_context_model_fields_match_template_free_variables() -> None:
     """Assert exact equality per context-model group (see module docstring)."""
     violations: list[str] = []
@@ -110,12 +96,9 @@ def test_context_model_fields_match_template_free_variables() -> None:
         required = frozenset()
         for role in group:
             required |= _free_variables(role.template)
-        allowed_extra = _EXPECTED_EXTRA_FIELDS_BEFORE_STRATEGY_MIGRATION.get(
-            context_model.__name__, frozenset()
-        )
-        if model_fields - allowed_extra != required:
+        if model_fields != required:
             missing = required - model_fields
-            extra = model_fields - allowed_extra - required
+            extra = model_fields - required
             templates = sorted({role.template for role in group})
             detail = f"{context_model.__name__} (templates: {templates})"
             if missing:

@@ -1,46 +1,44 @@
-"""Evolve-owned operations used by the small orchestration scheduler."""
+"""Evolve-owned operations used by the small orchestration scheduler.
 
-# Cursor errors include the exact unsafe state at each recovery boundary.
+One generation's control flow: derive every child slot's :class:`Proposal`
+up front from the generation-start :class:`~vibesys.search.population.models.PopulationState`
+(a pure, deterministic replay of ``PopulationSearch.propose``), evaluate the
+slots not yet admitted (serially, or in a bounded parallel pool when the
+environment supports it), then admit outcomes sequentially in slot order,
+committing durable state after each admit. A resumed run recomputes the same
+proposals from the same generation-start snapshot and only evaluates the
+slots ``EvolveState.admitted_slots`` has not already accounted for, so no
+admitted candidate is ever re-evaluated.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import random
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal
 
 from vibesys.domains.registry import resolve_domain
 from vibesys.evaluators.gates import BenchmarkContract
 from vibesys.evaluators.metrics import MetricSpace
-from vibesys.events import FrameworkSource, RunConfiguredData
+from vibesys.events import FrameworkSource
 from vibesys.loops.evolve.loop import (
     _bootstrap_seed,
     _discard_working_tree,
     _evaluate_candidate,
     _evaluate_in_subcontext,
-    _initialize_search_policy,
-    _LoopSearchEffects,
     _persist_evolve_state,
 )
-from vibesys.loops.evolve.policy_flow import (
+from vibesys.loops.evolve.state import EvolutionStateStore, EvolveState
+from vibesys.search.population.models import (
     CandidateOutcome,
-    EvolveSearch,
-    SelectionSettings,
+    Individual,
+    OpenEvolveSelectorConfig,
+    PopulationConfig,
+    PopulationState,
+    Proposal,
 )
-from vibesys.loops.evolve.search_policy import (
-    OpenEvolveSearchConfig,
-    SearchSelection,
-)
-from vibesys.loops.evolve.state import (
-    CandidateOutcomeRecord,
-    CandidatePlanRecord,
-    EvolutionStateStore,
-    EvolveResumeError,
-    GenerationCursor,
-    GenerationJournal,
-)
-from vibesys.render.sink import output_sink
+from vibesys.search.population.search import PopulationSearch
 from vs_agent.api import CandidateProgress
 
 if TYPE_CHECKING:
@@ -48,7 +46,6 @@ if TYPE_CHECKING:
 
     from vibesys.domains.base import DomainDefinition
     from vibesys.loops.evolve.orchestration import EvolveOptions
-    from vibesys.loops.evolve.population import Individual, Population
     from vibesys.orchestration.runtime import RunContext
     from vibesys.runtime import AgentHandle
 
@@ -60,48 +57,7 @@ _CANDIDATE_CRITERIA = (
 )
 
 
-def _plan_record(plan: SearchSelection) -> CandidatePlanRecord:
-    return CandidatePlanRecord(
-        parent_id=plan.parent.id,
-        inspiration_ids=tuple(individual.id for individual in plan.inspirations),
-        policy_parent_id=plan.policy_parent_id,
-        target_island=plan.target_island,
-    )
-
-
-def _outcome_record(outcome: CandidateOutcome) -> CandidateOutcomeRecord:
-    return CandidateOutcomeRecord(
-        passed=outcome.passed,
-        parent_id=outcome.parent_id,
-        inspiration_ids=tuple(outcome.inspiration_ids),
-        summary=outcome.summary,
-        feedback=outcome.feedback,
-        commit=outcome.commit,
-        perf_metric=outcome.perf_metric,
-        perf_unit=outcome.perf_unit,
-        metrics=dict(outcome.metrics),
-        policy_parent_id=outcome.policy_parent_id,
-        target_island=outcome.target_island,
-    )
-
-
-def _record_outcome(record: CandidateOutcomeRecord) -> CandidateOutcome:
-    return CandidateOutcome(
-        passed=record.passed,
-        parent_id=record.parent_id,
-        inspiration_ids=list(record.inspiration_ids),
-        summary=record.summary,
-        feedback=record.feedback,
-        commit=record.commit,
-        perf_metric=record.perf_metric,
-        perf_unit=record.perf_unit,
-        metrics=dict(record.metrics),
-        policy_parent_id=record.policy_parent_id,
-        target_island=record.target_island,
-    )
-
-
-def _openevolve_config(options: EvolveOptions) -> OpenEvolveSearchConfig | None:
+def _openevolve_config(options: EvolveOptions) -> OpenEvolveSelectorConfig | None:
     configured = (
         options.openevolve_population_size,
         options.openevolve_archive_size,
@@ -111,8 +67,8 @@ def _openevolve_config(options: EvolveOptions) -> OpenEvolveSearchConfig | None:
     )
     if all(value is None for value in configured):
         return None
-    defaults = OpenEvolveSearchConfig()
-    return OpenEvolveSearchConfig(
+    defaults = OpenEvolveSelectorConfig()
+    return OpenEvolveSelectorConfig(
         population_size=options.openevolve_population_size or defaults.population_size,
         archive_size=options.openevolve_archive_size or defaults.archive_size,
         num_islands=options.openevolve_num_islands or defaults.num_islands,
@@ -123,96 +79,73 @@ def _openevolve_config(options: EvolveOptions) -> OpenEvolveSearchConfig | None:
     )
 
 
-def _validate_cursor(
-    cursor: GenerationCursor | None, population: Population, children_per_generation: int
-) -> None:
-    """Reject incomplete old state and any ambiguous paid-work boundary."""
-    completed = cursor.completed if cursor is not None else 0
-    active = cursor.active if cursor is not None else None
-    if cursor is not None and cursor.rng_state is None:
-        message = "evolve cursor lacks sampler state; replay would diverge"
-        raise EvolveResumeError(message)
-    if active is None:
-        if any(individual.generation > completed for individual in population.all):
-            message = (
-                "evolve state has candidates beyond its completed generation cursor; "
-                "resuming could repeat paid work"
-            )
-            raise EvolveResumeError(message)
-        return
-    if active.generation != completed + 1 or active.next_child > children_per_generation + 1:
-        message = "evolve generation cursor does not match the run budget"
-        raise EvolveResumeError(message)
-    if active.phase in {"planning", "evaluating"}:
-        message = (
-            f"evolve generation {active.generation} stopped during {active.phase}; "
-            "the child may have consumed paid work without a durable result"
+def _resolve_selector(
+    options: EvolveOptions, existing: EvolveState | None
+) -> tuple[Literal["vibesys", "openevolve"], OpenEvolveSelectorConfig | None]:
+    """Pick the selector for this run: explicit request, else inferred.
+
+    Resuming an existing run whose ``compare_resume`` policy already forbids
+    changing any ``search_policy``/``openevolve_*`` field (other than
+    ``max_generations``) means the CLI-resolved config here always matches
+    what produced the persisted state, so no separate "recorded config"
+    lookup is needed on resume.
+    """
+    config = _openevolve_config(options)
+    requested = options.search_policy
+    if requested is None:
+        infer_openevolve = config is not None or (
+            existing is not None and existing.population.selector_state is not None
         )
-        raise EvolveResumeError(message)
-    recorded_ids = set(active.recorded.values())
-    population_ids = {
-        individual.id for individual in population.all if individual.generation == active.generation
-    }
-    if population_ids != recorded_ids or any(
-        slot < 1 or slot >= active.next_child for slot in active.recorded
-    ):
-        message = "evolve population and child cursor disagree; resuming could duplicate candidates"
-        raise EvolveResumeError(message)
-    if active.phase == "recording" and any(slot not in active.outcomes for slot in active.plans):
-        message = "evolve generation has missing paid candidate outcomes"
-        raise EvolveResumeError(message)
+        return ("openevolve" if infer_openevolve else "vibesys"), config
+    if requested == "vibesys" and config is not None:
+        message = "OpenEvolve configuration requires the OpenEvolve search policy"
+        raise ValueError(message)
+    return requested, config
 
 
 @dataclass(slots=True)
 class EvolveRun:
-    """One opened run's search state and candidate execution settings."""
+    """One opened run's durable search state and candidate execution settings."""
 
     host: RunContext
     options: EvolveOptions
     agents: dict[str, AgentHandle]
     state_store: EvolutionStateStore
-    population: Population
-    search: EvolveSearch
-    effects: _LoopSearchEffects
+    search: PopulationSearch
+    state: EvolveState
     domain: DomainDefinition
     benchmark: BenchmarkContract
-    rng: random.Random
     objective: str
 
     @classmethod
     async def open(cls, host: RunContext, options: EvolveOptions) -> EvolveRun:
-        """Load committed state and initialize one search policy."""
+        """Load committed state and bind one search policy to this run."""
         request = host.request
         bundle = request.input_bundle
         space = options.metric_space
         state_store = EvolutionStateStore(host.state.namespace)
-        population = state_store.load_population()
-        cursor = state_store.load_cursor()
-        if cursor is None and request.resume is not None:
-            message = "this evolve run has no child journal; its previous paid work cannot be replayed safely"
-            raise EvolveResumeError(message)
-        _validate_cursor(cursor, population, options.children_per_generation)
-        rng = random.Random(options.seed)  # noqa: S311  # lint-waiver: LW-010204 [S311]; fixed-seed search selection must resume reproducibly, and no security token is drawn from it.
-        if cursor is None:
-            state_store.save_cursor(GenerationCursor(rng_state=rng.getstate()))
-        else:
-            rng.setstate(cast("tuple[int, tuple[int, ...], float | None]", cursor.rng_state))
+        existing = state_store.load()
         recorded_space = state_store.load_metric_space()
         if recorded_space not in {space, MetricSpace()}:
             message = "recorded evolve metric space differs from the run descriptor"
             raise ValueError(message)
-        state_store.save_population(population)
-        state_store.save_metric_space(space)
-        policy_name, policy = await _initialize_search_policy(
-            host,
-            population,
-            state_store,
-            requested=options.search_policy,
-            seed=options.seed,
-            config=_openevolve_config(options),
+        selector, openevolve_config = _resolve_selector(options, existing)
+        config = PopulationConfig(
             space=space,
+            selection_temperature=options.selection_temperature,
+            frontier_bias=options.frontier_bias,
+            k_top_inspirations=options.k_top_inspirations,
+            k_random_inspirations=options.k_random_inspirations,
+            selector=selector,
+            openevolve=openevolve_config,
+            seed=options.seed,
         )
-        await _persist_evolve_state(host, state_store, label="evolve: initialize search state")
+        search = PopulationSearch(config)
+        state = existing if existing is not None else EvolveState(population=search.initial())
+        state_store.save_metric_space(space)
+        await _persist_evolve_state(
+            host, state_store, state, label="evolve: initialize search state"
+        )
         benchmark = BenchmarkContract(
             result_spec=bundle.benchmark_result,
             result_protocol=bundle.benchmark_result_protocol,
@@ -226,15 +159,13 @@ class EvolveRun:
                 f"[{axes}], frontier_bias={options.frontier_bias}, "
                 f"tolerance={space.relative_noise:.0%}"
             )
-        output_sink().run_configured(
-            RunConfiguredData(
-                run_log_path=str(host.environment.run_log_path),
-                project_root=str(host.workspaces.root.path),
-                objective=objective,
-                search_policy=policy_name.value,
-                benchmark_contract=benchmark.declared,
-                pareto_objectives=pareto,
-            )
+        host.run_configured(
+            run_log_path=str(host.environment.run_log_path),
+            project_root=str(host.workspaces.root.path),
+            objective=objective,
+            search_policy=selector,
+            benchmark_contract=benchmark.declared,
+            pareto_objectives=pareto,
         )
         agents = {
             role: await host.agents.spawn(host.agents.default_definition(role))
@@ -245,12 +176,10 @@ class EvolveRun:
             options=options,
             agents=agents,
             state_store=state_store,
-            population=population,
-            search=EvolveSearch(population, policy, space),
-            effects=_LoopSearchEffects(host, state_store),
+            search=search,
+            state=state,
             domain=resolve_domain(bundle.domain),
             benchmark=benchmark,
-            rng=rng,
             objective=objective,
         )
 
@@ -261,38 +190,16 @@ class EvolveRun:
         return self.options.max_parallelism > 1 and supported
 
     @property
-    def first_generation(self) -> int:
-        """Resume an unfinished generation at its next durable child slot."""
-        cursor = self.state_store.load_cursor() or GenerationCursor()
-        return cursor.active.generation if cursor.active is not None else cursor.completed + 1
+    def next_generation(self) -> int:
+        """The generation number this run should evaluate next.
 
-    def _journal(self, generation: int) -> GenerationJournal:
-        cursor = self.state_store.load_cursor()
-        if cursor is None or cursor.active is None or cursor.active.generation != generation:
-            message = f"evolve generation {generation} has no active journal"
-            raise EvolveResumeError(message)
-        return cursor.active
-
-    def next_child(self, generation: int) -> int:
-        """Return the first child slot not yet durably accounted for."""
-        return self._journal(generation).next_child
-
-    async def _save_journal(self, journal: GenerationJournal, *, label: str) -> None:
-        self.state_store.save_journal(journal.generation - 1, journal, self.rng.getstate())
-        await _persist_evolve_state(self.host, self.state_store, label=label)
-
-    def _selection(self, record: CandidatePlanRecord) -> SearchSelection:
-        individuals = {individual.id: individual for individual in self.population.all}
-        try:
-            return SearchSelection(
-                parent=individuals[record.parent_id],
-                inspirations=[individuals[id_] for id_ in record.inspiration_ids],
-                policy_parent_id=record.policy_parent_id,
-                target_island=record.target_island,
-            )
-        except KeyError as exc:
-            message = "recorded evolve plan references a missing individual"
-            raise EvolveResumeError(message) from exc
+        Whether a generation is freshly starting or being resumed
+        mid-flight, resume this same in-progress generation instead of
+        skipping past it.
+        """
+        if self.state.generation_start is not None:
+            return self.state.generation_start.generation
+        return self.state.population.generation + 1
 
     def report_parallel_mode(self) -> None:
         """Explain when requested concurrency falls back to serial work."""
@@ -302,9 +209,13 @@ class EvolveRun:
                 "ignored: this environment cannot isolate candidates"
             )
 
+    async def persist(self, *, label: str) -> None:
+        """Commit the exact durable state this run currently holds."""
+        await _persist_evolve_state(self.host, self.state_store, self.state, label=label)
+
     async def bootstrap(self) -> Individual | None:
         """Produce a verified generation-zero seed, repairing WIP on resume."""
-        return await _bootstrap_seed(
+        seed, state = await _bootstrap_seed(
             self.host,
             self.agents,
             objective=self.objective,
@@ -313,34 +224,47 @@ class EvolveRun:
             domain_definition=self.domain,
             pass_criteria=_CANDIDATE_CRITERIA,
             max_attempts=self.options.bootstrap_max_attempts,
-            population=self.population,
             state_store=self.state_store,
-            search_policy=self.search.search_policy,
+            search=self.search,
+            state=self.state,
             keep_deployments=self.options.keep_deployments,
             accuracy_timeout_seconds=self.host.request.input_bundle.manifest.accuracy.timeout_seconds,
             benchmark_contract=self.benchmark,
         )
+        self.state = state
+        return seed
 
     async def begin_generation(self, generation: int) -> None:
-        """Open or resume the generation's durable child journal."""
-        cursor = self.state_store.load_cursor() or GenerationCursor()
-        if cursor.active is None:
-            if generation != cursor.completed + 1:
-                message = "evolve generation would skip the committed budget cursor"
-                raise EvolveResumeError(message)
-            journal = GenerationJournal(
-                generation=generation, mode="parallel" if self.parallel else "serial"
+        """Advance to *generation* and snapshot its generation-start state.
+
+        Advancing ``population.generation`` here (rather than after every
+        slot is admitted) is what makes ``Individual.generation`` read
+        *generation* for every child admitted this generation:
+        ``PopulationSearch.admit`` tags each individual with the state's
+        current generation counter. A durable ``generation_start`` is also
+        what lets a resumed process recompute every child slot's proposal
+        deterministically without replaying anything that happened earlier
+        this generation.
+        """
+        if self.state.generation_start is None:
+            population = self.search.end_generation(self.state.population)
+            self.state = self.state.model_copy(
+                update={
+                    "population": population,
+                    "generation_start": population,
+                    "admitted_slots": 0,
+                }
             )
-            await self._save_journal(journal, label=f"evolve: begin generation {generation}")
-        elif cursor.active.generation != generation or cursor.active.mode != (
-            "parallel" if self.parallel else "serial"
-        ):
-            message = "evolve generation or evaluation mode changed on resume"
-            raise EvolveResumeError(message)
+            await self.persist(label=f"evolve: begin generation {generation}")
+        passed = sum(
+            1
+            for individual in self.state.population.individuals
+            if individual.passed and individual.commit
+        )
         self.host.switch_log(f"gen{generation:03d}")
         self.host.log(
             f"\n{'=' * 60}\n  Generation {generation}/{self.options.max_generations} — "
-            f"population={len(self.population)} (passed={len(self.population.passed)})\n"
+            f"population={len(self.state.population.individuals)} (passed={passed})\n"
             f"{'=' * 60}\n"
         )
 
@@ -357,295 +281,190 @@ class EvolveRun:
             self.host.log(f"\n--- {progress.label()} ---\n")
             yield
 
-    async def _sample_candidate(self) -> SearchSelection | None:
-        """Checkpoint the sampler before any paid candidate work."""
-        settings = SelectionSettings(
-            self.options.k_top_inspirations,
-            self.options.k_random_inspirations,
-            self.options.selection_temperature,
-            self.options.frontier_bias,
-        )
-        return await self.search.plan(self.effects, rng=self.rng, settings=settings)
+    def _proposals(self, generation_start: PopulationState) -> list[Proposal | None]:
+        """Deterministically replay every child slot's proposal.
 
-    async def plan_candidate(self, generation: int, child_idx: int) -> SearchSelection | None:
-        """Recover a recorded selection or save a new one before evaluation."""
-        journal = self._journal(generation)
-        if child_idx != journal.next_child or journal.mode != "serial":
-            message = "serial evolve child slot is out of order"
-            raise EvolveResumeError(message)
-        if journal.phase in {"planned", "recording"}:
-            return self._selection(journal.plans[child_idx])
-        if journal.phase != "ready":
-            message = "serial evolve child cannot be safely replanned"
-            raise EvolveResumeError(message)
-        await self._save_journal(
-            journal.model_copy(update={"phase": "planning"}),
-            label=f"evolve: plan g{generation}c{child_idx}",
-        )
-        plan = await self._sample_candidate()
-        if plan is None:
-            await self._save_journal(
-                journal.model_copy(update={"next_child": child_idx + 1}),
-                label=f"evolve: skip g{generation}c{child_idx}",
-            )
-            return None
-        await self._save_journal(
-            journal.model_copy(
-                update={"phase": "planned", "plans": {child_idx: _plan_record(plan)}}
-            ),
-            label=f"evolve: selected g{generation}c{child_idx}",
-        )
-        return plan
+        Pure and side-effect-free: given the same ``generation_start`` this
+        always returns the same list, so it is safe to recompute on every
+        resume rather than persist.
+        """
+        state = generation_start
+        proposals: list[Proposal | None] = []
+        for _ in range(self.options.children_per_generation):
+            proposal, state = self.search.propose(state)
+            proposals.append(proposal)
+        return proposals
 
-    async def plan_generation(self, generation: int) -> list[tuple[int, SearchSelection]]:
-        """Plan parallel children from one pre-generation population snapshot."""
-        journal = self._journal(generation)
-        if journal.mode != "parallel":
-            message = "parallel plan requested for a serial generation"
-            raise EvolveResumeError(message)
-        if journal.phase in {"planned", "recording"}:
-            return [(slot, self._selection(plan)) for slot, plan in sorted(journal.plans.items())]
-        if journal.phase != "ready" or journal.next_child != 1:
-            message = "parallel evolve generation cannot be safely replanned"
-            raise EvolveResumeError(message)
-        await self._save_journal(
-            journal.model_copy(update={"phase": "planning"}),
-            label=f"evolve: plan generation {generation}",
-        )
-        plans: list[tuple[int, SearchSelection]] = []
-        for child_idx in range(1, self.options.children_per_generation + 1):
-            plan = await self._sample_candidate()
-            if plan is None:
-                continue
-            if plan.parent.commit is None:
-                output_sink().framework_warning(
-                    f"parent {plan.parent.id} has no commit; cannot isolate "
-                    f"candidate g{generation}c{child_idx}; skipping",
-                    source=FrameworkSource.LOOP,
-                )
-                continue
-            plans.append((child_idx, plan))
-        await self._save_journal(
-            journal.model_copy(
-                update={
-                    "phase": "planned",
-                    "plans": {slot: _plan_record(plan) for slot, plan in plans},
-                }
-            ),
-            label=f"evolve: selected generation {generation}",
-        )
-        return plans
+    async def run_generation(self, generation: int) -> None:
+        """Evaluate and admit every not-yet-admitted slot of one generation."""
+        await self.begin_generation(generation)
+        assert self.state.generation_start is not None  # noqa: S101  # LW-040149 [S101]; set by begin_generation.
+        proposals = self._proposals(self.state.generation_start)
+        total = self.options.children_per_generation
+        pending = range(self.state.admitted_slots + 1, total + 1)
+        if self.parallel:
+            targets: list[tuple[int, Proposal]] = []
+            for slot in pending:
+                proposal = proposals[slot - 1]
+                if proposal is None:
+                    continue
+                if proposal.parent.commit is None:
+                    self.host.warning(
+                        f"parent {proposal.parent.id} has no commit; cannot isolate "
+                        f"candidate g{generation}c{slot}; skipping",
+                        source=FrameworkSource.LOOP,
+                    )
+                    continue
+                targets.append((slot, proposal))
+            outcomes = await self._evaluate_parallel_pool(generation, targets)
+            for slot in pending:
+                await self._admit_slot(generation, slot, outcomes.get(slot))
+        else:
+            for slot in pending:
+                await self.host.control.boundary()
+                proposal = proposals[slot - 1]
+                outcome: CandidateOutcome | None = None
+                if proposal is not None:
+                    with self.candidate_progress(generation, slot):
+                        outcome = await self._evaluate_serial(generation, slot, proposal)
+                await self._admit_slot(generation, slot, outcome)
+        await self._end_generation(generation)
 
-    async def evaluate_candidate(
-        self, generation: int, child_idx: int, plan: SearchSelection
+    async def _evaluate_serial(
+        self, generation: int, child_idx: int, proposal: Proposal
     ) -> CandidateOutcome | None:
-        """Evaluate once, then durably stage the outcome before admission."""
-        journal = self._journal(generation)
-        if child_idx != journal.next_child or journal.mode != "serial":
-            message = "serial evolve evaluation is out of order"
-            raise EvolveResumeError(message)
-        if journal.phase == "recording":
-            record = journal.outcomes.get(child_idx)
-            return _record_outcome(record) if record is not None else None
-        if journal.phase != "planned" or journal.plans.get(child_idx) != _plan_record(plan):
-            message = "serial evolve plan differs from its durable selection"
-            raise EvolveResumeError(message)
-        await self._save_journal(
-            journal.model_copy(update={"phase": "evaluating"}),
-            label=f"evolve: evaluate g{generation}c{child_idx}",
-        )
-        parent = plan.parent
+        """Check the parent out in the shared workspace, then evaluate."""
+        parent = proposal.parent
         parent_commit = parent.commit
         try:
             if parent_commit:
                 await self.host.workspaces.root.restore(parent_commit, clean=True)
-        except Exception:  # noqa: BLE001  # lint-waiver: LW-020016 [BLE001]; a parent that cannot be checked out skips its candidate instead of failing the generation.
-            output_sink().framework_warning(
+        except Exception:  # noqa: BLE001  # LW-020016 [BLE001]; a failing candidate is skipped by policy, so the generation continues without it.
+            self.host.warning(
                 f"could not check out parent {parent.id} "
                 f"(commit {parent_commit[:8] if parent_commit else 'n/a'}); skipping candidate",
                 source=FrameworkSource.LOOP,
             )
-            outcome = None
-        else:
-            outcome = await _evaluate_candidate(
-                self.host,
-                self.agents,
-                generation=generation,
-                child_idx=child_idx,
-                parent=parent,
-                inspirations=plan.inspirations,
-                objective=self.objective,
-                space=self.options.metric_space,
-                modality=self.options.modality,
-                domain_definition=self.domain,
-                pass_criteria=_CANDIDATE_CRITERIA,
-                keep_deployments=self.options.keep_deployments,
-                policy_parent_id=plan.policy_parent_id,
-                target_island=plan.target_island,
-                accuracy_timeout_seconds=self.host.request.input_bundle.manifest.accuracy.timeout_seconds,
-                benchmark_contract=self.benchmark,
-            )
-        await self._save_journal(
-            journal.model_copy(
-                update={
-                    "phase": "recording",
-                    "outcomes": {child_idx: _outcome_record(outcome)}
-                    if outcome is not None
-                    else {},
-                }
-            ),
-            label=f"evolve: evaluated g{generation}c{child_idx}",
+            return None
+        return await _evaluate_candidate(
+            self.host,
+            self.agents,
+            generation=generation,
+            child_idx=child_idx,
+            parent=parent,
+            inspirations=list(proposal.inspirations),
+            objective=self.objective,
+            space=self.options.metric_space,
+            modality=self.options.modality,
+            domain_definition=self.domain,
+            pass_criteria=_CANDIDATE_CRITERIA,
+            keep_deployments=self.options.keep_deployments,
+            policy_parent_id=proposal.policy_parent_id,
+            target_island=proposal.target_island,
+            accuracy_timeout_seconds=self.host.request.input_bundle.manifest.accuracy.timeout_seconds,
+            benchmark_contract=self.benchmark,
+            needs_code=self.search.needs_code,
         )
-        return outcome
-
-    async def evaluate_parallel(
-        self, generation: int, plans: list[tuple[int, SearchSelection]]
-    ) -> dict[int, CandidateOutcome]:
-        """Evaluate isolated children once and durably stage all outcomes."""
-        journal = self._journal(generation)
-        if journal.mode != "parallel":
-            message = "parallel evaluation requested for a serial generation"
-            raise EvolveResumeError(message)
-        if journal.phase == "recording":
-            return {
-                slot: _record_outcome(outcome)
-                for slot, outcome in journal.outcomes.items()
-                if slot >= journal.next_child
-            }
-        if (
-            journal.phase != "planned"
-            or {slot: _plan_record(plan) for slot, plan in plans} != journal.plans
-        ):
-            message = "parallel evolve plans differ from their durable selection"
-            raise EvolveResumeError(message)
-        await self._save_journal(
-            journal.model_copy(update={"phase": "evaluating"}),
-            label=f"evolve: evaluate generation {generation}",
-        )
-        if not plans:
-            outcomes: dict[int, CandidateOutcome] = {}
-        else:
-            outcomes = await self._evaluate_parallel_pool(generation, plans)
-        await self._save_journal(
-            journal.model_copy(
-                update={
-                    "phase": "recording",
-                    "outcomes": {
-                        slot: _outcome_record(outcome) for slot, outcome in outcomes.items()
-                    },
-                }
-            ),
-            label=f"evolve: evaluated generation {generation}",
-        )
-        return outcomes
 
     async def _evaluate_parallel_pool(
-        self, generation: int, plans: list[tuple[int, SearchSelection]]
+        self, generation: int, targets: list[tuple[int, Proposal]]
     ) -> dict[int, CandidateOutcome]:
-        """Run the bounded pool only after the in-flight marker is committed."""
-        cap = min(self.options.max_parallelism, len(plans))
+        """Run the bounded pool of isolated-worktree evaluations."""
+        if not targets:
+            return {}
+        cap = min(self.options.max_parallelism, len(targets))
         self.host.log(
-            f"[parallel] generation {generation}: evaluating {len(plans)} "
+            f"[parallel] generation {generation}: evaluating {len(targets)} "
             f"candidate(s), up to {cap} concurrently"
         )
         semaphore = asyncio.Semaphore(cap)
 
-        async def evaluate(child_idx: int, plan: SearchSelection) -> tuple[int, CandidateOutcome]:
+        async def evaluate(child_idx: int, proposal: Proposal) -> tuple[int, CandidateOutcome]:
             async with semaphore:
                 outcome = await _evaluate_in_subcontext(
                     self.host,
                     generation=generation,
                     child_idx=child_idx,
-                    parent=plan.parent,
-                    inspirations=plan.inspirations,
+                    parent=proposal.parent,
+                    inspirations=list(proposal.inspirations),
                     objective=self.objective,
                     space=self.options.metric_space,
                     modality=self.options.modality,
                     domain_definition=self.domain,
                     pass_criteria=_CANDIDATE_CRITERIA,
                     keep_deployments=self.options.keep_deployments,
-                    policy_parent_id=plan.policy_parent_id,
-                    target_island=plan.target_island,
+                    policy_parent_id=proposal.policy_parent_id,
+                    target_island=proposal.target_island,
                     accuracy_timeout_seconds=self.host.request.input_bundle.manifest.accuracy.timeout_seconds,
                     benchmark_contract=self.benchmark,
+                    needs_code=self.search.needs_code,
                 )
                 return child_idx, outcome
 
-        return dict(await asyncio.gather(*(evaluate(slot, plan) for slot, plan in plans)))
+        return dict(await asyncio.gather(*(evaluate(slot, proposal) for slot, proposal in targets)))
 
-    async def record_candidate(
-        self,
-        generation: int,
-        child_idx: int,
-        outcome: CandidateOutcome | None,
-        *,
-        serial: bool,
-    ) -> Individual | None:
-        """Admit one durable result and advance its child slot in the same checkpoint."""
-        journal = self._journal(generation)
-        if journal.phase != "recording" or journal.next_child != child_idx:
-            message = "evolve candidate recording is out of order"
-            raise EvolveResumeError(message)
-        record = journal.outcomes.get(child_idx)
-        if (record is None) != (outcome is None) or (
-            record is not None and outcome is not None and record != _outcome_record(outcome)
-        ):
-            message = "evolve result differs from its durable paid outcome"
-            raise EvolveResumeError(message)
-        individual = None
-        recorded = dict(journal.recorded)
+    async def _admit_slot(
+        self, generation: int, child_idx: int, outcome: CandidateOutcome | None
+    ) -> None:
+        """Admit one durable outcome (or skip) and advance the slot cursor.
+
+        Committing here, sequentially in slot order, is the run's sole
+        crash-recovery boundary: a resumed process only re-evaluates slots
+        past ``admitted_slots``, so a slot recorded here is never redone.
+        """
+        individual: Individual | None = None
         if outcome is not None:
-            individual = await self.search.record(
-                outcome, generation=generation, effects=self.effects
+            individual, new_population = self.search.admit(self.state.population, outcome)
+            self.state = self.state.model_copy(
+                update={"population": new_population, "admitted_slots": child_idx}
             )
-            recorded[child_idx] = individual.id
-            if serial and not outcome.passed:
+            self._log_admission(generation, individual, outcome)
+            if not self.parallel and not outcome.passed:
                 await _discard_working_tree(self.host)
-        next_phase = "recording" if not serial else "ready"
-        self.state_store.save_journal(
-            generation - 1,
-            journal.model_copy(
-                update={
-                    "phase": next_phase,
-                    "next_child": child_idx + 1,
-                    "plans": journal.plans if not serial else {},
-                    "outcomes": journal.outcomes if not serial else {},
-                    "recorded": recorded,
-                }
-            ),
-            self.rng.getstate(),
+        else:
+            self.state = self.state.model_copy(update={"admitted_slots": child_idx})
+        label = (
+            f"evolve: record individual {individual.id}"
+            if individual is not None
+            else f"evolve: skip g{generation}c{child_idx}"
         )
-        await _persist_evolve_state(
-            self.host,
-            self.state_store,
-            label=(
-                f"evolve: record individual {individual.id}"
-                if individual is not None
-                else f"evolve: skip g{generation}c{child_idx}"
-            ),
-        )
-        return individual
+        await self.persist(label=label)
 
-    async def complete_generation(self, generation: int) -> None:
-        """Persist search-policy generation state after all outcomes."""
-        journal = self._journal(generation)
-        if journal.next_child != self.options.children_per_generation + 1 or journal.phase not in {
-            "ready",
-            "recording",
-        }:
-            message = "evolve generation ended before every child slot was accounted for"
-            raise EvolveResumeError(message)
-        self.search.search_policy.finish_generation(generation)
-        self.state_store.save_completed_generation(generation, self.rng.getstate())
-        await _persist_evolve_state(
-            self.host, self.state_store, label=f"evolve: complete generation {generation}"
-        )
+    def _log_admission(
+        self, generation: int, individual: Individual, outcome: CandidateOutcome
+    ) -> None:
+        if outcome.passed:
+            metrics_repr = (
+                " ".join(f"{key}={value:g}" for key, value in individual.metrics.items())
+                if individual.metrics
+                else f"{individual.perf_metric} {individual.perf_unit or ''}"
+            )
+            self.host.log(
+                f"[Gen {generation}] Cand {individual.id} PASSED — "
+                f"{metrics_repr} (parent={outcome.parent_id})"
+            )
+        else:
+            feedback = (outcome.feedback or "").splitlines()
+            self.host.log(
+                f"[Gen {generation}] Cand {individual.id} FAILED — "
+                f"feedback: {feedback[0][:120] if feedback else ''}"
+            )
+
+    async def _end_generation(self, generation: int) -> None:
+        """Close out the generation once every slot is accounted for.
+
+        The generation counter itself already advanced in ``begin_generation``
+        (see its docstring); this only clears the in-progress markers so
+        ``next_generation`` moves on.
+        """
+        self.state = self.state.model_copy(update={"generation_start": None, "admitted_slots": 0})
+        await self.persist(label=f"evolve: complete generation {generation}")
 
     def report_final(self, best: Individual | None) -> None:
         """Report the Pareto frontier and chosen scalar candidate."""
         space = self.options.metric_space
         if space.objectives:
-            frontier = self.population.frontier(space)
+            frontier = self.search.frontier(self.state.population)
             self.host.log(f"\nFinal Pareto frontier ({len(frontier)} individuals):")
             for individual in frontier:
                 readings = " ".join(

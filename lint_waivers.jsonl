@@ -148,7 +148,6 @@
 {"id": "LW-009026", "path": "src/server/api/service.py", "rules": ["PLR0913"]}
 {"id": "LW-009027", "path": "src/server/api/service.py", "rules": ["C901", "PLR0911"]}
 {"id": "LW-009031", "path": "src/server/integration.py", "rules": ["BLE001"]}
-{"id": "LW-009042", "path": "src/vibesys/loops/evolve/search_policy.py", "rules": ["S311"]}
 {"id": "LW-009048", "path": "src/vibesys/backends/cuda/gpu_monitor.py", "rules": ["S607"]}
 {"id": "LW-009049", "path": "src/vibesys/backends/cuda/gpu_monitor.py", "rules": ["S607"]}
 {"id": "LW-009050", "path": "src/vibesys/backends/cuda/gpu_monitor.py", "rules": ["BLE001"]}
@@ -187,13 +186,11 @@
 {"id": "LW-010033", "path": "tests/vibesys/skypilot/test_bridge.py", "rules": ["SLF001"]}
 {"id": "LW-010034", "path": "tests/vibesys/skypilot/test_bridge.py", "rules": ["SLF001"]}
 {"id": "LW-010035", "path": "tests/vibesys/agents/drivers/test_omnigent_driver.py", "rules": ["SLF001"]}
-{"id": "LW-010036", "path": "tests/vibesys/loops/evolve/test_search_policy.py", "rules": ["SLF001"]}
 {"id": "LW-010037", "path": "tests/server/test_event_store_index.py", "rules": ["SLF001"]}
 {"id": "LW-010038", "path": "tests/server/test_event_store_index.py", "rules": ["SLF001"]}
 {"id": "LW-010042", "path": "tests/packaging/test_installed_release_verifier.py", "rules": ["SLF001"]}
 {"id": "LW-010045", "path": "tests/server/test_chat_response_bound.py", "rules": ["SLF001"]}
 {"id": "LW-010047", "path": "tests/vibesys/agents/test_docker_executor.py", "rules": ["SLF001"]}
-{"id": "LW-010048", "path": "tests/vibesys/loops/evolve/test_search_policy.py", "rules": ["SLF001"]}
 {"id": "LW-010049", "path": "tests/vibesys/agents/test_docker_executor.py", "rules": ["S102"]}
 {"id": "LW-010051", "path": "tests/vibesys/skypilot/test_bridge.py", "rules": ["PLR0913"]}
 {"id": "LW-010100", "path": "libs/vs-issue-board/src/vs_issue_board/core.py", "rules": ["BLE001"]}
@@ -300,10 +297,8 @@
 {"id": "LW-010201", "path": "src/vibesys/features.py", "rules": ["TRY004"]}
 {"id": "LW-010202", "path": "src/vibesys/search/hypothesis/state.py", "rules": ["S105"]}
 {"id": "LW-010203", "path": "src/vibesys/roles/common.py", "rules": ["S105"]}
-{"id": "LW-010204", "path": "src/vibesys/loops/evolve/run.py", "rules": ["S311"]}
 {"id": "LW-010207", "path": "src/vibesys/evaluators/gates.py", "rules": ["S108"]}
 {"id": "LW-010208", "path": "src/vibesys/sandbox/skypilot_evaluator.py", "rules": ["S108"]}
-{"id": "LW-010209", "path": "src/vibesys/loops/evolve/loop.py", "rules": ["S701"]}
 {"id": "LW-010210", "path": "src/vibesys/sandbox/modal_evaluator.py", "rules": ["S310"]}
 {"id": "LW-010211", "path": "src/vibesys/sandbox/modal_evaluator.py", "rules": ["S310"]}
 {"id": "LW-010225", "path": "src/entrypoints/cli/remote.py", "rules": ["S603"]}
@@ -388,7 +383,6 @@
 {"id": "LW-020012", "path": "src/vibesys/loops/evolve/loop.py", "rules": ["PLR0913"]}
 {"id": "LW-020013", "path": "src/vibesys/loops/evolve/loop.py", "rules": ["BLE001"]}
 {"id": "LW-020014", "path": "src/vibesys/loops/evolve/loop.py", "rules": ["PLR0913"]}
-{"id": "LW-020015", "path": "src/vibesys/loops/evolve/loop.py", "rules": ["PLR0913"]}
 {"id": "LW-020016", "path": "src/vibesys/loops/evolve/run.py", "rules": ["BLE001"]}
 {"id": "LW-020018", "path": "src/vibesys/loops/multi/session.py", "rules": ["C901"]}
 {"id": "LW-020019", "path": "src/vibesys/loops/multi/session.py", "rules": ["BLE001"]}
@@ -408,8 +402,6 @@
 {"id": "LW-030001", "path": "tests/vibesys/api/test_agent_facade.py", "rules": ["S603"]}
 {"id": "LW-030002", "path": "tests/vibesys/api/test_orchestration_dto_boundary.py", "rules": ["S603"]}
 {"id": "LW-030003", "path": "tests/vibesys/api/test_public_runtime.py", "rules": ["SLF001"]}
-{"id": "LW-030004", "path": "tests/vibesys/loops/evolve/test_policy_flow.py", "rules": ["S311"]}
-{"id": "LW-030005", "path": "tests/vibesys/loops/evolve/test_policy_flow.py", "rules": ["S311"]}
 {"id": "LW-030010", "path": "tests/vibesys/loops/multi/test_validation_helpers.py", "rules": ["SLF001"]}
 {"id": "LW-040001", "path": "src/vibesys/backends/fake.py", "rules": ["PLR0913"]}
 {"id": "LW-040002", "path": "src/vibesys/orchestration/runner.py", "rules": ["PLR0913"]}
@@ -507,7 +499,6 @@
 {"id": "LW-040106", "path": "src/vibesys/orchestration/progress_log.py", "rules": ["PLR0913"]}
 {"id": "LW-040107", "path": "src/vibesys/orchestration/runtime.py", "rules": ["SLF001"]}
 {"id": "LW-040108", "path": "src/vibesys/orchestration/runtime.py", "rules": ["F401"]}
-{"id": "LW-040109", "path": "src/vibesys/orchestration/runtime.py", "rules": ["FIX002", "TD003"]}
 {"id": "LW-040110", "path": "src/vibesys/orchestration/runtime.py", "rules": ["PLR0913"]}
 {"id": "LW-040111", "path": "src/vibesys/orchestration/state.py", "rules": ["SLF001"]}
 {"id": "LW-040112", "path": "src/vibesys/orchestration/workspaces.py", "rules": ["SLF001"]}
@@ -546,4 +537,28 @@
 {"id": "LW-040145", "path": "tests/vibesys/loops/single/test_profile_option.py", "rules": ["S106"]}
 {"id": "LW-040146", "path": "tests/vibesys/loops/single/test_resume.py", "rules": ["S106"]}
 {"id": "LW-040147", "path": "tests/vibesys/loops/single/test_rollback_restore_failure.py", "rules": ["S106"]}
-{"id": "LW-040148", "path": "tests/vibesys/roles/test_prompt_contracts.py", "rules": ["FIX002", "TD003"]}
+{"id": "LW-040148", "path": "src/vibesys/loops/evolve/loop.py", "rules": ["PLR0913"]}
+{"id": "LW-040149", "path": "src/vibesys/loops/evolve/run.py", "rules": ["S101"]}
+{"id": "LW-040150", "path": "tests/vibesys/golden/test_evolve_golden.py", "rules": ["ANN202"]}
+{"id": "LW-040151", "path": "tests/vibesys/golden/test_evolve_golden.py", "rules": ["ANN001", "ANN202"]}
+{"id": "LW-040152", "path": "tests/vibesys/golden/test_evolve_golden.py", "rules": ["ANN001"]}
+{"id": "LW-040153", "path": "tests/vibesys/loops/evolve/_support.py", "rules": ["ANN202"]}
+{"id": "LW-040154", "path": "tests/vibesys/loops/evolve/_support.py", "rules": ["ANN001", "ANN202"]}
+{"id": "LW-040155", "path": "tests/vibesys/loops/evolve/_support.py", "rules": ["ARG005"]}
+{"id": "LW-040156", "path": "tests/vibesys/loops/evolve/test_evolution_state.py", "rules": ["ANN001"]}
+{"id": "LW-040157", "path": "tests/vibesys/loops/evolve/test_evolution_state.py", "rules": ["ANN001"]}
+{"id": "LW-040158", "path": "tests/vibesys/loops/evolve/test_evolution_state.py", "rules": ["ANN001"]}
+{"id": "LW-040159", "path": "tests/vibesys/loops/evolve/test_evolution_state.py", "rules": ["ANN001"]}
+{"id": "LW-040160", "path": "tests/vibesys/loops/evolve/test_evolution_state.py", "rules": ["ANN001"]}
+{"id": "LW-040169", "path": "tests/vibesys/loops/evolve/test_evolutionary_loop.py", "rules": ["ANN202"]}
+{"id": "LW-040176", "path": "tests/vibesys/loops/evolve/test_evolutionary_loop.py", "rules": ["ANN202"]}
+{"id": "LW-040178", "path": "tests/vibesys/loops/evolve/test_evolutionary_loop.py", "rules": ["ARG005", "FBT003"]}
+{"id": "LW-040180", "path": "tests/vibesys/loops/evolve/test_evolutionary_loop.py", "rules": ["S106"]}
+{"id": "LW-040182", "path": "tests/vibesys/loops/evolve/test_evolutionary_loop.py", "rules": ["ARG005"]}
+{"id": "LW-040183", "path": "tests/vibesys/loops/evolve/test_evolutionary_loop.py", "rules": ["ARG005"]}
+{"id": "LW-040188", "path": "tests/vibesys/loops/evolve/test_evolve_crash_resume.py", "rules": ["ANN401"]}
+{"id": "LW-040189", "path": "tests/vibesys/loops/evolve/test_evolve_crash_resume.py", "rules": ["ANN001"]}
+{"id": "LW-040190", "path": "tests/vibesys/loops/evolve/test_evolve_crash_resume.py", "rules": ["ANN401", "ARG001"]}
+{"id": "LW-040191", "path": "tests/vibesys/loops/evolve/test_evolve_crash_resume.py", "rules": ["ARG005"]}
+{"id": "LW-040194", "path": "tests/vibesys/orchestration/test_agents_turn_differential_evolve.py", "rules": ["ANN202"]}
+{"id": "LW-040195", "path": "tests/vibesys/orchestration/test_agents_turn_differential_evolve.py", "rules": ["ANN001"]}

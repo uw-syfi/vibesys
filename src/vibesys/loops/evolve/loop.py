@@ -31,9 +31,7 @@ left to the user.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-from jinja2 import Environment, FileSystemLoader
+from typing import TYPE_CHECKING, cast
 
 from vibesys.domains.base import DomainDefinition, DomainRole
 from vibesys.domains.rendering import render_domain_section
@@ -42,40 +40,27 @@ from vibesys.evaluators.gates import (
     BenchmarkGateResult,
     FrameworkBenchmarkOutcome,
 )
-from vibesys.evaluators.perf_reply import ProfilerSummary
 from vibesys.events import FrameworkSource
-from vibesys.loops.evolve.policy_flow import (
-    BootstrapAttemptResult,
-    CandidateOutcome,
-)
-from vibesys.loops.evolve.population import (
-    Individual,
-    Population,
-)
-from vibesys.loops.evolve.search_policy import (
-    OpenEvolveSearchConfig,
-    OpenEvolveSearchPolicy,
-    SearchPolicy,
-    SearchPolicyName,
-    VibeSysSearchPolicy,
-)
 from vibesys.orchestration.runtime import MeasurementOptions
 from vibesys.profilers import ProfilerKind, mcp_spec, profiler_definition
-from vibesys.prompts import PROMPTS_DIR
-from vibesys.render.sink import output_sink
 from vibesys.roles.common import Verdict
-from vibesys.roles.judge import JudgeResponse
-from vibesys.roles.mutator import MutatorResponse
+from vibesys.roles.judge import CANDIDATE_JUDGE, CandidateJudgeContext
+from vibesys.roles.mutator import CANDIDATE_MUTATOR, MutatorContext
+from vibesys.roles.profiler import CANDIDATE_PROFILERS, CandidateProfilerContext
+from vibesys.search.population.models import CandidateOutcome, Individual
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vibesys.evaluators.metrics import MetricSpace, Objective
-    from vibesys.loops.evolve.state import EvolutionStateStore
+    from vibesys.loops.evolve.state import EvolutionStateStore, EvolveState
     from vibesys.orchestration.runtime import RunContext, WorkspaceHandle
+    from vibesys.roles.judge import JudgeResponse
+    from vibesys.roles.mutator import MutatorResponse
+    from vibesys.roles.profiler import ProfilerSummary
     from vibesys.runtime import AgentHandle
+    from vibesys.search.population.search import PopulationSearch
 
-_TEMPLATE_DIR = PROMPTS_DIR / "loops" / "evolve"
 _INTERFACE = "inprocess"
 
 # Shared "no contract declared" default; the dataclass is frozen, so one
@@ -88,34 +73,30 @@ class _AccuracyTimeoutMismatchError(ValueError):
         super().__init__("evolve accuracy timeout differs from the run manifest")
 
 
-# Evolve owns its role prompts; modality fragments and profiler prompts are
-# shared with the other strategies under prompts/shared/. Domain role files
-# are rendered separately and injected into the templates.
-_jinja_env = Environment(  # noqa: S701  # lint-waiver: LW-010209 [S701]; these are plain-text agent prompts, and HTML escaping would alter their instructions.
-    loader=FileSystemLoader([str(_TEMPLATE_DIR), str(PROMPTS_DIR / "shared")]),
-    keep_trailing_newline=True,
-    trim_blocks=True,
-    lstrip_blocks=True,
-)
+def _sequence(state: EvolveState) -> int:
+    """The generation number one commit of *state* belongs to.
 
-
-def _render(name: str, **kwargs: object) -> str:
-    return _jinja_env.get_template(name).render(**kwargs)
+    Bootstrap and every commit made before a generation opens report 1.
+    ``begin_generation`` advances ``population.generation`` to the generation
+    it is about to produce before snapshotting ``generation_start``, so
+    ``generation_start.generation`` already *is* that number while it is in
+    progress; once it ends, ``population.generation`` still holds it.
+    """
+    if state.generation_start is not None:
+        return max(state.generation_start.generation, 1)
+    return max(state.population.generation, 1)
 
 
 async def _persist_evolve_state(
-    ctx: RunContext, state_store: EvolutionStateStore, *, label: str
+    ctx: RunContext, state_store: EvolutionStateStore, state: EvolveState, *, label: str
 ) -> None:
     """Commit the exact durable evolutionary-search state tree."""
-    cursor = state_store.load_cursor()
-    sequence = max(
-        cursor.active.generation if cursor and cursor.active else cursor.completed if cursor else 0,
-        1,
-    )
-    await ctx.state.checkpoint(
+    sequence = _sequence(state)
+    await ctx.state.commit(
         sequence=sequence,
-        writes=state_store.checkpoint_writes(),
-        publish=state_store.projection(),
+        writes=state_store.checkpoint_writes(state),
+        candidate=False,
+        publish=state_store.projection(state),
     )
     ctx.log(f"[checkpoint] {label}")
 
@@ -153,8 +134,8 @@ async def _discard_working_tree(ctx: RunContext) -> None:
     """Drop any uncommitted changes left by a failed mutation attempt."""
     try:
         await ctx.workspaces.root.restore("HEAD", clean=True)
-    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010256 [BLE001]; cleanup warnings must not replace an earlier candidate failure.
-        output_sink().framework_warning(
+    except Exception as exc:  # noqa: BLE001  # LW-010256 [BLE001]; cleanup warnings must not replace an earlier candidate failure.
+        ctx.warning(
             "discard working tree failed",
             detail=str(exc),
             source=FrameworkSource.LOOP,
@@ -195,58 +176,6 @@ async def _teardown_candidate_deployment(
 # ---------------------------------------------------------------------------
 
 
-def _recent_failure_lessons(
-    population: Population, *, limit: int = 3, max_chars: int = 700
-) -> list[str]:
-    """Distinct feedback from the most-recent failed individuals.
-
-    While the population has no passing parent, every child is a cold start
-    that re-writes the server from scratch. Without this memory the search
-    repeats the same bug on every seed (e.g. an identical model-init crash),
-    burning generations while the population stays empty. Surfacing the recent
-    distinct failure feedback lets each new seed avoid traps earlier seeds hit.
-
-    De-duplicates on a normalized prefix so N identical failures collapse to a
-    single lesson, and truncates each to keep the prompt bounded.
-    """
-    seen: set[str] = set()
-    lessons: list[str] = []
-    for ind in reversed(population.all):  # most recent first
-        if ind.passed:
-            continue
-        fb = (ind.feedback or "").strip()
-        if not fb:
-            continue
-        key = " ".join(fb[:160].lower().split())
-        if key in seen:
-            continue
-        seen.add(key)
-        lessons.append(fb if len(fb) <= max_chars else fb[:max_chars].rstrip() + " …")
-        if len(lessons) >= limit:
-            break
-    return lessons
-
-
-def _latest_wip_seed(population: Population) -> Individual | None:
-    """Most-recent failed cold-start seed whose work was snapshotted.
-
-    While the population has no passing parent, each round is a cold start.
-    Rather than throw the failed seed away and rebuild from scratch every
-    round (which makes the search re-hit the same bug forever, unable to
-    bootstrap its first green candidate), we snapshot each failed seed to a
-    WIP commit and let the next cold start *repair it in place* — fix-forward
-    instead of restart. This returns that most-recent WIP seed so its tree can
-    be checked out as the base for the next attempt.
-
-    A WIP seed is a failed individual (``passed=False``) with ``parent_id is
-    None`` that nonetheless carries a ``commit`` (its snapshotted tree).
-    """
-    for ind in reversed(population.all):  # most recent first
-        if not ind.passed and ind.parent_id is None and ind.commit:
-            return ind
-    return None
-
-
 def _candidate_runtime_notes(
     ctx: RunContext, generation: int, child_idx: int, *, scope: WorkspaceHandle | None = None
 ) -> tuple[str, str | None]:
@@ -272,7 +201,6 @@ async def _run_mutator(  # noqa: PLR0913  # lint-waiver: LW-020007 [PLR0913]; th
     modality: str | None,
     domain_definition: DomainDefinition,
     is_cold_start: bool,
-    space: MetricSpace,
     failed_lessons: list[str] | None = None,
     num_failed_attempts: int = 0,
     repair_seed: bool = False,
@@ -287,38 +215,36 @@ async def _run_mutator(  # noqa: PLR0913  # lint-waiver: LW-020007 [PLR0913]; th
         DomainRole.IMPLEMENTER,
         **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes, scope=scope),
     )
-    system_prompt = _render(
-        "mutator_prompt.j2",
+    context = MutatorContext(
         reference_path=ctx.environment.reference_path,
         modality=modality,
         objective=objective,
         parent=parent,
         inspirations=inspirations,
         is_cold_start=is_cold_start,
-        space=space,
         interface=_INTERFACE,
         domain_implementer=domain_implementer,
         runtime_notes=prompt_runtime_notes,
-        profile_execution=ctx.environment.view_for(scope).profile_execution,
         accuracy_command=ctx.environment.view_for(scope).paths.accuracy_command,
         benchmark_command=ctx.environment.view_for(scope).paths.benchmark_command,
         failed_lessons=failed_lessons or [],
         num_failed_attempts=num_failed_attempts,
         repair_seed=repair_seed,
+        # `mutator_prompt.j2` gates an (currently unused) Pareto-frontier
+        # section on `objectives`, which no caller ever populated; pass a
+        # falsy value explicitly so strict-undefined rendering keeps
+        # skipping that section exactly as it does today.
+        objectives=None,
     )
-    return await agents["implementer"].turn_structured(
-        (
-            "Edit the workspace to produce an offspring of the parent. "
-            "Then return one JSON object matching the schema above."
+    return cast(
+        "MutatorResponse",
+        await ctx.agents.turn(
+            CANDIDATE_MUTATOR,
+            agent=agents["implementer"],
+            context=context,
+            label=f"gen-{generation}-cand-{child_idx}-mutator",
+            workspace=scope or ctx.workspaces.root,
         ),
-        system_prompt=system_prompt,
-        response_cls=MutatorResponse,
-        fallback_factory=lambda: MutatorResponse(
-            summary="Mutator produced no structured response.",
-            hypothesis="unknown",
-            expected_behavior="unknown",
-        ),
-        label=f"gen-{generation}-cand-{child_idx}-mutator",
     )
 
 
@@ -343,8 +269,7 @@ async def _run_judge(  # noqa: PLR0913  # lint-waiver: LW-020008 [PLR0913]; thes
         DomainRole.JUDGE,
         **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes, scope=scope),
     )
-    system_prompt = _render(
-        "judge_prompt.j2",
+    context = CandidateJudgeContext(
         accuracy_command=ctx.environment.view_for(scope).paths.accuracy_command,
         benchmark_command=ctx.environment.view_for(scope).paths.benchmark_command,
         pass_criteria=pass_criteria,
@@ -352,19 +277,17 @@ async def _run_judge(  # noqa: PLR0913  # lint-waiver: LW-020008 [PLR0913]; thes
         interface=_INTERFACE,
         domain_judge=domain_judge,
         runtime_notes=prompt_runtime_notes,
-        profile_execution=ctx.environment.view_for(scope).profile_execution,
         objective=objective,
     )
-    return await agents["judge"].turn_structured(
-        "Review the offspring per the criteria above. Return only the JSON verdict.",
-        system_prompt=system_prompt,
-        response_cls=JudgeResponse,
-        fallback_factory=lambda: JudgeResponse(
-            analysis="Judge produced no structured response.",
-            feedback="No structured response received.",
-            verdict=Verdict.FAIL,
+    return cast(
+        "JudgeResponse",
+        await ctx.agents.turn(
+            CANDIDATE_JUDGE,
+            agent=agents["judge"],
+            context=context,
+            label=f"gen-{generation}-cand-{child_idx}-judge",
+            workspace=scope or ctx.workspaces.root,
         ),
-        label=f"gen-{generation}-cand-{child_idx}-judge",
     )
 
 
@@ -405,7 +328,6 @@ async def _run_profiler(  # noqa: PLR0913  # lint-waiver: LW-020009 [PLR0913]; t
     if kind is ProfilerKind.NONE:
         return None
     definition = profiler_definition(kind)
-    template = definition.prompt_template
     prompt_runtime_notes = (
         runtime_notes if runtime_notes is not None else ctx.environment.view_for(scope).prompt_notes
     )
@@ -414,11 +336,16 @@ async def _run_profiler(  # noqa: PLR0913  # lint-waiver: LW-020009 [PLR0913]; t
         DomainRole.PROFILER,
         **_domain_render_context(ctx, modality, runtime_notes=prompt_runtime_notes, scope=scope),
     )
-    base_prompt = _render(
-        template,
+    addendum = (
+        _PARETO_PROFILER_ADDENDUM.format(
+            objective_list=_format_objectives_for_profiler(space.objectives),
+        )
+        if space.objectives
+        else ""
+    )
+    context = CandidateProfilerContext(
         benchmark_command=ctx.environment.view_for(scope).paths.benchmark_command,
         modality=modality,
-        interface=_INTERFACE,
         domain_profiler=domain_profiler,
         runtime_notes=prompt_runtime_notes,
         profile_execution=ctx.environment.view_for(scope).profile_execution,
@@ -426,61 +353,30 @@ async def _run_profiler(  # noqa: PLR0913  # lint-waiver: LW-020009 [PLR0913]; t
         profile_focus="Measure the headline metric for this candidate; rank top kernel-level bottlenecks.",
         profiler_support_name=definition.support_name,
         profiler_mcp_name=definition.mcp_name,
+        pareto_objectives_addendum=addendum,
     )
-    if space.objectives:
-        addendum = _PARETO_PROFILER_ADDENDUM.format(
-            objective_list=_format_objectives_for_profiler(space.objectives),
-        )
-        system_prompt = base_prompt + addendum
-    else:
-        system_prompt = base_prompt
     spec = mcp_spec(kind)
     label = f"gen-{generation}-cand-{child_idx}-profiler"
     try:
-        return await agents["profiler"].turn_structured(
-            "Profile the server and return exactly one JSON object matching the schema above.",
-            system_prompt=system_prompt,
-            response_cls=ProfilerSummary,
-            fallback_factory=lambda: ProfilerSummary(
-                analysis="Profiler produced no structured response.",
-                bottlenecks="n/a",
-                suggestions="n/a",
-                perf_metric=None,
-                perf_unit=None,
+        return cast(
+            "ProfilerSummary",
+            await ctx.agents.turn(
+                CANDIDATE_PROFILERS[kind],
+                agent=agents["profiler"],
+                context=context,
+                label=label,
+                mcp_servers=[spec] if spec is not None else None,
+                workspace=scope or ctx.workspaces.root,
             ),
-            label=label,
-            mcp_servers=[spec] if spec is not None else None,
         )
-    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010265 [BLE001]; configured profiler failures become framework warnings so the run continues without profile data.
-        output_sink().framework_warning(
+    except Exception as exc:  # noqa: BLE001  # LW-010265 [BLE001]; configured profiler failures become framework warnings so the run continues without profile data.
+        ctx.warning(
             "profiler failed", detail=str(exc), source=FrameworkSource.LOOP, round_label=label
         )
         return None
 
 
 _CandidateOutcome = CandidateOutcome
-
-
-async def _run_framework_accuracy_gate(
-    ctx: RunContext,
-    *,
-    generation: int,
-    child_idx: int,
-    timeout_seconds: int | None = None,
-    scope: WorkspaceHandle | None = None,
-) -> str | None:
-    """Run the immutable accuracy command and return retry feedback on failure."""
-    if (
-        timeout_seconds is not None
-        and timeout_seconds != ctx.request.input_bundle.manifest.accuracy.timeout_seconds
-    ):
-        raise _AccuracyTimeoutMismatchError
-    result = await ctx.evaluator.check(
-        process_id=f"evolve-accuracy-{generation}-{child_idx}",
-        label=f"gen-{generation}-cand-{child_idx}",
-        scope=scope,
-    )
-    return result.feedback
 
 
 async def _run_framework_benchmark_gate(
@@ -498,7 +394,7 @@ async def _run_framework_benchmark_gate(
     the framework's measurement of a candidate rather than only the agent
     transcripts around it.
     """
-    return await ctx.evaluator.measure(
+    return await ctx.gates.measure(
         output_slug=f"gen{generation}-cand{child_idx}",
         scope=scope,
         options=MeasurementOptions(
@@ -524,13 +420,17 @@ async def _run_candidate_gates(  # noqa: PLR0913  # lint-waiver: LW-020010 [PLR0
     when every gate passed; ``benchmark`` is set only when a declared contract
     ran and passed, and it carries the trusted measurement.
     """
-    failure_feedback = await _run_framework_accuracy_gate(
-        ctx,
-        generation=generation,
-        child_idx=child_idx,
-        timeout_seconds=accuracy_timeout_seconds,
+    if (
+        accuracy_timeout_seconds is not None
+        and accuracy_timeout_seconds != ctx.request.input_bundle.manifest.accuracy.timeout_seconds
+    ):
+        raise _AccuracyTimeoutMismatchError
+    accuracy = await ctx.gates.check(
+        process_id=f"evolve-accuracy-{generation}-{child_idx}",
+        label=f"gen-{generation}-cand-{child_idx}",
         scope=scope,
     )
+    failure_feedback = accuracy.feedback
     if failure_feedback is not None or not contract.declared:
         return failure_feedback, None
     gate = await _run_framework_benchmark_gate(
@@ -606,6 +506,7 @@ async def _evaluate_candidate(  # noqa: PLR0913  # lint-waiver: LW-020011 [PLR09
     accuracy_timeout_seconds: int | None = None,
     benchmark_contract: BenchmarkContract = _NO_BENCHMARK_CONTRACT,
     scope: WorkspaceHandle | None = None,
+    needs_code: bool = False,
 ) -> _CandidateOutcome:
     """Bind the candidate policy to this context's agents, gates, and workspace."""
     if isolated_deployment:
@@ -621,19 +522,20 @@ async def _evaluate_candidate(  # noqa: PLR0913  # lint-waiver: LW-020011 [PLR09
         + f"; inspirations={[i.id for i in inspirations]}"
     )
 
-    def outcome(
+    def outcome(  # noqa: PLR0913  # LW-040148 [PLR0913];  tracked: #288.
         *,
         passed: bool,
         summary: str,
         feedback: str | None,
         commit: str | None = None,
         fitness: tuple[float | None, str | None, dict[str, float]] | None = None,
+        code: str | None = None,
     ) -> _CandidateOutcome:
         metric, unit, metrics = fitness if fitness is not None else (None, None, {})
         return _CandidateOutcome(
             passed=passed,
             parent_id=parent.id,
-            inspiration_ids=[individual.id for individual in inspirations],
+            inspiration_ids=tuple(individual.id for individual in inspirations),
             summary=summary,
             feedback=feedback,
             commit=commit,
@@ -642,6 +544,7 @@ async def _evaluate_candidate(  # noqa: PLR0913  # lint-waiver: LW-020011 [PLR09
             metrics=metrics,
             policy_parent_id=policy_parent_id,
             target_island=target_island,
+            code=code,
         )
 
     try:
@@ -657,7 +560,6 @@ async def _evaluate_candidate(  # noqa: PLR0913  # lint-waiver: LW-020011 [PLR09
             modality=modality,
             domain_definition=domain_definition,
             is_cold_start=False,
-            space=space,
             runtime_notes=cand_notes,
             scope=scope,
         )
@@ -703,44 +605,20 @@ async def _evaluate_candidate(  # noqa: PLR0913  # lint-waiver: LW-020011 [PLR09
         fitness = _candidate_fitness(profile, benchmark)
         workspace = scope or ctx.workspaces.root
         commit = await workspace.snapshot(f"gen-{generation}-child-{child_idx}")
+        code = await _candidate_code(ctx, commit) if needs_code and commit else None
         return outcome(
             passed=True,
             summary=response.summary,
             feedback=verdict.feedback,
             commit=commit,
             fitness=fitness,
+            code=code,
         )
     finally:
         await _teardown_candidate_deployment(ctx, cand_deployment, keep=keep_deployments)
 
 
-class _LoopSearchEffects:
-    """Bind evolve search effects to the current run context and state store."""
-
-    def __init__(self, ctx: RunContext, state_store: EvolutionStateStore) -> None:
-        self.ctx = ctx
-        self.state_store = state_store
-
-    async def checkpoint(self, label: str) -> None:
-        await _persist_evolve_state(self.ctx, self.state_store, label=label)
-
-    def save_population(self, population: Population) -> None:
-        self.state_store.save_population(population)
-
-    async def retain_candidate(self, label: str, commit: str) -> None:
-        await self.ctx.workspaces.root.retain(label, commit)
-
-    async def candidate_code(self, commit: str) -> str:
-        return await _candidate_code(self.ctx, commit)
-
-    def log(self, message: str) -> None:
-        self.ctx.log(message)
-
-    def warn(self, message: str) -> None:
-        output_sink().framework_warning(message, source=FrameworkSource.LOOP)
-
-
-async def _evaluate_in_subcontext(  # noqa: PLR0913  # lint-waiver: LW-020012 [PLR0913]; these are independent per-candidate inputs with no shared owner object; grouping them into a parameter object is deferred.
+async def _evaluate_in_subcontext(  # noqa: PLR0913  # LW-020012 [PLR0913]; these are independent per-candidate inputs with no shared owner object; grouping them into a parameter object is deferred.
     ctx: RunContext,
     *,
     generation: int,
@@ -757,13 +635,14 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # lint-waiver: LW-020012 [P
     target_island: int | None,
     accuracy_timeout_seconds: int | None = None,
     benchmark_contract: BenchmarkContract = _NO_BENCHMARK_CONTRACT,
+    needs_code: bool = False,
 ) -> _CandidateOutcome:
     """Evaluate one candidate in a host-owned isolated workspace."""
-    inspiration_ids = [i.id for i in inspirations]
+    inspiration_ids = tuple(i.id for i in inspirations)
     label = f"g{generation}c{child_idx}"
     commit = parent.commit
     if commit is None:
-        output_sink().framework_warning(
+        ctx.warning(
             f"candidate {label} has no parent commit; skipping",
             source=FrameworkSource.LOOP,
         )
@@ -776,8 +655,8 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # lint-waiver: LW-020012 [P
         )
     try:
         scope = await ctx.workspaces.fork(commit)
-    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010257 [BLE001]; arbitrary provider setup failures are reported as a failed candidate.
-        output_sink().framework_warning(
+    except Exception as exc:  # noqa: BLE001  # LW-010257 [BLE001]; arbitrary provider setup failures are reported as a failed candidate.
+        ctx.warning(
             f"candidate {label} setup failed",
             detail=str(exc),
             source=FrameworkSource.LOOP,
@@ -813,14 +692,15 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # lint-waiver: LW-020012 [P
             accuracy_timeout_seconds=accuracy_timeout_seconds,
             benchmark_contract=benchmark_contract,
             scope=scope,
+            needs_code=needs_code,
         )
         if outcome.commit:
             # Subcontext teardown removes the linked worktree. Retain its
             # detached commit first so durable population state cannot name an
             # object that Git is then free to prune.
             await ctx.workspaces.root.retain(label, outcome.commit)
-    except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010258 [BLE001]; evaluator failures become candidate outcomes so the generation can continue.
-        output_sink().framework_warning(
+    except Exception as exc:  # noqa: BLE001  # LW-010258 [BLE001]; evaluator failures become candidate outcomes so the generation can continue.
+        ctx.warning(
             f"candidate {label} evaluation raised",
             detail=str(exc),
             source=FrameworkSource.LOOP,
@@ -837,8 +717,8 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # lint-waiver: LW-020012 [P
     finally:
         try:
             await scope.discard()
-        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010259 [BLE001]; teardown failure is reported without hiding the candidate result.
-            output_sink().framework_warning(
+        except Exception as exc:  # noqa: BLE001  # LW-010259 [BLE001]; teardown failure is reported without hiding the candidate result.
+            ctx.warning(
                 f"candidate {label} teardown failed",
                 detail=str(exc),
                 source=FrameworkSource.LOOP,
@@ -851,6 +731,14 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # lint-waiver: LW-020012 [P
 
 
 @dataclass(frozen=True, slots=True)
+class BootstrapAttemptResult:
+    """Recorded attempt whose checkpoint and report are still pending."""
+
+    seed: Individual | None
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
 class _BootstrapPassingEvidence:
     summary: str
     feedback: str
@@ -860,7 +748,12 @@ class _BootstrapPassingEvidence:
 
 @dataclass(slots=True)
 class _BootstrapAdapter:
-    """Bind one bootstrap attempt to the run's agents, gates, and state."""
+    """Bind one bootstrap attempt to the run's agents, gates, and search state.
+
+    ``state`` is reassigned (never mutated in place) after every admitted
+    attempt, pass or fail, mirroring the immutable ``EvolveState`` value the
+    caller checkpoints between attempts.
+    """
 
     ctx: RunContext
     agents: dict[str, AgentHandle]
@@ -869,9 +762,8 @@ class _BootstrapAdapter:
     modality: str | None
     domain_definition: DomainDefinition
     pass_criteria: str
-    population: Population
-    state_store: EvolutionStateStore
-    search_policy: SearchPolicy
+    search: PopulationSearch
+    state: EvolveState
     keep_deployments: bool
     accuracy_timeout_seconds: int | None
     benchmark_contract: BenchmarkContract
@@ -881,9 +773,12 @@ class _BootstrapAdapter:
         ctx = self.ctx
         ctx.log(f"\n--- bootstrap attempt {number}/{max_attempts} ---\n")
         wip_seed = await self._repair_seed()
+        revision_before_attempt = ctx.workspaces.root.revision
         cand_notes, cand_deployment = _candidate_runtime_notes(ctx, 0, number)
-        failed_lessons = _recent_failure_lessons(self.population)
-        num_failed_attempts = sum(1 for individual in self.population.all if not individual.passed)
+        failed_lessons = self.search.failure_lessons(self.state.population)
+        num_failed_attempts = sum(
+            1 for individual in self.state.population.individuals if not individual.passed
+        )
         base_desc = "reference" if wip_seed is None else f"repair-seed #{wip_seed.id}"
         ctx.log(
             f"bootstrap base={base_desc}"
@@ -902,7 +797,6 @@ class _BootstrapAdapter:
                 modality=self.modality,
                 domain_definition=self.domain_definition,
                 is_cold_start=True,
-                space=self.space,
                 failed_lessons=failed_lessons,
                 num_failed_attempts=num_failed_attempts,
                 repair_seed=wip_seed is not None,
@@ -933,7 +827,9 @@ class _BootstrapAdapter:
             else:
                 failure_feedback = verdict.feedback
             if failure_feedback is not None:
-                return await self._record_failure(number, mutator.summary, failure_feedback)
+                return await self._record_failure(
+                    number, mutator.summary, failure_feedback, revision_before_attempt
+                )
             return await self._record_seed(
                 number,
                 _BootstrapPassingEvidence(mutator.summary, verdict.feedback, benchmark, cand_notes),
@@ -943,12 +839,12 @@ class _BootstrapAdapter:
 
     async def _repair_seed(self) -> Individual | None:
         """Return the latest WIP seed if its tree can be checked out."""
-        wip_seed = _latest_wip_seed(self.population)
+        wip_seed = self.search.wip_seed(self.state.population)
         if wip_seed is not None and wip_seed.commit:
             try:
                 await self.ctx.workspaces.root.restore(wip_seed.commit, clean=True)
-            except Exception:  # noqa: BLE001  # lint-waiver: LW-020013 [BLE001]; any failure to restore the WIP seed falls back to rebuilding from the reference.
-                output_sink().framework_warning(
+            except Exception:  # noqa: BLE001  # LW-020013 [BLE001]; any failure to restore the WIP seed falls back to rebuilding from the reference.
+                self.ctx.warning(
                     f"could not check out WIP seed {wip_seed.id} "
                     f"(commit {wip_seed.commit[:8]}); starting from reference",
                     source=FrameworkSource.LOOP,
@@ -956,41 +852,50 @@ class _BootstrapAdapter:
                 wip_seed = None
         return wip_seed
 
-    async def _snapshot_wip(self, number: int) -> str | None:
-        """Retain a failed tree only when the snapshot created a new commit."""
+    def _wip_commit_since(self, revision_before_attempt: str | None) -> str | None:
+        """Return the tree's current commit if the attempt left a new one.
+
+        ``ctx.agents.turn`` now commits a role's pending edits as part of its
+        own pre/post-turn snapshot (the mutator's own turn, or the following
+        read-only judge turn's pre-turn snapshot, whichever runs first while
+        the tree is still dirty) -- so by the time an attempt's outcome is
+        known, any WIP tree is already committed under whatever turn label
+        captured it. This only has to recognize that a new commit exists,
+        not create one.
+        """
         try:
-            sha_before = self.ctx.workspaces.root.revision
-            sha_after = await self.ctx.workspaces.root.snapshot(f"wip-seed-bootstrap{number}")
-        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010260 [BLE001]; failed best-effort seed snapshot is reported while retaining the verified seed.
-            output_sink().framework_warning(
-                "wip-seed snapshot failed",
+            current = self.ctx.workspaces.root.revision
+        except Exception as exc:  # noqa: BLE001  # LW-010260 [BLE001]; a failed best-effort revision read is reported while retaining the verified seed.
+            self.ctx.warning(
+                "reading the workspace revision failed",
                 detail=str(exc),
                 source=FrameworkSource.LOOP,
             )
             return None
-        else:
-            return sha_after if sha_after and sha_after != sha_before else None
+        return current if current and current != revision_before_attempt else None
+
+    async def _admit(self, outcome: CandidateOutcome) -> Individual:
+        """Admit one attempt's outcome and persist the new search state."""
+        individual, new_population = self.search.admit(self.state.population, outcome)
+        self.state = self.state.model_copy(update={"population": new_population})
+        return individual
 
     async def _record_failure(
-        self, number: int, summary: str, feedback: str
+        self, number: int, summary: str, feedback: str, revision_before_attempt: str | None
     ) -> BootstrapAttemptResult:
-        """Record one failed attempt and checkpoint its optional WIP seed."""
-        failed = Individual(
-            id=self.population.next_id(),
-            generation=0,
-            parent_id=None,
-            inspiration_ids=[],
-            commit=await self._snapshot_wip(number),
-            perf_metric=None,
-            perf_unit=None,
-            passed=False,
-            summary=summary,
-            feedback=feedback,
+        """Record one failed attempt, retaining its optional WIP seed."""
+        commit = self._wip_commit_since(revision_before_attempt)
+        individual = await self._admit(
+            CandidateOutcome(
+                passed=False,
+                parent_id=None,
+                summary=summary,
+                feedback=feedback,
+                commit=commit,
+            )
         )
-        if failed.commit:
-            await self.ctx.workspaces.root.retain(f"wip-seed-{failed.id}", failed.commit)
-        self.population.add(failed)
-        self.state_store.save_population(self.population)
+        if commit:
+            await self.ctx.workspaces.root.retain(f"wip-seed-{individual.id}", commit)
         return BootstrapAttemptResult(
             seed=None,
             message=(
@@ -1002,7 +907,7 @@ class _BootstrapAdapter:
     async def _record_seed(
         self, number: int, evidence: _BootstrapPassingEvidence
     ) -> BootstrapAttemptResult:
-        """Profile and checkpoint the first passing generation-zero seed."""
+        """Profile and admit the first passing generation-zero seed."""
         ctx = self.ctx
         await ctx.environment.reselect_device()
         profile = await _run_profiler(
@@ -1018,36 +923,27 @@ class _BootstrapAdapter:
         )
         commit = await ctx.workspaces.root.snapshot("gen-0-seed")
         perf_metric, perf_unit, metrics = _candidate_fitness(profile, evidence.benchmark)
-        seed = Individual(
-            id=self.population.next_id(),
-            generation=0,
-            parent_id=None,
-            inspiration_ids=[],
-            commit=commit,
-            perf_metric=perf_metric,
-            perf_unit=perf_unit,
-            metrics=metrics,
-            passed=True,
-            summary=evidence.summary,
-            feedback=evidence.feedback,
+        code = await _candidate_code(ctx, commit) if self.search.needs_code and commit else None
+        individual = await self._admit(
+            CandidateOutcome(
+                passed=True,
+                parent_id=None,
+                summary=evidence.summary,
+                feedback=evidence.feedback,
+                commit=commit,
+                perf_metric=perf_metric,
+                perf_unit=perf_unit,
+                metrics=metrics,
+                code=code,
+            )
         )
         if commit:
-            await ctx.workspaces.root.retain(f"individual-{seed.id}", commit)
-        self.population.add(seed)
-        self.state_store.save_population(self.population)
-        if commit:
-            self.search_policy.record(
-                seed,
-                code=await _candidate_code(ctx, commit) if self.search_policy.requires_code else "",
-                policy_parent_id=None,
-                target_island=None,
-                space=self.space,
-            )
+            await ctx.workspaces.root.retain(f"individual-{individual.id}", commit)
         return BootstrapAttemptResult(
-            seed=seed,
+            seed=individual,
             message=(
-                f"[bootstrap {number}] PASSED — seed #{seed.id} "
-                f"perf={seed.perf_metric} {seed.perf_unit or ''} "
+                f"[bootstrap {number}] PASSED — seed #{individual.id} "
+                f"perf={individual.perf_metric} {individual.perf_unit or ''} "
                 f"(commit {commit[:8] if commit else 'n/a'})"
             ),
         )
@@ -1063,14 +959,18 @@ async def _bootstrap_seed(  # noqa: PLR0913  # lint-waiver: LW-020014 [PLR0913];
     domain_definition: DomainDefinition,
     pass_criteria: str,
     max_attempts: int,
-    population: Population,
     state_store: EvolutionStateStore,
-    search_policy: SearchPolicy,
+    search: PopulationSearch,
+    state: EvolveState,
     keep_deployments: bool = False,
     accuracy_timeout_seconds: int | None = None,
     benchmark_contract: BenchmarkContract = _NO_BENCHMARK_CONTRACT,
-) -> Individual | None:
-    """Retry and checkpoint generation-zero attempts until a seed passes."""
+) -> tuple[Individual | None, EvolveState]:
+    """Retry and checkpoint generation-zero attempts until a seed passes.
+
+    Returns the passing seed (or ``None`` once ``max_attempts`` is exhausted)
+    together with the final durable state, which the caller adopts as its own.
+    """
     ctx.switch_log("bootstrap")
     ctx.log(
         f"\n{'=' * 60}\n  Bootstrap — first passing seed "
@@ -1084,9 +984,8 @@ async def _bootstrap_seed(  # noqa: PLR0913  # lint-waiver: LW-020014 [PLR0913];
         modality=modality,
         domain_definition=domain_definition,
         pass_criteria=pass_criteria,
-        population=population,
-        state_store=state_store,
-        search_policy=search_policy,
+        search=search,
+        state=state,
         keep_deployments=keep_deployments,
         accuracy_timeout_seconds=accuracy_timeout_seconds,
         benchmark_contract=benchmark_contract,
@@ -1098,61 +997,9 @@ async def _bootstrap_seed(  # noqa: PLR0913  # lint-waiver: LW-020014 [PLR0913];
             if result.seed is not None
             else f"evolve: record failed bootstrap {number}"
         )
-        await _persist_evolve_state(ctx, state_store, label=label)
+        await _persist_evolve_state(ctx, state_store, bootstrap.state, label=label)
         ctx.log(result.message)
         if result.seed is not None:
-            return result.seed
+            return result.seed, bootstrap.state
     ctx.log(f"[bootstrap] exhausted {max_attempts} attempt(s) without a passing seed.")
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------------
-
-
-async def _initialize_search_policy(  # noqa: PLR0913  # lint-waiver: LW-020015 [PLR0913]; these are independent per-candidate inputs with no shared owner object; grouping them into a parameter object is deferred.
-    ctx: RunContext,
-    population: Population,
-    state_store: EvolutionStateStore,
-    *,
-    requested: SearchPolicyName | str | None,
-    seed: int | None,
-    config: OpenEvolveSearchConfig | None,
-    space: MetricSpace,
-) -> tuple[SearchPolicyName, SearchPolicy]:
-    state_dir = state_store.namespace.external_directory("openevolve")
-    if requested is None:
-        policy_name = (
-            SearchPolicyName.OPENEVOLVE
-            if config is not None or OpenEvolveSearchPolicy.has_state(state_dir)
-            else SearchPolicyName.VIBESYS
-        )
-    else:
-        policy_name = SearchPolicyName(requested)
-        if policy_name is SearchPolicyName.VIBESYS and config is not None:
-            message = "OpenEvolve configuration requires the OpenEvolve search policy"
-            raise ValueError(message)
-    if policy_name is not SearchPolicyName.OPENEVOLVE:
-        return policy_name, VibeSysSearchPolicy()
-
-    policy = OpenEvolveSearchPolicy(
-        state_dir=state_dir,
-        seed=seed,
-        config=config,
-        space=space,
-    )
-    for individual in population.passed:
-        if not individual.commit:
-            continue
-        policy.record(
-            individual,
-            code=await _candidate_code(ctx, individual.commit),
-            policy_parent_id=(
-                individual.policy_parent_id
-                or (f"vibesys-{individual.parent_id}" if individual.parent_id is not None else None)
-            ),
-            target_island=individual.policy_target_island,
-            space=space,
-        )
-    return policy_name, policy
+    return None, bootstrap.state
