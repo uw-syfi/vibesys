@@ -33,6 +33,7 @@ from vs_runtime.contracts import (
     validate_command,
     validate_member_id,
     validate_objectives,
+    validate_workspace_writable_paths,
 )
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
@@ -51,6 +52,14 @@ class _WorkspaceRetentionLabelError(ValueError):
         super().__init__("workspace retention label must be nonempty")
 
 
+@dataclass(frozen=True)
+class _FakeSessionConfig:
+    """Immutable creation options shared by a fake session."""
+
+    member_id: str | None
+    writable_paths: tuple[str, ...]
+
+
 def _echo_responder(
     _role: AgentRole,
     _history: tuple[str, ...],
@@ -67,14 +76,15 @@ class FakeAgentSession:
         self,
         role: AgentRole,
         workspace: Workspace,
-        member_id: str | None,
         binding: AgentBinding,
         responder: TurnResponder,
+        config: _FakeSessionConfig,
     ) -> None:
         """Bind one fresh session to immutable creation configuration."""
         self._role = role
         self._workspace = workspace
-        self._member_id = member_id
+        self._member_id = config.member_id
+        self._writable_paths = config.writable_paths
         self._binding = binding
         self._responder = responder
         self._history: list[str] = []
@@ -94,6 +104,11 @@ class FakeAgentSession:
     def member_id(self) -> str | None:
         """Return the durable policy identity for this instance."""
         return self._member_id
+
+    @property
+    def writable_paths(self) -> tuple[str, ...]:
+        """Return the immutable session-specific write grants."""
+        return self._writable_paths
 
     @property
     def binding(self) -> AgentBinding:
@@ -168,6 +183,7 @@ class FakeAgentSessions:
         *,
         workspace: Workspace,
         member_id: str | None = None,
+        writable_paths: tuple[str, ...] = (),
     ) -> AgentSession:
         """Validate the declared role and create an independent conversation."""
         if self._closed:
@@ -175,12 +191,16 @@ class FakeAgentSessions:
         if self._roles.get(role.id) != role:
             raise UnknownAgentRoleError(role.id)
         validate_member_id(member_id)
+        validated_paths = validate_workspace_writable_paths(
+            role.workspace_access,
+            writable_paths,
+        )
         session = FakeAgentSession(
             role,
             workspace,
-            member_id,
             self._bindings[role.id],
             self._responder,
+            _FakeSessionConfig(member_id, validated_paths),
         )
         self._sessions.append(session)
         return session

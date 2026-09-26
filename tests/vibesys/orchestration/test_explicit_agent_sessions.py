@@ -81,6 +81,9 @@ def _write_project(root: Path) -> None:
     root.mkdir(parents=True)
     (root / "OBJECTIVE.md").write_text("Improve the queue.\n")
     (root / "queue.py").write_text("VALUE = 1\n")
+    (root / "memory").mkdir()
+    (root / "memory" / "allowed.txt").write_text("before\n")
+    (root / "memory" / "seed.txt").write_text("seed\n")
     (root / "vibesys.input.toml").write_text(
         'version = 1\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
@@ -347,6 +350,68 @@ def test_read_only_session_restores_writes_and_early_close_is_idempotent(
 
     _run_with_clients(tmp_path, [client], body, declaration=(role,))
     assert client.closed
+
+
+def test_limited_session_preserves_granted_directory_and_reverts_other_writes(
+    tmp_path: Path,
+) -> None:
+    client = FakeAgentClient(session_reuse=True)
+
+    def write_workspace(invocation: FakeInvocation) -> str:
+        (invocation.workspace / "memory" / "notes.md").write_text("kept\n")
+        (invocation.workspace / "queue.py").write_text("VALUE = 2\n")
+        return "done"
+
+    client.enqueue_text("designer", write_workspace)
+    role = AgentRole(
+        id="designer",
+        system_prompt="Write only in memory/.",
+        workspace_access=WorkspaceAccess.LIMITED,
+    )
+
+    async def body(ctx: RunContext) -> None:
+        session = await ctx.agents.create_session(
+            role,
+            workspace=ctx.workspaces.root,
+            writable_paths=("memory",),
+        )
+        assert session.writable_paths == ("memory",)
+        attribute = "writable_paths"
+        with pytest.raises(AttributeError):
+            setattr(session, attribute, ("queue.py",))
+        assert await session.turn("write") == "done"
+        assert (ctx.workspaces.root.path / "memory" / "notes.md").read_text() == "kept\n"
+        assert (ctx.workspaces.root.path / "queue.py").read_text() == "VALUE = 1\n"
+
+    _run_with_clients(tmp_path, [client], body, declaration=(role,))
+
+
+def test_limited_file_grant_does_not_authorize_sibling_files(tmp_path: Path) -> None:
+    client = FakeAgentClient(session_reuse=True)
+
+    def write_workspace(invocation: FakeInvocation) -> str:
+        (invocation.workspace / "memory" / "allowed.txt").write_text("after\n")
+        (invocation.workspace / "memory" / "sibling.txt").write_text("revert\n")
+        return "done"
+
+    client.enqueue_text("profiler", write_workspace)
+    role = AgentRole(
+        id="profiler",
+        system_prompt="Write only the granted file.",
+        workspace_access=WorkspaceAccess.LIMITED,
+    )
+
+    async def body(ctx: RunContext) -> None:
+        session = await ctx.agents.create_session(
+            role,
+            workspace=ctx.workspaces.root,
+            writable_paths=("memory/allowed.txt",),
+        )
+        assert await session.turn("write") == "done"
+        assert (ctx.workspaces.root.path / "memory" / "allowed.txt").read_text() == "after\n"
+        assert not (ctx.workspaces.root.path / "memory" / "sibling.txt").exists()
+
+    _run_with_clients(tmp_path, [client], body, declaration=(role,))
 
 
 def test_run_cleanup_closes_sessions_in_reverse_creation_order(tmp_path: Path) -> None:

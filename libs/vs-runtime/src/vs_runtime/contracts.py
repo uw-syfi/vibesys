@@ -7,7 +7,11 @@ import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path  # Pydantic resolves WorkspaceRef at runtime.
+from pathlib import (
+    Path,
+    PurePosixPath,
+    PureWindowsPath,
+)  # Pydantic resolves WorkspaceRef at runtime.
 from typing import TYPE_CHECKING, Protocol, TypeVar, overload
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
@@ -16,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
+_CONTROL_CHARACTER_LIMIT = 32
 
 
 class RuntimeContractError(RuntimeError):
@@ -78,9 +83,15 @@ class StateModelError(RuntimeContractError):
 
 
 class WorkspaceAccess(StrEnum):
-    """Workspace mutation authority enforced for one role."""
+    """Workspace mutation authority enforced for one role.
+
+    ``LIMITED`` access requires session-specific writable paths. Paths that are
+    directories when the session is created grant their descendants; file and
+    nonexistent paths grant only the exact path.
+    """
 
     READ_ONLY = "read_only"
+    LIMITED = "limited"
     READ_WRITE = "read_write"
 
 
@@ -198,6 +209,11 @@ class AgentSession(Protocol):
         ...
 
     @property
+    def writable_paths(self) -> tuple[str, ...]:
+        """Return the fixed workspace-relative write grants for this session."""
+        ...
+
+    @property
     def binding(self) -> AgentBinding:
         """Return immutable harness and model attribution resolved by the runtime."""
         ...
@@ -233,8 +249,14 @@ class AgentSessions(Protocol):
         *,
         workspace: Workspace,
         member_id: str | None = None,
+        writable_paths: tuple[str, ...] = (),
     ) -> AgentSession:
-        """Create a conversation, durably resumed only when ``member_id`` is set."""
+        """Create a conversation with fixed write grants.
+
+        ``member_id`` enables durable provider-session resume. ``writable_paths``
+        is required only for ``LIMITED`` roles and is forbidden for the other
+        access modes.
+        """
         ...
 
     async def close(self) -> None:
@@ -320,6 +342,53 @@ class Skills(Protocol):
         from ``resolved`` and described in ``diagnostics``.
         """
         ...
+
+
+def validate_workspace_writable_paths(
+    access: WorkspaceAccess,
+    writable_paths: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Validate and freeze the session's bounded workspace write grants.
+
+    Read-only and read-write roles use their complete access mode and therefore
+    cannot also declare grants. Limited roles must name at least one canonical,
+    workspace-relative POSIX path. Grants are fixed for the session lifetime.
+    """
+    if not isinstance(writable_paths, tuple):
+        message = "writable_paths must be a tuple of workspace-relative paths"
+        raise TypeError(message)
+    if access is WorkspaceAccess.LIMITED:
+        if not writable_paths:
+            message = "limited workspace access requires writable_paths"
+            raise ValueError(message)
+    elif writable_paths:
+        message = f"{access.value} workspace access cannot declare writable_paths"
+        raise ValueError(message)
+
+    seen: set[str] = set()
+    for value in writable_paths:
+        if not isinstance(value, str) or not value:
+            message = "writable path entries must be nonempty workspace-relative paths"
+            raise ValueError(message)
+        posix_path = PurePosixPath(value)
+        windows_path = PureWindowsPath(value)
+        if (
+            posix_path.is_absolute()
+            or windows_path.is_absolute()
+            or windows_path.drive
+            or value in {".", ".."}
+            or "\\" in value
+            or posix_path.as_posix() != value
+            or any(part in {".", ".."} for part in posix_path.parts)
+            or any(ord(character) < _CONTROL_CHARACTER_LIMIT for character in value)
+        ):
+            message = f"writable path must be a canonical workspace-relative path: {value!r}"
+            raise ValueError(message)
+        if value in seen:
+            message = f"duplicate writable path: {value!r}"
+            raise ValueError(message)
+        seen.add(value)
+    return writable_paths
 
 
 class State(Protocol):

@@ -32,6 +32,7 @@ from vs_runtime.api import (
     WorkspaceAccess,
     WorkspaceRestoreError,
     WorkspaceSourceFact,
+    validate_workspace_writable_paths,
 )
 from vs_runtime.api.testing import FakeRunHost, FakeWorkspace
 
@@ -142,6 +143,60 @@ def test_fake_run_facts_have_a_policy_neutral_default() -> None:
     assert host.facts.objective_location == "OBJECTIVE.md"
     assert host.facts.reference_location == "."
     assert host.facts.profiler_id == "none"
+
+
+def test_limited_session_grants_are_validated_and_fixed() -> None:
+    async def scenario() -> None:
+        role = AgentRole(
+            id="writer",
+            system_prompt="Write only in the granted paths.",
+            workspace_access=WorkspaceAccess.LIMITED,
+        )
+        regular_role = _role()
+        host = FakeRunHost(_plugin(role, regular_role))
+        session = await host.agents.create_session(
+            role,
+            workspace=_workspace(),
+            writable_paths=("memory", "evidence/report.json"),
+        )
+
+        assert session.writable_paths == ("memory", "evidence/report.json")
+        writable_paths_attribute = "writable_paths"
+        with pytest.raises(AttributeError):
+            setattr(session, writable_paths_attribute, ("elsewhere",))
+
+        with pytest.raises(ValueError, match="requires writable_paths"):
+            await host.agents.create_session(role, workspace=_workspace())
+        with pytest.raises(ValueError, match="cannot declare writable_paths"):
+            await host.agents.create_session(
+                regular_role,
+                workspace=_workspace(),
+                writable_paths=("memory",),
+            )
+        await host.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("", id="empty"),
+        pytest.param(".", id="workspace-root"),
+        pytest.param("./notes", id="dot-component"),
+        pytest.param("../notes", id="parent-component"),
+        pytest.param("memory/../notes", id="nested-parent"),
+        pytest.param("/workspace/notes", id="absolute-posix"),
+        pytest.param("C:/notes", id="absolute-windows"),
+        pytest.param(r"memory\notes", id="windows-separator"),
+        pytest.param("memory//notes", id="duplicate-separator"),
+    ],
+)
+def test_writable_path_grants_reject_noncanonical_or_escaping_paths(
+    path: str,
+) -> None:
+    with pytest.raises(ValueError, match="writable path"):
+        validate_workspace_writable_paths(WorkspaceAccess.LIMITED, (path,))
 
 
 def test_same_session_continues_and_second_creation_is_fresh() -> None:

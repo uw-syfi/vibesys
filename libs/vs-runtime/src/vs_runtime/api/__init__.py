@@ -41,6 +41,7 @@ from vs_runtime.contracts import (
     WorkspaceSourceFact,
     validate_command,
     validate_member_id,
+    validate_workspace_writable_paths,
 )
 
 __all__ = [
@@ -84,4 +85,5 @@ __all__ = [
     "Workspaces",
     "validate_command",
     "validate_member_id",
+    "validate_workspace_writable_paths",
 ]

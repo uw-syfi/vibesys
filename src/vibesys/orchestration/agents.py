@@ -68,6 +68,7 @@ from vs_runtime.api import (
     Workspace,
     WorkspaceAccess,
     validate_member_id,
+    validate_workspace_writable_paths,
 )
 
 if TYPE_CHECKING:
@@ -89,14 +90,18 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 
-def _unauthorized_paths(changes: list[str], allowed: tuple[str, ...]) -> list[str]:
-    """Exclude the paths a read-only role may still update."""
+def _unauthorized_paths(
+    changes: list[str],
+    allowed: tuple[str, ...],
+    *,
+    directories: tuple[str, ...] = (),
+) -> list[str]:
+    """Return writes outside exact grants and descendants of directory grants."""
     return [
         path
         for path in changes
-        if not any(
-            path == item.rstrip("/") or path.startswith(f"{item.rstrip('/')}/") for item in allowed
-        )
+        if not any(path == item for item in allowed)
+        and not any(path == item or path.startswith(f"{item}/") for item in directories)
     ]
 
 
@@ -459,6 +464,8 @@ class _ExplicitAgentSession:
         role: AgentRole,
         workspace: WorkspaceHandle,
         member_id: str | None,
+        writable_paths: tuple[str, ...],
+        writable_directory_paths: tuple[str, ...],
         *,
         session_id: str,
     ) -> None:
@@ -467,6 +474,8 @@ class _ExplicitAgentSession:
         self._role = role
         self._workspace = workspace
         self._member_id = member_id
+        self._writable_paths = writable_paths
+        self._writable_directory_paths = writable_directory_paths
         self._binding = AgentBinding(
             backend=agent.backend_name,
             driver=agent.driver_name,
@@ -501,6 +510,11 @@ class _ExplicitAgentSession:
     def member_id(self) -> str | None:
         """Return the durable policy identity fixed at creation."""
         return self._member_id
+
+    @property
+    def writable_paths(self) -> tuple[str, ...]:
+        """Return the fixed workspace-relative write grants for this session."""
+        return self._writable_paths
 
     @property
     def binding(self) -> AgentBinding:
@@ -559,20 +573,43 @@ class _ExplicitAgentSession:
             except DriverAgentTurnTimeoutError as error:
                 raise AgentTurnTimeoutError(error.timeout_seconds) from error
         finally:
-            if self._role.workspace_access is WorkspaceAccess.READ_ONLY:
+            if self._role.workspace_access in {
+                WorkspaceAccess.READ_ONLY,
+                WorkspaceAccess.LIMITED,
+            }:
+                allowed_paths = (
+                    self._writable_paths
+                    if self._role.workspace_access is WorkspaceAccess.LIMITED
+                    else ()
+                )
+                allowed_directories = (
+                    self._writable_directory_paths
+                    if self._role.workspace_access is WorkspaceAccess.LIMITED
+                    else ()
+                )
                 changes = await self._workspace.pending_changes()
-                if changes:
+                unauthorized = _unauthorized_paths(
+                    changes,
+                    allowed_paths,
+                    directories=allowed_directories,
+                )
+                if unauthorized:
                     await self._workspace.restore(
                         revision,
                         clean=True,
+                        preserve_paths=allowed_paths,
                         preserve_memory=False,
                     )
-                    remaining = await self._workspace.pending_changes()
+                    remaining = _unauthorized_paths(
+                        await self._workspace.pending_changes(),
+                        allowed_paths,
+                        directories=allowed_directories,
+                    )
                     if remaining:
                         raise RoleIsolationError(remaining, role=self._role.id)
                     self._host.log(
-                        f"[role-isolation] reverted {len(changes)} workspace change(s) "
-                        f"attempted by {self._role.id}: {', '.join(changes[:8])}"
+                        f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
+                        f"attempted by {self._role.id}: {', '.join(unauthorized[:8])}"
                     )
 
         if (
@@ -613,11 +650,16 @@ class _Agents:
         *,
         workspace: Workspace,
         member_id: str | None = None,
+        writable_paths: tuple[str, ...] = (),
     ) -> _ExplicitAgentSession:
         """Create a role session, durable only when policy supplies a member ID."""
         validate_member_id(member_id)
         if self._roles.get(role.id) != role:
             raise UnknownAgentRoleError(role.id)
+        validated_paths = validate_workspace_writable_paths(
+            role.workspace_access,
+            writable_paths,
+        )
         unsupported_tools = sorted(tool.id for tool in role.tools if tool.id != "shell")
         if unsupported_tools:
             message = f"unsupported agent tools: {', '.join(unsupported_tools)}"
@@ -658,6 +700,8 @@ class _Agents:
             role,
             workspace,
             member_id,
+            validated_paths,
+            tuple(path for path in validated_paths if (workspace.path / path).is_dir()),
             session_id=session_id,
         )
         self._sessions.append(session)
