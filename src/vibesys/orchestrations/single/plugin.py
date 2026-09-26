@@ -1,5 +1,10 @@
 """Explicit declarations of the single-agent orchestration presets."""
 
+from typing import cast
+
+from pydantic import BaseModel
+
+from vibesys.orchestrations.hypothesis_readmodel import project_hypothesis_state
 from vibesys.orchestrations.single.agents import AGENTS
 from vibesys.orchestrations.single.models import (
     ProfileGuidedSingleOptions,
@@ -7,7 +12,13 @@ from vibesys.orchestrations.single.models import (
     SingleState,
 )
 from vibesys.orchestrations.single.orchestration import orchestrate, orchestrate_profile_guided
-from vs_runtime.api import OrchestrationPlugin
+from vs_runtime.api import OrchestrationPlugin, PluginProjection
+
+
+def _project(raw_state: BaseModel) -> PluginProjection:
+    """Project the single-agent aggregate into its public policy view."""
+    return project_hypothesis_state(cast("SingleState", raw_state).search)
+
 
 PLUGIN = OrchestrationPlugin(
     id="single-agent",
@@ -15,6 +26,7 @@ PLUGIN = OrchestrationPlugin(
     options=SingleOptions,
     state=SingleState,
     orchestrate=orchestrate,
+    project=_project,
 )
 
 PROFILE_GUIDED_PLUGIN = OrchestrationPlugin(
@@ -23,6 +35,7 @@ PROFILE_GUIDED_PLUGIN = OrchestrationPlugin(
     options=ProfileGuidedSingleOptions,
     state=SingleState,
     orchestrate=orchestrate_profile_guided,
+    project=_project,
 )
 
 __all__ = ["PLUGIN", "PROFILE_GUIDED_PLUGIN"]

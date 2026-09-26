@@ -1,9 +1,20 @@
-"""Explicit declaration of the plain multi-agent orchestration."""
+"""Explicit declarations of the multi-agent orchestration presets."""
 
+from typing import cast
+
+from pydantic import BaseModel
+
+from vibesys.orchestrations.hypothesis_readmodel import project_hypothesis_state
 from vibesys.orchestrations.multi.agents import AGENTS
 from vibesys.orchestrations.multi.models import MultiOptions, MultiState, ProfileGuidedMultiOptions
 from vibesys.orchestrations.multi.orchestration import orchestrate, orchestrate_profile_guided
-from vs_runtime.api import OrchestrationPlugin
+from vs_runtime.api import OrchestrationPlugin, PluginProjection
+
+
+def _project(raw_state: BaseModel) -> PluginProjection:
+    """Project the multi-agent aggregate into its public policy view."""
+    return project_hypothesis_state(cast("MultiState", raw_state).search)
+
 
 PLUGIN = OrchestrationPlugin(
     id="multi-agent",
@@ -11,6 +22,7 @@ PLUGIN = OrchestrationPlugin(
     options=MultiOptions,
     state=MultiState,
     orchestrate=orchestrate,
+    project=_project,
 )
 
 PROFILE_GUIDED_PLUGIN = OrchestrationPlugin(
@@ -19,6 +31,7 @@ PROFILE_GUIDED_PLUGIN = OrchestrationPlugin(
     options=ProfileGuidedMultiOptions,
     state=MultiState,
     orchestrate=orchestrate_profile_guided,
+    project=_project,
 )
 
 __all__ = ["PLUGIN", "PROFILE_GUIDED_PLUGIN"]

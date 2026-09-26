@@ -23,6 +23,7 @@ from vibesys.schemas import (
 )
 from vibesys.search.hypothesis import HypothesisSearch
 from vs_loop_state.api import HypothesisResolution
+from vs_runtime.api import PluginProjection, ProjectedRound
 
 if TYPE_CHECKING:
     from vibesys.search.hypothesis.state import Hypothesis, HypothesisState
@@ -171,7 +172,41 @@ def project_run_view(
     in-progress round, a server-journal round label) is journal-derived and
     out of scope for a core-state projection.
     """
-    projection = AgentRunProjection(
+    projection = _agent_run_projection(state, experiment_revision=experiment_revision)
+    return RunView(
+        run_id=run_id,
+        loop=loop,
+        status=status,
+        projection=projection.model_dump(mode="json"),
+        rounds=tuple(_round_summary(record) for record in projection.rounds),
+        experiment_revision=experiment_revision,
+    )
+
+
+def project_hypothesis_state(state: HypothesisState) -> PluginProjection:
+    """Project one hypothesis-search aggregate without run or host knowledge.
+
+    The plugin owns this pure transformation. VibeSys supplies run identity and
+    lifecycle status when it wraps the result for application consumers.
+    """
+    projection = _agent_run_projection(
+        state,
+        experiment_revision=state.experiment_revision,
+    )
+    return PluginProjection(
+        payload=projection.model_dump(mode="json"),
+        rounds=tuple(_projected_round(record) for record in projection.rounds),
+        experiment_revision=state.experiment_revision,
+    )
+
+
+def _agent_run_projection(
+    state: HypothesisState,
+    *,
+    experiment_revision: int,
+) -> AgentRunProjection:
+    """Build the shared agent payload used by plugin and legacy envelopes."""
+    return AgentRunProjection(
         current_round=len(state.rounds),
         active_hypothesis_id=state.active_hypothesis_id,
         experiment_revision=experiment_revision,
@@ -180,14 +215,6 @@ def project_run_view(
             for hypothesis in state.hypotheses
         ],
         rounds=[_round_view(record) for record in state.rounds],
-    )
-    return RunView(
-        run_id=run_id,
-        loop=loop,
-        status=status,
-        projection=projection.model_dump(mode="json"),
-        rounds=tuple(_round_summary(record) for record in projection.rounds),
-        experiment_revision=experiment_revision,
     )
 
 
@@ -298,6 +325,19 @@ def _round_summary(view: RoundView) -> RoundSummary:
     `RoundFinishedData`: only a "fail" verdict is a failed round.
     """
     return RoundSummary(
+        number=view.round_number,
+        status="failed" if view.judge_verdict == "fail" else "completed",
+        attempts=view.attempts,
+        judge_verdict=view.judge_verdict,
+        perf_metric=view.perf_metric,
+        perf_unit=view.perf_unit,
+        profile_skipped=view.profile_skipped,
+    )
+
+
+def _projected_round(view: RoundView) -> ProjectedRound:
+    """Reshape one policy round into the runtime-neutral projection contract."""
+    return ProjectedRound(
         number=view.round_number,
         status="failed" if view.judge_verdict == "fail" else "completed",
         attempts=view.attempts,
