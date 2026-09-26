@@ -29,6 +29,7 @@ INTERNAL_DISTRIBUTIONS = {
     "vs-loop-state",
     "vs-project",
     "vs-prompts",
+    "vs-runtime",
     "vs-sandbox",
 }
 INTERNAL_IMPORT_PACKAGES = {
@@ -39,6 +40,7 @@ INTERNAL_IMPORT_PACKAGES = {
     "vs_loop_state",
     "vs_project",
     "vs_prompts",
+    "vs_runtime",
     "vs_sandbox",
 }
 
@@ -173,6 +175,7 @@ def test_root_distribution_discovers_internal_packages_from_their_source_roots()
     assert package_dirs["server"] == "src/server"
     assert package_dirs["vs_feature_flags"] == ("libs/vs-feature-flags/src/vs_feature_flags")
     assert package_dirs["vs_prompts"] == "libs/vs-prompts/src/vs_prompts"
+    assert package_dirs["vs_runtime"] == "libs/vs-runtime/src/vs_runtime"
     assert package_dirs["vs_sandbox"] == "libs/vs-sandbox/src/vs_sandbox"
 
 

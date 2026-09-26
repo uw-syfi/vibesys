@@ -15,6 +15,7 @@ PACKAGE_SOURCE_ROOTS = (
     Path("libs/vs-loop-state/src"),
     Path("libs/vs-project/src"),
     Path("libs/vs-prompts/src"),
+    Path("libs/vs-runtime/src"),
     Path("libs/vs-sandbox/src"),
     Path("libs/vs-agent/src"),
 )

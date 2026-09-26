@@ -35,7 +35,8 @@
 # `vs_project` -> `vs_loop_state` and `vs_agent` -> {`vs_sandbox`,
 # `vs_loop_state`, `vs_project`} (vs_agent constructs agents over sandboxes,
 # reads loop-state schemas, and persists agent sessions to project state).
-# Reject any other lib-to-lib edge.
+# `vs_runtime` starts as a standalone contract package with no internal
+# dependencies. Reject any other lib-to-lib edge.
 
 source_roots = [
     "src",
@@ -46,6 +47,7 @@ source_roots = [
     "libs/vs-loop-state/src",
     "libs/vs-project/src",
     "libs/vs-prompts/src",
+    "libs/vs-runtime/src",
     "libs/vs-sandbox/src",
     "libs/vs-agent/src",
 ]
@@ -345,6 +347,11 @@ layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
+path = "vs_runtime"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
 path = "vs_agent"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_sandbox", "vs_loop_state", "vs_project"]
@@ -418,6 +425,10 @@ from = ["vs_project"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_prompts"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_runtime"]
 
 [[interfaces]]
 expose = ["api", "api\\..*"]

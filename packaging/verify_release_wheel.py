@@ -46,6 +46,7 @@ FRAMEWORK_PACKAGES = (
     "vs_loop_state",
     "vs_project",
     "vs_prompts",
+    "vs_runtime",
     "vs_sandbox",
 )
 _INTERNAL_DISTRIBUTIONS = frozenset(
@@ -58,6 +59,7 @@ _INTERNAL_DISTRIBUTIONS = frozenset(
         "vs-loop-state",
         "vs-project",
         "vs-prompts",
+        "vs-runtime",
         "vs-sandbox",
     }
 )
@@ -76,6 +78,7 @@ _PACKAGE_SOURCE_ROOTS = {
     Path("libs/vs-loop-state/src/vs_loop_state"): PurePosixPath("vs_loop_state"),
     Path("libs/vs-project/src/vs_project"): PurePosixPath("vs_project"),
     Path("libs/vs-prompts/src/vs_prompts"): PurePosixPath("vs_prompts"),
+    Path("libs/vs-runtime/src/vs_runtime"): PurePosixPath("vs_runtime"),
     Path("libs/vs-sandbox/src/vs_sandbox"): PurePosixPath("vs_sandbox"),
     Path("resources/evaluators"): PurePosixPath("vibesys/_resources/evaluators"),
     Path("resources/profilers"): PurePosixPath("vibesys/_resources/profilers"),

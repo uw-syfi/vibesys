@@ -46,6 +46,7 @@ FRAMEWORK_PACKAGES = (
     "vs_loop_state",
     "vs_project",
     "vs_prompts",
+    "vs_runtime",
     "vs_sandbox",
 )
 REQUIRED_SYSTEM_TOOLS = ("git",)
