@@ -8,9 +8,11 @@ command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 timeout_seconds = 600
 
 [benchmark]
-command = ["uv", "run", "python", "benchmark/benchmark.py"]
+entrypoint = "request-factory-adapter"
+args = ["benchmark/benchmark.py"]
 timeout_seconds = 1800
+result_protocol = 2
 
-[benchmark.result]
-json_argument = "--output-json"
-metric = "aggregate_throughput"
+[evaluator]
+name = "vibesys-evaluator-request-factory"
+version = "0.1.0"
