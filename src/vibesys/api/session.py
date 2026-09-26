@@ -17,7 +17,7 @@ from vibesys.domains.environment import EnvironmentBindMount
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.orchestration._common import resolved_run_id
 from vibesys.orchestration.contracts import project_run
-from vibesys.orchestration.runner import run_orchestration
+from vibesys.orchestration.runner import run_orchestration, run_plugin
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.skills import platform_skill_selection
 from vs_agent.api import MCPServerSpec, expose_as_tools
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from vibesys.api.contracts import AgentEnvironment, EventSink, RunView
     from vibesys.config import Config
-    from vibesys.orchestration.contracts import OrchestrationRegistry
+    from vibesys.orchestration.contracts import OrchestrationRegistry, Orchestrator
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import RunResourceHandoff
     from vibesys.sandbox.run_environment import RunEnvironmentSession
@@ -174,7 +174,20 @@ class _LocalRunSession:
         self._registry = registry
         self._registration = self._registry.resolve(request.orchestration.id)
         # Constructor validation precedes integration and run resource setup.
-        self._policy = self._registration.orchestrator(request.orchestration)
+        plugin = self._registration.plugin
+        if plugin is None:
+            orchestrator = cast("type[Orchestrator]", self._registration.orchestrator)
+            self._policy = orchestrator(request.orchestration)
+            self._plugin_options: BaseModel | None = None
+        else:
+            if request.orchestration.config_version != plugin.config_version:
+                message = (
+                    f"orchestration {plugin.id!r} requires config version "
+                    f"{plugin.config_version}, got {request.orchestration.config_version}"
+                )
+                raise ValueError(message)
+            self._policy = None
+            self._plugin_options = plugin.options.model_validate(request.orchestration.options)
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -298,7 +311,9 @@ class _LocalRunSession:
 
     async def _run(self) -> RunResult:
         request = self._request
-        hints = self._policy.setup.start_hints
+        policy = self._policy
+        plugin = self._registration.plugin
+        hints = policy.setup.start_hints if policy is not None else None
         try:
             self._integration.events.emit(
                 CoreEventType.RUN_STARTED,
@@ -307,16 +322,34 @@ class _LocalRunSession:
                     outer_loop=request.orchestration_id,
                     input=str(request.input_bundle.root),
                     max_rounds=hints.max_rounds if hints is not None else None,
-                    expected_roles=hints.expected_roles if hints is not None else (),
+                    expected_roles=(
+                        hints.expected_roles
+                        if hints is not None
+                        else tuple(role.id for role in plugin.agents)
+                        if plugin is not None
+                        else ()
+                    ),
                 ),
             )
-            succeeded = await run_orchestration(
-                request,
-                self._integration,
-                self._policy,
-                open_agent_environment=self.open_agent_environment,
-                projector=self._registration.projector,
-            )
+            if plugin is not None:
+                options = cast("BaseModel", self._plugin_options)
+                outcome = await run_plugin(
+                    request,
+                    self._integration,
+                    plugin,
+                    options,
+                    open_agent_environment=self.open_agent_environment,
+                    projector=self._registration.projector,
+                )
+                succeeded = outcome.value == "succeeded"
+            else:
+                succeeded = await run_orchestration(
+                    request,
+                    self._integration,
+                    cast("Orchestrator", policy),
+                    open_agent_environment=self.open_agent_environment,
+                    projector=self._registration.projector,
+                )
         except BaseException as exc:
             self._status = RunStatus.FAILED
             self._integration.events.emit(

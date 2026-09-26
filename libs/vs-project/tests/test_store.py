@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Json, ValidationError
 from tests.support.run_execution import run_execution_record
 
 from vs_project.api import (
@@ -39,6 +39,10 @@ class _Cursor(BaseModel):
 
     round: int
     phase: str
+
+
+class _JsonState(BaseModel):
+    value: Json[Any]
 
 
 def _descriptor() -> OrchestrationDescriptor:
@@ -940,6 +944,17 @@ def test_state_namespace_round_trips_strict_models_atomically(tmp_path: Path) ->
         "round": 3,
     }
     assert not list(raw_path.parent.glob("*.tmp"))
+
+
+def test_state_namespace_preserves_pydantic_round_trip_values(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    run = _run(store)
+    namespace = store.state.portable_namespace(run.run_id, "json-value")
+    state = _JsonState(value='{"nested":[1,2]}')
+
+    namespace.save("state.json", state)
+
+    assert namespace.load("state.json", _JsonState) == state
 
 
 def test_state_namespace_prepares_and_applies_exact_typed_transition(tmp_path: Path) -> None:

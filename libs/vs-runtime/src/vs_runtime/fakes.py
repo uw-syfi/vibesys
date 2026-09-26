@@ -19,6 +19,7 @@ from vs_runtime.contracts import (
     OrchestrationPlugin,
     RuntimeContractError,
     SessionClosedError,
+    StateModelError,
     UnknownAgentRoleError,
     Workspace,
     WorkspaceRef,
@@ -172,6 +173,71 @@ class FakeWorkspaces:
 
 
 @dataclass(frozen=True, slots=True)
+class FakeStateCommit:
+    """One validated state replacement recorded by :class:`FakeState`."""
+
+    value: BaseModel
+    workspace: Workspace | None
+    label: str | None
+
+
+class FakeState:
+    """Faithful in-memory plugin-state durability with detached values."""
+
+    def __init__(self, model: type[BaseModel] | None, root: Workspace) -> None:
+        """Bind the exact plugin declaration and its only live workspace."""
+        self._model = model
+        self._root = root
+        self._value: BaseModel | None = None
+        self._commits: list[FakeStateCommit] = []
+
+    @property
+    def commits(self) -> tuple[FakeStateCommit, ...]:
+        """Return detached commit records in durability order."""
+        return tuple(
+            FakeStateCommit(
+                type(commit.value).model_validate_json(
+                    commit.value.model_dump_json(round_trip=True)
+                ),
+                commit.workspace,
+                commit.label,
+            )
+            for commit in self._commits
+        )
+
+    async def load(self, model: type[ResponseT]) -> ResponseT | None:
+        """Return a detached value after validating the exact declared model."""
+        self._require_model(model)
+        if self._value is None:
+            return None
+        return model.model_validate_json(self._value.model_dump_json(round_trip=True))
+
+    async def commit(
+        self,
+        value: BaseModel,
+        *,
+        workspace: Workspace | None = None,
+        label: str | None = None,
+    ) -> None:
+        """Record one deep-validated replacement and optional root association."""
+        self._require_model(type(value))
+        if workspace is not None and workspace is not self._root:
+            message = "state can commit only the live root workspace for this run"
+            raise RuntimeContractError(message)
+        model = self._model
+        if model is None:
+            raise StateModelError(None, type(value))
+        snapshot = model.model_validate_json(value.model_dump_json(round_trip=True))
+        self._value = snapshot
+        recorded = model.model_validate_json(snapshot.model_dump_json(round_trip=True))
+        self._commits.append(FakeStateCommit(recorded, workspace, label))
+
+    def _require_model(self, model: type[BaseModel]) -> None:
+        if model is not self._model:
+            raise StateModelError(self._model, model)
+
+
+@dataclass(frozen=True, slots=True)
 class FakeAccuracyCall:
     """One recorded accuracy evaluation request."""
 
@@ -270,6 +336,7 @@ class FakeRunHost:
         self._workspaces = FakeWorkspaces(WorkspaceRef(path=project_root))
         self._agents = FakeAgentSessions(plugin.agents, responder=responder)
         self._evaluation = FakeEvaluation(run_id=run_id)
+        self._state = FakeState(plugin.state, self._workspaces.root)
         self._logs: list[str] = []
         self._closed = False
 
@@ -292,6 +359,11 @@ class FakeRunHost:
     def evaluation(self) -> FakeEvaluation:
         """Return the scriptable trusted evaluation capability."""
         return self._evaluation
+
+    @property
+    def state(self) -> FakeState:
+        """Return plugin-bound in-memory state durability."""
+        return self._state
 
     @property
     def logs(self) -> tuple[str, ...]:

@@ -10,7 +10,15 @@ Split from ``runtime.py`` by capability; see that module's docstring.
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, NotRequired, Protocol, TypedDict, TypeVar, Unpack
+from typing import (
+    TYPE_CHECKING,
+    NotRequired,
+    Protocol,
+    TypedDict,
+    TypeVar,
+    Unpack,
+    overload,
+)
 
 from pydantic import BaseModel
 
@@ -21,6 +29,7 @@ from vibesys.events import (
     RoundFinishedData,
 )
 from vibesys.orchestration import progress_log
+from vs_runtime.api import RuntimeContractError, StateModelError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -30,6 +39,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration._host import HostResources
     from vibesys.orchestration.view import RoundSummary, RunView
     from vs_project.api import StateNamespace, StateSlot
+    from vs_runtime.api import Workspace as RuntimeWorkspace
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -38,6 +48,13 @@ class _CheckpointOptions(TypedDict):
     publish: NotRequired[BaseModel | None]
     candidate: NotRequired[bool]
     label: NotRequired[str | None]
+
+
+class _LegacyCommitOptions(TypedDict):
+    sequence: NotRequired[int]
+    writes: NotRequired[Mapping[str, BaseModel]]
+    publish: NotRequired[BaseModel | None]
+    candidate: NotRequired[bool | None]
 
 
 class _CommittedStateProjector(Protocol):
@@ -89,8 +106,17 @@ class _TypedRunStateSlot[T: BaseModel]:
 class _RunState:
     """Policy-bound portable state and machine-local staging paths."""
 
-    def __init__(self, host: HostResources) -> None:
+    def __init__(
+        self,
+        host: HostResources,
+        state_model: type[BaseModel] | None = None,
+        *,
+        plugin_bound: bool = False,
+    ) -> None:
         self._host = host
+        self._state_model = state_model
+        self._plugin_bound = plugin_bound
+        self._next_transaction_sequence = 1
         # Cache of the last published `RunView`, used by `commit` to derive
         # round/experiment events from a before/after diff without re-reading
         # the run's durable state on every call. `_last_view_loaded` is False
@@ -147,6 +173,8 @@ class _RunState:
 
     async def load(self, model: type[T]) -> T | None:
         """Load the validated state after interrupted checkpoint recovery."""
+        if self._plugin_bound and model is not self._state_model:
+            raise StateModelError(self._state_model, model)
         return await self.slot("state.json", model).load()
 
     async def checkpoint(
@@ -168,7 +196,92 @@ class _RunState:
             )
             return revision
 
+    @overload
     async def commit(
+        self,
+        value: BaseModel,
+        *,
+        workspace: RuntimeWorkspace | None = None,
+        label: str | None = None,
+    ) -> None: ...
+
+    @overload
+    async def commit(
+        self,
+        *,
+        sequence: int,
+        writes: Mapping[str, BaseModel],
+        publish: BaseModel | None = None,
+        candidate: bool | None = None,
+        label: str | None = None,
+    ) -> str: ...
+
+    async def commit(
+        self,
+        value: BaseModel | None = None,
+        *,
+        workspace: RuntimeWorkspace | None = None,
+        label: str | None = None,
+        **legacy: Unpack[_LegacyCommitOptions],
+    ) -> str | None:
+        """Use the plugin-bound API or temporarily dispatch a legacy state write."""
+        if value is not None:
+            if legacy:
+                message = "plugin state commit cannot use legacy checkpoint arguments"
+                raise TypeError(message)
+            await self._commit_public(value, workspace=workspace, label=label)
+            return None
+        sequence = legacy.get("sequence")
+        writes = legacy.get("writes")
+        if sequence is None or writes is None:
+            message = "state commit requires a value"
+            raise TypeError(message)
+        if workspace is not None:
+            message = "legacy state commit cannot take a workspace"
+            raise TypeError(message)
+        candidate = legacy.get("candidate")
+        if candidate is None:
+            candidate = True
+        return await self._commit_legacy(
+            sequence=sequence,
+            writes=writes,
+            publish=legacy.get("publish"),
+            candidate=candidate,
+            label=label,
+        )
+
+    async def _commit_public(
+        self,
+        value: BaseModel,
+        *,
+        workspace: RuntimeWorkspace | None = None,
+        label: str | None = None,
+    ) -> None:
+        """Persist a deep-validated plugin state value without projection effects."""
+        model = self._state_model
+        if model is None or type(value) is not model:
+            raise StateModelError(model, type(value))
+        if workspace is not None and workspace is not self._host.workspaces.root:
+            message = "state can commit only the live root workspace for this run"
+            raise RuntimeContractError(message)
+        snapshot = model.model_validate_json(value.model_dump_json(round_trip=True))
+        namespace = self._host._setup.state_namespace
+        if namespace is None:
+            message = "plugin did not declare a durable state namespace"
+            raise TypeError(message)
+        async with self._host._parent_mutation_lock:
+            sequence = self._next_transaction_sequence
+            self._next_transaction_sequence += 1
+            await self._host._run_blocking(
+                self._persist,
+                sequence,
+                {"state.json": snapshot},
+                candidate=workspace is not None,
+                label=label,
+            )
+            self._host._resources.publish_committed_state(namespace, snapshot)
+
+    async def _commit_legacy(
         self,
         *,
         sequence: int,
@@ -253,23 +366,41 @@ class _RunState:
         label: str | None,
     ) -> tuple[str, BaseModel | None]:
         context = self._host._resources
-        namespace = self._host._setup.state_namespace
-        if namespace is None:
-            message = "policy did not declare a durable state slot"
-            raise TypeError(message)
+        revision = self._persist(
+            sequence,
+            writes,
+            candidate=candidate,
+            label=label,
+        )
+        committed = publish or writes.get("state.json")
+        if committed is not None:
+            namespace = self._host._setup.state_namespace
+            if namespace is None:
+                message = "policy did not declare a durable state slot"
+                raise TypeError(message)
+            context.publish_committed_state(namespace, committed)
+        return revision, committed
+
+    def _persist(
+        self,
+        sequence: int,
+        writes: Mapping[str, BaseModel],
+        *,
+        candidate: bool,
+        label: str | None,
+    ) -> str:
+        """Commit exact typed bytes through the existing recoverable transaction."""
+        context = self._host._resources
         coordinator = context._round_transaction_coordinator
         if coordinator is None:
             message = "policy did not declare checkpoint slots"
             raise TypeError(message)
         coordinator.begin(sequence, writes=writes, candidate=candidate, label=label).complete()
-        committed = publish or writes.get("state.json")
-        if committed is not None:
-            context.publish_committed_state(namespace, committed)
         revision = context.git.current_sha()
         if revision is None:
             message = "checkpoint completed without a Git revision"
             raise RuntimeError(message)
-        return revision, committed
+        return revision
 
 
 def _round_entries(view: RunView | None) -> dict[int, RoundSummary]:

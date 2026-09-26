@@ -9,6 +9,8 @@ from vibesys.orchestration.runtime import RunContext
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from pydantic import BaseModel
+
     from vibesys.backends.base import ComputeBackendImpl
     from vibesys.orchestration.contracts import OrchestrationProjector, Orchestrator
     from vibesys.orchestration.environment import AgentEnvironment
@@ -16,6 +18,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.request import RunRequest
     from vibesys.run.integration import LocalRunIntegration
     from vs_agent.api import AgentClientProtocol
+    from vs_runtime.api import OrchestrationPlugin, RunStatus
 
 
 async def run_orchestration(  # noqa: PLR0913  # LW-040002 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
@@ -56,3 +59,29 @@ async def run_orchestration(  # noqa: PLR0913  # LW-040002 [PLR0913]; the parame
         gate_executor=gate_executor,
     ) as ctx:
         return await orchestrator.run(ctx)
+
+
+async def run_plugin(  # noqa: PLR0913  # LW-040002 [PLR0913]; injected runtime collaborators retain independent ownership.
+    request: RunRequest,
+    integration: LocalRunIntegration,
+    plugin: OrchestrationPlugin,
+    options: BaseModel,
+    *,
+    open_agent_environment: Callable[..., AgentEnvironment] | None = None,
+    projector: OrchestrationProjector | None = None,
+    agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
+    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    gate_executor: GateExecutor | None = None,
+) -> RunStatus:
+    """Open the runtime adapter and invoke one validated plugin."""
+    async with RunContext.open(
+        request,
+        integration,
+        open_agent_environment=open_agent_environment,
+        projector=projector,
+        agent_client_factory=agent_client_factory,
+        backend_factory=backend_factory,
+        gate_executor=gate_executor,
+        plugin=plugin,
+    ) as ctx:
+        return await plugin.orchestrate(ctx, options)

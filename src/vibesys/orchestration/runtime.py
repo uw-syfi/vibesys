@@ -29,10 +29,12 @@ import asyncio
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, asynccontextmanager
+from dataclasses import replace
 from functools import partial
 from typing import TYPE_CHECKING
 
 from vibesys.context import (
+    RunSetup,
     borrow_run_agent_environment,
     open_run_resources,
     open_scoped_agent_environment,
@@ -68,7 +70,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
     from vibesys.backends.base import ComputeBackendImpl
-    from vibesys.context import RunSetup, _RunResources
+    from vibesys.context import _RunResources
     from vibesys.orchestration.environment import AgentEnvironment
     from vibesys.orchestration.request import RunRequest
     from vibesys.orchestration.state import _CommittedStateProjector
@@ -76,7 +78,7 @@ if TYPE_CHECKING:
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.runtime import AgentDefinition, WorkspaceScope
     from vs_agent.api import AgentClientProtocol
-    from vs_runtime.api import AgentRole
+    from vs_runtime.api import AgentRole, OrchestrationPlugin
 
 # Re-exported for callers that import these public names from this module
 # rather than from the capability module that now owns them.
@@ -162,6 +164,7 @@ class RunContext:
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
         gate_executor: GateExecutor | None = None,
         agent_roles: tuple[AgentRole, ...] = (),
+        plugin: OrchestrationPlugin | None = None,
     ) -> None:
         """Bind request, policy setup, and the application control channel.
 
@@ -179,6 +182,22 @@ class RunContext:
         ``run_accuracy_gate``/``run_benchmark_gate`` functions the real
         implementation wraps. Defaults to the real trusted-command gates.
         """
+        if plugin is not None:
+            if request.orchestration.id != plugin.id:
+                message = (
+                    f"selected orchestration {request.orchestration.id!r} does not match "
+                    f"plugin {plugin.id!r}"
+                )
+                raise ValueError(message)
+            if agent_roles and agent_roles != plugin.agents:
+                message = "agent roles must come from the orchestration plugin"
+                raise ValueError(message)
+            agent_roles = plugin.agents
+            setup = replace(
+                setup,
+                state_namespace=plugin.id if plugin.state is not None else None,
+                state_slots={"state.json": plugin.state} if plugin.state is not None else None,
+            )
         self.request = request
         self._setup = setup
         self._integration = integration
@@ -196,7 +215,11 @@ class RunContext:
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
         self.control = _RunControl(integration, debug=request.debug)
-        self.state = _RunState(self)
+        self.state = _RunState(
+            self,
+            plugin.state if plugin is not None else None,
+            plugin_bound=plugin is not None,
+        )
         self.gates = _Evaluator(self)
         self.evaluation = _EvaluationAdapter(self, self.gates)
         self.workspaces = _Workspaces(self)
@@ -292,15 +315,21 @@ class RunContext:
         request: RunRequest,
         integration: LocalRunIntegration,
         *,
-        setup: RunSetup,
+        setup: RunSetup | None = None,
         open_agent_environment: Callable[..., AgentEnvironment] | None = None,
         projector: _CommittedStateProjector | None = None,
         agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
         gate_executor: GateExecutor | None = None,
         agent_roles: tuple[AgentRole, ...] = (),
+        plugin: OrchestrationPlugin | None = None,
     ) -> AsyncIterator[RunContext]:
         """Construct and close the run, including after cancellation or setup failure."""
+        if setup is None:
+            if plugin is None:
+                message = "legacy orchestration hosts require an explicit setup"
+                raise TypeError(message)
+            setup = RunSetup()
         host = cls(
             request,
             integration,
@@ -311,6 +340,7 @@ class RunContext:
             backend_factory=backend_factory,
             gate_executor=gate_executor,
             agent_roles=agent_roles,
+            plugin=plugin,
         )
         try:
             prepare = asyncio.create_task(asyncio.to_thread(host._prepare))

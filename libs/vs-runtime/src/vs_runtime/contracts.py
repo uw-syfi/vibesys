@@ -47,6 +47,18 @@ class UnknownAgentRoleError(RuntimeContractError):
         super().__init__(f"agent role {role_id!r} is not declared by this orchestration")
 
 
+class StateModelError(RuntimeContractError):
+    """A state operation did not use the plugin's exact declared model."""
+
+    def __init__(self, expected: type[BaseModel] | None, actual: type[BaseModel]) -> None:
+        """Name the declared and requested state models."""
+        if expected is None:
+            message = "this orchestration does not declare durable state"
+        else:
+            message = f"orchestration state requires {expected.__name__}, got {actual.__name__}"
+        super().__init__(message)
+
+
 class WorkspaceAccess(StrEnum):
     """Workspace mutation authority enforced for one role."""
 
@@ -178,6 +190,24 @@ class Workspaces(Protocol):
         ...
 
 
+class State(Protocol):
+    """Typed opaque policy-state durability bound to one plugin declaration."""
+
+    async def load(self, model: type[ResponseT]) -> ResponseT | None:
+        """Load state only when ``model`` is the plugin's exact declared type."""
+        ...
+
+    async def commit(
+        self,
+        value: BaseModel,
+        *,
+        workspace: Workspace | None = None,
+        label: str | None = None,
+    ) -> None:
+        """Durably replace state, optionally atomically including the root workspace."""
+        ...
+
+
 class MetricDirection(StrEnum):
     """Which direction improves one benchmark objective."""
 
@@ -291,6 +321,11 @@ class RunHost(Protocol):
         """Return this run's trusted evaluation capability."""
         ...
 
+    @property
+    def state(self) -> State:
+        """Return plugin-bound typed state durability."""
+        ...
+
     def log(self, message: str) -> None:
         """Record a presentation-neutral run log message."""
         ...
@@ -308,6 +343,7 @@ class OrchestrationPlugin:
     agents: tuple[AgentRole, ...]
     options: type[BaseModel]
     orchestrate: Callable[[RunHost, BaseModel], Awaitable[RunStatus]]
+    config_version: int = 1
     state: type[BaseModel] | None = None
     project: Callable[[BaseModel], BaseModel] | None = None
 
@@ -315,6 +351,12 @@ class OrchestrationPlugin:
         """Reject duplicate role IDs before any run resources open."""
         if re.fullmatch(r"[a-z0-9][a-z0-9._-]*", self.id) is None:
             message = f"invalid orchestration plugin ID {self.id!r}"
+            raise ValueError(message)
+        if self.config_version < 1:
+            message = "orchestration plugin config version must be positive"
+            raise ValueError(message)
+        if self.options is BaseModel:
+            message = "orchestration plugin options must be a concrete BaseModel subclass"
             raise ValueError(message)
         seen: set[str] = set()
         duplicates: set[str] = set()

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.runtime import RunContext
     from vibesys.orchestration.view import RunStatus
     from vs_project.api import Project
+    from vs_runtime.api import OrchestrationPlugin
 
 
 class Orchestrator(Protocol):
@@ -49,10 +50,17 @@ class OrchestrationProjector(Protocol):
 class OrchestrationRegistration:
     """The execution class and optional read projection for one stable ID."""
 
-    orchestrator: type[Orchestrator]
+    orchestrator: type[Orchestrator] | None = None
+    plugin: OrchestrationPlugin | None = None
     projector: OrchestrationProjector | None = None
     portable_namespaces: tuple[str, ...] = ()
     state_family: str | None = None
+
+    def __post_init__(self) -> None:
+        """Require exactly one execution contract per registered ID."""
+        if (self.orchestrator is None) == (self.plugin is None):
+            message = "registration requires exactly one orchestrator or plugin"
+            raise ValueError(message)
 
 
 def empty_run_view(*, run_id: str, status: RunStatus, loop: str) -> RunView:
@@ -102,6 +110,25 @@ class OrchestrationRegistry:
             raise ValueError(msg)
         self._registrations[kind] = OrchestrationRegistration(
             orchestrator=orchestrator,
+            projector=projector,
+            portable_namespaces=portable_namespaces,
+            state_family=state_family,
+        )
+
+    def register_plugin(
+        self,
+        plugin: OrchestrationPlugin,
+        *,
+        projector: OrchestrationProjector | None = None,
+        portable_namespaces: tuple[str, ...] = (),
+        state_family: str | None = None,
+    ) -> None:
+        """Register an in-repository plugin in the same product catalog."""
+        if plugin.id in self._registrations:
+            msg = f"orchestration {plugin.id!r} is already registered"
+            raise ValueError(msg)
+        self._registrations[plugin.id] = OrchestrationRegistration(
+            plugin=plugin,
             projector=projector,
             portable_namespaces=portable_namespaces,
             state_family=state_family,

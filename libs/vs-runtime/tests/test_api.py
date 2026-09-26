@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import pytest
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, Json, ValidationError
 
 from vs_runtime.api import (
     AccuracyEvaluation,
@@ -19,6 +20,7 @@ from vs_runtime.api import (
     RunHost,
     RunStatus,
     SessionClosedError,
+    StateModelError,
     UnknownAgentRoleError,
     WorkspaceAccess,
     WorkspaceRef,
@@ -38,6 +40,20 @@ class _Reply(BaseModel):
     answer: str
 
 
+class _State(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    values: list[int] = Field(default_factory=list)
+
+
+class _OtherState(BaseModel):
+    value: int
+
+
+class _JsonState(BaseModel):
+    value: Json[Any]
+
+
 def _role(role_id: str = "implementer") -> AgentRole:
     return AgentRole(
         id=role_id,
@@ -53,12 +69,13 @@ async def _orchestrate(_host: RunHost, _options: BaseModel) -> RunStatus:
     return RunStatus.SUCCEEDED
 
 
-def _plugin(*agents: AgentRole) -> OrchestrationPlugin:
+def _plugin(*agents: AgentRole, state: type[BaseModel] | None = None) -> OrchestrationPlugin:
     return OrchestrationPlugin(
         id="test-plugin",
         agents=agents,
         options=_Options,
         orchestrate=_orchestrate,
+        state=state,
     )
 
 
@@ -232,5 +249,59 @@ def test_fake_evaluation_rejects_duplicate_objective_names() -> None:
                 objectives=(objective, objective),
             )
         assert host.evaluation.benchmark_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_fake_state_is_plugin_bound_and_stores_detached_values() -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(_role(), state=_State))
+        assert await host.state.load(_State) is None
+
+        value = _State(values=[1])
+        await host.state.commit(value, label="state only")
+        value.values.append(2)
+
+        assert await host.state.load(_State) == _State(values=[1])
+        assert host.state.commits[0].value == _State(values=[1])
+        assert host.state.commits[0].workspace is None
+
+        await host.state.commit(
+            _State(values=[3]),
+            workspace=host.workspaces.root,
+            label="with workspace",
+        )
+        assert host.state.commits[-1].workspace is host.workspaces.root
+
+        with pytest.raises(StateModelError, match="requires _State, got _OtherState"):
+            await host.state.load(_OtherState)
+        with pytest.raises(StateModelError, match="requires _State, got _OtherState"):
+            await host.state.commit(_OtherState(value=1))
+        with pytest.raises(RuntimeError, match="live root workspace"):
+            await host.state.commit(_State(), workspace=_workspace())
+
+    asyncio.run(scenario())
+
+
+def test_fake_state_rejects_operations_when_plugin_declares_none() -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(_role()))
+        with pytest.raises(StateModelError, match="does not declare durable state"):
+            await host.state.load(_State)
+        with pytest.raises(StateModelError, match="does not declare durable state"):
+            await host.state.commit(_State())
+
+    asyncio.run(scenario())
+
+
+def test_fake_state_preserves_round_trip_pydantic_values() -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(state=_JsonState))
+        value = _JsonState(value='{"nested":[1,2]}')
+
+        await host.state.commit(value)
+
+        assert await host.state.load(_JsonState) == value
+        assert host.state.commits[0].value == value
 
     asyncio.run(scenario())

@@ -16,7 +16,7 @@ def _serialize_state_model(model: BaseModel) -> bytes:
     """Return canonical JSON bytes for a typed state model."""
     try:
         content = json.dumps(
-            model.model_dump(mode="json"),
+            model.model_dump(mode="json", round_trip=True),
             allow_nan=False,
             indent=2,
             sort_keys=True,

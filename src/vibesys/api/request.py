@@ -20,7 +20,7 @@ Imports come directly from the core modules that own these symbols, not from
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from vibesys.agent_spec_config import resolve_agent_driver
 from vibesys.evaluators.input_manifest import InputBundle, load_input_bundle, load_project_task
@@ -51,6 +51,7 @@ from vibesys.skills import resolve_skill_source_dirs
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.orchestration.contracts import Orchestrator
     from vibesys.profilers import ProfilerKind
     from vs_project.api import OrchestrationDescriptor
 
@@ -87,7 +88,18 @@ def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
     # lint-waiver: LW-020003 [PLC0415]; the built-in orchestration registry imports every loop implementation, so it loads only when a caller needs it.
     from vibesys.loops.registry import built_in_orchestrations  # noqa: PLC0415
 
-    built_in_orchestrations().resolve(descriptor.id).orchestrator(descriptor)
+    registration = built_in_orchestrations().resolve(descriptor.id)
+    if registration.plugin is not None:
+        if descriptor.config_version != registration.plugin.config_version:
+            message = (
+                f"orchestration {descriptor.id!r} requires config version "
+                f"{registration.plugin.config_version}, got {descriptor.config_version}"
+            )
+            raise ValueError(message)
+        registration.plugin.options.model_validate(descriptor.options)
+        return
+    orchestrator = cast("type[Orchestrator]", registration.orchestrator)
+    orchestrator(descriptor)
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

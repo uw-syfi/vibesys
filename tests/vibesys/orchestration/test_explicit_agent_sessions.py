@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import BaseModel
@@ -25,6 +25,7 @@ from vs_runtime.api import (
     AgentCapability,
     AgentRole,
     AgentTool,
+    OrchestrationPlugin,
     RuntimeContractError,
     SessionClosedError,
     StructuredResponseError,
@@ -71,10 +72,10 @@ def _write_project(root: Path) -> None:
     )
 
 
-def _request(project_root: Path) -> RunRequest:
+def _request(project_root: Path, *, orchestration_id: str = "explicit-sessions") -> RunRequest:
     return RunRequest(
         project_root=project_root,
-        orchestration=OrchestrationDescriptor(id="explicit-sessions", config_version=1, options={}),
+        orchestration=OrchestrationDescriptor(id=orchestration_id, config_version=1, options={}),
         config=Config.model_validate({"model": {"name": "explicit-sessions"}}),
         input_bundle=load_input_bundle(project_root),
         objective="Improve the queue.",
@@ -91,7 +92,7 @@ def _run_with_clients(
     clients: list[_RecordingClient | FakeAgentClient],
     body: Callable[[RunContext], Awaitable[_Result]],
     *,
-    roles: tuple[AgentRole, ...],
+    declaration: tuple[AgentRole, ...] | OrchestrationPlugin,
     client_factory: Callable[..., _RecordingClient | FakeAgentClient] | None = None,
 ) -> _Result:
     project_root = tmp_path / "project"
@@ -103,12 +104,15 @@ def _run_with_clients(
         return available.popleft()
 
     async def exercise() -> _Result:
+        plugin = declaration if isinstance(declaration, OrchestrationPlugin) else None
+        roles = () if plugin is not None else cast("tuple[AgentRole, ...]", declaration)
         async with RunContext.open(
-            _request(project_root),
+            _request(project_root, orchestration_id=plugin.id if plugin else "explicit-sessions"),
             integration,
             setup=RunSetup(),
             agent_client_factory=client_factory or create_client,
             agent_roles=roles,
+            plugin=plugin,
         ) as ctx:
             return await body(ctx)
 
@@ -137,7 +141,7 @@ def test_sessions_fix_configuration_and_preserve_distinct_conversations(tmp_path
         assert await one.turn("second") == "two"
         assert await two.turn("first") == "fresh"
 
-    _run_with_clients(tmp_path, [first, second], body, roles=(role,))
+    _run_with_clients(tmp_path, [first, second], body, declaration=(role,))
 
     assert first.calls[0].session_key == first.calls[1].session_key
     assert first.calls[0].session_key != second.calls[0].session_key
@@ -156,7 +160,7 @@ def test_typed_parse_failure_is_not_replaced_by_a_fallback(tmp_path: Path) -> No
         with pytest.raises(StructuredResponseError, match="valid _Reply response"):
             await session.turn("invalid", response=_Reply)
 
-    _run_with_clients(tmp_path, [client], body, roles=(role,))
+    _run_with_clients(tmp_path, [client], body, declaration=(role,))
 
 
 def test_session_rejects_undeclared_role_and_missing_driver_capability(tmp_path: Path) -> None:
@@ -193,7 +197,7 @@ def test_session_rejects_undeclared_role_and_missing_driver_capability(tmp_path:
         tmp_path,
         [client],
         body,
-        roles=(declared, requires_resume, unsupported_tool, unsupported_skill),
+        declaration=(declared, requires_resume, unsupported_tool, unsupported_skill),
     )
     assert client.closed
 
@@ -225,7 +229,7 @@ def test_read_only_session_restores_writes_and_early_close_is_idempotent(
         with pytest.raises(SessionClosedError):
             await session.turn("too late")
 
-    _run_with_clients(tmp_path, [client], body, roles=(role,))
+    _run_with_clients(tmp_path, [client], body, declaration=(role,))
     assert client.closed
 
 
@@ -240,7 +244,7 @@ def test_run_cleanup_closes_sessions_in_reverse_creation_order(tmp_path: Path) -
         sessions.append(await ctx.agents.create_session(role, workspace=ctx.workspaces.root))
         sessions.append(await ctx.agents.create_session(role, workspace=ctx.workspaces.root))
 
-    _run_with_clients(tmp_path, [first, second], body, roles=(role,))
+    _run_with_clients(tmp_path, [first, second], body, declaration=(role,))
     assert closed == ["second", "first"]
     assert all(session.closed for session in sessions)
 
@@ -271,7 +275,7 @@ def test_canceled_session_construction_closes_the_opened_agent(tmp_path: Path) -
         tmp_path,
         [],
         body,
-        roles=(role,),
+        declaration=(role,),
         client_factory=create_client,
     )
 
@@ -309,7 +313,7 @@ def test_plugin_orchestrates_through_the_live_host(tmp_path: Path) -> None:
         tmp_path,
         [designer, implementer],
         body,
-        roles=PLUGIN.agents,
+        declaration=PLUGIN,
     )
     assert [call.kind for call in designer.calls] == ["orchestrator"]
     assert [call.kind for call in implementer.calls] == ["implementer"]
