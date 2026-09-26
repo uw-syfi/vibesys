@@ -12,7 +12,15 @@ name = "vibesys-evaluator-request-factory"
 version = "0.1.0"
 
 [benchmark]
-entrypoint = "request-factory-adapter"
-args = ["benchmark/benchmark.py"]
+entrypoint = "request-factory-fixed-text-v1"
+args = [
+  "--model", "Qwen/Qwen3.5-397B-A17B",
+  "--tokenizer", "Qwen/Qwen3.5-397B-A17B",
+  "--tokenizer-revision", "8472618112abcbd45acbcdc58436aff4233c23f7",
+  "--request-count", "64",
+  "--input-tokens", "2048",
+  "--output-tokens", "512",
+  "--concurrency", "48",
+]
 timeout_seconds = 1200
 result_protocol = 2
