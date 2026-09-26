@@ -1,6 +1,6 @@
 """Shared CPU-only contract smoke for Request Factory text benchmarks.
 
-Bundle scripts provide only their request matrix and expected contract. This
+Bundle TOML profiles provide request matrices and expected contracts. This
 module owns the fake OpenAI completions server, VibeSys result checks, and
 failure-path exercise. It never measures serving performance.
 """
