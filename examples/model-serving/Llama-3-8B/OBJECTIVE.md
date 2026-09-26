@@ -6,7 +6,7 @@ checker's tolerance. Build an OpenAI-compatible `/v1/chat/completions` and
 `/v1/completions` server.
 
 This run is scored on a **Pareto frontier over two axes** (see `objectives.toml`),
-both read from the benchmark's `--output-json` output:
+both emitted by the benchmark's VibeSys result protocol:
 
 - **`aggregate_throughput`** — output tokens/sec, **maximize**.
 - **`p99_latency_ms`** — p99 end-to-end request latency in milliseconds, **minimize**.
@@ -17,63 +17,48 @@ Raising throughput by inflating tail latency (e.g. larger batch sizes) is a real
 trade-off, not a free win: a credible bounded result can move along the frontier
 without replacing the lower-latency parent.
 
-## Benchmark protocol — sweep to the overload boundary
+## Benchmark protocol — Request Factory concurrency sweep
 
 The canonical score is the highest sustainable output-token throughput reached
-before the server becomes overloaded. Measure it with a closed-loop concurrency
-sweep. At every point, keep the request shape fixed with `--duration 20`,
-`--max-tokens 128`, and `--temperature 0`. Do not use `--num-requests 1` or
-shorten the output length: tiny workloads make throughput degenerate into
-first-token latency and provide no useful batching or scheduling signal.
+before the server becomes overloaded. Request Factory drives independent
+synthetic token requests through `/v1/completions` using a saturated,
+concurrency-bounded trace. The default shape is 512 requests per point, 256
+input tokens, and 128 output tokens. The methodology changes from fixed-duration
+bundle-generated prompts to a fixed-volume RF trace; comparisons to historical
+scores should account for that change.
 
 Wait for the server health endpoint before the sweep and keep the same server
-process alive across every point. The benchmark sends four discarded requests
-before each measured point. Canonical measurements keep this default warm-up so
-one-time request-path initialization is excluded consistently.
+process alive across every point. The trace uses 512 requests per point, 256
+input tokens, and 128 output tokens. RF sends independent requests in saturated
+arrival mode, bounded by the point's concurrency. This fixed-volume workload
+replaces the former duration-limited bundle client; its scores should not be
+treated as directly comparable with older fixed-duration runs.
 
 Run the benchmark client on the same host as the server and send requests over
-the loopback interface (for example, `http://127.0.0.1:<port>`). This keeps
-external network routing and ingress variability out of TTFT, TPOT, and
-throughput measurements while still exercising the OpenAI-compatible HTTP/SSE
-serving path. Provision enough host CPU for the client so load generation does
-not become the bottleneck.
+loopback. This keeps external routing out of the measurements while exercising
+the OpenAI-compatible HTTP/SSE serving path.
 
-Start at concurrency 1 and double through `2, 4, 8, 16, 32, 64, 128`. If
-throughput at 128 is more than 3% above the best earlier point, continue doubling
-until the sweep includes at least one overloaded point beyond the best
-sustainable point, subject to the server's documented admission limit. A point
-is overloaded when requests fail or time out, output throughput is below 95% of
-the best earlier point, or output throughput is no higher than 103% of that best
-point while p99 TTFT or p99 end-to-end latency exceeds 2x the last confirmed
-sustainable point.
-Confirm a suspected boundary by testing intermediate concurrency values between
-the last rising point and the first overloaded point, then repeat the best point
-and its neighbors. Do not classify ordinary run-to-run noise as overload.
+The default coarse sweep is concurrency `1,2,4,8,16,32,64,128`. The wrapper
+flags failures, throughput below 95% of the best earlier point, or throughput
+within 3% of the best accompanied by p99 end-to-end latency above 2x the last
+sustainable point. It confirms an overload bracket with an intermediate point
+and repeats both adjacent points. Without a detected overloaded point, the
+highest load must be within 3% of an earlier throughput peak or the benchmark
+fails rather than report an unestablished peak.
 
-Retain and report every sweep row. The canonical `aggregate_throughput` is the
-highest value among non-overloaded points. Report TTFT, TPOT, and
-`p99_latency_ms` from that same concurrency and repetition; do not combine
-throughput from one operating point with latency from another. If the sweep
-stops while throughput is still rising by more than 3%, it has not established a
-peak and must not be reported as one.
-
-The benchmark result's `load_concurrency` block must show that the client HTTP
-connection limit is at least the requested worker count. Check its observed
-`max_in_flight_requests` and `max_active_streams` values for client-side or
-admission-path bottlenecks before treating a latency cliff as server overload.
-Short targeted checks around a previously confirmed boundary are useful for
-hypothesis testing, but they cannot replace this canonical sweep or establish a
-new peak.
+Retain and report every sweep row. The canonical `aggregate_throughput` and
+`p99_latency_ms` are both selected from the same highest-throughput sustainable
+point. RF's pinned aggregate summary has no p99 field, so the wrapper derives
+p99 from RF's per-request total-duration records. The RF workload count and
+token lengths are checked against each summary and request log.
 
 ## Headline metric (`perf_metric`) and Pareto metrics — canonical fields, do not leave null
 
 Headline metric: `aggregate_throughput` (output tok/s)
 
-The scalar `perf_metric` (used for plateau detection and the scalar fallback) is
-the peak sustainable **`aggregate_throughput`** selected by the concurrency
-sweep. In addition, because this is a Pareto run, populate
-`ProfilerSummary.metrics` with **both** objective values using these exact keys
-from the selected operating point in the benchmark JSON:
+The scalar `perf_metric` is the peak sustainable **`aggregate_throughput`**.
+Populate `ProfilerSummary.metrics` with **both** objective values using these
+exact keys from the selected operating point:
 
 ```
 metrics = {

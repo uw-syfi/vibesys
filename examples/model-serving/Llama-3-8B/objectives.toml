@@ -18,7 +18,7 @@ relative_noise = 0.03
 name = "aggregate_throughput"   # output tok/s, from benchmark JSON
 direction = "max"
 
-# Latency axis — p99 end-to-end request latency under the fixed saturating load.
+# Latency axis — p99 end-to-end latency at the selected sustainable point.
 [[objective]]
 name = "p99_latency_ms"         # milliseconds, from benchmark JSON
 direction = "min"
