@@ -179,7 +179,11 @@ def test_profile_guidance_persists_without_changing_official_cadence(
         host = FakeRunHost(
             PROFILE_GUIDED_PLUGIN,
             project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", benchmark_configured=True),
+            facts=RunFacts(
+                domain_id="generic",
+                objective="Improve the candidate.",
+                benchmark_configured=True,
+            ),
             responder=script.respond,
         )
         _script_attribution(host, 40.0, 35.0)
@@ -247,7 +251,11 @@ def test_continuation_reuses_implementer_without_reprofiling_or_replanning(
         host = FakeRunHost(
             PROFILE_GUIDED_PLUGIN,
             project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", benchmark_configured=True),
+            facts=RunFacts(
+                domain_id="generic",
+                objective="Improve the candidate.",
+                benchmark_configured=True,
+            ),
             responder=script.respond,
         )
         _script_attribution(host, 40.0)

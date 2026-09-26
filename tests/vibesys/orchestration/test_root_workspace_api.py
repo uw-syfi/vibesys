@@ -58,6 +58,7 @@ def test_root_workspace_revision_restore_and_retention_contract(tmp_path: Path) 
             integration,
             setup=RunSetup(),
         ) as ctx:
+            assert ctx.facts.objective == "Improve the queue."
             workspace = ctx.workspaces.root
             baseline = workspace.trusted_input_baseline
             assert baseline is not None

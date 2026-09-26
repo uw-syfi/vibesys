@@ -395,6 +395,7 @@ class RunContext:
         view = resources.run_environment_view
         self._facts = RunFacts(
             domain_id=bundle.domain.value,
+            objective=self.request.objective or bundle.objective,
             environment_notes=view.prompt_notes,
             profile_execution=ProfileExecution(view.profile_execution),
             objective_location=view.paths.objective,

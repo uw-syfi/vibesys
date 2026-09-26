@@ -27,6 +27,7 @@ from vs_runtime.api import (
     RunFacts,
     RunHost,
     RunStatus,
+    RuntimeContractError,
     SessionClosedError,
     SkillCatalogError,
     SkillResourceRequest,
@@ -122,6 +123,7 @@ def test_agent_turn_timeout_error_preserves_the_policy_budget() -> None:
 def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:
     facts = RunFacts(
         domain_id="llm_serving",
+        objective="Increase serving throughput.",
         environment_notes="Run the service through its public endpoint.",
         profile_execution=ProfileExecution.REMOTE,
         workspace_sources=(WorkspaceSourceFact(name="runtime", dest="src/runtime"),),
@@ -134,15 +136,18 @@ def test_run_facts_are_strict_immutable_and_configurable_on_fake_host() -> None:
     with pytest.raises(ValidationError):
         RunFacts.model_validate({"domain_id": "generic", "backend": "modal"})
     with pytest.raises(ValidationError):
+        RunFacts(domain_id="generic")
+    with pytest.raises(ValidationError):
         facts.workspace_sources[0].__setattr__("dest", "other")
     with pytest.raises(ValidationError):
-        RunFacts(domain_id="generic", objective_location="")
+        RunFacts(domain_id="generic", objective="Improve the candidate.", objective_location="")
 
 
 def test_fake_run_facts_have_a_policy_neutral_default() -> None:
     host = FakeRunHost(_plugin())
 
-    assert host.facts == RunFacts(domain_id="generic")
+    assert host.facts == RunFacts(domain_id="generic", objective="Test objective.")
+    assert host.facts.objective == "Test objective."
     assert host.facts.objective_location == "OBJECTIVE.md"
     assert host.facts.reference_location == "."
     assert host.facts.profiler_id == "none"
@@ -323,6 +328,56 @@ def test_fake_workspace_models_root_revision_operations() -> None:
         assert not await workspace.try_restore("missing")
         with pytest.raises(WorkspaceRestoreError, match="missing"):
             await workspace.restore("missing")
+
+    asyncio.run(scenario())
+
+
+def test_fake_candidate_workspaces_are_isolated_retained_and_run_owned() -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(), project_root=Path("/project"))
+        root_revision = host.workspaces.root.revision
+        assert root_revision is not None
+        assert host.workspaces.supports_parallel_candidates
+
+        await asyncio.gather(
+            host.workspaces.create_candidate(root_revision),
+            host.workspaces.create_candidate(root_revision),
+        )
+        first, second = host.workspaces.candidates
+        assert first.id == "candidate-1"
+        assert second.id == "candidate-2"
+        assert first.path != second.path
+        assert first.path != host.workspaces.root.path
+
+        first_revision = await first.snapshot("candidate one")
+        second_revision = await second.snapshot("candidate two")
+        assert first_revision != second_revision
+        first.set_patch(first_revision, "diff --git a/queue.py b/queue.py")
+        assert await first.export_patch(first_revision) == "diff --git a/queue.py b/queue.py"
+
+        await first.discard()
+        await first.discard()
+        assert first.discarded
+        with pytest.raises(RuntimeContractError, match="closed"):
+            await first.export_patch(first_revision)
+
+        await host.workspaces.adopt(first_revision)
+        assert await host.workspaces.root.try_restore(first_revision)
+        with pytest.raises(RuntimeContractError, match="not retained"):
+            await host.workspaces.adopt("other-run-revision")
+
+        await host.close()
+        assert second.discarded
+
+    asyncio.run(scenario())
+
+
+def test_fake_candidate_creation_rejects_unsupported_runs() -> None:
+    async def scenario() -> None:
+        host = FakeRunHost(_plugin(), supports_parallel_candidates=False)
+        assert not host.workspaces.supports_parallel_candidates
+        with pytest.raises(RuntimeContractError, match="does not support"):
+            await host.workspaces.create_candidate()
 
     asyncio.run(scenario())
 

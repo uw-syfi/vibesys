@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from vibesys.context import WorkspaceResourceSpec, create_workspace_resources
 from vibesys.events import FrameworkSource
 from vibesys.runtime import WorkspaceScope
+from vs_runtime.api import RuntimeContractError
 from vs_runtime.api import WorkspaceRestoreError as RuntimeWorkspaceRestoreError
 
 if TYPE_CHECKING:
@@ -231,6 +232,31 @@ class WorkspaceHandle:
                 await self.restore(revision, clean=True, preserve_paths=preserve)
 
 
+class CandidateWorkspaceHandle(WorkspaceHandle):
+    """One run-owned isolated candidate with an explicit lifetime."""
+
+    def __init__(self, owner: _Workspaces, scope: WorkspaceScope) -> None:
+        """Bind the candidate to its owner and live isolated scope."""
+        super().__init__(owner, scope)
+        self._discarded = False
+
+    async def export_patch(self, revision: str) -> str:
+        """Export a candidate-owned patch using this workspace's tracker."""
+        if self._discarded:
+            message = "candidate workspace is closed"
+            raise RuntimeContractError(message)
+        return await self._owner._candidate_patch(revision, scope=self._scope)
+
+    async def discard(self) -> None:
+        """Release the isolated workspace idempotently."""
+        if self._discarded:
+            return
+        try:
+            await self._owner._discard_scope(self)
+        finally:
+            self._discarded = True
+
+
 class _Workspaces:
     """Own isolated worktrees and parent adoption for one run."""
 
@@ -250,11 +276,20 @@ class _Workspaces:
             return scope._scope
         return scope
 
-    async def fork(self, revision: str | None = None) -> WorkspaceHandle:
+    @property
+    def supports_parallel_candidates(self) -> bool:
+        """Return the environment's fixed isolated-candidate capability."""
+        return self._host._resources.run_environment_view.supports_parallel_candidate_evaluation
+
+    async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspaceHandle:
+        """Open an isolated candidate workspace at a retained revision."""
+        return await self.fork(from_revision)
+
+    async def fork(self, revision: str | None = None) -> CandidateWorkspaceHandle:
         """Open an isolated worktree at a committed parent revision."""
         async with self._host._parent_mutation_lock:
             scope = await self._host._run_blocking(self._fork, revision)
-            return WorkspaceHandle(self, scope)
+            return CandidateWorkspaceHandle(self, scope)
 
     def _fork(self, revision: str | None) -> WorkspaceScope:
         parent = self._host._resources
@@ -336,6 +371,22 @@ class _Workspaces:
         preserve_memory: bool = True,
     ) -> None:
         """Materialize a retained candidate revision in the parent workspace."""
+        await self._adopt_revision(
+            revision,
+            clean=clean,
+            preserve_paths=preserve_paths,
+            preserve_memory=preserve_memory,
+        )
+
+    async def _adopt_revision(
+        self,
+        revision: str,
+        *,
+        clean: bool = True,
+        preserve_paths: tuple[str, ...] = (),
+        preserve_memory: bool = True,
+    ) -> None:
+        """Materialize one retained revision in the parent workspace."""
         if preserve_memory:
             preserve_paths = self._with_declared_memory(preserve_paths)
         async with self._host._parent_mutation_lock:
@@ -360,7 +411,7 @@ class _Workspaces:
         """Restore a root or scoped workspace to a committed tree."""
         scope = self._scope_of(scope)
         if scope is None:
-            await self.adopt(
+            await self._adopt_revision(
                 revision,
                 clean=clean,
                 preserve_paths=preserve_paths,

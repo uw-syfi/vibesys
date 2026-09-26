@@ -271,6 +271,7 @@ def test_official_evaluation_records_binding_and_selects_winner(tmp_path: Path) 
         ),
         facts=RunFacts(
             domain_id="generic",
+            objective="Improve the candidate.",
             accuracy_configured=True,
             benchmark_configured=True,
         ),
@@ -351,7 +352,11 @@ def test_profiler_is_fresh_and_bounded_to_round_evidence(tmp_path: Path) -> None
     status, host = _run(
         tmp_path,
         script,
-        facts=RunFacts(domain_id="generic", profiler_id="linux_cpu"),
+        facts=RunFacts(
+            domain_id="generic",
+            objective="Improve the candidate.",
+            profiler_id="linux_cpu",
+        ),
     )
 
     assert status is RunStatus.SUCCEEDED

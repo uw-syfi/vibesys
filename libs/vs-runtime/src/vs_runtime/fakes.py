@@ -17,6 +17,7 @@ from vs_runtime.contracts import (
     AgentSession,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    CandidateWorkspace,
     CommandResult,
     LocalValidationEvaluation,
     OrchestrationPlugin,
@@ -60,6 +61,17 @@ class _FakeSessionConfig:
 
     member_id: str | None
     writable_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _FakeCandidateConfig:
+    """Creation state copied into one isolated fake workspace."""
+
+    workspace_id: str
+    path: Path
+    revision: str
+    trusted_input_baseline: str | None
+    known_revisions: set[str]
 
 
 def _echo_responder(
@@ -217,16 +229,72 @@ class FakeAgentSessions:
 
 
 class FakeWorkspaces:
-    """In-memory holder for one fake root workspace."""
+    """In-memory owner of one root and its isolated candidate workspaces."""
 
-    def __init__(self, root: Workspace) -> None:
-        """Bind the fake capability to one root workspace."""
+    def __init__(self, root: FakeWorkspace, *, supports_parallel_candidates: bool = True) -> None:
+        """Bind the fake capability to one root and a fixed isolation capability."""
         self._root = root
+        self._supports_parallel_candidates = supports_parallel_candidates
+        self._candidates: list[FakeCandidateWorkspace] = []
+        self._closed = False
 
     @property
     def root(self) -> Workspace:
         """Return the configured fake root workspace."""
         return self._root
+
+    @property
+    def supports_parallel_candidates(self) -> bool:
+        """Return the fixed candidate-isolation capability."""
+        return self._supports_parallel_candidates
+
+    @property
+    def candidates(self) -> tuple[FakeCandidateWorkspace, ...]:
+        """Return candidates in creation order, including discarded ones."""
+        return tuple(self._candidates)
+
+    async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
+        """Create one isolated workspace from a known root revision."""
+        if self._closed:
+            raise SessionClosedError
+        if not self._supports_parallel_candidates:
+            message = "this run does not support parallel candidate workspaces"
+            raise RuntimeContractError(message)
+        revision = from_revision or self._root.revision
+        if revision is None or not self._root.knows_revision(revision):
+            raise WorkspaceRestoreError(from_revision or "")
+        workspace_id = f"candidate-{len(self._candidates) + 1}"
+        candidate = FakeCandidateWorkspace(
+            owner=self,
+            config=_FakeCandidateConfig(
+                workspace_id=workspace_id,
+                path=self._root.path / workspace_id,
+                revision=revision,
+                trusted_input_baseline=self._root.trusted_input_baseline,
+                known_revisions=self._root.known_revisions,
+            ),
+        )
+        self._candidates.append(candidate)
+        return candidate
+
+    async def adopt(self, revision: str) -> None:
+        """Adopt a retained revision even after its candidate was discarded."""
+        if not self._root.knows_revision(revision):
+            message = f"candidate revision is not retained by this run: {revision!r}"
+            raise RuntimeContractError(message)
+        await self._root.restore(revision)
+
+    def retain_candidate_revision(self, revision: str) -> None:
+        """Keep a snapshotted candidate revision reachable from the root."""
+        self._root.add_retained_revision(revision)
+
+    async def close(self) -> None:
+        """Discard every live candidate in reverse creation order, once."""
+        if self._closed:
+            return
+        self._closed = True
+        for candidate in reversed(self._candidates):
+            await candidate.discard()
 
 
 @dataclass(frozen=True, slots=True)
@@ -392,6 +460,7 @@ class FakeWorkspace:
         workspace_id: str | None = None,
         revision: str | None = "fake-revision",
         trusted_input_baseline: str | None = None,
+        known_revisions: set[str] | None = None,
     ) -> None:
         """Create a workspace at one recorded tree and immutable baseline."""
         self._path = path
@@ -401,7 +470,7 @@ class FakeWorkspace:
         self._trusted_input_baseline = (
             revision if trusted_input_baseline is None else trusted_input_baseline
         )
-        self._known_revisions = {
+        self._known_revisions = set(known_revisions or ()) | {
             value for value in (revision, self._trusted_input_baseline) if value
         }
         self._snapshot_count = 0
@@ -436,7 +505,8 @@ class FakeWorkspace:
         """Record a deterministic new revision for the current fake tree."""
         del label
         self._snapshot_count += 1
-        revision = f"fake-revision-{self._snapshot_count}"
+        prefix = self._id or "fake"
+        revision = f"{prefix}-revision-{self._snapshot_count}"
         self._revision = revision
         self._tree_revision = revision
         self._known_revisions.add(revision)
@@ -464,6 +534,104 @@ class FakeWorkspace:
         if not label:
             raise _WorkspaceRetentionLabelError
         self._retained[label] = revision
+
+    def knows_revision(self, revision: str) -> bool:
+        """Return whether this fake can materialize a revision."""
+        return revision in self._known_revisions
+
+    @property
+    def known_revisions(self) -> set[str]:
+        """Return a copy of the revisions reachable from this fake workspace."""
+        return set(self._known_revisions)
+
+    def add_retained_revision(self, revision: str) -> None:
+        """Make an externally retained revision materializable."""
+        self._known_revisions.add(revision)
+
+
+class FakeCandidateWorkspace(FakeWorkspace):
+    """Faithful isolated fake with explicit, idempotent lifetime."""
+
+    def __init__(
+        self,
+        *,
+        owner: FakeWorkspaces,
+        config: _FakeCandidateConfig,
+    ) -> None:
+        """Bind a candidate to the one fake run that created it."""
+        super().__init__(
+            workspace_id=config.workspace_id,
+            path=config.path,
+            revision=config.revision,
+            trusted_input_baseline=config.trusted_input_baseline,
+            known_revisions=config.known_revisions,
+        )
+        self._owner = owner
+        self._discarded = False
+        self._patches: dict[str, str] = {}
+
+    @property
+    def discarded(self) -> bool:
+        """Return whether the isolated workspace has been released."""
+        return self._discarded
+
+    @property
+    def path(self) -> Path:
+        """Return the isolated path while its resources are live."""
+        self._require_open()
+        return super().path
+
+    @property
+    def revision(self) -> str | None:
+        """Return the recorded candidate revision while resources are live."""
+        self._require_open()
+        return super().revision
+
+    def set_patch(self, revision: str, patch: str) -> None:
+        """Configure the patch exported for a known revision."""
+        self._require_open()
+        if not self.knows_revision(revision):
+            raise _UnknownWorkspaceRevisionError(revision)
+        self._patches[revision] = patch
+
+    async def snapshot(self, label: str) -> str:
+        """Record a candidate revision while the workspace is live."""
+        self._require_open()
+        revision = await super().snapshot(label)
+        self._owner.retain_candidate_revision(revision)
+        return revision
+
+    async def restore(self, revision: str, *, clean: bool = True) -> None:
+        """Restore a candidate revision while the workspace is live."""
+        self._require_open()
+        await super().restore(revision, clean=clean)
+
+    async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
+        """Try to restore a candidate revision while the workspace is live."""
+        self._require_open()
+        return await super().try_restore(revision, clean=clean)
+
+    async def retain(self, revision: str, *, label: str) -> None:
+        """Retain a candidate revision while the workspace is live."""
+        self._require_open()
+        await super().retain(revision, label=label)
+
+    async def export_patch(self, revision: str) -> str:
+        """Return the configured candidate-owned patch for a known revision."""
+        self._require_open()
+        if not self.knows_revision(revision):
+            raise _UnknownWorkspaceRevisionError(revision)
+        return self._patches.get(revision, f"patch for {revision}")
+
+    async def discard(self) -> None:
+        """Release this fake candidate idempotently."""
+        self._discarded = True
+
+    def _require_open(self) -> None:
+        """Reject operations whose isolated resources no longer exist."""
+        if self._discarded:
+            message = "candidate workspace is closed"
+            raise RuntimeContractError(message)
 
 
 class FakeControl:
@@ -691,11 +859,17 @@ class FakeRunHost:
         facts: RunFacts | None = None,
         responder: TurnResponder = _echo_responder,
         agent_bindings: dict[str, AgentBinding] | None = None,
+        supports_parallel_candidates: bool = True,
     ) -> None:
         """Create a host whose private role map derives from ``plugin.agents``."""
         self._run_id = run_id
-        self._facts = RunFacts(domain_id="generic") if facts is None else facts
-        self._workspaces = FakeWorkspaces(FakeWorkspace(path=project_root))
+        self._facts = (
+            RunFacts(domain_id="generic", objective="Test objective.") if facts is None else facts
+        )
+        self._workspaces = FakeWorkspaces(
+            FakeWorkspace(path=project_root),
+            supports_parallel_candidates=supports_parallel_candidates,
+        )
         self._agents = FakeAgentSessions(
             plugin.agents,
             responder=responder,
@@ -769,3 +943,4 @@ class FakeRunHost:
             return
         self._closed = True
         await self._agents.close()
+        await self._workspaces.close()

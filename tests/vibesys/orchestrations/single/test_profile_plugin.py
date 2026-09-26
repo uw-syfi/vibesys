@@ -144,7 +144,11 @@ def test_profile_guidance_drives_prompts_and_persists_focus_without_changing_cad
         host = FakeRunHost(
             PROFILE_GUIDED_PLUGIN,
             project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", benchmark_configured=True),
+            facts=RunFacts(
+                domain_id="generic",
+                objective="Improve the candidate.",
+                benchmark_configured=True,
+            ),
             responder=script.respond,
         )
         _script_attribution(host, 40.0, 35.0)

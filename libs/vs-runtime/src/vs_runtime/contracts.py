@@ -156,6 +156,18 @@ class Workspace(Protocol):
         ...
 
 
+class CandidateWorkspace(Workspace, Protocol):
+    """One isolated candidate workspace owned by its creating run."""
+
+    async def export_patch(self, revision: str) -> str:
+        """Export ``revision`` against the immutable trusted-input baseline."""
+        ...
+
+    async def discard(self) -> None:
+        """Release the isolated workspace; safe to call more than once."""
+        ...
+
+
 class WorkspaceRef(BaseModel):
     """Immutable workspace value suitable for adapters and tests."""
 
@@ -265,11 +277,24 @@ class AgentSessions(Protocol):
 
 
 class Workspaces(Protocol):
-    """Run-owned access to live workspaces."""
+    """Run-owned access to the root and isolated candidate workspaces."""
 
     @property
     def root(self) -> Workspace:
         """Return the live root workspace for this run."""
+        ...
+
+    @property
+    def supports_parallel_candidates(self) -> bool:
+        """Return whether independent candidate workspaces can run concurrently."""
+        ...
+
+    async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
+        """Create an isolated candidate from a retained revision or the root head."""
+        ...
+
+    async def adopt(self, revision: str) -> None:
+        """Materialize a retained candidate revision in the root workspace."""
         ...
 
 
@@ -458,6 +483,7 @@ class RunFacts(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     domain_id: str = Field(min_length=1)
+    objective: str = Field(min_length=1)
     environment_notes: str = ""
     profile_execution: ProfileExecution = ProfileExecution.LOCAL
     objective_location: str = Field(default="OBJECTIVE.md", min_length=1)

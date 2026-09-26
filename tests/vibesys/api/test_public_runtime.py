@@ -444,8 +444,9 @@ def test_root_workspace_and_typed_state_capabilities(tmp_path: Path) -> None:
             assert retained_reference.endswith("/candidates/public-probe")
             with pytest.raises(ValueError, match="run root cannot be discarded"):
                 await root.discard()
+            assert not ctx.workspaces.supports_parallel_candidates
             with pytest.raises(RuntimeError, match="cannot open isolated candidate sandboxes"):
-                await ctx.workspaces.fork()
+                await ctx.workspaces.create_candidate()
 
     try:
         asyncio.run(exercise())
@@ -508,14 +509,16 @@ def test_scoped_workspace_adopts_candidate_and_closes_its_agent(
     )
 
     async def exercise() -> None:
+        unclosed_candidate = None
         async with RunContext.open(_request(project_root), integration, setup=RunSetup()) as ctx:
             # Local worktrees provide a cheap substrate for the generic parallel capability.
             ctx._resources.run_environment_view = replace(  # noqa: SLF001  # LW-030003; This test reads one private attribute to check internal wiring that has no public accessor.
                 ctx.environment.view, supports_parallel_candidate_evaluation=True
             )
+            assert ctx.workspaces.supports_parallel_candidates
             parent_revision = ctx.workspaces.root.revision
             assert parent_revision is not None
-            scoped = await ctx.workspaces.fork(parent_revision)
+            scoped = await ctx.workspaces.create_candidate(parent_revision)
             assert scoped.id is not None
             assert scoped.path != ctx.workspaces.root.path
             assert ctx.environment.view_for(scoped).env_kind == "local"
@@ -533,18 +536,23 @@ def test_scoped_workspace_adopts_candidate_and_closes_its_agent(
             assert "queue.py" in await scoped.pending_changes()
             revision = await scoped.snapshot("scoped candidate")
             assert scoped.revision == revision
-            assert "VALUE = 3" in await scoped.candidate_patch(revision)
+            assert "VALUE = 3" in await scoped.export_patch(revision)
             await scoped.restore(parent_revision)
             assert (scoped.path / "queue.py").read_text() == "VALUE = 1\n"
             await scoped.restore(revision)
             assert (scoped.path / "queue.py").read_text() == "VALUE = 3\n"
             assert (ctx.workspaces.root.path / "queue.py").read_text() == "VALUE = 1\n"
-            await ctx.workspaces.adopt(revision)
-            assert (ctx.workspaces.root.path / "queue.py").read_text() == "VALUE = 3\n"
+            await scoped.discard()
             await scoped.discard()
             assert client.closed
             with pytest.raises(ValueError, match="closed"):
                 _ = scoped.path
+            await ctx.workspaces.adopt(revision)
+            assert (ctx.workspaces.root.path / "queue.py").read_text() == "VALUE = 3\n"
+            unclosed_candidate = await ctx.workspaces.create_candidate(revision)
+        assert unclosed_candidate is not None
+        with pytest.raises(ValueError, match="closed"):
+            _ = unclosed_candidate.path
 
     try:
         asyncio.run(exercise())

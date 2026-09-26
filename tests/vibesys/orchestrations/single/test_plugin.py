@@ -187,6 +187,7 @@ def test_official_evaluation_records_runtime_binding_and_selects_winner(
     script = _Script(_plan("H-01"), _response())
     facts = RunFacts(
         domain_id="generic",
+        objective="Improve the candidate.",
         accuracy_configured=True,
         benchmark_configured=True,
         accuracy_command="check-accuracy",
@@ -268,7 +269,12 @@ def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None
         tmp_path,
         script,
         options=_options(max_rounds=1, official_eval_every=1),
-        facts=RunFacts(domain_id="generic", accuracy_configured=True, benchmark_configured=True),
+        facts=RunFacts(
+            domain_id="generic",
+            objective="Improve the candidate.",
+            accuracy_configured=True,
+            benchmark_configured=True,
+        ),
         configure=configure,
     )
 
@@ -368,7 +374,11 @@ def test_selected_profiler_support_name_and_agent_metric_provenance(tmp_path: Pa
         tmp_path,
         script,
         options=_options(max_rounds=1, official_eval_every=1),
-        facts=RunFacts(domain_id="generic", profiler_id="linux_cpu"),
+        facts=RunFacts(
+            domain_id="generic",
+            objective="Improve the candidate.",
+            profiler_id="linux_cpu",
+        ),
     )
 
     assert status is RunStatus.SUCCEEDED
