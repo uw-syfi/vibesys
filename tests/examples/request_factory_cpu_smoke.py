@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import http.server
 import json
-import math
 import sys
 import tempfile
 import threading
@@ -20,11 +19,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from tests.support import run_test_command
+
+from vs_evaluator_protocol.api import Hello, check_objectives, parse_records, read_measurement
 
 _ROOT = Path(__file__).resolve().parents[2]
 _TOKENIZER = Path(__file__).with_name("fixtures") / "request_factory_tokenizer.json"
+type FailureMode = Literal["http", "malformed-sse", "truncated-sse", "output-mismatch"]
 
 
 class RequestShape(BaseModel):
@@ -42,6 +44,13 @@ class MetricDefinition(BaseModel):
     direction: Literal["min", "max"]
 
 
+class FailureCase(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mode: FailureMode
+    message_contains: str = Field(min_length=1)
+
+
 class SmokeProfile(BaseModel):
     """Validated bundle-specific inputs for the shared HTTP smoke contract."""
 
@@ -54,11 +63,19 @@ class SmokeProfile(BaseModel):
     metrics: Mapping[str, MetricDefinition]
     required_fields: Mapping[str, Any]
     response_style: Literal["usage", "token-chunks"]
-    failure_message_contains: str
+    failure_message_contains: str | None = None
+    failure_cases: tuple[FailureCase, ...] = ()
     tokenizer: str | None = None
     corpus_text: str | None = None
     unique_prompt_tokens: bool = False
     unique_prompts: bool = False
+
+    @model_validator(mode="after")
+    def _has_failure_contract(self) -> SmokeProfile:
+        if self.failure_message_contains is None and not self.failure_cases:
+            message = "declare failure_message_contains or failure_cases"
+            raise ValueError(message)
+        return self
 
     @property
     def benchmark_path(self) -> Path:
@@ -76,6 +93,13 @@ class SmokeProfile(BaseModel):
         for shape in self.request_shapes:
             counts[(shape.input_tokens, shape.output_tokens)] += shape.count
         return counts
+
+    @property
+    def failures(self) -> tuple[FailureCase, ...]:
+        if self.failure_cases:
+            return self.failure_cases
+        assert self.failure_message_contains is not None
+        return (FailureCase(mode="http", message_contains=self.failure_message_contains),)
 
 
 class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
@@ -108,7 +132,7 @@ class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
         if error:
             self.send_error(400, error)
             return
-        if failure_mode:
+        if failure_mode == "http":
             self.send_error(503, "injected fake-server failure")
             return
 
@@ -116,7 +140,16 @@ class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
-        for event in self._events(body):
+        if failure_mode == "malformed-sse":
+            self.wfile.write(b"data: {not-json}\n\n")
+            self.wfile.flush()
+            return
+        events = self._events(body, mismatch=failure_mode in {"truncated-sse", "output-mismatch"})
+        if failure_mode == "truncated-sse":
+            self.wfile.write(b"data: " + json.dumps(events[0]).encode() + b"\n\n")
+            self.wfile.flush()
+            return
+        for event in events:
             self.wfile.write(b"data: " + json.dumps(event).encode() + b"\n\n")
             self.wfile.flush()
         self.wfile.write(b"data: [DONE]\n\n")
@@ -160,9 +193,9 @@ class _CompletionsHandler(http.server.BaseHTTPRequestHandler):
             return None
         return len(prompt), output_tokens
 
-    def _events(self, body: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+    def _events(self, body: Mapping[str, Any], *, mismatch: bool) -> tuple[Mapping[str, Any], ...]:
         prompt = body["prompt"]
-        output_tokens = body["max_tokens"]
+        output_tokens = body["max_tokens"] - int(mismatch)
         if self.server.profile.response_style == "token-chunks":
             events = tuple(
                 {"choices": [{"text": "x", "token_ids": [index], "finish_reason": None}]}
@@ -200,7 +233,7 @@ class _FakeServer(http.server.ThreadingHTTPServer):
     def __init__(self, profile: SmokeProfile) -> None:
         super().__init__(("127.0.0.1", 0), _CompletionsHandler)
         self.profile = profile
-        self.failure_mode = False
+        self.failure_mode: FailureMode | None = None
         self.errors: list[str] = []
         self.observed_shapes: Counter[tuple[int, int]] = Counter()
         self.observed_prompts: list[tuple[int, ...]] = []
@@ -227,8 +260,9 @@ def _run_case(
     server: _FakeServer,
     output_path: Path,
     *,
-    expect_success: bool,
+    failure: FailureCase | None,
 ) -> None:
+    expect_success = failure is None
     command = [
         sys.executable,
         str(profile.benchmark_path),
@@ -250,27 +284,31 @@ def _run_case(
         f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
     )
     assert not server.errors, "fake server rejected requests: " + "; ".join(server.errors)
-    records = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
+    records = parse_records(output_path.read_text(encoding="utf-8"))
     assert records, "benchmark did not write any result records"
-    assert records[0] == {
-        "kind": "hello",
-        "protocol": 2,
-        "metrics": {name: definition.model_dump() for name, definition in profile.metrics.items()},
-    }, f"unexpected VibeSys protocol-v2 hello record: {records[:1]}"
-    outcome = records[-1]
+    hello = records[0]
+    assert isinstance(hello, Hello), f"unexpected first protocol record: {hello}"
+    check_objectives(hello, set(profile.metrics))
+    assert set(hello.metrics) == set(profile.metrics)
+    for name, expected in profile.metrics.items():
+        actual = hello.metrics[name]
+        assert actual.unit == expected.unit
+        assert actual.direction == expected.direction
+        assert actual.required
+    measurement = read_measurement(records)
     if expect_success:
-        values = outcome.get("values", {})
-        assert outcome.get("kind") == "result", f"unexpected success record: {outcome}"
+        assert measurement.failure is None, f"unexpected benchmark failure: {measurement.failure}"
+        values = measurement.values
+        assert values is not None
         assert set(values) == set(profile.metrics), f"unexpected success metrics: {values}"
         for name, value in values.items():
-            assert not isinstance(value, bool), f"metric {name} is not numeric: {value!r}"
-            assert isinstance(value, int | float), f"metric {name} is not numeric: {value!r}"
-            assert math.isfinite(value), f"metric {name} is invalid: {value!r}"
             assert value >= 0, f"metric {name} is invalid: {value!r}"
     else:
-        assert outcome.get("kind") == "error", f"RF failures were not surfaced: {outcome}"
-        assert profile.failure_message_contains in outcome.get("message", ""), (
-            f"unexpected RF failure message: {outcome}"
+        assert measurement.values is None, f"RF failure produced values: {measurement.values}"
+        assert measurement.failure is not None, "RF failure was not surfaced"
+        assert failure is not None
+        assert failure.message_contains in measurement.failure, (
+            f"expected failure containing {failure.message_contains!r}, got {measurement.failure!r}"
         )
 
 
@@ -282,7 +320,7 @@ def run_cpu_smoke(profile: SmokeProfile, engine: str) -> None:
     try:
         with tempfile.TemporaryDirectory(prefix="request-factory-cpu-smoke-") as directory:
             output = Path(directory) / "success.jsonl"
-            _run_case(profile, engine, server, output, expect_success=True)
+            _run_case(profile, engine, server, output, failure=None)
             assert server.observed_shapes == profile.shape_counts, (
                 f"unexpected request-shape counts: {server.observed_shapes}; "
                 f"expected {profile.shape_counts}"
@@ -291,16 +329,17 @@ def run_cpu_smoke(profile: SmokeProfile, engine: str) -> None:
                 assert len(set(server.observed_prompts)) == len(server.observed_prompts), (
                     "Request Factory replayed a prompt within the measured benchmark"
                 )
-            server.observed_shapes.clear()
-            server.observed_prompts.clear()
-            server.failure_mode = True
-            _run_case(
-                profile,
-                engine,
-                server,
-                Path(directory) / "failure.jsonl",
-                expect_success=False,
-            )
+            for index, failure in enumerate(profile.failures):
+                server.observed_shapes.clear()
+                server.observed_prompts.clear()
+                server.failure_mode = failure.mode
+                _run_case(
+                    profile,
+                    engine,
+                    server,
+                    Path(directory) / f"failure-{index}.jsonl",
+                    failure=failure,
+                )
     finally:
         server.shutdown()
         server.server_close()
