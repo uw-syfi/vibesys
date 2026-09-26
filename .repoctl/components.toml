@@ -73,7 +73,6 @@ files = [
   "setup.py",
   "conftest.py",
   "MANIFEST.in",
-  "lint_waivers.jsonl",
   ".github/delegated-merge.toml",
   ".github/workflows/delegated-merge.yml",
 ]
