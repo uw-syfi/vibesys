@@ -17,6 +17,7 @@ directory and sets an explicit token-pool limit from prompt length and request
 count. It fails if RF reports that the pool is too short for a prompt.
 
 The evaluator injects the trusted RF engine path. For CPU-only request-path
-validation, run `python benchmark/cpu_smoke.py --request-factory-engine
-<RF_ENGINE>`; it uses a strict local fake completions server and a tiny local
-tokenizer fixture. Fake server metrics are not serving-performance results.
+validation, run `uv run python -m tests.examples.request_factory_cpu_smoke
+--profile examples/model-serving/qwen3.6-35b-a3b-2xh100/benchmark/cpu_smoke.toml
+--request-factory-engine <RF_ENGINE>`. Fake server metrics are not
+serving-performance results.
