@@ -11,11 +11,12 @@ from typing import TYPE_CHECKING
 
 from vibesys.context import RunSetup, RunStartHints
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.loops.evolve.entrypoint import EvolveOrchestrator, EvolveProjector
 from vibesys.orchestration import OrchestrationResumeDecision
 from vibesys.orchestration.contracts import OrchestrationRegistry
 from vibesys.orchestration.memory import declared_memory_paths
 from vibesys.orchestrations.agent_options import AgentOrchestrationOptions
+from vibesys.orchestrations.evolve.models import EvolveOptions
+from vibesys.orchestrations.evolve.plugin import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestrations.issue_queue.models import IssueQueueOptions
 from vibesys.orchestrations.issue_queue.plugin import (
     PLUGIN as ISSUE_QUEUE_PLUGIN,
@@ -155,6 +156,57 @@ def _compare_issue_queue_resume(
     )
 
 
+def _compare_evolve_resume(
+    recorded: OrchestrationDescriptor, requested: OrchestrationDescriptor
+) -> OrchestrationResumeDecision:
+    """Keep evolve policy fixed while allowing its total generation budget to grow."""
+    if (
+        recorded.id != EVOLVE_PLUGIN.id
+        or requested.id != EVOLVE_PLUGIN.id
+        or recorded.config_version != 1
+        or requested.config_version != 1
+    ):
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message="resuming a run cannot change its orchestration ID or config version",
+            )
+        )
+    old = EvolveOptions.model_validate(recorded.options)
+    new = EvolveOptions.model_validate(requested.options)
+    changed = tuple(
+        name
+        for name in EvolveOptions.model_fields
+        if name != "max_generations" and getattr(old, name) != getattr(new, name)
+    )
+    if changed:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message=(
+                    "resuming a run cannot change its recorded configuration "
+                    f"fields: {', '.join(changed)}"
+                ),
+            )
+        )
+    if new.max_generations < old.max_generations:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message=(
+                    "max_generations is the run's total limit and cannot decrease when "
+                    f"resuming (recorded {old.max_generations}, requested {new.max_generations})"
+                ),
+            )
+        )
+    if new.max_generations == old.max_generations:
+        return OrchestrationResumeDecision(descriptor=None)
+    return OrchestrationResumeDecision(descriptor=requested, requires_clean_workspace=True)
+
+
 def _hypothesis_setup(
     options: BaseModel,
     *,
@@ -194,6 +246,14 @@ def _issue_queue_setup(options: BaseModel) -> RunSetup:
     )
 
 
+def _evolve_setup(options: BaseModel) -> RunSetup:
+    parsed = EvolveOptions.model_validate(options)
+    return RunSetup(
+        resume_policy=_compare_evolve_resume,
+        start_hints=RunStartHints(max_rounds=parsed.max_generations),
+    )
+
+
 def built_in_orchestrations() -> OrchestrationRegistry:
     """Compose in-repository policy plugins with the VibeSys product host."""
     registry = OrchestrationRegistry()
@@ -210,12 +270,7 @@ def built_in_orchestrations() -> OrchestrationRegistry:
         state_family="agent",
     )
     registry.register_plugin(ISSUE_QUEUE_PLUGIN, setup=_issue_queue_setup)
-    registry.register(
-        "evolve",
-        EvolveOrchestrator,
-        projector=EvolveProjector(),
-        portable_namespaces=("evolve",),
-    )
+    registry.register_plugin(EVOLVE_PLUGIN, setup=_evolve_setup)
     return registry
 
 

@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from vibesys.api import (
     ComputeBackend,
@@ -22,10 +22,10 @@ from vibesys.api import (
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.context import RunSetup, RunStartHints
-from vibesys.events import CoreEvent, CoreEventType, RunStartedData
-from vibesys.loops.evolve.entrypoint import EvolveOrchestrator
+from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData, RunStartedData
 from vibesys.orchestration import OrchestrationResumeDecision
 from vibesys.orchestration.memory import declared_memory_paths
+from vibesys.orchestrations.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestrations.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestrations.multi import (
     PLUGIN as MULTI_PLUGIN,
@@ -93,7 +93,8 @@ class _PluginState(BaseModel):
 
 async def _run_plugin(host: RunHost, options: BaseModel) -> PluginRunStatus:
     parsed = _PluginOptions.model_validate(options)
-    await host.state.commit(_PluginState(completed_rounds=parsed.max_rounds))
+    for completed_rounds in range(1, parsed.max_rounds + 1):
+        await host.state.commit(_PluginState(completed_rounds=completed_rounds))
     return PluginRunStatus.SUCCEEDED
 
 
@@ -101,13 +102,9 @@ def _project_plugin(state: BaseModel) -> PluginProjection:
     parsed = _PluginState.model_validate(state)
     return PluginProjection(
         payload={"completed_rounds": parsed.completed_rounds},
-        rounds=(
-            ProjectedRound(
-                number=parsed.completed_rounds,
-                status="completed",
-                attempts=1,
-                judge_verdict="pass",
-            ),
+        rounds=tuple(
+            ProjectedRound(number=number, status="completed", attempts=1, judge_verdict="pass")
+            for number in range(1, parsed.completed_rounds + 1)
         ),
         experiment_revision=parsed.completed_rounds,
     )
@@ -183,7 +180,7 @@ def test_registry_rejects_ids_outside_descriptor_envelope(invalid_id: str) -> No
     assert registry.resolve("team.v2").orchestrator is _StubOrchestrator
 
 
-def test_builtin_catalog_selects_plugins_and_keeps_only_evolve_legacy() -> None:
+def test_builtin_catalog_selects_only_plugins() -> None:
     registry = built_in_orchestrations()
     expected = {
         "multi-agent": MULTI_PLUGIN,
@@ -191,6 +188,7 @@ def test_builtin_catalog_selects_plugins_and_keeps_only_evolve_legacy() -> None:
         "profile-guided-multi-agent": PROFILE_MULTI_PLUGIN,
         "profile-guided-single-agent": PROFILE_SINGLE_PLUGIN,
         "plain": ISSUE_QUEUE_PLUGIN,
+        "evolve": EVOLVE_PLUGIN,
     }
     for kind, plugin in expected.items():
         registration = registry.resolve(kind)
@@ -198,11 +196,6 @@ def test_builtin_catalog_selects_plugins_and_keeps_only_evolve_legacy() -> None:
         assert registration.orchestrator is None
         assert registration.projector is not None
         assert registration.portable_namespaces == (kind,)
-
-    legacy = registry.resolve("evolve")
-    assert legacy.orchestrator is EvolveOrchestrator
-    assert legacy.plugin is None
-    assert legacy.projector is not None
 
 
 def test_builtin_single_agent_executes_with_the_public_stub_backend(tmp_path: Path) -> None:
@@ -308,6 +301,46 @@ def test_builtin_plugins_allow_only_increased_total_budget_on_resume() -> None:
         compare(
             recorded, recorded.model_copy(update={"options": {**recorded.options, "max_rounds": 1}})
         )
+
+
+def test_evolve_plugin_resume_allows_only_increased_generation_budget() -> None:
+    registry = built_in_orchestrations()
+    options: dict[str, JsonValue] = {
+        "max_generations": 2,
+        "children_per_generation": 2,
+        "k_top_inspirations": 1,
+        "k_random_inspirations": 1,
+        "selection_temperature": 1.0,
+        "frontier_bias": 0.7,
+        "bootstrap_max_attempts": 3,
+        "keep_deployments": False,
+        "max_parallelism": 2,
+    }
+    recorded = OrchestrationDescriptor(
+        id="evolve",
+        config_version=1,
+        options=options,
+    )
+    prepared = registry.resolve("evolve").prepare_plugin(recorded)
+    compare = prepared.setup.resume_policy
+    assert compare is not None
+    assert prepared.setup.start_hints is not None
+    assert prepared.setup.start_hints.max_rounds == 2
+
+    assert compare(recorded, recorded).descriptor is None
+    increased = recorded.model_copy(update={"options": {**recorded.options, "max_generations": 3}})
+    decision = compare(recorded, increased)
+    assert decision.descriptor == increased
+    assert decision.requires_clean_workspace
+
+    changed_policy = recorded.model_copy(
+        update={"options": {**recorded.options, "children_per_generation": 3}}
+    )
+    with pytest.raises(ConfigurationError, match="children_per_generation"):
+        compare(recorded, changed_policy)
+    decreased = recorded.model_copy(update={"options": {**recorded.options, "max_generations": 1}})
+    with pytest.raises(ConfigurationError, match=r"max_generations.*cannot decrease"):
+        compare(recorded, decreased)
 
 
 def test_hypothesis_plugin_resume_uses_its_exact_option_schema() -> None:
@@ -483,7 +516,18 @@ def test_public_session_applies_registered_plugin_setup(tmp_path: Path) -> None:
     assert started.data.max_rounds == 3
     assert started.data.expected_roles == ("worker",)
     finished_rounds = [event for event in events if event.type is CoreEventType.ROUND_FINISHED]
-    assert [event.round_label for event in finished_rounds] == ["round-3"]
+    assert [event.round_label for event in finished_rounds] == ["round-1", "round-2", "round-3"]
+    experiment_changes = [
+        event.data
+        for event in events
+        if event.type is CoreEventType.EXPERIMENTS_CHANGED
+        and isinstance(event.data, ExperimentsChangedData)
+        and event.data.reason != "project_attached"
+    ]
+    assert experiment_changes == [
+        ExperimentsChangedData(reason="round_persisted", revision=2),
+        ExperimentsChangedData(reason="round_persisted", revision=3),
+    ]
     stored = (
         Project.open(request.project_root)
         .state.portable_namespace(result.run_id, _SETUP_PLUGIN.id)
@@ -491,27 +535,27 @@ def test_public_session_applies_registered_plugin_setup(tmp_path: Path) -> None:
         .load_optional()
     )
     assert stored == _PluginState(completed_rounds=3)
-    assert committed == [
-        RunView(
-            run_id=result.run_id,
-            loop=_SETUP_PLUGIN.id,
-            status=RunStatus.ACTIVE,
-            projection={"completed_rounds": 3},
-            rounds=(
-                {
-                    "number": 3,
-                    "status": "completed",
-                    "attempts": 1,
-                    "judge_verdict": "pass",
-                },
-            ),
-            experiment_revision=3,
-        )
-    ]
+    assert [view.experiment_revision for view in committed] == [1, 2, 3]
+    assert committed[-1] == RunView(
+        run_id=result.run_id,
+        loop=_SETUP_PLUGIN.id,
+        status=RunStatus.ACTIVE,
+        projection={"completed_rounds": 3},
+        rounds=tuple(
+            {
+                "number": number,
+                "status": "completed",
+                "attempts": 1,
+                "judge_verdict": "pass",
+            }
+            for number in range(1, 4)
+        ),
+        experiment_revision=3,
+    )
     historical = open_run_store(Project.open(request.project_root), registry=registry).get_run(
         result.run_id
     )
-    assert historical.model_copy(update={"status": RunStatus.ACTIVE}) == committed[0]
+    assert historical.model_copy(update={"status": RunStatus.ACTIVE}) == committed[-1]
     prepared = registry.resolve(_SETUP_PLUGIN.id).prepare_plugin(request.orchestration)
     assert prepared.setup is not None
     assert prepared.setup.resume_policy is _accept_resume
