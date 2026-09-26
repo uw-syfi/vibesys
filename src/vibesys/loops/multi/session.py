@@ -890,7 +890,9 @@ class MultiSession:
             return True
         if winner.commit is None:
             raise MultiSessionError.missing_winner_commit()
-        await self.workspace.retain(f"selected-round-{winner.round_number:04d}", winner.commit)
+        await self.workspace.retain_named(
+            f"selected-round-{winner.round_number:04d}", winner.commit
+        )
         await self.workspace.restore(winner.commit, clean=True)
         await self.workspace.snapshot(f"{self._label}: select round {winner.round_number}")
         metrics = (

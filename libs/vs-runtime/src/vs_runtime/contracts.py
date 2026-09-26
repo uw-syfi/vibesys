@@ -130,13 +130,8 @@ class Workspace(Protocol):
         """Try to materialize a revision, returning ``False`` on restore failure."""
         ...
 
-    async def retain(self, revision: str, /, *, label: str) -> str | None:
-        """Keep a revision reachable under a semantic label.
-
-        The optional return value is opaque and must not be used for policy
-        decisions. Implementations may need to return an internal retention
-        reference for compatibility with in-tree callers.
-        """
+    async def retain(self, revision: str, *, label: str) -> None:
+        """Keep a revision reachable under a policy-owned semantic label."""
         ...
 
 

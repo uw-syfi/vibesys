@@ -698,7 +698,7 @@ async def _evaluate_in_subcontext(  # noqa: PLR0913  # LW-020012 [PLR0913]; thes
             # Subcontext teardown removes the linked worktree. Retain its
             # detached commit first so durable population state cannot name an
             # object that Git is then free to prune.
-            await ctx.workspaces.root.retain(label, outcome.commit)
+            await ctx.workspaces.root.retain_named(label, outcome.commit)
     except Exception as exc:  # noqa: BLE001  # LW-010258 [BLE001]; evaluator failures become candidate outcomes so the generation can continue.
         ctx.warning(
             f"candidate {label} evaluation raised",
@@ -895,7 +895,7 @@ class _BootstrapAdapter:
             )
         )
         if commit:
-            await self.ctx.workspaces.root.retain(f"wip-seed-{individual.id}", commit)
+            await self.ctx.workspaces.root.retain_named(f"wip-seed-{individual.id}", commit)
         return BootstrapAttemptResult(
             seed=None,
             message=(
@@ -938,7 +938,7 @@ class _BootstrapAdapter:
             )
         )
         if commit:
-            await ctx.workspaces.root.retain(f"individual-{individual.id}", commit)
+            await ctx.workspaces.root.retain_named(f"individual-{individual.id}", commit)
         return BootstrapAttemptResult(
             seed=individual,
             message=(

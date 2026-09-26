@@ -648,7 +648,9 @@ class SingleSession:
             return True
         if winner.commit is None:
             raise SingleSessionError.missing_winner_commit()
-        await self.workspace.retain(f"selected-round-{winner.round_number:04d}", winner.commit)
+        await self.workspace.retain_named(
+            f"selected-round-{winner.round_number:04d}", winner.commit
+        )
         await self.workspace.restore(winner.commit, clean=True)
         await self.workspace.snapshot(f"{self._label_prefix}: select round {winner.round_number}")
         metrics = (

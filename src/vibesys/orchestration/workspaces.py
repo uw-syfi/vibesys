@@ -165,30 +165,14 @@ class WorkspaceHandle:
         """Try to restore a revision using the host's tolerant restore path."""
         return await self.restore_or_warn(revision, clean=clean)
 
-    async def retain(
-        self,
-        revision_or_name: str,
-        legacy_revision: str | None = None,
-        *,
-        label: str | None = None,
-    ) -> str | None:
-        """Retain a revision under a semantic label.
+    async def retain(self, revision: str, *, label: str) -> None:
+        """Retain a revision under a policy-owned semantic label."""
+        private_name = self._retention_name(label, revision)
+        await self._owner._retain(private_name, revision)
 
-        The two-positional-argument form remains temporarily for unmigrated
-        in-tree policies. Plugin callers use ``retain(revision, label=...)``;
-        its generated Git ref and return value stay private.
-        """
-        if legacy_revision is not None:
-            if label is not None:
-                message = "legacy workspace retention cannot also supply label"
-                raise TypeError(message)
-            return await self._owner._retain(revision_or_name, legacy_revision)
-        if label is None:
-            message = "workspace retention requires a semantic label"
-            raise TypeError(message)
-        private_name = self._retention_name(label, revision_or_name)
-        await self._owner._retain(private_name, revision_or_name)
-        return None
+    async def retain_named(self, name: str, revision: str) -> str:
+        """Transitional in-tree API for policies with established ref names."""
+        return await self._owner._retain(name, revision)
 
     @staticmethod
     def _retention_name(label: str, revision: str) -> str:
