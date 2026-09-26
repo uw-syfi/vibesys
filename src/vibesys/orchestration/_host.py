@@ -266,7 +266,11 @@ class HostResources(Protocol):
         ...
 
     def _spawn(
-        self, definition: AgentDefinition, *, scope: WorkspaceScope | None = None
+        self,
+        definition: AgentDefinition,
+        *,
+        scope: WorkspaceScope | None = None,
+        registration_id: str | None = None,
     ) -> Awaitable[AgentHandle]:
         """Open one independently configured agent in a live workspace."""
         ...

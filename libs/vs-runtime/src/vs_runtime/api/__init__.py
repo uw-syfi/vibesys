@@ -11,10 +11,13 @@ from vs_runtime.contracts import (
     RunStatus,
     RuntimeContractError,
     SessionClosedError,
+    StructuredResponseError,
     UnknownAgentRoleError,
     Workspace,
     WorkspaceAccess,
     WorkspaceRef,
+    Workspaces,
+    validate_member_id,
 )
 
 __all__ = [
@@ -28,8 +31,11 @@ __all__ = [
     "RunStatus",
     "RuntimeContractError",
     "SessionClosedError",
+    "StructuredResponseError",
     "UnknownAgentRoleError",
     "Workspace",
     "WorkspaceAccess",
     "WorkspaceRef",
+    "Workspaces",
+    "validate_member_id",
 ]

@@ -57,6 +57,7 @@ graph TD
     vibesys --> vs_loop_state
     vibesys --> vs_project
     vibesys --> vs_prompts
+    vibesys --> vs_runtime
     vibesys --> vs_sandbox
     vs_agent --> vs_loop_state
     vs_agent --> vs_project
@@ -536,6 +537,7 @@ graph TD
     vibesys.orchestration.agents --> vibesys.run
     vibesys.orchestration.agents --> vibesys.runtime
     vibesys.orchestration.agents --> vs_agent
+    vibesys.orchestration.agents --> vs_runtime
     vibesys.orchestration.artifacts --> vibesys.evaluators
     vibesys.orchestration.artifacts --> vibesys.orchestration.memory
     vibesys.orchestration.contracts --> vibesys.context
@@ -596,6 +598,7 @@ graph TD
     vibesys.orchestration.runtime --> vibesys.run
     vibesys.orchestration.runtime --> vibesys.runtime
     vibesys.orchestration.runtime --> vs_agent
+    vibesys.orchestration.runtime --> vs_runtime
     vibesys.orchestration.state --> vibesys
     vibesys.orchestration.state --> vibesys.orchestration._host
     vibesys.orchestration.state --> vibesys.orchestration.progress_log
@@ -606,6 +609,7 @@ graph TD
     vibesys.orchestration.workspaces --> vibesys.context
     vibesys.orchestration.workspaces --> vibesys.orchestration._host
     vibesys.orchestration.workspaces --> vibesys.runtime
+    vibesys.orchestrations --> vs_runtime
     vibesys.prompts --> vibesys
     vibesys.prompts --> vibesys.evaluators
     vibesys.prompts --> vs_prompts

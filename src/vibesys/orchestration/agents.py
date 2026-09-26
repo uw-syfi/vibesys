@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar, cast, overload
 
 from pydantic import BaseModel
 
@@ -34,6 +34,7 @@ from vibesys.events import (
     PhaseData,
     json_value,
 )
+from vibesys.orchestration.workspaces import WorkspaceHandle
 from vibesys.prompts import PROMPTS_DIR, Prompt, render_template
 from vibesys.run.run_control import splice_steering
 from vibesys.runtime import (
@@ -51,6 +52,16 @@ from vibesys.runtime import (
 from vibesys.schemas import SkillResourceSelection
 from vibesys.skills import build_skill_catalog, resolve_skill_selections
 from vs_agent.api import AgentSessionKey, SessionScope
+from vs_runtime.api import (
+    AgentRole,
+    RuntimeContractError,
+    SessionClosedError,
+    StructuredResponseError,
+    UnknownAgentRoleError,
+    Workspace,
+    WorkspaceAccess,
+    validate_member_id,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Generator, Mapping
@@ -61,7 +72,6 @@ if TYPE_CHECKING:
     from vibesys.constants import ComputeBackend
     from vibesys.context import _RunResources
     from vibesys.orchestration._host import HostResources, _WorkspaceHandleLike
-    from vibesys.orchestration.workspaces import WorkspaceHandle
     from vs_agent.api import (
         AgentCapabilities,
         AgentClientProtocol,
@@ -235,7 +245,15 @@ class _LocalAgentHandle:
         """Return the model used for this handle's role."""
         return self._client.model_for_kind(self._definition.id)
 
-    async def turn(self, message: str, *, system_prompt: str = "", label: str = "") -> str:
+    async def turn(
+        self,
+        message: str,
+        *,
+        system_prompt: str = "",
+        label: str = "",
+        session_key: AgentSessionKey | None = None,
+        reuse_session: bool | None = None,
+    ) -> str:
         """Run one text turn with run control and attributed lifecycle events."""
         if self._close_task is not None:
             raise _AgentClosedError(self._definition.id)
@@ -251,7 +269,8 @@ class _LocalAgentHandle:
                 round_label=label,
                 env=self._agent_env(),
                 invocation_id=execution_id,
-                session_key=AgentSessionKey(SessionScope.ROLE, kind),
+                session_key=session_key or AgentSessionKey(SessionScope.ROLE, kind),
+                reuse_session=reuse_session,
                 progress=progress,
             )
 
@@ -417,11 +436,202 @@ class _LocalAgentHandle:
             await asyncio.to_thread(self._executor.shutdown, wait=True)
 
 
+class _ExplicitAgentSession:
+    """One policy-facing conversation over a host-owned agent handle."""
+
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-040111 [PLR0913]; these are the immutable session binding and its independently owned host resources.
+        self,
+        host: HostResources,
+        agent: _LocalAgentHandle,
+        role: AgentRole,
+        workspace: WorkspaceHandle,
+        member_id: str | None,
+        *,
+        session_id: str,
+    ) -> None:
+        self._host = host
+        self._agent = agent
+        self._role = role
+        self._workspace = workspace
+        self._member_id = member_id
+        self._session_key = AgentSessionKey(SessionScope.ROLE, f"session:{session_id}")
+        self._turn_number = 0
+        self._turn_lock = asyncio.Lock()
+        self._closed = False
+        self._close_task: asyncio.Task[None] | None = None
+
+    @property
+    def role(self) -> AgentRole:
+        """Return the role fixed when the session was created."""
+        return self._role
+
+    @property
+    def workspace(self) -> WorkspaceHandle:
+        """Return the workspace fixed when the session was created."""
+        return self._workspace
+
+    @property
+    def member_id(self) -> str | None:
+        """Return the optional policy attribution fixed at creation."""
+        return self._member_id
+
+    @property
+    def closed(self) -> bool:
+        """Return whether this session accepts further turns."""
+        return self._closed
+
+    @overload
+    async def turn(self, message: str, *, response: None = None) -> str: ...
+
+    @overload
+    async def turn(self, message: str, *, response: type[T]) -> T: ...
+
+    async def turn(self, message: str, *, response: type[T] | None = None) -> str | T:
+        """Run one context-preserving turn and enforce workspace access."""
+        if self._closed:
+            raise SessionClosedError
+        async with self._turn_lock:
+            if self._closed:
+                raise SessionClosedError
+            return await self._turn_once(message, response=response)
+
+    async def _turn_once(self, message: str, *, response: type[T] | None) -> str | T:
+        """Run the serialized workspace transaction for one turn."""
+        self._turn_number += 1
+        label = f"{self._role.id}-session-turn-{self._turn_number}"
+        revision = await self._workspace.snapshot(f"{label}-input")
+        try:
+            if response is None:
+                result: str | T = await self._agent.turn(
+                    message,
+                    system_prompt=self._role.system_prompt,
+                    label=label,
+                    session_key=self._session_key,
+                    reuse_session=True,
+                )
+            else:
+
+                def parse_failure() -> T:
+                    raise StructuredResponseError(self._role.id, response)
+
+                result = await self._agent.turn_structured(
+                    message,
+                    response_cls=response,
+                    fallback_factory=parse_failure,
+                    system_prompt=self._role.system_prompt,
+                    label=label,
+                    session_key=self._session_key,
+                    reuse_session=True,
+                )
+        finally:
+            if self._role.workspace_access is WorkspaceAccess.READ_ONLY:
+                changes = await self._workspace.pending_changes()
+                if changes:
+                    await self._workspace.restore(
+                        revision,
+                        clean=True,
+                        preserve_memory=False,
+                    )
+                    remaining = await self._workspace.pending_changes()
+                    if remaining:
+                        raise RoleIsolationError(remaining, role=self._role.id)
+                    self._host.log(
+                        f"[role-isolation] reverted {len(changes)} workspace change(s) "
+                        f"attempted by {self._role.id}: {', '.join(changes[:8])}"
+                    )
+
+        if (
+            self._role.workspace_access is WorkspaceAccess.READ_WRITE
+            or await self._workspace.pending_changes()
+        ):
+            await self._workspace.snapshot(label)
+        return result
+
+    async def close(self) -> None:
+        """Release this session once; repeated calls await the same cleanup."""
+        if self._close_task is None:
+            self._closed = True
+            self._close_task = asyncio.create_task(self._close_once())
+        await asyncio.shield(self._close_task)
+
+    async def _close_once(self) -> None:
+        """Wait for the complete turn transaction before closing its agent."""
+        async with self._turn_lock:
+            await self._agent.close()
+
+    def _mark_closed(self) -> None:
+        """Reflect host-owned shutdown before handles close in spawn order."""
+        self._closed = True
+
+
 class _Agents:
     """Agent creation and per-turn progress for one run."""
 
-    def __init__(self, host: HostResources) -> None:
+    def __init__(self, host: HostResources, roles: tuple[AgentRole, ...] = ()) -> None:
         self._host = host
+        self._roles = {role.id: role for role in roles}
+        self._sessions: list[_ExplicitAgentSession] = []
+
+    async def create_session(
+        self,
+        role: AgentRole,
+        *,
+        workspace: Workspace,
+        member_id: str | None = None,
+    ) -> _ExplicitAgentSession:
+        """Create a fresh conversation bound to one role and workspace."""
+        validate_member_id(member_id)
+        if self._roles.get(role.id) != role:
+            raise UnknownAgentRoleError(role.id)
+        unsupported_tools = sorted(tool.id for tool in role.tools if tool.id != "shell")
+        if unsupported_tools:
+            message = f"unsupported agent tools: {', '.join(unsupported_tools)}"
+            raise RuntimeContractError(message)
+        if role.skills:
+            message = "role-scoped agent skills are not supported by this host adapter"
+            raise RuntimeContractError(message)
+        if not isinstance(workspace, WorkspaceHandle):
+            message = "workspace must be a live handle from this run"
+            raise TypeError(message)
+        scope = self._host.workspaces._scope_of(workspace)
+        session_id = uuid.uuid4().hex
+        agent = cast(
+            "_LocalAgentHandle",
+            await self._host._spawn(
+                self.default_definition(role.id),
+                scope=scope,
+                registration_id=f"session:{session_id}",
+            ),
+        )
+        missing_capabilities = sorted(
+            capability.value
+            for capability in role.required_capabilities
+            if not getattr(agent.capabilities, capability.value)
+        )
+        if missing_capabilities:
+            await agent.close()
+            message = f"agent driver lacks required capabilities: {', '.join(missing_capabilities)}"
+            raise RuntimeContractError(message)
+        session = _ExplicitAgentSession(
+            self._host,
+            agent,
+            role,
+            workspace,
+            member_id,
+            session_id=session_id,
+        )
+        self._sessions.append(session)
+        return session
+
+    async def close(self) -> None:
+        """Close explicit sessions in reverse creation order."""
+        for session in reversed(self._sessions):
+            await session.close()
+
+    def _mark_closed(self) -> None:
+        """Mark every public session closed before host-owned teardown."""
+        for session in self._sessions:
+            session._mark_closed()
 
     def default_definition(self, role_id: str, *, model: str | None = None) -> AgentDefinition:
         """Build a named role from this run's resolved agent configuration."""

@@ -75,6 +75,7 @@ if TYPE_CHECKING:
     from vibesys.run.integration import LocalRunIntegration
     from vibesys.runtime import AgentDefinition, WorkspaceScope
     from vs_agent.api import AgentClientProtocol
+    from vs_runtime.api import AgentRole
 
 # Re-exported for callers that import these public names from this module
 # rather than from the capability module that now owns them.
@@ -159,6 +160,7 @@ class RunContext:
         agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
         gate_executor: GateExecutor | None = None,
+        agent_roles: tuple[AgentRole, ...] = (),
     ) -> None:
         """Bind request, policy setup, and the application control channel.
 
@@ -196,7 +198,7 @@ class RunContext:
         self.state = _RunState(self)
         self.gates = _Evaluator(self)
         self.workspaces = _Workspaces(self)
-        self.agents = _Agents(self)
+        self.agents = _Agents(self, agent_roles)
         self.environment = _Environment(self)
         self.progress = _Progress(self)
 
@@ -204,6 +206,11 @@ class RunContext:
     def events(self) -> EventJournal:
         """Return the run's semantic event journal."""
         return self._integration.events
+
+    @property
+    def run_id(self) -> str:
+        """Return this run's stable identity."""
+        return self._resources.run_id
 
     def log(self, message: str) -> None:
         """Write one line to the active run log."""
@@ -289,6 +296,7 @@ class RunContext:
         agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
         backend_factory: Callable[..., ComputeBackendImpl] | None = None,
         gate_executor: GateExecutor | None = None,
+        agent_roles: tuple[AgentRole, ...] = (),
     ) -> AsyncIterator[RunContext]:
         """Construct and close the run, including after cancellation or setup failure."""
         host = cls(
@@ -300,6 +308,7 @@ class RunContext:
             agent_client_factory=agent_client_factory,
             backend_factory=backend_factory,
             gate_executor=gate_executor,
+            agent_roles=agent_roles,
         )
         try:
             prepare = asyncio.create_task(asyncio.to_thread(host._prepare))
@@ -329,7 +338,11 @@ class RunContext:
         self._ensure_resources()
 
     async def _spawn(
-        self, definition: AgentDefinition, *, scope: WorkspaceScope | None = None
+        self,
+        definition: AgentDefinition,
+        *,
+        scope: WorkspaceScope | None = None,
+        registration_id: str | None = None,
     ) -> _LocalAgentHandle:
         """Open one independently configured agent in a live workspace."""
         async with self._spawn_lock:
@@ -347,11 +360,12 @@ class RunContext:
                     context,
                     executor,
                     scope_id=scope.id if scope else None,
+                    registration_id=registration_id,
                 ),
             )
             try:
                 return await asyncio.shield(opened)
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as cancelled:
                 while not opened.done():
                     try:
                         await asyncio.shield(opened)
@@ -359,6 +373,15 @@ class RunContext:
                         continue
                 if opened.exception() is not None:
                     await asyncio.to_thread(executor.shutdown, wait=True)
+                else:
+                    handle = opened.result()
+                    cleanup = asyncio.create_task(handle.close())
+                    await _wait_until_done(cleanup)
+                    if error := cleanup.exception():
+                        cancelled.add_note(f"canceled agent construction cleanup failed: {error}")
+                    key = (scope.id if scope else None, registration_id or definition.id)
+                    if self._agents.get(key) is handle:
+                        del self._agents[key]
                 raise
             except BaseException:
                 await asyncio.to_thread(executor.shutdown, wait=True)
@@ -371,11 +394,12 @@ class RunContext:
         executor: ThreadPoolExecutor,
         *,
         scope_id: str | None,
+        registration_id: str | None,
     ) -> _LocalAgentHandle:
         """Open one sandbox and one agent client, with requested grants."""
         if self._closed:
             raise _RuntimeClosedError
-        key = (scope_id, definition.id)
+        key = (scope_id, registration_id or definition.id)
         if not definition.id or key in self._agents:
             raise _AgentRegistrationError(definition.id)
         if definition.spec.execution != AgentExecutionPolicy():
@@ -459,12 +483,17 @@ class RunContext:
     async def _close_once(self) -> None:
         """Drain in-flight work and release all resources exactly once."""
         self._closed = True
+        self.agents._mark_closed()
         errors: list[BaseException] = []
         for operation in tuple(self._blocking):
             await _wait_until_done(operation)
             if error := operation.exception():
                 errors.append(error)
         async with self._spawn_lock:
+            try:
+                await self.agents.close()
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-040112 [BLE001]; handle cleanup below must continue if explicit-session cleanup fails.
+                errors.append(exc)
             for agent in reversed(tuple(self._agents.values())):
                 try:
                     await agent.close()

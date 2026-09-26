@@ -15,6 +15,7 @@ from vs_runtime.contracts import (
     SessionClosedError,
     UnknownAgentRoleError,
     Workspace,
+    WorkspaceRef,
     validate_member_id,
 )
 
@@ -150,6 +151,19 @@ class FakeAgentSessions:
             await session.close()
 
 
+class FakeWorkspaces:
+    """In-memory holder for one fake root workspace."""
+
+    def __init__(self, root: Workspace) -> None:
+        """Bind the fake capability to one root workspace."""
+        self._root = root
+
+    @property
+    def root(self) -> Workspace:
+        """Return the configured fake root workspace."""
+        return self._root
+
+
 class FakeRunHost:
     """In-memory run host that owns fake sessions and captured log lines."""
 
@@ -163,7 +177,7 @@ class FakeRunHost:
     ) -> None:
         """Create a host whose private role map derives from ``plugin.agents``."""
         self._run_id = run_id
-        self._project_root = project_root
+        self._workspaces = FakeWorkspaces(WorkspaceRef(path=project_root))
         self._agents = FakeAgentSessions(plugin.agents, responder=responder)
         self._logs: list[str] = []
         self._closed = False
@@ -174,9 +188,9 @@ class FakeRunHost:
         return self._run_id
 
     @property
-    def project_root(self) -> Path:
-        """Return the configured fake project handle."""
-        return self._project_root
+    def workspaces(self) -> FakeWorkspaces:
+        """Return the fake live-workspace capability."""
+        return self._workspaces
 
     @property
     def agents(self) -> FakeAgentSessions:

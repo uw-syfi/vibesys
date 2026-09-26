@@ -28,6 +28,16 @@ class SessionClosedError(RuntimeContractError):
         super().__init__("agent session is closed")
 
 
+class StructuredResponseError(RuntimeContractError):
+    """An agent turn could not be parsed as its requested response type."""
+
+    def __init__(self, role_id: str, response_type: type[BaseModel]) -> None:
+        """Name the role and response contract whose validation failed."""
+        super().__init__(
+            f"agent role {role_id!r} did not return a valid {response_type.__name__} response"
+        )
+
+
 class UnknownAgentRoleError(RuntimeContractError):
     """A session was requested for a role outside the plugin's agent tuple."""
 
@@ -158,6 +168,15 @@ class AgentSessions(Protocol):
         ...
 
 
+class Workspaces(Protocol):
+    """Run-owned access to live workspaces."""
+
+    @property
+    def root(self) -> Workspace:
+        """Return the live root workspace for this run."""
+        ...
+
+
 class RunStatus(StrEnum):
     """Terminal status returned by orchestration policy."""
 
@@ -175,13 +194,13 @@ class RunHost(Protocol):
         ...
 
     @property
-    def project_root(self) -> Path:
-        """Return the absolute project root supplied by composition."""
+    def agents(self) -> AgentSessions:
+        """Return the run-owned agent-session capability."""
         ...
 
     @property
-    def agents(self) -> AgentSessions:
-        """Return the run-owned agent-session capability."""
+    def workspaces(self) -> Workspaces:
+        """Return this run's live workspace capability."""
         ...
 
     def log(self, message: str) -> None:
