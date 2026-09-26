@@ -1,0 +1,35 @@
+benchmark = "examples/model-serving/deepseek-v3.2-8xb200/benchmark/benchmark.py"
+model = "cpu-smoke-model"
+tokenizer = "examples/model-serving/deepseek-v3.2-8xb200/benchmark/cpu_smoke_tokenizer.json"
+corpus_text = "Request Factory benchmark sample synthetic workload input output token sequence stream generated deterministic prompt context model"
+benchmark_args = [
+  "--request-count", "8",
+  "--input-tokens", "16",
+  "--output-tokens", "4",
+  "--concurrency", "2",
+  "--token-pool-limit", "16",
+  "--text-file", "{corpus}",
+]
+response_style = "usage"
+failure_message_contains = "failed_steps"
+unique_prompt_tokens = true
+
+[[request_shapes]]
+input_tokens = 16
+output_tokens = 4
+count = 8
+
+[metrics.output_token_throughput_per_s]
+unit = "tok/s"
+direction = "max"
+
+[metrics.p90_latency_ms]
+unit = "ms"
+direction = "min"
+
+[required_fields]
+temperature = 0
+stream = true
+ignore_eos = true
+return_token_ids = true
+stream_options = { include_usage = true }
